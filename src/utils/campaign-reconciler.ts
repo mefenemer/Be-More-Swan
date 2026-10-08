@@ -53,7 +53,7 @@ import { triggerCampaignEmailDraft } from './trigger-campaign-email-draft';
 import { isScheduleActive } from '../config/post-status';
 import { recordCampaignSpend } from './campaign-ledger';
 import { mirrorOrder } from './campaign-mirror';
-import { issueOrder, recompileCampaignTargets } from './campaign-orders';
+import { issueHumanTask, issueOrder, recompileCampaignTargets } from './campaign-orders';
 import { ORDER_ACTION_SPECS, type CampaignOrderAction } from '../config/campaign-vocab';
 
 type Db = ReturnType<typeof getDb>;
@@ -266,6 +266,28 @@ async function unblockChain(db: Db, deliveredOrderId: number): Promise<number> {
     let released = 0;
     for (const next of waiting) {
         try {
+            // A PERSON's task (§9.5) has no assistant to issue to — checked first, or the "assistant
+            // no longer in the workspace" branch below would cancel every task a human was asked
+            // to do after earlier work. It is released into "waiting on <name>", nothing more.
+            if (next.action === 'request_human_task') {
+                const [c] = await db
+                    .select({ objective: campaigns.objective, orchestratorId: campaigns.aiAssistantId, status: campaigns.status })
+                    .from(campaigns).where(eq(campaigns.id, next.campaignId)).limit(1);
+                if (!c) continue;
+                if (c.status !== 'active' && c.status !== 'throttled') {
+                    await db.update(campaignOrders)
+                        .set({ status: 'cancelled', resultSummary: 'The campaign was no longer running when this became due', updatedAt: new Date() })
+                        .where(eq(campaignOrders.id, next.id));
+                    continue;
+                }
+                await issueHumanTask(db, next.id, {
+                    organisationId: next.organisationId, orchestratorAssistantId: c.orchestratorId,
+                    campaignObjective: c.objective, brief: (next.brief ?? {}) as Record<string, unknown>,
+                });
+                released++;
+                continue;
+            }
+
             if (!next.targetAssistantId) {
                 await db.update(campaignOrders)
                     .set({
@@ -460,18 +482,32 @@ async function judgeEmailOrder(
  * of the refund rule.
  */
 export async function settleOrderAsFailed(db: Db, orderId: number, summary: string): Promise<void> {
+    await settleOrderNow(db, orderId, { kind: 'failed', summary });
+}
+
+/**
+ * Settle one order now, from outside the reconcile loop — the email worker's failures, and a
+ * person's task the user marks done or says will not happen (§9.5). Goes through settleOrder, so a
+ * DELIVERED task releases whatever was waiting on it (unblockChain) and a rejected one cancels it.
+ * Returns false when the order was not open — already settled orders are never re-settled.
+ */
+export async function settleOrderNow(
+    db: Db, orderId: number,
+    verdict: { kind: 'delivered' | 'rejected' | 'failed'; summary: string },
+): Promise<boolean> {
     const [order] = await db.select({
         id: campaignOrders.id, organisationId: campaignOrders.organisationId,
         campaignId: campaignOrders.campaignId, action: campaignOrders.action,
         costWorkItems: campaignOrders.costWorkItems, status: campaignOrders.status,
     }).from(campaignOrders).where(eq(campaignOrders.id, orderId)).limit(1);
     // Forward only (rule 1): a settled order is never re-settled, which would refund it twice.
-    if (!order || !['issued', 'in_review'].includes(order.status)) return;
+    if (!order || !['issued', 'in_review'].includes(order.status)) return false;
     const result: ReconcileResult = {
         examined: 0, toReview: 0, delivered: 0, rejected: 0, failed: 0,
         unblocked: 0, finished: 0, refundedWork: 0, emailRedispatched: 0,
     };
-    await settleOrder(db, order, { kind: 'failed', summary }, result);
+    await settleOrder(db, order, verdict, result);
+    return true;
 }
 
 /**

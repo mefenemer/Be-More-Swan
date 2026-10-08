@@ -265,6 +265,7 @@
             </button>` : ''}
         </div>
         ${plan ? planBlock(c, plan) : ''}
+        ${humanTasksBlock(c)}
         ${canAddWork ? addWorkPanel(c) : ''}
         <p class="hidden mt-2 text-xs font-semibold text-gray-600" data-cmp-status="${esc(String(c.id))}"></p>
 
@@ -331,8 +332,9 @@
         <p class="text-[11px] font-bold text-indigo-700 uppercase tracking-wide">Plan waiting for you</p>
         <ul class="mt-2 space-y-1">
           ${plan.orders.map((o) => `
-            <li class="text-xs text-gray-700">• ${esc(o.label)}${o.quantity > 1 ? ` ×${esc(String(o.quantity))}` : ''} — ${esc(o.role)}
-              <span class="text-gray-400">(${esc(String(o.workItems))} ${o.workItems === 1 ? 'task' : 'tasks'})</span></li>`).join('')}
+            <li class="text-xs text-gray-700">• ${esc(o.label)}${o.quantity > 1 ? ` ×${esc(String(o.quantity))}` : ''} — ${esc(o.assignee || o.role)}
+              <span class="text-gray-400">(${o.workItems ? `${esc(String(o.workItems))} ${o.workItems === 1 ? 'task' : 'tasks'}` : 'uses no tasks'}${o.after && plan.orders[o.after - 1] ? ` · waits until: ${esc(plan.orders[o.after - 1].label)}${plan.orders[o.after - 1].assignee ? ` (${esc(plan.orders[o.after - 1].assignee)})` : ''}` : ''})</span>
+              ${o.task ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.task)}</span>` : ''}</li>`).join('')}
         </ul>
         <p class="text-xs text-gray-500 mt-2">
           Uses ${esc(String(plan.workItems))} tasks.
@@ -366,6 +368,73 @@
       </div>`;
   }
 
+  // ── Tasks waiting on people (§9.5) ─────────────────────────────────────────
+  // Each says who, what, when it is due (and whether that has passed), and how much work is held
+  // behind it — "waiting on Legal" means far more when the row can say three briefs are stuck.
+  // "Mark done" releases that work; "Won't happen" cancels it, and its confirm says so.
+  function humanTasksBlock(c) {
+    const tasks = Array.isArray(c.humanTasks) ? c.humanTasks : [];
+    if (!tasks.length) return '';
+    const today = new Date().toISOString().slice(0, 10);
+    return `
+      <div class="mt-4 border border-gray-200 rounded-xl p-4 space-y-3">
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Waiting on people</p>
+        ${tasks.map((t) => {
+          const id = esc(String(t.orderId));
+          const overdue = t.dueDate && t.dueDate < today && t.status === 'issued';
+          return `
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0 flex-1">
+              <p class="text-sm text-gray-900 break-words"><span class="font-bold">${esc(t.assignee || 'Someone on your team')}</span> — ${esc(t.task || '')}</p>
+              <p class="text-xs mt-0.5 ${overdue ? 'text-amber-700 font-bold' : 'text-gray-500'}">
+                ${t.status === 'blocked' ? 'Not started — waiting for earlier work. ' : ''}${t.dueDate ? `${overdue ? 'Overdue — was due' : 'Due'} ${esc(t.dueDate)}. ` : ''}${t.waiting ? `${esc(String(t.waiting))} ${t.waiting === 1 ? 'piece' : 'pieces'} of work waiting on this. ` : ''}${t.assigneeEmail ? `Tell them at ${esc(t.assigneeEmail)} — nothing is sent automatically.` : 'Nothing is sent to them automatically.'}
+              </p>
+            </div>
+            ${t.status === 'issued' ? `
+              <div class="flex items-center gap-2 shrink-0">
+                <button type="button" data-cmp-task-done="${id}" data-cmp-task-campaign="${esc(String(c.id))}"
+                  class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Mark done</button>
+                <button type="button" data-cmp-task-wont="${id}" data-cmp-task-campaign="${esc(String(c.id))}" data-cmp-task-waiting="${esc(String(t.waiting || 0))}"
+                  class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Won't happen</button>
+              </div>` : ''}
+          </div>`;
+        }).join('')}
+      </div>`;
+  }
+
+  // "Hold this until …" — any Add work item can wait for an open task on the same campaign.
+  function waitForField(c, id) {
+    const tasks = (Array.isArray(c.humanTasks) ? c.humanTasks : []);
+    if (!tasks.length) return '';
+    return `
+      <label class="block text-xs font-bold text-gray-600">Hold this until (optional)
+        <select data-cmp-aw-waitfor="${id}" data-keep="aw-waitfor-${id}" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+          <option value="">Start straight away</option>
+          ${tasks.map((t) => `<option value="${esc(String(t.orderId))}">${esc(t.assignee || 'Someone')} has done: ${esc((t.task || '').slice(0, 60))}</option>`).join('')}
+        </select>
+      </label>`;
+  }
+
+  // A person's task: who, how to reach them (for the USER — nothing is sent), what, and when.
+  function humanFields(id) {
+    return `
+      <div class="flex flex-wrap gap-3">
+        <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Who
+          <input type="text" maxlength="80" data-cmp-aw-assignee="${id}" data-keep="aw-assignee-${id}" placeholder="e.g. Sam (designer), Legal"
+            class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+        </label>
+        <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Their email (optional, for you)
+          <input type="email" maxlength="200" data-cmp-aw-email="${id}" data-keep="aw-email-${id}" placeholder="sam@yourcompany.com"
+            class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+        </label>
+        <label class="block text-xs font-bold text-gray-600">Due (optional)
+          <input type="date" data-cmp-aw-due="${id}" data-keep="aw-due-${id}"
+            class="mt-1 text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+        </label>
+      </div>
+      <p class="text-xs text-gray-500">Nothing is sent to them — you let them know. Mark it done here when it is, and any work waiting on it starts.</p>`;
+  }
+
   // ── Add work ───────────────────────────────────────────────────────────────
   // The GUI twin of a chat plan for a running campaign. A human click here PLACES the order
   // straight away (place_order) — this is the campaign surface, with the cost in front of them,
@@ -381,6 +450,7 @@
     narrow_targeting: { field: 'idea', label: 'Tightened description (optional)', placeholder: 'Who the search should find instead', required: false },
     adjust_messaging: { field: 'angle', label: 'New angle', placeholder: 'The argument this campaign should make from now on', required: true },
     draft_email_campaign: { field: 'angle', label: 'What should the emails get people to do? (optional)', placeholder: 'Leave blank to use this campaign\'s objective', required: false },
+    request_human_task: { field: 'task', label: 'What are you asking them to do?', placeholder: 'e.g. Record a 30-second product video for the launch posts', required: true },
   };
 
   function actionSpec(key) {
@@ -446,6 +516,7 @@
             </select>
           </label>` : '<p class="text-xs text-amber-700">There are no saved lead searches to narrow yet — use "Run a lead search" first.</p>') : ''}
         ${spec.key === 'draft_email_campaign' ? emailFields(id) : ''}
+        ${spec.key === 'request_human_task' ? humanFields(id) : ''}
         ${spec.key === 'draft_social_posts' || spec.key === 'draft_blog_pillar' || spec.key === 'draft_email_campaign' ? `
           <label class="block text-xs font-bold text-gray-600">For a different audience (optional)
             <input type="text" maxlength="300" data-cmp-aw-audience="${id}" data-keep="aw-aud-${id}-${esc(spec.key)}"
@@ -457,6 +528,7 @@
             <textarea rows="2" maxlength="1000" data-cmp-aw-text="${id}" data-keep="aw-text-${id}-${esc(spec.key)}" placeholder="${esc(prompt.placeholder)}"
               class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal"></textarea>
           </label>` : ''}
+        ${waitForField(c, id)}
         <div class="flex items-center justify-between gap-3">
           <p class="text-xs text-gray-500" data-cmp-aw-cost="${id}">${spec.workItemsPerUnit ? `Uses ${esc(String(spec.workItemsPerUnit))} ${spec.takesQuantity ? 'tasks each' : 'tasks'}.` : 'Uses no tasks — it changes what future work is asked for.'}</p>
           <button type="button" data-cmp-aw-submit="${id}" ${needsSearch && !state.savedSearches.length ? 'disabled' : ''}
@@ -1712,7 +1784,10 @@
     const reject = e.target.closest('[data-cmp-plan-reject]');
     const awToggle = e.target.closest('[data-cmp-addwork]');
     const awSubmit = e.target.closest('[data-cmp-aw-submit]');
-    if (!newBtn && !editBtn && !save && !cancel && !approve && !rejectOpen && !rejectCancel && !reject && !awToggle && !awSubmit) return;
+    const taskDone = e.target.closest('[data-cmp-task-done]');
+    const taskWont = e.target.closest('[data-cmp-task-wont]');
+    if (!newBtn && !editBtn && !save && !cancel && !approve && !rejectOpen && !rejectCancel && !reject && !awToggle && !awSubmit
+      && !taskDone && !taskWont) return;
 
     if (newBtn || editBtn) {
       state.form = newBtn ? { mode: 'create' } : { mode: 'edit', id: Number(editBtn.dataset.cmpEdit) };
@@ -1732,6 +1807,35 @@
     }
 
     if (state.busy) return;
+
+    // ── A person's task (§9.5) ──
+    if (taskDone || taskWont) {
+      const btn = taskDone || taskWont;
+      const orderId = Number(taskDone ? taskDone.dataset.cmpTaskDone : taskWont.dataset.cmpTaskWont);
+      const campaignId = Number(btn.dataset.cmpTaskCampaign);
+      if (taskWont) {
+        // The consequence is the point of the confirm: whatever was held behind this is cancelled.
+        const waiting = Number(taskWont.dataset.cmpTaskWaiting) || 0;
+        const ok = window.confirm(
+          `Mark this task as not happening?${waiting ? `\n\nThe ${waiting} ${waiting === 1 ? 'piece' : 'pieces'} of work waiting on it will be cancelled.` : ''}`,
+        );
+        if (!ok) return;
+      }
+      state.busy = true;
+      btn.disabled = true;
+      try {
+        await post({ action: 'complete_task', orderId, outcome: taskDone ? 'done' : 'wont_happen' });
+        window.showToast?.(taskDone ? 'Done — anything waiting on it has started.' : 'Recorded. Work waiting on it was cancelled.', 'success');
+      } catch (err) {
+        say(campaignId, err.message || 'That did not work — please try again.', 'error');
+        btn.disabled = false;
+        state.busy = false;
+        return;
+      }
+      state.busy = false;
+      await load();
+      return;
+    }
 
     // ── Save the form ──
     if (save) {
@@ -1857,6 +1961,16 @@
       // An order's own audience beats the campaign's for that order's work (§9.2).
       const forWho = (document.querySelector(`[data-cmp-aw-audience="${id}"]`)?.value || '').trim();
       if (forWho) brief.audience = forWho;
+      if (spec.key === 'request_human_task') {
+        const assignee = (document.querySelector(`[data-cmp-aw-assignee="${id}"]`)?.value || '').trim();
+        if (!assignee) { say(id, 'Say who you are asking.', 'error'); return; }
+        brief.assignee = assignee;
+        const email = (document.querySelector(`[data-cmp-aw-email="${id}"]`)?.value || '').trim();
+        if (email) brief.assigneeEmail = email;
+        const due = document.querySelector(`[data-cmp-aw-due="${id}"]`)?.value || '';
+        if (due) brief.dueDate = due;
+      }
+      const waitFor = document.querySelector(`[data-cmp-aw-waitfor="${id}"]`)?.value || '';
       if (spec.key === 'draft_email_campaign') {
         const trigger = document.querySelector(`[data-cmp-aw-trigger="${id}"]`)?.value || '';
         const kind = document.querySelector(`[data-cmp-aw-kind="${id}"]`)?.value || '';
@@ -1877,7 +1991,7 @@
       awSubmit.disabled = true;
       say(id, 'Briefing…');
       try {
-        await post({ action: 'place_order', campaignId: id, orderAction: spec.key, quantity, brief });
+        await post({ action: 'place_order', campaignId: id, orderAction: spec.key, quantity, brief, waitFor: waitFor || undefined });
       } catch (err) {
         say(id, err.message || 'That did not work — please try again.', 'error');
         awSubmit.disabled = false;

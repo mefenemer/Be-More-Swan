@@ -13,6 +13,7 @@
 //   POST { action: 'start',       campaignId }             → draft|paused → active
 //   POST { action: 'pause',       campaignId, reason }
 //   POST { action: 'stop_all',    assistantId }            → pause every live campaign
+//   POST { action: 'complete_task', orderId, outcome: 'done'|'wont_happen', note? }   (§9.5)
 //   POST { action: 'list_orders', campaignId }
 //   POST { action: 'place_order', campaignId, orderAction, brief?, quantity? }
 //   POST { action: 'create_link',  campaignId, destinationUrl, label?, medium?, network? }
@@ -48,6 +49,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { campaignSpendTotals, fitsBudget, readPlanTaskGate } from '../../src/utils/campaign-ledger';
 import { placeOrder, recompileCampaignTargets } from '../../src/utils/campaign-orders';
 import { settleDecisionMirror } from '../../src/utils/campaign-mirror';
+import { settleOrderNow } from '../../src/utils/campaign-reconciler';
 import { hiredRoleKeys } from '../../src/utils/campaign-proposer';
 import { normaliseAudience, type CampaignAudience } from '../../src/config/campaign-audience';
 import { countCampaignOutcome } from '../../src/utils/campaign-outcomes';
@@ -55,7 +57,7 @@ import {
     PLANNABLE_STATUSES, fileStrategyPlan, normalisePlanOrders, pendingPlanFor, planProblem, planWorkItems,
 } from '../../src/utils/campaign-plan';
 import {
-    CAMPAIGN_ORDER_ACTIONS, CREATABLE_CAMPAIGN_MODES, LIVE_CAMPAIGN_STATUSES, ORDER_ACTION_SPECS,
+    CAMPAIGN_ORDER_ACTIONS, CREATABLE_CAMPAIGN_MODES, HUMAN_ROLE_KEY, LIVE_CAMPAIGN_STATUSES, ORDER_ACTION_SPECS,
     DEFAULT_FUNNEL_STAGE, defaultExcludeCustomers, isFunnelStage, isLinkMedium, isOrderAction,
     isSelectableOutcomeMetric, orderWorkItems, outcomeForStage, type FunnelStage,
 } from '../../src/config/campaign-vocab';
@@ -194,7 +196,32 @@ export default withLambda(async (event) => {
             const pendingPlan = await pendingPlanFor(db, r.id);
             // Progress in the campaign's OWN unit (§9.6). null = not countable, never 0.
             const progress = await countCampaignOutcome(db, { id: r.id, organisationId: orgId }, r.outcomeMetric);
-            items.push({ ...r, ...totals, orders: live ?? { open: 0, inReview: 0, delivered: 0 }, pendingPlan, progress });
+            // Open tasks for people (§9.5), each with how much work is held behind it — "waiting on
+            // Legal" means far more when the row can say three briefs are stuck behind it.
+            const openTasks = await db.select({
+                orderId: campaignOrders.id, status: campaignOrders.status, brief: campaignOrders.brief,
+                blockedOnOrderId: campaignOrders.blockedOnOrderId,
+                waiting: sql<number>`(SELECT count(*)::int FROM campaign_orders w
+                                       WHERE w.blocked_on_order_id = ${campaignOrders.id} AND w.status = 'blocked')`,
+            }).from(campaignOrders)
+                .where(and(
+                    eq(campaignOrders.campaignId, r.id),
+                    eq(campaignOrders.action, 'request_human_task'),
+                    inArray(campaignOrders.status, ['issued', 'blocked']),
+                ))
+                .orderBy(campaignOrders.id);
+            const humanTasks = openTasks.map((t) => {
+                const b = (t.brief ?? {}) as Record<string, unknown>;
+                return {
+                    orderId: t.orderId, status: t.status, waiting: Number(t.waiting) || 0,
+                    blockedOnOrderId: t.blockedOnOrderId,
+                    assignee: typeof b.assignee === 'string' ? b.assignee : null,
+                    assigneeEmail: typeof b.assigneeEmail === 'string' ? b.assigneeEmail : null,
+                    task: typeof b.task === 'string' ? b.task : null,
+                    dueDate: typeof b.dueDate === 'string' ? b.dueDate : null,
+                };
+            });
+            items.push({ ...r, ...totals, orders: live ?? { open: 0, inReview: 0, delivered: 0 }, pendingPlan, progress, humanTasks });
         }
 
         // The plan gate travels with the list so the Budget & Control strip can render in one
@@ -251,7 +278,9 @@ export default withLambda(async (event) => {
         // button that always fails. Saved searches feed the "Narrow the targeting" picker, which
         // has to name WHICH search to tighten.
         const hired = await hiredRoleKeys(db, orgId);
-        const availableOrderActions = CAMPAIGN_ORDER_ACTIONS.filter((a) => hired.has(ORDER_ACTION_SPECS[a].roleKey));
+        // A person's task needs no hire — every workspace has people (§9.5).
+        const availableOrderActions = CAMPAIGN_ORDER_ACTIONS.filter((a) =>
+            ORDER_ACTION_SPECS[a].roleKey === HUMAN_ROLE_KEY || hired.has(ORDER_ACTION_SPECS[a].roleKey));
         const savedSearches = await db
             .select({ id: discoveryCampaigns.id, name: discoveryCampaigns.name, idea: discoveryCampaigns.idea })
             .from(discoveryCampaigns)
@@ -566,6 +595,33 @@ export default withLambda(async (event) => {
         return json(200, { decisionId, campaignId: campaign.id, status: campaign.status });
     }
 
+    // ── complete_task ─────────────────────────────────────────────────────────
+    // A person's task (§9.5): the user says it is done, or that it will not happen. Done delivers
+    // the order, which RELEASES whatever was waiting on it; "won't happen" rejects it, which cancels
+    // what was waiting (the precondition will never be met). Reached from the row's buttons and
+    // from the chat's campaign_task_update card — the same action either way.
+    if (action === 'complete_task') {
+        const orderId = Number(body.orderId);
+        const [order] = await db.select({
+            id: campaignOrders.id, action: campaignOrders.action, status: campaignOrders.status,
+            campaignId: campaignOrders.campaignId, brief: campaignOrders.brief,
+        }).from(campaignOrders)
+            .where(and(eq(campaignOrders.id, orderId), eq(campaignOrders.organisationId, orgId)))
+            .limit(1);
+        if (!order || order.action !== 'request_human_task') return json(404, { error: 'Task not found.' });
+        if (order.status === 'blocked') {
+            return json(400, { error: 'This task is still waiting for earlier work, so it cannot be done yet.' });
+        }
+        const outcome = body.outcome === 'wont_happen' ? 'wont_happen' : 'done';
+        const note = str(body.note, 280);
+        const who = (order.brief as Record<string, unknown> | null)?.assignee;
+        const settled = await settleOrderNow(db, order.id, outcome === 'done'
+            ? { kind: 'delivered', summary: `Done${typeof who === 'string' && who ? ` — ${who}` : ''}${note ? `: ${note}` : ''}` }
+            : { kind: 'rejected', summary: `Will not happen${note ? `: ${note}` : ''} — work waiting on it was cancelled` });
+        if (!settled) return json(400, { error: 'This task has already been settled.' });
+        return json(200, { ok: true, outcome });
+    }
+
     // ── list_orders ───────────────────────────────────────────────────────────
     if (action === 'list_orders') {
         const campaign = await requireCampaign(Number(body.campaignId));
@@ -610,6 +666,24 @@ export default withLambda(async (event) => {
             return json(429, { error: 'This workspace has used its monthly task allowance, so your assistants cannot take on new work until it resets. Nothing has been charged.' });
         }
 
+        // §9.5: "hold this until <an open task> is done". Must be an open order of THIS campaign —
+        // waiting on a settled one would wait for ever, and on another campaign's (or tenant's)
+        // order would be an IDOR.
+        let blockedOnOrderId: number | null = null;
+        if (body.waitFor !== undefined && body.waitFor !== null && body.waitFor !== '') {
+            const [dep] = await db.select({ id: campaignOrders.id })
+                .from(campaignOrders)
+                .where(and(
+                    eq(campaignOrders.id, Number(body.waitFor)),
+                    eq(campaignOrders.campaignId, campaign.id),
+                    eq(campaignOrders.organisationId, orgId),
+                    inArray(campaignOrders.status, ['queued', 'issued', 'in_review', 'blocked']),
+                ))
+                .limit(1);
+            if (!dep) return json(400, { error: 'The task this should wait for is already finished or no longer exists.' });
+            blockedOnOrderId = dep.id;
+        }
+
         const result = await placeOrder({
             db, organisationId: orgId, userId,
             campaignId: campaign.id,
@@ -618,6 +692,7 @@ export default withLambda(async (event) => {
             action: order.action,
             brief: order.brief,
             quantity: order.quantity,
+            blockedOnOrderId,
         });
         if (result.status === 'failed') return json(400, { error: result.message ?? 'The order could not be placed.' });
         return json(200, { orderId: result.orderId, status: result.status, workItems: result.workItems });
@@ -1305,8 +1380,24 @@ export default withLambda(async (event) => {
         }
 
         const placed: Array<{ orderId: number | null; status: string; message?: string }> = [];
+        // Plan position (1-based) → the order it became, so "after": 2 can point at a real row.
+        const placedByPosition: Array<number | null> = [];
         for (const o of (proposed.orders ?? []).slice(0, 10)) {
-            if (!isOrderAction(o.action)) continue;
+            if (!isOrderAction(o.action)) { placedByPosition.push(null); continue; }
+            // §9.5: an item that waits for an earlier one is placed BLOCKED behind it, and the
+            // reconciler releases it when that one delivers. If the earlier one could not be placed
+            // at all, the thing this was waiting for will never happen — skip it and say so,
+            // rather than running it early, which is exactly what "wait for Legal" exists to stop.
+            const after = Number(o.after);
+            let blockedOnOrderId: number | null = null;
+            if (Number.isInteger(after) && after >= 1 && after <= placedByPosition.length) {
+                blockedOnOrderId = placedByPosition[after - 1];
+                if (!blockedOnOrderId) {
+                    placed.push({ orderId: null, status: 'failed', message: `Not placed — it waits for item ${after}, which could not be placed.` });
+                    placedByPosition.push(null);
+                    continue;
+                }
+            }
             const r = await placeOrder({
                 db, organisationId: orgId, userId,
                 campaignId: campaign.id,
@@ -1315,8 +1406,10 @@ export default withLambda(async (event) => {
                 action: o.action,
                 brief: (o.brief && typeof o.brief === 'object') ? o.brief as Record<string, unknown> : {},
                 quantity: Number(o.quantity) || 1,
+                blockedOnOrderId,
             });
             placed.push({ orderId: r.orderId, status: r.status, message: r.message });
+            placedByPosition.push(r.status === 'failed' ? null : r.orderId);
         }
 
         await db.update(campaignDecisions).set({

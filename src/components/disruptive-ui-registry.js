@@ -912,6 +912,7 @@
       blog_writer: 'Blog Writing Assistant',
       lead_qualifier: 'Lead Generation Assistant',
       newsletter_editor: 'Email Marketing Assistant',
+      human: 'A person on your team',
     };
 
     const objective = typeof ui.objective === 'string' ? ui.objective.trim() : '';
@@ -946,6 +947,17 @@
     // The orders SENT are exactly the orders SHOWN: `raw` rides along with each rendered row, so an
     // order the card hid can never be saved behind the user's back. The server re-validates all of it.
     const actionSpec = (a) => (C && Array.isArray(C.orderActions) ? C.orderActions.find((x) => x.key === a) : null);
+    // Which raw items the SERVER will actually place (campaign-plan.ts normalisePlanOrders): one it
+    // can name, whose "after" — if any — points backwards at an item that itself survives. Computed
+    // once so the list, the "waits until" note and the task total all agree with what approving does.
+    const rawOrders = Array.isArray(ui.orders) ? ui.orders : [];
+    const survives = [];
+    rawOrders.forEach((r, i) => {
+      const shown = !!(r && typeof r === 'object' && ROLE_LABEL[r.assignedRole] && actionSpec(r.action));
+      const a = Math.floor(Number(r && r.after));
+      const waitsBack = Number.isInteger(a) && a >= 1 && a <= i;
+      survives.push(shown && (!waitsBack || survives[a - 1]));
+    });
     const orders = (Array.isArray(ui.orders) ? ui.orders : [])
       .filter((o) => o && typeof o === 'object' && ROLE_LABEL[o.assignedRole] && actionSpec(o.action))
       .map((o) => {
@@ -956,7 +968,7 @@
           : Number.isFinite(Number(o.quantity)) && o.quantity !== null && o.quantity !== ''
             ? Math.max(1, Math.min(spec.maxQuantity, Math.floor(Number(o.quantity))))
             : (spec.defaultQuantity || 1);
-        const detail = [o.angle, o.idea].find((v) => typeof v === 'string' && v.trim());
+        const detail = [o.angle, o.idea, o.task].find((v) => typeof v === 'string' && v.trim());
         const forWho = typeof o.audience === 'string' && o.audience.trim() ? o.audience.trim() : '';
         // An email order says who gets the emails and that nothing is sent (§9.7) — approving a
         // card that silently meant "email everyone who signs up" would be a decision made for them.
@@ -967,6 +979,21 @@
               ? 'A follow-up for people who sign up through a form — saved switched off'
               : 'Saved in Email Studio, switched off — nothing is sent until you say')
           : '';
+        // A person's task (§9.5) names who, says nothing is sent to them, and shows what waits.
+        const humanNote = o.action === 'request_human_task'
+          ? `${typeof o.assignee === 'string' && o.assignee.trim() ? o.assignee.trim() : 'Someone on your team'}${typeof o.dueDate === 'string' && o.dueDate ? ` · due ${o.dueDate}` : ''} — you tell them; nothing is sent`
+          : '';
+        // Named, not numbered: the card hides items it cannot show, so a bare "item 4" would not
+        // match anything the user can see. Same positions as the server (raw list, backwards only).
+        const rawIdx = rawOrders.indexOf(o);
+        const skipped = !survives[rawIdx];
+        const afterN = Math.floor(Number(o.after));
+        const prereq = Number.isInteger(afterN) && afterN >= 1 && afterN <= rawIdx ? rawOrders[afterN - 1] : null;
+        const afterNote = skipped
+          ? 'Waits for something that cannot be done, so it will be skipped'
+          : prereq
+            ? `Waits until: ${actionSpec(prereq.action).label}${typeof prereq.assignee === 'string' && prereq.assignee ? ` (${prereq.assignee})` : ''}`
+            : '';
         return {
           raw: o,
           label: spec.label,
@@ -975,10 +1002,29 @@
           detail: detail ? String(detail).trim() : '',
           forWho,
           emailNote,
+          humanNote,
+          afterNote,
+          skipped,
           tasks: (spec.workItemsPerUnit || 0) * qty,
         };
       });
-    const planTasks = orders.reduce((n, o) => n + o.tasks, 0);
+    // Skipped items are listed (so the user sees them) but neither priced nor sent.
+    const planTasks = orders.reduce((n, o) => n + (o.skipped ? 0 : o.tasks), 0);
+    // What is SENT: only the items that survive, with each "after" rewritten from the model's raw
+    // position to the position in THIS list. Sending the raw "after" against a filtered list would
+    // point every later item at the wrong one — the server counts positions in what it receives.
+    const sentPosByRaw = new Map();
+    const sendOrders = [];
+    orders.forEach((o) => {
+      if (o.skipped) return;
+      const rawIdx = rawOrders.indexOf(o.raw);
+      const a = Math.floor(Number(o.raw.after));
+      const copy = Object.assign({}, o.raw);
+      delete copy.after;
+      if (Number.isInteger(a) && a >= 1 && a <= rawIdx && sentPosByRaw.has(a)) copy.after = sentPosByRaw.get(a);
+      sendOrders.push(copy);
+      sentPosByRaw.set(rawIdx + 1, sendOrders.length);
+    });
 
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
@@ -1009,7 +1055,7 @@
         <p class="text-xs font-bold text-indigo-700 uppercase tracking-wide mb-1">Who I'd brief</p>
         <ul class="mb-3 space-y-1">
           ${orders.map((o) => `
-            <li class="text-xs text-gray-600">• ${esc(o.label)}${o.qty ? ` ×${esc(String(o.qty))}` : ''} — ${esc(o.role)}${o.detail ? `<span class="block pl-3 text-gray-500 italic break-words">${esc(o.detail)}</span>` : ''}${o.forWho ? `<span class="block pl-3 text-gray-500 break-words">For: ${esc(o.forWho)}</span>` : ''}${o.emailNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.emailNote)}</span>` : ''}</li>
+            <li class="text-xs text-gray-600">• ${esc(o.label)}${o.qty ? ` ×${esc(String(o.qty))}` : ''} — ${esc(o.role)}${o.detail ? `<span class="block pl-3 text-gray-500 italic break-words">${esc(o.detail)}</span>` : ''}${o.forWho ? `<span class="block pl-3 text-gray-500 break-words">For: ${esc(o.forWho)}</span>` : ''}${o.emailNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.emailNote)}</span>` : ''}${o.humanNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.humanNote)}</span>` : ''}${o.afterNote ? `<span class="block pl-3 text-gray-500">${esc(o.afterNote)}</span>` : ''}</li>
           `).join('')}
         </ul>` : ''}
 
@@ -1065,7 +1111,7 @@
           bubbles: true,
           detail: {
             campaignId,
-            orders: orders.map((o) => o.raw),
+            orders: sendOrders,
             respond({ ok, error }) {
               if (ok) {
                 say('Plan saved — approve it on that campaign in your Campaigns tab to brief your assistants.');
@@ -1098,7 +1144,7 @@
           audience: aud ? { persona, description: audDesc, excludeDomains } : null,
           funnelStage: stage,
           excludeExistingCustomers: excludeCustomers,
-          orders: orders.map((o) => o.raw),
+          orders: sendOrders,
           // The success line is built from the SERVER's answer, never from the model's intent —
           // chat-claims-drafts-it-never-saved is a reply that announced drafts which were never
           // written. Re-enabling on failure lets a transient error be retried instead of
@@ -1239,6 +1285,65 @@
   }
 
   register('campaign_edit_proposal', renderCampaignEditProposalCard);
+
+  // ── Built-in: Campaign Task Update Card ─────────────────────────────────────
+  // { type: 'campaign_task_update', orderId, outcome: 'done'|'wont_happen', note? }
+  //
+  // The chat twin of a task's "Mark done" / "Won't happen" buttons on the Campaigns tab (§9.0).
+  // The user confirms on the card; the click performs campaigns.ts complete_task. "Won't happen"
+  // says outright that it cancels the work waiting on the task — that is the consequence the user
+  // is approving.
+  function renderCampaignTaskUpdateCard(ui, esc) {
+    const orderId = Number.isInteger(Number(ui.orderId)) && Number(ui.orderId) > 0 ? Number(ui.orderId) : null;
+    const outcome = ui.outcome === 'wont_happen' ? 'wont_happen' : 'done';
+    const note = typeof ui.note === 'string' ? ui.note.trim().slice(0, 280) : '';
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Campaign task · Confirm</p>
+      <p class="font-bold text-gray-900 mt-1">${outcome === 'done' ? 'Mark this task done' : 'This task will not happen'}</p>
+      ${note ? `<p class="text-sm text-gray-700 mt-1 break-words">${esc(note)}</p>` : ''}
+      <p class="text-xs text-gray-600 mt-2">${outcome === 'done'
+        ? 'Any work that was waiting for it starts now.'
+        : 'Any work that was waiting for it is cancelled.'}</p>
+      <div class="flex items-center gap-2 mt-3">
+        <button type="button" data-ctu-confirm ${orderId ? '' : 'disabled'}
+          class="${outcome === 'done' ? 'btn-primary' : 'btn-destructive'} px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          ${outcome === 'done' ? 'Mark done' : 'Confirm'}
+        </button>
+        <button type="button" data-ctu-cancel
+          class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Not yet</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-ctu-status></p>`;
+    const status = el.querySelector('[data-ctu-status]');
+    const say = (text, tone) => {
+      status.textContent = text;
+      status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`;
+    };
+    const setBusy = (b) => el.querySelectorAll('[data-ctu-confirm], [data-ctu-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      const confirm = e.target.closest('[data-ctu-confirm]');
+      const cancel = e.target.closest('[data-ctu-cancel]');
+      if (!confirm && !cancel) return;
+      setBusy(true);
+      if (cancel) { say('Left open.'); return; }
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('campaign:taskUpdate', {
+        bubbles: true,
+        detail: {
+          orderId, outcome, note,
+          respond({ ok, error }) {
+            if (ok) { say(outcome === 'done' ? 'Done — your Campaigns tab shows it.' : 'Recorded — your Campaigns tab shows it.'); return; }
+            setBusy(false);
+            say(error || 'Could not save that — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('campaign_task_update', renderCampaignTaskUpdateCard);
 
   // ── Built-in: Action Item Assignment Card ───────────────────────────────────
   // Renderer for the meeting-note-taker route's wire shape (chat-orchestrator.ts):

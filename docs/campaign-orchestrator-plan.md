@@ -484,6 +484,23 @@ chained orders (`blocked` until the predecessor delivers, released by the reconc
 - Legal/compliance review as a gate: a human task can block the orders behind it, so "hold the
   launch until Legal approves the claims" is a chain, not a new mechanism.
 
+**✅ Native half built 2026-10-08 (not yet deployed; NO DDL).** Order `request_human_task`
+(role `human` — deliberately NOT in `ORCHESTRATABLE_ROLE_KEYS`: a person is asked, not commanded),
+0 tasks, brief = assignee, task, optional dueDate + assigneeEmail. **Nothing is ever sent to the
+person** — the email is shown so the USER knows who to tell. Deviation: no new `waiting_on_human`
+status (it would have meant widening a CHECK); 'issued' + "Waiting on <name>" carries it, and
+'blocked' is "not started — waiting for earlier work". Waiting: plan items take `after` (1-based,
+backwards only); positions are translated when invalid items are dropped, and an item whose
+prerequisite was dropped is SKIPPED, never run early. "Add work" can "Hold this until" an open task.
+"Mark done" delivers (releasing waiting work via unblockChain, which now RELEASES a person's task
+instead of cancelling it for having no assistant); "Won't happen" rejects (cancelling what waited).
+Chat: plans can include people + `after`; a `campaign_task_update` card marks a task done through
+the same `complete_task`. Rows show open tasks, overdue, and how much work waits on each.
+**Not built (the automatic half):** filing a Jira/Asana ticket (needs a per-tenant project picker —
+the Meeting Note Taker's `createJiraIssue`/`createAsanaTask` are the code to reuse) and closing the
+task when the ticket closes (webhooks or polling); asset upload on "Mark done" waits for §9.3.
+Guarded by `tests/campaign-human-tasks.test.ts`.
+
 ### 9.6 Funnel stage & differentiated KPIs
 
 **Build:**

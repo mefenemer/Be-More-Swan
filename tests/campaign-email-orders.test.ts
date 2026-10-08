@@ -173,10 +173,12 @@ check('a lost wake-up is re-sent by the reconciler', () => {
 
 check('a failed draft is cancelled and refunded through the ONE settlement path, at most once', () => {
     const rec = code(read('src/utils/campaign-reconciler.ts'));
-    const fn = span(rec, 'export async function settleOrderAsFailed', '\n}', 'settleOrderAsFailed');
+    const wrapper = span(rec, 'export async function settleOrderAsFailed', '\n}', 'settleOrderAsFailed');
+    assert.match(wrapper, /settleOrderNow\(db, orderId, \{ kind: 'failed'/);
+    const fn = span(rec, 'export async function settleOrderNow', '\n}', 'settleOrderNow');
     assert.match(fn, /\['issued', 'in_review'\]\.includes\(order\.status\)/,
         'Forward only — re-settling a settled order would refund it twice.');
-    assert.match(fn, /settleOrder\(db, order, \{ kind: 'failed'/);
+    assert.match(fn, /settleOrder\(db, order, verdict, result\)/);
 });
 
 check('the reconciler follows an email order after drafting', () => {

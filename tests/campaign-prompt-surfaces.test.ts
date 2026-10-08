@@ -33,7 +33,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CAMPAIGN_ORDER_ACTIONS, ORDER_ACTION_SPECS, UNAVAILABLE_OUTCOME_METRICS, CAMPAIGN_OUTCOME_METRICS } from '../src/config/campaign-vocab';
+import { CAMPAIGN_ORDER_ACTIONS, ORDER_ACTION_SPECS, UNAVAILABLE_OUTCOME_METRICS, CAMPAIGN_OUTCOME_METRICS, HUMAN_ROLE_KEY } from '../src/config/campaign-vocab';
 import { ORCHESTRATABLE_ROLE_KEYS, CAMPAIGN_ORCHESTRATOR_ROLE_KEY } from '../src/constants/roles';
 
 let passed = 0;
@@ -183,7 +183,10 @@ check('every order action the executor has is offered by the prompt', () => {
 check('every assignedRole the prompt offers is orchestratable, and vice versa', () => {
     const roleLine = span(PROMPT, '"assignedRole":', '\n', 'the assignedRole union in the wire shape');
     const offered = [...roleLine.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]).filter((v) => v !== 'assignedRole');
-    const allowed = new Set(ORCHESTRATABLE_ROLE_KEYS);
+    // HUMAN_ROLE_KEY is the ONE receiver that is not an assistant (§9.5): a person on the team is
+    // asked, not commanded, so it is deliberately absent from ORCHESTRATABLE_ROLE_KEYS. It is the
+    // only exemption — the next check pins that it can never be routed to an assistant.
+    const allowed = new Set([...ORCHESTRATABLE_ROLE_KEYS, HUMAN_ROLE_KEY]);
     const invented = offered.filter((r) => !allowed.has(r));
     assert.deepStrictEqual(invented, [],
         `The prompt offers role(s) the orchestrator may not command: ${invented.join(', ')}. `
@@ -198,10 +201,22 @@ check('each order action is described against the assistant that actually receiv
     // Assistant as drafting social posts, the model will emit a mismatched pair that the executor
     // rejects — a proposal the user approved that then quietly fails.
     for (const [action, spec] of Object.entries(ORDER_ACTION_SPECS)) {
+        if (spec.roleKey === HUMAN_ROLE_KEY) continue;
         assert.ok(ORCHESTRATABLE_ROLE_KEYS.includes(spec.roleKey),
             `ORDER_ACTION_SPECS.${action} is assigned to "${spec.roleKey}", which is not in ORCHESTRATABLE_ROLE_KEYS. `
             + 'The executor would route an order to an assistant the security boundary forbids.');
     }
+});
+
+check('a task for a person is never routed to an assistant', () => {
+    const orders = stripComments(read('src/utils/campaign-orders.ts'));
+    const place = span(orders, 'export async function placeOrder', 'export function humanTaskSummary', 'placeOrder');
+    const humanBranch = place.indexOf('spec.roleKey === HUMAN_ROLE_KEY) return placeHumanTask(');
+    assert.ok(humanBranch !== -1, 'placeOrder must hand a person\'s task to placeHumanTask.');
+    assert.ok(humanBranch < place.indexOf('ORCHESTRATABLE_ROLE_KEYS.includes'),
+        'The human branch must come BEFORE the assistant lookup, or a person\'s task is resolved against an assistant.');
+    assert.ok(!ORCHESTRATABLE_ROLE_KEYS.includes(HUMAN_ROLE_KEY),
+        'HUMAN_ROLE_KEY must never join ORCHESTRATABLE_ROLE_KEYS — a person is not an assistant the orchestrator commands.');
 });
 
 check('the prompt offers only outcome metrics something can actually count', () => {

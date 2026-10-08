@@ -94,7 +94,7 @@ export interface ProposedDecision {
     evidence: EvidenceItem[];
     costOfInaction: string;
     /** Applied verbatim by campaigns.ts `decide`. The model gets no turn between approval and execution. */
-    orders: Array<{ action: string; brief: Record<string, unknown>; quantity: number }>;
+    orders: Array<{ action: string; brief: Record<string, unknown>; quantity: number; after?: number }>;
 }
 
 /** Sum the work items a proposal would cost, so the card can state it before approval. */

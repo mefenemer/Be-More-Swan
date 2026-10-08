@@ -25,7 +25,7 @@
 import { CAMPAIGN_TYPES } from './newsletter-campaign-chat-draft';
 import { EMAIL_TRIGGERS } from './campaign-email-order';
 import { and, desc, eq, sql } from 'drizzle-orm';
-import { campaignBudgets, campaignDecisions, campaigns, discoveryCampaigns } from '../../db/schema';
+import { campaignBudgets, campaignDecisions, campaignOrders, campaigns, discoveryCampaigns } from '../../db/schema';
 import { persistProposal, type LiveCampaign, type ProposedDecision } from './campaign-proposer';
 import { settleDecisionMirror } from './campaign-mirror';
 import { campaignSpendTotals } from './campaign-ledger';
@@ -50,6 +50,7 @@ export const ORDER_ROLE_LABELS: Record<string, string> = {
     blog_writer: 'Blog Writing Assistant',
     lead_qualifier: 'Lead Generation Assistant',
     newsletter_editor: 'Email Marketing Assistant',
+    human: 'A person on your team',
 };
 
 /** Campaign states a plan may be filed against and approved on. Paused needs a Resume first. */
@@ -59,6 +60,12 @@ export interface PlanOrder {
     action: CampaignOrderAction;
     quantity: number;
     brief: Record<string, unknown>;
+    /**
+     * 1-based position of an EARLIER order in the same plan that this one waits for (§9.5) — the
+     * "hold the posts until Legal has approved the claims" shape. Only ever points backwards, so a
+     * plan cannot describe a cycle.
+     */
+    after?: number;
 }
 
 /**
@@ -73,7 +80,11 @@ export interface PlanOrder {
  * `quantity` is not here on purpose — placeOrder writes it from the priced quantity, so the
  * number drafted can never differ from the number charged.
  */
-const BRIEF_TEXT_FIELDS: Record<string, number> = { angle: 300, audience: 300, idea: 1000, name: 120, facts: 2000 };
+const BRIEF_TEXT_FIELDS: Record<string, number> = {
+    angle: 300, audience: 300, idea: 1000, name: 120, facts: 2000,
+    // request_human_task (§9.5): who, and what they are being asked to do.
+    assignee: 80, task: 500,
+};
 /** Closed vocabularies — anything else is dropped, and the worker picks the stage's default. */
 const BRIEF_ENUM_FIELDS: Record<string, readonly string[]> = {
     emailKind: CAMPAIGN_TYPES,
@@ -92,6 +103,14 @@ function cleanBrief(rec: Record<string, unknown>): Record<string, unknown> {
     for (const [k, allowed] of Object.entries(BRIEF_ENUM_FIELDS)) {
         if (typeof src[k] === 'string' && allowed.includes(src[k] as string)) out[k] = src[k];
     }
+    // A real calendar date or nothing — "by Friday" is not a due date we can show as overdue.
+    if (typeof src.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(src.dueDate.trim())
+        && !Number.isNaN(Date.parse(src.dueDate.trim()))) out.dueDate = src.dueDate.trim();
+    // Kept for the user to see who to tell. Nothing sends to it (§9.5): an address the model typed
+    // must never become a message from this business to a stranger.
+    if (typeof src.assigneeEmail === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(src.assigneeEmail.trim())) {
+        out.assigneeEmail = src.assigneeEmail.trim().slice(0, 200).toLowerCase();
+    }
     const dc = Math.floor(Number(src.discoveryCampaignId));
     if (Number.isInteger(dc) && dc > 0) out.discoveryCampaignId = dc;
     return out;
@@ -109,7 +128,12 @@ function cleanBrief(rec: Record<string, unknown>): Record<string, unknown> {
 export function normalisePlanOrders(raw: unknown): PlanOrder[] {
     if (!Array.isArray(raw)) return [];
     const out: PlanOrder[] = [];
-    for (const o of raw) {
+    // Raw 1-based position → position in `out`. `after` is written against the list the MODEL
+    // emitted, and dropping an invalid item earlier in that list would otherwise shift every later
+    // `after` onto the wrong item — "wait for Legal" silently becoming "wait for the blog post".
+    const kept = new Map<number, number>();
+    for (let r = 0; r < raw.length; r++) {
+        const o = raw[r];
         if (!o || typeof o !== 'object') continue;
         const rec = o as Record<string, unknown>;
         if (!isOrderAction(rec.action)) continue;
@@ -118,7 +142,21 @@ export function normalisePlanOrders(raw: unknown): PlanOrder[] {
         const quantity = !spec.takesQuantity ? 1
             : Number.isFinite(q) ? Math.max(1, Math.min(spec.maxQuantity, MAX_ORDER_QUANTITY, q))
             : (spec.defaultQuantity ?? 1);
-        out.push({ action: rec.action, quantity, brief: cleanBrief(rec) });
+
+        // Backwards only: `after` must name an item EARLIER in the raw list. Pointing at itself or a
+        // later one is ignored (that is how a cycle starts). Pointing at an earlier item that was
+        // DROPPED skips this one too — its precondition can never be met, and running it without
+        // the wait is exactly what "hold until Legal has approved" exists to stop.
+        const rawAfter = Math.floor(Number(rec.after));
+        let after: number | undefined;
+        if (Number.isInteger(rawAfter) && rawAfter >= 1 && rawAfter <= r) {
+            const mapped = kept.get(rawAfter);
+            if (mapped === undefined) continue;
+            after = mapped;
+        }
+
+        out.push({ action: rec.action, quantity, brief: cleanBrief(rec), ...(after ? { after } : {}) });
+        kept.set(r + 1, out.length);
         if (out.length >= MAX_PLAN_ORDERS) break;
     }
     return out;
@@ -141,6 +179,9 @@ export function planOrderProblem(o: PlanOrder): string | null {
     }
     if (o.action === 'adjust_messaging' && !o.brief.angle) {
         return `"${label}" needs the new angle to take.`;
+    }
+    if (o.action === 'request_human_task' && (!o.brief.assignee || !o.brief.task)) {
+        return `"${label}" needs who to ask and what they are being asked to do.`;
     }
     return null;
 }
@@ -179,7 +220,10 @@ export function buildStrategyProposal(orders: PlanOrder[], campaignStatus: strin
                 return {
                     label: ORDER_ROLE_LABELS[spec.roleKey] ?? spec.roleKey,
                     value: `${spec.label}${o.quantity > 1 ? ` ×${o.quantity}` : ''}`,
-                    detail: `${items} ${items === 1 ? 'task' : 'tasks'}`,
+                    detail: [
+                        spec.workItemsPerUnit ? `${items} ${items === 1 ? 'task' : 'tasks'}` : 'uses no tasks',
+                        o.after ? `waits for item ${o.after}` : '',
+                    ].filter(Boolean).join(' · '),
                 };
             }),
             { label: 'Where this came from', value: 'Agreed in conversation with your Campaign Assistant' },
@@ -187,7 +231,7 @@ export function buildStrategyProposal(orders: PlanOrder[], campaignStatus: strin
         costOfInaction: isDraft
             ? 'The campaign stays a draft: nothing is commissioned and no assistant is briefed.'
             : 'None of this work is commissioned. The campaign carries on with what it already has.',
-        orders: orders.map((o) => ({ action: o.action, brief: o.brief, quantity: o.quantity })),
+        orders: orders.map((o) => ({ action: o.action, brief: o.brief, quantity: o.quantity, ...(o.after ? { after: o.after } : {}) })),
     };
 }
 
@@ -227,7 +271,13 @@ export async function fileStrategyPlan(
  */
 export async function pendingPlanFor(db: Db, campaignId: number): Promise<{
     decisionId: number; workItems: number; expiresAt: Date;
-    orders: Array<{ action: string; label: string; role: string; quantity: number; workItems: number }>;
+    orders: Array<{
+        action: string; label: string; role: string; quantity: number; workItems: number;
+        /** 1-based item this one waits for, if any. */
+        after: number | null;
+        /** For a person's task: who, and what. Null for assistant work. */
+        assignee: string | null; task: string | null;
+    }>;
 } | null> {
     const [d] = await db
         .select({
@@ -255,9 +305,34 @@ export async function pendingPlanFor(db: Db, campaignId: number): Promise<{
             role: ORDER_ROLE_LABELS[spec.roleKey] ?? spec.roleKey,
             quantity: o.quantity,
             workItems: orderWorkItems(o.action, o.quantity),
+            after: o.after ?? null,
+            assignee: typeof o.brief.assignee === 'string' ? o.brief.assignee : null,
+            task: typeof o.brief.task === 'string' ? o.brief.task : null,
         };
     });
     return { decisionId: d.id, workItems: Number(d.costWorkItems) || 0, expiresAt: d.expiresAt, orders };
+}
+
+/**
+ * The open tasks for PEOPLE on one campaign (§9.5), with the orderId the chat needs to propose
+ * marking one done. Empty string when there are none, so the snapshot line simply ends.
+ */
+async function openTasksLine(db: Db, campaignId: number): Promise<string> {
+    const rows = await db.select({ id: campaignOrders.id, status: campaignOrders.status, brief: campaignOrders.brief })
+        .from(campaignOrders)
+        .where(and(
+            eq(campaignOrders.campaignId, campaignId),
+            eq(campaignOrders.action, 'request_human_task'),
+            sql`${campaignOrders.status} IN ('issued','blocked')`,
+        ))
+        .limit(10);
+    if (!rows.length) return '';
+    const items = rows.map((t) => {
+        const b = (t.brief ?? {}) as Record<string, unknown>;
+        return `orderId ${t.id}: ${String(b.assignee ?? 'someone')} — "${String(b.task ?? '').slice(0, 120)}"`
+            + `${b.dueDate ? ` (due ${b.dueDate})` : ''}${t.status === 'blocked' ? ' [not started — waiting for earlier work]' : ''}`;
+    });
+    return `. Open tasks for people: ${items.join('; ')}`;
 }
 
 /** Campaigns listed to the chat. A workspace runs a handful; more than this is a list to page. */
@@ -332,6 +407,7 @@ export async function buildCampaignsSnapshot(
                 + `, ${used} of ${r.maxWorkItems ?? 0} tasks used or committed`
                 + `, ${who ? `for: ${who}` : 'no audience set'}`
                 + `, ${r.excludeExistingCustomers ? 'leaves existing customers out of its lead searches' : 'INCLUDES existing customers'}`
+                + await openTasksLine(db, r.id)
                 + `${plan ? `, a plan of ${plan.orders.length} briefs is waiting for the user's approval` : ''}`,
             );
         }

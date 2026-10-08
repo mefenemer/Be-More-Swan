@@ -548,6 +548,19 @@
       postCampaignChange({ action: 'propose_plan', campaignId: d.campaignId, orders: d.orders }, respond, d.campaignId);
     }
 
+    // "Mark done" / "Confirm" on a campaign_task_update card (§9.5) — the same complete_task the
+    // Campaigns tab's buttons call. The user's click on the card is the confirmation.
+    function onCampaignTaskUpdate(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      postCampaignChange({
+        action: 'complete_task',
+        orderId: d.orderId,
+        outcome: d.outcome === 'wont_happen' ? 'wont_happen' : 'done',
+        note: d.note || undefined,
+      }, respond, null);
+    }
+
     // "Save these changes" on a campaign_edit_proposal card. Sends ONLY the descriptive fields,
     // and marks the call viaChat so the server refuses any budget field outright — a chat turn
     // may never raise a ceiling, whatever a card happens to carry.
@@ -778,6 +791,7 @@
     container.addEventListener('campaign:create', onCampaignCreate);
     container.addEventListener('campaign:proposePlan', onCampaignProposePlan);
     container.addEventListener('campaign:edit', onCampaignEdit);
+    container.addEventListener('campaign:taskUpdate', onCampaignTaskUpdate);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
     container.addEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
@@ -811,6 +825,7 @@
         container.removeEventListener('campaign:create', onCampaignCreate);
         container.removeEventListener('campaign:proposePlan', onCampaignProposePlan);
         container.removeEventListener('campaign:edit', onCampaignEdit);
+        container.removeEventListener('campaign:taskUpdate', onCampaignTaskUpdate);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
         container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);

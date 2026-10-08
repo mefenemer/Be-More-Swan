@@ -158,8 +158,12 @@ console.log('\n──── the chain from chat card to placed order ───�
 
 check('the chat card sends the orders it shows, and only those', () => {
     const fn = span(card, 'function renderCampaignStrategyProposalCard', '\n  register(', 'the proposal card');
-    assert.match(fn, /orders: orders\.map\(\(o\) => o\.raw\)/,
+    assert.match(fn, /orders: sendOrders/,
         'The card must send the rendered orders. Before §9.1 it sent none, so every chat plan was lost.');
+    // §9.5: only items that will survive are sent, and "after" is rewritten to positions in the
+    // SENT list — otherwise an item hidden earlier shifts every later wait onto the wrong item.
+    assert.match(fn, /if \(o\.skipped\) return;/);
+    assert.match(fn, /copy\.after = sentPosByRaw\.get\(a\)/);
 });
 
 check('chat-session forwards the orders to create', () => {

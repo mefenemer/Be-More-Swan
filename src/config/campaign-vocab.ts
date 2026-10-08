@@ -184,7 +184,15 @@ export const CAMPAIGN_ORDER_ACTIONS = [
     'narrow_targeting',
     'adjust_messaging',
     'draft_email_campaign',
+    'request_human_task',
 ] as const;
+
+/**
+ * The "role" of an order that goes to a PERSON rather than an assistant (§9.5). Deliberately not in
+ * ORCHESTRATABLE_ROLE_KEYS: that list is the set of assistants the orchestrator may command, and a
+ * teammate is not commanded — they are asked, and they say when it is done.
+ */
+export const HUMAN_ROLE_KEY = 'human';
 export type CampaignOrderAction = typeof CAMPAIGN_ORDER_ACTIONS[number];
 
 export interface OrderActionSpec {
@@ -274,6 +282,17 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
         defaultQuantity: 4,
         // A form follow-up is a sequence; a send-it-yourself campaign is a set of draft emails.
         artefactKind: 'newsletter_sequence',
+    },
+    request_human_task: {
+        roleKey: HUMAN_ROLE_KEY,
+        label: 'Ask a person',
+        description: 'Adds a task for someone on your team — a designer, an agency, legal — to this campaign. Other work can wait for it. It is marked done by you (or by asking your Campaign Assistant), and nothing is sent to that person automatically.',
+        // A person's time is not the workspace's task allowance. Charging it would make a campaign
+        // that waits on Legal look more expensive than one that does not.
+        workItemsPerUnit: 0,
+        takesQuantity: false,
+        maxQuantity: 1,
+        artefactKind: null,
     },
 };
 

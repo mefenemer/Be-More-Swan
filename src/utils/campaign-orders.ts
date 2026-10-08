@@ -39,7 +39,7 @@ import { assembleBlueprint } from './blueprint';
 import { createDiscoveryRun } from './discovery';
 import { recordCampaignSpend } from './campaign-ledger';
 import { mirrorOrder } from './campaign-mirror';
-import { ORDER_ACTION_SPECS, orderWorkItems, type CampaignOrderAction } from '../config/campaign-vocab';
+import { HUMAN_ROLE_KEY, ORDER_ACTION_SPECS, orderWorkItems, type CampaignOrderAction } from '../config/campaign-vocab';
 import { ORCHESTRATABLE_ROLE_KEYS } from '../constants/roles';
 
 type Db = ReturnType<typeof getDb>;
@@ -86,6 +86,9 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
 
     // Belt and braces: the HTTP boundary validates the action, but this is the function that
     // actually reaches another assistant, so it re-checks the role boundary itself.
+    // A task for a PERSON (§9.5): no assistant to resolve, nothing to execute, no tasks charged.
+    if (spec.roleKey === HUMAN_ROLE_KEY) return placeHumanTask(input);
+
     if (!ORCHESTRATABLE_ROLE_KEYS.includes(spec.roleKey)) {
         return { orderId: null, status: 'failed', workItems: 0, message: 'That assistant cannot be given orders.' };
     }
@@ -147,6 +150,67 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
         orchestratorAssistantId: input.orchestratorAssistantId,
         campaignObjective: input.campaignObjective,
         targetAssistantId: target.id, targetUserId: target.userId,
+    });
+}
+
+/** "Waiting on Sam (Legal) — due 14 Oct". The row's one sentence for a person's task. */
+export function humanTaskSummary(brief: Record<string, unknown>): string {
+    const who = typeof brief.assignee === 'string' && brief.assignee.trim() ? brief.assignee.trim() : 'someone on your team';
+    const due = typeof brief.dueDate === 'string' ? brief.dueDate : null;
+    return `Waiting on ${who}${due ? ` — due ${due}` : ''}`;
+}
+
+/**
+ * Place a task for a person. The order row is the whole record: there is no executor, no artefact
+ * and no ledger charge (a teammate's time is not the workspace's task allowance).
+ *
+ * ⚠️ Nothing is sent to the person. The brief may carry an email address so the USER knows who to
+ * tell, but a plan the model drafted must never become a message from this business to anyone —
+ * telling them is the user's act (or, later, a ticket in their own Jira/Asana).
+ */
+async function placeHumanTask(input: PlaceOrderInput): Promise<PlaceOrderResult> {
+    const blocked = !!input.blockedOnOrderId;
+    const [order] = await input.db.insert(campaignOrders).values({
+        organisationId: input.organisationId,
+        campaignId: input.campaignId,
+        targetAssistantId: null,
+        targetRoleKey: HUMAN_ROLE_KEY,
+        action: input.action,
+        brief: input.brief,
+        costWorkItems: 0,
+        status: blocked ? 'blocked' : 'queued',
+        blockedOnOrderId: input.blockedOnOrderId ?? null,
+    }).returning({ id: campaignOrders.id });
+    if (!order) return { orderId: null, status: 'failed', workItems: 0, message: 'Could not record the task.' };
+    if (blocked) return { orderId: order.id, status: 'blocked', workItems: 0 };
+    await issueHumanTask(input.db, order.id, {
+        organisationId: input.organisationId,
+        orchestratorAssistantId: input.orchestratorAssistantId,
+        campaignObjective: input.campaignObjective,
+        brief: input.brief,
+    });
+    return { orderId: order.id, status: 'issued', workItems: 0 };
+}
+
+/**
+ * Put a person's task in front of them: 'issued' is "waiting on <name>" for this action. Exported
+ * for the reconciler, which releases a person's task that was waiting on earlier work — the
+ * assistant path (issueOrder) cannot, because there is no assistant to issue to.
+ */
+export async function issueHumanTask(db: Db, orderId: number, ctx: {
+    organisationId: number; orchestratorAssistantId: number; campaignObjective: string;
+    brief: Record<string, unknown>;
+}): Promise<void> {
+    const summary = humanTaskSummary(ctx.brief);
+    await db.update(campaignOrders)
+        .set({ status: 'issued', issuedAt: new Date(), resultSummary: summary, updatedAt: new Date() })
+        .where(eq(campaignOrders.id, orderId));
+    await mirrorOrder(db, {
+        organisationId: ctx.organisationId, aiAssistantId: ctx.orchestratorAssistantId,
+        orderId, campaignObjective: ctx.campaignObjective, action: 'request_human_task',
+        status: 'issued',
+        targetRoleLabel: typeof ctx.brief.assignee === 'string' && ctx.brief.assignee ? ctx.brief.assignee : 'A person on your team',
+        workItems: 0, resultSummary: summary,
     });
 }
 
@@ -430,6 +494,13 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
     // (src/utils/campaign-email-order.ts). The order stays 'issued' until the emails exist; a lost
     // wake-up is re-sent by the reconciler, so a failed dispatch is NOT a failed order.
     // Nothing here or in the worker ever sends an email.
+    // Never reached: a person's task is placed by placeHumanTask and released by issueHumanTask,
+    // neither of which runs an executor. Present only because this table must name every action;
+    // if it IS reached, something routed a human task to an assistant, so refuse rather than guess.
+    request_human_task: async () => ({
+        ok: false, message: 'A task for a person cannot be given to an assistant.',
+    }),
+
     draft_email_campaign: async (_db, ctx, orderId) => {
         const n = Math.max(1, Math.floor(Number(ctx.brief.quantity) || 1));
         await triggerCampaignEmailDraft(orderId, 'order-issued');
