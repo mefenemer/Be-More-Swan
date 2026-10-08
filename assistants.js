@@ -5324,6 +5324,16 @@ function _applyDashboardRegistry(data) {
     // the numbers arrive, the same way the Data Hub and Searches tabs do.
     const rqLabel = window._detailReviewQueue.label || 'Review';
     setText('detail-rq-heading', rqLabel);
+    // The Be More Swan "i" explainer on the heading (explainers.js), when the role names one
+    // (registry reviewQueue.explain). setText just replaced the text — and with it any old icon —
+    // so clear the scanner's "done" mark; otherwise a heading reused from a role that had an icon
+    // would never get this role's. The MutationObserver rescan adds the icon.
+    const rqHeading = document.getElementById('detail-rq-heading');
+    if (rqHeading) {
+        rqHeading.removeAttribute('data-explain-ready');
+        if (window._detailReviewQueue.explain) rqHeading.setAttribute('data-explain', window._detailReviewQueue.explain);
+        else rqHeading.removeAttribute('data-explain');
+    }
     setText('review-queue-tab-label', rqLabel);
     // ⚠️ Count NOW, not on first activation. _detailRqRefreshRecordCounts was only ever reached
     // through _activateMainTab('review-queue'), so "Outreach (23)" — and all four column badges —
