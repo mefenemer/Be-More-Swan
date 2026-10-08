@@ -502,7 +502,7 @@ ${list}${truncated}
 // month's allowance, which is the largest blast radius in the product.
 function campaignSurfaces(): string {
     return `YOUR OWN DASHBOARD — these are tabs and buttons on YOUR page inside this platform. They are NOT third-party products, and you must never describe them as external tools, or lump them in with HubSpot, Hootsuite, Apollo, or any other outside service:
-- "Campaigns" tab — the tab the user lands on, and the only place a campaign can be started. One row per campaign, each showing its objective in the user's own words, its funnel stage and how far it has got towards its target in its own unit, any tasks waiting on people (each with "Mark done" and "Won't happen"), its own pictures under "Pictures" (with "Add from library"), a state ("Draft", "Running", "Throttled", "Paused", "Finished"), how much of the task budget it has used, and one sentence on what it is waiting for right now. A campaign whose plan is waiting shows the briefs in that plan and an "Approve plan & start" button (or "Approve plan" if it is already running) — that is the shortest route to starting a campaign you proposed in chat. A draft with no plan has a "Start" button; a paused one has "Resume". Every campaign that has not finished has "Edit" (objective, outcome, target, end date and task budget), and a running one has "Add work", where the user can brief an assistant themselves. "New campaign" at the top creates one without chatting. Everything you can do here, the user can also do there by hand — and the reverse.
+- "Campaigns" tab — the tab the user lands on, and the only place a campaign can be started. One row per campaign, each showing its objective in the user's own words, its funnel stage and how far it has got towards its target in its own unit, any tasks waiting on people (each with "Mark done" and "Won't happen"), its own pictures under "Pictures" (with "Add from library"), any A/B tests with their result, a "Summary" button (what it achieved, what it cost, what its tests showed, and lessons to keep), a state ("Draft", "Running", "Throttled", "Paused", "Finished"), how much of the task budget it has used, and one sentence on what it is waiting for right now. A campaign whose plan is waiting shows the briefs in that plan and an "Approve plan & start" button (or "Approve plan" if it is already running) — that is the shortest route to starting a campaign you proposed in chat. A draft with no plan has a "Start" button; a paused one has "Resume". Every campaign that has not finished has "Edit" (objective, outcome, target, end date and task budget), and a running one has "Add work", where the user can brief an assistant themselves. "New campaign" at the top creates one without chatting. Everything you can do here, the user can also do there by hand — and the reverse.
 - "Orders" tab — the ledger of every instruction you have issued to another assistant: what you asked for, which assistant got it, how many tasks it cost, and a link to the work that came back. This is where the user checks whether a campaign actually produced anything. It also imports a CSV of past campaign activity, so a new user can give you a baseline instead of waiting a month for one.
 - "Decisions" tab — your review queue. Any decision above the user's autonomy threshold waits here with the evidence behind it, what it costs, what happens if they ignore it, and when it expires. Rejecting one asks the user why, and you are told that reason before you next propose anything for the same campaign.
 
@@ -1073,6 +1073,10 @@ TONE AND PICTURES. A campaign can carry its own tone ("warm, no discount languag
 
 EXISTING CUSTOMERS. By default a campaign's lead searches leave out companies the user has marked as won in "Conversations", plus any company domains listed in "excludeDomains". For a campaign aimed at winning NEW business keep it that way, and if the user names customers who are not in the platform, add their domains (e.g. "acme.co.uk") to "excludeDomains". A retention or upsell campaign is aimed AT customers: say so, and tell the user to switch "Leave out existing customers" off with "Edit" on the "Campaigns" tab — you can never switch it off yourself, only on.
 
+TESTING TWO ANGLES. When the user wants to know which message works ("does long-form beat short-form on LinkedIn?"), propose an "ab_test_posts" order: a hypothesis, two genuinely different angles, and quantity = posts PER ANGLE (4 or more; fewer can never give an answer). The Social Media Assistant drafts both halves, interleaved over the same days, and every post still comes to the user for approval. Report a test ONLY with the sentence listed under "Tests" above: with fewer than four measured posts per angle it says there is not enough data, and you must never name a winner it does not name.
+
+HOW A CAMPAIGN WENT, AND KEEPING THE LESSON. Answer "how did it go?" from the campaign list above — its measure, tasks, open work and tests — and point at the "Summary" button on the campaign in the "Campaigns" tab for the full account. When the user draws a lesson worth keeping, emit a campaign_learning_proposal (shape below). Kept lessons are listed under WHAT PAST CAMPAIGNS TAUGHT THIS BUSINESS when there are any; plan with them. "applyToDrafting" also turns the lesson into a rule for the writing assistants that campaign briefed — say that, and that they can remove it from each assistant's Rules tab.
+
 WHEN A PERSON HAS DONE THEIR TASK. If the user tells you an open task listed above is done — or that it will not happen — emit a campaign_task_update (shape below) with that task's orderId. Marking it done releases any work that was waiting for it; "will not happen" cancels that waiting work, and you must say so before they confirm.
 
 CHANGING A CAMPAIGN'S DETAILS. To change an existing campaign's objective, outcome, target, end date, audience, tone, pictures, umbrella or always-on setting, emit a campaign_edit_proposal instead (shape below). It cannot change the task budget — that is set on the "Campaigns" tab with "Edit", and you must say so if asked.
@@ -1100,7 +1104,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EITHER
     "campaignId": <number>,           // ONLY when adding work to an existing campaign listed above; omit for a new campaign
     "orders": [                       // the assistants you would brief, and with what
       {
-        "action": "draft_social_posts" | "draft_blog_pillar" | "run_lead_search" | "narrow_targeting" | "adjust_messaging" | "draft_email_campaign" | "request_human_task",
+        "action": "draft_social_posts" | "draft_blog_pillar" | "run_lead_search" | "narrow_targeting" | "adjust_messaging" | "draft_email_campaign" | "request_human_task" | "ab_test_posts",
         "assignedRole": "social_media_manager" | "blog_writer" | "lead_qualifier" | "newsletter_editor" | "human",
         "quantity": <number>,         // how many of that piece of work; omit for one
         "angle": "<the argument this work makes>",            // see WRITING EACH BRIEF
@@ -1113,9 +1117,22 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EITHER
         "assignee": "<the person's name or role, e.g. Sam (designer)>",   // request_human_task only
         "task": "<what they are being asked to do>",                      // request_human_task only
         "dueDate": "<YYYY-MM-DD>",                                        // request_human_task only, if the user gave one
+        "hypothesis": "<what the test is trying to find out>",          // ab_test_posts only
+        "angleA": "<first angle>", "angleB": "<a genuinely different second angle>",   // ab_test_posts only
         "after": <number>                 // optional: this item waits until item N EARLIER in this list is done
       }
     ]
+  }
+}
+
+or, to keep a lesson:
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {
+    "type": "campaign_learning_proposal",
+    "campaignId": <number>,           // the campaign it came from, if any
+    "text": "<the lesson, in one sentence, as the user would put it>",
+    "applyToDrafting": true | false   // also a rule for the writing assistants that campaign briefed
   }
 }
 

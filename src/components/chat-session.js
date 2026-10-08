@@ -565,6 +565,29 @@
       }, respond, null);
     }
 
+    // "Keep this lesson" on a campaign_learning_proposal card (§9.8) — the same save_learning the
+    // Summary panel's "Keep" calls. Reports how many assistants got the rule, from the server.
+    function onCampaignSaveLearning(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          action: 'save_learning', campaignId: d.campaignId || null, text: d.text,
+          source: 'user', applyToDrafting: d.applyToDrafting === true,
+        }),
+      })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `Save failed (HTTP ${res.status}).`);
+          respond({ ok: true, appliedTo: data.appliedTo });
+          document.dispatchEvent(new CustomEvent('campaign:updated', { detail: { assistantId, campaignId: d.campaignId || null } }));
+        })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     // "Save these changes" on a campaign_edit_proposal card. Sends ONLY the descriptive fields,
     // and marks the call viaChat so the server refuses any budget field outright — a chat turn
     // may never raise a ceiling, whatever a card happens to carry.
@@ -801,6 +824,7 @@
     container.addEventListener('campaign:proposePlan', onCampaignProposePlan);
     container.addEventListener('campaign:edit', onCampaignEdit);
     container.addEventListener('campaign:taskUpdate', onCampaignTaskUpdate);
+    container.addEventListener('campaign:saveLearning', onCampaignSaveLearning);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
     container.addEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
@@ -835,6 +859,7 @@
         container.removeEventListener('campaign:proposePlan', onCampaignProposePlan);
         container.removeEventListener('campaign:edit', onCampaignEdit);
         container.removeEventListener('campaign:taskUpdate', onCampaignTaskUpdate);
+        container.removeEventListener('campaign:saveLearning', onCampaignSaveLearning);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
         container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);

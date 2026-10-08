@@ -4181,6 +4181,53 @@ export const campaignAssets = pgTable("campaign_assets", {
   index("campaign_assets_asset_idx").on(t.contentAssetId),
 ]);
 
+// ── A/B tests and campaign learnings (db/z-campaign-learning.sql, plan §9.8) ──
+// One `ab_test_posts` order drafts N posts per angle. Each drafting job's variant is tagged in
+// campaignExperimentJobs (not a new content_generation_jobs column — several workers read that
+// table), and the drafting worker gives each job ITS angle from here.
+export const campaignExperiments = pgTable("campaign_experiments", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").notNull().references(() => campaigns.id, { onDelete: "cascade" }),
+  orderId: integer("order_id").references((): AnyPgColumn => campaignOrders.id, { onDelete: "set null" }),
+  hypothesis: text().notNull(),
+  angleA: text("angle_a").notNull(),
+  angleB: text("angle_b").notNull(),
+  postsPerVariant: integer("posts_per_variant").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("campaign_experiments_campaign_idx").on(t.campaignId),
+  uniqueIndex("campaign_experiments_order_uidx").on(t.orderId).where(sql`order_id IS NOT NULL`),
+  check("campaign_experiments_posts_check", sql`${t.postsPerVariant} BETWEEN 1 AND 20`),
+]);
+
+export const campaignExperimentJobs = pgTable("campaign_experiment_jobs", {
+  jobId: integer("job_id").primaryKey().references((): AnyPgColumn => contentGenerationJobs.id, { onDelete: "cascade" }),
+  experimentId: integer("experiment_id").notNull().references(() => campaignExperiments.id, { onDelete: "cascade" }),
+  variant: text().notNull(),
+}, (t) => [
+  index("campaign_experiment_jobs_exp_idx").on(t.experimentId, t.variant),
+  check("campaign_experiment_jobs_variant_check", sql`${t.variant} IN ('A','B')`),
+]);
+
+// What the user chose to keep from a finished campaign or a concluded test. Read by the Campaign
+// Assistant's chat when it plans the next one; optionally ALSO written as a content_rules row
+// (origin 'campaign_learning') on each writing assistant the campaign briefed. SET NULL: a lesson
+// outlives its campaign.
+export const campaignLearnings = pgTable("campaign_learnings", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
+  learning: text().notNull(),
+  source: text().notNull(),
+  appliedToDrafting: boolean("applied_to_drafting").notNull().default(false),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("campaign_learnings_org_idx").on(t.organisationId, t.createdAt),
+  check("campaign_learnings_source_check", sql`${t.source} IN ('summary','test','user')`),
+]);
+
 export const campaignSpendEvents = pgTable("campaign_spend_events", {
   id: bigint({ mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),

@@ -984,7 +984,11 @@
           : Number.isFinite(Number(o.quantity)) && o.quantity !== null && o.quantity !== ''
             ? Math.max(1, Math.min(spec.maxQuantity, Math.floor(Number(o.quantity))))
             : (spec.defaultQuantity || 1);
-        const detail = [o.angle, o.idea, o.task].find((v) => typeof v === 'string' && v.trim());
+        const detail = [o.angle, o.idea, o.task, o.hypothesis].find((v) => typeof v === 'string' && v.trim());
+        // An A/B test (§9.8) shows BOTH angles — the user is approving a comparison, not one post.
+        const testNote = o.action === 'ab_test_posts' && typeof o.angleA === 'string' && typeof o.angleB === 'string'
+          ? `A: ${o.angleA.trim()} · B: ${o.angleB.trim()} — per angle, every post still comes to you`
+          : '';
         const forWho = typeof o.audience === 'string' && o.audience.trim() ? o.audience.trim() : '';
         // An email order says who gets the emails and that nothing is sent (§9.7) — approving a
         // card that silently meant "email everyone who signs up" would be a decision made for them.
@@ -1019,6 +1023,7 @@
           forWho,
           emailNote,
           humanNote,
+          testNote,
           afterNote,
           skipped,
           tasks: (spec.workItemsPerUnit || 0) * qty,
@@ -1075,7 +1080,7 @@
         <p class="text-xs font-bold text-indigo-700 uppercase tracking-wide mb-1">Who I'd brief</p>
         <ul class="mb-3 space-y-1">
           ${orders.map((o) => `
-            <li class="text-xs text-gray-600">• ${esc(o.label)}${o.qty ? ` ×${esc(String(o.qty))}` : ''} — ${esc(o.role)}${o.detail ? `<span class="block pl-3 text-gray-500 italic break-words">${esc(o.detail)}</span>` : ''}${o.forWho ? `<span class="block pl-3 text-gray-500 break-words">For: ${esc(o.forWho)}</span>` : ''}${o.emailNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.emailNote)}</span>` : ''}${o.humanNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.humanNote)}</span>` : ''}${o.afterNote ? `<span class="block pl-3 text-gray-500">${esc(o.afterNote)}</span>` : ''}</li>
+            <li class="text-xs text-gray-600">• ${esc(o.label)}${o.qty ? ` ×${esc(String(o.qty))}` : ''} — ${esc(o.role)}${o.detail ? `<span class="block pl-3 text-gray-500 italic break-words">${esc(o.detail)}</span>` : ''}${o.forWho ? `<span class="block pl-3 text-gray-500 break-words">For: ${esc(o.forWho)}</span>` : ''}${o.emailNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.emailNote)}</span>` : ''}${o.humanNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.humanNote)}</span>` : ''}${o.testNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.testNote)}</span>` : ''}${o.afterNote ? `<span class="block pl-3 text-gray-500">${esc(o.afterNote)}</span>` : ''}</li>
           `).join('')}
         </ul>` : ''}
 
@@ -1392,6 +1397,70 @@
   }
 
   register('campaign_task_update', renderCampaignTaskUpdateCard);
+
+  // ── Built-in: Campaign Learning Proposal Card ───────────────────────────────
+  // { type: 'campaign_learning_proposal', campaignId?, text, applyToDrafting? }
+  //
+  // The chat twin of "Keep" on a campaign's Summary (§9.8). The user can untick "also apply to
+  // drafting" before saving — that part turns the lesson into a rule on other assistants, and the
+  // card says so and says where to remove it.
+  function renderCampaignLearningProposalCard(ui, esc) {
+    const text = typeof ui.text === 'string' ? ui.text.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
+    const campaignId = Number.isInteger(Number(ui.campaignId)) && Number(ui.campaignId) > 0 ? Number(ui.campaignId) : null;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Keep a lesson · Approval needed</p>
+      <p class="text-sm text-gray-900 mt-2 break-words">${text ? esc(text) : '<span class="text-amber-700">No lesson was written.</span>'}</p>
+      ${campaignId ? `
+        <label class="flex items-start gap-2 text-xs text-gray-700 mt-3">
+          <input type="checkbox" data-clp-apply ${ui.applyToDrafting === true ? 'checked' : ''} class="mt-0.5">
+          <span>Also make it a rule for the writing assistants this campaign briefed. You can remove it from each assistant's Rules tab.</span>
+        </label>` : ''}
+      <p class="text-xs text-gray-600 mt-2">Your Campaign Assistant reads kept lessons whenever it plans a campaign.</p>
+      <div class="flex items-center gap-2 mt-3">
+        <button type="button" data-clp-save ${text ? '' : 'disabled'}
+          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Keep this lesson</button>
+        <button type="button" data-clp-cancel
+          class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-clp-status></p>`;
+    const status = el.querySelector('[data-clp-status]');
+    const say = (t, tone) => {
+      status.textContent = t;
+      status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`;
+    };
+    const setBusy = (b) => el.querySelectorAll('[data-clp-save], [data-clp-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      const save = e.target.closest('[data-clp-save]');
+      const cancel = e.target.closest('[data-clp-cancel]');
+      if (!save && !cancel) return;
+      setBusy(true);
+      if (cancel) { say('Not kept.'); return; }
+      const apply = !!el.querySelector('[data-clp-apply]')?.checked;
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('campaign:saveLearning', {
+        bubbles: true,
+        detail: {
+          campaignId, text, applyToDrafting: apply,
+          respond({ ok, error, appliedTo }) {
+            if (ok) {
+              const n = Array.isArray(appliedTo) ? appliedTo.length : 0;
+              say(apply
+                ? (n ? `Kept, and added as a rule for ${n} ${n === 1 ? 'assistant' : 'assistants'}.` : 'Kept. No writing assistant was briefed by that campaign, so no rule was added.')
+                : 'Kept — your Campaign Assistant will plan with it.');
+              return;
+            }
+            setBusy(false);
+            say(error || 'Could not save that — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('campaign_learning_proposal', renderCampaignLearningProposalCard);
 
   // ── Built-in: Action Item Assignment Card ───────────────────────────────────
   // Renderer for the meeting-note-taker route's wire shape (chat-orchestrator.ts):

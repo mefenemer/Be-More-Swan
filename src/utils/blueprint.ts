@@ -12,8 +12,6 @@
 // real steering weight but an assistant without them is fully configured, so none counts toward
 // completeness.
 
-import { audienceLine } from '../config/campaign-audience';
-import { isFunnelStage } from '../config/campaign-vocab';
 import { eq, and, desc, isNull, inArray, sql } from 'drizzle-orm';
 import * as crypto from 'crypto';
 import { getDb } from '../../db/client';
@@ -43,9 +41,7 @@ import { checkProhibitedUsePatterns } from './tos-gate';
 import { OPERATIONAL_TRIGGERS, OPERATIONAL_SOURCES } from './operational-setup';
 import { BUDGET_CONFIG_KEY, resolveBudget } from '../config/execution-budgets';
 import { buildGoalDirective, renderGoalDirective } from './goal-directive';
-import { buildCampaignDirective } from './campaign-directive';
-import type { CampaignOutcomeMetric } from '../config/campaign-vocab';
-import type { CampaignConstraints } from '../config/campaign-reject-reasons';
+import { buildCampaignDirective, directiveInputFrom } from './campaign-directive';
 import type { GoalStatus } from '../config/goal-metrics';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -633,31 +629,11 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
 
     if (liveCampaign) hashParts.push({ id: `campaign:${liveCampaign.id}`, updatedAt: liveCampaign.updatedAt });
 
-    const campaignBrief = (liveCampaign?.brief ?? {}) as Record<string, unknown>;
-    const weeksRemaining = liveCampaign?.endsAt
-        ? Math.max(0, Math.round((liveCampaign.endsAt.getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000)))
-        : null;
-
-    const campaignDirective = buildCampaignDirective(liveCampaign ? {
-        id: liveCampaign.id,
-        objective: liveCampaign.objective,
-        outcomeMetric: liveCampaign.outcomeMetric as CampaignOutcomeMetric,
-        angle: typeof campaignBrief.angle === 'string' ? campaignBrief.angle : null,
-        // The order's own audience wins (one campaign can brief two assistants for two personas);
-        // otherwise the campaign's. Slow-moving by construction — it changes only on an edit,
-        // which recompiles (campaigns.ts edit → recompileCampaignTargets).
-        audience: audienceLine(liveCampaign.audience, campaignBrief.audience),
-        // Slow-moving (changes only on an edit, which recompiles) — safe in section content.
-        funnelStage: isFunnelStage(liveCampaign.funnelStage) ? liveCampaign.funnelStage : null,
-        // Slow-moving, like the stage: changes only on an edit, which recompiles.
-        tone: liveCampaign.tone ?? null,
-        // Pace is not computed here on purpose: it needs live outcome counts, and this section
-        // must stay slow-moving. It is 'unknown' until the Phase 2 outcome attribution lands,
-        // and the directive omits the pace line entirely rather than guessing.
-        pace: 'unknown',
-        weeksRemaining,
-        constraints: liveCampaign.constraints as CampaignConstraints | null,
-    } : null);
+    // Built by the shared directiveInputFrom (campaign-directive.ts), the same function the per-job
+    // rebuild uses — so the assistant-wide section and a job's own section can never disagree.
+    const campaignDirective = buildCampaignDirective(liveCampaign
+        ? directiveInputFrom(liveCampaign, (liveCampaign.brief ?? {}) as Record<string, unknown>)
+        : null);
 
     // No live campaign ⇒ empty content, so the section serialises to nothing at all rather than an
     // empty header that reads as "a campaign exists but is unknown".

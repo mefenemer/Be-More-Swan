@@ -38,6 +38,7 @@ import { fitForPlatform, isShortForm, type BrandHashtags } from '../../src/utils
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { operationalSetupLines } from '../../src/utils/operational-setup';
 import { renderBlueprintPrompt } from '../../src/utils/blueprint-prompt';
+import { campaignDirectiveForJob } from '../../src/utils/campaign-job-directive';
 import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
 import { resolvePostingSchedule } from '../../src/config/posting-cadence';
 import {
@@ -320,6 +321,13 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         if (!bp) throw new Error('Blueprint not found');
 
         const sections = bp.sections as Record<string, { content: Record<string, unknown> }>;
+        // §9.8: a job a campaign commissioned is drafted for THAT campaign (and, in an A/B test, its
+        // own angle) — not for whichever campaign the blueprint's one section 13 happens to name.
+        // A local copy only: the stored blueprint is never touched.
+        const jobCampaign = await campaignDirectiveForJob(db, job.id);
+        if (jobCampaign) {
+            (sections as Record<string, unknown>)['13-campaign'] = { status: 'complete', content: { ...jobCampaign.directive } };
+        }
 
         const identity    = sections['1-identity']?.content    || {};
         const compliance  = sections['9-compliance']?.content  || {};

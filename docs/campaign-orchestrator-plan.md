@@ -602,6 +602,24 @@ Email Studio show it). Guarded by `tests/campaign-email-orders.test.ts`.
   future campaign reads is the `goals-steer-generation` bug again — ship the consumer in the same
   commit, or don't ship the save button.
 
+**✅ Built 2026-10-08 (not yet deployed). ⚠️ Needs `db/z-campaign-learning.sql` applied to BOTH
+envs BEFORE the code deploys (new tables only).** A/B: order `ab_test_posts` (hypothesis + two
+different angles, quantity = posts per angle, default 4, 2 tasks per pair) drafts both halves
+interleaved A,B,A,B; each job is tagged in `campaign_experiment_jobs`. **Found on the way:** the
+blueprint holds ONE section 13 per assistant, so both halves would have been drafted with the same
+angle — and an assistant serving two campaigns drafted one campaign's posts with the other's
+instructions. A job commissioned by an order now gets section 13 rebuilt for ITS campaign, brief and
+variant (`campaign-job-directive.ts`, via the same `directiveInputFrom` the blueprint now uses).
+Verdict (`judgeExperiment`): fewer than 4 measured posts per angle → "not enough data"; under 1.25×
+→ "no clear difference"; one sentence used by the row, summary and chat. Summary: on demand, any
+status, counts only — no model; candidate lessons are sentences about the facts. Kept lessons
+(`campaign_learnings`) are read by the Campaign Assistant's planning every turn; "apply to drafting"
+writes a `content_rules` row (origin `campaign_learning`) on EACH writing assistant the campaign
+briefed and recompiles them — visible and deletable in their Rules tab. Chat: test orders,
+verdicts in the snapshot, `campaign_learning_proposal` card. Not done: blog A/B (social only);
+deleting a lesson does not delete the rules it became (said in the UI). Guarded by
+`tests/campaign-learning.test.ts`.
+
 ### 9.9 Build order
 
 1. **§9.1** orders flow (chat strategy decision + GUI create/edit/add work). Blocking.

@@ -113,7 +113,9 @@ check('the directive carries the tone, inside the brand voice', () => {
 check('the blueprint reads the tone, and a tone edit recompiles', () => {
     const bp = code(read('src/utils/blueprint.ts'));
     assert.match(bp, /tone: campaigns\.tone/);
-    assert.match(bp, /tone: liveCampaign\.tone \?\? null/);
+    assert.match(bp, /directiveInputFrom\(liveCampaign,/);
+    const d = code(read('src/utils/campaign-directive.ts'));
+    assert.match(d, /tone: c\.tone \?\? null/);
     const edit = span(api, "action === 'edit'", "action === 'start'", 'edit');
     assert.match(edit, /patch\.tone !== undefined\)/);
 });

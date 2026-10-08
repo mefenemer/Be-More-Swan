@@ -23,7 +23,8 @@
 // ('ahead' | 'on_track' | 'behind'), never a percentage and never a raw count.
 
 import { renderCampaignConstraints, type CampaignConstraints } from '../config/campaign-reject-reasons';
-import { CAMPAIGN_OUTCOME_LABELS, type CampaignOutcomeMetric, type FunnelStage } from '../config/campaign-vocab';
+import { CAMPAIGN_OUTCOME_LABELS, isFunnelStage, type CampaignOutcomeMetric, type FunnelStage } from '../config/campaign-vocab';
+import { audienceLine } from '../config/campaign-audience';
 
 /** How the campaign is tracking. Deliberately coarse — see the fast-moving-value warning above. */
 export type CampaignPace = 'ahead' | 'on_track' | 'behind' | 'unknown';
@@ -56,6 +57,49 @@ export interface CampaignDirective {
     audience: string | null;
     /** Pre-rendered prose. This is the ONLY thing emitted into the prompt. */
     directive: string;
+}
+
+/** The campaign columns a directive is built from — what blueprint.ts and the per-job rebuild select. */
+export interface DirectiveCampaignRow {
+    id: number;
+    objective: string;
+    outcomeMetric: string;
+    endsAt: Date | null;
+    constraints: unknown;
+    audience: unknown;
+    funnelStage: string | null;
+    tone: string | null;
+}
+
+/**
+ * The ONE place a campaign row + an order brief become a DirectiveCampaign. Pure.
+ *
+ * Shared by blueprint.ts (the assistant-wide section 13) and campaign-job-directive.ts (the
+ * per-job rebuild, §9.8). Two hand-written copies would drift — one would learn the tone and the
+ * other would not, and nobody would see it until drafts disagreed.
+ *
+ * `angleOverride` beats the brief's angle: an A/B test job carries ITS variant's angle.
+ */
+export function directiveInputFrom(
+    c: DirectiveCampaignRow, brief: Record<string, unknown>, angleOverride?: string | null,
+): DirectiveCampaign {
+    const weeksRemaining = c.endsAt
+        ? Math.max(0, Math.round((c.endsAt.getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000)))
+        : null;
+    return {
+        id: c.id,
+        objective: c.objective,
+        outcomeMetric: c.outcomeMetric as CampaignOutcomeMetric,
+        angle: angleOverride ?? (typeof brief.angle === 'string' ? brief.angle : null),
+        // The order's own audience wins (one campaign can brief two assistants for two personas).
+        audience: audienceLine(c.audience, brief.audience),
+        funnelStage: isFunnelStage(c.funnelStage) ? c.funnelStage : null,
+        tone: c.tone ?? null,
+        // Never computed here: section content must stay slow-moving (see the header).
+        pace: 'unknown',
+        weeksRemaining,
+        constraints: c.constraints as CampaignConstraints | null,
+    };
 }
 
 /**

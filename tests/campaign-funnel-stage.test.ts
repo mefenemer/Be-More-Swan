@@ -108,7 +108,9 @@ async function main() {
     await check('the blueprint passes the campaign\'s stage into the directive', () => {
         const bp = code(read('src/utils/blueprint.ts'));
         assert.match(bp, /funnelStage: campaigns\.funnelStage/);
-        assert.match(bp, /funnelStage: isFunnelStage\(liveCampaign\.funnelStage\)/);
+        assert.match(bp, /directiveInputFrom\(liveCampaign,/);
+        const d = code(read('src/utils/campaign-directive.ts'));
+        assert.match(d, /funnelStage: isFunnelStage\(c\.funnelStage\)/);
     });
 
     console.log('\n──── the halt only fires where it means something ────');

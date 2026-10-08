@@ -185,6 +185,7 @@ export const CAMPAIGN_ORDER_ACTIONS = [
     'adjust_messaging',
     'draft_email_campaign',
     'request_human_task',
+    'ab_test_posts',
 ] as const;
 
 /**
@@ -293,6 +294,19 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
         takesQuantity: false,
         maxQuantity: 1,
         artefactKind: null,
+    },
+    ab_test_posts: {
+        roleKey: SMM_ROLE_KEY,
+        label: 'Test two angles',
+        description: 'Has the Social Media Assistant draft the same number of posts for each of two angles, so you can see which one people engage with more. Every post still comes to you for approval. With fewer than four measured posts per angle it says there is not enough data, rather than naming a winner on noise.',
+        // Per PAIR — one post for each angle. Quantity is posts per angle.
+        workItemsPerUnit: 2,
+        takesQuantity: true,
+        // The social executor's own clamp is 20 posts; a pair is two, so 10 per angle.
+        maxQuantity: 10,
+        // Four per angle is the floor below which the result says "not enough data" (§9.8).
+        defaultQuantity: 4,
+        artefactKind: 'scheduled_post',
     },
 };
 

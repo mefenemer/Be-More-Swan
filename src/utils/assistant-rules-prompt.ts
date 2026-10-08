@@ -58,7 +58,7 @@ export function formatRulesBlock(rules: PromptRule[]): string | null {
         if (!text) continue;
         const p = String(r.platform || '').trim().toLowerCase();
         const scope = p && p !== 'global' ? ` [only for ${PLATFORM_LABELS[p] ?? p}]` : '';
-        const line = `- ${text}${scope}${r.origin === 'rejection_feedback' ? ' (from feedback on something you produced that they rejected)' : ''}`;
+        const line = `- ${text}${scope}${r.origin === 'rejection_feedback' ? ' (from feedback on something you produced that they rejected)' : r.origin === 'campaign_learning' ? ' (a lesson they kept from a past campaign)' : ''}`;
         if (used + line.length > MAX_BLOCK_CHARS) break;
         lines.push(line);
         used += line.length;

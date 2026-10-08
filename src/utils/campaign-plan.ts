@@ -31,6 +31,7 @@ import { settleDecisionMirror } from './campaign-mirror';
 import { campaignSpendTotals } from './campaign-ledger';
 import { audienceLine } from '../config/campaign-audience';
 import { countCampaignOutcome } from './campaign-outcomes';
+import { experimentResults, learningsPromptBlock } from './campaign-learning';
 import {
     CAMPAIGN_OUTCOME_LABELS, CAMPAIGN_STATUS_LABELS, ORDER_ACTION_SPECS, isOrderAction, orderWorkItems,
     type CampaignOrderAction, type CampaignOutcomeMetric, type CampaignStatus,
@@ -84,6 +85,8 @@ const BRIEF_TEXT_FIELDS: Record<string, number> = {
     angle: 300, audience: 300, idea: 1000, name: 120, facts: 2000,
     // request_human_task (§9.5): who, and what they are being asked to do.
     assignee: 80, task: 500,
+    // ab_test_posts (§9.8): what is being tested, and the two angles.
+    hypothesis: 300, angleA: 300, angleB: 300,
 };
 /** Closed vocabularies — anything else is dropped, and the worker picks the stage's default. */
 const BRIEF_ENUM_FIELDS: Record<string, readonly string[]> = {
@@ -179,6 +182,12 @@ export function planOrderProblem(o: PlanOrder): string | null {
     }
     if (o.action === 'adjust_messaging' && !o.brief.angle) {
         return `"${label}" needs the new angle to take.`;
+    }
+    if (o.action === 'ab_test_posts' && (!o.brief.angleA || !o.brief.angleB || !o.brief.hypothesis)) {
+        return `"${label}" needs what you are testing and both angles.`;
+    }
+    if (o.action === 'ab_test_posts' && String(o.brief.angleA).trim().toLowerCase() === String(o.brief.angleB).trim().toLowerCase()) {
+        return `"${label}" needs two DIFFERENT angles — the same angle twice tests nothing.`;
     }
     if (o.action === 'request_human_task' && (!o.brief.assignee || !o.brief.task)) {
         return `"${label}" needs who to ask and what they are being asked to do.`;
@@ -335,6 +344,12 @@ async function openTasksLine(db: Db, campaignId: number): Promise<string> {
     return `. Open tasks for people: ${items.join('; ')}`;
 }
 
+/** A/B tests on one campaign (§9.8), each with the SAME verdict sentence the row shows. */
+async function testsLine(db: Db, campaignId: number, organisationId: number): Promise<string> {
+    const tests = await experimentResults(db, campaignId, organisationId);
+    return tests.length ? `. Tests: ${tests.map((t) => `"${t.hypothesis}" — ${t.sentence}`).join(' | ')}` : '';
+}
+
 /** The pictures attached to one campaign (§9.3), by id and name, so the chat can say which it would remove. */
 async function campaignPicturesLine(db: Db, campaignId: number): Promise<string> {
     const rows = await db.select({ id: contentAssets.id, name: contentAssets.name })
@@ -414,7 +429,9 @@ export async function buildCampaignsSnapshot(
                 .map((x) => `- discoveryCampaignId ${x.id}: ${x.name ? `"${x.name}" — ` : ''}${x.idea.slice(0, 160)}`).join('\n')}`
             : '\nThere are no saved lead searches, so "narrow_targeting" cannot be used — propose "run_lead_search" instead.';
 
-        const library = await libraryLine(db, organisationId);
+        // Lessons kept from past campaigns (§9.8) ride with the snapshot, so planning reads them every turn.
+        const lessons = await learningsPromptBlock(db, organisationId);
+        const library = `${await libraryLine(db, organisationId)}${lessons ? `\n\n${lessons}` : ''}`;
         if (!rows.length) {
             return `YOUR CAMPAIGNS RIGHT NOW — this assistant has no campaigns yet. Anything the user wants to run is a NEW campaign.${searchBlock}${library}`;
         }
@@ -442,6 +459,7 @@ export async function buildCampaignsSnapshot(
                 + `${r.tone ? `, tone: "${r.tone}"` : ''}`
                 + await campaignPicturesLine(db, r.id)
                 + await openTasksLine(db, r.id)
+                + await testsLine(db, r.id, organisationId)
                 + `${plan ? `, a plan of ${plan.orders.length} briefs is waiting for the user's approval` : ''}`,
             );
         }

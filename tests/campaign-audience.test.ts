@@ -103,7 +103,11 @@ console.log('\n──── it reaches drafting ────');
 check('blueprint section 13 reads the campaign audience, with the order\'s taking precedence', () => {
     const bp = code(read('src/utils/blueprint.ts'));
     assert.match(bp, /audience: campaigns\.audience/, 'The live-campaign select must read campaigns.audience.');
-    assert.match(bp, /audience: audienceLine\(liveCampaign\.audience, campaignBrief\.audience\)/);
+    // §9.8 moved the construction into the shared directiveInputFrom (used by the blueprint AND the
+    // per-job rebuild), so pin both: the blueprint uses it, and it carries the precedence rule.
+    assert.match(bp, /directiveInputFrom\(liveCampaign,/);
+    const d = code(read('src/utils/campaign-directive.ts'));
+    assert.match(d, /audience: audienceLine\(c\.audience, brief\.audience\)/);
 });
 
 check('an audience edit recompiles the assistants the campaign briefs', () => {

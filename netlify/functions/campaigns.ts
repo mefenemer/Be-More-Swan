@@ -14,6 +14,9 @@
 //   POST { action: 'pause',       campaignId, reason }
 //   POST { action: 'stop_all',    assistantId }            → pause every live campaign
 //   POST { action: 'complete_task', orderId, outcome: 'done'|'wont_happen', note? }   (§9.5)
+//   POST { action: 'summary', campaignId }                  → facts, tests, candidate lessons (§9.8)
+//   POST { action: 'save_learning', campaignId?, text, source, applyToDrafting }
+//   POST { action: 'list_learnings', assistantId } / { action: 'delete_learning', learningId }
 //   POST { action: 'timeline', assistantId }                → the year view (§9.4)
 //   POST { action: 'list_library', assistantId }          → the org's pictures, for the picker (§9.3)
 //   POST { action: 'attach_assets', campaignId, assetIds[] } / { action: 'detach_asset', campaignId, assetId }
@@ -44,7 +47,7 @@
 
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
-    adVariants, aiAssistants, auditLogs, campaignAssets, campaignAttributions, campaignBudgets, contentAssets,
+    adVariants, aiAssistants, auditLogs, campaignAssets, campaignLearnings, campaignAttributions, campaignBudgets, contentAssets,
     campaignClickEvents, campaignDecisions, campaignLinks, campaignOrders, campaigns, discoveryCampaigns,
 } from '../../db/schema';
 import { getDb } from '../../db/client';
@@ -58,6 +61,7 @@ import { normaliseAudience, type CampaignAudience } from '../../src/config/campa
 import { countCampaignOutcome } from '../../src/utils/campaign-outcomes';
 import { MAX_CAMPAIGN_ASSETS, normaliseAssetIds, normaliseTone } from '../../src/config/campaign-creative';
 import { resolveAssetDisplayUrl } from '../../src/utils/social-publish';
+import { buildCampaignSummary, experimentResults, saveLearning } from '../../src/utils/campaign-learning';
 import {
     PLANNABLE_STATUSES, fileStrategyPlan, normalisePlanOrders, pendingPlanFor, planProblem, planWorkItems,
 } from '../../src/utils/campaign-plan';
@@ -308,7 +312,12 @@ export default withLambda(async (event) => {
                 };
             });
             const assets = await campaignAssetsFor(r.id);
-            items.push({ ...r, ...totals, orders: live ?? { open: 0, inReview: 0, delivered: 0 }, pendingPlan, progress, humanTasks, assets });
+            // A/B tests (§9.8) with their honest verdict — "not enough data" until each angle has it.
+            const tests = (await experimentResults(db, r.id, orgId)).map((t) => ({
+                id: t.id, hypothesis: t.hypothesis, angleA: t.angleA, angleB: t.angleB,
+                a: t.a, b: t.b, verdict: t.verdict.verdict, sentence: t.sentence,
+            }));
+            items.push({ ...r, ...totals, orders: live ?? { open: 0, inReview: 0, delivered: 0 }, pendingPlan, progress, humanTasks, assets, tests });
         }
 
         // The plan gate travels with the list so the Budget & Control strip can render in one
@@ -710,6 +719,61 @@ export default withLambda(async (event) => {
         }, orders);
         if (!decisionId) return json(500, { error: 'The plan could not be saved — please try again.' });
         return json(200, { decisionId, campaignId: campaign.id, status: campaign.status });
+    }
+
+    // ── summary + lessons (§9.8) ──────────────────────────────────────────────
+    if (action === 'summary') {
+        const campaign = await requireCampaign(Number(body.campaignId));
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+        const summary = await buildCampaignSummary(db, campaign.id, orgId);
+        if (!summary) return json(404, { error: 'Campaign not found.' });
+        return json(200, { summary });
+    }
+
+    if (action === 'save_learning') {
+        const text = str(body.text, 300);
+        if (!text) return json(400, { error: 'Write the lesson to keep.' });
+        let campaignId: number | null = null;
+        let objective: string | null = null;
+        if (body.campaignId !== undefined && body.campaignId !== null) {
+            const campaign = await requireCampaign(Number(body.campaignId));
+            if (!campaign) return json(404, { error: 'Campaign not found.' });
+            campaignId = campaign.id;
+            objective = campaign.objective;
+        }
+        const source = body.source === 'test' || body.source === 'summary' ? body.source : 'user';
+        const result = await saveLearning(db, {
+            organisationId: orgId, userId, campaignId, text, source,
+            applyToDrafting: body.applyToDrafting === true && campaignId !== null,
+            campaignObjective: objective,
+        });
+        return json(200, result);
+    }
+
+    if (action === 'list_learnings') {
+        const assistantId = Number(body.assistantId);
+        if (!await requireOrchestrator(assistantId)) return json(404, { error: 'Assistant not found.' });
+        const rows = await db.select({
+            id: campaignLearnings.id, learning: campaignLearnings.learning, source: campaignLearnings.source,
+            appliedToDrafting: campaignLearnings.appliedToDrafting, createdAt: campaignLearnings.createdAt,
+            campaignId: campaignLearnings.campaignId, objective: campaigns.objective,
+        }).from(campaignLearnings)
+            .leftJoin(campaigns, eq(campaigns.id, campaignLearnings.campaignId))
+            .where(eq(campaignLearnings.organisationId, orgId))
+            .orderBy(desc(campaignLearnings.createdAt))
+            .limit(100);
+        return json(200, { learnings: rows });
+    }
+
+    // Removes the lesson from planning. A rule it became stays in each assistant's Rules tab until
+    // removed there — said in the UI, because deleting other assistants' rules from here would be a
+    // reach across surfaces the user cannot see.
+    if (action === 'delete_learning') {
+        await db.delete(campaignLearnings).where(and(
+            eq(campaignLearnings.id, Number(body.learningId)),
+            eq(campaignLearnings.organisationId, orgId),
+        ));
+        return json(200, { ok: true });
     }
 
     // ── timeline (§9.4) ───────────────────────────────────────────────────────

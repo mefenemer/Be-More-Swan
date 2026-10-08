@@ -165,7 +165,8 @@ export function verdictFromArtefactStatuses(
 }
 
 /** The two actions whose work lands as content_generation_jobs. */
-const CONTENT_ACTIONS: readonly CampaignOrderAction[] = ['draft_social_posts', 'draft_blog_pillar'];
+// ab_test_posts (§9.8) produces posts through content jobs exactly like draft_social_posts.
+const CONTENT_ACTIONS: readonly CampaignOrderAction[] = ['draft_social_posts', 'draft_blog_pillar', 'ab_test_posts'];
 
 /**
  * Judge one content order from the jobs it enqueued and the posts those jobs produced.

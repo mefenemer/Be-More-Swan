@@ -81,6 +81,10 @@
     rejectingPlan: null,
     /** Per campaign: { open, picking, selected: Set } for the Pictures panel (§9.3). */
     pictures: {},
+    /** Per campaign: { open, loading, data, error } for the Summary panel (§9.8). */
+    summaries: {},
+    /** Lessons kept from past campaigns; null until loaded. */
+    learnings: null,
     /** The org's library for the picker; null until first opened. */
     library: null,
     libraryError: null,
@@ -316,10 +320,15 @@
         </div>
         ${plan ? planBlock(c, plan) : ''}
         ${humanTasksBlock(c)}
+        ${testsBlock(c)}
         ${canAddWork ? addWorkPanel(c) : ''}
         <p class="hidden mt-2 text-xs font-semibold text-gray-600" data-cmp-status="${esc(String(c.id))}"></p>
 
         <div class="flex flex-wrap items-center gap-3 mt-3">
+          <button type="button" data-cmp-toggle-summary="${esc(String(c.id))}"
+            class="text-xs font-bold text-gray-500 hover:text-gray-700 underline transition">
+            ${state.summaries[c.id] && state.summaries[c.id].open ? 'Hide summary' : 'Summary'}
+          </button>
           <button type="button" data-cmp-toggle-pictures="${esc(String(c.id))}"
             class="text-xs font-bold text-gray-500 hover:text-gray-700 underline transition">
             ${state.pictures[c.id] && state.pictures[c.id].open ? 'Hide pictures' : `Pictures${(c.assets || []).length ? ` (${esc(String(c.assets.length))})` : ''}`}
@@ -333,6 +342,7 @@
             ${state.paid_[c.id] && state.paid_[c.id].open ? 'Hide' : (c.mode === 'paid' ? 'Advertising' : 'Add advertising')}
           </button>
         </div>
+        ${summaryPanel(c)}
         ${picturesPanel(c)}
         ${linksPanel(c.id)}
         ${paidPanel(c)}
@@ -550,6 +560,157 @@
     await load();
   });
 
+  // ── A/B tests (§9.8) ───────────────────────────────────────────────────────
+  // Each test states its hypothesis, each angle's numbers, and the server's verdict sentence — the
+  // same words the summary and the chat use. A winner can be kept as a lesson in one click; "not
+  // enough data" and "no clear difference" offer nothing to keep, because there is nothing learned.
+  // Is this exact lesson already kept from this campaign? Derived from the saved lessons rather than
+  // remembered per click, so a re-render (or a reload) can never offer "Keep" on something kept.
+  function isKept(campaignId, text) {
+    return (state.learnings || []).some((l) => Number(l.campaignId) === Number(campaignId) && l.learning === text);
+  }
+  function keepButton(campaignId, source, text, cls) {
+    const kept = isKept(campaignId, text);
+    return `<button type="button" data-cmp-keep="${esc(String(campaignId))}" data-cmp-keep-source="${esc(source)}" data-cmp-keep-text="${esc(text)}"
+      ${kept ? 'disabled' : ''} class="${cls} border text-xs font-bold rounded-lg transition disabled:opacity-50">${kept ? 'Kept' : 'Keep'}</button>`;
+  }
+
+  function testsBlock(c) {
+    const tests = Array.isArray(c.tests) ? c.tests : [];
+    if (!tests.length) return '';
+    const stat = (v) => `${esc(String(v.posts))} drafted · ${esc(String(v.measured))} measured${v.mean === null ? '' : ` · ${esc(String(Math.round(v.mean * 10) / 10))} avg engagements`}`;
+    return `
+      <div class="mt-4 border border-gray-200 rounded-xl p-4 space-y-3">
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Tests</p>
+        ${tests.map((t) => `
+          <div>
+            <p class="text-sm font-bold text-gray-900 break-words">${esc(t.hypothesis)}</p>
+            <p class="text-xs text-gray-600 mt-1 break-words"><span class="font-bold">A</span> — ${esc(t.angleA)}: ${stat(t.a)}</p>
+            <p class="text-xs text-gray-600 break-words"><span class="font-bold">B</span> — ${esc(t.angleB)}: ${stat(t.b)}</p>
+            <p class="text-xs mt-1 ${t.verdict === 'a' || t.verdict === 'b' ? 'font-bold text-gray-900' : 'text-gray-500'} break-words">${esc(t.sentence)}</p>
+            ${t.verdict === 'a' || t.verdict === 'b' ? `<div class="mt-2">${keepButton(c.id, 'test', t.sentence, 'btn-secondary px-3 py-1.5')}</div>` : ''}
+          </div>`).join('')}
+      </div>`;
+  }
+
+  // ── Summary and lessons (§9.8) ─────────────────────────────────────────────
+  // Facts from counts, the tests' verdicts, and candidate lessons — each a sentence about those
+  // facts. Nothing is kept until the user presses Keep; they can also write their own lesson.
+  // "Also make it a rule for the writing assistants" turns a lesson into a rule on each writing
+  // assistant this campaign briefed (removable from its Rules tab), so it reaches the next draft.
+  function summaryPanel(c) {
+    const st = state.summaries[c.id];
+    if (!st || !st.open) return '';
+    const id = esc(String(c.id));
+    if (st.error) return `<div class="mt-3 border border-gray-200 rounded-xl p-4"><p class="text-xs text-red-600">${esc(st.error)}</p></div>`;
+    if (!st.data) return '<div class="mt-3 border border-gray-200 rounded-xl p-4"><p class="text-xs text-gray-400">Working out the summary…</p></div>';
+    const s = st.data;
+    return `
+      <div class="mt-3 border border-gray-200 rounded-xl p-4 space-y-3">
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">${s.status === 'finished' ? 'How it went' : 'How it is going'}</p>
+        <ul class="space-y-1">${s.facts.map((f) => `<li class="text-xs text-gray-700">• ${esc(f)}</li>`).join('')}</ul>
+        ${s.tests.length ? `<ul class="space-y-1">${s.tests.map((t) => `<li class="text-xs text-gray-700 break-words">• Test — ${esc(t.hypothesis)}: ${esc(t.sentence)}</li>`).join('')}</ul>` : ''}
+        <p class="text-xs font-bold text-gray-700 pt-1">Lessons to keep</p>
+        ${s.candidates.length ? s.candidates.map((x) => `
+          <div class="flex items-start justify-between gap-3">
+            <p class="text-xs text-gray-700 break-words flex-1">${esc(x.text)}</p>
+            <span class="shrink-0">${keepButton(c.id, x.source, x.text, 'btn-secondary px-3 py-1')}</span>
+          </div>`).join('') : '<p class="text-xs text-gray-500">Nothing in the numbers yet stands out as a lesson. You can still write your own.</p>'}
+        <div class="flex items-center gap-2">
+          <input type="text" maxlength="300" data-cmp-own-lesson="${id}" data-keep="own-lesson-${id}" placeholder="Your own lesson, e.g. Webinar invites land better on Tuesdays"
+            class="flex-1 min-w-0 text-sm border border-gray-300 rounded-lg px-3 py-2">
+          <button type="button" data-cmp-keep="${id}" data-cmp-keep-source="user" data-cmp-keep-own="1"
+            class="btn-primary px-3 py-2 text-xs font-bold rounded-lg transition disabled:opacity-50">Keep</button>
+        </div>
+        <label class="flex items-start gap-2 text-xs text-gray-700">
+          <input type="checkbox" data-cmp-keep-apply="${id}" data-keep="keep-apply-${id}" class="mt-0.5">
+          <span>Also make kept lessons a rule for the writing assistants this campaign briefed (you can remove it from each assistant's Rules tab).</span>
+        </label>
+        <p class="text-xs text-gray-500">Kept lessons are read by your Campaign Assistant whenever it plans a campaign.</p>
+      </div>`;
+  }
+
+  function lessonsHtml() {
+    const rows = Array.isArray(state.learnings) ? state.learnings : [];
+    if (!rows.length) return '';
+    return `
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mt-4 space-y-2">
+        <p class="text-sm font-bold text-gray-900">Lessons kept</p>
+        <p class="text-xs text-gray-500">Your Campaign Assistant plans with these. Removing one here does not remove a rule it became — do that from the assistant's Rules tab.</p>
+        ${rows.map((l) => `
+          <div class="flex items-start justify-between gap-3">
+            <p class="text-xs text-gray-700 break-words flex-1">${esc(l.learning)}${l.objective ? ` <span class="text-gray-400">— ${esc(l.objective.slice(0, 60))}</span>` : ''}${l.appliedToDrafting ? ' <span class="text-gray-400">(also a drafting rule)</span>' : ''}</p>
+            <button type="button" data-cmp-lesson-delete="${esc(String(l.id))}" title="Stop planning with this"
+              class="text-xs font-bold text-gray-400 hover:text-gray-700">×</button>
+          </div>`).join('')}
+      </div>`;
+  }
+
+  async function loadLearnings() {
+    try {
+      const data = await post({ action: 'list_learnings', assistantId: state.assistantId });
+      state.learnings = Array.isArray(data.learnings) ? data.learnings : [];
+    } catch (err) {
+      console.error('[AssistantCampaigns] lessons load failed:', err);
+      state.learnings = [];
+    }
+    if (state.rendered) render();
+  }
+
+  document.addEventListener('click', async (e) => {
+    const toggle = e.target.closest('[data-cmp-toggle-summary]');
+    const keep = e.target.closest('[data-cmp-keep]');
+    const del = e.target.closest('[data-cmp-lesson-delete]');
+    if (!toggle && !keep && !del) return;
+
+    if (toggle) {
+      const id = Number(toggle.dataset.cmpToggleSummary);
+      const st = state.summaries[id] || (state.summaries[id] = { open: false, data: null, error: null });
+      st.open = !st.open;
+      if (state.rendered) render();
+      if (st.open) {
+        // Always fresh: a summary is counts, and counts move.
+        st.data = null; st.error = null;
+        try { st.data = (await post({ action: 'summary', campaignId: id })).summary; }
+        catch (err) { st.error = err.message || 'Could not work out the summary.'; }
+        if (state.rendered) render();
+      }
+      return;
+    }
+
+    if (state.busy) return;
+    if (del) {
+      state.busy = true;
+      try { await post({ action: 'delete_learning', learningId: Number(del.dataset.cmpLessonDelete) }); }
+      catch (err) { window.showToast?.(err.message || 'Could not remove that lesson.', 'error'); }
+      state.busy = false;
+      await loadLearnings();
+      return;
+    }
+
+    const campaignId = Number(keep.dataset.cmpKeep);
+    const text = keep.dataset.cmpKeepOwn
+      ? (document.querySelector(`[data-cmp-own-lesson="${campaignId}"]`)?.value || '').trim()
+      : (keep.dataset.cmpKeepText || '');
+    if (!text) { window.showToast?.('Write the lesson first.', 'error'); return; }
+    const apply = !!document.querySelector(`[data-cmp-keep-apply="${campaignId}"]`)?.checked;
+    state.busy = true;
+    keep.disabled = true;
+    try {
+      const data = await post({ action: 'save_learning', campaignId, text, source: keep.dataset.cmpKeepSource || 'user', applyToDrafting: apply });
+      const n = Array.isArray(data.appliedTo) ? data.appliedTo.length : 0;
+      // From the server's answer — "added as a rule" only when one actually was.
+      window.showToast?.(apply
+        ? (n ? `Kept, and added as a rule for ${n} ${n === 1 ? 'assistant' : 'assistants'}.` : 'Kept. This campaign briefed no writing assistant, so no rule was added.')
+        : 'Kept — your Campaign Assistant will plan with it.', 'success');
+    } catch (err) {
+      window.showToast?.(err.message || 'Could not keep that lesson.', 'error');
+      keep.disabled = false;
+    }
+    state.busy = false;
+    await loadLearnings();
+  });
+
   // ── Tasks waiting on people (§9.5) ─────────────────────────────────────────
   // Each says who, what, when it is due (and whether that has passed), and how much work is held
   // behind it — "waiting on Legal" means far more when the row can say three briefs are stuck.
@@ -633,6 +794,7 @@
     adjust_messaging: { field: 'angle', label: 'New angle', placeholder: 'The argument this campaign should make from now on', required: true },
     draft_email_campaign: { field: 'angle', label: 'What should the emails get people to do? (optional)', placeholder: 'Leave blank to use this campaign\'s objective', required: false },
     request_human_task: { field: 'task', label: 'What are you asking them to do?', placeholder: 'e.g. Record a 30-second product video for the launch posts', required: true },
+    ab_test_posts: { field: 'hypothesis', label: 'What are you testing?', placeholder: 'e.g. Does a customer story beat a how-to on LinkedIn?', required: true },
   };
 
   function actionSpec(key) {
@@ -699,6 +861,18 @@
           </label>` : '<p class="text-xs text-amber-700">There are no saved lead searches to narrow yet — use "Run a lead search" first.</p>') : ''}
         ${spec.key === 'draft_email_campaign' ? emailFields(id) : ''}
         ${spec.key === 'request_human_task' ? humanFields(id) : ''}
+        ${spec.key === 'ab_test_posts' ? `
+          <div class="flex flex-wrap gap-3">
+            <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Angle A
+              <input type="text" maxlength="300" data-cmp-aw-angle-a="${id}" data-keep="aw-angle-a-${id}" placeholder="e.g. A customer's story"
+                class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+            </label>
+            <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Angle B
+              <input type="text" maxlength="300" data-cmp-aw-angle-b="${id}" data-keep="aw-angle-b-${id}" placeholder="e.g. A step-by-step how-to"
+                class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+            </label>
+          </div>
+          <p class="text-xs text-gray-500">"How many" is posts for EACH angle — at least 4 each, or the result can only say there is not enough data.</p>` : ''}
         ${spec.key === 'draft_social_posts' || spec.key === 'draft_blog_pillar' || spec.key === 'draft_email_campaign' ? `
           <label class="block text-xs font-bold text-gray-600">For a different audience (optional)
             <input type="text" maxlength="300" data-cmp-aw-audience="${id}" data-keep="aw-aud-${id}-${esc(spec.key)}"
@@ -1389,7 +1563,8 @@
         ${optimiserHealthHtml()}
         ${funnelHtml()}
         ${neverLaunchedNote(state.campaigns)}
-        <div class="space-y-4">${nestedRows()}</div>`;
+        <div class="space-y-4">${nestedRows()}</div>
+        ${lessonsHtml()}`;
     }
 
     host.querySelectorAll('[data-keep]').forEach((el) => {
@@ -1437,6 +1612,7 @@
     state.loaded = true;
     rerender();
     loadFunnel();
+    loadLearnings();
   }
 
   /**
@@ -2179,6 +2355,14 @@
       // An order's own audience beats the campaign's for that order's work (§9.2).
       const forWho = (document.querySelector(`[data-cmp-aw-audience="${id}"]`)?.value || '').trim();
       if (forWho) brief.audience = forWho;
+      if (spec.key === 'ab_test_posts') {
+        const a = (document.querySelector(`[data-cmp-aw-angle-a="${id}"]`)?.value || '').trim();
+        const b = (document.querySelector(`[data-cmp-aw-angle-b="${id}"]`)?.value || '').trim();
+        if (!a || !b) { say(id, 'Give both angles.', 'error'); return; }
+        if (a.toLowerCase() === b.toLowerCase()) { say(id, 'The two angles need to be different.', 'error'); return; }
+        brief.angleA = a;
+        brief.angleB = b;
+      }
       if (spec.key === 'request_human_task') {
         const assignee = (document.querySelector(`[data-cmp-aw-assignee="${id}"]`)?.value || '').trim();
         if (!assignee) { say(id, 'Say who you are asking.', 'error'); return; }

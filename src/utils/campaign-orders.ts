@@ -34,6 +34,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
     aiAssistants, aiBlueprints, campaignOrders, contentGenerationJobs, discoveryCampaigns,
+    campaignExperiments, campaignExperimentJobs,
 } from '../../db/schema';
 import { assembleBlueprint } from './blueprint';
 import { createDiscoveryRun } from './discovery';
@@ -494,6 +495,47 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
     // (src/utils/campaign-email-order.ts). The order stays 'issued' until the emails exist; a lost
     // wake-up is re-sent by the reconciler, so a failed dispatch is NOT a failed order.
     // Nothing here or in the worker ever sends an email.
+    // An A/B test (§9.8): N posts per angle, interleaved A, B, A, B across the days ahead so neither
+    // angle gets the better posting days — a test where every A goes out on a Monday measures Mondays.
+    // Each job is TAGGED with its variant (campaign_experiment_jobs); the drafting worker reads the
+    // tag to give each job ITS angle (campaign-job-directive.ts). Without the tag both halves would
+    // be drafted with the blueprint's one angle and the test would compare a thing to itself.
+    ab_test_posts: async (db, ctx, orderId) => {
+        const blueprintId = await resolveBlueprintId(db, ctx.targetAssistantId, ctx.organisationId);
+        if (!blueprintId) return { ok: false, message: 'The Social Media Assistant has no usable setup yet, so nothing could be queued.' };
+        const angleA = String(ctx.brief.angleA || '').trim();
+        const angleB = String(ctx.brief.angleB || '').trim();
+        const hypothesis = String(ctx.brief.hypothesis || '').trim();
+        if (!angleA || !angleB || !hypothesis) return { ok: false, message: 'The test needs what it is testing and both angles.' };
+        const perVariant = Math.max(1, Math.min(10, Math.floor(Number(ctx.brief.quantity) || 1)));
+
+        const [exp] = await db.insert(campaignExperiments).values({
+            organisationId: ctx.organisationId, campaignId: ctx.campaignId, orderId,
+            hypothesis: hypothesis.slice(0, 300), angleA: angleA.slice(0, 300), angleB: angleB.slice(0, 300),
+            postsPerVariant: perVariant,
+        }).returning({ id: campaignExperiments.id });
+
+        const now = Date.now();
+        for (let i = 0; i < perVariant * 2; i++) {
+            const variant = i % 2 === 0 ? 'A' : 'B';
+            const [job] = await db.insert(contentGenerationJobs).values({
+                jobId: randomUUID(),
+                blueprintId,
+                assistantId: ctx.targetAssistantId,
+                organisationId: ctx.organisationId,
+                userId: ctx.targetUserId,
+                status: 'queued',
+                attempt: 0,
+                maxAttempts: 3,
+                triggerType: 'on_demand',
+                targetPublishDate: new Date(now + (i + 1) * 24 * 60 * 60 * 1000),
+                campaignOrderId: orderId,
+            }).returning({ id: contentGenerationJobs.id });
+            await db.insert(campaignExperimentJobs).values({ jobId: job.id, experimentId: exp.id, variant });
+        }
+        return { ok: true, summary: `${perVariant * 2} posts queued — ${perVariant} for each angle` };
+    },
+
     // Never reached: a person's task is placed by placeHumanTask and released by issueHumanTask,
     // neither of which runs an executor. Present only because this table must name every action;
     // if it IS reached, something routed a human task to an assistant, so refuse rather than guess.
