@@ -535,7 +535,7 @@ async function _loadAssistantsForFilter() {
     const bar = document.getElementById('conn-assistant-bar');
     const sel = document.getElementById('conn-assistant-select');
     try {
-        const res = await fetch('/.netlify/functions/get-assistants');
+        const res = await (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants'));
         if (res.ok) {
             const data = await res.json();
             _assistants = (data.assistants || []).filter(a => a.isActive !== false);
@@ -578,6 +578,7 @@ window.initAssistantConnections = async function (assistantId, currentData) {
     _selectedAssistantId = String(assistantId);
     _assistantScoped = true;
     window._intLoadConnections = _loadConnections; // let the revoke-all flow refresh the grid
+    window._intRenderConnections = _renderConnectionsGrid; // redraw only — see _renderConnectionsGrid
     _assistantSelectedIds = new Set([
         ...((currentData?.configuration?.appliedDefaults?.platforms) || []).map(Number),
         ...((window.cachedContext?.linked_integrations) || []).map(Number),
@@ -673,6 +674,21 @@ async function _loadConnections() {
     // Blog destinations (cms category) — a separate subsystem, loaded only when it's live for
     // this assistant so the OAuth-only pages never call it.
     await _loadBlogDestinations();
+
+    _renderConnectionsGrid();
+}
+
+/**
+ * Draw the connections grid (and the Overview status card) from what _loadConnections last
+ * fetched — no network. Split out so something that only changes how the grid is DRAWN can redraw
+ * it without re-downloading it: the Synced actions list (assistant-integrations.js) publishes the
+ * categories its recipes cover and asks for a redraw so their "coming soon" twins drop out. It used
+ * to call _loadConnections for that, refetching integrations (~1.3 s) and the blog destinations on
+ * every assistant page, a second time, for data it already had.
+ */
+function _renderConnectionsGrid() {
+    const grid = document.getElementById('connections-grid');
+    if (!grid) return;
 
     // Overview status card first — it lives outside this grid and must render on every path,
     // including the "nothing relevant to connect" empty state below.

@@ -1965,10 +1965,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         inspoBlock,
         leadsSnapshot,
     });
-    // The user's rules, for the roles whose records come ONLY from chat (Tier 1 Support, Meeting
-    // Note Taker, AR Clerk). Their Assistant Rules and rejection feedback reached nothing before:
-    // content_rules otherwise reach a model only through the drafting worker, which these roles
-    // do not have. See src/utils/assistant-rules-prompt.ts. Never throws.
+    // The user's rules (their Assistant Rules, learned directives and workspace-wide rules) for the
+    // roles in RULE_READING_ROLES: the chat-only records roles, whose rules reached nothing before,
+    // and the Social Media / Blog roles, whose rules reached autopilot but not a draft asked for
+    // here. See src/utils/assistant-rules-prompt.ts. Never throws.
     const rulesBlock = assistantRow.roleKey && RULE_READING_ROLES.has(assistantRow.roleKey)
         ? await loadAssistantRulesBlock(db, { assistantId: session.aiAssistantId, organisationId: orgId })
         : null;
