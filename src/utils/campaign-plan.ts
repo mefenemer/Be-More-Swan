@@ -386,6 +386,9 @@ export async function buildCampaignsSnapshot(
                 excludeExistingCustomers: campaigns.excludeExistingCustomers,
                 funnelStage: campaigns.funnelStage,
                 tone: campaigns.tone,
+                parentCampaignId: campaigns.parentCampaignId,
+                alwaysOn: campaigns.alwaysOn,
+                startsAt: campaigns.startsAt,
                 maxWorkItems: campaignBudgets.maxWorkItems,
             })
             .from(campaigns)
@@ -429,7 +432,10 @@ export async function buildCampaignsSnapshot(
                 `- campaignId ${r.id}: "${r.objective}" — ${label}, ${r.funnelStage} stage`
                 + `, measured by ${metricLabel}: ${progress === null ? 'cannot be counted yet' : `${progress} so far`}`
                 + `${r.targetValue ? ` of a target of ${r.targetValue}` : ''}`
-                + `${r.endsAt ? `, ends ${r.endsAt.toISOString().slice(0, 10)}` : ''}`
+                + `${r.startsAt ? `, started ${r.startsAt.toISOString().slice(0, 10)}` : ''}`
+                + `${r.alwaysOn ? ', ALWAYS ON (business as usual, no end date)' : r.endsAt ? `, ends ${r.endsAt.toISOString().slice(0, 10)}` : ''}`
+                + `${r.parentCampaignId ? `, inside the umbrella campaignId ${r.parentCampaignId}` : ''}`
+                + `${rows.some((x) => x.parentCampaignId === r.id) ? `, an UMBRELLA over campaignId ${rows.filter((x) => x.parentCampaignId === r.id).map((x) => x.id).join(', ')}` : ''}`
                 + `, ${used} of ${r.maxWorkItems ?? 0} tasks used or committed`
                 + `, ${who ? `for: ${who}` : 'no audience set'}`
                 + `, ${r.excludeExistingCustomers ? 'leaves existing customers out of its lead searches' : 'INCLUDES existing customers'}`

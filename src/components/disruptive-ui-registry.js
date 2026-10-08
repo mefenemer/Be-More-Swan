@@ -940,6 +940,10 @@
       ? aud.excludeDomains.filter((d) => typeof d === 'string' && d.trim()).map((d) => d.trim()) : [];
     const tone = typeof ui.tone === 'string' ? ui.tone.trim().slice(0, 300) : '';
     const attach = campaignCardAssets(ui.attachAssets);
+    // §9.4. The umbrella is shown by id only on purpose — the card cannot see campaign names, and
+    // the server refuses an umbrella that is not this assistant's, or that would nest two deep.
+    const parentId = Number.isInteger(Number(ui.parentCampaignId)) && Number(ui.parentCampaignId) > 0 ? Number(ui.parentCampaignId) : null;
+    const alwaysOn = ui.alwaysOn === true;
     // The stage (§9.6). An unknown value falls back to the default rather than being shown raw.
     const stage = C && C.funnelStages.indexOf(ui.funnelStage) !== -1 ? ui.funnelStage : (C ? C.defaultFunnelStage : 'conversion');
     // An explicit choice wins; otherwise the stage decides — the same default the server applies
@@ -1058,6 +1062,8 @@
         <p class="text-sm text-gray-700 mb-1 break-words"><span class="font-bold text-indigo-900">For:</span>
           ${persona || audDesc ? `${esc(persona)}${persona && audDesc ? ' — ' : ''}${esc(audDesc)}` : '<span class="text-amber-700">no audience given yet</span>'}</p>
         ${tone ? `<p class="text-sm text-gray-700 mb-1 break-words"><span class="font-bold text-indigo-900">Tone:</span> ${esc(tone)}</p>` : ''}
+        ${alwaysOn ? '<p class="text-sm text-gray-700 mb-1"><span class="font-bold text-indigo-900">Always on</span> — business as usual, no end date</p>' : ''}
+        ${parentId ? `<p class="text-sm text-gray-700 mb-1"><span class="font-bold text-indigo-900">Inside umbrella:</span> campaign #${esc(String(parentId))}</p>` : ''}
         ${attach.length ? `<p class="text-sm text-gray-700 mb-1 break-words"><span class="font-bold text-indigo-900">Pictures:</span> ${esc(attach.map((a) => a.name || `#${a.id}`).join(', '))}</p>` : ''}
         <p class="text-xs mb-3 ${excludeCustomers ? 'text-gray-600' : 'text-amber-700 font-bold'}">
           ${excludeCustomers
@@ -1159,6 +1165,10 @@
           funnelStage: stage,
           tone: tone || null,
           attachAssetIds: attach.map((a) => a.id),
+          parentCampaignId: parentId,
+          alwaysOn,
+          // Always-on campaigns have no end date — never send one alongside.
+          ...(alwaysOn ? { endsAt: null } : {}),
           excludeExistingCustomers: excludeCustomers,
           orders: sendOrders,
           // The success line is built from the SERVER's answer, never from the model's intent —
@@ -1247,6 +1257,14 @@
     if (removePics.length) {
       changes.detachAssetIds = removePics.map((a) => a.id);
       rows.push(['Remove pictures', removePics.map((a) => a.name || `#${a.id}`).join(', ')]);
+    }
+    if (ui.parentCampaignId !== undefined && ui.parentCampaignId !== null && Number.isInteger(Number(ui.parentCampaignId)) && Number(ui.parentCampaignId) >= 0) {
+      changes.parentCampaignId = Number(ui.parentCampaignId);
+      rows.push(['Umbrella', changes.parentCampaignId ? `inside campaign #${changes.parentCampaignId}` : 'taken out of its umbrella']);
+    }
+    if (typeof ui.alwaysOn === 'boolean') {
+      changes.alwaysOn = ui.alwaysOn;
+      rows.push(['Always on', ui.alwaysOn ? 'yes — no end date' : 'no']);
     }
     // Only ever ON from a card (§9.0). A card carrying false shows nothing and sends nothing.
     if (ui.excludeExistingCustomers === true) {

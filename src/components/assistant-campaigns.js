@@ -218,6 +218,47 @@
       <p class="text-xs text-gray-500 mt-0.5">${exclusion}</p>`;
   }
 
+  // ── Umbrellas (§9.4) ───────────────────────────────────────────────────────
+  // Children render directly under their umbrella, indented. A child whose umbrella is not in the
+  // list (archived) renders at the top level rather than disappearing.
+  function childrenOf(c) {
+    return state.campaigns.filter((x) => x.parentCampaignId === c.id);
+  }
+
+  function nestedRows() {
+    const ids = new Set(state.campaigns.map((c) => c.id));
+    const top = state.campaigns.filter((c) => !c.parentCampaignId || !ids.has(c.parentCampaignId));
+    return top.map((c) => {
+      const kids = childrenOf(c);
+      return campaignRow(c) + (kids.length
+        ? `<div class="ml-6 space-y-4" style="border-left:2px solid #e5e7eb;padding-left:1rem">${kids.map(campaignRow).join('')}</div>`
+        : '');
+    }).join('');
+  }
+
+  /**
+   * An umbrella's roll-up: read-only sums over its campaigns. Budgets are NOT pooled — each child
+   * keeps its own ceiling, so effort moved inside one can never eat another's (the review's
+   * concern, met by construction). Outcomes are summed per measure, never across measures: adding
+   * engagements to leads is a number that means nothing.
+   */
+  function umbrellaHtml(c) {
+    const kids = childrenOf(c);
+    if (!kids.length) return '';
+    const used = kids.reduce((n, k) => n + (Number(k.spentWork) || 0) + (Number(k.committedWork) || 0), 0);
+    const cap = kids.reduce((n, k) => n + (Number(k.maxWorkItems) || 0), 0);
+    const byMetric = {};
+    kids.forEach((k) => {
+      if (k.progress === null || k.progress === undefined) return;
+      byMetric[k.outcomeMetric] = (byMetric[k.outcomeMetric] || 0) + Number(k.progress);
+    });
+    const outcomes = Object.entries(byMetric)
+      .map(([m, n]) => `${n} ${(C() ? C().outcomeLabel(m) : m).toLowerCase()}`).join(' · ');
+    return `
+      <p class="text-xs text-gray-600 mt-1"><span class="font-bold text-gray-700">Umbrella over ${esc(String(kids.length))} ${kids.length === 1 ? 'campaign' : 'campaigns'}</span>
+        — ${esc(String(used))} of ${esc(String(cap))} tasks used or committed across them${outcomes ? ` · ${esc(outcomes)}` : ''}. Each keeps its own budget.</p>`;
+  }
+
   // ── Rows ───────────────────────────────────────────────────────────────────
   function campaignRow(c) {
     const chip = chipFor(c);
@@ -239,9 +280,13 @@
             <p class="font-bold text-gray-900 break-words">${esc(c.objective)}</p>
             <p class="text-xs text-gray-500 mt-0.5">${outcomeLine(c)}</p>
             ${progressBar(c)}
+            ${umbrellaHtml(c)}
             ${audienceHtml(c)}
           </div>
-          <span class="${chip.cls} shrink-0">${esc(chip.label)}</span>
+          <span class="flex items-center gap-1 shrink-0">
+            ${c.alwaysOn ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border bg-gray-50 text-gray-600 border-gray-200">Always on</span>' : ''}
+            <span class="${chip.cls}">${esc(chip.label)}</span>
+          </span>
         </div>
 
         <p class="text-xs text-gray-600 leading-relaxed">${esc(activityLine(c))}</p>
@@ -733,6 +778,7 @@
           </label>
         </div>
         <p class="text-xs text-gray-500">The task budget is the most of your monthly allowance this campaign may commission. At the cap it stops — it never bills you extra.</p>
+        ${umbrellaFields(c)}
         <label class="block text-xs font-bold text-gray-600">Tone for this campaign (optional)
           <input type="text" maxlength="300" data-cmpf="tone" data-keep="f-tone" value="${esc((c && c.tone) || '')}"
             placeholder="e.g. warm and celebratory, no discount language — always within your brand voice"
@@ -765,6 +811,31 @@
           <button type="button" data-cmpf-cancel class="btn-utility px-4 py-2 text-sm font-bold rounded-lg transition">Cancel</button>
         </div>
         <p class="hidden text-xs font-semibold" data-cmpf-status></p>
+      </div>`;
+  }
+
+  // Umbrella picker + always-on (§9.4). Offers only campaigns that can legally be an umbrella —
+  // top-level, not this one — and none at all for a campaign that is itself an umbrella (the server
+  // refuses two levels; offering a choice it will refuse is a dead end).
+  function umbrellaFields(c) {
+    const isUmbrella = c && childrenOf(c).length > 0;
+    const options = state.campaigns.filter((x) => !x.parentCampaignId && (!c || x.id !== c.id) && x.status !== 'archived');
+    const current = c && c.parentCampaignId ? c.parentCampaignId : '';
+    const alwaysOn = c ? c.alwaysOn === true : false;
+    return `
+      <div class="flex flex-wrap gap-3 items-end">
+        <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Inside an umbrella campaign (optional)
+          ${isUmbrella
+            ? '<p class="mt-1 text-xs font-normal text-gray-500">This campaign is an umbrella for others, so it cannot go inside one.</p>'
+            : `<select data-cmpf="parentCampaignId" data-keep="f-parent" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+                <option value="">None</option>
+                ${options.map((x) => `<option value="${esc(String(x.id))}" ${x.id === current ? 'selected' : ''}>${esc(x.objective.slice(0, 70))}</option>`).join('')}
+              </select>`}
+        </label>
+        <label class="flex items-center gap-2 text-xs text-gray-700 pb-2">
+          <input type="checkbox" data-cmpf="alwaysOn" data-keep="f-always-on" ${alwaysOn ? 'checked' : ''}>
+          <span><span class="font-bold">Always on</span> — business as usual, no end date</span>
+        </label>
       </div>`;
   }
 
@@ -1318,7 +1389,7 @@
         ${optimiserHealthHtml()}
         ${funnelHtml()}
         ${neverLaunchedNote(state.campaigns)}
-        <div class="space-y-4">${state.campaigns.map(campaignRow).join('')}</div>`;
+        <div class="space-y-4">${nestedRows()}</div>`;
     }
 
     host.querySelectorAll('[data-keep]').forEach((el) => {
@@ -1990,6 +2061,9 @@
         funnelStage: val('funnelStage'),
         // Sent even when blank: clearing the field on Edit clears the campaign's tone.
         tone: val('tone'),
+        // '' = no umbrella (the server reads blank as "none"); absent when the field is not shown.
+        ...(host?.querySelector('[data-cmpf="parentCampaignId"]') ? { parentCampaignId: val('parentCampaignId') || null } : {}),
+        alwaysOn: !!host?.querySelector('[data-cmpf="alwaysOn"]')?.checked,
         outcomeMetric: val('outcomeMetric'),
         // Blank means "no target" / "no end date" — sent as null, never as 0.
         targetValue: val('targetValue') ? Number(val('targetValue')) : null,
@@ -2172,6 +2246,125 @@
     load();
   });
 
+  // ── The year view (§9.4) ───────────────────────────────────────────────────
+  // Drawn at the top of this assistant's Calendar tab (assistant-calendar.js calls renderTimeline).
+  // One row per campaign across twelve months: its flight as a bar, children indented under their
+  // umbrella, always-on campaigns as a pale band to the end of the year, a tick for every post and
+  // article it commissioned, and a line for today. Read-only — every change happens on the row.
+  //
+  // A draft that has never started has no flight to draw; it is listed with "not started" rather
+  // than given an invented one from its creation date.
+  const timeline = { year: new Date().getFullYear(), data: null, error: null, host: null };
+
+  function pctOfYear(d, year) {
+    const start = Date.UTC(year, 0, 1);
+    const end = Date.UTC(year + 1, 0, 1);
+    return Math.max(0, Math.min(100, ((d.getTime() - start) / (end - start)) * 100));
+  }
+
+  function timelineHtml() {
+    const year = timeline.year;
+    const nav = `
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-sm font-bold text-gray-900">Campaign year</p>
+        <div class="flex items-center gap-2">
+          <button type="button" data-cmp-tl-year="${year - 1}" class="btn-utility px-2 py-1 text-xs font-bold rounded-lg">‹ ${year - 1}</button>
+          <span class="text-xs font-bold text-gray-700">${year}</span>
+          <button type="button" data-cmp-tl-year="${year + 1}" class="btn-utility px-2 py-1 text-xs font-bold rounded-lg">${year + 1} ›</button>
+        </div>
+      </div>`;
+    if (timeline.error) return `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">${nav}<p class="text-xs text-red-600">${esc(timeline.error)}</p></div>`;
+    if (!timeline.data) return `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">${nav}<p class="text-xs text-gray-400">Loading…</p></div>`;
+    const rows = timeline.data.campaigns || [];
+    if (!rows.length) return `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">${nav}<p class="text-xs text-gray-500">No campaigns yet — your year fills in as you create them.</p></div>`;
+
+    const yStart = new Date(Date.UTC(year, 0, 1));
+    const yEnd = new Date(Date.UTC(year + 1, 0, 1));
+    const now = new Date();
+    const months = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+    const ids = new Set(rows.map((r) => r.id));
+    const ordered = [];
+    rows.filter((r) => !r.parentCampaignId || !ids.has(r.parentCampaignId)).forEach((r) => {
+      ordered.push({ r, child: false });
+      rows.filter((k) => k.parentCampaignId === r.id).forEach((k) => ordered.push({ r: k, child: true }));
+    });
+    const COLOUR = { active: 'bg-emerald-600', throttled: 'bg-amber-400', paused: 'bg-amber-400', finished: 'bg-gray-400', draft: 'bg-gray-300' };
+
+    const line = ({ r, child }) => {
+      const start = r.startsAt ? new Date(r.startsAt) : null;
+      let bar = '';
+      if (start) {
+        const end = r.alwaysOn ? yEnd
+          : r.endsAt ? new Date(r.endsAt)
+            : (r.status === 'active' || r.status === 'throttled') ? now : start;
+        if (end >= yStart && start < yEnd) {
+          const left = pctOfYear(start, year);
+          const width = Math.max(0.6, pctOfYear(end, year) - left);
+          // ⚠️ Not emerald-200: that step is remapped to the brand pink (emerald-is-neon-pink), which
+          // read as the "today" line. The band is the running green, lighter.
+          const cls = r.alwaysOn ? 'bg-emerald-600 opacity-60' : (COLOUR[r.status] || 'bg-gray-300');
+          bar = `<div class="absolute inset-y-0 ${cls} rounded-md" style="left:${left}%;width:${width}%"></div>`;
+        }
+      }
+      const ticks = (timeline.data.items || [])
+        .filter((i) => i.campaignId === r.id)
+        .map((i) => new Date(i.at))
+        .filter((d) => d >= yStart && d < yEnd)
+        .map((d) => `<div class="absolute bg-gray-900" style="left:${pctOfYear(d, year)}%;top:20%;bottom:20%;width:2px"></div>`)
+        .join('');
+      const note = !start ? 'not started' : r.alwaysOn ? 'always on' : (C() ? C().statusLabel(r.status) : r.status);
+      return `
+        <div class="flex items-center gap-3">
+          <div class="w-48 shrink-0 ${child ? 'pl-4' : ''}">
+            <p class="text-xs ${child ? 'text-gray-700' : 'font-bold text-gray-900'} truncate" title="${esc(r.objective)}">${esc(r.objective)}</p>
+            <p class="text-[11px] text-gray-400">${esc(note)}</p>
+          </div>
+          <div class="relative flex-1 h-6 bg-gray-100 rounded-md overflow-hidden">${bar}${ticks}</div>
+        </div>`;
+    };
+
+    const todayPct = now >= yStart && now < yEnd ? pctOfYear(now, year) : null;
+    return `
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+        ${nav}
+        <div class="flex items-center gap-3 mb-1">
+          <div class="w-48 shrink-0"></div>
+          <div class="relative flex-1 flex">${months.map((m) => `<span class="flex-1 text-[11px] text-gray-400">${m}</span>`).join('')}</div>
+        </div>
+        <div class="relative space-y-2">
+          ${ordered.map(line).join('')}
+          ${todayPct !== null ? `<div class="absolute top-0 bottom-0 bg-indigo-600" style="left:calc(12rem + 0.75rem + (100% - 12rem - 0.75rem) * ${todayPct / 100});width:2px" title="Today"></div>` : ''}
+        </div>
+        <p class="text-[11px] text-gray-400 mt-3">Bars are each campaign's dates; pale bands are always-on campaigns; each mark is a post or article it commissioned. Campaigns inside an umbrella are indented under it.</p>
+      </div>`;
+  }
+
+  async function loadTimeline() {
+    if (!state.assistantId) return;
+    try {
+      timeline.data = await post({ action: 'timeline', assistantId: state.assistantId });
+      timeline.error = null;
+    } catch (err) {
+      timeline.error = err.message || 'Could not load the campaign year.';
+    }
+    if (timeline.host && timeline.host.isConnected) timeline.host.innerHTML = timelineHtml();
+  }
+
+  function renderTimeline(host) {
+    timeline.host = host;
+    host.innerHTML = timelineHtml();
+    loadTimeline();
+  }
+
+  // Bound once at load, on document — never from the render path (the host is replaced on each
+  // navigation, and a listener bound to it would die with it).
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-cmp-tl-year]');
+    if (!btn || !timeline.host) return;
+    timeline.year = Number(btn.dataset.cmpTlYear) || timeline.year;
+    timeline.host.innerHTML = timelineHtml();
+  });
+
   // ── Public API ─────────────────────────────────────────────────────────────
   window.AssistantCampaigns = {
     init({ assistantId, cfg }) {
@@ -2183,6 +2376,8 @@
       // activate this one.
       load();
     },
+    /** The year view, drawn into `host` (the Calendar tab, §9.4). */
+    renderTimeline,
     /** Called on first activation of the tab. Cheap if init() already loaded. */
     activate() {
       if (state.rendered) return;

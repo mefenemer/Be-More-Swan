@@ -71,6 +71,14 @@
       const res = await fetch(FRAGMENT_URL);
       if (!res.ok) throw new Error(`Calendar failed to load (${res.status}).`);
       host.innerHTML = await res.text();
+      // The Campaign Assistant owns no posts, so its scoped calendar is nearly empty; what it DOES
+      // own is the year. Its campaign timeline (§9.4) sits above the calendar.
+      if (state.roleKey === 'campaign_orchestrator' && window.AssistantCampaigns?.renderTimeline) {
+        const tl = document.createElement('div');
+        tl.className = 'mb-6';
+        host.prepend(tl);
+        window.AssistantCampaigns.renderTimeline(tl);
+      }
       if (typeof window.initCalendar === 'function') {
         await window.initCalendar({
           assistantId: state.assistantId,

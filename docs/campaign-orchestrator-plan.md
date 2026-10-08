@@ -484,6 +484,21 @@ another — the budget concern is already structurally met. The real gap is plan
 - Umbrella rows on the Campaigns tab roll up children's tasks used and outcomes (read-only sums).
   Parent-level budgets that constrain children are **deferred** until someone needs them.
 
+**✅ Built 2026-10-08 (not yet deployed). ⚠️ Needs `db/z-campaign-hierarchy.sql` applied to BOTH
+envs BEFORE the code deploys.** `campaigns.parent_campaign_id` (SET NULL) + `campaigns.always_on`
+(inline CHECK: always-on ⇒ no end date). ONE level, enforced in `campaigns.ts resolveParent` (same
+org, same assistant, live, top-level, and a campaign with children cannot become a child).
+Budgets are NOT pooled: the umbrella row shows read-only sums — tasks across its campaigns and
+outcomes PER MEASURE (never engagements + leads). Always-on campaigns have no end date, which is
+also why the finish sweep (only non-null ends_at) never finishes one. Year view: drawn at the top
+of this assistant's Calendar tab (its scoped calendar is otherwise empty — it owns no posts):
+flights as bars, children indented, always-on as a lighter band, a tick per post/article its
+orders commissioned (`timeline` action, through orders only), a today line; a draft that never
+started gets no invented flight. Chat: snapshot names umbrellas/always-on/dates; proposal and edit
+cards carry `parentCampaignId` (0 = take out) and `alwaysOn`. Not done: parent-level budgets
+(deferred as planned); pausing an umbrella does not pause its campaigns. Guarded by
+`tests/campaign-hierarchy.test.ts`.
+
 ### 9.5 Human team members (hybrid workflows)
 
 **Exists:** Meeting Note Taker's `create_tasks` handler (Jira / Asana tickets), Slack connector,

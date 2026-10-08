@@ -3972,6 +3972,11 @@ export const campaigns = pgTable("campaigns", {
   // The tone this campaign asks for, inside the brand voice (db/z-campaign-creative.sql, §9.3) —
   // "warm, no discount language". Quoted into blueprint §13. NULL = the brand voice alone.
   tone: text(),
+  // Umbrella → child, ONE level (db/z-campaign-hierarchy.sql, §9.4; depth enforced in campaigns.ts).
+  // SET NULL: removing an umbrella never takes its campaigns with it. Budgets do not roll down.
+  parentCampaignId: integer("parent_campaign_id").references((): AnyPgColumn => campaigns.id, { onDelete: "set null" }),
+  // Business-as-usual: no end date, ever (CHECK below). Drawn as a band on the year view.
+  alwaysOn: boolean("always_on").notNull().default(false),
   // 'organic' | 'paid' | 'blended'. Phase 1 creates only 'organic'; the others are refused at the
   // HTTP boundary until the ad rails exist.
   mode: text().notNull().default("organic"),
@@ -4018,6 +4023,9 @@ export const campaigns = pgTable("campaigns", {
 }, (t) => [
   index("campaigns_assistant_idx").on(t.organisationId, t.aiAssistantId, t.status),
   index("campaigns_active_idx").on(t.status, t.endsAt).where(sql`status IN ('active','throttled')`),
+  check("campaigns_parent_not_self_check", sql`${t.parentCampaignId} IS NULL OR ${t.parentCampaignId} <> ${t.id}`),
+  check("campaigns_always_on_no_end_check", sql`NOT ${t.alwaysOn} OR ${t.endsAt} IS NULL`),
+  index("campaigns_parent_idx").on(t.parentCampaignId).where(sql`parent_campaign_id IS NOT NULL`),
   check("campaigns_funnel_stage_check", sql`${t.funnelStage} IN ('awareness','consideration','conversion','retention')`),
   check("campaigns_mode_check", sql`${t.mode} IN ('organic','paid','blended')`),
   check("campaigns_status_check", sql`${t.status} IN ('draft','active','throttled','paused','finished','archived')`),

@@ -14,6 +14,7 @@
 //   POST { action: 'pause',       campaignId, reason }
 //   POST { action: 'stop_all',    assistantId }            → pause every live campaign
 //   POST { action: 'complete_task', orderId, outcome: 'done'|'wont_happen', note? }   (§9.5)
+//   POST { action: 'timeline', assistantId }                → the year view (§9.4)
 //   POST { action: 'list_library', assistantId }          → the org's pictures, for the picker (§9.3)
 //   POST { action: 'attach_assets', campaignId, assetIds[] } / { action: 'detach_asset', campaignId, assetId }
 //   POST { action: 'list_orders', campaignId }
@@ -190,6 +191,36 @@ export default withLambda(async (event) => {
         return take.map((a) => ({ id: a.id, name: a.name }));
     }
 
+    /**
+     * Validate an umbrella for a campaign (§9.4). ONE level only: the umbrella must itself have no
+     * umbrella, and a campaign that already has children cannot become one's child — a CHECK can't
+     * see other rows, so this is the only place depth is enforced. Same organisation AND the same
+     * Campaign Assistant (an umbrella across two assistants' campaigns would roll up nothing).
+     * `undefined` = not being changed; `null` = no umbrella.
+     */
+    async function resolveParent(raw: unknown, assistantId: number, selfId: number | null)
+        : Promise<{ ok: true; id: number | null | undefined } | { ok: false; error: string }> {
+        if (raw === undefined) return { ok: true, id: undefined };
+        if (raw === null || raw === '' || raw === 0 || raw === '0') return { ok: true, id: null };
+        const pid = Number(raw);
+        if (!Number.isInteger(pid) || pid <= 0) return { ok: false, error: 'That umbrella campaign does not exist.' };
+        if (selfId && pid === selfId) return { ok: false, error: 'A campaign cannot be its own umbrella.' };
+        const [parent] = await db.select({ id: campaigns.id, parent: campaigns.parentCampaignId, assistant: campaigns.aiAssistantId, status: campaigns.status })
+            .from(campaigns)
+            .where(and(eq(campaigns.id, pid), eq(campaigns.organisationId, orgId)))
+            .limit(1);
+        if (!parent || parent.assistant !== assistantId || parent.status === 'archived') {
+            return { ok: false, error: 'That umbrella campaign does not exist.' };
+        }
+        if (parent.parent) return { ok: false, error: 'That campaign is already inside an umbrella — umbrellas are one level deep.' };
+        if (selfId) {
+            const [child] = await db.select({ id: campaigns.id }).from(campaigns)
+                .where(and(eq(campaigns.parentCampaignId, selfId), eq(campaigns.organisationId, orgId))).limit(1);
+            if (child) return { ok: false, error: 'This campaign is an umbrella for others, so it cannot go inside another umbrella.' };
+        }
+        return { ok: true, id: pid };
+    }
+
     // ── list ──────────────────────────────────────────────────────────────────
     if (action === 'list') {
         const assistantId = Number(body.assistantId);
@@ -217,6 +248,8 @@ export default withLambda(async (event) => {
                 excludeExistingCustomers: campaigns.excludeExistingCustomers,
                 funnelStage: campaigns.funnelStage,
                 tone: campaigns.tone,
+                parentCampaignId: campaigns.parentCampaignId,
+                alwaysOn: campaigns.alwaysOn,
                 createdAt: campaigns.createdAt,
                 maxWorkItems: campaignBudgets.maxWorkItems,
                 maxSpendGbp: campaignBudgets.maxSpendGbp,
@@ -389,6 +422,11 @@ export default withLambda(async (event) => {
             ? null : int(body.targetValue, 1, 100000, 10);
         const endsAt = typeof body.endsAt === 'string' && body.endsAt ? new Date(body.endsAt) : null;
 
+        const parent = await resolveParent(body.parentCampaignId, assistantId, null);
+        if (!parent.ok) return json(400, { error: parent.error });
+        // Always-on means no end date — the CHECK refuses both together, so say it here instead.
+        const alwaysOn = body.alwaysOn === true;
+
         // Invariant 1. `asDraft` is the chat path: a proposal the user approved in conversation
         // becomes a saved campaign that commissions nothing until a human starts it.
         const asDraft = body.asDraft === true;
@@ -419,7 +457,9 @@ export default withLambda(async (event) => {
             targetValue,
             mode: 'organic',
             status: 'draft',
-            endsAt: endsAt && !Number.isNaN(endsAt.getTime()) ? endsAt : null,
+            endsAt: alwaysOn ? null : (endsAt && !Number.isNaN(endsAt.getTime()) ? endsAt : null),
+            parentCampaignId: parent.id ?? null,
+            alwaysOn,
             audience: normaliseAudience(body.audience),
             funnelStage,
             tone: normaliseTone(body.tone),
@@ -488,6 +528,10 @@ export default withLambda(async (event) => {
         }
         if (typeof body.excludeExistingCustomers === 'boolean') patch.excludeExistingCustomers = body.excludeExistingCustomers;
         if (body.tone !== undefined) patch.tone = normaliseTone(body.tone);
+        const parent = await resolveParent(body.parentCampaignId, campaign.aiAssistantId, campaign.id);
+        if (!parent.ok) return json(400, { error: parent.error });
+        if (parent.id !== undefined) patch.parentCampaignId = parent.id;
+        if (typeof body.alwaysOn === 'boolean') patch.alwaysOn = body.alwaysOn;
         const objective = str(body.objective, 500);
         if (objective) patch.objective = objective;
         // Stage and outcome move together: the outcome must be one the (new) stage may be measured
@@ -507,6 +551,10 @@ export default withLambda(async (event) => {
             const d = new Date(body.endsAt);
             patch.endsAt = Number.isNaN(d.getTime()) ? null : d;
         }
+        // Always-on wins over an end date (CHECK campaigns_always_on_no_end_check): switching it on
+        // clears the date, and a date sent to a campaign that stays always-on is dropped.
+        const finalAlwaysOn = typeof patch.alwaysOn === 'boolean' ? patch.alwaysOn : campaign.alwaysOn;
+        if (finalAlwaysOn) patch.endsAt = null;
         await db.update(campaigns).set(patch).where(eq(campaigns.id, campaign.id));
         // The objective and end date are what the directive says; an edit must reach drafting.
         if (patch.objective !== undefined || patch.outcomeMetric !== undefined || patch.endsAt !== undefined
@@ -662,6 +710,43 @@ export default withLambda(async (event) => {
         }, orders);
         if (!decisionId) return json(500, { error: 'The plan could not be saved — please try again.' });
         return json(200, { decisionId, campaignId: campaign.id, status: campaign.status });
+    }
+
+    // ── timeline (§9.4) ───────────────────────────────────────────────────────
+    // The year view: every campaign's flight, its umbrella, whether it is always on, and a tick for
+    // each post and article it commissioned, on the date it is scheduled or went out. Read-only.
+    if (action === 'timeline') {
+        const assistantId = Number(body.assistantId);
+        if (!await requireOrchestrator(assistantId)) return json(404, { error: 'Assistant not found.' });
+        const rows = await db.select({
+            id: campaigns.id, objective: campaigns.objective, status: campaigns.status,
+            funnelStage: campaigns.funnelStage, startsAt: campaigns.startsAt, endsAt: campaigns.endsAt,
+            createdAt: campaigns.createdAt, parentCampaignId: campaigns.parentCampaignId, alwaysOn: campaigns.alwaysOn,
+        }).from(campaigns)
+            .where(and(eq(campaigns.organisationId, orgId), eq(campaigns.aiAssistantId, assistantId), sql`${campaigns.status} <> 'archived'`))
+            .orderBy(campaigns.createdAt);
+        if (!rows.length) return json(200, { campaigns: [], items: [] });
+        const ids = sql.join(rows.map((r) => sql`${r.id}`), sql`, `);
+        // Only work that traces to the campaign through its own orders — never a date overlap.
+        const items = await db.execute<{ campaign_id: number; kind: string; at: string | null; status: string }>(sql`
+            SELECT o.campaign_id, 'post' AS kind, coalesce(p.published_at, p.publish_date) AS at, p.status
+              FROM content_generation_jobs j
+              JOIN campaign_orders o ON o.id = j.campaign_order_id
+              JOIN scheduled_posts p ON p.id = j.result_post_id
+             WHERE o.campaign_id IN (${ids}) AND o.organisation_id = ${orgId}
+               AND p.status NOT IN ('rejected','cancelled')
+            UNION ALL
+            SELECT o.campaign_id, 'article' AS kind, coalesce(b.published_at, b.publish_date) AS at, b.status
+              FROM content_generation_jobs j
+              JOIN campaign_orders o ON o.id = j.campaign_order_id
+              JOIN blog_posts b ON b.id = j.result_blog_post_id
+             WHERE o.campaign_id IN (${ids}) AND o.organisation_id = ${orgId}
+               AND b.status NOT IN ('rejected','archived')
+            LIMIT 2000`);
+        return json(200, {
+            campaigns: rows,
+            items: [...items].filter((i) => i.at).map((i) => ({ campaignId: i.campaign_id, kind: i.kind, at: i.at, status: i.status })),
+        });
     }
 
     // ── campaign pictures (§9.3) ──────────────────────────────────────────────
