@@ -19,7 +19,7 @@
 // bury the user's real pictures. Options live in visual_brief_options until approved.
 
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
-import { aiAssistants, campaigns, contentAssets, mediaGenerationJobs, organisations, visualBriefOptions, visualBriefs } from '../../db/schema';
+import { aiAssistants, campaigns, contentAssets, mediaGenerationJobs, organisations, scheduledPosts, visualBriefOptions, visualBriefs } from '../../db/schema';
 import type { getDb } from '../../db/client';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import {
@@ -36,8 +36,11 @@ import { orgHasAssistantFeature } from './assistant-capabilities';
 import { PexelsRateLimitError, searchUniqueImages, searchUniqueVideos } from './pexels';
 import { BRAND_CARD_PROVIDER } from './brand-card-lifecycle';
 import { resolveAssetDisplayUrl } from './social-publish';
+import { POST_ATTACH_NOTES, attachApprovedToPost } from './brief-post-media';
+import { triggerBriefRound } from './trigger-brief-round';
 import {
     GENERATION_TIMEOUT_MS, MAX_ROUNDS, OWN_SOURCE, OWN_SOURCE_LABEL, PURPOSE_SPECS, REJECT_REASON_LABELS, SOURCE_SPECS,
+    normaliseBrief, sourcesAreFree,
     type BriefPurpose, type RejectReason,
 } from '../config/visual-brief-vocab';
 
@@ -612,7 +615,13 @@ async function settleBriefStatus(db: Db, briefId: number): Promise<void> {
          WHERE b.id = ${briefId} AND b.status NOT IN ('generating', 'cancelled')`);
 }
 
-export type DecideResult = { ok: true; contentAssetId?: number } | { ok: false; status: number; error: string };
+export type DecideResult = { ok: true; contentAssetId?: number; postNote?: string } | { ok: false; status: number; error: string };
+
+/** After an approval: a brief raised for a post (Phase 5) puts the picture on that post if it still needs one. */
+async function placeOnPost(db: Db, brief: BriefRow, orgId: number, assetId: number): Promise<string | undefined> {
+    if (!brief.scheduledPostId) return undefined;
+    return POST_ATTACH_NOTES[await attachApprovedToPost(db, { orgId, postId: brief.scheduledPostId, assetId })];
+}
 
 /**
  * Approve: the option becomes a content_assets row in the library, from where every assistant can
@@ -657,7 +666,7 @@ export async function decideOption(db: Db, args: {
     if (opt.source === OWN_SOURCE && opt.contentAssetId) {
         await settleBriefStatus(db, brief.id);
         if (brief.campaignOrderId) await settleCampaignOrder(db, brief.id);
-        return { ok: true, contentAssetId: opt.contentAssetId };
+        return { ok: true, contentAssetId: opt.contentAssetId, postNote: await placeOnPost(db, brief, orgId, opt.contentAssetId) };
     }
 
     try {
@@ -678,7 +687,7 @@ export async function decideOption(db: Db, args: {
         await db.update(visualBriefOptions).set({ contentAssetId: asset.id }).where(eq(visualBriefOptions.id, optionId));
         await settleBriefStatus(db, brief.id);
         if (brief.campaignOrderId) await settleCampaignOrder(db, brief.id);
-        return { ok: true, contentAssetId: asset.id };
+        return { ok: true, contentAssetId: asset.id, postNote: await placeOnPost(db, brief, orgId, asset.id) };
     } catch (err) {
         // Give the option back rather than leave it "approved" with nothing in the library.
         await db.update(visualBriefOptions).set({ status: 'proposed', decidedAt: null }).where(eq(visualBriefOptions.id, optionId));
@@ -718,6 +727,63 @@ async function settleCampaignOrder(db: Db, briefId: number): Promise<void> {
         await settleVisualOrder(db, briefId, settleOrderNow);
     } catch (err) {
         console.error('[visual-briefs] campaign order settle failed — the hourly reconcile will retry:', briefId, err instanceof Error ? err.message : err);
+    }
+}
+
+// ── A post with no picture (Phase 5) ────────────────────────────────────────────────────────────
+
+/**
+ * Raise a brief for a social draft that has no picture — called by the drafting job when every media
+ * source came back empty, and by "Ask the Brand Designer" in the post editor. Returns the brief id,
+ * or null when there is no Brand Designer to ask (or the post is not this organisation's).
+ *
+ * - ONE open brief per post: a retried job, or a second click, returns the one that exists.
+ * - Its sources are the Brand Designer's own defaults (a video post asks for stock video only), and
+ *   its first round starts at once ONLY when those are all free — the same rule as a campaign's
+ *   commission. An AI round waits for "Make options", where the cost is shown. Raising a brief
+ *   never spends a credit.
+ * - Never throws: on the drafting path a picture must never fail a draft.
+ */
+export async function raiseBriefForPost(db: Db, args: {
+    orgId: number; postId: number; context: string; mediaType?: 'image' | 'video'; platform?: string | null;
+}): Promise<number | null> {
+    try {
+        const [post] = await db.select({ id: scheduledPosts.id }).from(scheduledPosts)
+            .where(and(eq(scheduledPosts.id, args.postId), eq(scheduledPosts.organisationId, args.orgId))).limit(1);
+        if (!post) return null;
+        const [designer] = await db.select({ id: aiAssistants.id, onboardingContext: aiAssistants.onboardingContext })
+            .from(aiAssistants)
+            .where(and(eq(aiAssistants.organisationId, args.orgId), sql`(${aiAssistants.configuration} ->> 'type') = 'brand_designer'`))
+            .orderBy(desc(aiAssistants.id)).limit(1);
+        if (!designer) return null;
+        const [open] = await db.select({ id: visualBriefs.id }).from(visualBriefs).where(and(
+            eq(visualBriefs.organisationId, args.orgId), eq(visualBriefs.scheduledPostId, args.postId),
+            sql`${visualBriefs.status} <> 'cancelled'`,
+        )).limit(1);
+        if (open) return open.id;
+
+        const isVideo = args.mediaType === 'video';
+        const n = normaliseBrief({
+            title: `A ${isVideo ? 'video' : 'picture'} for a${args.platform ? ` ${args.platform}` : ''} post`.slice(0, 120),
+            message: clip(args.context, 1000) || 'A picture for this post',
+            purpose: isVideo ? 'story' : 'social_post',
+            sources: isVideo ? ['stock_video'] : defaultSourcesFor(designer.onboardingContext),
+        });
+        if (!n.ok) return null;
+        const [row] = await db.insert(visualBriefs).values({
+            organisationId: args.orgId, aiAssistantId: designer.id, createdBy: null,
+            ...n.brief, origin: 'assistant', scheduledPostId: args.postId,
+        }).returning();
+        if (sourcesAreFree(n.brief.sources)) {
+            const started = await startRound(db, { orgId: args.orgId, brief: row });
+            if (started.ok && !(await triggerBriefRound(row.id, null))) {
+                await endRound(db, row.id, { chargeAi: false, note: 'Could not start making options — press "Make options" to try again.' });
+            }
+        }
+        return row.id;
+    } catch (err) {
+        console.error('[visual-briefs] could not raise a brief for post', args.postId, err instanceof Error ? err.message : err);
+        return null;
     }
 }
 
@@ -798,6 +864,8 @@ export interface BriefView {
     mood: string | null; mustInclude: string | null; mustAvoid: string | null; sources: string[]; status: string;
     origin: string; dueDate: string | null; rounds: number; artDirection: unknown; generationNote: string | null;
     createdAt: string; roundCredits: number; waitingOn: string | null;
+    /** The social draft this brief is finding a picture for (Phase 5), or null. */
+    scheduledPostId: number | null;
     /** The campaign that commissioned this brief (Phase 3), or null. Its picture joins that campaign. */
     campaign: { id: number; objective: string } | null;
     options: Array<{
@@ -855,6 +923,7 @@ export async function listBriefs(db: Db, orgId: number, assistantId: number, lim
             createdAt: new Date(b.createdAt).toISOString(),
             roundCredits: (sources.includes('ai_image') ? IMAGE_CREDIT_COST : 0) + (sources.includes('ai_video') ? VIDEO_CREDIT_COST : 0),
             waitingOn: b.waitingOn,
+            scheduledPostId: b.scheduledPostId,
             campaign: b.campaignId && objectives.has(b.campaignId) ? { id: b.campaignId, objective: objectives.get(b.campaignId)! } : null,
             options: byBrief.get(b.id) ?? [],
         };
@@ -882,7 +951,7 @@ export async function buildBriefsSnapshot(db: Db, orgId: number, assistantId: nu
     const lines = briefs.map((b) => {
         const waiting = b.options.filter((o) => o.status === 'proposed');
         const approved = b.options.filter((o) => o.status === 'approved').length;
-        const head = `- Brief ${b.id} "${b.title}"${b.campaign ? ` (commissioned by the campaign "${clip(b.campaign.objective, 80)}" — the picture approved joins that campaign)` : ''} — ${b.status === 'generating' ? 'making options now' : b.status.replace('_', ' ')}; ${b.rounds} round${b.rounds === 1 ? '' : 's'}; ${approved} approved; sources: ${b.sources.join(', ')}${b.dueDate ? `; due ${b.dueDate}` : ''}${b.waitingOn ? `; waiting on ${clip(b.waitingOn, 60)} to add their own` : ''}.`;
+        const head = `- Brief ${b.id} "${b.title}"${b.campaign ? ` (commissioned by the campaign "${clip(b.campaign.objective, 80)}" — the picture approved joins that campaign)` : ''}${b.scheduledPostId ? ' (raised for a social post with no picture — the picture approved goes onto that post if it still has none)' : ''} — ${b.status === 'generating' ? 'making options now' : b.status.replace('_', ' ')}; ${b.rounds} round${b.rounds === 1 ? '' : 's'}; ${approved} approved; sources: ${b.sources.join(', ')}${b.dueDate ? `; due ${b.dueDate}` : ''}${b.waitingOn ? `; waiting on ${clip(b.waitingOn, 60)} to add their own` : ''}.`;
         const rows = waiting.map((o, i) => `    • option ${o.id} (#${i + 1} waiting) — ${sourceLabel(o.source).replace(/s$/, '').toLowerCase()}${o.prompt ? `: ${clip(o.prompt, 90)}` : ''}`);
         return [head, ...rows].join('\n');
     });

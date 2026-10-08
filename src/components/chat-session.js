@@ -646,7 +646,7 @@
             body: JSON.stringify({ action: 'decide', optionId: x.optionId, decision: x.decision, reason: x.reason, note: x.note }),
           });
           const data = await res.json().catch(() => ({}));
-          results.push(res.ok ? { optionId: x.optionId, ok: true } : { optionId: x.optionId, ok: false, error: data.error || `HTTP ${res.status}` });
+          results.push(res.ok ? { optionId: x.optionId, ok: true, postNote: data.postNote || null } : { optionId: x.optionId, ok: false, error: data.error || `HTTP ${res.status}` });
         } catch (err) {
           results.push({ optionId: x.optionId, ok: false, error: err.message });
         }

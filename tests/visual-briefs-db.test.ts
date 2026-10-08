@@ -22,6 +22,7 @@ import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { endRound, sweepStuckRounds } from '../src/utils/visual-briefs';
 import { judgeVisualOrder } from '../src/utils/campaign-visual-order';
+import { attachApprovedToPost } from '../src/utils/brief-post-media';
 
 let passed = 0;
 async function check(name: string, fn: () => void | Promise<void>): Promise<void> {
@@ -53,6 +54,9 @@ async function main() {
         }
         // INCLUDING ALL for this one: its unique (campaign, asset) pair is part of what is tested.
         await sql.unsafe(`CREATE TABLE ${schema}.campaign_assets (LIKE public.campaign_assets INCLUDING ALL)`);
+        // Phase 5: the post a brief was raised for. The junction keeps its unique pair (INCLUDING ALL).
+        await sql.unsafe(`CREATE TABLE ${schema}.scheduled_posts (LIKE public.scheduled_posts INCLUDING DEFAULTS)`);
+        await sql.unsafe(`CREATE TABLE ${schema}.scheduled_post_assets (LIKE public.scheduled_post_assets INCLUDING ALL)`);
         await sql.unsafe(`SET search_path TO ${schema}`);
         const db = drizzle({ client: sql }) as never;
 
@@ -160,6 +164,36 @@ async function main() {
                 'options were made and turned down — real work, not refunded');
             assert.strictEqual((await judgeVisualOrder(db, { id: 13, organisationId: 2, campaignId: 78, artefactId: waiting })).kind, 'rejected',
                 'another organisation\'s brief is not found');
+        });
+        // ── Phase 5: an approved picture goes onto the post it was raised for — only if it still needs one ──
+        const postRow = async (status: string, group: string | null = null) => {
+            const [p] = await sql.unsafe(
+                `INSERT INTO scheduled_posts (user_id, organisation_id, platform, post_format, publish_date, status, crosspost_group_id)
+                 VALUES (1, ${ORG}, 'linkedin', 'image', now(), $1, $2) RETURNING id`, [status, group]);
+            return Number(p.id);
+        };
+        const mediaOf = async (postId: number) => (await sql.unsafe(`SELECT content_asset_id FROM scheduled_post_assets WHERE scheduled_post_id = ${postId}`)).map((x) => Number(x.content_asset_id));
+
+        await check('a draft with no picture gets it — and so does its cross-post sibling', async () => {
+            const g = 'grp-1';
+            const a = await postRow('pending_approval', g);
+            const b = await postRow('pending_approval', g);
+            assert.strictEqual(await attachApprovedToPost(db, { orgId: ORG, postId: a, assetId: 900 }), 'attached');
+            assert.deepStrictEqual(await mediaOf(a), [900]);
+            assert.deepStrictEqual(await mediaOf(b), [900], 'one post going to two platforms is still one post');
+            const [row] = await sql.unsafe(`SELECT content_asset_ids FROM scheduled_posts WHERE id = ${a}`);
+            assert.deepStrictEqual(row.content_asset_ids, [900], 'the deprecated array is kept in step');
+        });
+
+        await check('a picture the user already chose is NEVER replaced, and a published post is left alone', async () => {
+            const chosen = await postRow('pending_approval');
+            await sql.unsafe(`INSERT INTO scheduled_post_assets (scheduled_post_id, content_asset_id, position) VALUES (${chosen}, 111, 0)`);
+            assert.strictEqual(await attachApprovedToPost(db, { orgId: ORG, postId: chosen, assetId: 901 }), 'post_has_media');
+            assert.deepStrictEqual(await mediaOf(chosen), [111]);
+            const live = await postRow('published');
+            assert.strictEqual(await attachApprovedToPost(db, { orgId: ORG, postId: live, assetId: 902 }), 'not_editable');
+            assert.deepStrictEqual(await mediaOf(live), []);
+            assert.strictEqual(await attachApprovedToPost(db, { orgId: 2, postId: live, assetId: 903 }), 'post_gone', 'another organisation\'s post is not found');
         });
     } finally {
         await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(() => {});

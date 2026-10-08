@@ -5251,16 +5251,19 @@ export const visualBriefs = pgTable("visual_briefs", {
   // A campaign's commission (db/z-campaign-visuals.sql). SET NULL: an approved picture outlives it.
   campaignId: integer("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
   campaignOrderId: integer("campaign_order_id").references(() => campaignOrders.id, { onDelete: "set null" }),
+  // The draft post this brief is finding a picture for (db/z-brand-designer-post-briefs.sql).
+  scheduledPostId: integer("scheduled_post_id").references(() => scheduledPosts.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
   index("visual_briefs_campaign_order_idx").on(t.campaignOrderId),
+  index("visual_briefs_scheduled_post_idx").on(t.scheduledPostId),
   index("visual_briefs_assistant_status_idx").on(t.organisationId, t.aiAssistantId, t.status),
   check("visual_briefs_purpose_check", sql`${t.purpose} IN ('social_post','blog_header','ad','email_header','story','other')`),
   check("visual_briefs_aspect_ratio_check", sql`${t.aspectRatio} IN ('1:1','4:5','16:9','9:16')`),
   check("visual_briefs_media_type_check", sql`${t.mediaType} IN ('image','video')`),
   check("visual_briefs_status_check", sql`${t.status} IN ('open','generating','in_review','approved','cancelled')`),
-  check("visual_briefs_origin_check", sql`${t.origin} IN ('user','chat','campaign')`),
+  check("visual_briefs_origin_check", sql`${t.origin} IN ('user','chat','campaign','assistant')`),
 ]);
 
 export const visualBriefOptions = pgTable("visual_brief_options", {

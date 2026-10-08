@@ -233,6 +233,16 @@ generation returns.
    button is); Hailuo takes no aspect ratio, so a clip's framing follows the prompt, not the brief's
    shape. Guarded by `tests/brand-designer-sources.test.ts`.
 5. **SMM / Blog Writer raise briefs** instead of auto-picking media when nothing fits.
+   ✅ **Built 2026-10-08 for the Social Media Assistant.** `db/z-brand-designer-post-briefs.sql`
+   (`visual_briefs.scheduled_post_id`, origin 'assistant'). When a draft's media sources ALL come back
+   empty (`process-content-jobs`, not Shorts), and a Brand Designer is hired, a brief linked to that
+   post is raised — one per post; free sources start at once, AI waits for the click. "Ask the Brand
+   Designer" in the post editor raises one by hand (shown only when one is hired). Approving puts the
+   picture on the post and its cross-post siblings ONLY while it is still editable and has no media —
+   a picture the user chose is never replaced (`src/utils/brief-post-media.ts`, proven on Postgres).
+   **Not for the Blog Writer:** a blog draft's body pictures are optional and best-effort
+   (`blog-media-source.ts`), so a post is never stuck without one; a blog header can be briefed by
+   hand and inserted from the library in Blog Studio. Guarded by `tests/brand-designer-post-briefs.test.ts`.
 
 Each step lands with: DDL in an idempotent `db/z-*.sql` applied to both environments **before** the
 code, the drizzle mirror, the GUI control, the chat card and prompt text, explainers (`data-explain`

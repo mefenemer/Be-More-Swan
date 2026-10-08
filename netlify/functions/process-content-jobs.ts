@@ -28,6 +28,7 @@ import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmar
 import { CONTENT_QUALITY_STANDARDS } from '../../src/constants/content-quality';
 import { creditLine } from '../../src/utils/pexels';
 import { resolveMediaForPost } from '../../src/utils/media-resolver';
+import { raiseBriefForPost } from '../../src/utils/visual-briefs';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
 import { generateAndPersistImage, renderAndPersistBrandCard, r2IsConfigured } from '../../src/lib/media-persist';
 import { headlineFromCaption, MAX_HEADLINE_CHARS } from '../../src/lib/brand-card';
@@ -1084,6 +1085,17 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                     // case: holdCredits threw 'insufficient_ai_credits' when the balance was short.
                     mediaExhaustedReason = resolved.lastError === 'insufficient_ai_credits'
                         ? 'ai_credits_exhausted' : 'media_exhausted';
+                    // Brand Designer plan, Phase 5: if the workspace has a Brand Designer, hand it the
+                    // job — a brief linked to this post. Free sources start at once; AI waits for the
+                    // user's click on the Briefs tab. The picture they approve lands on this post if it
+                    // still has none. A no-op without a Brand Designer, and it never throws.
+                    // Not for a Short: its only usable source is the 9:16 card, which already failed.
+                    if (!isYoutubeShort) {
+                        await raiseBriefForPost(db, {
+                            orgId: job.organisation_id, postId: post.id, context: stockContext,
+                            mediaType: isVideo ? 'video' : 'image', platform,
+                        });
+                    }
                 }
             }
         } catch (imgErr) {

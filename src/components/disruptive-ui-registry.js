@@ -1590,7 +1590,9 @@
           respond({ results }) {
             const failed = (results || []).filter((r) => !r.ok);
             const done = (results || []).length - failed.length;
-            if (!failed.length) { say(`Done — ${done} ${done === 1 ? 'option' : 'options'} decided.`); return; }
+            // A brief raised for a post (Phase 5) says what happened to that post.
+            const notes = (results || []).map((r) => r.postNote).filter(Boolean);
+            if (!failed.length) { say(`Done — ${done} ${done === 1 ? 'option' : 'options'} decided.${notes.length ? ` ${notes[0]}` : ''}`); return; }
             say(`${done} done. Not done: ${failed.map((r) => `option ${r.optionId} (${r.error})`).join('; ')}`, 'error');
           },
         },

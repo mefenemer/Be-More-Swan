@@ -16,11 +16,13 @@
 //                                                     Content's own upload + safety check) or a library
 //                                                     picture — which is where a Canva import lands
 //   list_library {}                                 → the library, for that picker
+//   post_brief   { postId }                         → is there a Brand Designer, and a brief for this post? (Phase 5)
+//   brief_for_post { postId, context? }             → "Ask the Brand Designer" from the post editor
 
 import { and, eq, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
-import { aiAssistants, visualBriefs } from '../../db/schema';
+import { aiAssistants, scheduledPosts, visualBriefs } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { getBalance } from '../../src/utils/ai-credits';
@@ -29,7 +31,7 @@ import { BRAND_DESIGNER_ROLE_KEY } from '../../src/constants/roles';
 import { briefVocabForClient, normaliseBrief } from '../../src/config/visual-brief-vocab';
 import {
     addOwnOptions, cancelBrief, decideOption, defaultSourcesFor, endRound, listBriefs, listLibraryForPicker, startRound,
-    sweepStuckRounds, videoUnavailableReason, type BriefRow,
+    raiseBriefForPost, sweepStuckRounds, videoUnavailableReason, type BriefRow,
 } from '../../src/utils/visual-briefs';
 import { readBrandGuidelines } from '../../src/utils/brand-guidelines';
 import { triggerBriefRound } from '../../src/utils/trigger-brief-round';
@@ -226,6 +228,37 @@ export default withLambda(async (event) => {
 
     if (action === 'list_library') {
         return json(200, { assets: await listLibraryForPicker(db, orgId) });
+    }
+
+    // Phase 5 — the post editor. `designerId` null = no Brand Designer here, and the editor shows no
+    // button rather than one that can only fail.
+    if (action === 'post_brief') {
+        const postId = Number(body.postId);
+        const [designer] = await db.select({ id: aiAssistants.id }).from(aiAssistants)
+            .where(and(eq(aiAssistants.organisationId, orgId), sql`(${aiAssistants.configuration} ->> 'type') = ${BRAND_DESIGNER_ROLE_KEY}`)).limit(1);
+        if (!designer || !Number.isInteger(postId) || postId <= 0) return json(200, { designerId: designer?.id ?? null, brief: null });
+        const [brief] = await db.select({ id: visualBriefs.id, status: visualBriefs.status, aiAssistantId: visualBriefs.aiAssistantId })
+            .from(visualBriefs).where(and(
+                eq(visualBriefs.organisationId, orgId), eq(visualBriefs.scheduledPostId, postId), sql`${visualBriefs.status} <> 'cancelled'`,
+            )).limit(1);
+        return json(200, { designerId: designer.id, brief: brief ?? null });
+    }
+
+    if (action === 'brief_for_post') {
+        const postId = Number(body.postId);
+        if (!Number.isInteger(postId) || postId <= 0) return json(400, { error: 'postId is required.' });
+        const [post] = await db.select({ caption: scheduledPosts.caption, platform: scheduledPosts.platform }).from(scheduledPosts)
+            .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.organisationId, orgId))).limit(1);
+        if (!post) return json(404, { error: 'Post not found.' });
+        const context = (typeof body.context === 'string' && body.context.trim()) ? body.context : (post.caption || '');
+        const blocked = await enforcePromptModeration({ text: context.slice(0, 1000), userId, organisationId: orgId, source: 'brand-briefs' });
+        if (blocked) return blocked;
+        const briefId = await raiseBriefForPost(db, {
+            orgId, postId, context, platform: post.platform,
+            mediaType: body.mediaType === 'video' ? 'video' : 'image',
+        });
+        if (!briefId) return json(404, { error: 'There is no Brand Designer in this workspace to ask.' });
+        return json(200, { ok: true, briefId });
     }
 
     if (action === 'cancel') {

@@ -266,7 +266,7 @@
     const visible = b.options.filter((o) => o.status !== 'rejected');
     const rejected = b.options.length - visible.length;
     const note = state.notes[b.id];
-    const meta = [purposeLabel(b.purpose), b.aspectRatio, b.sources.map(sourceLabel).join(', '), b.dueDate ? `due ${b.dueDate}` : '', b.origin === 'chat' ? 'from chat' : '', b.origin === 'campaign' ? 'from a campaign' : '']
+    const meta = [purposeLabel(b.purpose), b.aspectRatio, b.sources.map(sourceLabel).join(', '), b.dueDate ? `due ${b.dueDate}` : '', b.origin === 'chat' ? 'from chat' : '', b.origin === 'campaign' ? 'from a campaign' : '', b.origin === 'assistant' ? 'raised by your Social Media Assistant' : '']
       .filter(Boolean).map(esc).join(' · ');
     const live = b.status !== 'cancelled';
     return `
@@ -278,6 +278,7 @@
           </div>
           ${chip(b)}
         </div>
+        ${b.scheduledPostId ? '<p class="text-xs text-indigo-700 mt-1">For a social post that found no picture — the one you approve goes onto that post if it still has none.</p>' : ''}
         ${b.campaign ? `<p class="text-xs text-indigo-700 mt-1 break-words">For the campaign “${esc(b.campaign.objective)}” — the picture you approve joins that campaign's pictures.</p>` : ''}
         ${b.message ? `<p class="text-sm text-gray-700 mt-2 break-words">${esc(b.message)}</p>` : ''}
         ${b.headline ? `<p class="text-xs text-gray-600 mt-1">Words on the card: <span class="font-bold">${esc(b.headline)}</span></p>` : ''}
@@ -527,8 +528,9 @@
       const optionId = Number(approve.dataset.briefApprove);
       const brief = state.briefs.find((b) => b.options.some((o) => o.id === optionId));
       try {
-        await post({ action: 'decide', optionId, decision: 'approve' });
-        if (brief) say(brief.id, 'Added to your library — every assistant can use it now.');
+        const res = await post({ action: 'decide', optionId, decision: 'approve' });
+        // A brief raised for a post (Phase 5) also says what happened to that post.
+        if (brief) say(brief.id, `Added to your library — every assistant can use it now.${res.postNote ? ` ${res.postNote}` : ''}`);
       } catch (err) {
         if (brief) say(brief.id, err.message, 'error');
       }
