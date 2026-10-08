@@ -18,7 +18,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import {
     assessProviders, classifyAnthropicError, readFalBalance, probeAnthropic, FAL_LOCK_PATTERN,
     readStabilityBalance, STABILITY_TRACK_CREDITS, DEFAULT_STABILITY_LOW_BALANCE_CREDITS,
-    type FalLockEvidence,
+    assessMediaFailures, type FalLockEvidence, type MediaFailureEvidence,
 } from '../src/utils/provider-balance';
 import { dueForAlert } from '../netlify/functions/check-provider-balances';
 
@@ -155,6 +155,58 @@ async function main() {
         const fn = readFileSync(join(root, 'netlify/functions/check-provider-balances.ts'), 'utf8');
         assert.ok(fn.includes('readStabilityBalance()'), 'the probe is defined but never run');
         assert.ok(fn.includes('stability, stabilityLowBalanceCredits'), 'the reading never reaches the rules');
+    });
+
+    // ── AI media failing for reasons other than the lock (Brand Designer plan, Phase 0) ─────────
+    const media = (over: Partial<MediaFailureEvidence>): MediaFailureEvidence => ({
+        mediaType: 'video', failures: 6, stuck: 0, organisations: 2, latestAt: '2026-10-08T10:00:00Z',
+        topError: 'Fal request failed (404): {"detail":"Application \'hailuo-2.3\' not found"}',
+        lastSuccessAt: '2026-10-07T09:00:00Z', ...over,
+    });
+
+    await check('AI video failing in two workspaces with no success since is DOWN, and says what failed', () => {
+        const [p, ...rest] = assessMediaFailures([media({})]);
+        assert.strictEqual(rest.length, 0);
+        assert.strictEqual(p.provider, 'fal_media');
+        assert.strictEqual(p.severity, 'down');
+        assert.match(p.headline, /AI videos are failing for 2 workspaces/);
+        assert.ok(p.lines.some(l => l.includes('not found')), 'the alert must name the error, readable on a phone');
+        assert.ok(p.lines.some(l => l.includes('FAL_VIDEO_MODEL')), 'and point at what to check');
+    });
+
+    await check('one workspace failing is that workspace\'s problem — no alert', () => {
+        assert.deepStrictEqual(assessMediaFailures([media({ organisations: 1, failures: 40 })]), [],
+            'a volume of failures in ONE workspace is a bad prompt or a policy refusal, not us');
+    });
+
+    await check('a success after the newest failure turns DOWN into a warning', () => {
+        const [p] = assessMediaFailures([media({ lastSuccessAt: '2026-10-08T11:00:00Z' })]);
+        assert.strictEqual(p.severity, 'low');
+        assert.match(p.headline, /then worked again/);
+    });
+
+    await check('stuck jobs count, and the alert says their credits are still held', () => {
+        const [p] = assessMediaFailures([media({ failures: 0, stuck: 3, topError: 'stuck in processing for over an hour' })]);
+        assert.strictEqual(p.severity, 'down');
+        assert.ok(p.lines.some(l => l.includes('credits are still held')));
+    });
+
+    await check('images and videos are judged separately', () => {
+        const ps = assessMediaFailures([media({ mediaType: 'image' }), media({ mediaType: 'video', organisations: 1 })]);
+        assert.deepStrictEqual(ps.map(p => p.headline), ['AI images are failing for 2 workspaces']);
+    });
+
+    await check('the media rule reaches the scheduled check, without double-counting the lock', () => {
+        const ps = assessProviders({
+            fal: { status: 'ok', balance: 100, currency: 'USD' }, falEvidence: noEvidence,
+            anthropic: { status: 'ok' }, mediaFailures: [media({})],
+        });
+        assert.deepStrictEqual(ps.map(p => p.provider), ['fal_media']);
+        const fn = readFileSync(join(root, 'netlify/functions/check-provider-balances.ts'), 'utf8');
+        assert.ok(fn.includes('readMediaFailureEvidence().catch('), 'a broken media query must not stop the balance probes');
+        assert.ok(fn.includes("stabilityLowBalanceCredits: stabilityLow, mediaFailures"), 'the evidence never reaches the rules');
+        assert.ok(fn.includes("!~ '${FAL_LOCK_PATTERN}'"), 'the lock has its own rule — counting it here sends two emails for one outage');
+        assert.ok(fn.includes("NOT LIKE 'Superseded:%'"), 'operator clean-up is not a platform failure');
     });
 
     console.log(`\n${passed} checks passed`);

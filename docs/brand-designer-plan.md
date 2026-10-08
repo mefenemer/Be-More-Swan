@@ -158,6 +158,15 @@ generation returns.
 ## 6. Build order
 
 0. **Watchdog**: fal balance + AI media failure rate on the prod monitor. Before anything ships.
+   ✅ **Built 2026-10-08.** The balance half already existed: `check-provider-balances` (every 6h)
+   emails on a fal lock or a low balance (`FAL_ADMIN_KEY` is set on prod, so the low-balance warning
+   works), and its heartbeat feeds `platform-watchdog` + `prod-watchdog.yml`. Added: AI image/video
+   failures for ANY other reason — retired model id, rejected key, fal outage — and videos stuck in
+   `queued`/`processing` over an hour, read from `media_generation_jobs` per media type. Alerts
+   when ≥2 workspaces are affected (DOWN, or a warning if a fal asset has generated since); excludes
+   the lock (own rule), `Superseded:` clean-up, policy-flagged prompts and deleted owners. Guarded by
+   `tests/provider-balances.test.ts` (rules) and `tests/media-failure-evidence.test.ts` (the SQL, on
+   real Postgres in the CI rls job).
 1. **Role + briefs + review queue** (GUI and chat together), stock + AI image + brand card sources.
 2. **Brand guidelines** fields on `brand_kit`, fed into prompts and cards.
 3. **`commission_visuals`** campaign order + delivery judgement in the reconciler.

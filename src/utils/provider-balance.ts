@@ -68,6 +68,54 @@ export interface FalLockEvidence {
     lastSuccessAt: string | null;
 }
 
+/**
+ * AI media failing for any reason OTHER than the balance lock — a model id fal has retired (the
+ * Hailuo endpoint already 404s on the wrong id), a rejected key, an outage at fal, or a video whose
+ * background function died and left it `processing` forever. The lock has its own rule above; these
+ * failures had none, so they were visible only to the workspace they happened in.
+ *
+ * Read from media_generation_jobs, which every fal path writes (editor, autopilot, regenerate,
+ * suggestions, background video). One row per media type.
+ */
+export interface MediaFailureEvidence {
+    mediaType: 'image' | 'video';
+    /** status 'failed' in 24h, excluding the lock (its own rule), operator clean-up and deleted owners. */
+    failures: number;
+    /** Queued or processing for over an hour — the background function never settled them. */
+    stuck: number;
+    /** Distinct organisations with a failed OR stuck job. */
+    organisations: number;
+    latestAt: string | null;
+    /** The error that occurred most, first 180 chars. */
+    topError: string | null;
+    /** Newest fal asset of this type that DID generate. Later than latestAt = it works again. */
+    lastSuccessAt: string | null;
+}
+
+/** Same reasoning as check-content-generation-health: workspaces share nothing but us. */
+export const MEDIA_ORGS_THAT_MEAN_PLATFORM = 2;
+
+/** Pure: which media types are failing across workspaces, and whether they have recovered since. */
+export function assessMediaFailures(evidence: MediaFailureEvidence[]): ProviderProblem[] {
+    const problems: ProviderProblem[] = [];
+    for (const ev of evidence) {
+        if (ev.organisations < MEDIA_ORGS_THAT_MEAN_PLATFORM) continue;
+        const noun = ev.mediaType === 'video' ? 'AI videos' : 'AI images';
+        const recovered = !!(ev.lastSuccessAt && ev.latestAt && new Date(ev.lastSuccessAt) > new Date(ev.latestAt));
+        const lines = [
+            `${ev.failures} failed and ${ev.stuck} stuck in the last 24h, across ${ev.organisations} organisations (latest ${ev.latestAt ?? 'unknown'}).`,
+            ev.topError ? `Most common error: ${ev.topError}` : 'No error message was recorded.',
+            `Last ${ev.mediaType} that generated: ${ev.lastSuccessAt ?? 'none on record'}.`,
+            ev.stuck > 0 ? 'Stuck jobs: the background function died before settling them — their credits are still held.' : '',
+            'Not the balance lock (that has its own alert). Check the model id (FAL_IMAGE_MODEL / FAL_VIDEO_MODEL), FAL_KEY, and status.fal.ai.',
+        ].filter(Boolean);
+        problems.push(recovered
+            ? { provider: 'fal_media', severity: 'low', headline: `${noun} failed for ${ev.organisations} workspaces in 24h, then worked again`, lines }
+            : { provider: 'fal_media', severity: 'down', headline: `${noun} are failing for ${ev.organisations} workspaces`, lines });
+    }
+    return problems;
+}
+
 export async function readFalBalance(fetchImpl: typeof fetch = fetch): Promise<FalBalance> {
     const key = process.env.FAL_ADMIN_KEY || process.env.FAL_KEY;
     if (!key) return { status: 'not_configured' };
@@ -132,7 +180,7 @@ export async function probeAnthropic(
 }
 
 export interface ProviderProblem {
-    provider: 'fal' | 'anthropic' | 'stability';
+    provider: 'fal' | 'fal_media' | 'anthropic' | 'stability';
     /** 'down' = customers are affected now; 'low' = they will be soon. */
     severity: 'down' | 'low';
     headline: string;
@@ -152,6 +200,8 @@ export function assessProviders(input: {
     /** Optional so existing callers and tests that predate music are unchanged. */
     stability?: StabilityBalance;
     stabilityLowBalanceCredits?: number;
+    /** Optional so existing callers and tests that predate it are unchanged. */
+    mediaFailures?: MediaFailureEvidence[];
 }): ProviderProblem[] {
     const problems: ProviderProblem[] = [];
     const low = input.falLowBalanceUsd ?? DEFAULT_FAL_LOW_BALANCE_USD;
@@ -204,5 +254,6 @@ export function assessProviders(input: {
         problems.push({ provider: 'anthropic', severity: 'down', headline: 'Anthropic rejected our API key — all AI drafting is failing',
             lines: [`Probe said: ${input.anthropic.detail}`, 'Check ANTHROPIC_API_KEY in the Netlify environment.'] });
     }
+    problems.push(...assessMediaFailures(input.mediaFailures ?? []));
     return problems;
 }
