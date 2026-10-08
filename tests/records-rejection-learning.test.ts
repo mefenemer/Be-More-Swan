@@ -38,11 +38,12 @@ check('each rule is one line, and feedback rules say where they came from', () =
     assert.ok(b.includes('- Never promise a refund (from feedback on something you produced that they rejected)'));
     assert.ok(b.includes('- Sign off as the Support Team\n') || b.endsWith('- Sign off as the Support Team'));
     assert.ok(b.includes('the rule wins'));
+    assert.ok(b.includes('still produce the work without that part'), 'a declined part must not swallow the whole draft');
 });
 check('the block is capped, keeping the newest rules (they come first)', () => {
     const many = Array.from({ length: 200 }, (_, i) => ({ ruleText: `rule number ${i} `.repeat(5), origin: 'manual' }));
     const b = formatRulesBlock(many)!;
-    assert.ok(b.length < 4500, `block is ${b.length} chars`);
+    assert.ok(b.length < 4800, `block is ${b.length} chars (4000 of rule lines + the header)`);
     assert.ok(b.includes('rule number 0 '));
     assert.ok(!b.includes('rule number 199 '));
 });
