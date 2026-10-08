@@ -4162,7 +4162,7 @@ export const campaignOrders = pgTable("campaign_orders", {
   check("campaign_orders_status_check", sql`${t.status} IN ('queued','issued','in_review','delivered','blocked','cancelled','rejected')`),
   check("campaign_orders_cost_check", sql`${t.costWorkItems} >= 0 AND ${t.costGbp} >= 0`),
   // Widened by db/z-campaign-email-orders.sql (§9.7) — an email order's artefact is a sequence or an email.
-  check("campaign_orders_artefact_check", sql`${t.artefactKind} IS NULL OR ${t.artefactKind} IN ('scheduled_post','blog_post','discovery_campaign','assistant_record','newsletter_sequence','newsletter_issue')`),
+  check("campaign_orders_artefact_check", sql`${t.artefactKind} IS NULL OR ${t.artefactKind} IN ('scheduled_post','blog_post','discovery_campaign','assistant_record','newsletter_sequence','newsletter_issue','visual_brief')`),
   check("campaign_orders_no_self_block_check", sql`${t.blockedOnOrderId} IS NULL OR ${t.blockedOnOrderId} <> ${t.id}`),
 ]);
 
@@ -5243,15 +5243,19 @@ export const visualBriefs = pgTable("visual_briefs", {
   creditHold: integer("credit_hold").notNull().default(0),
   generationStartedAt: timestamp("generation_started_at"),
   generationNote: text("generation_note"),
+  // A campaign's commission (db/z-campaign-visuals.sql). SET NULL: an approved picture outlives it.
+  campaignId: integer("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
+  campaignOrderId: integer("campaign_order_id").references(() => campaignOrders.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
+  index("visual_briefs_campaign_order_idx").on(t.campaignOrderId),
   index("visual_briefs_assistant_status_idx").on(t.organisationId, t.aiAssistantId, t.status),
   check("visual_briefs_purpose_check", sql`${t.purpose} IN ('social_post','blog_header','ad','email_header','story','other')`),
   check("visual_briefs_aspect_ratio_check", sql`${t.aspectRatio} IN ('1:1','4:5','16:9','9:16')`),
   check("visual_briefs_media_type_check", sql`${t.mediaType} IN ('image','video')`),
   check("visual_briefs_status_check", sql`${t.status} IN ('open','generating','in_review','approved','cancelled')`),
-  check("visual_briefs_origin_check", sql`${t.origin} IN ('user','chat')`),
+  check("visual_briefs_origin_check", sql`${t.origin} IN ('user','chat','campaign')`),
 ]);
 
 export const visualBriefOptions = pgTable("visual_brief_options", {

@@ -24,16 +24,17 @@
 
 import { CAMPAIGN_TYPES } from './newsletter-campaign-chat-draft';
 import { EMAIL_TRIGGERS } from './campaign-email-order';
+import { BRIEF_ASPECT_RATIOS, BRIEF_PURPOSES, BRIEF_SOURCES } from '../config/visual-brief-vocab';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { campaignAssets, campaignBudgets, campaignDecisions, campaignOrders, campaigns, contentAssets, discoveryCampaigns } from '../../db/schema';
-import { persistProposal, type LiveCampaign, type ProposedDecision } from './campaign-proposer';
+import { hiredRoleKeys, persistProposal, type LiveCampaign, type ProposedDecision } from './campaign-proposer';
 import { settleDecisionMirror } from './campaign-mirror';
 import { campaignSpendTotals } from './campaign-ledger';
 import { audienceLine } from '../config/campaign-audience';
 import { countCampaignOutcome } from './campaign-outcomes';
 import { experimentResults, learningsPromptBlock } from './campaign-learning';
 import {
-    CAMPAIGN_OUTCOME_LABELS, CAMPAIGN_STATUS_LABELS, ORDER_ACTION_SPECS, isOrderAction, orderWorkItems,
+    CAMPAIGN_OUTCOME_LABELS, CAMPAIGN_STATUS_LABELS, HUMAN_ROLE_KEY, ORDER_ACTION_SPECS, isOrderAction, orderWorkItems,
     type CampaignOrderAction, type CampaignOutcomeMetric, type CampaignStatus,
 } from '../config/campaign-vocab';
 
@@ -51,6 +52,7 @@ export const ORDER_ROLE_LABELS: Record<string, string> = {
     blog_writer: 'Blog Writing Assistant',
     lead_qualifier: 'Lead Generation Assistant',
     newsletter_editor: 'Email Marketing Assistant',
+    brand_designer: 'Brand Designer',
     human: 'A person on your team',
 };
 
@@ -87,6 +89,9 @@ const BRIEF_TEXT_FIELDS: Record<string, number> = {
     assignee: 80, task: 500,
     // ab_test_posts (§9.8): what is being tested, and the two angles.
     hypothesis: 300, angleA: 300, angleB: 300,
+    // commission_visuals (Brand Designer, Phase 3): what the picture shows, exact words for a
+    // branded card, what it must not show — read by campaign-visual-order.ts createBriefForOrder.
+    show: 1000, headline: 120, mustAvoid: 300,
 };
 /** Closed vocabularies — anything else is dropped, and the worker picks the stage's default. */
 const BRIEF_ENUM_FIELDS: Record<string, readonly string[]> = {
@@ -95,6 +100,9 @@ const BRIEF_ENUM_FIELDS: Record<string, readonly string[]> = {
     // request_human_task (§9.5): also file it as a ticket in the business's own tool, in the
     // project it remembered. Filing failing never fails the task.
     fileIn: ['jira', 'asana'],
+    // commission_visuals: what the picture is for, and its shape (visual-brief-vocab.ts).
+    purpose: BRIEF_PURPOSES,
+    aspectRatio: BRIEF_ASPECT_RATIOS,
 };
 
 function cleanBrief(rec: Record<string, unknown>): Record<string, unknown> {
@@ -116,6 +124,12 @@ function cleanBrief(rec: Record<string, unknown>): Record<string, unknown> {
     // must never become a message from this business to a stranger.
     if (typeof src.assigneeEmail === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(src.assigneeEmail.trim())) {
         out.assigneeEmail = src.assigneeEmail.trim().slice(0, 200).toLowerCase();
+    }
+    // commission_visuals: where its options may come from. Unknown sources are dropped; an empty
+    // list is left out, so the Brand Designer's own default applies.
+    if (Array.isArray(src.sources)) {
+        const sources = BRIEF_SOURCES.filter((s) => (src.sources as unknown[]).includes(s));
+        if (sources.length) out.sources = sources;
     }
     const dc = Math.floor(Number(src.discoveryCampaignId));
     if (Number.isInteger(dc) && dc > 0) out.discoveryCampaignId = dc;
@@ -191,6 +205,9 @@ export function planOrderProblem(o: PlanOrder): string | null {
     }
     if (o.action === 'ab_test_posts' && String(o.brief.angleA).trim().toLowerCase() === String(o.brief.angleB).trim().toLowerCase()) {
         return `"${label}" needs two DIFFERENT angles — the same angle twice tests nothing.`;
+    }
+    if (o.action === 'commission_visuals' && !o.brief.show && !o.brief.headline) {
+        return `"${label}" needs what the picture should show, or the words it should carry.`;
     }
     if (o.action === 'request_human_task' && (!o.brief.assignee || !o.brief.task)) {
         return `"${label}" needs who to ask and what they are being asked to do.`;
@@ -391,6 +408,24 @@ const SNAPSHOT_CAMPAIGNS = 15;
  * shape and same failure mode as buildLeadsSnapshot() in chat-orchestrator.ts. Never throws: a
  * snapshot is context, not the conversation.
  */
+/**
+ * Which assistants this workspace has actually hired, so the chat proposes only orders that can run.
+ * Before the Brand Designer existed every orderable role was a common hire; now an order for one
+ * that is not here would be filed, approved, and then refused at placement ("this workspace has not
+ * hired the assistant that does it") — the user agreeing to work that was never coming.
+ */
+async function briefableLine(db: Db, organisationId: number): Promise<string> {
+    try {
+        const hired = await hiredRoleKeys(db, organisationId);
+        const yes = Object.entries(ORDER_ACTION_SPECS)
+            .filter(([, spec]) => spec.roleKey === HUMAN_ROLE_KEY || hired.has(spec.roleKey))
+            .map(([action]) => `"${action}"`);
+        return `\n\nORDERS THIS WORKSPACE CAN RUN (its assistants are hired): ${yes.join(', ')}. Any other order would be refused — say which assistant they would need to hire instead.`;
+    } catch {
+        return '';
+    }
+}
+
 export async function buildCampaignsSnapshot(
     db: Db, organisationId: number, aiAssistantId: number,
 ): Promise<string | null> {
@@ -437,7 +472,7 @@ export async function buildCampaignsSnapshot(
 
         // Lessons kept from past campaigns (§9.8) ride with the snapshot, so planning reads them every turn.
         const lessons = await learningsPromptBlock(db, organisationId);
-        const library = `${await libraryLine(db, organisationId)}${lessons ? `\n\n${lessons}` : ''}`;
+        const library = `${await libraryLine(db, organisationId)}${lessons ? `\n\n${lessons}` : ''}${await briefableLine(db, organisationId)}`;
         if (!rows.length) {
             return `YOUR CAMPAIGNS RIGHT NOW — this assistant has no campaigns yet. Anything the user wants to run is a NEW campaign.${searchBlock}${library}`;
         }

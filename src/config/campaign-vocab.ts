@@ -19,7 +19,7 @@
 // action the executor cannot dispatch. The one place free text belongs is `campaigns.objective`,
 // which is the founder's own sentence and is never parsed.
 
-import { BLOG_WRITER_ROLE_KEY, LEAD_GENERATOR_ROLE_KEY, NEWSLETTER_ROLE_KEY, SMM_ROLE_KEY } from '../constants/roles';
+import { BLOG_WRITER_ROLE_KEY, BRAND_DESIGNER_ROLE_KEY, LEAD_GENERATOR_ROLE_KEY, NEWSLETTER_ROLE_KEY, SMM_ROLE_KEY } from '../constants/roles';
 
 // ── Campaign mode ────────────────────────────────────────────────────────────
 /**
@@ -186,6 +186,7 @@ export const CAMPAIGN_ORDER_ACTIONS = [
     'draft_email_campaign',
     'request_human_task',
     'ab_test_posts',
+    'commission_visuals',
 ] as const;
 
 /**
@@ -218,7 +219,7 @@ export interface OrderActionSpec {
     /** How many when the brief does not say. Absent = 1. */
     defaultQuantity?: number;
     /** What comes back, matching campaign_orders.artefact_kind. */
-    artefactKind: 'scheduled_post' | 'blog_post' | 'discovery_campaign' | 'newsletter_sequence' | 'newsletter_issue' | null;
+    artefactKind: 'scheduled_post' | 'blog_post' | 'discovery_campaign' | 'newsletter_sequence' | 'newsletter_issue' | 'visual_brief' | null;
 }
 
 export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = {
@@ -307,6 +308,21 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
         // Four per angle is the floor below which the result says "not enough data" (§9.8).
         defaultQuantity: 4,
         artefactKind: 'scheduled_post',
+    },
+    // Brand Designer plan, Phase 3. ONE brief per order: what the picture is for. The Brand
+    // Designer makes options; the user approves one on its Briefs tab; that picture joins this
+    // campaign's own pictures (§9.3), which the posts it commissions use first.
+    commission_visuals: {
+        roleKey: BRAND_DESIGNER_ROLE_KEY,
+        label: 'Commission pictures',
+        description: 'Briefs the Brand Designer for this campaign\u2019s pictures. Stock photos and branded cards are made straight away; AI images wait for you to press \u201cMake options\u201d on its Briefs tab, where the AI credit is shown. The picture you approve joins this campaign\u2019s pictures.',
+        // The brief and the round are the Brand Designer's work. AI images are charged in AI
+        // CREDITS, separately and only on the user's click — never in campaign tasks, which would
+        // charge the same picture twice.
+        workItemsPerUnit: 1,
+        takesQuantity: false,
+        maxQuantity: 1,
+        artefactKind: 'visual_brief',
     },
 };
 

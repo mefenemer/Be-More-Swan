@@ -922,6 +922,7 @@
       blog_writer: 'Blog Writing Assistant',
       lead_qualifier: 'Lead Generation Assistant',
       newsletter_editor: 'Email Marketing Assistant',
+      brand_designer: 'Brand Designer',
       human: 'A person on your team',
     };
 
@@ -984,7 +985,7 @@
           : Number.isFinite(Number(o.quantity)) && o.quantity !== null && o.quantity !== ''
             ? Math.max(1, Math.min(spec.maxQuantity, Math.floor(Number(o.quantity))))
             : (spec.defaultQuantity || 1);
-        const detail = [o.angle, o.idea, o.task, o.hypothesis].find((v) => typeof v === 'string' && v.trim());
+        const detail = [o.angle, o.idea, o.task, o.hypothesis, o.show, o.headline].find((v) => typeof v === 'string' && v.trim());
         // An A/B test (§9.8) shows BOTH angles — the user is approving a comparison, not one post.
         const testNote = o.action === 'ab_test_posts' && typeof o.angleA === 'string' && typeof o.angleB === 'string'
           ? `A: ${o.angleA.trim()} · B: ${o.angleB.trim()} — per angle, every post still comes to you`
@@ -998,6 +999,12 @@
             : o.emailTrigger === 'form'
               ? 'A follow-up for people who sign up through a form — saved switched off'
               : 'Saved in Email Studio, switched off — nothing is sent until you say')
+          : '';
+        // Pictures (Brand Designer, Phase 3) say where the choice happens and that AI waits for a
+        // click — approving this plan must not read as approving an AI-credit spend.
+        const sources = Array.isArray(o.sources) ? o.sources : null;
+        const pictureNote = o.action === 'commission_visuals'
+          ? `${sources && !sources.includes('ai_image') ? 'Stock photos and branded cards, made straight away' : 'Stock and branded cards straight away; AI images only when you press "Make options" on its Briefs tab'} — you choose; the picture joins this campaign`
           : '';
         // A person's task (§9.5) names who, says nothing is sent to them, and shows what waits.
         const humanNote = o.action === 'request_human_task'
@@ -1022,6 +1029,7 @@
           detail: detail ? String(detail).trim() : '',
           forWho,
           emailNote,
+          pictureNote,
           humanNote,
           testNote,
           afterNote,
@@ -1080,7 +1088,7 @@
         <p class="text-xs font-bold text-indigo-700 uppercase tracking-wide mb-1">Who I'd brief</p>
         <ul class="mb-3 space-y-1">
           ${orders.map((o) => `
-            <li class="text-xs text-gray-600">• ${esc(o.label)}${o.qty ? ` ×${esc(String(o.qty))}` : ''} — ${esc(o.role)}${o.detail ? `<span class="block pl-3 text-gray-500 italic break-words">${esc(o.detail)}</span>` : ''}${o.forWho ? `<span class="block pl-3 text-gray-500 break-words">For: ${esc(o.forWho)}</span>` : ''}${o.emailNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.emailNote)}</span>` : ''}${o.humanNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.humanNote)}</span>` : ''}${o.testNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.testNote)}</span>` : ''}${o.afterNote ? `<span class="block pl-3 text-gray-500">${esc(o.afterNote)}</span>` : ''}</li>
+            <li class="text-xs text-gray-600">• ${esc(o.label)}${o.qty ? ` ×${esc(String(o.qty))}` : ''} — ${esc(o.role)}${o.detail ? `<span class="block pl-3 text-gray-500 italic break-words">${esc(o.detail)}</span>` : ''}${o.forWho ? `<span class="block pl-3 text-gray-500 break-words">For: ${esc(o.forWho)}</span>` : ''}${o.emailNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.emailNote)}</span>` : ''}${o.pictureNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.pictureNote)}</span>` : ''}${o.humanNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.humanNote)}</span>` : ''}${o.testNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.testNote)}</span>` : ''}${o.afterNote ? `<span class="block pl-3 text-gray-500">${esc(o.afterNote)}</span>` : ''}</li>
           `).join('')}
         </ul>` : ''}
 

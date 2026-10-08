@@ -19,7 +19,7 @@
 // bury the user's real pictures. Options live in visual_brief_options until approved.
 
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
-import { aiAssistants, contentAssets, mediaGenerationJobs, organisations, visualBriefOptions, visualBriefs } from '../../db/schema';
+import { aiAssistants, campaigns, contentAssets, mediaGenerationJobs, organisations, visualBriefOptions, visualBriefs } from '../../db/schema';
 import type { getDb } from '../../db/client';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { FalContentPolicyError, FalError, falConfigured, generateImages, type AspectRatio } from '../lib/fal-gateway';
@@ -539,6 +539,7 @@ export async function decideOption(db: Db, args: {
         const [asset] = await db.insert(contentAssets).values(values).returning({ id: contentAssets.id });
         await db.update(visualBriefOptions).set({ contentAssetId: asset.id }).where(eq(visualBriefOptions.id, optionId));
         await settleBriefStatus(db, brief.id);
+        if (brief.campaignOrderId) await settleCampaignOrder(db, brief.id);
         return { ok: true, contentAssetId: asset.id };
     } catch (err) {
         // Give the option back rather than leave it "approved" with nothing in the library.
@@ -561,7 +562,25 @@ export async function cancelBrief(db: Db, orgId: number, briefId: number): Promi
         await db.update(visualBriefOptions).set({ status: 'rejected', rejectReason: 'other: brief cancelled', decidedAt: new Date() })
             .where(inArray(visualBriefOptions.id, leftovers.map((o) => o.id)));
     }
+    await settleCampaignOrder(db, briefId);
     return { ok: true };
+}
+
+/**
+ * A brief a campaign commissioned (Phase 3): settle its order NOW rather than at the next hourly
+ * reconcile — the approved picture joins the campaign, and anything waiting on it is released.
+ * Best-effort: the decision is already saved, and the reconciler settles anything this misses.
+ * The reconciler is imported LAZILY — it imports campaign-orders, which imports this module.
+ */
+async function settleCampaignOrder(db: Db, briefId: number): Promise<void> {
+    try {
+        const [{ settleOrderNow }, { settleVisualOrder }] = await Promise.all([
+            import('./campaign-reconciler'), import('./campaign-visual-order'),
+        ]);
+        await settleVisualOrder(db, briefId, settleOrderNow);
+    } catch (err) {
+        console.error('[visual-briefs] campaign order settle failed — the hourly reconcile will retry:', briefId, err instanceof Error ? err.message : err);
+    }
 }
 
 // ── Reading ─────────────────────────────────────────────────────────────────────────────────────
@@ -571,6 +590,8 @@ export interface BriefView {
     mood: string | null; mustInclude: string | null; mustAvoid: string | null; sources: string[]; status: string;
     origin: string; dueDate: string | null; rounds: number; artDirection: unknown; generationNote: string | null;
     createdAt: string; roundCredits: number;
+    /** The campaign that commissioned this brief (Phase 3), or null. Its picture joins that campaign. */
+    campaign: { id: number; objective: string } | null;
     options: Array<{
         id: number; round: number; source: string; status: string; url: string | null; width: number | null; height: number | null;
         prompt: string | null; attributionName: string | null; attributionUrl: string | null; rejectReason: string | null; contentAssetId: number | null;
@@ -583,6 +604,13 @@ export async function listBriefs(db: Db, orgId: number, assistantId: number, lim
         .where(and(eq(visualBriefs.organisationId, orgId), eq(visualBriefs.aiAssistantId, assistantId)))
         .orderBy(desc(visualBriefs.createdAt)).limit(limit);
     if (!briefs.length) return [];
+    const campaignIds = [...new Set(briefs.map((b) => b.campaignId).filter((x): x is number => !!x))];
+    const objectives = new Map<number, string>();
+    if (campaignIds.length) {
+        const rows = await db.select({ id: campaigns.id, objective: campaigns.objective }).from(campaigns)
+            .where(and(eq(campaigns.organisationId, orgId), inArray(campaigns.id, campaignIds)));
+        for (const c of rows) objectives.set(c.id, c.objective);
+    }
     const opts = await db.select().from(visualBriefOptions)
         .where(and(eq(visualBriefOptions.organisationId, orgId), inArray(visualBriefOptions.briefId, briefs.map((b) => b.id))))
         .orderBy(desc(visualBriefOptions.round), visualBriefOptions.id);
@@ -606,6 +634,7 @@ export async function listBriefs(db: Db, orgId: number, assistantId: number, lim
             dueDate: b.dueDate ? String(b.dueDate) : null, rounds: b.rounds, artDirection: b.artDirection, generationNote: b.generationNote,
             createdAt: new Date(b.createdAt).toISOString(),
             roundCredits: sources.includes('ai_image') ? IMAGE_CREDIT_COST : 0,
+            campaign: b.campaignId && objectives.has(b.campaignId) ? { id: b.campaignId, objective: objectives.get(b.campaignId)! } : null,
             options: byBrief.get(b.id) ?? [],
         };
     });
@@ -632,7 +661,7 @@ export async function buildBriefsSnapshot(db: Db, orgId: number, assistantId: nu
     const lines = briefs.map((b) => {
         const waiting = b.options.filter((o) => o.status === 'proposed');
         const approved = b.options.filter((o) => o.status === 'approved').length;
-        const head = `- Brief ${b.id} "${b.title}" — ${b.status === 'generating' ? 'making options now' : b.status.replace('_', ' ')}; ${b.rounds} round${b.rounds === 1 ? '' : 's'}; ${approved} approved; sources: ${b.sources.join(', ')}${b.dueDate ? `; due ${b.dueDate}` : ''}.`;
+        const head = `- Brief ${b.id} "${b.title}"${b.campaign ? ` (commissioned by the campaign "${clip(b.campaign.objective, 80)}" — the picture approved joins that campaign)` : ''} — ${b.status === 'generating' ? 'making options now' : b.status.replace('_', ' ')}; ${b.rounds} round${b.rounds === 1 ? '' : 's'}; ${approved} approved; sources: ${b.sources.join(', ')}${b.dueDate ? `; due ${b.dueDate}` : ''}.`;
         const rows = waiting.map((o, i) => `    • option ${o.id} (#${i + 1} waiting) — ${SOURCE_SPECS[o.source as keyof typeof SOURCE_SPECS]?.label.replace(/s$/, '').toLowerCase() ?? o.source}${o.prompt ? `: ${clip(o.prompt, 90)}` : ''}`);
         return [head, ...rows].join('\n');
     });

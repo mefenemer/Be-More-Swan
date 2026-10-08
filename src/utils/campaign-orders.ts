@@ -30,6 +30,10 @@
 
 import { triggerCampaignEmailDraft } from './trigger-campaign-email-draft';
 import { fileTaskTicket, isPmProvider } from './campaign-tickets';
+import { createBriefForOrder } from './campaign-visual-order';
+import { endRound, startRound } from './visual-briefs';
+import { triggerBriefRound } from './trigger-brief-round';
+import { visualBriefs } from '../../db/schema';
 import { randomUUID } from 'crypto';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
@@ -360,7 +364,7 @@ interface ExecutorResult {
     message?: string;
     /** True when the order is complete the moment it is issued (steering orders). */
     terminal?: boolean;
-    artefactKind?: 'scheduled_post' | 'blog_post' | 'discovery_campaign';
+    artefactKind?: 'scheduled_post' | 'blog_post' | 'discovery_campaign' | 'visual_brief';
     artefactId?: number;
     summary?: string;
 }
@@ -574,5 +578,27 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
             ok: true,
             summary: `The Email Marketing Assistant is writing ${n} email${n === 1 ? '' : 's'}`,
         };
+    },
+
+    // Brand Designer plan, Phase 3 — ONE brief, linked to the campaign and this order. A brief whose
+    // sources are all free starts its first round now; one with AI images waits for the user's
+    // "Make options" on the Briefs tab, because an AI credit is spent only on a click that shows it.
+    // A free round that cannot start is not a failed order: the brief exists and says so, and the
+    // user can press the button. See src/utils/campaign-visual-order.ts.
+    commission_visuals: async (db, ctx, orderId) => {
+        const made = await createBriefForOrder(db, ctx, orderId);
+        if (!made.ok) return { ok: false, message: made.message };
+        let summary = 'Brief with the Brand Designer — press "Make options" on its Briefs tab (AI images use AI credits)';
+        if (made.allFree) {
+            const [brief] = await db.select().from(visualBriefs).where(eq(visualBriefs.id, made.briefId)).limit(1);
+            const started = brief ? await startRound(db, { orgId: ctx.organisationId, brief }) : null;
+            if (started && started.ok && await triggerBriefRound(made.briefId, null)) {
+                summary = 'The Brand Designer is making options — choose one on its Briefs tab';
+            } else if (started && started.ok) {
+                await endRound(db, made.briefId, { chargeAi: false, note: 'Could not start making options — press "Make options" to try again.' });
+                summary = 'Brief with the Brand Designer — options could not start; press "Make options" on its Briefs tab';
+            }
+        }
+        return { ok: true, artefactKind: 'visual_brief', artefactId: made.briefId, summary };
     },
 };

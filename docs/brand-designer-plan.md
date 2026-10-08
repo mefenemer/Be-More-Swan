@@ -202,6 +202,18 @@ generation returns.
    AI options left undecided on a finished brief stay in R2 until the brief is cancelled.
 2. **Brand guidelines** — ✅ built 2026-10-08 as `organisations.brand_guidelines`, not kit fields (§4.5).
 3. **`commission_visuals`** campaign order + delivery judgement in the reconciler.
+   ✅ **Built 2026-10-08.** `db/z-campaign-visuals.sql` (brief → campaign + order links, `origin`
+   'campaign', artefact kind `visual_brief`, "works with" both ways). One brief per order, 1 task.
+   Executor (`campaign-orders.ts`) creates the brief from the order's `show`/`headline` (else the
+   objective), the campaign's tone as mood, and the designer's default sources; it starts a round
+   ONLY when every source is free — a brief with AI images waits for "Make options" on the Briefs
+   tab, so approving a campaign plan never spends an AI credit. Approving an option attaches it to
+   `campaign_assets` and settles the order DELIVERED at once (releasing work waiting on it);
+   cancelling settles rejected, or failed + refunded if nothing was ever made. The hourly reconciler
+   judges the same way as the backstop (`src/utils/campaign-visual-order.ts`, proven on Postgres in
+   `tests/visual-briefs-db.test.ts`). Chat: the Campaign Assistant can plan the order, and is now told
+   which orders this workspace can run (an unhired assistant's order was refused only at placement).
+   GUI: Add work → "Commission pictures". Guarded by `tests/campaign-visual-orders.test.ts`.
 4. **AI video + human-made + Canva** as sources in the same queue.
 5. **SMM / Blog Writer raise briefs** instead of auto-picking media when nothing fits.
 

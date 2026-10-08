@@ -21,6 +21,7 @@ import assert from 'node:assert';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { endRound, sweepStuckRounds } from '../src/utils/visual-briefs';
+import { judgeVisualOrder } from '../src/utils/campaign-visual-order';
 
 let passed = 0;
 async function check(name: string, fn: () => void | Promise<void>): Promise<void> {
@@ -50,6 +51,8 @@ async function main() {
         for (const t of ['visual_briefs', 'visual_brief_options', 'ai_credit_balance', 'ai_credit_ledger']) {
             await sql.unsafe(`CREATE TABLE ${schema}.${t} (LIKE public.${t} INCLUDING DEFAULTS)`);
         }
+        // INCLUDING ALL for this one: its unique (campaign, asset) pair is part of what is tested.
+        await sql.unsafe(`CREATE TABLE ${schema}.campaign_assets (LIKE public.campaign_assets INCLUDING ALL)`);
         await sql.unsafe(`SET search_path TO ${schema}`);
         const db = drizzle({ client: sql }) as never;
 
@@ -113,6 +116,32 @@ async function main() {
             assert.strictEqual(await endRound(db, stale, { chargeAi: true, note: null }), false,
                 'the worker arriving after the sweep must not charge a round the user was told was free');
             assert.deepStrictEqual(await balance(), { balance: before.balance + 1, held: before.held - 1 });
+        });
+        // ── Phase 3: a campaign's picture order, judged from its brief ──────────────────────
+        await check('an approved picture DELIVERS the order and joins the campaign once, however often it is judged', async () => {
+            const id = await brief('in_review', 0);
+            await sql.unsafe(`INSERT INTO visual_brief_options (organisation_id, brief_id, round, source, status, content_asset_id) VALUES (${ORG}, ${id}, 1, 'stock', 'approved', 501)`);
+            await option(id, 'proposed');
+            const order = { id: 9, organisationId: ORG, campaignId: 77, artefactId: id };
+            const v1 = await judgeVisualOrder(db, order);
+            assert.strictEqual(v1.kind, 'delivered');
+            const v2 = await judgeVisualOrder(db, order);
+            assert.strictEqual(v2.kind, 'delivered');
+            const rows = await sql.unsafe(`SELECT content_asset_id FROM campaign_assets WHERE campaign_id = 77`);
+            assert.deepStrictEqual(rows.map((x) => Number(x.content_asset_id)), [501], 'attached once, not once per judgement');
+        });
+
+        await check('waiting options are "in review"; cancelled before anything was made is FAILED (refunded)', async () => {
+            const waiting = await brief('in_review', 0);
+            await option(waiting, 'proposed');
+            assert.strictEqual((await judgeVisualOrder(db, { id: 10, organisationId: ORG, campaignId: 78, artefactId: waiting })).kind, 'in_review');
+            const [c] = await sql.unsafe(`INSERT INTO visual_briefs (organisation_id, ai_assistant_id, title, status, rounds) VALUES (${ORG}, 1, 't', 'cancelled', 0) RETURNING id`);
+            assert.strictEqual((await judgeVisualOrder(db, { id: 11, organisationId: ORG, campaignId: 78, artefactId: Number(c.id) })).kind, 'failed');
+            const [d] = await sql.unsafe(`INSERT INTO visual_briefs (organisation_id, ai_assistant_id, title, status, rounds) VALUES (${ORG}, 1, 't', 'cancelled', 2) RETURNING id`);
+            assert.strictEqual((await judgeVisualOrder(db, { id: 12, organisationId: ORG, campaignId: 78, artefactId: Number(d.id) })).kind, 'rejected',
+                'options were made and turned down — real work, not refunded');
+            assert.strictEqual((await judgeVisualOrder(db, { id: 13, organisationId: 2, campaignId: 78, artefactId: waiting })).kind, 'rejected',
+                'another organisation\'s brief is not found');
         });
     } finally {
         await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(() => {});

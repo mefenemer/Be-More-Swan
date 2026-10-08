@@ -210,7 +210,7 @@
     const visible = b.options.filter((o) => o.status !== 'rejected');
     const rejected = b.options.length - visible.length;
     const note = state.notes[b.id];
-    const meta = [purposeLabel(b.purpose), b.aspectRatio, b.sources.map(sourceLabel).join(', '), b.dueDate ? `due ${b.dueDate}` : '', b.origin === 'chat' ? 'from chat' : '']
+    const meta = [purposeLabel(b.purpose), b.aspectRatio, b.sources.map(sourceLabel).join(', '), b.dueDate ? `due ${b.dueDate}` : '', b.origin === 'chat' ? 'from chat' : '', b.origin === 'campaign' ? 'from a campaign' : '']
       .filter(Boolean).map(esc).join(' · ');
     const live = b.status !== 'cancelled';
     return `
@@ -222,6 +222,7 @@
           </div>
           ${chip(b)}
         </div>
+        ${b.campaign ? `<p class="text-xs text-indigo-700 mt-1 break-words">For the campaign “${esc(b.campaign.objective)}” — the picture you approve joins that campaign's pictures.</p>` : ''}
         ${b.message ? `<p class="text-sm text-gray-700 mt-2 break-words">${esc(b.message)}</p>` : ''}
         ${b.headline ? `<p class="text-xs text-gray-600 mt-1">Words on the card: <span class="font-bold">${esc(b.headline)}</span></p>` : ''}
         <p class="text-xs text-gray-600 mt-2">${esc(activityLine(b))}</p>

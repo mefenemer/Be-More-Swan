@@ -647,4 +647,6 @@ prompt text (§9.0), and the prompt-surfaces test extended.
 Planned as its own assistant (`brand_designer`) — see [brand-designer-plan.md](./brand-designer-plan.md).
 What it adds here: a new order action **`commission_visuals`**, priced and approved like every other
 order, delivered when its brief has approved visuals (which then land in `campaign_assets`, §9.3).
-A brief handed to a person reuses §9.5 human tasks. Not built.
+A brief handed to a person reuses §9.5 human tasks. ✅ `commission_visuals` built 2026-10-08 — see
+brand-designer-plan.md §6 step 3. The campaign snapshot now also lists which orders the workspace
+can run (its hired assistants), so the chat no longer plans work for an assistant that is not hired.
