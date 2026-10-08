@@ -2697,7 +2697,10 @@
       state.selected.clear();
       const emptyMsg = hub.kind === 'content_library'
         ? 'Posts this assistant drafts will appear here across their whole lifecycle — from draft through scheduled to published. Click Create Post above to write one yourself or generate one with AI.'
-        : `Work your assistant produces in chat lands here automatically — or import a CSV to get started. ${esc(hub.importHint)}`;
+        : hub.emptyMessage
+          // A role whose records are written by the system (no import) says where they come from.
+          ? esc(hub.emptyMessage)
+          : `Work your assistant produces in chat lands here automatically — or import a CSV to get started. ${esc(hub.importHint)}`;
       // ⚠️ The Deleted section is appended here too. An account whose every live lead has aged out
       // has an EMPTY table and a full graveyard, and that is exactly the moment the section has to
       // be reachable — leaving it off this branch would mean the only way to recover those leads
@@ -3019,7 +3022,7 @@
     host.innerHTML = `
       <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6">
         <div class="min-w-0">
-          <h3 class="text-lg font-bold text-gray-900">${esc(hub.label)}</h3>
+          <h3 class="text-lg font-bold text-gray-900"${hub.explain ? ` data-explain="${esc(hub.explain)}"` : ''}>${esc(hub.label)}</h3>
           <p class="text-sm text-gray-500 mt-1 max-w-2xl">${esc(hub.description)}</p>
         </div>
         <button type="button" id="datahub-create-post"
@@ -3045,7 +3048,7 @@
     host.innerHTML = `
       <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6">
         <div class="min-w-0">
-          <h3 class="text-lg font-bold text-gray-900">${esc(hub.label)}</h3>
+          <h3 class="text-lg font-bold text-gray-900"${hub.explain ? ` data-explain="${esc(hub.explain)}"` : ''}>${esc(hub.label)}</h3>
           <p class="text-sm text-gray-500 mt-1 max-w-2xl">${esc(hub.description)}</p>
         </div>
         <!-- flex-wrap, not nowrap: every button is whitespace-nowrap, so without it the row's
@@ -3063,12 +3066,12 @@
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
             Add Lead
           </button>` : ''}
-          <input type="file" accept=".csv" class="hidden" data-hub-file>
+          ${hub.noImport ? '' : `<input type="file" accept=".csv" class="hidden" data-hub-file>
           <button type="button" data-hub-import
             class="inline-flex items-center gap-2 px-4 py-2 ${hub.manualAdd ? 'btn-secondary border' : 'btn-primary'} text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0-12l-4 4m4-4l4 4"/></svg>
             Import CSV
-          </button>
+          </button>`}
           <button type="button" data-hub-export
             class="btn-utility inline-flex items-center gap-2 px-4 py-2 border text-sm font-bold rounded-lg transition whitespace-nowrap">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 16V4m0 12l-4-4m4 4l4-4"/></svg>

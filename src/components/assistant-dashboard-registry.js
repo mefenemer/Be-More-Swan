@@ -448,6 +448,8 @@
         kind: 'records',
         recordType: 'campaign_decision',
         label: 'Decisions',
+        // The Be More Swan "i" explainer on the heading (explainers.js GLOSSARY).
+        explain: 'campaign-decisions',
         // Explicitly not the generic "approve, schedule or reject" line: approving a decision
         // issues ORDERS to other assistants, whose output then comes back for review separately.
         // Approving here is never the last gate before something reaches the outside world.
@@ -460,6 +462,8 @@
         id: 'datahub',
         label: 'Orders',
         recordType: 'campaign_order',
+        // The Be More Swan "i" explainer on the heading (explainers.js GLOSSARY).
+        explain: 'campaign-orders',
         description: 'Every instruction this assistant has issued to your other assistants — what it asked for, what it cost, and what came back.',
         columns: [
           { key: 'title', label: 'Order' },
@@ -469,11 +473,12 @@
           { key: 'status', label: 'Status' },
           { key: 'result', label: 'Result' },
         ],
-        // Golden Rule 1 — never require an external system. A founder can bring last quarter's
-        // numbers in from a spreadsheet and get a real baseline on day one instead of an empty
-        // dashboard they have to wait a month to fill.
-        importHint: 'Upload a CSV of past campaign activity — one row per channel per period. This gives your Campaign Assistant a baseline to compare new campaigns against.',
-        importColumns: ['campaign', 'channel', 'spend', 'outcomes', 'date'],
+        // ⚠️ NO IMPORT. These rows are mirrors of real campaign_orders, written by campaigns.ts;
+        // assistant-records.ts refuses to import them (a CSV row would be an "order" no assistant
+        // was ever given). The old "import last quarter's numbers as a baseline" promise had no
+        // consumer and its button could only fail — removed 2026-10-08.
+        noImport: true,
+        emptyMessage: 'Nothing yet. When you approve a campaign\'s plan, or use "Add work" on the Campaigns tab, each piece of work it asks for appears here — who got it, how many tasks it used, and what came back.',
       },
       // ⊕ Campaigns tab (assistant-campaigns.js → campaigns.ts). One row per campaign, each row
       // stating what it is doing right now. Modelled on the Searches tab, whose lesson was learned

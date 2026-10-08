@@ -179,7 +179,7 @@
     return `
       <div class="mt-3">
         <div class="flex items-center justify-between mb-1">
-          <span class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Task budget</span>
+          <span class="text-[11px] font-bold text-gray-500 uppercase tracking-wide" data-explain="campaign-task-budget">Task budget</span>
           <span class="text-[11px] font-semibold text-gray-600">${esc(String(spent))} of ${esc(String(cap))} used${committed ? ` · ${esc(String(committed))} committed` : ''}</span>
         </div>
         <div class="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden flex">
@@ -267,7 +267,7 @@
     const outcomes = Object.entries(byMetric)
       .map(([m, n]) => `${n} ${(C() ? C().outcomeLabel(m) : m).toLowerCase()}`).join(' · ');
     return `
-      <p class="text-xs text-gray-600 mt-1"><span class="font-bold text-gray-700">Umbrella over ${esc(String(kids.length))} ${kids.length === 1 ? 'campaign' : 'campaigns'}</span>
+      <p class="text-xs text-gray-600 mt-1"><span class="font-bold text-gray-700" data-explain="campaign-umbrella">Umbrella over ${esc(String(kids.length))} ${kids.length === 1 ? 'campaign' : 'campaigns'}</span>
         — ${esc(String(used))} of ${esc(String(cap))} tasks used or committed across them${outcomes ? ` · ${esc(outcomes)}` : ''}. Each keeps its own budget.</p>`;
   }
 
@@ -290,13 +290,13 @@
         <div class="flex items-start justify-between gap-4 mb-2">
           <div class="min-w-0">
             <p class="font-bold text-gray-900 break-words">${esc(c.objective)}</p>
-            <p class="text-xs text-gray-500 mt-0.5">${outcomeLine(c)}</p>
+            <p class="text-xs text-gray-500 mt-0.5" data-explain="campaign-outcome">${outcomeLine(c)}</p>
             ${progressBar(c)}
             ${umbrellaHtml(c)}
             ${audienceHtml(c)}
           </div>
           <span class="flex items-center gap-1 shrink-0">
-            ${c.alwaysOn ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border bg-gray-50 text-gray-600 border-gray-200">Always on</span>' : ''}
+            ${c.alwaysOn ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border bg-gray-50 text-gray-600 border-gray-200" data-explain="campaign-always-on">Always on</span>' : ''}
             <span class="${chip.cls}">${esc(chip.label)}</span>
           </span>
         </div>
@@ -345,6 +345,7 @@
             class="text-xs font-bold text-gray-500 hover:text-gray-700 underline transition">
             ${state.links[c.id] && state.links[c.id].open ? 'Hide' : 'Tracked links'}
           </button>
+          <span data-explain="campaign-tracked-links"></span>
           <button type="button" data-cmp-toggle-paid="${esc(String(c.id))}"
             class="text-xs font-bold text-gray-500 hover:text-gray-700 underline transition">
             ${state.paid_[c.id] && state.paid_[c.id].open ? 'Hide' : (c.mode === 'paid' ? 'Advertising' : 'Add advertising')}
@@ -402,7 +403,7 @@
     const reasons = (C() && C().rejectReasons) || [];
     return `
       <div class="mt-4 bg-indigo-50/60 border border-indigo-200 rounded-xl p-4">
-        <p class="text-[11px] font-bold text-indigo-700 uppercase tracking-wide">Plan waiting for you</p>
+        <p class="text-[11px] font-bold text-indigo-700 uppercase tracking-wide" data-explain="campaign-plan">Plan waiting for you</p>
         <ul class="mt-2 space-y-1">
           ${plan.orders.map((o) => `
             <li class="text-xs text-gray-700">• ${esc(o.label)}${o.quantity > 1 ? ` ×${esc(String(o.quantity))}` : ''} — ${esc(o.assignee || o.role)}
@@ -487,7 +488,7 @@
     }
     return `
       <div class="mt-3 border border-gray-200 rounded-xl p-4 space-y-3">
-        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">This campaign's pictures</p>
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide" data-explain="campaign-pictures">This campaign's pictures</p>
         ${assets.length ? `
           <div class="flex flex-wrap gap-2">
             ${assets.map((a) => `
@@ -589,7 +590,7 @@
     const stat = (v) => `${esc(String(v.posts))} drafted · ${esc(String(v.measured))} measured${v.mean === null ? '' : ` · ${esc(String(Math.round(v.mean * 10) / 10))} avg engagements`}`;
     return `
       <div class="mt-4 border border-gray-200 rounded-xl p-4 space-y-3">
-        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Tests</p>
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide" data-explain="campaign-ab-test">Tests</p>
         ${tests.map((t) => `
           <div>
             <p class="text-sm font-bold text-gray-900 break-words">${esc(t.hypothesis)}</p>
@@ -615,7 +616,7 @@
     const s = st.data;
     return `
       <div class="mt-3 border border-gray-200 rounded-xl p-4 space-y-3">
-        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">${s.status === 'finished' ? 'How it went' : 'How it is going'}</p>
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide" data-explain="campaign-summary">${s.status === 'finished' ? 'How it went' : 'How it is going'}</p>
         <ul class="space-y-1">${s.facts.map((f) => `<li class="text-xs text-gray-700">• ${esc(f)}</li>`).join('')}</ul>
         ${s.tests.length ? `<ul class="space-y-1">${s.tests.map((t) => `<li class="text-xs text-gray-700 break-words">• Test — ${esc(t.hypothesis)}: ${esc(t.sentence)}</li>`).join('')}</ul>` : ''}
         <p class="text-xs font-bold text-gray-700 pt-1">Lessons to keep</p>
@@ -643,7 +644,7 @@
     if (!rows.length) return '';
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mt-4 space-y-2">
-        <p class="text-sm font-bold text-gray-900">Lessons kept</p>
+        <p class="text-sm font-bold text-gray-900" data-explain="campaign-lessons">Lessons kept</p>
         <p class="text-xs text-gray-500">Your Campaign Assistant plans with these. Removing one here does not remove a rule it became — do that from the assistant's Rules tab.</p>
         ${rows.map((l) => `
           <div class="flex items-start justify-between gap-3">
@@ -729,7 +730,7 @@
     const today = new Date().toISOString().slice(0, 10);
     return `
       <div class="mt-4 border border-gray-200 rounded-xl p-4 space-y-3">
-        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Waiting on people</p>
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide" data-explain="campaign-human-tasks">Waiting on people</p>
         ${tasks.map((t) => {
           const id = esc(String(t.orderId));
           const overdue = t.dueDate && t.dueDate < today && t.status === 'issued';
@@ -770,7 +771,7 @@
     const st = state.filing[t.orderId];
     const err = t.ticketError ? `<p class="text-xs text-amber-700 mt-1">The ticket was not filed: ${esc(t.ticketError)}</p>` : '';
     if (!st || !st.open) {
-      return `${err}<button type="button" data-cmp-ticket-open="${id}" class="mt-1 text-xs font-bold text-gray-500 hover:text-gray-700 underline">File in Jira or Asana</button>`;
+      return `${err}<button type="button" data-cmp-ticket-open="${id}" class="mt-1 text-xs font-bold text-gray-500 hover:text-gray-700 underline">File in Jira or Asana</button><span data-explain="campaign-ticket"></span>`;
     }
     if (state.ticketOptionsError) return `${err}<p class="text-xs text-red-600 mt-1">${esc(state.ticketOptionsError)}</p>`;
     if (!state.ticketOptions) return `${err}<p class="text-xs text-gray-400 mt-1">Checking your connected tools…</p>`;
@@ -867,7 +868,7 @@
     const tasks = (Array.isArray(c.humanTasks) ? c.humanTasks : []);
     if (!tasks.length) return '';
     return `
-      <label class="block text-xs font-bold text-gray-600">Hold this until (optional)
+      <label class="block text-xs font-bold text-gray-600"><span data-explain="campaign-hold-until">Hold this until (optional)</span>
         <select data-cmp-aw-waitfor="${id}" data-keep="aw-waitfor-${id}" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
           <option value="">Start straight away</option>
           ${tasks.map((t) => `<option value="${esc(String(t.orderId))}">${esc(t.assignee || 'Someone')} has done: ${esc((t.task || '').slice(0, 60))}</option>`).join('')}
@@ -967,7 +968,7 @@
     const needsSearch = spec.key === 'narrow_targeting';
     return `
       <div class="mt-4 bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
-        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Add work to this campaign</p>
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide" data-explain="campaign-add-work">Add work to this campaign</p>
         <select data-cmp-aw-action="${id}" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2">
           ${actions.map((a) => `<option value="${esc(a.key)}" ${a.key === spec.key ? 'selected' : ''}>${esc(a.label)}</option>`).join('')}
         </select>
@@ -1046,43 +1047,43 @@
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-4 space-y-3" data-cmp-form>
         <p class="text-sm font-bold text-gray-900">${f.mode === 'edit' ? 'Edit campaign' : 'New campaign'}</p>
-        <label class="block text-xs font-bold text-gray-600">What should this campaign achieve?
+        <label class="block text-xs font-bold text-gray-600"><span data-explain="campaign-objective">What should this campaign achieve?</span>
           <textarea rows="2" maxlength="500" data-cmpf="objective" data-keep="f-objective"
             placeholder="e.g. 50 new leads from UK accountancy firms by the end of March"
             class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">${esc(v('objective', ''))}</textarea>
         </label>
-        <label class="block text-xs font-bold text-gray-600">What is this campaign for?
+        <label class="block text-xs font-bold text-gray-600"><span data-explain="campaign-funnel-stage">What is this campaign for?</span>
           <select data-cmpf="funnelStage" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
             ${stages.map((st) => `<option value="${esc(st)}" ${st === f.stage ? 'selected' : ''}>${esc(C() ? C().stageLabel(st) : st)}${C() && C().stageDescription(st) ? ` — ${esc(C().stageDescription(st))}` : ''}</option>`).join('')}
           </select>
         </label>
         <div class="flex flex-wrap gap-3">
-          <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">What counts as success
+          <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]"><span data-explain="campaign-outcome">What counts as success</span>
             <select data-cmpf="outcomeMetric" data-keep="f-outcome-${esc(f.stage)}" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
               ${outcomes.map((m) => `<option value="${esc(m)}" ${m === currentOutcome ? 'selected' : ''}>${esc(C() ? C().outcomeLabel(m) : m)}</option>`).join('')}
             </select>
           </label>
-          <label class="block text-xs font-bold text-gray-600">Aiming for (optional)
+          <label class="block text-xs font-bold text-gray-600"><span data-explain="campaign-target">Aiming for (optional)</span>
             <input type="number" min="1" data-cmpf="targetValue" data-keep="f-target" value="${esc(v('targetValue', ''))}"
               class="mt-1 w-28 text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
           </label>
-          <label class="block text-xs font-bold text-gray-600">Ends (optional)
+          <label class="block text-xs font-bold text-gray-600"><span data-explain="campaign-end-date">Ends (optional)</span>
             <input type="date" data-cmpf="endsAt" data-keep="f-ends" value="${esc(ends)}"
               class="mt-1 text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
           </label>
-          <label class="block text-xs font-bold text-gray-600">Task budget
+          <label class="block text-xs font-bold text-gray-600"><span data-explain="campaign-task-budget">Task budget</span>
             <input type="number" min="1" max="1000" data-cmpf="maxWorkItems" data-keep="f-budget" value="${esc(v('maxWorkItems', 50))}"
               class="mt-1 w-28 text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
           </label>
         </div>
         <p class="text-xs text-gray-500">The task budget is the most of your monthly allowance this campaign may commission. At the cap it stops — it never bills you extra.</p>
         ${umbrellaFields(c)}
-        <label class="block text-xs font-bold text-gray-600">Tone for this campaign (optional)
+        <label class="block text-xs font-bold text-gray-600"><span data-explain="campaign-tone">Tone for this campaign (optional)</span>
           <input type="text" maxlength="300" data-cmpf="tone" data-keep="f-tone" value="${esc((c && c.tone) || '')}"
             placeholder="e.g. warm and celebratory, no discount language — always within your brand voice"
             class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
         </label>
-        <p class="text-xs font-bold text-gray-700 pt-2">Who is it for?</p>
+        <p class="text-xs font-bold text-gray-700 pt-2" data-explain="campaign-audience">Who is it for?</p>
         <div class="flex flex-wrap gap-3">
           <label class="block text-xs font-bold text-gray-600 min-w-[12rem]">Persona
             <input type="text" maxlength="80" data-cmpf="persona" data-keep="f-persona" value="${esc(aud.persona || '')}"
@@ -1095,9 +1096,9 @@
         </div>
         <label class="flex items-start gap-2 text-xs text-gray-700">
           <input type="checkbox" data-cmpf="excludeExistingCustomers" data-keep="${esc(exclKey)}" ${excludeCustomers ? 'checked' : ''} class="mt-0.5">
-          <span><span class="font-bold">Leave out existing customers.</span> Lead searches for this campaign skip companies you have marked as won in Conversations. Untick it only for a campaign aimed at your customers.</span>
+          <span><span class="font-bold" data-explain="campaign-exclude-customers">Leave out existing customers.</span> Lead searches for this campaign skip companies you have marked as won in Conversations. Untick it only for a campaign aimed at your customers.</span>
         </label>
-        <label class="block text-xs font-bold text-gray-600">Also leave out (optional)
+        <label class="block text-xs font-bold text-gray-600"><span data-explain="campaign-also-leave-out">Also leave out (optional)</span>
           <textarea rows="2" data-cmpf="excludeDomains" data-keep="f-excl-domains"
             placeholder="Customers or partners not in the platform, as web addresses — acme.co.uk, example.com"
             class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">${esc((aud.excludeDomains || []).join(', '))}</textarea>
@@ -1122,7 +1123,7 @@
     const alwaysOn = c ? c.alwaysOn === true : false;
     return `
       <div class="flex flex-wrap gap-3 items-end">
-        <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Inside an umbrella campaign (optional)
+        <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]"><span data-explain="campaign-umbrella">Inside an umbrella campaign (optional)</span>
           ${isUmbrella
             ? '<p class="mt-1 text-xs font-normal text-gray-500">This campaign is an umbrella for others, so it cannot go inside one.</p>'
             : `<select data-cmpf="parentCampaignId" data-keep="f-parent" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
@@ -1132,7 +1133,7 @@
         </label>
         <label class="flex items-center gap-2 text-xs text-gray-700 pb-2">
           <input type="checkbox" data-cmpf="alwaysOn" data-keep="f-always-on" ${alwaysOn ? 'checked' : ''}>
-          <span><span class="font-bold">Always on</span> — business as usual, no end date</span>
+          <span><span class="font-bold" data-explain="campaign-always-on">Always on</span> — business as usual, no end date</span>
         </label>
       </div>`;
   }
@@ -1140,7 +1141,8 @@
   function toolbarHtml() {
     if (state.form) return '';
     return `
-      <div class="flex justify-end mb-4">
+      <div class="flex items-center justify-between gap-3 mb-4">
+        <p class="text-sm font-bold text-gray-900" data-explain="campaign">Your campaigns</p>
         <button type="button" data-cmp-new class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">New campaign</button>
       </div>`;
   }
@@ -1169,7 +1171,7 @@
     host.innerHTML = `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-wrap items-center justify-between gap-4">
         <div class="min-w-0">
-          <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Capacity — your plan</p>
+          <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide" data-explain="campaign-capacity">Capacity — your plan</p>
           <p class="text-sm font-bold text-gray-900 mt-0.5">${capacity}</p>
           <p class="text-xs text-gray-500 mt-1">
             ${committed ? `${esc(String(committed))} committed to campaigns. ` : ''}At the cap it stops. It never bills you extra.
@@ -1181,7 +1183,8 @@
             <button type="button" data-cmp-stop-all
               class="btn-destructive px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
               Stop everything
-            </button>`
+            </button>
+            <span data-explain="campaign-stop-everything"></span>`
             // Never a disabled button. There is nothing running, and a greyed-out kill switch reads
             // as "this is broken" rather than "there is nothing to stop".
             : '<p class="text-xs text-gray-400">No campaigns running.</p>'}
@@ -1250,7 +1253,7 @@
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-4">
         <div class="flex items-center justify-between gap-4 mb-4">
-          <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">What the work turned into</p>
+          <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide" data-explain="campaign-results">What the work turned into</p>
           <p class="text-xs text-gray-400">All time</p>
         </div>
 
@@ -2576,7 +2579,7 @@
     const year = timeline.year;
     const nav = `
       <div class="flex items-center justify-between mb-3">
-        <p class="text-sm font-bold text-gray-900">Campaign year</p>
+        <p class="text-sm font-bold text-gray-900" data-explain="campaign-year">Campaign year</p>
         <div class="flex items-center gap-2">
           <button type="button" data-cmp-tl-year="${year - 1}" class="btn-utility px-2 py-1 text-xs font-bold rounded-lg">‹ ${year - 1}</button>
           <span class="text-xs font-bold text-gray-700">${year}</span>
