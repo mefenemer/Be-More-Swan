@@ -137,7 +137,10 @@
    * tab had to learn to state out loud.
    */
   function activityLine(c) {
-    const o = c.orders || { open: 0, inReview: 0, delivered: 0 };
+    // Coerced: a count that arrives as the string "0" is truthy, and the row then claimed work was
+    // waiting on the user when none was. The server casts too; this keeps the row honest regardless.
+    const raw = c.orders || {};
+    const o = { open: Number(raw.open) || 0, inReview: Number(raw.inReview) || 0, delivered: Number(raw.delivered) || 0 };
     if (c.status === 'draft') return 'Not started — nothing has been commissioned and no work has been done yet.';
     if (c.status === 'paused') {
       return c.haltReason
@@ -1007,7 +1010,7 @@
           </label>` : ''}
         ${waitForField(c, id)}
         <div class="flex items-center justify-between gap-3">
-          <p class="text-xs text-gray-500" data-cmp-aw-cost="${id}">${spec.workItemsPerUnit ? `Uses ${esc(String(spec.workItemsPerUnit))} ${spec.takesQuantity ? 'tasks each' : 'tasks'}.` : 'Uses no tasks — it changes what future work is asked for.'}</p>
+          <p class="text-xs text-gray-500" data-cmp-aw-cost="${id}">${spec.workItemsPerUnit ? `Uses ${esc(String(spec.workItemsPerUnit))} ${spec.workItemsPerUnit === 1 ? 'task' : 'tasks'}${spec.takesQuantity ? ' each' : ''}.` : 'Uses no tasks — it changes what future work is asked for.'}</p>
           <button type="button" data-cmp-aw-submit="${id}" ${needsSearch && !state.savedSearches.length ? 'disabled' : ''}
             class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
             Brief the assistant

@@ -57,6 +57,18 @@ import { crmDescription, crmHeaders, crmRow, isCrmTarget, splitName, websiteUrl 
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const RECORD_TYPES = new Set(['lead', 'enrichment', 'meeting', 'invoice', 'ticket']);
+/**
+ * Types this endpoint may READ — RECORD_TYPES plus the Campaign Assistant's two mirrors.
+ *
+ * ⚠️ Without these the Campaign Assistant's Orders and Decisions tabs 400'd on every load from the
+ * day the role launched (2026-08-06) until 2026-10-08: the tabs rendered empty, and nothing
+ * surfaced the error. They are READ-only on purpose: `campaign_order` and `campaign_decision` rows
+ * are mirrors written by campaigns.ts (campaign-mirror.ts), and a CSV import or a generic PATCH
+ * would create or settle a mirror with no real order or decision behind it — approving one here
+ * would show a settled card while no assistant was ever briefed. Decisions are settled through
+ * campaigns.ts `decide` (assistants.js routes them there).
+ */
+const READ_RECORD_TYPES = new Set([...RECORD_TYPES, 'campaign_order', 'campaign_decision']);
 const SOURCES = new Set(['chat', 'csv_import', 'integration']);
 // Bulk-import ceiling per request — a CSV bigger than this should be split client-side.
 const MAX_BULK_RECORDS = 500;
@@ -340,7 +352,7 @@ export default withLambda(async (event) => {
             }
 
             const recordType = String(event.queryStringParameters?.recordType || '');
-            if (!RECORD_TYPES.has(recordType)) return json(400, { error: 'recordType must be one of lead, enrichment, meeting, invoice, ticket.' });
+            if (!READ_RECORD_TYPES.has(recordType)) return json(400, { error: `recordType must be one of ${[...READ_RECORD_TYPES].join(', ')}.` });
             if (!(await ownsAssistant(assistantId))) return json(404, { error: 'Assistant not found.' });
 
             // Optional approval-gate filter — the Review Queue tab passes ?approvalStatus=pending_approval;
