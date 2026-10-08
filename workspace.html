@@ -10315,16 +10315,30 @@ async function _rqLoadQualityReview(postId) {
                 const el = document.getElementById('post-review-script-alert');
                 if (el) { el.textContent = text; el.classList.remove('hidden'); }
             }
+            _prqRedrawRailAfterFailure(postId);
             return;
         }
         data = await res.json();
-    } catch { wrap.classList.add('hidden'); return; }
+    } catch { wrap.classList.add('hidden'); _prqRedrawRailAfterFailure(postId); return; }
 
     if (_prqPostId !== postId) return; // a different post was opened while this was in flight
     // Nothing written yet (a brand-new post) — no verdict to show, and certainly no error.
     if (data && data.empty) { _prqShow('prq-loading', false); wrap.classList.add('hidden'); return; }
     _prqShow('prq-loading', false);
     _prqRenderReview(data);
+}
+
+/**
+ * A failed review must still redraw the step rail.
+ *
+ * Only _prqRenderReview used to call _railRender, so when the review failed the rail kept the copy
+ * drawn as the modal opened — before the caption had loaded — and "Check & improve" and "Schedule &
+ * publish" stayed locked on "Write a caption first" over an 810-character caption (prod, 2026-10-08).
+ * That hid Approve, Reject and Discard: a broken optional review blocked every decision on the post.
+ */
+function _prqRedrawRailAfterFailure(postId) {
+    if (_prqPostId !== postId) return; // a different post was opened while this was in flight
+    _railRender();
 }
 
 /** Paint a verdict. Used on open and after every action, so there is one rendering path. */

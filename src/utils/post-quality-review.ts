@@ -42,6 +42,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiBlueprints, scheduledPosts } from '../../db/schema';
 import { gatewayGenerate } from '../lib/ai-gateway';
+import { parseModelJson } from './model-json';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -343,12 +344,13 @@ Return ONLY valid JSON, no markdown, no explanation.`;
         maxTokens: withSuggestions ? 600 : 400,
     });
 
-    let parsed: { brandVoiceScore?: number; complianceWarnings?: unknown; suggestions?: unknown };
-    try {
-        parsed = JSON.parse(gwResponse.text);
-    } catch {
-        throw new Error('Quality review parsing failed.');
-    }
+    // ⚠️ parseModelJson, not JSON.parse. Despite "no markdown", the reviewer wraps its JSON in a
+    // ```json fence on a share of calls, and the bare parse turned every one of those into a 502
+    // ("The quality review could not be completed"). Reproduced 2026-10-08 against a prod post with
+    // its real blueprint: 1 call in 3 came back fenced, with a perfectly good verdict inside.
+    type ReviewJson = { brandVoiceScore?: number; complianceWarnings?: unknown; suggestions?: unknown };
+    const parsed = parseModelJson<ReviewJson>(gwResponse.text);
+    if (!parsed) throw new Error('Quality review parsing failed.');
 
     const complianceWarnings = Array.isArray(parsed.complianceWarnings)
         ? parsed.complianceWarnings.map(String).slice(0, 5) : [];
