@@ -146,7 +146,9 @@ export async function buildCampaignSummary(db: Db, campaignId: number, organisat
     // Candidate lessons — each says only what the facts say. The user picks which to keep, and can
     // write their own; nothing is saved without them.
     const candidates: { text: string; source: 'summary' | 'test' }[] = [];
-    if (progress !== null && c.targetValue && weeks) {
+    // Only once the campaign has actually DONE something. "Reached 0 of 500 with 0 tasks" is not a
+    // lesson — offering it to keep teaches the next plan nothing and buries the real ones.
+    if (progress !== null && c.targetValue && weeks && (spend.spentWork > 0 || progress > 0)) {
         candidates.push({
             source: 'summary',
             text: `A ${c.funnelStage} campaign for ${metricLabel} reached ${progress} of ${c.targetValue} in ${weeks} ${weeks === 1 ? 'week' : 'weeks'} with ${spend.spentWork} tasks.`,

@@ -277,9 +277,11 @@ export default withLambda(async (event) => {
             const totals = await campaignSpendTotals(db, r.id);
             const [live] = await db
                 .select({
-                    open: sql<number>`COUNT(*) FILTER (WHERE ${campaignOrders.status} IN ('queued','issued','blocked'))`,
-                    inReview: sql<number>`COUNT(*) FILTER (WHERE ${campaignOrders.status} = 'in_review')`,
-                    delivered: sql<number>`COUNT(*) FILTER (WHERE ${campaignOrders.status} = 'delivered')`,
+                    // ::int — Postgres returns COUNT as bigint, which the driver hands over as a STRING,
+                    // and "0" is truthy: the row read "Waiting on you — 0 pieces of work…".
+                    open: sql<number>`(COUNT(*) FILTER (WHERE ${campaignOrders.status} IN ('queued','issued','blocked')))::int`,
+                    inReview: sql<number>`(COUNT(*) FILTER (WHERE ${campaignOrders.status} = 'in_review'))::int`,
+                    delivered: sql<number>`(COUNT(*) FILTER (WHERE ${campaignOrders.status} = 'delivered'))::int`,
                 })
                 .from(campaignOrders)
                 .where(eq(campaignOrders.campaignId, r.id));

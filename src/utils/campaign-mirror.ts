@@ -46,6 +46,19 @@ export interface MirrorOrderInput {
 }
 
 /**
+ * The Orders tab shows "Assigned to" as written here. Callers pass the receiving ROLE KEY (or, for a
+ * person's task, the person's name), and a raw `social_media_manager` in a founder's table is an
+ * internal identifier leaking out — never seen until 2026-10-08 only because the tab could not load.
+ */
+const ASSIGNEE_NAMES: Record<string, string> = {
+    social_media_manager: 'Social Media Assistant',
+    blog_writer: 'Blog Writing Assistant',
+    lead_qualifier: 'Lead Generation Assistant',
+    newsletter_editor: 'Email Marketing Assistant',
+    human: 'A person on your team',
+};
+
+/**
  * Write (or refresh) the Data Hub row for one order.
  *
  * Orders are created `approved`, not `pending_approval`. They are not awaiting a human — the
@@ -59,10 +72,13 @@ export async function mirrorOrder(db: Db, input: MirrorOrderInput): Promise<numb
             kind: 'campaign_order',
             orderId: input.orderId,
             campaign: input.campaignObjective,
-            assignedTo: input.targetRoleLabel,
+            assignedTo: ASSIGNEE_NAMES[input.targetRoleLabel] ?? input.targetRoleLabel,
             action: spec?.label ?? input.action,
             cost: `${input.workItems} ${input.workItems === 1 ? 'item' : 'items'}`,
             workItems: input.workItems,
+            // The Orders tab's "Tasks" column key (assistant-dashboard-registry.js hubTab.columns).
+            // It was never written, so the column read "—" for every order.
+            taskCost: input.workItems,
             result: input.resultSummary ?? null,
         };
 
