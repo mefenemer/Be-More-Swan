@@ -15,6 +15,7 @@ import {
     contentGenerationJobs, aiBlueprints, aiAssistants,
     scheduledPosts, scheduledPostAssets, contentAssets, mediaGenerationJobs,
     auditLogs, organisations,
+    campaignOrders,
 } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { gatewayGenerate, isUpstreamBlocked } from '../../src/lib/ai-gateway';
@@ -37,6 +38,7 @@ import { fitForPlatform, isShortForm, type BrandHashtags } from '../../src/utils
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { operationalSetupLines } from '../../src/utils/operational-setup';
 import { renderBlueprintPrompt } from '../../src/utils/blueprint-prompt';
+import { campaignDirectiveForJob } from '../../src/utils/campaign-job-directive';
 import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
 import { resolvePostingSchedule } from '../../src/config/posting-cadence';
 import {
@@ -319,6 +321,13 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         if (!bp) throw new Error('Blueprint not found');
 
         const sections = bp.sections as Record<string, { content: Record<string, unknown> }>;
+        // §9.8: a job a campaign commissioned is drafted for THAT campaign (and, in an A/B test, its
+        // own angle) — not for whichever campaign the blueprint's one section 13 happens to name.
+        // A local copy only: the stored blueprint is never touched.
+        const jobCampaign = await campaignDirectiveForJob(db, job.id);
+        if (jobCampaign) {
+            (sections as Record<string, unknown>)['13-campaign'] = { status: 'complete', content: { ...jobCampaign.directive } };
+        }
 
         const identity    = sections['1-identity']?.content    || {};
         const compliance  = sections['9-compliance']?.content  || {};
@@ -1018,7 +1027,18 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                     });
                 };
 
+                // The campaign this job was commissioned for, if any (§9.3) — its own pictures go
+                // first. Not for a Short: the card is the only 9:16 source, and a campaign photo at
+                // the wrong ratio would be a postage stamp on a black field.
+                const [campaignOfJob] = isYoutubeShort ? [] : await db
+                    .select({ campaignId: campaignOrders.campaignId })
+                    .from(contentGenerationJobs)
+                    .innerJoin(campaignOrders, eq(campaignOrders.id, contentGenerationJobs.campaignOrderId))
+                    .where(eq(contentGenerationJobs.id, job.id))
+                    .limit(1);
+
                 const resolved = await resolveMediaForPost(db, {
+                    campaignId: campaignOfJob?.campaignId ?? null,
                     // A Short overrides the assistant's source order: stock and AI images arrive at
                     // whatever ratio the provider chose, and a 16:9 photo inside a 9:16 frame is a
                     // postage stamp on a black field. The card is the only source we can ask for 9:16

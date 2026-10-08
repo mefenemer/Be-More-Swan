@@ -19,7 +19,7 @@
 // action the executor cannot dispatch. The one place free text belongs is `campaigns.objective`,
 // which is the founder's own sentence and is never parsed.
 
-import { BLOG_WRITER_ROLE_KEY, LEAD_GENERATOR_ROLE_KEY, SMM_ROLE_KEY } from '../constants/roles';
+import { BLOG_WRITER_ROLE_KEY, LEAD_GENERATOR_ROLE_KEY, NEWSLETTER_ROLE_KEY, SMM_ROLE_KEY } from '../constants/roles';
 
 // ── Campaign mode ────────────────────────────────────────────────────────────
 /**
@@ -69,14 +69,19 @@ export const CAMPAIGN_STATUS_LABELS: Record<CampaignStatus, string> = {
  * an objective measured by a number nobody can produce is a progress bar wired to nothing, which
  * is exactly how SMART Goals shipped decorative.
  */
-export const CAMPAIGN_OUTCOME_METRICS = ['leads', 'replies', 'signups', 'published_content'] as const;
+export const CAMPAIGN_OUTCOME_METRICS = [
+    'leads', 'replies', 'signups', 'published_content', 'engagement', 'clicks', 'email_engagement',
+] as const;
 export type CampaignOutcomeMetric = typeof CAMPAIGN_OUTCOME_METRICS[number];
 
 export const CAMPAIGN_OUTCOME_LABELS: Record<CampaignOutcomeMetric, string> = {
     leads: 'New leads found',
-    replies: 'Replies from prospects',
+    replies: 'Replies received',
     signups: 'Signups captured',
     published_content: 'Pieces published',
+    engagement: 'Engagements on its posts',
+    clicks: 'Clicks on its tracked links',
+    email_engagement: 'People who opened or clicked its emails',
 };
 
 /**
@@ -85,17 +90,84 @@ export const CAMPAIGN_OUTCOME_LABELS: Record<CampaignOutcomeMetric, string> = {
  */
 export const CAMPAIGN_OUTCOME_SOURCES: Record<CampaignOutcomeMetric, string> = {
     leads: 'assistant_records (record_type=lead) created while the campaign was live',
-    replies: 'lead_threads inbound messages classified as a reply',
-    signups: 'revenue_events — NOT counted until the Phase 2 capture page exists',
-    published_content: 'scheduled_posts + blog_posts with a published state',
+    replies: 'lead_threads with an inbound message, on leads this campaign\'s searches found',
+    signups: 'campaign_attributions (subject audience_contact) — a form signup bound to one of its tracked links',
+    published_content: 'scheduled_posts + blog_posts with a published state, commissioned by its orders',
+    engagement: 'post_insights.total_interactions on the posts its orders produced',
+    clicks: 'campaign_click_events on its tracked links, automated visits excluded',
+    email_engagement: 'newsletter_sends + newsletter_sequence_sends opened or clicked, on emails its orders drafted (campaign_order_id) — distinct people',
 };
 
 /**
  * Outcomes that cannot be counted yet. The UI must not offer these as a target: an objective the
  * platform can never score is worse than no objective, because the campaign will read as failing
- * forever. `signups` needs the Phase 2 BMS-hosted capture page.
+ * forever. Empty since §9.7: `signups` left in §9.6 (Form Builder signups bind to tracked links
+ * through campaign_attributions) and `email_engagement` in §9.7 (an email campaign now records the
+ * order that commissioned it). Keep the list — the next unbuilt metric belongs here, not offered.
  */
-export const UNAVAILABLE_OUTCOME_METRICS: readonly CampaignOutcomeMetric[] = ['signups'];
+export const UNAVAILABLE_OUTCOME_METRICS: readonly CampaignOutcomeMetric[] = [];
+
+// ── Funnel stage (plan §9.6) ─────────────────────────────────────────────────
+/**
+ * Not every campaign is meant to convert. An awareness campaign is judged on whether people saw and
+ * engaged with it; judging it on signups makes it read as failing for the whole of its flight, and
+ * — worse — lets the halt rule stop it for doing exactly what it was for. The stage decides three
+ * things: which outcomes may be its target, what drafting is told to optimise for (blueprint §13),
+ * and whether the lead-quality halt may fire at all.
+ */
+export const FUNNEL_STAGES = ['awareness', 'consideration', 'conversion', 'retention'] as const;
+export type FunnelStage = typeof FUNNEL_STAGES[number];
+
+export const FUNNEL_STAGE_LABELS: Record<FunnelStage, string> = {
+    awareness: 'Awareness',
+    consideration: 'Consideration',
+    conversion: 'Conversion',
+    retention: 'Retention',
+};
+
+export const FUNNEL_STAGE_DESCRIPTIONS: Record<FunnelStage, string> = {
+    awareness: 'Get seen by people who do not know you yet',
+    consideration: 'Get people who know you to look closer',
+    conversion: 'Turn interest into leads and signups',
+    retention: 'Keep and grow the customers you have',
+};
+
+/**
+ * What each stage may be measured by, in the order the picker offers them (the first is the
+ * default). Every entry must be countable — an unavailable metric listed here is filtered out by
+ * `stageOutcomes()` rather than offered.
+ */
+export const STAGE_OUTCOME_METRICS: Record<FunnelStage, readonly CampaignOutcomeMetric[]> = {
+    awareness: ['engagement', 'published_content'],
+    consideration: ['clicks', 'engagement', 'replies'],
+    conversion: ['leads', 'signups', 'replies'],
+    retention: ['email_engagement', 'replies', 'engagement', 'clicks'],
+};
+
+/** Campaigns created before §9.6 have no stage; every one of them was a lead campaign. */
+export const DEFAULT_FUNNEL_STAGE: FunnelStage = 'conversion';
+
+export const isFunnelStage = (v: unknown): v is FunnelStage =>
+    typeof v === 'string' && (FUNNEL_STAGES as readonly string[]).includes(v);
+
+/** The countable outcomes a stage may target, default first. */
+export function stageOutcomes(stage: FunnelStage): CampaignOutcomeMetric[] {
+    return STAGE_OUTCOME_METRICS[stage].filter((m) => !UNAVAILABLE_OUTCOME_METRICS.includes(m));
+}
+
+/** `metric` if this stage may be measured by it, otherwise the stage's default. */
+export function outcomeForStage(stage: FunnelStage, metric: unknown): CampaignOutcomeMetric {
+    const allowed = stageOutcomes(stage);
+    return (allowed as readonly unknown[]).includes(metric) ? metric as CampaignOutcomeMetric : allowed[0];
+}
+
+/**
+ * Whether a NEW campaign at this stage leaves existing customers out of its lead searches, when
+ * nobody said. Retention is aimed AT customers; every other stage is finding new ones (§9.2).
+ */
+export function defaultExcludeCustomers(stage: FunnelStage): boolean {
+    return stage !== 'retention';
+}
 
 // ── Orders: what the orchestrator can ask a colleague to do ──────────────────
 /**
@@ -111,7 +183,17 @@ export const CAMPAIGN_ORDER_ACTIONS = [
     'run_lead_search',
     'narrow_targeting',
     'adjust_messaging',
+    'draft_email_campaign',
+    'request_human_task',
+    'ab_test_posts',
 ] as const;
+
+/**
+ * The "role" of an order that goes to a PERSON rather than an assistant (§9.5). Deliberately not in
+ * ORCHESTRATABLE_ROLE_KEYS: that list is the set of assistants the orchestrator may command, and a
+ * teammate is not commanded — they are asked, and they say when it is done.
+ */
+export const HUMAN_ROLE_KEY = 'human';
 export type CampaignOrderAction = typeof CAMPAIGN_ORDER_ACTIONS[number];
 
 export interface OrderActionSpec {
@@ -128,8 +210,15 @@ export interface OrderActionSpec {
     workItemsPerUnit: number;
     /** Does `brief.quantity` mean anything for this action? */
     takesQuantity: boolean;
+    /**
+     * The most one order may ask for. Must match the clamp inside this action's executor in
+     * campaign-orders.ts — pricing more than the executor writes charges for work nobody gets.
+     */
+    maxQuantity: number;
+    /** How many when the brief does not say. Absent = 1. */
+    defaultQuantity?: number;
     /** What comes back, matching campaign_orders.artefact_kind. */
-    artefactKind: 'scheduled_post' | 'blog_post' | 'discovery_campaign' | null;
+    artefactKind: 'scheduled_post' | 'blog_post' | 'discovery_campaign' | 'newsletter_sequence' | 'newsletter_issue' | null;
 }
 
 export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = {
@@ -139,6 +228,7 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
         description: 'Queues extra posts for the Social Media Assistant to draft, on this campaign’s message. They land in its Posts queue for your approval like any other draft.',
         workItemsPerUnit: 1,
         takesQuantity: true,
+        maxQuantity: 20,
         artefactKind: 'scheduled_post',
     },
     draft_blog_pillar: {
@@ -149,6 +239,7 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
         // point of a shared unit is that the orchestrator can compare unlike things.
         workItemsPerUnit: 6,
         takesQuantity: true,
+        maxQuantity: 5,
         artefactKind: 'blog_post',
     },
     run_lead_search: {
@@ -157,6 +248,7 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
         description: 'Creates a saved search for the Lead Generation Assistant aimed at this campaign’s audience. Created as a draft — starting it is a separate, human click, because a run costs money and reaches real strangers.',
         workItemsPerUnit: 4,
         takesQuantity: false,
+        maxQuantity: 1,
         artefactKind: 'discovery_campaign',
     },
     narrow_targeting: {
@@ -165,6 +257,7 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
         description: 'Edits an existing saved search — tightens the ideal-customer description and adds negative keywords — so it stops finding the wrong kind of company.',
         workItemsPerUnit: 0,
         takesQuantity: false,
+        maxQuantity: 1,
         artefactKind: 'discovery_campaign',
     },
     adjust_messaging: {
@@ -173,7 +266,47 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
         description: 'Changes the angle this campaign asks for. Applies to work drafted from now on; it does not rewrite drafts that already exist.',
         workItemsPerUnit: 0,
         takesQuantity: false,
+        maxQuantity: 1,
         artefactKind: null,
+    },
+    draft_email_campaign: {
+        roleKey: NEWSLETTER_ROLE_KEY,
+        label: 'Write an email campaign',
+        description: 'Briefs the Email Marketing Assistant to write a short series of emails on this campaign\u2019s message — a follow-up for people who sign up through a form, or emails you send to a group yourself. Saved switched off in Email Studio: nothing is sent until you turn it on or send it.',
+        // Per email. Above a post (each email is a full piece with a subject and a job in a
+        // series) and well below a pillar article.
+        workItemsPerUnit: 2,
+        takesQuantity: true,
+        // MAX_CAMPAIGN_EMAILS in newsletter-campaign-chat-draft.ts — the generator's own ceiling.
+        maxQuantity: 7,
+        // The Email Studio's own cadences run three to four emails; one email is not a campaign.
+        defaultQuantity: 4,
+        // A form follow-up is a sequence; a send-it-yourself campaign is a set of draft emails.
+        artefactKind: 'newsletter_sequence',
+    },
+    request_human_task: {
+        roleKey: HUMAN_ROLE_KEY,
+        label: 'Ask a person',
+        description: 'Adds a task for someone on your team — a designer, an agency, legal — to this campaign. Other work can wait for it. It is marked done by you (or by asking your Campaign Assistant), and nothing is sent to that person automatically.',
+        // A person's time is not the workspace's task allowance. Charging it would make a campaign
+        // that waits on Legal look more expensive than one that does not.
+        workItemsPerUnit: 0,
+        takesQuantity: false,
+        maxQuantity: 1,
+        artefactKind: null,
+    },
+    ab_test_posts: {
+        roleKey: SMM_ROLE_KEY,
+        label: 'Test two angles',
+        description: 'Has the Social Media Assistant draft the same number of posts for each of two angles, so you can see which one people engage with more. Every post still comes to you for approval. With fewer than four measured posts per angle it says there is not enough data, rather than naming a winner on noise.',
+        // Per PAIR — one post for each angle. Quantity is posts per angle.
+        workItemsPerUnit: 2,
+        takesQuantity: true,
+        // The social executor's own clamp is 20 posts; a pair is two, so 10 per angle.
+        maxQuantity: 10,
+        // Four per angle is the floor below which the result says "not enough data" (§9.8).
+        defaultQuantity: 4,
+        artefactKind: 'scheduled_post',
     },
 };
 

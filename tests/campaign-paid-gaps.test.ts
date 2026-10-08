@@ -89,7 +89,10 @@ check('the picker is inline, not a link to a shared grid', () => {
     // mistake hands a role every connector in the product.
     assert.match(ui, /data-cmp-account-select/);
     assert.match(ui, /action: 'select', accountUrn: urn/);
-    assert.ok(!/href="\/integrations\.html"/.test(ui), 'the picker regressed to a link out');
+    // Scoped to the paid panel: other parts of the tab may legitimately link to Integrations (a
+    // person's task points there to connect Jira/Asana, §9.5). What must not link out is THIS picker.
+    const paid = ui.slice(landmark(ui, 'function paidLockedHtml('), landmark(ui, 'function paidPanel('));
+    assert.ok(!/href="\/integrations\.html"/.test(paid), 'the picker regressed to a link out');
 });
 
 check('accounts are only fetched when the workspace could use one', () => {

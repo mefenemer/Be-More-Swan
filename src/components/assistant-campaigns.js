@@ -10,6 +10,13 @@
  *   • start    → POST campaigns { action:'start', campaignId }
  *   • pause    → POST campaigns { action:'pause', campaignId, reason }
  *   • stop_all → POST campaigns { action:'stop_all', assistantId }
+ *   • create / edit / place_order / decide — the §9.1 controls: "New campaign", "Edit",
+ *     "Add work", and "Approve plan & start" on a campaign whose chat plan is waiting.
+ *
+ * ── GUI and chat reach the same things (plan §9.0) ───────────────────────────
+ * Every control here has a chat twin, and both hit the same campaigns.ts action. A plan agreed in
+ * chat is filed PENDING and lands on its row here; nothing the chat does places an order. Writes
+ * made from the chat dispatch campaign:created / campaign:updated, which reload this tab.
  *
  * ── Saying what is happening ─────────────────────────────────────────────────
  * Copied deliberately from assistant-signal-inbox.js, whose lesson was learned the expensive way:
@@ -62,6 +69,30 @@
     adAccounts: null,
     /** Chosen targeting entities, per campaign: { locations: [{urn,name}], ... }. */
     targeting: {},
+    /** Order actions this workspace can use — the server filters by which assistants are hired. */
+    availableOrderActions: [],
+    /** Saved lead searches, for "Narrow the targeting". */
+    savedSearches: [],
+    /** The create/edit form: null, { mode: 'create' } or { mode: 'edit', id }. */
+    form: null,
+    /** Per campaign: { open, action } for the Add work panel. */
+    addWork: {},
+    /** Decision id whose "Turn down" reason picker is open. */
+    rejectingPlan: null,
+    /** Per campaign: { open, picking, selected: Set } for the Pictures panel (§9.3). */
+    pictures: {},
+    /** Per campaign: { open, loading, data, error } for the Summary panel (§9.8). */
+    summaries: {},
+    /** Jira/Asana options for "File in…" (§9.5): null until first needed. */
+    ticketOptions: null,
+    ticketOptionsError: null,
+    /** Per task order id: { open, provider, projectId } for its "File in…" picker. */
+    filing: {},
+    /** Lessons kept from past campaigns; null until loaded. */
+    learnings: null,
+    /** The org's library for the picker; null until first opened. */
+    library: null,
+    libraryError: null,
   };
 
   function esc(v) {
@@ -121,7 +152,10 @@
     if (o.inReview) return `Waiting on you — ${o.inReview} ${o.inReview === 1 ? 'piece' : 'pieces'} of work ${o.inReview === 1 ? 'is' : 'are'} in a review queue.`;
     if (o.open) return `Running — ${o.open} ${o.open === 1 ? 'brief is' : 'briefs are'} with your other assistants.`;
     if (c.status === 'throttled') return 'Throttled — it has stopped commissioning new work while it waits for results from what it already sent.';
-    return 'Running, but nothing is currently commissioned. It will brief your assistants as it decides what to do next.';
+    // This used to promise "it will brief your assistants as it decides what to do next". Nothing
+    // does that — the daily run only proposes escalations and halts on work that already exists —
+    // so an empty running campaign waited for ever on a promise. Say what actually moves it.
+    return 'Running, but nothing is commissioned yet. Use "Add work", or ask your Campaign Assistant for a plan.';
   }
 
   // ── Burn bar ───────────────────────────────────────────────────────────────
@@ -152,11 +186,86 @@
       </div>`;
   }
 
+  // Stage, measure and progress in one line (§9.6). Progress is in the campaign's OWN unit, and
+  // `null` from the server means it cannot be counted — said in words, never drawn as zero.
   function outcomeLine(c) {
     const label = C() ? C().outcomeLabel(c.outcomeMetric) : c.outcomeMetric;
-    return c.targetValue
-      ? `${esc(label)} — aiming for ${esc(String(c.targetValue))}`
-      : esc(label);
+    const stage = c.funnelStage ? `${esc(C() ? C().stageLabel(c.funnelStage) : c.funnelStage)} · ` : '';
+    const n = c.progress;
+    const progress = n === null || n === undefined
+      ? ' — cannot be counted yet'
+      : c.targetValue
+        ? ` — ${esc(String(n))} of ${esc(String(c.targetValue))}`
+        : ` — ${esc(String(n))} so far`;
+    return `${stage}${esc(label)}${progress}`;
+  }
+
+  /** A thin bar under the outcome line, only when there is a target and a count to compare. */
+  function progressBar(c) {
+    if (!c.targetValue || c.progress === null || c.progress === undefined) return '';
+    const pct = Math.min(100, Math.round((Number(c.progress) / Number(c.targetValue)) * 100));
+    return `
+      <div class="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden mt-1">
+        <div class="bg-emerald-600 h-full" style="width:${pct}%"></div>
+      </div>`;
+  }
+
+  // ── Who it is for (§9.2) ───────────────────────────────────────────────────
+  // Stated on every row, including when it is missing: "no audience" is the single most common
+  // reason a campaign drafts generic work, and a blank line would hide that.
+  function audienceHtml(c) {
+    const a = c.audience && typeof c.audience === 'object' ? c.audience : {};
+    const who = [a.persona, a.description].filter((v) => typeof v === 'string' && v.trim()).join(' — ');
+    const extra = Array.isArray(a.excludeDomains) ? a.excludeDomains : [];
+    const exclusion = c.excludeExistingCustomers === false
+      ? '<span class="font-bold text-amber-700">Includes existing customers.</span>'
+      : `Leaves out companies marked won${extra.length ? ` and ${esc(String(extra.length))} more (${esc(extra.slice(0, 3).join(', '))}${extra.length > 3 ? '…' : ''})` : ''}.`;
+    return `
+      <p class="text-xs text-gray-600 mt-1 break-words">${who
+        ? `<span class="font-bold text-gray-700">For:</span> ${esc(who)}`
+        : '<span class="text-amber-700">No audience set — use Edit to say who this is for.</span>'}</p>
+      <p class="text-xs text-gray-500 mt-0.5">${exclusion}</p>`;
+  }
+
+  // ── Umbrellas (§9.4) ───────────────────────────────────────────────────────
+  // Children render directly under their umbrella, indented. A child whose umbrella is not in the
+  // list (archived) renders at the top level rather than disappearing.
+  function childrenOf(c) {
+    return state.campaigns.filter((x) => x.parentCampaignId === c.id);
+  }
+
+  function nestedRows() {
+    const ids = new Set(state.campaigns.map((c) => c.id));
+    const top = state.campaigns.filter((c) => !c.parentCampaignId || !ids.has(c.parentCampaignId));
+    return top.map((c) => {
+      const kids = childrenOf(c);
+      return campaignRow(c) + (kids.length
+        ? `<div class="ml-6 space-y-4" style="border-left:2px solid #e5e7eb;padding-left:1rem">${kids.map(campaignRow).join('')}</div>`
+        : '');
+    }).join('');
+  }
+
+  /**
+   * An umbrella's roll-up: read-only sums over its campaigns. Budgets are NOT pooled — each child
+   * keeps its own ceiling, so effort moved inside one can never eat another's (the review's
+   * concern, met by construction). Outcomes are summed per measure, never across measures: adding
+   * engagements to leads is a number that means nothing.
+   */
+  function umbrellaHtml(c) {
+    const kids = childrenOf(c);
+    if (!kids.length) return '';
+    const used = kids.reduce((n, k) => n + (Number(k.spentWork) || 0) + (Number(k.committedWork) || 0), 0);
+    const cap = kids.reduce((n, k) => n + (Number(k.maxWorkItems) || 0), 0);
+    const byMetric = {};
+    kids.forEach((k) => {
+      if (k.progress === null || k.progress === undefined) return;
+      byMetric[k.outcomeMetric] = (byMetric[k.outcomeMetric] || 0) + Number(k.progress);
+    });
+    const outcomes = Object.entries(byMetric)
+      .map(([m, n]) => `${n} ${(C() ? C().outcomeLabel(m) : m).toLowerCase()}`).join(' · ');
+    return `
+      <p class="text-xs text-gray-600 mt-1"><span class="font-bold text-gray-700">Umbrella over ${esc(String(kids.length))} ${kids.length === 1 ? 'campaign' : 'campaigns'}</span>
+        — ${esc(String(used))} of ${esc(String(cap))} tasks used or committed across them${outcomes ? ` · ${esc(outcomes)}` : ''}. Each keeps its own budget.</p>`;
   }
 
   // ── Rows ───────────────────────────────────────────────────────────────────
@@ -165,16 +274,28 @@
     // Start is offered for a draft OR a pause, matching the server's own guard. A paused campaign
     // offering no way back is the bug connection-pause-needs-a-resume is named after, so the label
     // says which of the two this is rather than showing a bare "Start" on a campaign that ran once.
-    const canStart = c.status === 'draft' || c.status === 'paused';
+    // A draft whose plan is waiting gets "Approve plan & start" instead of a bare Start: starting
+    // it without the plan would run a campaign that commissions nothing, which is exactly how
+    // prod's first campaign sat idle for eight days.
+    const plan = c.pendingPlan || null;
+    const canStart = (c.status === 'draft' && !plan) || c.status === 'paused';
     const canPause = c.status === 'active' || c.status === 'throttled';
+    const canEdit = c.status !== 'finished' && c.status !== 'archived';
+    const canAddWork = (c.status === 'active' || c.status === 'throttled') && state.availableOrderActions.length > 0;
     return `
       <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5" data-cmp-row="${esc(String(c.id))}">
         <div class="flex items-start justify-between gap-4 mb-2">
           <div class="min-w-0">
             <p class="font-bold text-gray-900 break-words">${esc(c.objective)}</p>
             <p class="text-xs text-gray-500 mt-0.5">${outcomeLine(c)}</p>
+            ${progressBar(c)}
+            ${umbrellaHtml(c)}
+            ${audienceHtml(c)}
           </div>
-          <span class="${chip.cls} shrink-0">${esc(chip.label)}</span>
+          <span class="flex items-center gap-1 shrink-0">
+            ${c.alwaysOn ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border bg-gray-50 text-gray-600 border-gray-200">Always on</span>' : ''}
+            <span class="${chip.cls}">${esc(chip.label)}</span>
+          </span>
         </div>
 
         <p class="text-xs text-gray-600 leading-relaxed">${esc(activityLine(c))}</p>
@@ -191,10 +312,32 @@
               class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
               Pause
             </button>` : ''}
+          ${canAddWork ? `
+            <button type="button" data-cmp-addwork="${esc(String(c.id))}"
+              class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+              ${state.addWork[c.id] && state.addWork[c.id].open ? 'Close' : 'Add work'}
+            </button>` : ''}
+          ${canEdit ? `
+            <button type="button" data-cmp-edit="${esc(String(c.id))}"
+              class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition">
+              Edit
+            </button>` : ''}
         </div>
+        ${plan ? planBlock(c, plan) : ''}
+        ${humanTasksBlock(c)}
+        ${testsBlock(c)}
+        ${canAddWork ? addWorkPanel(c) : ''}
         <p class="hidden mt-2 text-xs font-semibold text-gray-600" data-cmp-status="${esc(String(c.id))}"></p>
 
         <div class="flex flex-wrap items-center gap-3 mt-3">
+          <button type="button" data-cmp-toggle-summary="${esc(String(c.id))}"
+            class="text-xs font-bold text-gray-500 hover:text-gray-700 underline transition">
+            ${state.summaries[c.id] && state.summaries[c.id].open ? 'Hide summary' : 'Summary'}
+          </button>
+          <button type="button" data-cmp-toggle-pictures="${esc(String(c.id))}"
+            class="text-xs font-bold text-gray-500 hover:text-gray-700 underline transition">
+            ${state.pictures[c.id] && state.pictures[c.id].open ? 'Hide pictures' : `Pictures${(c.assets || []).length ? ` (${esc(String(c.assets.length))})` : ''}`}
+          </button>
           <button type="button" data-cmp-toggle-links="${esc(String(c.id))}"
             class="text-xs font-bold text-gray-500 hover:text-gray-700 underline transition">
             ${state.links[c.id] && state.links[c.id].open ? 'Hide' : 'Tracked links'}
@@ -204,6 +347,8 @@
             ${state.paid_[c.id] && state.paid_[c.id].open ? 'Hide' : (c.mode === 'paid' ? 'Advertising' : 'Add advertising')}
           </button>
         </div>
+        ${summaryPanel(c)}
+        ${picturesPanel(c)}
         ${linksPanel(c.id)}
         ${paidPanel(c)}
       </div>`;
@@ -221,9 +366,9 @@
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center">
         <p class="text-sm font-bold text-gray-700">No campaigns yet</p>
         <p class="text-xs text-gray-500 mt-2 max-w-md mx-auto leading-relaxed">
-          A campaign turns one objective into briefs for your other assistants. Tell this assistant
-          what you are trying to achieve and it will propose a plan — you approve it, and nothing
-          starts until you press Start here.
+          A campaign turns one objective into briefs for your other assistants. Press
+          "New campaign" to set one up yourself, or tell this assistant what you are trying to
+          achieve and it will propose a plan. Either way, nothing starts until you approve it here.
         </p>
       </div>`;
   }
@@ -238,8 +383,762 @@
         <p class="text-xs text-amber-900 leading-relaxed">
           <span class="font-bold">Nothing has started yet.</span>
           ${list.length === 1 ? 'This campaign is' : 'These campaigns are'} saved but not running —
-          no briefs have gone out and no work has been done. Press Start when you are ready.
+          no briefs have gone out and no work has been done. Approve the plan, or press Start, when you are ready.
         </p>
+      </div>`;
+  }
+
+  // ── The plan waiting on a campaign ─────────────────────────────────────────
+  // A plan agreed in chat (or proposed by the daily run) lands here as well as in Decisions. This
+  // is the row the user is already looking at, and approving from it means the decision and the
+  // campaign it starts are on one screen. Turning it down asks why — that reason is written into
+  // the campaign's constraints and restated in the next proposal, the same as in Decisions.
+  function planBlock(c, plan) {
+    const id = esc(String(plan.decisionId));
+    const rejecting = Number(state.rejectingPlan) === Number(plan.decisionId);
+    const reasons = (C() && C().rejectReasons) || [];
+    return `
+      <div class="mt-4 bg-indigo-50/60 border border-indigo-200 rounded-xl p-4">
+        <p class="text-[11px] font-bold text-indigo-700 uppercase tracking-wide">Plan waiting for you</p>
+        <ul class="mt-2 space-y-1">
+          ${plan.orders.map((o) => `
+            <li class="text-xs text-gray-700">• ${esc(o.label)}${o.quantity > 1 ? ` ×${esc(String(o.quantity))}` : ''} — ${esc(o.assignee || o.role)}
+              <span class="text-gray-400">(${o.workItems ? `${esc(String(o.workItems))} ${o.workItems === 1 ? 'task' : 'tasks'}` : 'uses no tasks'}${o.after && plan.orders[o.after - 1] ? ` · waits until: ${esc(plan.orders[o.after - 1].label)}${plan.orders[o.after - 1].assignee ? ` (${esc(plan.orders[o.after - 1].assignee)})` : ''}` : ''})</span>
+              ${o.task ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.task)}</span>` : ''}</li>`).join('')}
+        </ul>
+        <p class="text-xs text-gray-500 mt-2">
+          Uses ${esc(String(plan.workItems))} tasks.
+          ${c.status === 'draft' ? 'Approving starts the campaign and briefs these assistants.' : 'Approving briefs these assistants.'}
+          Their work still comes back to you for approval.
+        </p>
+        ${rejecting ? `
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <select data-cmp-plan-reason="${id}" data-keep="plan-reason-${id}" class="text-xs border border-gray-300 rounded-lg px-2 py-1.5">
+              <option value="">Why not?</option>
+              ${reasons.map((r) => `<option value="${esc(r)}">${esc(C().rejectReasonLabel(r))}</option>`).join('')}
+            </select>
+            <input type="text" data-cmp-plan-note="${id}" data-keep="plan-note-${id}" maxlength="280" placeholder="Anything else? (optional)"
+              class="text-xs border border-gray-300 rounded-lg px-2 py-1.5 flex-1 min-w-0">
+            <button type="button" data-cmp-plan-reject="${id}" data-cmp-plan-campaign="${esc(String(c.id))}"
+              class="btn-destructive px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Turn down</button>
+            <button type="button" data-cmp-plan-reject-cancel
+              class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition">Cancel</button>
+          </div>` : `
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button" data-cmp-plan-approve="${id}" data-cmp-plan-campaign="${esc(String(c.id))}"
+              data-cmp-plan-tasks="${esc(String(plan.workItems))}" data-cmp-plan-starts="${c.status === 'draft' ? '1' : ''}"
+              class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+              ${c.status === 'draft' ? 'Approve plan &amp; start' : 'Approve plan'}
+            </button>
+            <button type="button" data-cmp-plan-reject-open="${id}"
+              class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+              Turn down
+            </button>
+          </div>`}
+      </div>`;
+  }
+
+  // ── Pictures (§9.3) ────────────────────────────────────────────────────────
+  // The campaign's own visuals: posts it commissions use these first, least-used first, so a flight
+  // looks like one campaign. Attach from the existing library (uploading stays in the library —
+  // one place to upload, not two); remove with ×. Nothing here generates or uploads anything.
+  function thumb(a, extra) {
+    const media = a.url
+      ? (a.assetType === 'video'
+        ? `<video src="${esc(a.url)}" muted preload="metadata" class="w-16 h-16 object-cover"></video>`
+        : `<img src="${esc(a.url)}" alt="${esc(a.name || '')}" loading="lazy" class="w-16 h-16 object-cover">`)
+      : '<div class="w-16 h-16 bg-gray-200"></div>';
+    return `<div class="relative rounded-md overflow-hidden ${extra || ''}" title="${esc(a.name || '')}">${media}</div>`;
+  }
+
+  function picturesPanel(c) {
+    const st = state.pictures[c.id];
+    if (!st || !st.open) return '';
+    const id = esc(String(c.id));
+    const assets = Array.isArray(c.assets) ? c.assets : [];
+    const attachedIds = new Set(assets.map((a) => a.id));
+    let picker = '';
+    if (st.picking) {
+      if (state.libraryError) {
+        picker = `<p class="text-xs text-red-600">${esc(state.libraryError)}</p>`;
+      } else if (!state.library) {
+        picker = '<p class="text-xs text-gray-400">Loading your library…</p>';
+      } else {
+        const choices = state.library.filter((a) => !attachedIds.has(a.id));
+        picker = choices.length ? `
+          <p class="text-xs text-gray-500">Choose pictures from your library, then attach them.</p>
+          <div class="flex flex-wrap gap-2">
+            ${choices.map((a) => `
+              <button type="button" data-cmp-pic-pick="${id}" data-asset="${esc(String(a.id))}"
+                class="cursor-pointer rounded-md ${st.selected.has(a.id) ? 'ring-2 ring-emerald-600' : 'opacity-60'}">${thumb(a)}</button>`).join('')}
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button" data-cmp-pic-attach="${id}" ${st.selected.size ? '' : 'disabled'}
+              class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+              Attach ${st.selected.size ? esc(String(st.selected.size)) : ''} selected
+            </button>
+            <button type="button" data-cmp-pic-cancel="${id}" class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition">Cancel</button>
+          </div>`
+          : '<p class="text-xs text-gray-500">Every picture in your library is already attached, or the library is empty. Upload pictures in your content library first.</p>';
+      }
+    }
+    return `
+      <div class="mt-3 border border-gray-200 rounded-xl p-4 space-y-3">
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">This campaign's pictures</p>
+        ${assets.length ? `
+          <div class="flex flex-wrap gap-2">
+            ${assets.map((a) => `
+              <div class="relative">
+                ${thumb(a)}
+                <button type="button" data-cmp-pic-remove="${id}" data-asset="${esc(String(a.id))}" title="Remove from this campaign"
+                  class="absolute top-0 right-0 bg-white border border-gray-200 rounded-md px-1 text-xs font-bold text-gray-600">×</button>
+              </div>`).join('')}
+          </div>
+          <p class="text-xs text-gray-500">Posts this campaign commissions use these first, so they look like one campaign. Removing one does not change posts already drafted.</p>`
+          : '<p class="text-xs text-gray-500">None yet. Posts use your assistant\'s usual picture sources until you attach some.</p>'}
+        ${st.picking ? picker : `
+          <button type="button" data-cmp-pic-open="${id}"
+            class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Add from library</button>`}
+      </div>`;
+  }
+
+  async function loadLibrary() {
+    try {
+      const data = await post({ action: 'list_library', assistantId: state.assistantId });
+      state.library = Array.isArray(data.assets) ? data.assets : [];
+      state.libraryError = null;
+    } catch (err) {
+      state.libraryError = err.message || 'Could not load your library.';
+    }
+    if (state.rendered) render();
+  }
+
+  document.addEventListener('click', async (e) => {
+    const toggle = e.target.closest('[data-cmp-toggle-pictures]');
+    const open = e.target.closest('[data-cmp-pic-open]');
+    const cancel = e.target.closest('[data-cmp-pic-cancel]');
+    const pick = e.target.closest('[data-cmp-pic-pick]');
+    const attach = e.target.closest('[data-cmp-pic-attach]');
+    const remove = e.target.closest('[data-cmp-pic-remove]');
+    if (!toggle && !open && !cancel && !pick && !attach && !remove) return;
+    const el = toggle || open || cancel || pick || attach || remove;
+    const cid = Number(toggle ? toggle.dataset.cmpTogglePictures
+      : open ? open.dataset.cmpPicOpen : cancel ? cancel.dataset.cmpPicCancel
+        : pick ? pick.dataset.cmpPicPick : attach ? attach.dataset.cmpPicAttach : remove.dataset.cmpPicRemove);
+    const st = state.pictures[cid] || (state.pictures[cid] = { open: false, picking: false, selected: new Set() });
+
+    if (toggle) { st.open = !st.open; if (state.rendered) render(); return; }
+    if (open) {
+      st.picking = true; st.selected = new Set();
+      if (state.rendered) render();
+      if (!state.library) await loadLibrary();
+      return;
+    }
+    if (cancel) { st.picking = false; st.selected = new Set(); if (state.rendered) render(); return; }
+    if (pick) {
+      const aid = Number(pick.dataset.asset);
+      if (st.selected.has(aid)) st.selected.delete(aid); else st.selected.add(aid);
+      if (state.rendered) render();
+      return;
+    }
+    if (state.busy) return;
+    state.busy = true;
+    el.disabled = true;
+    try {
+      if (attach) {
+        const data = await post({ action: 'attach_assets', campaignId: cid, assetIds: [...st.selected] });
+        const n = Array.isArray(data.attached) ? data.attached.length : 0;
+        // Counted from the server's answer: an id it would not attach (not ours, purged, a cap)
+        // must not be reported as attached.
+        window.showToast?.(n ? `${n} ${n === 1 ? 'picture' : 'pictures'} attached.` : 'Nothing was attached.', n ? 'success' : 'error');
+        st.picking = false; st.selected = new Set();
+      } else {
+        await post({ action: 'detach_asset', campaignId: cid, assetId: Number(remove.dataset.asset) });
+      }
+    } catch (err) {
+      say(cid, err.message || 'That did not work — please try again.', 'error');
+      el.disabled = false;
+      state.busy = false;
+      return;
+    }
+    state.busy = false;
+    await load();
+  });
+
+  // ── A/B tests (§9.8) ───────────────────────────────────────────────────────
+  // Each test states its hypothesis, each angle's numbers, and the server's verdict sentence — the
+  // same words the summary and the chat use. A winner can be kept as a lesson in one click; "not
+  // enough data" and "no clear difference" offer nothing to keep, because there is nothing learned.
+  // Is this exact lesson already kept from this campaign? Derived from the saved lessons rather than
+  // remembered per click, so a re-render (or a reload) can never offer "Keep" on something kept.
+  function isKept(campaignId, text) {
+    return (state.learnings || []).some((l) => Number(l.campaignId) === Number(campaignId) && l.learning === text);
+  }
+  function keepButton(campaignId, source, text, cls) {
+    const kept = isKept(campaignId, text);
+    return `<button type="button" data-cmp-keep="${esc(String(campaignId))}" data-cmp-keep-source="${esc(source)}" data-cmp-keep-text="${esc(text)}"
+      ${kept ? 'disabled' : ''} class="${cls} border text-xs font-bold rounded-lg transition disabled:opacity-50">${kept ? 'Kept' : 'Keep'}</button>`;
+  }
+
+  function testsBlock(c) {
+    const tests = Array.isArray(c.tests) ? c.tests : [];
+    if (!tests.length) return '';
+    const stat = (v) => `${esc(String(v.posts))} drafted · ${esc(String(v.measured))} measured${v.mean === null ? '' : ` · ${esc(String(Math.round(v.mean * 10) / 10))} avg engagements`}`;
+    return `
+      <div class="mt-4 border border-gray-200 rounded-xl p-4 space-y-3">
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Tests</p>
+        ${tests.map((t) => `
+          <div>
+            <p class="text-sm font-bold text-gray-900 break-words">${esc(t.hypothesis)}</p>
+            <p class="text-xs text-gray-600 mt-1 break-words"><span class="font-bold">A</span> — ${esc(t.angleA)}: ${stat(t.a)}</p>
+            <p class="text-xs text-gray-600 break-words"><span class="font-bold">B</span> — ${esc(t.angleB)}: ${stat(t.b)}</p>
+            <p class="text-xs mt-1 ${t.verdict === 'a' || t.verdict === 'b' ? 'font-bold text-gray-900' : 'text-gray-500'} break-words">${esc(t.sentence)}</p>
+            ${t.verdict === 'a' || t.verdict === 'b' ? `<div class="mt-2">${keepButton(c.id, 'test', t.sentence, 'btn-secondary px-3 py-1.5')}</div>` : ''}
+          </div>`).join('')}
+      </div>`;
+  }
+
+  // ── Summary and lessons (§9.8) ─────────────────────────────────────────────
+  // Facts from counts, the tests' verdicts, and candidate lessons — each a sentence about those
+  // facts. Nothing is kept until the user presses Keep; they can also write their own lesson.
+  // "Also make it a rule for the writing assistants" turns a lesson into a rule on each writing
+  // assistant this campaign briefed (removable from its Rules tab), so it reaches the next draft.
+  function summaryPanel(c) {
+    const st = state.summaries[c.id];
+    if (!st || !st.open) return '';
+    const id = esc(String(c.id));
+    if (st.error) return `<div class="mt-3 border border-gray-200 rounded-xl p-4"><p class="text-xs text-red-600">${esc(st.error)}</p></div>`;
+    if (!st.data) return '<div class="mt-3 border border-gray-200 rounded-xl p-4"><p class="text-xs text-gray-400">Working out the summary…</p></div>';
+    const s = st.data;
+    return `
+      <div class="mt-3 border border-gray-200 rounded-xl p-4 space-y-3">
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">${s.status === 'finished' ? 'How it went' : 'How it is going'}</p>
+        <ul class="space-y-1">${s.facts.map((f) => `<li class="text-xs text-gray-700">• ${esc(f)}</li>`).join('')}</ul>
+        ${s.tests.length ? `<ul class="space-y-1">${s.tests.map((t) => `<li class="text-xs text-gray-700 break-words">• Test — ${esc(t.hypothesis)}: ${esc(t.sentence)}</li>`).join('')}</ul>` : ''}
+        <p class="text-xs font-bold text-gray-700 pt-1">Lessons to keep</p>
+        ${s.candidates.length ? s.candidates.map((x) => `
+          <div class="flex items-start justify-between gap-3">
+            <p class="text-xs text-gray-700 break-words flex-1">${esc(x.text)}</p>
+            <span class="shrink-0">${keepButton(c.id, x.source, x.text, 'btn-secondary px-3 py-1')}</span>
+          </div>`).join('') : '<p class="text-xs text-gray-500">Nothing in the numbers yet stands out as a lesson. You can still write your own.</p>'}
+        <div class="flex items-center gap-2">
+          <input type="text" maxlength="300" data-cmp-own-lesson="${id}" data-keep="own-lesson-${id}" placeholder="Your own lesson, e.g. Webinar invites land better on Tuesdays"
+            class="flex-1 min-w-0 text-sm border border-gray-300 rounded-lg px-3 py-2">
+          <button type="button" data-cmp-keep="${id}" data-cmp-keep-source="user" data-cmp-keep-own="1"
+            class="btn-primary px-3 py-2 text-xs font-bold rounded-lg transition disabled:opacity-50">Keep</button>
+        </div>
+        <label class="flex items-start gap-2 text-xs text-gray-700">
+          <input type="checkbox" data-cmp-keep-apply="${id}" data-keep="keep-apply-${id}" class="mt-0.5">
+          <span>Also make kept lessons a rule for the writing assistants this campaign briefed (you can remove it from each assistant's Rules tab).</span>
+        </label>
+        <p class="text-xs text-gray-500">Kept lessons are read by your Campaign Assistant whenever it plans a campaign.</p>
+      </div>`;
+  }
+
+  function lessonsHtml() {
+    const rows = Array.isArray(state.learnings) ? state.learnings : [];
+    if (!rows.length) return '';
+    return `
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mt-4 space-y-2">
+        <p class="text-sm font-bold text-gray-900">Lessons kept</p>
+        <p class="text-xs text-gray-500">Your Campaign Assistant plans with these. Removing one here does not remove a rule it became — do that from the assistant's Rules tab.</p>
+        ${rows.map((l) => `
+          <div class="flex items-start justify-between gap-3">
+            <p class="text-xs text-gray-700 break-words flex-1">${esc(l.learning)}${l.objective ? ` <span class="text-gray-400">— ${esc(l.objective.slice(0, 60))}</span>` : ''}${l.appliedToDrafting ? ' <span class="text-gray-400">(also a drafting rule)</span>' : ''}</p>
+            <button type="button" data-cmp-lesson-delete="${esc(String(l.id))}" title="Stop planning with this"
+              class="text-xs font-bold text-gray-400 hover:text-gray-700">×</button>
+          </div>`).join('')}
+      </div>`;
+  }
+
+  async function loadLearnings() {
+    try {
+      const data = await post({ action: 'list_learnings', assistantId: state.assistantId });
+      state.learnings = Array.isArray(data.learnings) ? data.learnings : [];
+    } catch (err) {
+      console.error('[AssistantCampaigns] lessons load failed:', err);
+      state.learnings = [];
+    }
+    if (state.rendered) render();
+  }
+
+  document.addEventListener('click', async (e) => {
+    const toggle = e.target.closest('[data-cmp-toggle-summary]');
+    const keep = e.target.closest('[data-cmp-keep]');
+    const del = e.target.closest('[data-cmp-lesson-delete]');
+    if (!toggle && !keep && !del) return;
+
+    if (toggle) {
+      const id = Number(toggle.dataset.cmpToggleSummary);
+      const st = state.summaries[id] || (state.summaries[id] = { open: false, data: null, error: null });
+      st.open = !st.open;
+      if (state.rendered) render();
+      if (st.open) {
+        // Always fresh: a summary is counts, and counts move.
+        st.data = null; st.error = null;
+        try { st.data = (await post({ action: 'summary', campaignId: id })).summary; }
+        catch (err) { st.error = err.message || 'Could not work out the summary.'; }
+        if (state.rendered) render();
+      }
+      return;
+    }
+
+    if (state.busy) return;
+    if (del) {
+      state.busy = true;
+      try { await post({ action: 'delete_learning', learningId: Number(del.dataset.cmpLessonDelete) }); }
+      catch (err) { window.showToast?.(err.message || 'Could not remove that lesson.', 'error'); }
+      state.busy = false;
+      await loadLearnings();
+      return;
+    }
+
+    const campaignId = Number(keep.dataset.cmpKeep);
+    const text = keep.dataset.cmpKeepOwn
+      ? (document.querySelector(`[data-cmp-own-lesson="${campaignId}"]`)?.value || '').trim()
+      : (keep.dataset.cmpKeepText || '');
+    if (!text) { window.showToast?.('Write the lesson first.', 'error'); return; }
+    const apply = !!document.querySelector(`[data-cmp-keep-apply="${campaignId}"]`)?.checked;
+    state.busy = true;
+    keep.disabled = true;
+    try {
+      const data = await post({ action: 'save_learning', campaignId, text, source: keep.dataset.cmpKeepSource || 'user', applyToDrafting: apply });
+      const n = Array.isArray(data.appliedTo) ? data.appliedTo.length : 0;
+      // From the server's answer — "added as a rule" only when one actually was.
+      window.showToast?.(apply
+        ? (n ? `Kept, and added as a rule for ${n} ${n === 1 ? 'assistant' : 'assistants'}.` : 'Kept. This campaign briefed no writing assistant, so no rule was added.')
+        : 'Kept — your Campaign Assistant will plan with it.', 'success');
+    } catch (err) {
+      window.showToast?.(err.message || 'Could not keep that lesson.', 'error');
+      keep.disabled = false;
+    }
+    state.busy = false;
+    await loadLearnings();
+  });
+
+  // ── Tasks waiting on people (§9.5) ─────────────────────────────────────────
+  // Each says who, what, when it is due (and whether that has passed), and how much work is held
+  // behind it — "waiting on Legal" means far more when the row can say three briefs are stuck.
+  // "Mark done" releases that work; "Won't happen" cancels it, and its confirm says so.
+  function humanTasksBlock(c) {
+    const tasks = Array.isArray(c.humanTasks) ? c.humanTasks : [];
+    if (!tasks.length) return '';
+    const today = new Date().toISOString().slice(0, 10);
+    return `
+      <div class="mt-4 border border-gray-200 rounded-xl p-4 space-y-3">
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Waiting on people</p>
+        ${tasks.map((t) => {
+          const id = esc(String(t.orderId));
+          const overdue = t.dueDate && t.dueDate < today && t.status === 'issued';
+          return `
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0 flex-1">
+              <p class="text-sm text-gray-900 break-words"><span class="font-bold">${esc(t.assignee || 'Someone on your team')}</span> — ${esc(t.task || '')}</p>
+              <p class="text-xs mt-0.5 ${overdue ? 'text-amber-700 font-bold' : 'text-gray-500'}">
+                ${t.status === 'blocked' ? 'Not started — waiting for earlier work. ' : ''}${t.dueDate ? `${overdue ? 'Overdue — was due' : 'Due'} ${esc(t.dueDate)}. ` : ''}${t.waiting ? `${esc(String(t.waiting))} ${t.waiting === 1 ? 'piece' : 'pieces'} of work waiting on this. ` : ''}${t.assigneeEmail ? `Tell them at ${esc(t.assigneeEmail)} — nothing is sent automatically.` : 'Nothing is sent to them automatically.'}
+              </p>
+              ${ticketLine(t, c)}
+            </div>
+            ${t.status === 'issued' ? `
+              <div class="flex items-center gap-2 shrink-0">
+                <button type="button" data-cmp-task-done="${id}" data-cmp-task-campaign="${esc(String(c.id))}"
+                  class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Mark done</button>
+                <button type="button" data-cmp-task-wont="${id}" data-cmp-task-campaign="${esc(String(c.id))}" data-cmp-task-waiting="${esc(String(t.waiting || 0))}"
+                  class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Won't happen</button>
+              </div>` : ''}
+          </div>`;
+        }).join('')}
+      </div>`;
+  }
+
+  // ── A task's ticket (§9.5) ─────────────────────────────────────────────────
+  // Filed: a link, and the promise that closing it finishes the task. Failed: the reason, and a way
+  // to file by hand. Neither: "File in…", which opens a picker of the CONNECTED tools' projects —
+  // a tool that is not connected says where to connect it rather than vanishing.
+  function ticketLine(t, c) {
+    const id = esc(String(t.orderId));
+    if (t.ticket && t.ticket.id) {
+      const label = t.ticket.provider === 'jira' ? 'Jira' : 'Asana';
+      const link = t.ticket.url
+        ? `<a href="${esc(t.ticket.url)}" target="_blank" rel="noopener" class="font-bold underline">${label} ${esc(t.ticket.id)}</a>`
+        : `<span class="font-bold">${label} ${esc(t.ticket.id)}</span>`;
+      return `<p class="text-xs text-gray-600 mt-1">${link} — closing that ticket marks this done and starts anything waiting on it.${t.ticketReachable === false ? ' <span class="text-amber-700">We could not check it last time; it stays open until we can.</span>' : ''}</p>`;
+    }
+    const st = state.filing[t.orderId];
+    const err = t.ticketError ? `<p class="text-xs text-amber-700 mt-1">The ticket was not filed: ${esc(t.ticketError)}</p>` : '';
+    if (!st || !st.open) {
+      return `${err}<button type="button" data-cmp-ticket-open="${id}" class="mt-1 text-xs font-bold text-gray-500 hover:text-gray-700 underline">File in Jira or Asana</button>`;
+    }
+    if (state.ticketOptionsError) return `${err}<p class="text-xs text-red-600 mt-1">${esc(state.ticketOptionsError)}</p>`;
+    if (!state.ticketOptions) return `${err}<p class="text-xs text-gray-400 mt-1">Checking your connected tools…</p>`;
+    const connected = state.ticketOptions.filter((o) => o.connected);
+    if (!connected.length) {
+      return `${err}<p class="text-xs text-gray-600 mt-1">Connect Jira or Asana on the <a href="/integrations.html" class="font-bold underline">Integrations</a> page, then file it from here.</p>`;
+    }
+    if (!st.provider || !connected.some((o) => o.provider === st.provider)) st.provider = connected[0].provider;
+    const opt = connected.find((o) => o.provider === st.provider);
+    if (!st.projectId) st.projectId = (opt.defaultProject && opt.defaultProject.id) || (opt.projects[0] && opt.projects[0].id) || '';
+    return `${err}
+      <div class="mt-2 flex flex-wrap items-center gap-2">
+        <select data-cmp-ticket-provider="${id}" class="text-xs border border-gray-300 rounded-lg px-2 py-1.5">
+          ${connected.map((o) => `<option value="${esc(o.provider)}" ${o.provider === st.provider ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+        </select>
+        ${opt.error ? `<span class="text-xs text-red-600">${esc(opt.error)}</span>` : `
+          <select data-cmp-ticket-project="${id}" class="text-xs border border-gray-300 rounded-lg px-2 py-1.5 min-w-0">
+            ${opt.projects.map((p) => `<option value="${esc(p.id)}" ${p.id === st.projectId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+          </select>`}
+        <label class="flex items-center gap-1 text-xs text-gray-600">
+          <input type="checkbox" data-cmp-ticket-remember="${id}" ${opt.defaultProject ? '' : 'checked'}> Use this project next time
+        </label>
+        <button type="button" data-cmp-ticket-file="${id}" data-cmp-task-campaign="${esc(String(c.id))}" ${opt.error || !opt.projects.length ? 'disabled' : ''}
+          class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">File</button>
+        <button type="button" data-cmp-ticket-cancel="${id}" class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg">Cancel</button>
+      </div>`;
+  }
+
+  async function loadTicketOptions() {
+    try {
+      const data = await post({ action: 'ticket_options' });
+      state.ticketOptions = Array.isArray(data.providers) ? data.providers : [];
+      state.ticketOptionsError = null;
+    } catch (err) {
+      state.ticketOptionsError = err.message || 'Could not check your connected tools.';
+    }
+    if (state.rendered) render();
+  }
+
+  document.addEventListener('change', (e) => {
+    const prov = e.target.closest('[data-cmp-ticket-provider]');
+    const proj = e.target.closest('[data-cmp-ticket-project]');
+    if (!prov && !proj) return;
+    const id = Number((prov || proj).dataset[prov ? 'cmpTicketProvider' : 'cmpTicketProject']);
+    const st = state.filing[id];
+    if (!st) return;
+    if (prov) { st.provider = prov.value; st.projectId = ''; if (state.rendered) render(); }
+    else st.projectId = proj.value;
+  });
+
+  document.addEventListener('click', async (e) => {
+    const open = e.target.closest('[data-cmp-ticket-open]');
+    const cancel = e.target.closest('[data-cmp-ticket-cancel]');
+    const file = e.target.closest('[data-cmp-ticket-file]');
+    if (!open && !cancel && !file) return;
+    if (open) {
+      const id = Number(open.dataset.cmpTicketOpen);
+      state.filing[id] = { open: true, provider: null, projectId: '' };
+      if (state.rendered) render();
+      if (!state.ticketOptions) await loadTicketOptions();
+      return;
+    }
+    if (cancel) { delete state.filing[Number(cancel.dataset.cmpTicketCancel)]; if (state.rendered) render(); return; }
+    if (state.busy) return;
+    const id = Number(file.dataset.cmpTicketFile);
+    const st = state.filing[id];
+    if (!st) return;
+    const opt = (state.ticketOptions || []).find((o) => o.provider === st.provider);
+    const proj = opt && opt.projects.find((p) => p.id === st.projectId);
+    state.busy = true;
+    file.disabled = true;
+    try {
+      const data = await post({
+        action: 'file_ticket', orderId: id, provider: st.provider, projectId: st.projectId,
+        projectName: proj ? proj.name : null,
+        remember: !!document.querySelector(`[data-cmp-ticket-remember="${id}"]`)?.checked,
+      });
+      window.showToast?.(`Filed as ${st.provider === 'jira' ? 'Jira' : 'Asana'} ${data.ticket.id}. Closing it there marks the task done.`, 'success');
+      delete state.filing[id];
+      // A remembered project changes what the next picker preselects — re-read it next time.
+      state.ticketOptions = null;
+    } catch (err) {
+      say(Number(file.dataset.cmpTaskCampaign), err.message || 'Could not file the ticket.', 'error');
+      file.disabled = false;
+      state.busy = false;
+      return;
+    }
+    state.busy = false;
+    await load();
+  });
+
+  // "Hold this until …" — any Add work item can wait for an open task on the same campaign.
+  function waitForField(c, id) {
+    const tasks = (Array.isArray(c.humanTasks) ? c.humanTasks : []);
+    if (!tasks.length) return '';
+    return `
+      <label class="block text-xs font-bold text-gray-600">Hold this until (optional)
+        <select data-cmp-aw-waitfor="${id}" data-keep="aw-waitfor-${id}" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+          <option value="">Start straight away</option>
+          ${tasks.map((t) => `<option value="${esc(String(t.orderId))}">${esc(t.assignee || 'Someone')} has done: ${esc((t.task || '').slice(0, 60))}</option>`).join('')}
+        </select>
+      </label>`;
+  }
+
+  // A person's task: who, how to reach them (for the USER — nothing is sent), what, and when.
+  function humanFields(id) {
+    return `
+      <div class="flex flex-wrap gap-3">
+        <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Who
+          <input type="text" maxlength="80" data-cmp-aw-assignee="${id}" data-keep="aw-assignee-${id}" placeholder="e.g. Sam (designer), Legal"
+            class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+        </label>
+        <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Their email (optional, for you)
+          <input type="email" maxlength="200" data-cmp-aw-email="${id}" data-keep="aw-email-${id}" placeholder="sam@yourcompany.com"
+            class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+        </label>
+        <label class="block text-xs font-bold text-gray-600">Due (optional)
+          <input type="date" data-cmp-aw-due="${id}" data-keep="aw-due-${id}"
+            class="mt-1 text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+        </label>
+      </div>
+      <label class="block text-xs font-bold text-gray-600">Also file it as a ticket (optional)
+        <select data-cmp-aw-filein="${id}" data-keep="aw-filein-${id}" class="mt-1 text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+          <option value="">No</option>
+          <option value="jira">In Jira — the project you last chose</option>
+          <option value="asana">In Asana — the project you last chose</option>
+        </select>
+      </label>
+      <p class="text-xs text-gray-500">Nothing is sent to them — you let them know. Mark it done here when it is (or close its ticket), and any work waiting on it starts.</p>`;
+  }
+
+  // ── Add work ───────────────────────────────────────────────────────────────
+  // The GUI twin of a chat plan for a running campaign. A human click here PLACES the order
+  // straight away (place_order) — this is the campaign surface, with the cost in front of them,
+  // which is exactly where §1.3 says a commitment may be made. The chat can only file a plan.
+  //
+  // The text field changes meaning with the action, because each executor reads a different brief
+  // field (campaign-plan.ts BRIEF_TEXT_FIELDS): a lead search needs WHO to look for, messaging
+  // needs the new ANGLE, drafting work takes an optional angle.
+  const BRIEF_PROMPTS = {
+    draft_social_posts: { field: 'angle', label: 'Angle (optional)', placeholder: 'What these posts should argue', required: false },
+    draft_blog_pillar: { field: 'angle', label: 'Angle (optional)', placeholder: 'What the article should argue', required: false },
+    run_lead_search: { field: 'idea', label: 'Who to look for', placeholder: 'e.g. UK accountancy firms with 10–50 staff', required: true },
+    narrow_targeting: { field: 'idea', label: 'Tightened description (optional)', placeholder: 'Who the search should find instead', required: false },
+    adjust_messaging: { field: 'angle', label: 'New angle', placeholder: 'The argument this campaign should make from now on', required: true },
+    draft_email_campaign: { field: 'angle', label: 'What should the emails get people to do? (optional)', placeholder: 'Leave blank to use this campaign\'s objective', required: false },
+    request_human_task: { field: 'task', label: 'What are you asking them to do?', placeholder: 'e.g. Record a 30-second product video for the launch posts', required: true },
+    ab_test_posts: { field: 'hypothesis', label: 'What are you testing?', placeholder: 'e.g. Does a customer story beat a how-to on LinkedIn?', required: true },
+  };
+
+  function actionSpec(key) {
+    const list = (C() && C().orderActions) || [];
+    return list.find((a) => a.key === key) || null;
+  }
+
+  // The email order's own choices (§9.7). Both pickers start on "the stage decides", which is the
+  // server's default too (campaign-email-order.ts resolveEmailPlan) — so leaving them alone is a
+  // real answer, not a missing one.
+  function emailFields(id) {
+    const kinds = (C() && C().emailCampaignKinds) || [];
+    return `
+      <div class="flex flex-wrap gap-3">
+        <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Who gets them
+          <select data-cmp-aw-trigger="${id}" data-keep="aw-trigger-${id}" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+            <option value="">Let the campaign's stage decide</option>
+            <option value="form">People who sign up through a form (a follow-up)</option>
+            <option value="custom">A group I send them to myself</option>
+          </select>
+        </label>
+        <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Kind of email campaign
+          <select data-cmp-aw-kind="${id}" data-keep="aw-kind-${id}" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+            <option value="">Let the campaign's stage decide</option>
+            ${kinds.map((k) => `<option value="${esc(k.type)}">${esc(k.label)}</option>`).join('')}
+          </select>
+        </label>
+      </div>
+      <label class="block text-xs font-bold text-gray-600">Links and facts the emails may use (optional)
+        <textarea rows="2" maxlength="2000" data-cmp-aw-facts="${id}" data-keep="aw-facts-${id}"
+          placeholder="e.g. Book a call: https://your-site.com/book — the emails only ever link to addresses you put here"
+          class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal"></textarea>
+      </label>
+      <p class="text-xs text-gray-500">Saved in Email Studio, switched off. Nothing is sent until you turn the follow-up on or send each email yourself.</p>`;
+  }
+
+  function addWorkPanel(c) {
+    const st = state.addWork[c.id];
+    if (!st || !st.open) return '';
+    const id = esc(String(c.id));
+    const actions = state.availableOrderActions.map(actionSpec).filter(Boolean);
+    if (!st.action || !actions.some((a) => a.key === st.action)) st.action = actions[0] ? actions[0].key : null;
+    const spec = actionSpec(st.action);
+    if (!spec) return '';
+    const prompt = BRIEF_PROMPTS[spec.key] || null;
+    const needsSearch = spec.key === 'narrow_targeting';
+    return `
+      <div class="mt-4 bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Add work to this campaign</p>
+        <select data-cmp-aw-action="${id}" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2">
+          ${actions.map((a) => `<option value="${esc(a.key)}" ${a.key === spec.key ? 'selected' : ''}>${esc(a.label)}</option>`).join('')}
+        </select>
+        <p class="text-xs text-gray-500">${esc(spec.description)}</p>
+        ${spec.takesQuantity ? `
+          <label class="block text-xs font-bold text-gray-600">How many (up to ${esc(String(spec.maxQuantity))})
+            <input type="number" min="1" max="${esc(String(spec.maxQuantity))}" value="${esc(String(spec.defaultQuantity || 1))}" data-cmp-aw-qty="${id}" data-keep="aw-qty-${id}-${esc(spec.key)}"
+              class="mt-1 w-24 text-sm border border-gray-300 rounded-lg px-3 py-1.5 font-normal">
+          </label>` : ''}
+        ${needsSearch ? (state.savedSearches.length ? `
+          <label class="block text-xs font-bold text-gray-600">Which saved search
+            <select data-cmp-aw-search="${id}" data-keep="aw-search-${id}" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+              ${state.savedSearches.map((x) => `<option value="${esc(String(x.id))}">${esc(x.name || x.idea.slice(0, 80))}</option>`).join('')}
+            </select>
+          </label>` : '<p class="text-xs text-amber-700">There are no saved lead searches to narrow yet — use "Run a lead search" first.</p>') : ''}
+        ${spec.key === 'draft_email_campaign' ? emailFields(id) : ''}
+        ${spec.key === 'request_human_task' ? humanFields(id) : ''}
+        ${spec.key === 'ab_test_posts' ? `
+          <div class="flex flex-wrap gap-3">
+            <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Angle A
+              <input type="text" maxlength="300" data-cmp-aw-angle-a="${id}" data-keep="aw-angle-a-${id}" placeholder="e.g. A customer's story"
+                class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+            </label>
+            <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Angle B
+              <input type="text" maxlength="300" data-cmp-aw-angle-b="${id}" data-keep="aw-angle-b-${id}" placeholder="e.g. A step-by-step how-to"
+                class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+            </label>
+          </div>
+          <p class="text-xs text-gray-500">"How many" is posts for EACH angle — at least 4 each, or the result can only say there is not enough data.</p>` : ''}
+        ${spec.key === 'draft_social_posts' || spec.key === 'draft_blog_pillar' || spec.key === 'draft_email_campaign' ? `
+          <label class="block text-xs font-bold text-gray-600">For a different audience (optional)
+            <input type="text" maxlength="300" data-cmp-aw-audience="${id}" data-keep="aw-aud-${id}-${esc(spec.key)}"
+              placeholder="Leave blank to write for this campaign's audience"
+              class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+          </label>` : ''}
+        ${prompt ? `
+          <label class="block text-xs font-bold text-gray-600">${esc(prompt.label)}
+            <textarea rows="2" maxlength="1000" data-cmp-aw-text="${id}" data-keep="aw-text-${id}-${esc(spec.key)}" placeholder="${esc(prompt.placeholder)}"
+              class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal"></textarea>
+          </label>` : ''}
+        ${waitForField(c, id)}
+        <div class="flex items-center justify-between gap-3">
+          <p class="text-xs text-gray-500" data-cmp-aw-cost="${id}">${spec.workItemsPerUnit ? `Uses ${esc(String(spec.workItemsPerUnit))} ${spec.takesQuantity ? 'tasks each' : 'tasks'}.` : 'Uses no tasks — it changes what future work is asked for.'}</p>
+          <button type="button" data-cmp-aw-submit="${id}" ${needsSearch && !state.savedSearches.length ? 'disabled' : ''}
+            class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+            Brief the assistant
+          </button>
+        </div>
+      </div>`;
+  }
+
+  // ── New campaign / Edit ────────────────────────────────────────────────────
+  // The GUI twin of the chat's proposal and edit cards. Unlike the chat, this form MAY set the
+  // task budget — the number is in front of the user, on the campaign surface (§1.3). It never
+  // starts anything: a campaign created here is a draft until Start.
+  function formHtml() {
+    const f = state.form;
+    if (!f) return '';
+    const c = f.mode === 'edit' ? state.campaigns.find((x) => Number(x.id) === Number(f.id)) : null;
+    if (f.mode === 'edit' && !c) return '';
+    // The stage picks the outcomes on offer (§9.6). Held on state.form so a stage change can
+    // re-render the form with the right list; the outcome's data-keep key carries the stage so a
+    // choice valid for one stage is never restored into another's list.
+    const stages = (C() && C().funnelStages) || ['conversion'];
+    if (!f.stage) f.stage = (c && c.funnelStage) || (C() ? C().defaultFunnelStage : 'conversion');
+    const outcomes = (C() && C().stageOutcomes(f.stage)) || ['leads'];
+    const currentOutcome = c && outcomes.indexOf(c.outcomeMetric) !== -1 ? c.outcomeMetric : outcomes[0];
+    const v = (key, dflt) => (c && c[key] != null ? c[key] : dflt);
+    const ends = c && c.endsAt ? String(c.endsAt).slice(0, 10) : '';
+    const aud = c && c.audience && typeof c.audience === 'object' ? c.audience : {};
+    // Editing keeps the campaign's own setting. Creating follows the stage: retention is aimed AT
+    // customers, every other stage leaves them out — and the checkbox's keep-key carries the stage
+    // so switching stage re-applies that default instead of restoring the previous stage's tick.
+    const excludeCustomers = c ? c.excludeExistingCustomers !== false : f.stage !== 'retention';
+    const exclKey = c ? 'f-excl' : `f-excl-${f.stage}`;
+    return `
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-4 space-y-3" data-cmp-form>
+        <p class="text-sm font-bold text-gray-900">${f.mode === 'edit' ? 'Edit campaign' : 'New campaign'}</p>
+        <label class="block text-xs font-bold text-gray-600">What should this campaign achieve?
+          <textarea rows="2" maxlength="500" data-cmpf="objective" data-keep="f-objective"
+            placeholder="e.g. 50 new leads from UK accountancy firms by the end of March"
+            class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">${esc(v('objective', ''))}</textarea>
+        </label>
+        <label class="block text-xs font-bold text-gray-600">What is this campaign for?
+          <select data-cmpf="funnelStage" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+            ${stages.map((st) => `<option value="${esc(st)}" ${st === f.stage ? 'selected' : ''}>${esc(C() ? C().stageLabel(st) : st)}${C() && C().stageDescription(st) ? ` — ${esc(C().stageDescription(st))}` : ''}</option>`).join('')}
+          </select>
+        </label>
+        <div class="flex flex-wrap gap-3">
+          <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">What counts as success
+            <select data-cmpf="outcomeMetric" data-keep="f-outcome-${esc(f.stage)}" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+              ${outcomes.map((m) => `<option value="${esc(m)}" ${m === currentOutcome ? 'selected' : ''}>${esc(C() ? C().outcomeLabel(m) : m)}</option>`).join('')}
+            </select>
+          </label>
+          <label class="block text-xs font-bold text-gray-600">Aiming for (optional)
+            <input type="number" min="1" data-cmpf="targetValue" data-keep="f-target" value="${esc(v('targetValue', ''))}"
+              class="mt-1 w-28 text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+          </label>
+          <label class="block text-xs font-bold text-gray-600">Ends (optional)
+            <input type="date" data-cmpf="endsAt" data-keep="f-ends" value="${esc(ends)}"
+              class="mt-1 text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+          </label>
+          <label class="block text-xs font-bold text-gray-600">Task budget
+            <input type="number" min="1" max="1000" data-cmpf="maxWorkItems" data-keep="f-budget" value="${esc(v('maxWorkItems', 50))}"
+              class="mt-1 w-28 text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+          </label>
+        </div>
+        <p class="text-xs text-gray-500">The task budget is the most of your monthly allowance this campaign may commission. At the cap it stops — it never bills you extra.</p>
+        ${umbrellaFields(c)}
+        <label class="block text-xs font-bold text-gray-600">Tone for this campaign (optional)
+          <input type="text" maxlength="300" data-cmpf="tone" data-keep="f-tone" value="${esc((c && c.tone) || '')}"
+            placeholder="e.g. warm and celebratory, no discount language — always within your brand voice"
+            class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+        </label>
+        <p class="text-xs font-bold text-gray-700 pt-2">Who is it for?</p>
+        <div class="flex flex-wrap gap-3">
+          <label class="block text-xs font-bold text-gray-600 min-w-[12rem]">Persona
+            <input type="text" maxlength="80" data-cmpf="persona" data-keep="f-persona" value="${esc(aud.persona || '')}"
+              placeholder="e.g. SMB founders" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+          </label>
+          <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Who they are and what they care about
+            <input type="text" maxlength="500" data-cmpf="audienceDescription" data-keep="f-aud-desc" value="${esc(aud.description || '')}"
+              placeholder="e.g. owners of 5–50 person firms who handle their own marketing" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+          </label>
+        </div>
+        <label class="flex items-start gap-2 text-xs text-gray-700">
+          <input type="checkbox" data-cmpf="excludeExistingCustomers" data-keep="${esc(exclKey)}" ${excludeCustomers ? 'checked' : ''} class="mt-0.5">
+          <span><span class="font-bold">Leave out existing customers.</span> Lead searches for this campaign skip companies you have marked as won in Conversations. Untick it only for a campaign aimed at your customers.</span>
+        </label>
+        <label class="block text-xs font-bold text-gray-600">Also leave out (optional)
+          <textarea rows="2" data-cmpf="excludeDomains" data-keep="f-excl-domains"
+            placeholder="Customers or partners not in the platform, as web addresses — acme.co.uk, example.com"
+            class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">${esc((aud.excludeDomains || []).join(', '))}</textarea>
+        </label>
+        <div class="flex items-center gap-2">
+          <button type="button" data-cmpf-save class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+            ${f.mode === 'edit' ? 'Save changes' : 'Save as draft'}
+          </button>
+          <button type="button" data-cmpf-cancel class="btn-utility px-4 py-2 text-sm font-bold rounded-lg transition">Cancel</button>
+        </div>
+        <p class="hidden text-xs font-semibold" data-cmpf-status></p>
+      </div>`;
+  }
+
+  // Umbrella picker + always-on (§9.4). Offers only campaigns that can legally be an umbrella —
+  // top-level, not this one — and none at all for a campaign that is itself an umbrella (the server
+  // refuses two levels; offering a choice it will refuse is a dead end).
+  function umbrellaFields(c) {
+    const isUmbrella = c && childrenOf(c).length > 0;
+    const options = state.campaigns.filter((x) => !x.parentCampaignId && (!c || x.id !== c.id) && x.status !== 'archived');
+    const current = c && c.parentCampaignId ? c.parentCampaignId : '';
+    const alwaysOn = c ? c.alwaysOn === true : false;
+    return `
+      <div class="flex flex-wrap gap-3 items-end">
+        <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Inside an umbrella campaign (optional)
+          ${isUmbrella
+            ? '<p class="mt-1 text-xs font-normal text-gray-500">This campaign is an umbrella for others, so it cannot go inside one.</p>'
+            : `<select data-cmpf="parentCampaignId" data-keep="f-parent" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+                <option value="">None</option>
+                ${options.map((x) => `<option value="${esc(String(x.id))}" ${x.id === current ? 'selected' : ''}>${esc(x.objective.slice(0, 70))}</option>`).join('')}
+              </select>`}
+        </label>
+        <label class="flex items-center gap-2 text-xs text-gray-700 pb-2">
+          <input type="checkbox" data-cmpf="alwaysOn" data-keep="f-always-on" ${alwaysOn ? 'checked' : ''}>
+          <span><span class="font-bold">Always on</span> — business as usual, no end date</span>
+        </label>
+      </div>`;
+  }
+
+  function toolbarHtml() {
+    if (state.form) return '';
+    return `
+      <div class="flex justify-end mb-4">
+        <button type="button" data-cmp-new class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">New campaign</button>
       </div>`;
   }
 
@@ -770,13 +1669,30 @@
       host.innerHTML = '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center"><p class="text-sm text-gray-400">Loading campaigns…</p></div>';
       return;
     }
-    if (!state.campaigns.length) { host.innerHTML = emptyState(); return; }
+    // render() rewrites the whole tab, and it runs on its own whenever the funnel or a link list
+    // arrives — so without this, anything typed into "New campaign" or "Add work" vanished
+    // mid-sentence. Fields opt in with data-keep; their values are carried across the rewrite.
+    const kept = {};
+    host.querySelectorAll('[data-keep]').forEach((el) => { kept[el.dataset.keep] = el.type === 'checkbox' ? el.checked : el.value; });
 
-    host.innerHTML = `
-      ${optimiserHealthHtml()}
-      ${funnelHtml()}
-      ${neverLaunchedNote(state.campaigns)}
-      <div class="space-y-4">${state.campaigns.map(campaignRow).join('')}</div>`;
+    if (!state.campaigns.length) {
+      host.innerHTML = `${toolbarHtml()}${formHtml()}${state.form ? '' : emptyState()}`;
+    } else {
+      host.innerHTML = `
+        ${toolbarHtml()}
+        ${formHtml()}
+        ${optimiserHealthHtml()}
+        ${funnelHtml()}
+        ${neverLaunchedNote(state.campaigns)}
+        <div class="space-y-4">${nestedRows()}</div>
+        ${lessonsHtml()}`;
+    }
+
+    host.querySelectorAll('[data-keep]').forEach((el) => {
+      if (!Object.prototype.hasOwnProperty.call(kept, el.dataset.keep)) return;
+      if (el.type === 'checkbox') el.checked = kept[el.dataset.keep];
+      else el.value = kept[el.dataset.keep];
+    });
   }
 
   function rerender() {
@@ -807,6 +1723,8 @@
       // Null is meaningful for both: "nothing to report" rather than "healthy" / "available".
       state.optimiserHealth = data.optimiserHealth || null;
       state.paid = data.paid || null;
+      state.availableOrderActions = Array.isArray(data.availableOrderActions) ? data.availableOrderActions : [];
+      state.savedSearches = Array.isArray(data.savedSearches) ? data.savedSearches : [];
       state.loadError = null;
     } catch (err) {
       console.error('[AssistantCampaigns] load failed:', err);
@@ -815,6 +1733,7 @@
     state.loaded = true;
     rerender();
     loadFunnel();
+    loadLearnings();
   }
 
   /**
@@ -1337,6 +2256,280 @@
     if (state.rendered) render();
   }
 
+  // ── §9.1 controls: form, plan, Add work ────────────────────────────────────
+  // A third listener, for the same reason the link listener is separate: the start/pause handler
+  // early-returns on anything else, and these have their own failure handling. Each write RELOADS
+  // from the server on success and does NOT re-render on failure — a re-render would wipe what
+  // the user typed, and the server's sentence is shown where they are looking instead.
+  function formSay(text, tone) {
+    const el = document.querySelector('[data-cmpf-status]');
+    if (!el) return;
+    el.textContent = text;
+    el.className = `text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-gray-600'}`;
+  }
+
+  document.addEventListener('change', (e) => {
+    const stageSel = e.target.closest('[data-cmpf="funnelStage"]');
+    if (stageSel && state.form) {
+      state.form.stage = stageSel.value;
+      if (state.rendered) render();
+      return;
+    }
+    const sel = e.target.closest('[data-cmp-aw-action]');
+    if (!sel) return;
+    const id = Number(sel.dataset.cmpAwAction);
+    const st = state.addWork[id] || (state.addWork[id] = { open: true, action: null });
+    st.action = sel.value;
+    if (state.rendered) render();
+  });
+
+  document.addEventListener('click', async (e) => {
+    const newBtn = e.target.closest('[data-cmp-new]');
+    const editBtn = e.target.closest('[data-cmp-edit]');
+    const save = e.target.closest('[data-cmpf-save]');
+    const cancel = e.target.closest('[data-cmpf-cancel]');
+    const approve = e.target.closest('[data-cmp-plan-approve]');
+    const rejectOpen = e.target.closest('[data-cmp-plan-reject-open]');
+    const rejectCancel = e.target.closest('[data-cmp-plan-reject-cancel]');
+    const reject = e.target.closest('[data-cmp-plan-reject]');
+    const awToggle = e.target.closest('[data-cmp-addwork]');
+    const awSubmit = e.target.closest('[data-cmp-aw-submit]');
+    const taskDone = e.target.closest('[data-cmp-task-done]');
+    const taskWont = e.target.closest('[data-cmp-task-wont]');
+    if (!newBtn && !editBtn && !save && !cancel && !approve && !rejectOpen && !rejectCancel && !reject && !awToggle && !awSubmit
+      && !taskDone && !taskWont) return;
+
+    if (newBtn || editBtn) {
+      state.form = newBtn ? { mode: 'create' } : { mode: 'edit', id: Number(editBtn.dataset.cmpEdit) };
+      if (state.rendered) render();
+      document.querySelector('[data-cmp-form]')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      return;
+    }
+    if (cancel) { state.form = null; if (state.rendered) render(); return; }
+    if (rejectOpen) { state.rejectingPlan = Number(rejectOpen.dataset.cmpPlanRejectOpen); if (state.rendered) render(); return; }
+    if (rejectCancel) { state.rejectingPlan = null; if (state.rendered) render(); return; }
+    if (awToggle) {
+      const id = Number(awToggle.dataset.cmpAddwork);
+      const st = state.addWork[id] || (state.addWork[id] = { open: false, action: null });
+      st.open = !st.open;
+      if (state.rendered) render();
+      return;
+    }
+
+    if (state.busy) return;
+
+    // ── A person's task (§9.5) ──
+    if (taskDone || taskWont) {
+      const btn = taskDone || taskWont;
+      const orderId = Number(taskDone ? taskDone.dataset.cmpTaskDone : taskWont.dataset.cmpTaskWont);
+      const campaignId = Number(btn.dataset.cmpTaskCampaign);
+      if (taskWont) {
+        // The consequence is the point of the confirm: whatever was held behind this is cancelled.
+        const waiting = Number(taskWont.dataset.cmpTaskWaiting) || 0;
+        const ok = window.confirm(
+          `Mark this task as not happening?${waiting ? `\n\nThe ${waiting} ${waiting === 1 ? 'piece' : 'pieces'} of work waiting on it will be cancelled.` : ''}`,
+        );
+        if (!ok) return;
+      }
+      state.busy = true;
+      btn.disabled = true;
+      try {
+        await post({ action: 'complete_task', orderId, outcome: taskDone ? 'done' : 'wont_happen' });
+        window.showToast?.(taskDone ? 'Done — anything waiting on it has started.' : 'Recorded. Work waiting on it was cancelled.', 'success');
+      } catch (err) {
+        say(campaignId, err.message || 'That did not work — please try again.', 'error');
+        btn.disabled = false;
+        state.busy = false;
+        return;
+      }
+      state.busy = false;
+      await load();
+      return;
+    }
+
+    // ── Save the form ──
+    if (save) {
+      const host = document.querySelector('[data-cmp-form]');
+      const val = (k) => (host?.querySelector(`[data-cmpf="${k}"]`)?.value ?? '').trim();
+      const objective = val('objective');
+      if (!objective) { formSay('Say what this campaign should achieve.', 'error'); return; }
+      const payload = {
+        objective,
+        funnelStage: val('funnelStage'),
+        // Sent even when blank: clearing the field on Edit clears the campaign's tone.
+        tone: val('tone'),
+        // '' = no umbrella (the server reads blank as "none"); absent when the field is not shown.
+        ...(host?.querySelector('[data-cmpf="parentCampaignId"]') ? { parentCampaignId: val('parentCampaignId') || null } : {}),
+        alwaysOn: !!host?.querySelector('[data-cmpf="alwaysOn"]')?.checked,
+        outcomeMetric: val('outcomeMetric'),
+        // Blank means "no target" / "no end date" — sent as null, never as 0.
+        targetValue: val('targetValue') ? Number(val('targetValue')) : null,
+        endsAt: val('endsAt') || null,
+        maxWorkItems: Number(val('maxWorkItems')) || 50,
+        // Sent whole on purpose: this form shows every audience field, so what is on screen IS the
+        // audience — clearing a field here clears it (unlike the chat, which only ever adds).
+        audience: {
+          persona: val('persona'),
+          description: val('audienceDescription'),
+          excludeDomains: val('excludeDomains'),
+        },
+        excludeExistingCustomers: !!host?.querySelector('[data-cmpf="excludeExistingCustomers"]')?.checked,
+      };
+      const f = state.form;
+      state.busy = true;
+      save.disabled = true;
+      formSay('Saving…');
+      try {
+        if (f.mode === 'edit') {
+          // `endsAt: ''` clears the date server-side; null would be ignored as "unchanged".
+          await post({ action: 'edit', campaignId: f.id, ...payload, endsAt: payload.endsAt || '' });
+          window.showToast?.('Campaign updated.', 'success');
+        } else {
+          await post({ action: 'create', assistantId: state.assistantId, ...payload });
+          window.showToast?.('Saved as a draft. Press Start on it when you are ready, or use Add work once it is running.', 'success');
+        }
+      } catch (err) {
+        formSay(err.message || 'That did not save — please try again.', 'error');
+        save.disabled = false;
+        state.busy = false;
+        return;
+      }
+      state.busy = false;
+      state.form = null;
+      await load();
+      return;
+    }
+
+    // ── Approve a plan ──
+    if (approve) {
+      const decisionId = Number(approve.dataset.cmpPlanApprove);
+      const campaignId = Number(approve.dataset.cmpPlanCampaign);
+      const tasks = approve.dataset.cmpPlanTasks;
+      const starts = approve.dataset.cmpPlanStarts === '1';
+      const ok = window.confirm(
+        `${starts ? 'Start this campaign and brief' : 'Brief'} your assistants with this plan?\n\n`
+        + `It uses ${tasks} tasks from your monthly allowance. Everything they draft still comes back `
+        + 'to you for approval, and you can pause the campaign at any time.',
+      );
+      if (!ok) return;
+      state.busy = true;
+      approve.disabled = true;
+      say(campaignId, starts ? 'Starting…' : 'Briefing…');
+      try {
+        const data = await post({ action: 'decide', decisionId, verdict: 'approve' });
+        // Counted from the server's answer, not the click: an order to an assistant this
+        // workspace has not hired fails on its own while the rest go out.
+        const placed = (data.orders || []).filter((o) => o.status !== 'failed');
+        const failed = (data.orders || []).filter((o) => o.status === 'failed');
+        window.showToast?.(
+          failed.length
+            ? `${placed.length} ${placed.length === 1 ? 'brief' : 'briefs'} sent; ${failed.length} could not be: ${failed.map((o) => o.message).filter(Boolean).join(' ')}`
+            : `${placed.length} ${placed.length === 1 ? 'brief' : 'briefs'} sent to your assistants.`,
+          failed.length ? 'error' : 'success',
+        );
+      } catch (err) {
+        say(campaignId, err.message || 'That did not work — please try again.', 'error');
+        approve.disabled = false;
+        state.busy = false;
+        return;
+      }
+      state.busy = false;
+      await load();
+      return;
+    }
+
+    // ── Turn a plan down ──
+    if (reject) {
+      const decisionId = Number(reject.dataset.cmpPlanReject);
+      const campaignId = Number(reject.dataset.cmpPlanCampaign);
+      const reason = document.querySelector(`[data-cmp-plan-reason="${decisionId}"]`)?.value || '';
+      const note = (document.querySelector(`[data-cmp-plan-note="${decisionId}"]`)?.value || '').trim();
+      if (!reason) { say(campaignId, 'Pick a reason — it is what stops the same plan coming back.', 'error'); return; }
+      state.busy = true;
+      reject.disabled = true;
+      try {
+        await post({ action: 'decide', decisionId, verdict: 'reject', reason, note: note || undefined });
+      } catch (err) {
+        say(campaignId, err.message || 'That did not work — please try again.', 'error');
+        reject.disabled = false;
+        state.busy = false;
+        return;
+      }
+      state.busy = false;
+      state.rejectingPlan = null;
+      window.showToast?.('Plan turned down. Your reason goes into the next proposal.', 'success');
+      await load();
+      return;
+    }
+
+    // ── Add work ──
+    if (awSubmit) {
+      const id = Number(awSubmit.dataset.cmpAwSubmit);
+      const st = state.addWork[id];
+      const spec = st && actionSpec(st.action);
+      if (!spec) return;
+      const prompt = BRIEF_PROMPTS[spec.key];
+      const text = (document.querySelector(`[data-cmp-aw-text="${id}"]`)?.value || '').trim();
+      if (prompt && prompt.required && !text) { say(id, `${prompt.label} is needed for this.`, 'error'); return; }
+      const brief = {};
+      if (prompt && text) brief[prompt.field] = text;
+      // An order's own audience beats the campaign's for that order's work (§9.2).
+      const forWho = (document.querySelector(`[data-cmp-aw-audience="${id}"]`)?.value || '').trim();
+      if (forWho) brief.audience = forWho;
+      if (spec.key === 'ab_test_posts') {
+        const a = (document.querySelector(`[data-cmp-aw-angle-a="${id}"]`)?.value || '').trim();
+        const b = (document.querySelector(`[data-cmp-aw-angle-b="${id}"]`)?.value || '').trim();
+        if (!a || !b) { say(id, 'Give both angles.', 'error'); return; }
+        if (a.toLowerCase() === b.toLowerCase()) { say(id, 'The two angles need to be different.', 'error'); return; }
+        brief.angleA = a;
+        brief.angleB = b;
+      }
+      if (spec.key === 'request_human_task') {
+        const assignee = (document.querySelector(`[data-cmp-aw-assignee="${id}"]`)?.value || '').trim();
+        if (!assignee) { say(id, 'Say who you are asking.', 'error'); return; }
+        brief.assignee = assignee;
+        const email = (document.querySelector(`[data-cmp-aw-email="${id}"]`)?.value || '').trim();
+        if (email) brief.assigneeEmail = email;
+        const due = document.querySelector(`[data-cmp-aw-due="${id}"]`)?.value || '';
+        if (due) brief.dueDate = due;
+        const fileIn = document.querySelector(`[data-cmp-aw-filein="${id}"]`)?.value || '';
+        if (fileIn) brief.fileIn = fileIn;
+      }
+      const waitFor = document.querySelector(`[data-cmp-aw-waitfor="${id}"]`)?.value || '';
+      if (spec.key === 'draft_email_campaign') {
+        const trigger = document.querySelector(`[data-cmp-aw-trigger="${id}"]`)?.value || '';
+        const kind = document.querySelector(`[data-cmp-aw-kind="${id}"]`)?.value || '';
+        const facts = (document.querySelector(`[data-cmp-aw-facts="${id}"]`)?.value || '').trim();
+        if (trigger) brief.emailTrigger = trigger;
+        if (kind) brief.emailKind = kind;
+        if (facts) brief.facts = facts;
+      }
+      if (spec.key === 'narrow_targeting') {
+        brief.discoveryCampaignId = Number(document.querySelector(`[data-cmp-aw-search="${id}"]`)?.value) || null;
+      }
+      const quantity = spec.takesQuantity
+        ? Math.max(1, Math.min(spec.maxQuantity, Number(document.querySelector(`[data-cmp-aw-qty="${id}"]`)?.value) || 1))
+        : 1;
+      const tasks = (spec.workItemsPerUnit || 0) * quantity;
+      if (tasks && !window.confirm(`${spec.label}${quantity > 1 ? ` ×${quantity}` : ''}?\n\nThis uses ${tasks} tasks from this campaign's budget. The work comes back to you for approval.`)) return;
+      state.busy = true;
+      awSubmit.disabled = true;
+      say(id, 'Briefing…');
+      try {
+        await post({ action: 'place_order', campaignId: id, orderAction: spec.key, quantity, brief, waitFor: waitFor || undefined });
+      } catch (err) {
+        say(id, err.message || 'That did not work — please try again.', 'error');
+        awSubmit.disabled = false;
+        state.busy = false;
+        return;
+      }
+      state.busy = false;
+      st.open = false;
+      window.showToast?.(`${spec.label} — briefed. It is listed in Orders.`, 'success');
+      await load();
+    }
+  });
+
   // ── Writes made from outside this tab ──────────────────────────────────────
   /**
    * A campaign created from the chat window (CampaignStrategyProposalCard → chat-session.js) writes
@@ -1353,6 +2546,131 @@
     if (!state.assistantId || Number(id) !== Number(state.assistantId)) return;
     load();
   });
+  // A plan or an edit saved from the chat (chat-session.js). Same reason, same check.
+  document.addEventListener('campaign:updated', (e) => {
+    const id = e.detail && e.detail.assistantId;
+    if (!state.assistantId || Number(id) !== Number(state.assistantId)) return;
+    load();
+  });
+
+  // ── The year view (§9.4) ───────────────────────────────────────────────────
+  // Drawn at the top of this assistant's Calendar tab (assistant-calendar.js calls renderTimeline).
+  // One row per campaign across twelve months: its flight as a bar, children indented under their
+  // umbrella, always-on campaigns as a pale band to the end of the year, a tick for every post and
+  // article it commissioned, and a line for today. Read-only — every change happens on the row.
+  //
+  // A draft that has never started has no flight to draw; it is listed with "not started" rather
+  // than given an invented one from its creation date.
+  const timeline = { year: new Date().getFullYear(), data: null, error: null, host: null };
+
+  function pctOfYear(d, year) {
+    const start = Date.UTC(year, 0, 1);
+    const end = Date.UTC(year + 1, 0, 1);
+    return Math.max(0, Math.min(100, ((d.getTime() - start) / (end - start)) * 100));
+  }
+
+  function timelineHtml() {
+    const year = timeline.year;
+    const nav = `
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-sm font-bold text-gray-900">Campaign year</p>
+        <div class="flex items-center gap-2">
+          <button type="button" data-cmp-tl-year="${year - 1}" class="btn-utility px-2 py-1 text-xs font-bold rounded-lg">‹ ${year - 1}</button>
+          <span class="text-xs font-bold text-gray-700">${year}</span>
+          <button type="button" data-cmp-tl-year="${year + 1}" class="btn-utility px-2 py-1 text-xs font-bold rounded-lg">${year + 1} ›</button>
+        </div>
+      </div>`;
+    if (timeline.error) return `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">${nav}<p class="text-xs text-red-600">${esc(timeline.error)}</p></div>`;
+    if (!timeline.data) return `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">${nav}<p class="text-xs text-gray-400">Loading…</p></div>`;
+    const rows = timeline.data.campaigns || [];
+    if (!rows.length) return `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">${nav}<p class="text-xs text-gray-500">No campaigns yet — your year fills in as you create them.</p></div>`;
+
+    const yStart = new Date(Date.UTC(year, 0, 1));
+    const yEnd = new Date(Date.UTC(year + 1, 0, 1));
+    const now = new Date();
+    const months = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+    const ids = new Set(rows.map((r) => r.id));
+    const ordered = [];
+    rows.filter((r) => !r.parentCampaignId || !ids.has(r.parentCampaignId)).forEach((r) => {
+      ordered.push({ r, child: false });
+      rows.filter((k) => k.parentCampaignId === r.id).forEach((k) => ordered.push({ r: k, child: true }));
+    });
+    const COLOUR = { active: 'bg-emerald-600', throttled: 'bg-amber-400', paused: 'bg-amber-400', finished: 'bg-gray-400', draft: 'bg-gray-300' };
+
+    const line = ({ r, child }) => {
+      const start = r.startsAt ? new Date(r.startsAt) : null;
+      let bar = '';
+      if (start) {
+        const end = r.alwaysOn ? yEnd
+          : r.endsAt ? new Date(r.endsAt)
+            : (r.status === 'active' || r.status === 'throttled') ? now : start;
+        if (end >= yStart && start < yEnd) {
+          const left = pctOfYear(start, year);
+          const width = Math.max(0.6, pctOfYear(end, year) - left);
+          // ⚠️ Not emerald-200: that step is remapped to the brand pink (emerald-is-neon-pink), which
+          // read as the "today" line. The band is the running green, lighter.
+          const cls = r.alwaysOn ? 'bg-emerald-600 opacity-60' : (COLOUR[r.status] || 'bg-gray-300');
+          bar = `<div class="absolute inset-y-0 ${cls} rounded-md" style="left:${left}%;width:${width}%"></div>`;
+        }
+      }
+      const ticks = (timeline.data.items || [])
+        .filter((i) => i.campaignId === r.id)
+        .map((i) => new Date(i.at))
+        .filter((d) => d >= yStart && d < yEnd)
+        .map((d) => `<div class="absolute bg-gray-900" style="left:${pctOfYear(d, year)}%;top:20%;bottom:20%;width:2px"></div>`)
+        .join('');
+      const note = !start ? 'not started' : r.alwaysOn ? 'always on' : (C() ? C().statusLabel(r.status) : r.status);
+      return `
+        <div class="flex items-center gap-3">
+          <div class="w-48 shrink-0 ${child ? 'pl-4' : ''}">
+            <p class="text-xs ${child ? 'text-gray-700' : 'font-bold text-gray-900'} truncate" title="${esc(r.objective)}">${esc(r.objective)}</p>
+            <p class="text-[11px] text-gray-400">${esc(note)}</p>
+          </div>
+          <div class="relative flex-1 h-6 bg-gray-100 rounded-md overflow-hidden">${bar}${ticks}</div>
+        </div>`;
+    };
+
+    const todayPct = now >= yStart && now < yEnd ? pctOfYear(now, year) : null;
+    return `
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+        ${nav}
+        <div class="flex items-center gap-3 mb-1">
+          <div class="w-48 shrink-0"></div>
+          <div class="relative flex-1 flex">${months.map((m) => `<span class="flex-1 text-[11px] text-gray-400">${m}</span>`).join('')}</div>
+        </div>
+        <div class="relative space-y-2">
+          ${ordered.map(line).join('')}
+          ${todayPct !== null ? `<div class="absolute top-0 bottom-0 bg-indigo-600" style="left:calc(12rem + 0.75rem + (100% - 12rem - 0.75rem) * ${todayPct / 100});width:2px" title="Today"></div>` : ''}
+        </div>
+        <p class="text-[11px] text-gray-400 mt-3">Bars are each campaign's dates; pale bands are always-on campaigns; each mark is a post or article it commissioned. Campaigns inside an umbrella are indented under it.</p>
+      </div>`;
+  }
+
+  async function loadTimeline() {
+    if (!state.assistantId) return;
+    try {
+      timeline.data = await post({ action: 'timeline', assistantId: state.assistantId });
+      timeline.error = null;
+    } catch (err) {
+      timeline.error = err.message || 'Could not load the campaign year.';
+    }
+    if (timeline.host && timeline.host.isConnected) timeline.host.innerHTML = timelineHtml();
+  }
+
+  function renderTimeline(host) {
+    timeline.host = host;
+    host.innerHTML = timelineHtml();
+    loadTimeline();
+  }
+
+  // Bound once at load, on document — never from the render path (the host is replaced on each
+  // navigation, and a listener bound to it would die with it).
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-cmp-tl-year]');
+    if (!btn || !timeline.host) return;
+    timeline.year = Number(btn.dataset.cmpTlYear) || timeline.year;
+    timeline.host.innerHTML = timelineHtml();
+  });
 
   // ── Public API ─────────────────────────────────────────────────────────────
   window.AssistantCampaigns = {
@@ -1365,6 +2683,8 @@
       // activate this one.
       load();
     },
+    /** The year view, drawn into `host` (the Calendar tab, §9.4). */
+    renderTimeline,
     /** Called on first activation of the tab. Cheap if init() already loaded. */
     activate() {
       if (state.rendered) return;

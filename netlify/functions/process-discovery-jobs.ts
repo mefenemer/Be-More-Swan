@@ -37,6 +37,7 @@ import { enqueueScenarioTrigger } from '../../src/utils/scenario-engine';
 import { recordEvent } from '../../src/utils/revenue-ledger';
 import { getBlueprintVersion } from '../../src/utils/blueprint-version';
 import { getIcpSnapshot } from '../../src/utils/icp-snapshot';
+import { campaignExclusionsForSearch } from '../../src/utils/customer-exclusion';
 import {
     companiesPhrase, coverageSentence, outcomeSentence, isComplete,
     type RunStopReason,
@@ -289,7 +290,18 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
         // one job is one campaign is one assistant, and a recompile mid-run should not split a
         // single run's events across two versions.
         const blueprintVersion = await getBlueprintVersion(db, campaign.aiAssistantId);
-        const guardrails = await loadGuardrails(db, job.campaign_id);
+        const loadedGuardrails = await loadGuardrails(db, job.campaign_id);
+        // A search a Campaign Assistant order points at also skips the campaign's existing
+        // customers and its "also leave out" list — resolved fresh each run, so a deal marked won
+        // yesterday is not hunted today (src/utils/customer-exclusion.ts). Hand-built searches are
+        // untouched: this returns [] for them.
+        // ⚠️ A COPY, never an assignment: with no guardrail row loadGuardrails returns the shared
+        // module-level DEFAULT_GUARDRAILS, and mutating it would leak this campaign's customer list
+        // into every later run in the same warm function — another tenant's included.
+        const campaignExclusions = await campaignExclusionsForSearch(db, job.campaign_id);
+        const guardrails: Guardrails = campaignExclusions.length
+            ? { ...loadedGuardrails, excludedDomains: [...new Set([...loadedGuardrails.excludedDomains, ...campaignExclusions])] }
+            : loadedGuardrails;
 
         // Current run counters (persisted on the job row).
         const [state] = await db

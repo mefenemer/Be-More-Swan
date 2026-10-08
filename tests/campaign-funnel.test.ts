@@ -305,7 +305,10 @@ check('a failed create does NOT re-render, so the typed address survives', () =>
 
 check('the link status line pins style.display, not just the class', () => {
     // `hidden` loses to a class that sets display — the trap the tab badge above already documents.
-    const fn = ui.slice(landmark(ui, 'function sayLink('), landmark(ui, 'document.addEventListener(\'change\''));
+    // End bound searched FROM sayLink: the first change listener in the file is no longer the one
+    // after it (§9.4/§9.5 added listeners earlier), and a bound before the start slices to ''.
+    const start = landmark(ui, 'function sayLink(');
+    const fn = ui.slice(start, landmark(ui, 'document.addEventListener(\'change\'', start));
     assert.match(fn, /el\.style\.display = '';/);
 });
 

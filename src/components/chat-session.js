@@ -493,6 +493,16 @@
           targetValue: d.targetValue,
           maxWorkItems: d.maxWorkItems,
           endsAt: d.endsAt,
+          audience: d.audience || null,
+          funnelStage: d.funnelStage,
+          tone: d.tone || undefined,
+          attachAssetIds: Array.isArray(d.attachAssetIds) ? d.attachAssetIds : [],
+          parentCampaignId: d.parentCampaignId || undefined,
+          alwaysOn: d.alwaysOn === true,
+          excludeExistingCustomers: d.excludeExistingCustomers !== false,
+          // The plan's briefs. The server files them as a PENDING plan on the draft — it places
+          // nothing. Dropping them here is what left prod's first campaign briefing nobody.
+          orders: Array.isArray(d.orders) ? d.orders : [],
         }),
       })
         .then(async (res) => {
@@ -511,6 +521,98 @@
           console.error('[ChatSession] campaign create failed:', err);
           respond({ ok: false, error: err.message });
         });
+    }
+
+    // Shared by the two handlers below: post, report the server's answer to the card, and tell the
+    // Campaigns tab behind this modal to reload (same reason as campaign:created above).
+    function postCampaignChange(payload, respond, campaignId) {
+      fetch('/.netlify/functions/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(payload),
+      })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `Save failed (HTTP ${res.status}).`);
+          respond({ ok: true });
+          document.dispatchEvent(new CustomEvent('campaign:updated', { detail: { assistantId, campaignId } }));
+        })
+        .catch((err) => {
+          console.error('[ChatSession] campaign change failed:', err);
+          respond({ ok: false, error: err.message });
+        });
+    }
+
+    // "Save this plan" on a proposal card naming an existing campaign. FILES a pending plan —
+    // propose_plan never places an order; the user approves it on the Campaigns tab (§1.3).
+    function onCampaignProposePlan(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      postCampaignChange({ action: 'propose_plan', campaignId: d.campaignId, orders: d.orders }, respond, d.campaignId);
+    }
+
+    // "Mark done" / "Confirm" on a campaign_task_update card (§9.5) — the same complete_task the
+    // Campaigns tab's buttons call. The user's click on the card is the confirmation.
+    function onCampaignTaskUpdate(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      postCampaignChange({
+        action: 'complete_task',
+        orderId: d.orderId,
+        outcome: d.outcome === 'wont_happen' ? 'wont_happen' : 'done',
+        note: d.note || undefined,
+      }, respond, null);
+    }
+
+    // "Keep this lesson" on a campaign_learning_proposal card (§9.8) — the same save_learning the
+    // Summary panel's "Keep" calls. Reports how many assistants got the rule, from the server.
+    function onCampaignSaveLearning(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          action: 'save_learning', campaignId: d.campaignId || null, text: d.text,
+          source: 'user', applyToDrafting: d.applyToDrafting === true,
+        }),
+      })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `Save failed (HTTP ${res.status}).`);
+          respond({ ok: true, appliedTo: data.appliedTo });
+          document.dispatchEvent(new CustomEvent('campaign:updated', { detail: { assistantId, campaignId: d.campaignId || null } }));
+        })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
+    // "Save these changes" on a campaign_edit_proposal card. Sends ONLY the descriptive fields,
+    // and marks the call viaChat so the server refuses any budget field outright — a chat turn
+    // may never raise a ceiling, whatever a card happens to carry.
+    function onCampaignEdit(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const c = d.changes || {};
+      postCampaignChange({
+        action: 'edit',
+        campaignId: d.campaignId,
+        viaChat: true,
+        objective: c.objective,
+        outcomeMetric: c.outcomeMetric,
+        targetValue: c.targetValue,
+        endsAt: c.endsAt,
+        audience: c.audience,
+        funnelStage: c.funnelStage,
+        tone: c.tone,
+        attachAssetIds: c.attachAssetIds,
+        detachAssetIds: c.detachAssetIds,
+        parentCampaignId: c.parentCampaignId,
+        alwaysOn: c.alwaysOn,
+        // Only ever true from the chat; the server refuses false on this path anyway.
+        excludeExistingCustomers: c.excludeExistingCustomers === true ? true : undefined,
+      }, respond, d.campaignId);
     }
 
     // "Save this draft" on a BlogPostDraftCard (disruptive-ui-registry.js). Unlike the two
@@ -719,6 +821,10 @@
     container.addEventListener('handoff:response', onHandoffResponse);
     container.addEventListener('discovery:create', onDiscoveryCreate);
     container.addEventListener('campaign:create', onCampaignCreate);
+    container.addEventListener('campaign:proposePlan', onCampaignProposePlan);
+    container.addEventListener('campaign:edit', onCampaignEdit);
+    container.addEventListener('campaign:taskUpdate', onCampaignTaskUpdate);
+    container.addEventListener('campaign:saveLearning', onCampaignSaveLearning);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
     container.addEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
@@ -750,6 +856,10 @@
         container.removeEventListener('handoff:response', onHandoffResponse);
         container.removeEventListener('discovery:create', onDiscoveryCreate);
         container.removeEventListener('campaign:create', onCampaignCreate);
+        container.removeEventListener('campaign:proposePlan', onCampaignProposePlan);
+        container.removeEventListener('campaign:edit', onCampaignEdit);
+        container.removeEventListener('campaign:taskUpdate', onCampaignTaskUpdate);
+        container.removeEventListener('campaign:saveLearning', onCampaignSaveLearning);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
         container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);

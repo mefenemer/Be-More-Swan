@@ -235,7 +235,12 @@ check('the tracing column the whole file depends on is declared in both places',
     assert.ok(read('db/campaign-order-tracing.sql').includes('ADD COLUMN IF NOT EXISTS campaign_order_id'), 'no DDL');
     const orders = stripComments(read('src/utils/campaign-orders.ts'));
     const stamps = [...orders.matchAll(/campaignOrderId:\s*orderId/g)];
-    assert.equal(stamps.length, 2, `expected both content executors to stamp the order id, found ${stamps.length}`);
+    // One stamp per content executor — the reconciler follows exactly the actions in CONTENT_ACTIONS,
+    // so the expected count comes from that list (§9.8 added ab_test_posts as a third).
+    const rec = stripComments(read('src/utils/campaign-reconciler.ts'));
+    const listed = (rec.match(/CONTENT_ACTIONS: readonly CampaignOrderAction\[\] = \[([^\]]*)\]/)?.[1] ?? '').split(',').filter((x) => x.trim()).length;
+    assert.ok(listed >= 2, 'Could not read CONTENT_ACTIONS from the reconciler.');
+    assert.equal(stamps.length, listed, `expected every content executor (${listed}) to stamp the order id, found ${stamps.length}`);
 });
 
 console.log(`\n${passed} checks passed.\n`);

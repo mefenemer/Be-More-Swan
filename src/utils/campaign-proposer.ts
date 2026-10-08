@@ -67,6 +67,18 @@ export interface LiveCampaign {
     organisationId: number;
     aiAssistantId: number;
     objective: string;
+    /** §9.6 — optional so the plan-filing callers, which never propose a halt, need not read it. */
+    funnelStage?: string | null;
+}
+
+/**
+ * Stages the lead-quality halt may fire for. A halt says "the leads this campaign finds are bad,
+ * stop finding them" — meaningful only for a campaign whose purpose is finding leads. Missing stage
+ * (pre-§9.6 callers) is treated as conversion, which every such campaign was.
+ */
+export const HALT_STAGES: readonly string[] = ['conversion'];
+export function mayProposeHalt(stage: string | null | undefined): boolean {
+    return HALT_STAGES.includes(stage ?? 'conversion');
 }
 
 /** One structured fact. Never prose a model wrote — every field here came out of a COUNT or an AVG. */
@@ -82,7 +94,7 @@ export interface ProposedDecision {
     evidence: EvidenceItem[];
     costOfInaction: string;
     /** Applied verbatim by campaigns.ts `decide`. The model gets no turn between approval and execution. */
-    orders: Array<{ action: string; brief: Record<string, unknown>; quantity: number }>;
+    orders: Array<{ action: string; brief: Record<string, unknown>; quantity: number; after?: number }>;
 }
 
 /** Sum the work items a proposal would cost, so the card can state it before approval. */
@@ -393,6 +405,7 @@ export async function liveCampaignsForRun(db: Db, limit: number): Promise<LiveCa
             organisationId: campaigns.organisationId,
             aiAssistantId: campaigns.aiAssistantId,
             objective: campaigns.objective,
+            funnelStage: campaigns.funnelStage,
         })
         .from(campaigns)
         .where(inArray(campaigns.status, ['active', 'throttled']))

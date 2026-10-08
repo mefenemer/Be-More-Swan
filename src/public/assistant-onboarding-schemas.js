@@ -216,9 +216,9 @@
         fields: [
           {
             // Must stay in step with CAMPAIGN_OUTCOME_METRICS in src/config/campaign-vocab.ts,
-            // minus UNAVAILABLE_OUTCOME_METRICS. `signups` is deliberately absent: nothing counts
-            // it until the Phase 2 capture page exists, and an outcome that always reads zero is
-            // worse than one the user did not pick.
+            // minus UNAVAILABLE_OUTCOME_METRICS (email engagement waits for §9.7 — an outcome that
+            // always reads zero is worse than one the user did not pick). A campaign's stage can
+            // still overrule this default: an awareness campaign is never measured on leads.
             key: 'defaultOutcomeMetric',
             label: 'How should a campaign measure success?',
             type: 'dropdown',
@@ -226,8 +226,11 @@
             placeholder: 'Choose what to count…',
             options: [
               { value: 'leads', label: 'New leads found' },
-              { value: 'replies', label: 'Replies from prospects' },
+              { value: 'replies', label: 'Replies received' },
               { value: 'published_content', label: 'Pieces published' },
+              { value: 'signups', label: 'Signups captured' },
+              { value: 'engagement', label: 'Engagements on its posts' },
+              { value: 'clicks', label: 'Clicks on its tracked links' },
             ],
           },
           {

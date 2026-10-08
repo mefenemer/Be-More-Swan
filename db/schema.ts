@@ -3965,6 +3965,18 @@ export const campaigns = pgTable("campaigns", {
   objective: text().notNull(),
   outcomeMetric: text("outcome_metric").notNull().default("leads"),
   targetValue: integer("target_value"),
+  // 'awareness' | 'consideration' | 'conversion' | 'retention' (db/z-campaign-funnel-stage.sql,
+  // plan §9.6). Decides which outcomes may be the target, what drafting optimises for, and whether
+  // the lead-quality halt may fire. Every pre-§9.6 campaign was a lead campaign, hence the default.
+  funnelStage: text("funnel_stage").notNull().default("conversion"),
+  // The tone this campaign asks for, inside the brand voice (db/z-campaign-creative.sql, §9.3) —
+  // "warm, no discount language". Quoted into blueprint §13. NULL = the brand voice alone.
+  tone: text(),
+  // Umbrella → child, ONE level (db/z-campaign-hierarchy.sql, §9.4; depth enforced in campaigns.ts).
+  // SET NULL: removing an umbrella never takes its campaigns with it. Budgets do not roll down.
+  parentCampaignId: integer("parent_campaign_id").references((): AnyPgColumn => campaigns.id, { onDelete: "set null" }),
+  // Business-as-usual: no end date, ever (CHECK below). Drawn as a band on the year view.
+  alwaysOn: boolean("always_on").notNull().default(false),
   // 'organic' | 'paid' | 'blended'. Phase 1 creates only 'organic'; the others are refused at the
   // HTTP boundary until the ad rails exist.
   mode: text().notNull().default("organic"),
@@ -3983,6 +3995,14 @@ export const campaigns = pgTable("campaigns", {
   haltReason: text("halt_reason"),
   haltedAt: timestamp("halted_at"),
   haltedBy: integer("halted_by").references(() => users.id, { onDelete: "set null" }),
+
+  // ── Audience (db/z-campaign-audience.sql, plan §9.2) ──
+  // { persona?, description?, excludeDomains? } — CampaignAudience in src/config/campaign-audience.ts.
+  // NULL = not said yet; the directive omits the line rather than inventing an audience.
+  audience: jsonb(),
+  // Leave companies already marked "won" out of this campaign's lead searches. Default ON: an
+  // acquisition campaign hunting existing customers wastes the budget it was given.
+  excludeExistingCustomers: boolean("exclude_existing_customers").notNull().default(true),
 
   // ── Paid rails (db/campaign-paid.sql). NULL on every organic campaign, which is all of them. ──
   adNetwork: text("ad_network"),
@@ -4003,6 +4023,10 @@ export const campaigns = pgTable("campaigns", {
 }, (t) => [
   index("campaigns_assistant_idx").on(t.organisationId, t.aiAssistantId, t.status),
   index("campaigns_active_idx").on(t.status, t.endsAt).where(sql`status IN ('active','throttled')`),
+  check("campaigns_parent_not_self_check", sql`${t.parentCampaignId} IS NULL OR ${t.parentCampaignId} <> ${t.id}`),
+  check("campaigns_always_on_no_end_check", sql`NOT ${t.alwaysOn} OR ${t.endsAt} IS NULL`),
+  index("campaigns_parent_idx").on(t.parentCampaignId).where(sql`parent_campaign_id IS NOT NULL`),
+  check("campaigns_funnel_stage_check", sql`${t.funnelStage} IN ('awareness','consideration','conversion','retention')`),
   check("campaigns_mode_check", sql`${t.mode} IN ('organic','paid','blended')`),
   check("campaigns_status_check", sql`${t.status} IN ('draft','active','throttled','paused','finished','archived')`),
   check("campaigns_halt_reason_check", sql`${t.status} <> 'paused' OR ${t.haltReason} IS NOT NULL`),
@@ -4134,12 +4158,76 @@ export const campaignOrders = pgTable("campaign_orders", {
   index("campaign_orders_target_idx").on(t.targetAssistantId, t.status),
   check("campaign_orders_status_check", sql`${t.status} IN ('queued','issued','in_review','delivered','blocked','cancelled','rejected')`),
   check("campaign_orders_cost_check", sql`${t.costWorkItems} >= 0 AND ${t.costGbp} >= 0`),
-  check("campaign_orders_artefact_check", sql`${t.artefactKind} IS NULL OR ${t.artefactKind} IN ('scheduled_post','blog_post','discovery_campaign','assistant_record')`),
+  // Widened by db/z-campaign-email-orders.sql (§9.7) — an email order's artefact is a sequence or an email.
+  check("campaign_orders_artefact_check", sql`${t.artefactKind} IS NULL OR ${t.artefactKind} IN ('scheduled_post','blog_post','discovery_campaign','assistant_record','newsletter_sequence','newsletter_issue')`),
   check("campaign_orders_no_self_block_check", sql`${t.blockedOnOrderId} IS NULL OR ${t.blockedOnOrderId} <> ${t.id}`),
 ]);
 
 // APPEND-ONLY ledger of budget actually consumed. A correction is a new compensating row with a
 // negative amount, never an edit — history that can be rewritten cannot be audited.
+// A campaign's own visuals (db/z-campaign-creative.sql, §9.3). A link table, not a column on
+// content_assets: one picture can serve two campaigns, and content_assets is read with bare selects
+// that a new column would break on an un-migrated environment. Posts a campaign commissions use
+// these first (media-resolver.ts), least-used first, before the assistant's usual sources.
+export const campaignAssets = pgTable("campaign_assets", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").notNull().references(() => campaigns.id, { onDelete: "cascade" }),
+  contentAssetId: integer("content_asset_id").notNull().references(() => contentAssets.id, { onDelete: "cascade" }),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("campaign_assets_pair_uidx").on(t.campaignId, t.contentAssetId),
+  index("campaign_assets_asset_idx").on(t.contentAssetId),
+]);
+
+// ── A/B tests and campaign learnings (db/z-campaign-learning.sql, plan §9.8) ──
+// One `ab_test_posts` order drafts N posts per angle. Each drafting job's variant is tagged in
+// campaignExperimentJobs (not a new content_generation_jobs column — several workers read that
+// table), and the drafting worker gives each job ITS angle from here.
+export const campaignExperiments = pgTable("campaign_experiments", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").notNull().references(() => campaigns.id, { onDelete: "cascade" }),
+  orderId: integer("order_id").references((): AnyPgColumn => campaignOrders.id, { onDelete: "set null" }),
+  hypothesis: text().notNull(),
+  angleA: text("angle_a").notNull(),
+  angleB: text("angle_b").notNull(),
+  postsPerVariant: integer("posts_per_variant").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("campaign_experiments_campaign_idx").on(t.campaignId),
+  uniqueIndex("campaign_experiments_order_uidx").on(t.orderId).where(sql`order_id IS NOT NULL`),
+  check("campaign_experiments_posts_check", sql`${t.postsPerVariant} BETWEEN 1 AND 20`),
+]);
+
+export const campaignExperimentJobs = pgTable("campaign_experiment_jobs", {
+  jobId: integer("job_id").primaryKey().references((): AnyPgColumn => contentGenerationJobs.id, { onDelete: "cascade" }),
+  experimentId: integer("experiment_id").notNull().references(() => campaignExperiments.id, { onDelete: "cascade" }),
+  variant: text().notNull(),
+}, (t) => [
+  index("campaign_experiment_jobs_exp_idx").on(t.experimentId, t.variant),
+  check("campaign_experiment_jobs_variant_check", sql`${t.variant} IN ('A','B')`),
+]);
+
+// What the user chose to keep from a finished campaign or a concluded test. Read by the Campaign
+// Assistant's chat when it plans the next one; optionally ALSO written as a content_rules row
+// (origin 'campaign_learning') on each writing assistant the campaign briefed. SET NULL: a lesson
+// outlives its campaign.
+export const campaignLearnings = pgTable("campaign_learnings", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
+  learning: text().notNull(),
+  source: text().notNull(),
+  appliedToDrafting: boolean("applied_to_drafting").notNull().default(false),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("campaign_learnings_org_idx").on(t.organisationId, t.createdAt),
+  check("campaign_learnings_source_check", sql`${t.source} IN ('summary','test','user')`),
+]);
+
 export const campaignSpendEvents = pgTable("campaign_spend_events", {
   id: bigint({ mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
@@ -4636,6 +4724,9 @@ export const newsletterIssues = pgTable("newsletter_issues", {
   // stops a republish drafting a second issue about the same post. SET NULL, not CASCADE — an
   // issue may already have been sent, and deleting the post must not delete the record of it.
   sourceBlogPostId: integer("source_blog_post_id").references(() => blogPosts.id, { onDelete: "set null" }),
+  // The Campaign Assistant order that commissioned this email (db/z-campaign-email-orders.sql, §9.7).
+  // How a campaign counts its email opens and clicks. SET NULL: a sent email outlives its order.
+  campaignOrderId: integer("campaign_order_id").references((): AnyPgColumn => campaignOrders.id, { onDelete: "set null" }),
   // Set on an issue that IS a resend, pointing at the one it repeats. ⚠️ Unique where not null:
   // one resend per issue, ever — a retry or a double-click must not mail the same people twice.
   // The resend carries its OWN counters, so "did the second subject line do better?" is a
@@ -4794,6 +4885,8 @@ export const newsletterSequences = pgTable("newsletter_sequences", {
   enabledAt: timestamp("enabled_at"),
   enabledBy: integer("enabled_by").references(() => users.id, { onDelete: "set null" }),
   createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  // The Campaign Assistant order that commissioned this email campaign (§9.7). Saved switched OFF.
+  campaignOrderId: integer("campaign_order_id").references((): AnyPgColumn => campaignOrders.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [

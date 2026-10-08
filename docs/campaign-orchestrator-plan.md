@@ -2,8 +2,9 @@
 
 **roleKey:** `campaign_orchestrator` (snake_case, to be added verbatim to `db/seed-catalog.ts`)
 **Display name:** Campaign Orchestrator
-**Status:** design only — nothing built. Mockup: `docs/mockups/campaign-orchestrator-mockup.html`
-**Written:** 2026-08-06
+**Status:** Phase 1 + paid rails built (catalog name "Campaign Assistant"). ⚠️ A started campaign
+places no orders — see §9.1, which blocks everything in §9. Mockup: `docs/mockups/campaign-orchestrator-mockup.html`
+**Written:** 2026-08-06 · **§9 added:** 2026-10-08 (marketing review)
 
 ---
 
@@ -340,3 +341,303 @@ UI traps to carry in: **`hidden` loses to `inline-flex`** — any new tab badge 
 `_setDetailRqTabBadge` and pin `style.display`, or it renders as an empty amber dot. Reuse
 compiled Tailwind classes so `style.css` needs no rebuild (`tailwind-rebuild-drift`);
 `last:border-b-0` is not in the compiled sheet.
+
+---
+
+## 9. Marketing review — Phase 4 (added 2026-10-08)
+
+A marketing-manager review of this plan. The verdict: keep the Effort Ledger, but the plan solves
+for system architecture and misses how a team actually plans and runs a year of marketing. It asks
+for a **hybrid team orchestrator** — AI and human colleagues, audiences, brand assets, a campaign
+hierarchy — not "an AI blog-and-tweet factory". Each point below was checked against the code on
+2026-10-08; most of the building blocks already exist elsewhere in the product and are simply not
+wired to campaigns.
+
+### 9.0 The rule for every item in this section: GUI and chat parity
+
+Every capability here ships **twice, in the same commit**: a manual control on the campaign
+surface, and the same outcome reachable by talking to the assistant. A capability that exists in
+only one of the two is not done.
+
+- **One server path.** The GUI and the chat call the same `campaigns.ts` action with the same
+  validation. Chat never gets its own write path — a guard that holds for one caller holds for
+  exactly one caller (§5).
+- **Chat writes produce a card, the card writes the row.** The model proposes a `uiElement`; the
+  user's click on that card performs the write; the reply is built from the write's return value,
+  never from the model's intent (`chat-claims-drafts-it-never-saved`).
+- **Every chat write dispatches a `document` event** (`campaign:updated`, alongside the existing
+  `campaign:created`) so the tab behind the chat modal re-renders. There is no generic mechanism.
+- **The §1.3 invariant is unchanged and applies to every new capability**: a chat turn may create
+  and edit *drafts* and *proposals*, but can never start a campaign, raise a ceiling, resume a
+  pause, send to a human, or spend. Those are clicks on the campaign surface with the numbers
+  visible. Where the table below says "proposal", the chat card files a pending decision that
+  the user approves on the Decisions tab or the card itself — never auto-applied.
+- **No £ figure in any chat card** (§6) — including in hierarchy and budget views.
+- **The system prompt names every new tab, field and button verbatim**, and
+  `tests/campaign-prompt-surfaces.test.ts` pins each one, so the assistant can tell the user where
+  the manual control lives and never invents one.
+
+| Capability | Manual (GUI) | Chat |
+|---|---|---|
+| Audience / persona / funnel stage | Fields on the campaign create/edit form | Set in the strategy proposal card; "change the audience to…" → edit card |
+| Exclude existing customers | Toggle on the campaign (default ON for acquisition stages) | Stated in the proposal card; chat can turn it ON, never OFF without the user's click |
+| Campaign tone & assets | Tone field + asset picker on the campaign | "Use the holiday guidelines / these images" → edit card listing the assets it will attach |
+| Parent / child, always-on | Parent picker + always-on flag; Calendar year view | "Put this under Summer Rebrand" → edit card; "what's running this year?" → read-only summary |
+| Commission AI work (orders) | "Add work" on the campaign row | Orders inside a proposal → pending decision |
+| Human tasks | "Assign to a person" on the campaign row; mark done | Proposed as an order; ticket created only on the user's approval |
+| Email nurture | "Add work → Email campaign" | Proposed as an order to the Email Marketing Assistant |
+| A/B test | "Test two angles" on the campaign | "Test angle X vs Y" → test card with hypothesis |
+| Post-mortem | "Campaign summary" on a finished row; save learnings | "How did the campaign go?" → the same summary; "remember that" → save-learning card |
+
+### 9.1 Prerequisite — orders must actually flow (BLOCKING)
+
+Found 2026-10-08: a started campaign briefs nobody. `start` only flips status; the chat proposal's
+`orders` are dropped by `chat-session.js` `onCampaignCreate` and ignored by `create`; decision kind
+`strategy` is handled by `decide` but nothing ever inserts one; `place_order` has no caller.
+Prod's only campaign has run since 2026-09-30 with zero orders.
+
+- **Chat:** `create` persists the proposal's orders as a pending `strategy` decision. Approving it
+  places them verbatim and starts the campaign (the path `decide` already implements).
+- **GUI:** a campaign create/edit form on the Campaigns tab (today chat is the ONLY way to create
+  a campaign, and the `edit` action has no client), plus "Add work" on each row → `place_order`.
+- Every subsection below extends the order system, so none of it is worth building first.
+
+**✅ Built 2026-10-08 (not yet deployed; no DDL).** `src/utils/campaign-plan.ts` files a chat plan
+as a pending `strategy` decision (a newer plan supersedes the old one); `create` and the new
+`propose_plan` action file it, and never place it. Approving it (on the campaign row as
+"Approve plan & start", or in Decisions) checks the monthly cap and the whole plan against the
+budget, activates the campaign **before** placing its orders (section 13 only compiles live
+campaigns), then places them. The Campaigns tab gained "New campaign", "Edit", "Add work"
+(→ `place_order`) and the plan block; the chat gained a campaigns snapshot, `campaignId` on the
+proposal (add work to an existing campaign) and a `campaign_edit_proposal` card that cannot touch
+the budget (`viaChat` refuses it server-side). Fixed on the way: executors read `brief.quantity`
+while the ledger priced `quantity` (6 posts priced, 1 drafted); chat briefs carried no `idea` /
+`angle`, so lead searches and messaging changes could never run; a blank target saved as 1; blog
+pillars priced up to 20 but drafted at most 5. Guarded by `tests/campaign-plan-flow.test.ts`.
+
+### 9.2 Audience, personas, suppression
+
+**Exists:** campaign-first `icpSnapshot` resolver (Lead Generator), `audience_segments` (Email
+Marketing Assistant), a `brief.persona` slot on orders that nothing populates.
+**Build:**
+- `campaigns.audience` (jsonb: persona name, description, segment id or ICP override) and
+  `campaigns.funnel_stage` (§9.6). Carried into every order's brief and into blueprint section
+  `13-campaign` so drafting writes *for someone* — both seams, as §4 requires.
+- Per-order persona override, so one campaign can brief the Blog Writer for Persona A and the Lead
+  Generator for Persona B.
+- **Existing-customer exclusion.** `checkSuppression` covers opt-outs only; nothing stops a
+  `run_lead_search` order finding companies that are already customers. Exclude domains from won
+  outcomes / CRM contacts at discovery time, default ON for awareness/consideration/conversion
+  campaigns, OFF for retention (where customers ARE the audience).
+
+**✅ Built 2026-10-08 (not yet deployed). ⚠️ Needs `db/z-campaign-audience.sql` applied to BOTH
+envs BEFORE the code deploys** (`requireCampaign` selects every column). `campaigns.audience`
+(persona, description, excludeDomains) + `exclude_existing_customers` (default TRUE until §9.6
+sets it per stage). Pure helpers in `src/config/campaign-audience.ts`. Drafting: blueprint §13
+reads `audienceLine(campaign.audience, order.brief.audience)` — the order's own audience wins.
+Lead searches: `src/utils/customer-exclusion.ts` resolves, on every run, the domains of leads
+marked WON in Conversations plus the campaign's "also leave out" list, for searches a campaign
+order points at only (hand-built searches untouched); merged into a COPY of the guardrails.
+Customers the platform never saw can only be excluded by domain — there is no tenant customer
+list to read. Segment ids are deferred to §9.7. GUI: form fields, an audience line on every row
+("No audience set" when missing), per-brief audience on Add work. Chat: proposal + edit cards
+show and send the audience; the chat can switch the exclusion ON but never OFF, and its domain
+list is merged, never replaced. Guarded by `tests/campaign-audience.test.ts`.
+
+### 9.3 Creative assets & campaign tone
+
+**Exists:** `content_assets`, brand kit (`brand-kit.ts`), brand cards, AI image generation.
+**Build:**
+- `campaigns.tone` (free text, e.g. "holiday guidelines: warm, no discounts language") injected
+  through §13 alongside the angle.
+- Campaign asset tags on `content_assets`; `draft_social_posts` orders prefer tagged assets before
+  generating or falling back to stock.
+- Commissioning visuals is a human task (§9.5) or an AI image order — never silently text-only
+  when the campaign has assets attached.
+- Open question: the brand kit is one per workspace. A per-campaign variant ("holiday guidelines")
+  either lives in `campaigns.tone` + tagged assets, or needs a named brand-kit variant. Start with
+  the former.
+
+**✅ Built 2026-10-08 (not yet deployed). ⚠️ Needs `db/z-campaign-creative.sql` applied to BOTH
+envs BEFORE the code deploys.** `campaigns.tone` (≤300 chars) reaches drafting through §13 as a
+narrowing of the brand voice ("where it conflicts, they win"). Pictures live in a new
+`campaign_assets` link table — deliberately NOT a column on `content_assets`, which the media
+library reads with bare selects (and one picture can serve two campaigns). Posts a campaign's
+orders commission try its pictures FIRST in `resolveMediaForPost`, least-used first (reuse is
+allowed — one look across the flight), before the assistant's usual sources; not for YouTube
+Shorts (9:16). ⚠️ A campaign picture reports its REAL origin from its provider (an unknown provider
+counts as AI), because that source feeds the auto-publish gate. GUI: tone on the form, "Pictures"
+panel per campaign (attach from the library, remove ×). Chat: tone + attach/detach on the proposal
+and edit cards, only from library ids the snapshot listed. Not done: uploading from the campaign
+(uploads stay in the library), blog feature images (social posts only), a per-campaign brand-kit
+variant (deferred, tone + pictures cover it). Guarded by `tests/campaign-creative.test.ts`.
+
+### 9.4 Campaign hierarchy & the year view
+
+Each campaign already has its own task ceiling, so reallocating inside one cannot cannibalise
+another — the budget concern is already structurally met. The real gap is planning.
+**Build:**
+- `campaigns.parent_campaign_id` (one level: umbrella → child) and `campaigns.always_on`
+  (no `ends_at`, excluded from the reconciler's finish sweep).
+- Calendar (§3.6, never built): campaign flights as bars, children nested under umbrellas,
+  always-on as a background band, delegated posts/blogs overlaid.
+- Umbrella rows on the Campaigns tab roll up children's tasks used and outcomes (read-only sums).
+  Parent-level budgets that constrain children are **deferred** until someone needs them.
+
+**✅ Built 2026-10-08 (not yet deployed). ⚠️ Needs `db/z-campaign-hierarchy.sql` applied to BOTH
+envs BEFORE the code deploys.** `campaigns.parent_campaign_id` (SET NULL) + `campaigns.always_on`
+(inline CHECK: always-on ⇒ no end date). ONE level, enforced in `campaigns.ts resolveParent` (same
+org, same assistant, live, top-level, and a campaign with children cannot become a child).
+Budgets are NOT pooled: the umbrella row shows read-only sums — tasks across its campaigns and
+outcomes PER MEASURE (never engagements + leads). Always-on campaigns have no end date, which is
+also why the finish sweep (only non-null ends_at) never finishes one. Year view: drawn at the top
+of this assistant's Calendar tab (its scoped calendar is otherwise empty — it owns no posts):
+flights as bars, children indented, always-on as a lighter band, a tick per post/article its
+orders commissioned (`timeline` action, through orders only), a today line; a draft that never
+started gets no invented flight. Chat: snapshot names umbrellas/always-on/dates; proposal and edit
+cards carry `parentCampaignId` (0 = take out) and `alwaysOn`. Not done: parent-level budgets
+(deferred as planned); pausing an umbrella does not pause its campaigns. Guarded by
+`tests/campaign-hierarchy.test.ts`.
+
+### 9.5 Human team members (hybrid workflows)
+
+**Exists:** Meeting Note Taker's `create_tasks` handler (Jira / Asana tickets), Slack connector,
+chained orders (`blocked` until the predecessor delivers, released by the reconciler).
+**Build:**
+- Order action `request_human_task`: assignee (name/email or a PM-tool project), description, due
+  date, 0 work items. New order status `waiting_on_human`, chip "Waiting on: <name>".
+- Delivery: a native "Mark done" (with optional asset upload, which attaches to the campaign —
+  §9.3) works with no integration (Golden Rule 1); a Jira/Asana ticket closing is the automatic
+  path. Without a return path the order waits for ever — the exact bug the reconciler was
+  written to close.
+- Legal/compliance review as a gate: a human task can block the orders behind it, so "hold the
+  launch until Legal approves the claims" is a chain, not a new mechanism.
+
+**✅ Native half built 2026-10-08 (not yet deployed; NO DDL).** Order `request_human_task`
+(role `human` — deliberately NOT in `ORCHESTRATABLE_ROLE_KEYS`: a person is asked, not commanded),
+0 tasks, brief = assignee, task, optional dueDate + assigneeEmail. **Nothing is ever sent to the
+person** — the email is shown so the USER knows who to tell. Deviation: no new `waiting_on_human`
+status (it would have meant widening a CHECK); 'issued' + "Waiting on <name>" carries it, and
+'blocked' is "not started — waiting for earlier work". Waiting: plan items take `after` (1-based,
+backwards only); positions are translated when invalid items are dropped, and an item whose
+prerequisite was dropped is SKIPPED, never run early. "Add work" can "Hold this until" an open task.
+"Mark done" delivers (releasing waiting work via unblockChain, which now RELEASES a person's task
+instead of cancelling it for having no assistant); "Won't happen" rejects (cancelling what waited).
+Chat: plans can include people + `after`; a `campaign_task_update` card marks a task done through
+the same `complete_task`. Rows show open tasks, overdue, and how much work waits on each.
+**✅ Automatic half built 2026-10-08 (no DDL).** A person's task can be filed as a Jira issue or
+Asana task — "File in Jira or Asana" on the task (project picker, "use this project next time"
+remembered per workspace in the integration's metadata, MERGED), "Also file it as a ticket" in Add
+work, or `fileIn` on a chat plan item (uses the remembered project; a failure is recorded on the
+task, never fails it). The ticket ref lives on the order's brief. The hourly reconciler asks each
+ISSUED task's ticket whether it is done (Jira: status CATEGORY 'done'; Asana: `completed`) and
+delivers the task when it is — releasing the work waiting on it. Polling, not webhooks. "Could not
+tell" (deleted, disconnected, network) is never done. The provider requests moved into
+`src/utils/pm-tickets.ts`, which the Meeting Note Taker now uses too. Not done: assigning the
+ticket to a named person (assignees are free text, not provider account ids — the name is in the
+ticket body); asset upload on "Mark done". Guarded by `tests/campaign-tickets.test.ts`.
+Guarded by `tests/campaign-human-tasks.test.ts`.
+
+### 9.6 Funnel stage & differentiated KPIs
+
+**Build:**
+- `funnel_stage`: `awareness | consideration | conversion | retention`, required on new campaigns.
+- Outcome metrics per stage: awareness → reach, engagement (from `post_insights`, already
+  collected); consideration → clicks on tracked links, replies; conversion → leads, signups;
+  retention → email engagement, repeat outcomes.
+- KPI cards (§3.1) switch labels and sources by stage; card 2 stays "Effort per Outcome".
+- **Proposer guard:** `halt` (lead quality) and any target-shortfall logic apply to conversion
+  campaigns only. An awareness campaign must never be halted for not producing signups.
+- Unblocks `signups` (`UNAVAILABLE_OUTCOME_METRICS`): Form Builder submissions are already
+  attributed via `campaign_attributions`.
+
+**✅ Built 2026-10-08 (not yet deployed). ⚠️ Needs `db/z-campaign-funnel-stage.sql` applied to
+BOTH envs BEFORE the code deploys.** `campaigns.funnel_stage` (NOT NULL DEFAULT 'conversion' —
+every earlier campaign was a lead campaign; inline CHECK, no DROP). Stage → allowed outcomes in
+`STAGE_OUTCOME_METRICS` (vocab); create/edit fall back to the stage default rather than letting an
+awareness campaign count leads. New countable outcomes: `engagement` (post_insights on the posts
+its orders produced), `clicks` (tracked links, bots excluded), and `signups` is now live (Form
+Builder signups via campaign_attributions); `email_engagement` waits for §9.7.
+**Found on the way: nothing counted a campaign's own outcome** — target and metric were stored and
+shown, `replies` was counted nowhere. `src/utils/campaign-outcomes.ts` now counts each metric
+through the campaign's orders and links only (never by date overlap), null = not countable. Rows
+show stage + "37 of 500", the chat snapshot carries the same numbers. Drafting: a per-stage line
+in the §13 directive (awareness never pitches, retention speaks to customers). Halt: only for
+conversion campaigns (`mayProposeHalt`). Retention defaults to including customers.
+**Deviation from the plan:** the four assistant-level KPI cards were NOT made stage-aware — they
+aggregate every campaign an assistant runs, and summing engagements with leads is meaningless.
+Stage-specific measurement lives on each campaign row instead. Pace stays 'unknown'; it can now
+be computed from these counts (a follow-up). Guarded by `tests/campaign-funnel-stage.test.ts`.
+
+### 9.7 Email nurture
+
+The review asked for HubSpot/Mailchimp; we already have the Email Marketing Assistant (forms,
+segments, email campaigns, form-started campaigns). It is simply not an order target.
+**Build:** order action `draft_email_campaign` → Email Marketing Assistant, landing as a draft
+email campaign for approval. ⚠️ `orchestration-target-role-decides-artifact`: the hand-off must
+branch on the target's role or it produces a social post nobody finds. External ESPs stay out of
+scope until a customer asks.
+
+**✅ Built 2026-10-08 (not yet deployed). ⚠️ Needs `db/z-campaign-email-orders.sql` applied to
+BOTH envs BEFORE the code deploys — the Email Studio's bare reads break without it, not just
+campaigns.** Order `draft_email_campaign` → Email Marketing Assistant (`newsletter_editor` added to
+`ORCHESTRATABLE_ROLE_KEYS`), 2 tasks per email, default 4, max 7. Uses the Studio's own generator
+(`draftCampaignEmails`) and cadences. `emailTrigger: form` = a follow-up sequence for form signups
+(the nurture), `custom` = draft emails the user sends; the stage picks when unsaid. **It never
+sends:** sequences stay `is_enabled = false`, emails stay drafts; switching on is the user's in
+Email Studio. Drafting is a BACKGROUND job (`draft-campaign-emails-background`) because one model
+call per email would blow the plan-approval request's ~26s; awaited wake-up, atomic claim on the
+order, lost wake-ups re-sent by the hourly reconciler, failures cancelled + refunded through the
+reconciler's one settlement path. Emails/sequences carry `campaign_order_id`, which unlocks the
+`email_engagement` outcome (distinct people who opened or clicked; retention's default measure).
+Not done: a segment id on the campaign audience (the send-it-yourself drafts have no segment set —
+the user picks one when sending); no notification when the emails are ready (the order's row and
+Email Studio show it). Guarded by `tests/campaign-email-orders.test.ts`.
+
+### 9.8 A/B testing & post-mortems
+
+**Exists:** paid variants (`ad_variants`) already test creatives.
+**Build:**
+- Organic test: an order pair with a declared hypothesis ("long-form beats short-form on LinkedIn")
+  and two angles, tagged A/B on the produced posts. The result reports **"not enough data"**
+  below `MIN_POSTS_FOR_AVERAGE` — organic samples are small and a winner declared on noise is
+  worse than none.
+- Post-mortem: when the reconciler moves a campaign to `finished`, generate a summary (objective
+  vs result, orders delivered, test outcomes, what the user rejected and why). The user chooses
+  which learnings to save.
+- ⚠️ Saved learnings need their own route into prompts: learned directives / `content_rules` reach
+  posts roles only today (`learned-directives-gated-to-posts-roles`). Saving a learning that no
+  future campaign reads is the `goals-steer-generation` bug again — ship the consumer in the same
+  commit, or don't ship the save button.
+
+**✅ Built 2026-10-08 (not yet deployed). ⚠️ Needs `db/z-campaign-learning.sql` applied to BOTH
+envs BEFORE the code deploys (new tables only).** A/B: order `ab_test_posts` (hypothesis + two
+different angles, quantity = posts per angle, default 4, 2 tasks per pair) drafts both halves
+interleaved A,B,A,B; each job is tagged in `campaign_experiment_jobs`. **Found on the way:** the
+blueprint holds ONE section 13 per assistant, so both halves would have been drafted with the same
+angle — and an assistant serving two campaigns drafted one campaign's posts with the other's
+instructions. A job commissioned by an order now gets section 13 rebuilt for ITS campaign, brief and
+variant (`campaign-job-directive.ts`, via the same `directiveInputFrom` the blueprint now uses).
+Verdict (`judgeExperiment`): fewer than 4 measured posts per angle → "not enough data"; under 1.25×
+→ "no clear difference"; one sentence used by the row, summary and chat. Summary: on demand, any
+status, counts only — no model; candidate lessons are sentences about the facts. Kept lessons
+(`campaign_learnings`) are read by the Campaign Assistant's planning every turn; "apply to drafting"
+writes a `content_rules` row (origin `campaign_learning`) on EACH writing assistant the campaign
+briefed and recompiles them — visible and deletable in their Rules tab. Chat: test orders,
+verdicts in the snapshot, `campaign_learning_proposal` card. Not done: blog A/B (social only);
+deleting a lesson does not delete the rules it became (said in the UI). Guarded by
+`tests/campaign-learning.test.ts`.
+
+### 9.9 Build order
+
+1. **§9.1** orders flow (chat strategy decision + GUI create/edit/add work). Blocking.
+2. **§9.2 + §9.6** audience, persona, funnel stage, existing-customer exclusion — small, and they
+   change what gets drafted.
+3. **§9.7** email order — closes capture → nurture.
+4. **§9.5** human tasks — native first, Jira/Asana/Slack second.
+5. **§9.3 + §9.4** campaign tone/assets, hierarchy, Calendar year view.
+6. **§9.8** organic A/B and post-mortems.
+
+Each step lands with: DDL in an idempotent `db/*.sql` applied to both envs **before** the code
+(`requireCampaign` selects every column), the drizzle mirror, the GUI control, the chat card and
+prompt text (§9.0), and the prompt-surfaces test extended.

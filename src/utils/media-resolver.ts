@@ -12,7 +12,8 @@
 
 import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { contentAssets } from '../../db/schema';
+import { campaignAssets, contentAssets } from '../../db/schema';
+import { mediaSourceForProvider } from '../config/campaign-creative';
 import { normalizeMediaSources, type MediaSource } from './media-sources';
 import { searchUniqueImages, searchUniqueVideos, createPexelsAsset } from './pexels';
 
@@ -34,6 +35,10 @@ export interface ResolveArgs {
     // Stable per-post number (the post id) used to alternate stock ↔ brand_card. Same value in ⇒
     // same source out, so a retried job re-resolves the same way and a test can assert the choice.
     rotationKey?: number;
+    // The Campaign Assistant campaign this post was commissioned for, if any (§9.3). Its own
+    // pictures are tried FIRST, ahead of the assistant's usual sources: the user attached them to
+    // the campaign precisely so its posts share one visual identity across the flight.
+    campaignId?: number | null;
 }
 
 export type ResolvedMedia =
@@ -65,6 +70,18 @@ export async function resolveMediaForPost(db: Db, args: ResolveArgs): Promise<Re
 
     const tried: MediaSource[] = [];
     let lastError: string | undefined;
+
+    if (args.campaignId) {
+        try {
+            const picked = await pickCampaignAsset(db, orgId, args.campaignId, mediaType);
+            // The source is the asset's REAL origin, not "campaign" — the auto-publish gate keys on
+            // it, and an AI image attached to a campaign must still never publish unattended.
+            if (picked) return { ok: true, assetId: picked.id, source: mediaSourceForProvider(picked.provider) };
+        } catch (err) {
+            // A failing lookup must not cost the post its picture — fall through to the usual sources.
+            lastError = err instanceof Error ? err.message : String(err);
+        }
+    }
 
     for (const source of order) {
         tried.push(source);
@@ -115,6 +132,34 @@ async function pickManualAsset(db: Db, orgId: number, mediaType: 'image' | 'vide
         .orderBy(asc(contentAssets.createdAt))
         .limit(1);
     return row?.id ?? null;
+}
+
+// Campaign source (§9.3): a picture the user attached to this campaign. Unlike the manual library,
+// a campaign picture MAY be reused — a consistent look across the flight is the point — so the
+// least-used one is chosen (fewest posts already carrying it, then oldest), which rotates through
+// the set rather than repeating the first. Purged, rejected and storage-less assets never qualify.
+async function pickCampaignAsset(
+    db: Db, orgId: number, campaignId: number, mediaType: 'image' | 'video',
+): Promise<{ id: number; provider: string | null } | null> {
+    const [row] = await db
+        .select({ id: contentAssets.id, provider: contentAssets.provider })
+        .from(campaignAssets)
+        .innerJoin(contentAssets, eq(contentAssets.id, campaignAssets.contentAssetId))
+        .where(and(
+            eq(campaignAssets.campaignId, campaignId),
+            eq(campaignAssets.organisationId, orgId),
+            eq(contentAssets.organisationId, orgId),
+            eq(contentAssets.assetType, mediaType),
+            ne(contentAssets.status, 'rejected'),
+            isNull(contentAssets.purgedAt),
+            sql`(${contentAssets.storageKey} IS NOT NULL OR ${contentAssets.storageUrl} IS NOT NULL OR ${contentAssets.externalUrl} IS NOT NULL)`,
+        ))
+        .orderBy(
+            sql`(SELECT count(*) FROM scheduled_post_assets spa WHERE spa.content_asset_id = ${contentAssets.id})`,
+            asc(contentAssets.createdAt),
+        )
+        .limit(1);
+    return row ?? null;
 }
 
 // Stock source: Pexels search (image or video) with per-org dedup; the first unique candidate is

@@ -46,12 +46,15 @@ import { and, eq, inArray, isNotNull, lt } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
     aiAssistants, blogPosts, campaignOrders, campaigns, contentGenerationJobs, discoveryCampaigns,
-    scheduledPosts,
+    newsletterIssues, newsletterSequences, scheduledPosts,
 } from '../../db/schema';
+import { EMAIL_ORDER_ACTION, findStrandedEmailOrders } from './campaign-email-order';
+import { triggerCampaignEmailDraft } from './trigger-campaign-email-draft';
+import { checkTaskTickets } from './campaign-tickets';
 import { isScheduleActive } from '../config/post-status';
 import { recordCampaignSpend } from './campaign-ledger';
 import { mirrorOrder } from './campaign-mirror';
-import { issueOrder, recompileCampaignTargets } from './campaign-orders';
+import { issueHumanTask, issueOrder, recompileCampaignTargets } from './campaign-orders';
 import { ORDER_ACTION_SPECS, type CampaignOrderAction } from '../config/campaign-vocab';
 
 type Db = ReturnType<typeof getDb>;
@@ -86,6 +89,10 @@ export interface ReconcileResult {
     finished: number;
     /** Work items refunded to campaigns whose orders produced nothing. */
     refundedWork: number;
+    /** Email orders whose drafting wake-up was lost, woken again (§9.7). */
+    emailRedispatched: number;
+    /** People's tasks settled because their Jira/Asana ticket closed (§9.5). */
+    ticketsClosed: number;
 }
 
 /** What the artefacts behind one order add up to. */
@@ -161,7 +168,8 @@ export function verdictFromArtefactStatuses(
 }
 
 /** The two actions whose work lands as content_generation_jobs. */
-const CONTENT_ACTIONS: readonly CampaignOrderAction[] = ['draft_social_posts', 'draft_blog_pillar'];
+// ab_test_posts (§9.8) produces posts through content jobs exactly like draft_social_posts.
+const CONTENT_ACTIONS: readonly CampaignOrderAction[] = ['draft_social_posts', 'draft_blog_pillar', 'ab_test_posts'];
 
 /**
  * Judge one content order from the jobs it enqueued and the posts those jobs produced.
@@ -262,6 +270,28 @@ async function unblockChain(db: Db, deliveredOrderId: number): Promise<number> {
     let released = 0;
     for (const next of waiting) {
         try {
+            // A PERSON's task (§9.5) has no assistant to issue to — checked first, or the "assistant
+            // no longer in the workspace" branch below would cancel every task a human was asked
+            // to do after earlier work. It is released into "waiting on <name>", nothing more.
+            if (next.action === 'request_human_task') {
+                const [c] = await db
+                    .select({ objective: campaigns.objective, orchestratorId: campaigns.aiAssistantId, status: campaigns.status })
+                    .from(campaigns).where(eq(campaigns.id, next.campaignId)).limit(1);
+                if (!c) continue;
+                if (c.status !== 'active' && c.status !== 'throttled') {
+                    await db.update(campaignOrders)
+                        .set({ status: 'cancelled', resultSummary: 'The campaign was no longer running when this became due', updatedAt: new Date() })
+                        .where(eq(campaignOrders.id, next.id));
+                    continue;
+                }
+                await issueHumanTask(db, next.id, {
+                    organisationId: next.organisationId, orchestratorAssistantId: c.orchestratorId,
+                    campaignObjective: c.objective, brief: (next.brief ?? {}) as Record<string, unknown>,
+                });
+                released++;
+                continue;
+            }
+
             if (!next.targetAssistantId) {
                 await db.update(campaignOrders)
                     .set({
@@ -413,6 +443,78 @@ async function settleOrder(
 }
 
 /**
+ * An email order (§9.7), once its emails exist. Before that the worker owns it (pending).
+ *
+ *   form follow-up (a sequence):   switched on → delivered · deleted → rejected · else in_review
+ *   send-it-yourself (draft emails): any still a draft → in_review (waiting on the user)
+ *                                    else any approved/scheduled/sent → delivered
+ *                                    else (all rejected, archived or deleted) → rejected
+ * "Waiting" wins over "sent", for the same reason as verdictFromArtefactStatuses: a half-sent
+ * series that reads 'delivered' drops its unsent emails off the user's radar.
+ */
+const EMAIL_AWAITING = new Set(['draft', 'pending_approval', 'in_review']);
+const EMAIL_COMMITTED = new Set(['approved', 'scheduled', 'sending', 'sent', 'paused', 'failed']);
+
+async function judgeEmailOrder(
+    db: Db, order: { id: number; artefactKind: string | null; artefactId: number | null },
+): Promise<Verdict> {
+    if (!order.artefactId || !order.artefactKind) return { kind: 'pending' };
+    if (order.artefactKind === 'newsletter_sequence') {
+        const [seq] = await db.select({ isEnabled: newsletterSequences.isEnabled })
+            .from(newsletterSequences).where(eq(newsletterSequences.id, order.artefactId)).limit(1);
+        if (!seq) return { kind: 'rejected', summary: 'Email campaign deleted in Email Studio' };
+        return seq.isEnabled
+            ? { kind: 'delivered', summary: 'Switched on — following up everyone who signs up through the form' }
+            : { kind: 'in_review', summary: 'Emails written — switched off in Email Studio until you review them' };
+    }
+    const rows = await db.select({ status: newsletterIssues.status })
+        .from(newsletterIssues).where(eq(newsletterIssues.campaignOrderId, order.id));
+    if (!rows.length) return { kind: 'rejected', summary: 'Draft emails deleted in Email Studio' };
+    if (rows.some((r) => EMAIL_AWAITING.has(r.status))) {
+        const sent = rows.filter((r) => EMAIL_COMMITTED.has(r.status)).length;
+        return { kind: 'in_review', summary: `${sent} of ${rows.length} emails approved or sent — the rest are drafts in Email Studio` };
+    }
+    if (rows.some((r) => EMAIL_COMMITTED.has(r.status))) return { kind: 'delivered', summary: 'Emails approved or sent' };
+    return { kind: 'rejected', summary: 'Draft emails turned down in Email Studio' };
+}
+
+/**
+ * Settle one order as failed — cancel, refund, mirror — from outside the reconcile loop.
+ *
+ * Exported for the email drafting worker, so a draft that could not be written is recorded through
+ * exactly the same settlement as any other order that produced nothing, rather than a second copy
+ * of the refund rule.
+ */
+export async function settleOrderAsFailed(db: Db, orderId: number, summary: string): Promise<void> {
+    await settleOrderNow(db, orderId, { kind: 'failed', summary });
+}
+
+/**
+ * Settle one order now, from outside the reconcile loop — the email worker's failures, and a
+ * person's task the user marks done or says will not happen (§9.5). Goes through settleOrder, so a
+ * DELIVERED task releases whatever was waiting on it (unblockChain) and a rejected one cancels it.
+ * Returns false when the order was not open — already settled orders are never re-settled.
+ */
+export async function settleOrderNow(
+    db: Db, orderId: number,
+    verdict: { kind: 'delivered' | 'rejected' | 'failed'; summary: string },
+): Promise<boolean> {
+    const [order] = await db.select({
+        id: campaignOrders.id, organisationId: campaignOrders.organisationId,
+        campaignId: campaignOrders.campaignId, action: campaignOrders.action,
+        costWorkItems: campaignOrders.costWorkItems, status: campaignOrders.status,
+    }).from(campaignOrders).where(eq(campaignOrders.id, orderId)).limit(1);
+    // Forward only (rule 1): a settled order is never re-settled, which would refund it twice.
+    if (!order || !['issued', 'in_review'].includes(order.status)) return false;
+    const result: ReconcileResult = {
+        examined: 0, toReview: 0, delivered: 0, rejected: 0, failed: 0,
+        unblocked: 0, finished: 0, refundedWork: 0, emailRedispatched: 0, ticketsClosed: 0,
+    };
+    await settleOrder(db, order, verdict, result);
+    return true;
+}
+
+/**
  * Sweep campaigns past the end date the user set.
  *
  * Only active|throttled are eligible. A paused campaign stays paused whatever the date says —
@@ -463,7 +565,7 @@ async function sweepExpiredCampaigns(db: Db, result: ReconcileResult): Promise<v
 export async function reconcileCampaigns(db: Db): Promise<ReconcileResult> {
     const result: ReconcileResult = {
         examined: 0, toReview: 0, delivered: 0, rejected: 0, failed: 0,
-        unblocked: 0, finished: 0, refundedWork: 0,
+        unblocked: 0, finished: 0, refundedWork: 0, emailRedispatched: 0, ticketsClosed: 0,
     };
 
     // 'issued' and 'in_review' are the two non-terminal states with work outstanding. in_review is
@@ -477,6 +579,7 @@ export async function reconcileCampaigns(db: Db): Promise<ReconcileResult> {
             action: campaignOrders.action,
             status: campaignOrders.status,
             artefactId: campaignOrders.artefactId,
+            artefactKind: campaignOrders.artefactKind,
             costWorkItems: campaignOrders.costWorkItems,
             assistantRecordId: campaignOrders.assistantRecordId,
             issuedAt: campaignOrders.issuedAt,
@@ -492,6 +595,8 @@ export async function reconcileCampaigns(db: Db): Promise<ReconcileResult> {
                 ? await judgeContentOrder(db, order)
                 : order.action === 'run_lead_search'
                     ? await judgeLeadSearchOrder(db, order)
+                : order.action === EMAIL_ORDER_ACTION
+                    ? await judgeEmailOrder(db, order)
                     // narrow_targeting and adjust_messaging are terminal the moment they are
                     // issued, so they never appear here. If one does, something set the status by
                     // hand — leave it alone rather than inventing a delivery.
@@ -509,5 +614,22 @@ export async function reconcileCampaigns(db: Db): Promise<ReconcileResult> {
     }
 
     await sweepExpiredCampaigns(db, result);
+
+    // Email orders whose drafting wake-up never arrived (§9.7). Re-waking one is not new work —
+    // the order was placed, costed and approved; this only delivers the knock it already had. The
+    // worker's atomic claim makes a duplicate wake-up harmless.
+    try {
+        for (const id of await findStrandedEmailOrders(db)) {
+            if (await triggerCampaignEmailDraft(id, 'reconciler')) result.emailRedispatched++;
+        }
+    } catch (err) {
+        console.error('[campaign-reconciler] email redispatch failed', err);
+    }
+
+    // People's tasks filed in Jira/Asana (§9.5): a closed ticket is the person saying it is done.
+    // Recording that is this file's mandate — what already happened elsewhere — and delivering the
+    // task releases the work that was waiting on it, through the one settlement path.
+    const tickets = await checkTaskTickets(db, (orderId, summary) => settleOrderNow(db, orderId, { kind: 'delivered', summary }));
+    result.ticketsClosed = tickets.closed;
     return result;
 }

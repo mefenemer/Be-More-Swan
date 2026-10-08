@@ -4,11 +4,23 @@
 //
 //   POST { action: 'list',        assistantId }            → campaigns + budgets + live state
 //   POST { action: 'create',      assistantId, objective, outcomeMetric, targetValue?,
-//                                 maxWorkItems?, endsAt?, asDraft? }
-//   POST { action: 'edit',        campaignId, ...fields }
+//                                 maxWorkItems?, endsAt?, asDraft?, orders?[] }
+//                                 → orders become a PENDING strategy decision, never placed here
+//   POST { action: 'edit',        campaignId, ...fields, viaChat? }
+//                                 fields include audience { persona, description, excludeDomains }
+//                                 and excludeExistingCustomers (§9.2), funnelStage (§9.6)
+//   POST { action: 'propose_plan', campaignId, orders[] }    → pending strategy decision (chat)
 //   POST { action: 'start',       campaignId }             → draft|paused → active
 //   POST { action: 'pause',       campaignId, reason }
 //   POST { action: 'stop_all',    assistantId }            → pause every live campaign
+//   POST { action: 'complete_task', orderId, outcome: 'done'|'wont_happen', note? }   (§9.5)
+//   POST { action: 'ticket_options' } / { action: 'file_ticket', orderId, provider, projectId?, projectName?, remember? }
+//   POST { action: 'summary', campaignId }                  → facts, tests, candidate lessons (§9.8)
+//   POST { action: 'save_learning', campaignId?, text, source, applyToDrafting }
+//   POST { action: 'list_learnings', assistantId } / { action: 'delete_learning', learningId }
+//   POST { action: 'timeline', assistantId }                → the year view (§9.4)
+//   POST { action: 'list_library', assistantId }          → the org's pictures, for the picker (§9.3)
+//   POST { action: 'attach_assets', campaignId, assetIds[] } / { action: 'detach_asset', campaignId, assetId }
 //   POST { action: 'list_orders', campaignId }
 //   POST { action: 'place_order', campaignId, orderAction, brief?, quantity? }
 //   POST { action: 'create_link',  campaignId, destinationUrl, label?, medium?, network? }
@@ -36,17 +48,29 @@
 
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
-    adVariants, aiAssistants, auditLogs, campaignAttributions, campaignBudgets,
-    campaignClickEvents, campaignDecisions, campaignLinks, campaignOrders, campaigns,
+    adVariants, aiAssistants, auditLogs, campaignAssets, campaignLearnings, campaignAttributions, campaignBudgets, contentAssets,
+    campaignClickEvents, campaignDecisions, campaignLinks, campaignOrders, campaigns, discoveryCampaigns,
 } from '../../db/schema';
 import { getDb } from '../../db/client';
 import { requireTenant } from '../../src/utils/tenant';
 import { campaignSpendTotals, fitsBudget, readPlanTaskGate } from '../../src/utils/campaign-ledger';
 import { placeOrder, recompileCampaignTargets } from '../../src/utils/campaign-orders';
 import { settleDecisionMirror } from '../../src/utils/campaign-mirror';
+import { settleOrderNow } from '../../src/utils/campaign-reconciler';
+import { hiredRoleKeys } from '../../src/utils/campaign-proposer';
+import { normaliseAudience, type CampaignAudience } from '../../src/config/campaign-audience';
+import { countCampaignOutcome } from '../../src/utils/campaign-outcomes';
+import { MAX_CAMPAIGN_ASSETS, normaliseAssetIds, normaliseTone } from '../../src/config/campaign-creative';
+import { resolveAssetDisplayUrl } from '../../src/utils/social-publish';
+import { buildCampaignSummary, experimentResults, saveLearning } from '../../src/utils/campaign-learning';
+import { fileTaskTicket, isPmProvider, ticketOptions } from '../../src/utils/campaign-tickets';
 import {
-    CREATABLE_CAMPAIGN_MODES, LIVE_CAMPAIGN_STATUSES,
-    isLinkMedium, isOrderAction, isSelectableOutcomeMetric, orderWorkItems,
+    PLANNABLE_STATUSES, fileStrategyPlan, normalisePlanOrders, pendingPlanFor, planProblem, planWorkItems,
+} from '../../src/utils/campaign-plan';
+import {
+    CAMPAIGN_ORDER_ACTIONS, CREATABLE_CAMPAIGN_MODES, HUMAN_ROLE_KEY, LIVE_CAMPAIGN_STATUSES, ORDER_ACTION_SPECS,
+    DEFAULT_FUNNEL_STAGE, defaultExcludeCustomers, isFunnelStage, isLinkMedium, isOrderAction,
+    isSelectableOutcomeMetric, orderWorkItems, outcomeForStage, type FunnelStage,
 } from '../../src/config/campaign-vocab';
 import { isSafeDestination, mintLinkToken } from '../../src/utils/campaign-attribution';
 import { buildTargetingCriteria } from '../../src/utils/ad-networks/linkedin';
@@ -74,6 +98,11 @@ function str(v: unknown, max: number): string | null {
 
 /** Active tracked links one campaign may hold. A real campaign runs a handful of creatives. */
 const MAX_LINKS_PER_CAMPAIGN = 50;
+
+/** Absent, null or an empty string — "not set", which is different from zero. */
+function isBlank(v: unknown): boolean {
+    return v === undefined || v === null || (typeof v === 'string' && !v.trim());
+}
 
 /** Clamp an untrusted integer into a sane range, falling back to a default. */
 function int(v: unknown, min: number, max: number, dflt: number): number {
@@ -120,6 +149,84 @@ export default withLambda(async (event) => {
         return c ?? null;
     }
 
+    /**
+     * A campaign's own pictures (§9.3), with a display URL each. R2 is private, so the URL is a
+     * short-lived signed one from the same helper the media library uses — never a raw key.
+     */
+    async function campaignAssetsFor(campaignId: number) {
+        const rows = await db.select({
+            id: contentAssets.id, name: contentAssets.name, assetType: contentAssets.assetType,
+            storageUrl: contentAssets.storageUrl, storageKey: contentAssets.storageKey,
+            externalUrl: contentAssets.externalUrl, purgedAt: contentAssets.purgedAt,
+        }).from(campaignAssets)
+            .innerJoin(contentAssets, eq(contentAssets.id, campaignAssets.contentAssetId))
+            .where(and(eq(campaignAssets.campaignId, campaignId), eq(campaignAssets.organisationId, orgId)))
+            .orderBy(campaignAssets.createdAt);
+        const out = [];
+        for (const a of rows) {
+            if (a.purgedAt) continue;
+            out.push({ id: a.id, name: a.name, assetType: a.assetType, url: await resolveAssetDisplayUrl(a) });
+        }
+        return out;
+    }
+
+    /**
+     * Attach pictures to a campaign. Every id is checked against THIS organisation's library — an
+     * id from another tenant is silently not attached (an IDOR probe learns nothing), and the
+     * response names exactly what was attached so no surface claims more than happened.
+     */
+    async function attachAssets(campaignId: number, ids: number[]) {
+        if (!ids.length) return [];
+        const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(campaignAssets)
+            .where(eq(campaignAssets.campaignId, campaignId));
+        const room = Math.max(0, MAX_CAMPAIGN_ASSETS - Number(n));
+        if (!room) return [];
+        const owned = await db.select({ id: contentAssets.id, name: contentAssets.name })
+            .from(contentAssets)
+            .where(and(
+                eq(contentAssets.organisationId, orgId),
+                inArray(contentAssets.id, ids),
+                isNull(contentAssets.purgedAt),
+                inArray(contentAssets.assetType, ['image', 'video']),
+            ));
+        const take = owned.slice(0, room);
+        if (!take.length) return [];
+        await db.insert(campaignAssets)
+            .values(take.map((a) => ({ organisationId: orgId, campaignId, contentAssetId: a.id, createdBy: userId })))
+            .onConflictDoNothing();
+        return take.map((a) => ({ id: a.id, name: a.name }));
+    }
+
+    /**
+     * Validate an umbrella for a campaign (§9.4). ONE level only: the umbrella must itself have no
+     * umbrella, and a campaign that already has children cannot become one's child — a CHECK can't
+     * see other rows, so this is the only place depth is enforced. Same organisation AND the same
+     * Campaign Assistant (an umbrella across two assistants' campaigns would roll up nothing).
+     * `undefined` = not being changed; `null` = no umbrella.
+     */
+    async function resolveParent(raw: unknown, assistantId: number, selfId: number | null)
+        : Promise<{ ok: true; id: number | null | undefined } | { ok: false; error: string }> {
+        if (raw === undefined) return { ok: true, id: undefined };
+        if (raw === null || raw === '' || raw === 0 || raw === '0') return { ok: true, id: null };
+        const pid = Number(raw);
+        if (!Number.isInteger(pid) || pid <= 0) return { ok: false, error: 'That umbrella campaign does not exist.' };
+        if (selfId && pid === selfId) return { ok: false, error: 'A campaign cannot be its own umbrella.' };
+        const [parent] = await db.select({ id: campaigns.id, parent: campaigns.parentCampaignId, assistant: campaigns.aiAssistantId, status: campaigns.status })
+            .from(campaigns)
+            .where(and(eq(campaigns.id, pid), eq(campaigns.organisationId, orgId)))
+            .limit(1);
+        if (!parent || parent.assistant !== assistantId || parent.status === 'archived') {
+            return { ok: false, error: 'That umbrella campaign does not exist.' };
+        }
+        if (parent.parent) return { ok: false, error: 'That campaign is already inside an umbrella — umbrellas are one level deep.' };
+        if (selfId) {
+            const [child] = await db.select({ id: campaigns.id }).from(campaigns)
+                .where(and(eq(campaigns.parentCampaignId, selfId), eq(campaigns.organisationId, orgId))).limit(1);
+            if (child) return { ok: false, error: 'This campaign is an umbrella for others, so it cannot go inside another umbrella.' };
+        }
+        return { ok: true, id: pid };
+    }
+
     // ── list ──────────────────────────────────────────────────────────────────
     if (action === 'list') {
         const assistantId = Number(body.assistantId);
@@ -143,6 +250,12 @@ export default withLambda(async (event) => {
                 // reword freely, and connection-status-vocabulary-drift is what it costs when a
                 // surface guesses a state instead of reading one.
                 haltedBy: campaigns.haltedBy,
+                audience: campaigns.audience,
+                excludeExistingCustomers: campaigns.excludeExistingCustomers,
+                funnelStage: campaigns.funnelStage,
+                tone: campaigns.tone,
+                parentCampaignId: campaigns.parentCampaignId,
+                alwaysOn: campaigns.alwaysOn,
                 createdAt: campaigns.createdAt,
                 maxWorkItems: campaignBudgets.maxWorkItems,
                 maxSpendGbp: campaignBudgets.maxSpendGbp,
@@ -170,7 +283,46 @@ export default withLambda(async (event) => {
                 })
                 .from(campaignOrders)
                 .where(eq(campaignOrders.campaignId, r.id));
-            items.push({ ...r, ...totals, orders: live ?? { open: 0, inReview: 0, delivered: 0 } });
+            // The plan waiting on this campaign, if any. Without it on the row, a campaign agreed
+            // in chat shows a bare Start button that would start it with NOTHING commissioned.
+            const pendingPlan = await pendingPlanFor(db, r.id);
+            // Progress in the campaign's OWN unit (§9.6). null = not countable, never 0.
+            const progress = await countCampaignOutcome(db, { id: r.id, organisationId: orgId }, r.outcomeMetric);
+            // Open tasks for people (§9.5), each with how much work is held behind it — "waiting on
+            // Legal" means far more when the row can say three briefs are stuck behind it.
+            const openTasks = await db.select({
+                orderId: campaignOrders.id, status: campaignOrders.status, brief: campaignOrders.brief,
+                blockedOnOrderId: campaignOrders.blockedOnOrderId,
+                waiting: sql<number>`(SELECT count(*)::int FROM campaign_orders w
+                                       WHERE w.blocked_on_order_id = ${campaignOrders.id} AND w.status = 'blocked')`,
+            }).from(campaignOrders)
+                .where(and(
+                    eq(campaignOrders.campaignId, r.id),
+                    eq(campaignOrders.action, 'request_human_task'),
+                    inArray(campaignOrders.status, ['issued', 'blocked']),
+                ))
+                .orderBy(campaignOrders.id);
+            const humanTasks = openTasks.map((t) => {
+                const b = (t.brief ?? {}) as Record<string, unknown>;
+                return {
+                    orderId: t.orderId, status: t.status, waiting: Number(t.waiting) || 0,
+                    blockedOnOrderId: t.blockedOnOrderId,
+                    assignee: typeof b.assignee === 'string' ? b.assignee : null,
+                    assigneeEmail: typeof b.assigneeEmail === 'string' ? b.assigneeEmail : null,
+                    task: typeof b.task === 'string' ? b.task : null,
+                    dueDate: typeof b.dueDate === 'string' ? b.dueDate : null,
+                    ticket: b.ticket && typeof b.ticket === 'object' ? b.ticket : null,
+                    ticketError: typeof b.ticketError === 'string' ? b.ticketError : null,
+                    ticketReachable: b.ticketReachable === false ? false : true,
+                };
+            });
+            const assets = await campaignAssetsFor(r.id);
+            // A/B tests (§9.8) with their honest verdict — "not enough data" until each angle has it.
+            const tests = (await experimentResults(db, r.id, orgId)).map((t) => ({
+                id: t.id, hypothesis: t.hypothesis, angleA: t.angleA, angleB: t.angleB,
+                a: t.a, b: t.b, verdict: t.verdict.verdict, sentence: t.sentence,
+            }));
+            items.push({ ...r, ...totals, orders: live ?? { open: 0, inReview: 0, delivered: 0 }, pendingPlan, progress, humanTasks, assets, tests });
         }
 
         // The plan gate travels with the list so the Budget & Control strip can render in one
@@ -222,7 +374,22 @@ export default withLambda(async (event) => {
             selectedAccountUrn: adsReadiness?.ready ? adsReadiness.connection.selectedAccountUrn : null,
         };
 
-        return json(200, { campaigns: items, planGate, optimiserHealth, paid });
+        // What "Add work" may offer. Only the assistants this workspace has actually hired — an
+        // order to one it has not is refused by placeOrder anyway, and offering it would be a
+        // button that always fails. Saved searches feed the "Narrow the targeting" picker, which
+        // has to name WHICH search to tighten.
+        const hired = await hiredRoleKeys(db, orgId);
+        // A person's task needs no hire — every workspace has people (§9.5).
+        const availableOrderActions = CAMPAIGN_ORDER_ACTIONS.filter((a) =>
+            ORDER_ACTION_SPECS[a].roleKey === HUMAN_ROLE_KEY || hired.has(ORDER_ACTION_SPECS[a].roleKey));
+        const savedSearches = await db
+            .select({ id: discoveryCampaigns.id, name: discoveryCampaigns.name, idea: discoveryCampaigns.idea })
+            .from(discoveryCampaigns)
+            .where(and(eq(discoveryCampaigns.organisationId, orgId), sql`${discoveryCampaigns.status} <> 'archived'`))
+            .orderBy(desc(discoveryCampaigns.createdAt))
+            .limit(25);
+
+        return json(200, { campaigns: items, planGate, optimiserHealth, paid, availableOrderActions, savedSearches });
     }
 
     // ── create ────────────────────────────────────────────────────────────────
@@ -244,10 +411,35 @@ export default withLambda(async (event) => {
             return json(400, { error: 'This campaign cannot be given a money budget yet. Its budget is the work it commissions.' });
         }
 
-        const outcomeMetric = isSelectableOutcomeMetric(body.outcomeMetric) ? body.outcomeMetric : 'leads';
+        // The stage decides which outcomes may be the target (§9.6): an awareness campaign asked to
+        // count leads would read as failing for its whole flight, so the metric is checked against
+        // the stage and falls back to the stage's own default rather than being refused.
+        const funnelStage: FunnelStage = isFunnelStage(body.funnelStage) ? body.funnelStage : DEFAULT_FUNNEL_STAGE;
+        const outcomeMetric = outcomeForStage(funnelStage, body.outcomeMetric);
         const maxWorkItems = int(body.maxWorkItems, 1, 1000, 100);
-        const targetValue = Number.isFinite(Number(body.targetValue)) ? int(body.targetValue, 1, 100000, 10) : null;
+        // The chat card's briefs. Filed below as a PENDING strategy decision — placing them here
+        // would be starting the campaign from a chat click (§1.3). Checked against the campaign's
+        // own ceiling up front, because a plan that cannot fit its budget would only fail later,
+        // at approval, after the user had been told it was saved.
+        const planOrders = normalisePlanOrders(body.orders);
+        const planNeeds = planWorkItems(planOrders);
+        const problem = planProblem(planOrders);
+        if (problem) return json(400, { error: `${problem} Ask for the plan again with that filled in.` });
+        if (planNeeds > maxWorkItems) {
+            return json(400, {
+                error: `This plan needs ${planNeeds} tasks but the campaign may only use ${maxWorkItems}. Ask for a smaller plan, or a larger task budget.`,
+            });
+        }
+        // `Number(null)` and `Number('')` are both 0, which is finite — so without the blank check
+        // a card with no target (it sends null) saved "aiming for 1".
+        const targetValue = isBlank(body.targetValue) || !Number.isFinite(Number(body.targetValue))
+            ? null : int(body.targetValue, 1, 100000, 10);
         const endsAt = typeof body.endsAt === 'string' && body.endsAt ? new Date(body.endsAt) : null;
+
+        const parent = await resolveParent(body.parentCampaignId, assistantId, null);
+        if (!parent.ok) return json(400, { error: parent.error });
+        // Always-on means no end date — the CHECK refuses both together, so say it here instead.
+        const alwaysOn = body.alwaysOn === true;
 
         // Invariant 1. `asDraft` is the chat path: a proposal the user approved in conversation
         // becomes a saved campaign that commissions nothing until a human starts it.
@@ -279,7 +471,17 @@ export default withLambda(async (event) => {
             targetValue,
             mode: 'organic',
             status: 'draft',
-            endsAt: endsAt && !Number.isNaN(endsAt.getTime()) ? endsAt : null,
+            endsAt: alwaysOn ? null : (endsAt && !Number.isNaN(endsAt.getTime()) ? endsAt : null),
+            parentCampaignId: parent.id ?? null,
+            alwaysOn,
+            audience: normaliseAudience(body.audience),
+            funnelStage,
+            tone: normaliseTone(body.tone),
+            // An explicit choice wins; otherwise the stage decides — retention is aimed AT existing
+            // customers, every other stage is finding new ones (§9.2 / §9.6).
+            excludeExistingCustomers: typeof body.excludeExistingCustomers === 'boolean'
+                ? body.excludeExistingCustomers
+                : defaultExcludeCustomers(funnelStage),
         }).returning({ id: campaigns.id });
 
         await db.insert(campaignBudgets).values({
@@ -292,7 +494,12 @@ export default withLambda(async (event) => {
             autonomyThresholdWork: int(body.autonomyThresholdWork, 0, 50, 0),
         });
 
-        return json(200, { campaignId: created.id, status: 'draft' });
+        const planDecisionId = await fileStrategyPlan(db, {
+            id: created.id, organisationId: orgId, aiAssistantId: assistantId, objective, status: 'draft',
+        }, planOrders);
+        const attached = await attachAssets(created.id, normaliseAssetIds(body.attachAssetIds));
+
+        return json(200, { campaignId: created.id, status: 'draft', planDecisionId, attachedAssets: attached });
     }
 
     // ── edit ──────────────────────────────────────────────────────────────────
@@ -302,20 +509,83 @@ export default withLambda(async (event) => {
         if (Number(body.maxSpendGbp) > 0) {
             return json(400, { error: 'This campaign cannot be given a money budget yet.' });
         }
+        if (['finished', 'archived'].includes(campaign.status)) {
+            return json(400, { error: `This campaign is ${campaign.status}, so it can no longer be changed.` });
+        }
+        // §1.3: a chat turn may never raise a ceiling. The chat edit card sends viaChat, and the
+        // budget fields are refused outright on that path rather than compared — "lowering only"
+        // would still let the model choose a number the user only half-read.
+        if (body.viaChat === true && (body.maxWorkItems !== undefined || body.autonomyThresholdWork !== undefined)) {
+            return json(400, { error: 'A campaign\'s task budget is changed on the Campaigns tab, with the numbers in front of you — not from the chat.' });
+        }
+
+        // §9.0: the chat may only ever NARROW who a campaign reaches. Turning the customer
+        // exclusion off widens it to people the business already sells to — a human decision, made
+        // on the Campaigns tab with the toggle in front of them.
+        if (body.viaChat === true && body.excludeExistingCustomers === false) {
+            return json(400, { error: 'Including existing customers is switched on from the Campaigns tab ("Edit"), not from the chat.' });
+        }
 
         const patch: Record<string, unknown> = { updatedAt: new Date() };
+        if (body.audience !== undefined) {
+            const next = normaliseAudience(body.audience);
+            if (body.viaChat === true) {
+                // Merged, never replaced, on the chat path: a card that names a new persona must
+                // not silently drop the "also leave out" list the user typed on the tab. Domains
+                // only ever accumulate here.
+                const prev = (normaliseAudience(campaign.audience) ?? {}) as CampaignAudience;
+                const domains = [...new Set([...(prev.excludeDomains ?? []), ...(next?.excludeDomains ?? [])])];
+                patch.audience = normaliseAudience({ ...prev, ...(next ?? {}), excludeDomains: domains });
+            } else {
+                patch.audience = next;
+            }
+        }
+        if (typeof body.excludeExistingCustomers === 'boolean') patch.excludeExistingCustomers = body.excludeExistingCustomers;
+        if (body.tone !== undefined) patch.tone = normaliseTone(body.tone);
+        const parent = await resolveParent(body.parentCampaignId, campaign.aiAssistantId, campaign.id);
+        if (!parent.ok) return json(400, { error: parent.error });
+        if (parent.id !== undefined) patch.parentCampaignId = parent.id;
+        if (typeof body.alwaysOn === 'boolean') patch.alwaysOn = body.alwaysOn;
         const objective = str(body.objective, 500);
         if (objective) patch.objective = objective;
-        if (isSelectableOutcomeMetric(body.outcomeMetric)) patch.outcomeMetric = body.outcomeMetric;
-        if (body.targetValue !== undefined) patch.targetValue = int(body.targetValue, 1, 100000, 10);
+        // Stage and outcome move together: the outcome must be one the (new) stage may be measured
+        // by, so a stage change that would orphan the current metric resets it to the stage default
+        // instead of leaving an awareness campaign counting leads.
+        const nextStage: FunnelStage = isFunnelStage(body.funnelStage)
+            ? body.funnelStage
+            : (isFunnelStage(campaign.funnelStage) ? campaign.funnelStage : DEFAULT_FUNNEL_STAGE);
+        if (isFunnelStage(body.funnelStage) && body.funnelStage !== campaign.funnelStage) patch.funnelStage = body.funnelStage;
+        const wantedMetric = isSelectableOutcomeMetric(body.outcomeMetric) ? body.outcomeMetric : campaign.outcomeMetric;
+        const nextMetric = outcomeForStage(nextStage, wantedMetric);
+        if (nextMetric !== campaign.outcomeMetric) patch.outcomeMetric = nextMetric;
+        if (body.targetValue !== undefined) {
+            patch.targetValue = isBlank(body.targetValue) ? null : int(body.targetValue, 1, 100000, 10);
+        }
         if (typeof body.endsAt === 'string') {
             const d = new Date(body.endsAt);
             patch.endsAt = Number.isNaN(d.getTime()) ? null : d;
         }
+        // Always-on wins over an end date (CHECK campaigns_always_on_no_end_check): switching it on
+        // clears the date, and a date sent to a campaign that stays always-on is dropped.
+        const finalAlwaysOn = typeof patch.alwaysOn === 'boolean' ? patch.alwaysOn : campaign.alwaysOn;
+        if (finalAlwaysOn) patch.endsAt = null;
         await db.update(campaigns).set(patch).where(eq(campaigns.id, campaign.id));
         // The objective and end date are what the directive says; an edit must reach drafting.
-        if (patch.objective !== undefined || patch.outcomeMetric !== undefined || patch.endsAt !== undefined) {
+        if (patch.objective !== undefined || patch.outcomeMetric !== undefined || patch.endsAt !== undefined
+            || patch.audience !== undefined || patch.funnelStage !== undefined || patch.tone !== undefined) {
             await recompileCampaignTargets(db, campaign.id, 'campaign-edited');
+        }
+
+        // Pictures (§9.3) — attachable and removable from the chat as well as the tab: neither widens
+        // who a campaign reaches or what it spends, and both are reversible in one click.
+        const attachedAssets = await attachAssets(campaign.id, normaliseAssetIds(body.attachAssetIds));
+        const detachIds = normaliseAssetIds(body.detachAssetIds);
+        if (detachIds.length) {
+            await db.delete(campaignAssets).where(and(
+                eq(campaignAssets.campaignId, campaign.id),
+                eq(campaignAssets.organisationId, orgId),
+                inArray(campaignAssets.contentAssetId, detachIds),
+            ));
         }
 
         if (body.maxWorkItems !== undefined || body.autonomyThresholdWork !== undefined) {
@@ -324,7 +594,7 @@ export default withLambda(async (event) => {
             if (body.autonomyThresholdWork !== undefined) bpatch.autonomyThresholdWork = int(body.autonomyThresholdWork, 0, 50, 0);
             await db.update(campaignBudgets).set(bpatch).where(eq(campaignBudgets.campaignId, campaign.id));
         }
-        return json(200, { ok: true });
+        return json(200, { ok: true, attachedAssets, detached: detachIds.length });
     }
 
     // ── start (also the documented RESUME path) ───────────────────────────────
@@ -424,6 +694,221 @@ export default withLambda(async (event) => {
         return json(200, { ok: true, stopped: live.length });
     }
 
+    // ── propose_plan ──────────────────────────────────────────────────────────
+    // The chat's way to add work to a campaign that already exists. It FILES the plan; it never
+    // places it. Placing is `decide` (a human approval) or `place_order` (a human click on the
+    // Campaigns tab) — the GUI and the chat reach the same orders by the same gate.
+    if (action === 'propose_plan') {
+        const campaign = await requireCampaign(Number(body.campaignId));
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+        if (!PLANNABLE_STATUSES.includes(campaign.status as never)) {
+            return json(400, {
+                error: campaign.status === 'paused'
+                    ? 'This campaign is paused. Resume it on the Campaigns tab first, then add work to it.'
+                    : `This campaign is ${campaign.status}, so it cannot take on new work.`,
+            });
+        }
+        const orders = normalisePlanOrders(body.orders);
+        if (!orders.length) return json(400, { error: 'This plan has no work an assistant can do.' });
+        const problem = planProblem(orders);
+        if (problem) return json(400, { error: problem });
+
+        const [budget] = await db.select({ maxWorkItems: campaignBudgets.maxWorkItems })
+            .from(campaignBudgets).where(eq(campaignBudgets.campaignId, campaign.id)).limit(1);
+        const verdict = fitsBudget(await campaignSpendTotals(db, campaign.id), budget?.maxWorkItems ?? 0, planWorkItems(orders));
+        if (!verdict.allowed) return json(400, { error: verdict.message });
+
+        const decisionId = await fileStrategyPlan(db, {
+            id: campaign.id, organisationId: orgId, aiAssistantId: campaign.aiAssistantId,
+            objective: campaign.objective, status: campaign.status,
+        }, orders);
+        if (!decisionId) return json(500, { error: 'The plan could not be saved — please try again.' });
+        return json(200, { decisionId, campaignId: campaign.id, status: campaign.status });
+    }
+
+    // ── summary + lessons (§9.8) ──────────────────────────────────────────────
+    if (action === 'summary') {
+        const campaign = await requireCampaign(Number(body.campaignId));
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+        const summary = await buildCampaignSummary(db, campaign.id, orgId);
+        if (!summary) return json(404, { error: 'Campaign not found.' });
+        return json(200, { summary });
+    }
+
+    if (action === 'save_learning') {
+        const text = str(body.text, 300);
+        if (!text) return json(400, { error: 'Write the lesson to keep.' });
+        let campaignId: number | null = null;
+        let objective: string | null = null;
+        if (body.campaignId !== undefined && body.campaignId !== null) {
+            const campaign = await requireCampaign(Number(body.campaignId));
+            if (!campaign) return json(404, { error: 'Campaign not found.' });
+            campaignId = campaign.id;
+            objective = campaign.objective;
+        }
+        const source = body.source === 'test' || body.source === 'summary' ? body.source : 'user';
+        const result = await saveLearning(db, {
+            organisationId: orgId, userId, campaignId, text, source,
+            applyToDrafting: body.applyToDrafting === true && campaignId !== null,
+            campaignObjective: objective,
+        });
+        return json(200, result);
+    }
+
+    if (action === 'list_learnings') {
+        const assistantId = Number(body.assistantId);
+        if (!await requireOrchestrator(assistantId)) return json(404, { error: 'Assistant not found.' });
+        const rows = await db.select({
+            id: campaignLearnings.id, learning: campaignLearnings.learning, source: campaignLearnings.source,
+            appliedToDrafting: campaignLearnings.appliedToDrafting, createdAt: campaignLearnings.createdAt,
+            campaignId: campaignLearnings.campaignId, objective: campaigns.objective,
+        }).from(campaignLearnings)
+            .leftJoin(campaigns, eq(campaigns.id, campaignLearnings.campaignId))
+            .where(eq(campaignLearnings.organisationId, orgId))
+            .orderBy(desc(campaignLearnings.createdAt))
+            .limit(100);
+        return json(200, { learnings: rows });
+    }
+
+    // Removes the lesson from planning. A rule it became stays in each assistant's Rules tab until
+    // removed there — said in the UI, because deleting other assistants' rules from here would be a
+    // reach across surfaces the user cannot see.
+    if (action === 'delete_learning') {
+        await db.delete(campaignLearnings).where(and(
+            eq(campaignLearnings.id, Number(body.learningId)),
+            eq(campaignLearnings.organisationId, orgId),
+        ));
+        return json(200, { ok: true });
+    }
+
+    // ── timeline (§9.4) ───────────────────────────────────────────────────────
+    // The year view: every campaign's flight, its umbrella, whether it is always on, and a tick for
+    // each post and article it commissioned, on the date it is scheduled or went out. Read-only.
+    if (action === 'timeline') {
+        const assistantId = Number(body.assistantId);
+        if (!await requireOrchestrator(assistantId)) return json(404, { error: 'Assistant not found.' });
+        const rows = await db.select({
+            id: campaigns.id, objective: campaigns.objective, status: campaigns.status,
+            funnelStage: campaigns.funnelStage, startsAt: campaigns.startsAt, endsAt: campaigns.endsAt,
+            createdAt: campaigns.createdAt, parentCampaignId: campaigns.parentCampaignId, alwaysOn: campaigns.alwaysOn,
+        }).from(campaigns)
+            .where(and(eq(campaigns.organisationId, orgId), eq(campaigns.aiAssistantId, assistantId), sql`${campaigns.status} <> 'archived'`))
+            .orderBy(campaigns.createdAt);
+        if (!rows.length) return json(200, { campaigns: [], items: [] });
+        const ids = sql.join(rows.map((r) => sql`${r.id}`), sql`, `);
+        // Only work that traces to the campaign through its own orders — never a date overlap.
+        const items = await db.execute<{ campaign_id: number; kind: string; at: string | null; status: string }>(sql`
+            SELECT o.campaign_id, 'post' AS kind, coalesce(p.published_at, p.publish_date) AS at, p.status
+              FROM content_generation_jobs j
+              JOIN campaign_orders o ON o.id = j.campaign_order_id
+              JOIN scheduled_posts p ON p.id = j.result_post_id
+             WHERE o.campaign_id IN (${ids}) AND o.organisation_id = ${orgId}
+               AND p.status NOT IN ('rejected','cancelled')
+            UNION ALL
+            SELECT o.campaign_id, 'article' AS kind, coalesce(b.published_at, b.publish_date) AS at, b.status
+              FROM content_generation_jobs j
+              JOIN campaign_orders o ON o.id = j.campaign_order_id
+              JOIN blog_posts b ON b.id = j.result_blog_post_id
+             WHERE o.campaign_id IN (${ids}) AND o.organisation_id = ${orgId}
+               AND b.status NOT IN ('rejected','archived')
+            LIMIT 2000`);
+        return json(200, {
+            campaigns: rows,
+            items: [...items].filter((i) => i.at).map((i) => ({ campaignId: i.campaign_id, kind: i.kind, at: i.at, status: i.status })),
+        });
+    }
+
+    // ── campaign pictures (§9.3) ──────────────────────────────────────────────
+    if (action === 'list_library') {
+        const assistantId = Number(body.assistantId);
+        if (!await requireOrchestrator(assistantId)) return json(404, { error: 'Assistant not found.' });
+        // Newest first; images and videos only (the only things a post can carry); nothing purged
+        // or rejected. Capped — a picker of thousands is not a picker.
+        const rows = await db.select({
+            id: contentAssets.id, name: contentAssets.name, assetType: contentAssets.assetType,
+            storageUrl: contentAssets.storageUrl, storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl,
+            provider: contentAssets.provider,
+        }).from(contentAssets)
+            .where(and(
+                eq(contentAssets.organisationId, orgId),
+                inArray(contentAssets.assetType, ['image', 'video']),
+                isNull(contentAssets.purgedAt),
+                sql`${contentAssets.status} <> 'rejected'`,
+            ))
+            .orderBy(desc(contentAssets.createdAt))
+            .limit(60);
+        const assets = [];
+        for (const a of rows) {
+            assets.push({ id: a.id, name: a.name, assetType: a.assetType, provider: a.provider, url: await resolveAssetDisplayUrl(a) });
+        }
+        return json(200, { assets });
+    }
+
+    if (action === 'attach_assets') {
+        const campaign = await requireCampaign(Number(body.campaignId));
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+        const attached = await attachAssets(campaign.id, normaliseAssetIds(body.assetIds));
+        return json(200, { attached });
+    }
+
+    if (action === 'detach_asset') {
+        const campaign = await requireCampaign(Number(body.campaignId));
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+        await db.delete(campaignAssets).where(and(
+            eq(campaignAssets.campaignId, campaign.id),
+            eq(campaignAssets.organisationId, orgId),
+            eq(campaignAssets.contentAssetId, Number(body.assetId)),
+        ));
+        return json(200, { ok: true });
+    }
+
+    // ── tickets for people's tasks (§9.5) ─────────────────────────────────────
+    if (action === 'ticket_options') {
+        return json(200, { providers: await ticketOptions(db, orgId) });
+    }
+
+    if (action === 'file_ticket') {
+        if (!isPmProvider(body.provider)) return json(400, { error: 'Choose Jira or Asana.' });
+        try {
+            const ticket = await fileTaskTicket(db, {
+                organisationId: orgId, orderId: Number(body.orderId), provider: body.provider,
+                projectId: str(body.projectId, 120), projectName: str(body.projectName, 200),
+                remember: body.remember === true,
+            });
+            return json(200, { ticket });
+        } catch (err) {
+            // The provider's own words where it gave them — "project does not exist" is actionable.
+            return json(400, { error: err instanceof Error ? err.message : 'Could not file the ticket.' });
+        }
+    }
+
+    // ── complete_task ─────────────────────────────────────────────────────────
+    // A person's task (§9.5): the user says it is done, or that it will not happen. Done delivers
+    // the order, which RELEASES whatever was waiting on it; "won't happen" rejects it, which cancels
+    // what was waiting (the precondition will never be met). Reached from the row's buttons and
+    // from the chat's campaign_task_update card — the same action either way.
+    if (action === 'complete_task') {
+        const orderId = Number(body.orderId);
+        const [order] = await db.select({
+            id: campaignOrders.id, action: campaignOrders.action, status: campaignOrders.status,
+            campaignId: campaignOrders.campaignId, brief: campaignOrders.brief,
+        }).from(campaignOrders)
+            .where(and(eq(campaignOrders.id, orderId), eq(campaignOrders.organisationId, orgId)))
+            .limit(1);
+        if (!order || order.action !== 'request_human_task') return json(404, { error: 'Task not found.' });
+        if (order.status === 'blocked') {
+            return json(400, { error: 'This task is still waiting for earlier work, so it cannot be done yet.' });
+        }
+        const outcome = body.outcome === 'wont_happen' ? 'wont_happen' : 'done';
+        const note = str(body.note, 280);
+        const who = (order.brief as Record<string, unknown> | null)?.assignee;
+        const settled = await settleOrderNow(db, order.id, outcome === 'done'
+            ? { kind: 'delivered', summary: `Done${typeof who === 'string' && who ? ` — ${who}` : ''}${note ? `: ${note}` : ''}` }
+            : { kind: 'rejected', summary: `Will not happen${note ? `: ${note}` : ''} — work waiting on it was cancelled` });
+        if (!settled) return json(400, { error: 'This task has already been settled.' });
+        return json(200, { ok: true, outcome });
+    }
+
     // ── list_orders ───────────────────────────────────────────────────────────
     if (action === 'list_orders') {
         const campaign = await requireCampaign(Number(body.campaignId));
@@ -443,11 +928,17 @@ export default withLambda(async (event) => {
         if (!LIVE_CAMPAIGN_STATUSES.includes(campaign.status as never)) {
             return json(400, { error: 'This campaign is not running, so it cannot commission work.' });
         }
-        const orderAction = body.orderAction;
-        if (!isOrderAction(orderAction)) return json(400, { error: 'Unknown order type.' });
-
-        const quantity = int(body.quantity, 1, 20, 1);
-        const workItems = orderWorkItems(orderAction, quantity);
+        // The same normaliser the chat plan goes through, so a brief typed into the Campaigns tab
+        // and one agreed in chat are validated, capped and priced identically.
+        const [order] = normalisePlanOrders([{
+            ...((body.brief && typeof body.brief === 'object') ? body.brief as Record<string, unknown> : {}),
+            action: body.orderAction,
+            quantity: body.quantity,
+        }]);
+        if (!order) return json(400, { error: 'Unknown order type.' });
+        const problem = planProblem([order]);
+        if (problem) return json(400, { error: problem });
+        const workItems = orderWorkItems(order.action, order.quantity);
 
         const [budget] = await db.select({ maxWorkItems: campaignBudgets.maxWorkItems })
             .from(campaignBudgets).where(eq(campaignBudgets.campaignId, campaign.id)).limit(1);
@@ -455,14 +946,40 @@ export default withLambda(async (event) => {
         const verdict = fitsBudget(totals, budget?.maxWorkItems ?? 0, workItems);
         if (!verdict.allowed) return json(400, { error: verdict.message });
 
+        // The plan gate, as `start` reads it: a workspace at its monthly cap cannot do the work.
+        const gate = await readPlanTaskGate(db, orgId);
+        if (gate.noPlan) return json(402, { error: 'Choose a plan to commission work.' });
+        if (gate.atCap) {
+            return json(429, { error: 'This workspace has used its monthly task allowance, so your assistants cannot take on new work until it resets. Nothing has been charged.' });
+        }
+
+        // §9.5: "hold this until <an open task> is done". Must be an open order of THIS campaign —
+        // waiting on a settled one would wait for ever, and on another campaign's (or tenant's)
+        // order would be an IDOR.
+        let blockedOnOrderId: number | null = null;
+        if (body.waitFor !== undefined && body.waitFor !== null && body.waitFor !== '') {
+            const [dep] = await db.select({ id: campaignOrders.id })
+                .from(campaignOrders)
+                .where(and(
+                    eq(campaignOrders.id, Number(body.waitFor)),
+                    eq(campaignOrders.campaignId, campaign.id),
+                    eq(campaignOrders.organisationId, orgId),
+                    inArray(campaignOrders.status, ['queued', 'issued', 'in_review', 'blocked']),
+                ))
+                .limit(1);
+            if (!dep) return json(400, { error: 'The task this should wait for is already finished or no longer exists.' });
+            blockedOnOrderId = dep.id;
+        }
+
         const result = await placeOrder({
             db, organisationId: orgId, userId,
             campaignId: campaign.id,
             orchestratorAssistantId: campaign.aiAssistantId,
             campaignObjective: campaign.objective,
-            action: orderAction,
-            brief: (body.brief && typeof body.brief === 'object') ? body.brief as Record<string, unknown> : {},
-            quantity,
+            action: order.action,
+            brief: order.brief,
+            quantity: order.quantity,
+            blockedOnOrderId,
         });
         if (result.status === 'failed') return json(400, { error: result.message ?? 'The order could not be placed.' });
         return json(200, { orderId: result.orderId, status: result.status, workItems: result.workItems });
@@ -1111,9 +1628,63 @@ export default withLambda(async (event) => {
         // human's approval and execution — re-asking it here would mean the user approved one
         // thing and something else happened.
         const proposed = (decision.proposed ?? {}) as { orders?: Array<Record<string, unknown>> };
+
+        // A strategy decision commits a whole plan at once, so it is checked as a whole BEFORE
+        // anything is placed. Refusing here leaves the decision pending and approvable once the
+        // reason is fixed; placing order by order until one failed would half-run a plan.
+        if (decision.kind === 'strategy') {
+            if (!PLANNABLE_STATUSES.includes(campaign.status as never)) {
+                return json(400, {
+                    error: campaign.status === 'paused'
+                        ? 'This campaign is paused. Resume it on the Campaigns tab first, then approve the plan.'
+                        : `This campaign is ${campaign.status}, so it cannot take on new work.`,
+                });
+            }
+            const gate = await readPlanTaskGate(db, orgId);
+            if (gate.noPlan) return json(402, { error: 'Choose a plan to start running campaigns.' });
+            if (gate.atCap) {
+                return json(429, {
+                    error: 'This workspace has used its monthly task allowance, so your assistants cannot take on new work until it resets. Nothing has been charged — the allowance is a stop, not a bill.',
+                });
+            }
+            const [budget] = await db.select({ maxWorkItems: campaignBudgets.maxWorkItems })
+                .from(campaignBudgets).where(eq(campaignBudgets.campaignId, campaign.id)).limit(1);
+            const verdict = fitsBudget(
+                await campaignSpendTotals(db, campaign.id),
+                budget?.maxWorkItems ?? 0,
+                planWorkItems(normalisePlanOrders(proposed.orders)),
+            );
+            if (!verdict.allowed) return json(400, { error: verdict.message });
+
+            // ⚠️ Activate BEFORE placing. Each order recompiles its target assistant's blueprint,
+            // and section 13 only reads LIVE campaigns — placing first would compile every brief
+            // against a draft and steer nothing until some unrelated recompile.
+            if (campaign.status === 'draft') {
+                await db.update(campaigns)
+                    .set({ status: 'active', startsAt: campaign.startsAt ?? new Date(), updatedAt: new Date() })
+                    .where(eq(campaigns.id, campaign.id));
+            }
+        }
+
         const placed: Array<{ orderId: number | null; status: string; message?: string }> = [];
+        // Plan position (1-based) → the order it became, so "after": 2 can point at a real row.
+        const placedByPosition: Array<number | null> = [];
         for (const o of (proposed.orders ?? []).slice(0, 10)) {
-            if (!isOrderAction(o.action)) continue;
+            if (!isOrderAction(o.action)) { placedByPosition.push(null); continue; }
+            // §9.5: an item that waits for an earlier one is placed BLOCKED behind it, and the
+            // reconciler releases it when that one delivers. If the earlier one could not be placed
+            // at all, the thing this was waiting for will never happen — skip it and say so,
+            // rather than running it early, which is exactly what "wait for Legal" exists to stop.
+            const after = Number(o.after);
+            let blockedOnOrderId: number | null = null;
+            if (Number.isInteger(after) && after >= 1 && after <= placedByPosition.length) {
+                blockedOnOrderId = placedByPosition[after - 1];
+                if (!blockedOnOrderId) {
+                    placed.push({ orderId: null, status: 'failed', message: `Not placed — it waits for item ${after}, which could not be placed.` });
+                    placedByPosition.push(null);
+                    continue;
+                }
+            }
             const r = await placeOrder({
                 db, organisationId: orgId, userId,
                 campaignId: campaign.id,
@@ -1122,8 +1693,10 @@ export default withLambda(async (event) => {
                 action: o.action,
                 brief: (o.brief && typeof o.brief === 'object') ? o.brief as Record<string, unknown> : {},
                 quantity: Number(o.quantity) || 1,
+                blockedOnOrderId,
             });
             placed.push({ orderId: r.orderId, status: r.status, message: r.message });
+            placedByPosition.push(r.status === 'failed' ? null : r.orderId);
         }
 
         await db.update(campaignDecisions).set({
@@ -1131,13 +1704,8 @@ export default withLambda(async (event) => {
         }).where(eq(campaignDecisions.id, decision.id));
         await settleDecisionMirror(db, decision.id, 'approved');
 
-        // A strategy decision is the campaign's own go-ahead, so approving it starts the campaign.
-        // Every other kind acts on a campaign that is already running.
-        if (decision.kind === 'strategy' && campaign.status === 'draft') {
-            await db.update(campaigns)
-                .set({ status: 'active', startsAt: new Date(), updatedAt: new Date() })
-                .where(eq(campaigns.id, campaign.id));
-        }
+        // A strategy decision is the campaign's own go-ahead: it was started above, before its
+        // orders were placed. Every other kind acts on a campaign that is already running.
 
         // Report what actually happened per order rather than a blanket success. Some orders fail
         // for legitimate reasons (the workspace has not hired that assistant), and the user needs

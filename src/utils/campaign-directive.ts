@@ -23,7 +23,8 @@
 // ('ahead' | 'on_track' | 'behind'), never a percentage and never a raw count.
 
 import { renderCampaignConstraints, type CampaignConstraints } from '../config/campaign-reject-reasons';
-import { CAMPAIGN_OUTCOME_LABELS, type CampaignOutcomeMetric } from '../config/campaign-vocab';
+import { CAMPAIGN_OUTCOME_LABELS, isFunnelStage, type CampaignOutcomeMetric, type FunnelStage } from '../config/campaign-vocab';
+import { audienceLine } from '../config/campaign-audience';
 
 /** How the campaign is tracking. Deliberately coarse — see the fast-moving-value warning above. */
 export type CampaignPace = 'ahead' | 'on_track' | 'behind' | 'unknown';
@@ -37,6 +38,10 @@ export interface DirectiveCampaign {
     angle?: string | null;
     /** Free-text audience description from the strategy, if any. */
     audience?: string | null;
+    /** Where in the funnel this campaign works (§9.6). Absent on legacy callers = no stage line. */
+    funnelStage?: FunnelStage | null;
+    /** The campaign's own tone, inside the brand voice (§9.3). */
+    tone?: string | null;
     pace: CampaignPace;
     /** Days left, bucketed to a week so a daily tick cannot churn the blueprint. */
     weeksRemaining?: number | null;
@@ -52,6 +57,49 @@ export interface CampaignDirective {
     audience: string | null;
     /** Pre-rendered prose. This is the ONLY thing emitted into the prompt. */
     directive: string;
+}
+
+/** The campaign columns a directive is built from — what blueprint.ts and the per-job rebuild select. */
+export interface DirectiveCampaignRow {
+    id: number;
+    objective: string;
+    outcomeMetric: string;
+    endsAt: Date | null;
+    constraints: unknown;
+    audience: unknown;
+    funnelStage: string | null;
+    tone: string | null;
+}
+
+/**
+ * The ONE place a campaign row + an order brief become a DirectiveCampaign. Pure.
+ *
+ * Shared by blueprint.ts (the assistant-wide section 13) and campaign-job-directive.ts (the
+ * per-job rebuild, §9.8). Two hand-written copies would drift — one would learn the tone and the
+ * other would not, and nobody would see it until drafts disagreed.
+ *
+ * `angleOverride` beats the brief's angle: an A/B test job carries ITS variant's angle.
+ */
+export function directiveInputFrom(
+    c: DirectiveCampaignRow, brief: Record<string, unknown>, angleOverride?: string | null,
+): DirectiveCampaign {
+    const weeksRemaining = c.endsAt
+        ? Math.max(0, Math.round((c.endsAt.getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000)))
+        : null;
+    return {
+        id: c.id,
+        objective: c.objective,
+        outcomeMetric: c.outcomeMetric as CampaignOutcomeMetric,
+        angle: angleOverride ?? (typeof brief.angle === 'string' ? brief.angle : null),
+        // The order's own audience wins (one campaign can brief two assistants for two personas).
+        audience: audienceLine(c.audience, brief.audience),
+        funnelStage: isFunnelStage(c.funnelStage) ? c.funnelStage : null,
+        tone: c.tone ?? null,
+        // Never computed here: section content must stay slow-moving (see the header).
+        pace: 'unknown',
+        weeksRemaining,
+        constraints: c.constraints as CampaignConstraints | null,
+    };
 }
 
 /**
@@ -82,6 +130,18 @@ export function buildCampaignDirective(campaign: DirectiveCampaign | null | unde
 }
 
 /**
+ * One instruction per funnel stage, phrased as a constraint on THIS piece of work. Each one says
+ * what to do AND what not to do, because the failure for each stage is the neighbouring stage's
+ * behaviour: awareness drifting into a pitch, retention pitching customers as if they were new.
+ */
+const FUNNEL_STAGE_DIRECTIVES: Record<FunnelStage, string> = {
+    awareness: 'Stage: awareness — this work is for people who do not know this business yet. Make it worth reading or sharing on its own: lead with the reader\'s problem or a genuinely useful idea, not with the business. Do not ask for a sale, a call or a signup.',
+    consideration: 'Stage: consideration — this work is for people who know of this business and are weighing it up. Show how it works, with specifics and evidence. End with one low-commitment next step, such as learning more, not a request to buy.',
+    conversion: 'Stage: conversion — this work is for people ready to act. Make one specific next step unmistakable and easy, and ask for nothing else.',
+    retention: 'Stage: retention — this work is for existing customers. Help them get more from what they already have and speak to them as customers; never pitch them as if they were new.',
+};
+
+/**
  * The prose the model actually reads.
  *
  * Written as constraints on THIS piece of work, not as a briefing on the campaign. A model told
@@ -96,6 +156,18 @@ function renderCampaignDirective(c: DirectiveCampaign, objective: string, outcom
     lines.push(`What the campaign is trying to produce: ${outcome.toLowerCase()}.`);
 
     if (c.audience) lines.push(`Who it is for: ${c.audience}`);
+
+    // The stage changes what a GOOD piece of work is, which is why it is here and not just on a
+    // dashboard. Before §9.6 every campaign was implicitly a conversion campaign, so an awareness
+    // flight was drafted as a run of sales pitches to people who had never heard of the business.
+    const stageLine = c.funnelStage ? FUNNEL_STAGE_DIRECTIVES[c.funnelStage] : null;
+    if (stageLine) lines.push(stageLine);
+
+    // Narrows the brand voice for this campaign; never replaces it. Stated as such, or a model
+    // reads "playful" and drops the brand's rules about claims and language with it.
+    if (c.tone?.trim()) {
+        lines.push(`The tone this campaign asks for, within the brand voice: ${c.tone.trim()}. Where it conflicts with the brand voice or your content rules, they win.`);
+    }
     if (c.angle) lines.push(`The angle this campaign is taking: ${c.angle}`);
 
     // Pace changes emphasis, not truthfulness. "Behind" makes the call to action more direct; it
