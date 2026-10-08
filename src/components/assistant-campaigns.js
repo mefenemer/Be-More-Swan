@@ -79,6 +79,11 @@
     addWork: {},
     /** Decision id whose "Turn down" reason picker is open. */
     rejectingPlan: null,
+    /** Per campaign: { open, picking, selected: Set } for the Pictures panel (§9.3). */
+    pictures: {},
+    /** The org's library for the picker; null until first opened. */
+    library: null,
+    libraryError: null,
   };
 
   function esc(v) {
@@ -270,6 +275,10 @@
         <p class="hidden mt-2 text-xs font-semibold text-gray-600" data-cmp-status="${esc(String(c.id))}"></p>
 
         <div class="flex flex-wrap items-center gap-3 mt-3">
+          <button type="button" data-cmp-toggle-pictures="${esc(String(c.id))}"
+            class="text-xs font-bold text-gray-500 hover:text-gray-700 underline transition">
+            ${state.pictures[c.id] && state.pictures[c.id].open ? 'Hide pictures' : `Pictures${(c.assets || []).length ? ` (${esc(String(c.assets.length))})` : ''}`}
+          </button>
           <button type="button" data-cmp-toggle-links="${esc(String(c.id))}"
             class="text-xs font-bold text-gray-500 hover:text-gray-700 underline transition">
             ${state.links[c.id] && state.links[c.id].open ? 'Hide' : 'Tracked links'}
@@ -279,6 +288,7 @@
             ${state.paid_[c.id] && state.paid_[c.id].open ? 'Hide' : (c.mode === 'paid' ? 'Advertising' : 'Add advertising')}
           </button>
         </div>
+        ${picturesPanel(c)}
         ${linksPanel(c.id)}
         ${paidPanel(c)}
       </div>`;
@@ -367,6 +377,133 @@
           </div>`}
       </div>`;
   }
+
+  // ── Pictures (§9.3) ────────────────────────────────────────────────────────
+  // The campaign's own visuals: posts it commissions use these first, least-used first, so a flight
+  // looks like one campaign. Attach from the existing library (uploading stays in the library —
+  // one place to upload, not two); remove with ×. Nothing here generates or uploads anything.
+  function thumb(a, extra) {
+    const media = a.url
+      ? (a.assetType === 'video'
+        ? `<video src="${esc(a.url)}" muted preload="metadata" class="w-16 h-16 object-cover"></video>`
+        : `<img src="${esc(a.url)}" alt="${esc(a.name || '')}" loading="lazy" class="w-16 h-16 object-cover">`)
+      : '<div class="w-16 h-16 bg-gray-200"></div>';
+    return `<div class="relative rounded-md overflow-hidden ${extra || ''}" title="${esc(a.name || '')}">${media}</div>`;
+  }
+
+  function picturesPanel(c) {
+    const st = state.pictures[c.id];
+    if (!st || !st.open) return '';
+    const id = esc(String(c.id));
+    const assets = Array.isArray(c.assets) ? c.assets : [];
+    const attachedIds = new Set(assets.map((a) => a.id));
+    let picker = '';
+    if (st.picking) {
+      if (state.libraryError) {
+        picker = `<p class="text-xs text-red-600">${esc(state.libraryError)}</p>`;
+      } else if (!state.library) {
+        picker = '<p class="text-xs text-gray-400">Loading your library…</p>';
+      } else {
+        const choices = state.library.filter((a) => !attachedIds.has(a.id));
+        picker = choices.length ? `
+          <p class="text-xs text-gray-500">Choose pictures from your library, then attach them.</p>
+          <div class="flex flex-wrap gap-2">
+            ${choices.map((a) => `
+              <button type="button" data-cmp-pic-pick="${id}" data-asset="${esc(String(a.id))}"
+                class="cursor-pointer rounded-md ${st.selected.has(a.id) ? 'ring-2 ring-emerald-600' : 'opacity-60'}">${thumb(a)}</button>`).join('')}
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button" data-cmp-pic-attach="${id}" ${st.selected.size ? '' : 'disabled'}
+              class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+              Attach ${st.selected.size ? esc(String(st.selected.size)) : ''} selected
+            </button>
+            <button type="button" data-cmp-pic-cancel="${id}" class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition">Cancel</button>
+          </div>`
+          : '<p class="text-xs text-gray-500">Every picture in your library is already attached, or the library is empty. Upload pictures in your content library first.</p>';
+      }
+    }
+    return `
+      <div class="mt-3 border border-gray-200 rounded-xl p-4 space-y-3">
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">This campaign's pictures</p>
+        ${assets.length ? `
+          <div class="flex flex-wrap gap-2">
+            ${assets.map((a) => `
+              <div class="relative">
+                ${thumb(a)}
+                <button type="button" data-cmp-pic-remove="${id}" data-asset="${esc(String(a.id))}" title="Remove from this campaign"
+                  class="absolute top-0 right-0 bg-white border border-gray-200 rounded-md px-1 text-xs font-bold text-gray-600">×</button>
+              </div>`).join('')}
+          </div>
+          <p class="text-xs text-gray-500">Posts this campaign commissions use these first, so they look like one campaign. Removing one does not change posts already drafted.</p>`
+          : '<p class="text-xs text-gray-500">None yet. Posts use your assistant\'s usual picture sources until you attach some.</p>'}
+        ${st.picking ? picker : `
+          <button type="button" data-cmp-pic-open="${id}"
+            class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Add from library</button>`}
+      </div>`;
+  }
+
+  async function loadLibrary() {
+    try {
+      const data = await post({ action: 'list_library', assistantId: state.assistantId });
+      state.library = Array.isArray(data.assets) ? data.assets : [];
+      state.libraryError = null;
+    } catch (err) {
+      state.libraryError = err.message || 'Could not load your library.';
+    }
+    if (state.rendered) render();
+  }
+
+  document.addEventListener('click', async (e) => {
+    const toggle = e.target.closest('[data-cmp-toggle-pictures]');
+    const open = e.target.closest('[data-cmp-pic-open]');
+    const cancel = e.target.closest('[data-cmp-pic-cancel]');
+    const pick = e.target.closest('[data-cmp-pic-pick]');
+    const attach = e.target.closest('[data-cmp-pic-attach]');
+    const remove = e.target.closest('[data-cmp-pic-remove]');
+    if (!toggle && !open && !cancel && !pick && !attach && !remove) return;
+    const el = toggle || open || cancel || pick || attach || remove;
+    const cid = Number(toggle ? toggle.dataset.cmpTogglePictures
+      : open ? open.dataset.cmpPicOpen : cancel ? cancel.dataset.cmpPicCancel
+        : pick ? pick.dataset.cmpPicPick : attach ? attach.dataset.cmpPicAttach : remove.dataset.cmpPicRemove);
+    const st = state.pictures[cid] || (state.pictures[cid] = { open: false, picking: false, selected: new Set() });
+
+    if (toggle) { st.open = !st.open; if (state.rendered) render(); return; }
+    if (open) {
+      st.picking = true; st.selected = new Set();
+      if (state.rendered) render();
+      if (!state.library) await loadLibrary();
+      return;
+    }
+    if (cancel) { st.picking = false; st.selected = new Set(); if (state.rendered) render(); return; }
+    if (pick) {
+      const aid = Number(pick.dataset.asset);
+      if (st.selected.has(aid)) st.selected.delete(aid); else st.selected.add(aid);
+      if (state.rendered) render();
+      return;
+    }
+    if (state.busy) return;
+    state.busy = true;
+    el.disabled = true;
+    try {
+      if (attach) {
+        const data = await post({ action: 'attach_assets', campaignId: cid, assetIds: [...st.selected] });
+        const n = Array.isArray(data.attached) ? data.attached.length : 0;
+        // Counted from the server's answer: an id it would not attach (not ours, purged, a cap)
+        // must not be reported as attached.
+        window.showToast?.(n ? `${n} ${n === 1 ? 'picture' : 'pictures'} attached.` : 'Nothing was attached.', n ? 'success' : 'error');
+        st.picking = false; st.selected = new Set();
+      } else {
+        await post({ action: 'detach_asset', campaignId: cid, assetId: Number(remove.dataset.asset) });
+      }
+    } catch (err) {
+      say(cid, err.message || 'That did not work — please try again.', 'error');
+      el.disabled = false;
+      state.busy = false;
+      return;
+    }
+    state.busy = false;
+    await load();
+  });
 
   // ── Tasks waiting on people (§9.5) ─────────────────────────────────────────
   // Each says who, what, when it is due (and whether that has passed), and how much work is held
@@ -596,6 +733,11 @@
           </label>
         </div>
         <p class="text-xs text-gray-500">The task budget is the most of your monthly allowance this campaign may commission. At the cap it stops — it never bills you extra.</p>
+        <label class="block text-xs font-bold text-gray-600">Tone for this campaign (optional)
+          <input type="text" maxlength="300" data-cmpf="tone" data-keep="f-tone" value="${esc((c && c.tone) || '')}"
+            placeholder="e.g. warm and celebratory, no discount language — always within your brand voice"
+            class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+        </label>
         <p class="text-xs font-bold text-gray-700 pt-2">Who is it for?</p>
         <div class="flex flex-wrap gap-3">
           <label class="block text-xs font-bold text-gray-600 min-w-[12rem]">Persona
@@ -1846,6 +1988,8 @@
       const payload = {
         objective,
         funnelStage: val('funnelStage'),
+        // Sent even when blank: clearing the field on Edit clears the campaign's tone.
+        tone: val('tone'),
         outcomeMetric: val('outcomeMetric'),
         // Blank means "no target" / "no end date" — sent as null, never as 0.
         targetValue: val('targetValue') ? Number(val('targetValue')) : null,

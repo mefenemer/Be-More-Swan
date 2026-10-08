@@ -14,6 +14,8 @@
 //   POST { action: 'pause',       campaignId, reason }
 //   POST { action: 'stop_all',    assistantId }            → pause every live campaign
 //   POST { action: 'complete_task', orderId, outcome: 'done'|'wont_happen', note? }   (§9.5)
+//   POST { action: 'list_library', assistantId }          → the org's pictures, for the picker (§9.3)
+//   POST { action: 'attach_assets', campaignId, assetIds[] } / { action: 'detach_asset', campaignId, assetId }
 //   POST { action: 'list_orders', campaignId }
 //   POST { action: 'place_order', campaignId, orderAction, brief?, quantity? }
 //   POST { action: 'create_link',  campaignId, destinationUrl, label?, medium?, network? }
@@ -41,7 +43,7 @@
 
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
-    adVariants, aiAssistants, auditLogs, campaignAttributions, campaignBudgets,
+    adVariants, aiAssistants, auditLogs, campaignAssets, campaignAttributions, campaignBudgets, contentAssets,
     campaignClickEvents, campaignDecisions, campaignLinks, campaignOrders, campaigns, discoveryCampaigns,
 } from '../../db/schema';
 import { getDb } from '../../db/client';
@@ -53,6 +55,8 @@ import { settleOrderNow } from '../../src/utils/campaign-reconciler';
 import { hiredRoleKeys } from '../../src/utils/campaign-proposer';
 import { normaliseAudience, type CampaignAudience } from '../../src/config/campaign-audience';
 import { countCampaignOutcome } from '../../src/utils/campaign-outcomes';
+import { MAX_CAMPAIGN_ASSETS, normaliseAssetIds, normaliseTone } from '../../src/config/campaign-creative';
+import { resolveAssetDisplayUrl } from '../../src/utils/social-publish';
 import {
     PLANNABLE_STATUSES, fileStrategyPlan, normalisePlanOrders, pendingPlanFor, planProblem, planWorkItems,
 } from '../../src/utils/campaign-plan';
@@ -138,6 +142,54 @@ export default withLambda(async (event) => {
         return c ?? null;
     }
 
+    /**
+     * A campaign's own pictures (§9.3), with a display URL each. R2 is private, so the URL is a
+     * short-lived signed one from the same helper the media library uses — never a raw key.
+     */
+    async function campaignAssetsFor(campaignId: number) {
+        const rows = await db.select({
+            id: contentAssets.id, name: contentAssets.name, assetType: contentAssets.assetType,
+            storageUrl: contentAssets.storageUrl, storageKey: contentAssets.storageKey,
+            externalUrl: contentAssets.externalUrl, purgedAt: contentAssets.purgedAt,
+        }).from(campaignAssets)
+            .innerJoin(contentAssets, eq(contentAssets.id, campaignAssets.contentAssetId))
+            .where(and(eq(campaignAssets.campaignId, campaignId), eq(campaignAssets.organisationId, orgId)))
+            .orderBy(campaignAssets.createdAt);
+        const out = [];
+        for (const a of rows) {
+            if (a.purgedAt) continue;
+            out.push({ id: a.id, name: a.name, assetType: a.assetType, url: await resolveAssetDisplayUrl(a) });
+        }
+        return out;
+    }
+
+    /**
+     * Attach pictures to a campaign. Every id is checked against THIS organisation's library — an
+     * id from another tenant is silently not attached (an IDOR probe learns nothing), and the
+     * response names exactly what was attached so no surface claims more than happened.
+     */
+    async function attachAssets(campaignId: number, ids: number[]) {
+        if (!ids.length) return [];
+        const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(campaignAssets)
+            .where(eq(campaignAssets.campaignId, campaignId));
+        const room = Math.max(0, MAX_CAMPAIGN_ASSETS - Number(n));
+        if (!room) return [];
+        const owned = await db.select({ id: contentAssets.id, name: contentAssets.name })
+            .from(contentAssets)
+            .where(and(
+                eq(contentAssets.organisationId, orgId),
+                inArray(contentAssets.id, ids),
+                isNull(contentAssets.purgedAt),
+                inArray(contentAssets.assetType, ['image', 'video']),
+            ));
+        const take = owned.slice(0, room);
+        if (!take.length) return [];
+        await db.insert(campaignAssets)
+            .values(take.map((a) => ({ organisationId: orgId, campaignId, contentAssetId: a.id, createdBy: userId })))
+            .onConflictDoNothing();
+        return take.map((a) => ({ id: a.id, name: a.name }));
+    }
+
     // ── list ──────────────────────────────────────────────────────────────────
     if (action === 'list') {
         const assistantId = Number(body.assistantId);
@@ -164,6 +216,7 @@ export default withLambda(async (event) => {
                 audience: campaigns.audience,
                 excludeExistingCustomers: campaigns.excludeExistingCustomers,
                 funnelStage: campaigns.funnelStage,
+                tone: campaigns.tone,
                 createdAt: campaigns.createdAt,
                 maxWorkItems: campaignBudgets.maxWorkItems,
                 maxSpendGbp: campaignBudgets.maxSpendGbp,
@@ -221,7 +274,8 @@ export default withLambda(async (event) => {
                     dueDate: typeof b.dueDate === 'string' ? b.dueDate : null,
                 };
             });
-            items.push({ ...r, ...totals, orders: live ?? { open: 0, inReview: 0, delivered: 0 }, pendingPlan, progress, humanTasks });
+            const assets = await campaignAssetsFor(r.id);
+            items.push({ ...r, ...totals, orders: live ?? { open: 0, inReview: 0, delivered: 0 }, pendingPlan, progress, humanTasks, assets });
         }
 
         // The plan gate travels with the list so the Budget & Control strip can render in one
@@ -368,6 +422,7 @@ export default withLambda(async (event) => {
             endsAt: endsAt && !Number.isNaN(endsAt.getTime()) ? endsAt : null,
             audience: normaliseAudience(body.audience),
             funnelStage,
+            tone: normaliseTone(body.tone),
             // An explicit choice wins; otherwise the stage decides — retention is aimed AT existing
             // customers, every other stage is finding new ones (§9.2 / §9.6).
             excludeExistingCustomers: typeof body.excludeExistingCustomers === 'boolean'
@@ -388,8 +443,9 @@ export default withLambda(async (event) => {
         const planDecisionId = await fileStrategyPlan(db, {
             id: created.id, organisationId: orgId, aiAssistantId: assistantId, objective, status: 'draft',
         }, planOrders);
+        const attached = await attachAssets(created.id, normaliseAssetIds(body.attachAssetIds));
 
-        return json(200, { campaignId: created.id, status: 'draft', planDecisionId });
+        return json(200, { campaignId: created.id, status: 'draft', planDecisionId, attachedAssets: attached });
     }
 
     // ── edit ──────────────────────────────────────────────────────────────────
@@ -431,6 +487,7 @@ export default withLambda(async (event) => {
             }
         }
         if (typeof body.excludeExistingCustomers === 'boolean') patch.excludeExistingCustomers = body.excludeExistingCustomers;
+        if (body.tone !== undefined) patch.tone = normaliseTone(body.tone);
         const objective = str(body.objective, 500);
         if (objective) patch.objective = objective;
         // Stage and outcome move together: the outcome must be one the (new) stage may be measured
@@ -453,8 +510,20 @@ export default withLambda(async (event) => {
         await db.update(campaigns).set(patch).where(eq(campaigns.id, campaign.id));
         // The objective and end date are what the directive says; an edit must reach drafting.
         if (patch.objective !== undefined || patch.outcomeMetric !== undefined || patch.endsAt !== undefined
-            || patch.audience !== undefined || patch.funnelStage !== undefined) {
+            || patch.audience !== undefined || patch.funnelStage !== undefined || patch.tone !== undefined) {
             await recompileCampaignTargets(db, campaign.id, 'campaign-edited');
+        }
+
+        // Pictures (§9.3) — attachable and removable from the chat as well as the tab: neither widens
+        // who a campaign reaches or what it spends, and both are reversible in one click.
+        const attachedAssets = await attachAssets(campaign.id, normaliseAssetIds(body.attachAssetIds));
+        const detachIds = normaliseAssetIds(body.detachAssetIds);
+        if (detachIds.length) {
+            await db.delete(campaignAssets).where(and(
+                eq(campaignAssets.campaignId, campaign.id),
+                eq(campaignAssets.organisationId, orgId),
+                inArray(campaignAssets.contentAssetId, detachIds),
+            ));
         }
 
         if (body.maxWorkItems !== undefined || body.autonomyThresholdWork !== undefined) {
@@ -463,7 +532,7 @@ export default withLambda(async (event) => {
             if (body.autonomyThresholdWork !== undefined) bpatch.autonomyThresholdWork = int(body.autonomyThresholdWork, 0, 50, 0);
             await db.update(campaignBudgets).set(bpatch).where(eq(campaignBudgets.campaignId, campaign.id));
         }
-        return json(200, { ok: true });
+        return json(200, { ok: true, attachedAssets, detached: detachIds.length });
     }
 
     // ── start (also the documented RESUME path) ───────────────────────────────
@@ -593,6 +662,50 @@ export default withLambda(async (event) => {
         }, orders);
         if (!decisionId) return json(500, { error: 'The plan could not be saved — please try again.' });
         return json(200, { decisionId, campaignId: campaign.id, status: campaign.status });
+    }
+
+    // ── campaign pictures (§9.3) ──────────────────────────────────────────────
+    if (action === 'list_library') {
+        const assistantId = Number(body.assistantId);
+        if (!await requireOrchestrator(assistantId)) return json(404, { error: 'Assistant not found.' });
+        // Newest first; images and videos only (the only things a post can carry); nothing purged
+        // or rejected. Capped — a picker of thousands is not a picker.
+        const rows = await db.select({
+            id: contentAssets.id, name: contentAssets.name, assetType: contentAssets.assetType,
+            storageUrl: contentAssets.storageUrl, storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl,
+            provider: contentAssets.provider,
+        }).from(contentAssets)
+            .where(and(
+                eq(contentAssets.organisationId, orgId),
+                inArray(contentAssets.assetType, ['image', 'video']),
+                isNull(contentAssets.purgedAt),
+                sql`${contentAssets.status} <> 'rejected'`,
+            ))
+            .orderBy(desc(contentAssets.createdAt))
+            .limit(60);
+        const assets = [];
+        for (const a of rows) {
+            assets.push({ id: a.id, name: a.name, assetType: a.assetType, provider: a.provider, url: await resolveAssetDisplayUrl(a) });
+        }
+        return json(200, { assets });
+    }
+
+    if (action === 'attach_assets') {
+        const campaign = await requireCampaign(Number(body.campaignId));
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+        const attached = await attachAssets(campaign.id, normaliseAssetIds(body.assetIds));
+        return json(200, { attached });
+    }
+
+    if (action === 'detach_asset') {
+        const campaign = await requireCampaign(Number(body.campaignId));
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+        await db.delete(campaignAssets).where(and(
+            eq(campaignAssets.campaignId, campaign.id),
+            eq(campaignAssets.organisationId, orgId),
+            eq(campaignAssets.contentAssetId, Number(body.assetId)),
+        ));
+        return json(200, { ok: true });
     }
 
     // ── complete_task ─────────────────────────────────────────────────────────

@@ -25,7 +25,7 @@
 import { CAMPAIGN_TYPES } from './newsletter-campaign-chat-draft';
 import { EMAIL_TRIGGERS } from './campaign-email-order';
 import { and, desc, eq, sql } from 'drizzle-orm';
-import { campaignBudgets, campaignDecisions, campaignOrders, campaigns, discoveryCampaigns } from '../../db/schema';
+import { campaignAssets, campaignBudgets, campaignDecisions, campaignOrders, campaigns, contentAssets, discoveryCampaigns } from '../../db/schema';
 import { persistProposal, type LiveCampaign, type ProposedDecision } from './campaign-proposer';
 import { settleDecisionMirror } from './campaign-mirror';
 import { campaignSpendTotals } from './campaign-ledger';
@@ -335,6 +335,30 @@ async function openTasksLine(db: Db, campaignId: number): Promise<string> {
     return `. Open tasks for people: ${items.join('; ')}`;
 }
 
+/** The pictures attached to one campaign (§9.3), by id and name, so the chat can say which it would remove. */
+async function campaignPicturesLine(db: Db, campaignId: number): Promise<string> {
+    const rows = await db.select({ id: contentAssets.id, name: contentAssets.name })
+        .from(campaignAssets).innerJoin(contentAssets, eq(contentAssets.id, campaignAssets.contentAssetId))
+        .where(eq(campaignAssets.campaignId, campaignId)).limit(30);
+    return rows.length ? `, its own pictures: ${rows.map((a) => `assetId ${a.id} "${a.name}"`).join(', ')}` : ', no pictures of its own';
+}
+
+/** The newest pictures in the library, the only ids the chat may offer to attach. */
+async function libraryLine(db: Db, organisationId: number): Promise<string> {
+    const rows = await db.select({ id: contentAssets.id, name: contentAssets.name, assetType: contentAssets.assetType })
+        .from(contentAssets)
+        .where(and(
+            eq(contentAssets.organisationId, organisationId),
+            sql`${contentAssets.assetType} IN ('image','video')`,
+            sql`${contentAssets.purgedAt} IS NULL`,
+            sql`${contentAssets.status} <> 'rejected'`,
+        ))
+        .orderBy(desc(contentAssets.createdAt)).limit(20);
+    return rows.length
+        ? `\nNEWEST PICTURES IN THEIR LIBRARY (the only assetId values you may attach): ${rows.map((a) => `assetId ${a.id} "${a.name}" (${a.assetType})`).join('; ')}`
+        : '\nTheir library has no pictures yet — they upload them in their content library, then attach them to a campaign.';
+}
+
 /** Campaigns listed to the chat. A workspace runs a handful; more than this is a list to page. */
 const SNAPSHOT_CAMPAIGNS = 15;
 
@@ -361,6 +385,7 @@ export async function buildCampaignsSnapshot(
                 audience: campaigns.audience,
                 excludeExistingCustomers: campaigns.excludeExistingCustomers,
                 funnelStage: campaigns.funnelStage,
+                tone: campaigns.tone,
                 maxWorkItems: campaignBudgets.maxWorkItems,
             })
             .from(campaigns)
@@ -386,8 +411,9 @@ export async function buildCampaignsSnapshot(
                 .map((x) => `- discoveryCampaignId ${x.id}: ${x.name ? `"${x.name}" — ` : ''}${x.idea.slice(0, 160)}`).join('\n')}`
             : '\nThere are no saved lead searches, so "narrow_targeting" cannot be used — propose "run_lead_search" instead.';
 
+        const library = await libraryLine(db, organisationId);
         if (!rows.length) {
-            return `YOUR CAMPAIGNS RIGHT NOW — this assistant has no campaigns yet. Anything the user wants to run is a NEW campaign.${searchBlock}`;
+            return `YOUR CAMPAIGNS RIGHT NOW — this assistant has no campaigns yet. Anything the user wants to run is a NEW campaign.${searchBlock}${library}`;
         }
 
         const lines: string[] = [];
@@ -407,12 +433,14 @@ export async function buildCampaignsSnapshot(
                 + `, ${used} of ${r.maxWorkItems ?? 0} tasks used or committed`
                 + `, ${who ? `for: ${who}` : 'no audience set'}`
                 + `, ${r.excludeExistingCustomers ? 'leaves existing customers out of its lead searches' : 'INCLUDES existing customers'}`
+                + `${r.tone ? `, tone: "${r.tone}"` : ''}`
+                + await campaignPicturesLine(db, r.id)
                 + await openTasksLine(db, r.id)
                 + `${plan ? `, a plan of ${plan.orders.length} briefs is waiting for the user's approval` : ''}`,
             );
         }
         return `YOUR CAMPAIGNS RIGHT NOW — read at the moment this message was sent. These are FACT: answer questions about the user's campaigns from here, never guess, and use these campaignId values (never invent one) when the user wants to change or add work to an existing campaign.
-${lines.join('\n')}${searchBlock}`;
+${lines.join('\n')}${searchBlock}${library}`;
     } catch (err) {
         console.error('[campaign-plan] campaigns snapshot failed (non-fatal)', err);
         return null;

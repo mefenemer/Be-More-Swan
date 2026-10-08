@@ -39,6 +39,8 @@ export interface DirectiveCampaign {
     audience?: string | null;
     /** Where in the funnel this campaign works (§9.6). Absent on legacy callers = no stage line. */
     funnelStage?: FunnelStage | null;
+    /** The campaign's own tone, inside the brand voice (§9.3). */
+    tone?: string | null;
     pace: CampaignPace;
     /** Days left, bucketed to a week so a daily tick cannot churn the blueprint. */
     weeksRemaining?: number | null;
@@ -116,6 +118,12 @@ function renderCampaignDirective(c: DirectiveCampaign, objective: string, outcom
     // flight was drafted as a run of sales pitches to people who had never heard of the business.
     const stageLine = c.funnelStage ? FUNNEL_STAGE_DIRECTIVES[c.funnelStage] : null;
     if (stageLine) lines.push(stageLine);
+
+    // Narrows the brand voice for this campaign; never replaces it. Stated as such, or a model
+    // reads "playful" and drops the brand's rules about claims and language with it.
+    if (c.tone?.trim()) {
+        lines.push(`The tone this campaign asks for, within the brand voice: ${c.tone.trim()}. Where it conflicts with the brand voice or your content rules, they win.`);
+    }
     if (c.angle) lines.push(`The angle this campaign is taking: ${c.angle}`);
 
     // Pace changes emphasis, not truthfulness. "Behind" makes the call to action more direct; it

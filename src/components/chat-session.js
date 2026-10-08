@@ -495,6 +495,8 @@
           endsAt: d.endsAt,
           audience: d.audience || null,
           funnelStage: d.funnelStage,
+          tone: d.tone || undefined,
+          attachAssetIds: Array.isArray(d.attachAssetIds) ? d.attachAssetIds : [],
           excludeExistingCustomers: d.excludeExistingCustomers !== false,
           // The plan's briefs. The server files them as a PENDING plan on the draft — it places
           // nothing. Dropping them here is what left prod's first campaign briefing nobody.
@@ -578,6 +580,9 @@
         endsAt: c.endsAt,
         audience: c.audience,
         funnelStage: c.funnelStage,
+        tone: c.tone,
+        attachAssetIds: c.attachAssetIds,
+        detachAssetIds: c.detachAssetIds,
         // Only ever true from the chat; the server refuses false on this path anyway.
         excludeExistingCustomers: c.excludeExistingCustomers === true ? true : undefined,
       }, respond, d.campaignId);

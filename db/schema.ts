@@ -3969,6 +3969,9 @@ export const campaigns = pgTable("campaigns", {
   // plan §9.6). Decides which outcomes may be the target, what drafting optimises for, and whether
   // the lead-quality halt may fire. Every pre-§9.6 campaign was a lead campaign, hence the default.
   funnelStage: text("funnel_stage").notNull().default("conversion"),
+  // The tone this campaign asks for, inside the brand voice (db/z-campaign-creative.sql, §9.3) —
+  // "warm, no discount language". Quoted into blueprint §13. NULL = the brand voice alone.
+  tone: text(),
   // 'organic' | 'paid' | 'blended'. Phase 1 creates only 'organic'; the others are refused at the
   // HTTP boundary until the ad rails exist.
   mode: text().notNull().default("organic"),
@@ -4154,6 +4157,22 @@ export const campaignOrders = pgTable("campaign_orders", {
 
 // APPEND-ONLY ledger of budget actually consumed. A correction is a new compensating row with a
 // negative amount, never an edit — history that can be rewritten cannot be audited.
+// A campaign's own visuals (db/z-campaign-creative.sql, §9.3). A link table, not a column on
+// content_assets: one picture can serve two campaigns, and content_assets is read with bare selects
+// that a new column would break on an un-migrated environment. Posts a campaign commissions use
+// these first (media-resolver.ts), least-used first, before the assistant's usual sources.
+export const campaignAssets = pgTable("campaign_assets", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").notNull().references(() => campaigns.id, { onDelete: "cascade" }),
+  contentAssetId: integer("content_asset_id").notNull().references(() => contentAssets.id, { onDelete: "cascade" }),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("campaign_assets_pair_uidx").on(t.campaignId, t.contentAssetId),
+  index("campaign_assets_asset_idx").on(t.contentAssetId),
+]);
+
 export const campaignSpendEvents = pgTable("campaign_spend_events", {
   id: bigint({ mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),

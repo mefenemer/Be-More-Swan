@@ -458,6 +458,20 @@ list is merged, never replaced. Guarded by `tests/campaign-audience.test.ts`.
   either lives in `campaigns.tone` + tagged assets, or needs a named brand-kit variant. Start with
   the former.
 
+**✅ Built 2026-10-08 (not yet deployed). ⚠️ Needs `db/z-campaign-creative.sql` applied to BOTH
+envs BEFORE the code deploys.** `campaigns.tone` (≤300 chars) reaches drafting through §13 as a
+narrowing of the brand voice ("where it conflicts, they win"). Pictures live in a new
+`campaign_assets` link table — deliberately NOT a column on `content_assets`, which the media
+library reads with bare selects (and one picture can serve two campaigns). Posts a campaign's
+orders commission try its pictures FIRST in `resolveMediaForPost`, least-used first (reuse is
+allowed — one look across the flight), before the assistant's usual sources; not for YouTube
+Shorts (9:16). ⚠️ A campaign picture reports its REAL origin from its provider (an unknown provider
+counts as AI), because that source feeds the auto-publish gate. GUI: tone on the form, "Pictures"
+panel per campaign (attach from the library, remove ×). Chat: tone + attach/detach on the proposal
+and edit cards, only from library ids the snapshot listed. Not done: uploading from the campaign
+(uploads stay in the library), blog feature images (social posts only), a per-campaign brand-kit
+variant (deferred, tone + pictures cover it). Guarded by `tests/campaign-creative.test.ts`.
+
 ### 9.4 Campaign hierarchy & the year view
 
 Each campaign already has its own task ceiling, so reallocating inside one cannot cannibalise

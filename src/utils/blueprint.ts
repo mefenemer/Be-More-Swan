@@ -607,6 +607,7 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
             constraints: campaigns.constraints,
             audience: campaigns.audience,
             funnelStage: campaigns.funnelStage,
+            tone: campaigns.tone,
             updatedAt: campaigns.updatedAt,
             brief: campaignOrders.brief,
         })
@@ -648,6 +649,8 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
         audience: audienceLine(liveCampaign.audience, campaignBrief.audience),
         // Slow-moving (changes only on an edit, which recompiles) — safe in section content.
         funnelStage: isFunnelStage(liveCampaign.funnelStage) ? liveCampaign.funnelStage : null,
+        // Slow-moving, like the stage: changes only on an edit, which recompiles.
+        tone: liveCampaign.tone ?? null,
         // Pace is not computed here on purpose: it needs live outcome counts, and this section
         // must stay slow-moving. It is 'unknown' until the Phase 2 outcome attribution lands,
         // and the directive omits the pace line entirely rather than guessing.

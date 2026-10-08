@@ -903,6 +903,16 @@
   // ⚠️ NO £ FIGURE APPEARS ON THIS CARD, EVER. Not "£0", not "no cost". Phase 1 campaigns spend
   // capacity, not money, and discovery-spend-cap-is-operator-only is the receipt: a pound sign on
   // a card IS a price to whoever reads it, whatever we meant by it. Work is counted in tasks.
+  // Pictures named on a campaign card (§9.3): [{ id, name }] → only positive integer ids, each with
+  // a display name. The SERVER checks every id against the org's own library and reports what it
+  // actually attached, so a name here is a label for the user, never the authority.
+  function campaignCardAssets(list) {
+    return (Array.isArray(list) ? list : [])
+      .map((a) => ({ id: Number(a && a.id), name: a && typeof a.name === 'string' ? a.name.trim().slice(0, 80) : '' }))
+      .filter((a) => Number.isInteger(a.id) && a.id > 0)
+      .slice(0, 30);
+  }
+
   function renderCampaignStrategyProposalCard(ui, esc) {
     const C = window.CampaignConstants;
     // Named for the user, not for the schema. "lead_qualifier" on a card is an internal identifier
@@ -928,6 +938,8 @@
     const audDesc = aud && typeof aud.description === 'string' ? aud.description.trim() : '';
     const excludeDomains = aud && Array.isArray(aud.excludeDomains)
       ? aud.excludeDomains.filter((d) => typeof d === 'string' && d.trim()).map((d) => d.trim()) : [];
+    const tone = typeof ui.tone === 'string' ? ui.tone.trim().slice(0, 300) : '';
+    const attach = campaignCardAssets(ui.attachAssets);
     // The stage (§9.6). An unknown value falls back to the default rather than being shown raw.
     const stage = C && C.funnelStages.indexOf(ui.funnelStage) !== -1 ? ui.funnelStage : (C ? C.defaultFunnelStage : 'conversion');
     // An explicit choice wins; otherwise the stage decides — the same default the server applies
@@ -1045,6 +1057,8 @@
           ${esc(C ? C.stageLabel(stage) : stage)}${C && C.stageDescription(stage) ? ` — ${esc(C.stageDescription(stage).toLowerCase())}` : ''}</p>
         <p class="text-sm text-gray-700 mb-1 break-words"><span class="font-bold text-indigo-900">For:</span>
           ${persona || audDesc ? `${esc(persona)}${persona && audDesc ? ' — ' : ''}${esc(audDesc)}` : '<span class="text-amber-700">no audience given yet</span>'}</p>
+        ${tone ? `<p class="text-sm text-gray-700 mb-1 break-words"><span class="font-bold text-indigo-900">Tone:</span> ${esc(tone)}</p>` : ''}
+        ${attach.length ? `<p class="text-sm text-gray-700 mb-1 break-words"><span class="font-bold text-indigo-900">Pictures:</span> ${esc(attach.map((a) => a.name || `#${a.id}`).join(', '))}</p>` : ''}
         <p class="text-xs mb-3 ${excludeCustomers ? 'text-gray-600' : 'text-amber-700 font-bold'}">
           ${excludeCustomers
             ? `Leaves out companies you have marked as won${excludeDomains.length ? `, plus ${esc(String(excludeDomains.length))} more you named` : ''}.`
@@ -1143,6 +1157,8 @@
           endsAt: typeof ui.endsAt === 'string' ? ui.endsAt : null,
           audience: aud ? { persona, description: audDesc, excludeDomains } : null,
           funnelStage: stage,
+          tone: tone || null,
+          attachAssetIds: attach.map((a) => a.id),
           excludeExistingCustomers: excludeCustomers,
           orders: sendOrders,
           // The success line is built from the SERVER's answer, never from the model's intent —
@@ -1217,6 +1233,20 @@
         // the list the user typed on the tab.
         if (excludeDomains.length) rows.push(['Also leave out', excludeDomains.join(', ')]);
       }
+    }
+    if (typeof ui.tone === 'string' && ui.tone.trim()) {
+      changes.tone = ui.tone.trim().slice(0, 300);
+      rows.push(['Tone', changes.tone]);
+    }
+    const addPics = campaignCardAssets(ui.attachAssets);
+    const removePics = campaignCardAssets(ui.detachAssets);
+    if (addPics.length) {
+      changes.attachAssetIds = addPics.map((a) => a.id);
+      rows.push(['Add pictures', addPics.map((a) => a.name || `#${a.id}`).join(', ')]);
+    }
+    if (removePics.length) {
+      changes.detachAssetIds = removePics.map((a) => a.id);
+      rows.push(['Remove pictures', removePics.map((a) => a.name || `#${a.id}`).join(', ')]);
     }
     // Only ever ON from a card (§9.0). A card carrying false shows nothing and sends nothing.
     if (ui.excludeExistingCustomers === true) {
