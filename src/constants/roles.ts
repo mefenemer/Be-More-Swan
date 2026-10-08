@@ -28,6 +28,9 @@ export const LEAD_GENERATOR_ROLE_KEY = 'lead_qualifier';
 /** The canonical role key for the Campaign Assistant (the multi-assistant orchestrator). */
 export const CAMPAIGN_ORCHESTRATOR_ROLE_KEY = 'campaign_orchestrator';
 
+/** The Email Marketing Assistant (user-facing name). The role key predates the rename and stays. */
+export const NEWSLETTER_ROLE_KEY = 'newsletter_editor';
+
 /**
  * The roles the Campaign Assistant is allowed to issue orders to, and nothing else.
  *
@@ -41,4 +44,7 @@ export const ORCHESTRATABLE_ROLE_KEYS: string[] = [
     SMM_ROLE_KEY,
     BLOG_WRITER_ROLE_KEY,
     LEAD_GENERATOR_ROLE_KEY,
+    // §9.7 — an email campaign, saved switched OFF for the user to review in Email Studio. The
+    // delegable unit is the drafted series; sending stays a human act in the Studio.
+    NEWSLETTER_ROLE_KEY,
 ];

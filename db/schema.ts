@@ -4147,7 +4147,8 @@ export const campaignOrders = pgTable("campaign_orders", {
   index("campaign_orders_target_idx").on(t.targetAssistantId, t.status),
   check("campaign_orders_status_check", sql`${t.status} IN ('queued','issued','in_review','delivered','blocked','cancelled','rejected')`),
   check("campaign_orders_cost_check", sql`${t.costWorkItems} >= 0 AND ${t.costGbp} >= 0`),
-  check("campaign_orders_artefact_check", sql`${t.artefactKind} IS NULL OR ${t.artefactKind} IN ('scheduled_post','blog_post','discovery_campaign','assistant_record')`),
+  // Widened by db/z-campaign-email-orders.sql (§9.7) — an email order's artefact is a sequence or an email.
+  check("campaign_orders_artefact_check", sql`${t.artefactKind} IS NULL OR ${t.artefactKind} IN ('scheduled_post','blog_post','discovery_campaign','assistant_record','newsletter_sequence','newsletter_issue')`),
   check("campaign_orders_no_self_block_check", sql`${t.blockedOnOrderId} IS NULL OR ${t.blockedOnOrderId} <> ${t.id}`),
 ]);
 
@@ -4649,6 +4650,9 @@ export const newsletterIssues = pgTable("newsletter_issues", {
   // stops a republish drafting a second issue about the same post. SET NULL, not CASCADE — an
   // issue may already have been sent, and deleting the post must not delete the record of it.
   sourceBlogPostId: integer("source_blog_post_id").references(() => blogPosts.id, { onDelete: "set null" }),
+  // The Campaign Assistant order that commissioned this email (db/z-campaign-email-orders.sql, §9.7).
+  // How a campaign counts its email opens and clicks. SET NULL: a sent email outlives its order.
+  campaignOrderId: integer("campaign_order_id").references((): AnyPgColumn => campaignOrders.id, { onDelete: "set null" }),
   // Set on an issue that IS a resend, pointing at the one it repeats. ⚠️ Unique where not null:
   // one resend per issue, ever — a retry or a double-click must not mail the same people twice.
   // The resend carries its OWN counters, so "did the second subject line do better?" is a
@@ -4807,6 +4811,8 @@ export const newsletterSequences = pgTable("newsletter_sequences", {
   enabledAt: timestamp("enabled_at"),
   enabledBy: integer("enabled_by").references(() => users.id, { onDelete: "set null" }),
   createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  // The Campaign Assistant order that commissioned this email campaign (§9.7). Saved switched OFF.
+  campaignOrderId: integer("campaign_order_id").references((): AnyPgColumn => campaignOrders.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [

@@ -17,6 +17,7 @@
 //
 // Run:  npm run gen:constants     (and commit the result — there is no build step on deploy)
 
+import { CAMPAIGN_CADENCES } from '../src/config/email-campaign-cadences';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -331,6 +332,8 @@ ${formatRows}
   var PAUSE_REASON_LABELS = ${JSON.stringify(PAUSE_REASON_LABELS)};
   // Funnel stage (plan section 9.6). STAGE_OUTCOMES is already filtered to countable metrics, so
   // the client cannot offer an outcome nothing counts.
+  // The Email Studio's campaign kinds, for the Add work picker on an email order (section 9.7).
+  var EMAIL_CAMPAIGN_KINDS = ${JSON.stringify(CAMPAIGN_CADENCES.map((c) => ({ type: c.type, label: c.label, description: c.description })))};
   var FUNNEL_STAGES = ${JSON.stringify(FUNNEL_STAGES)};
   var FUNNEL_STAGE_LABELS = ${JSON.stringify(FUNNEL_STAGE_LABELS)};
   var FUNNEL_STAGE_DESCRIPTIONS = ${JSON.stringify(FUNNEL_STAGE_DESCRIPTIONS)};
@@ -344,6 +347,7 @@ ${formatRows}
           key, label: s.label, description: s.description,
           // Pricing, not routing: the Add work form states the cost before the click.
           takesQuantity: s.takesQuantity, maxQuantity: s.maxQuantity, workItemsPerUnit: s.workItemsPerUnit,
+          defaultQuantity: s.defaultQuantity ?? 1,
       })),
   )};
 
@@ -402,6 +406,9 @@ ${formatRows}
 
     // Why an ad was paused, in words. ⚠️ An ad that stopped without saying why is the assistant
     // making a decision the user cannot argue with — so this must never fall back to a raw enum.
+    /** Email campaign kinds an email order may ask for: [{ type, label, description }]. */
+    emailCampaignKinds: EMAIL_CAMPAIGN_KINDS,
+
     /** Funnel stages in order, with their labels and one-line descriptions. */
     funnelStages: FUNNEL_STAGES,
     defaultFunnelStage: DEFAULT_FUNNEL_STAGE,

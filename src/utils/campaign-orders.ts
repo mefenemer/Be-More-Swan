@@ -28,6 +28,7 @@
 //   gate, which is where it stays until a human approves it there.
 // * It cannot reach a role outside ORCHESTRATABLE_ROLE_KEYS.
 
+import { triggerCampaignEmailDraft } from './trigger-campaign-email-draft';
 import { randomUUID } from 'crypto';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
@@ -423,4 +424,18 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
         ok: true, terminal: true,
         summary: 'Campaign angle updated — applies to work drafted from now on',
     }),
+
+    // An email campaign (§9.7). Drafting is a BACKGROUND job — one model call per email, too slow
+    // for the plan-approval request this runs inside — so the executor only wakes the worker
+    // (src/utils/campaign-email-order.ts). The order stays 'issued' until the emails exist; a lost
+    // wake-up is re-sent by the reconciler, so a failed dispatch is NOT a failed order.
+    // Nothing here or in the worker ever sends an email.
+    draft_email_campaign: async (_db, ctx, orderId) => {
+        const n = Math.max(1, Math.floor(Number(ctx.brief.quantity) || 1));
+        await triggerCampaignEmailDraft(orderId, 'order-issued');
+        return {
+            ok: true,
+            summary: `The Email Marketing Assistant is writing ${n} email${n === 1 ? '' : 's'}`,
+        };
+    },
 };

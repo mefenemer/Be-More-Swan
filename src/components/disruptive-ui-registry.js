@@ -911,6 +911,7 @@
       social_media_manager: 'Social Media Assistant',
       blog_writer: 'Blog Writing Assistant',
       lead_qualifier: 'Lead Generation Assistant',
+      newsletter_editor: 'Email Marketing Assistant',
     };
 
     const objective = typeof ui.objective === 'string' ? ui.objective.trim() : '';
@@ -949,10 +950,23 @@
       .filter((o) => o && typeof o === 'object' && ROLE_LABEL[o.assignedRole] && actionSpec(o.action))
       .map((o) => {
         const spec = actionSpec(o.action);
-        const qty = spec.takesQuantity && Number.isFinite(Number(o.quantity))
-          ? Math.max(1, Math.min(spec.maxQuantity, Math.floor(Number(o.quantity)))) : 1;
+        // Same rule as the server's normalisePlanOrders: no quantity means the action's default
+        // (four emails, one post), so the card prices exactly what approving will commit.
+        const qty = !spec.takesQuantity ? 1
+          : Number.isFinite(Number(o.quantity)) && o.quantity !== null && o.quantity !== ''
+            ? Math.max(1, Math.min(spec.maxQuantity, Math.floor(Number(o.quantity))))
+            : (spec.defaultQuantity || 1);
         const detail = [o.angle, o.idea].find((v) => typeof v === 'string' && v.trim());
         const forWho = typeof o.audience === 'string' && o.audience.trim() ? o.audience.trim() : '';
+        // An email order says who gets the emails and that nothing is sent (§9.7) — approving a
+        // card that silently meant "email everyone who signs up" would be a decision made for them.
+        const emailNote = o.action === 'draft_email_campaign'
+          ? (o.emailTrigger === 'custom'
+            ? 'Emails you send to a group yourself — saved as drafts, nothing sent'
+            : o.emailTrigger === 'form'
+              ? 'A follow-up for people who sign up through a form — saved switched off'
+              : 'Saved in Email Studio, switched off — nothing is sent until you say')
+          : '';
         return {
           raw: o,
           label: spec.label,
@@ -960,6 +974,7 @@
           qty: qty > 1 ? qty : null,
           detail: detail ? String(detail).trim() : '',
           forWho,
+          emailNote,
           tasks: (spec.workItemsPerUnit || 0) * qty,
         };
       });
@@ -994,7 +1009,7 @@
         <p class="text-xs font-bold text-indigo-700 uppercase tracking-wide mb-1">Who I'd brief</p>
         <ul class="mb-3 space-y-1">
           ${orders.map((o) => `
-            <li class="text-xs text-gray-600">• ${esc(o.label)}${o.qty ? ` ×${esc(String(o.qty))}` : ''} — ${esc(o.role)}${o.detail ? `<span class="block pl-3 text-gray-500 italic break-words">${esc(o.detail)}</span>` : ''}${o.forWho ? `<span class="block pl-3 text-gray-500 break-words">For: ${esc(o.forWho)}</span>` : ''}</li>
+            <li class="text-xs text-gray-600">• ${esc(o.label)}${o.qty ? ` ×${esc(String(o.qty))}` : ''} — ${esc(o.role)}${o.detail ? `<span class="block pl-3 text-gray-500 italic break-words">${esc(o.detail)}</span>` : ''}${o.forWho ? `<span class="block pl-3 text-gray-500 break-words">For: ${esc(o.forWho)}</span>` : ''}${o.emailNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.emailNote)}</span>` : ''}</li>
           `).join('')}
         </ul>` : ''}
 

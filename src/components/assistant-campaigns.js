@@ -380,11 +380,41 @@
     run_lead_search: { field: 'idea', label: 'Who to look for', placeholder: 'e.g. UK accountancy firms with 10–50 staff', required: true },
     narrow_targeting: { field: 'idea', label: 'Tightened description (optional)', placeholder: 'Who the search should find instead', required: false },
     adjust_messaging: { field: 'angle', label: 'New angle', placeholder: 'The argument this campaign should make from now on', required: true },
+    draft_email_campaign: { field: 'angle', label: 'What should the emails get people to do? (optional)', placeholder: 'Leave blank to use this campaign\'s objective', required: false },
   };
 
   function actionSpec(key) {
     const list = (C() && C().orderActions) || [];
     return list.find((a) => a.key === key) || null;
+  }
+
+  // The email order's own choices (§9.7). Both pickers start on "the stage decides", which is the
+  // server's default too (campaign-email-order.ts resolveEmailPlan) — so leaving them alone is a
+  // real answer, not a missing one.
+  function emailFields(id) {
+    const kinds = (C() && C().emailCampaignKinds) || [];
+    return `
+      <div class="flex flex-wrap gap-3">
+        <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Who gets them
+          <select data-cmp-aw-trigger="${id}" data-keep="aw-trigger-${id}" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+            <option value="">Let the campaign's stage decide</option>
+            <option value="form">People who sign up through a form (a follow-up)</option>
+            <option value="custom">A group I send them to myself</option>
+          </select>
+        </label>
+        <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Kind of email campaign
+          <select data-cmp-aw-kind="${id}" data-keep="aw-kind-${id}" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+            <option value="">Let the campaign's stage decide</option>
+            ${kinds.map((k) => `<option value="${esc(k.type)}">${esc(k.label)}</option>`).join('')}
+          </select>
+        </label>
+      </div>
+      <label class="block text-xs font-bold text-gray-600">Links and facts the emails may use (optional)
+        <textarea rows="2" maxlength="2000" data-cmp-aw-facts="${id}" data-keep="aw-facts-${id}"
+          placeholder="e.g. Book a call: https://your-site.com/book — the emails only ever link to addresses you put here"
+          class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal"></textarea>
+      </label>
+      <p class="text-xs text-gray-500">Saved in Email Studio, switched off. Nothing is sent until you turn the follow-up on or send each email yourself.</p>`;
   }
 
   function addWorkPanel(c) {
@@ -406,7 +436,7 @@
         <p class="text-xs text-gray-500">${esc(spec.description)}</p>
         ${spec.takesQuantity ? `
           <label class="block text-xs font-bold text-gray-600">How many (up to ${esc(String(spec.maxQuantity))})
-            <input type="number" min="1" max="${esc(String(spec.maxQuantity))}" value="1" data-cmp-aw-qty="${id}" data-keep="aw-qty-${id}-${esc(spec.key)}"
+            <input type="number" min="1" max="${esc(String(spec.maxQuantity))}" value="${esc(String(spec.defaultQuantity || 1))}" data-cmp-aw-qty="${id}" data-keep="aw-qty-${id}-${esc(spec.key)}"
               class="mt-1 w-24 text-sm border border-gray-300 rounded-lg px-3 py-1.5 font-normal">
           </label>` : ''}
         ${needsSearch ? (state.savedSearches.length ? `
@@ -415,7 +445,8 @@
               ${state.savedSearches.map((x) => `<option value="${esc(String(x.id))}">${esc(x.name || x.idea.slice(0, 80))}</option>`).join('')}
             </select>
           </label>` : '<p class="text-xs text-amber-700">There are no saved lead searches to narrow yet — use "Run a lead search" first.</p>') : ''}
-        ${spec.key === 'draft_social_posts' || spec.key === 'draft_blog_pillar' ? `
+        ${spec.key === 'draft_email_campaign' ? emailFields(id) : ''}
+        ${spec.key === 'draft_social_posts' || spec.key === 'draft_blog_pillar' || spec.key === 'draft_email_campaign' ? `
           <label class="block text-xs font-bold text-gray-600">For a different audience (optional)
             <input type="text" maxlength="300" data-cmp-aw-audience="${id}" data-keep="aw-aud-${id}-${esc(spec.key)}"
               placeholder="Leave blank to write for this campaign's audience"
@@ -1826,6 +1857,14 @@
       // An order's own audience beats the campaign's for that order's work (§9.2).
       const forWho = (document.querySelector(`[data-cmp-aw-audience="${id}"]`)?.value || '').trim();
       if (forWho) brief.audience = forWho;
+      if (spec.key === 'draft_email_campaign') {
+        const trigger = document.querySelector(`[data-cmp-aw-trigger="${id}"]`)?.value || '';
+        const kind = document.querySelector(`[data-cmp-aw-kind="${id}"]`)?.value || '';
+        const facts = (document.querySelector(`[data-cmp-aw-facts="${id}"]`)?.value || '').trim();
+        if (trigger) brief.emailTrigger = trigger;
+        if (kind) brief.emailKind = kind;
+        if (facts) brief.facts = facts;
+      }
       if (spec.key === 'narrow_targeting') {
         brief.discoveryCampaignId = Number(document.querySelector(`[data-cmp-aw-search="${id}"]`)?.value) || null;
       }

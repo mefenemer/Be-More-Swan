@@ -22,6 +22,8 @@
 //    is not stored here: the card the user approved in chat already showed it, and a decision card
 //    is a record of facts (campaign-proposer.ts's rule, kept).
 
+import { CAMPAIGN_TYPES } from './newsletter-campaign-chat-draft';
+import { EMAIL_TRIGGERS } from './campaign-email-order';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { campaignBudgets, campaignDecisions, campaigns, discoveryCampaigns } from '../../db/schema';
 import { persistProposal, type LiveCampaign, type ProposedDecision } from './campaign-proposer';
@@ -47,6 +49,7 @@ export const ORDER_ROLE_LABELS: Record<string, string> = {
     social_media_manager: 'Social Media Assistant',
     blog_writer: 'Blog Writing Assistant',
     lead_qualifier: 'Lead Generation Assistant',
+    newsletter_editor: 'Email Marketing Assistant',
 };
 
 /** Campaign states a plan may be filed against and approved on. Paused needs a Resume first. */
@@ -64,10 +67,18 @@ export interface PlanOrder {
  *   angle / audience      → blueprint section 13-campaign (campaign-directive.ts)
  *   idea / name           → run_lead_search, narrow_targeting (campaign-orders.ts executors)
  *   discoveryCampaignId   → narrow_targeting: WHICH saved search to tighten
+ *   emailKind / emailTrigger / facts → draft_email_campaign (campaign-email-order.ts): which
+ *                           Email Studio kind, form follow-up vs send-it-yourself, and the ONLY
+ *                           text a link in the emails may come from
  * `quantity` is not here on purpose — placeOrder writes it from the priced quantity, so the
  * number drafted can never differ from the number charged.
  */
-const BRIEF_TEXT_FIELDS: Record<string, number> = { angle: 300, audience: 300, idea: 1000, name: 120 };
+const BRIEF_TEXT_FIELDS: Record<string, number> = { angle: 300, audience: 300, idea: 1000, name: 120, facts: 2000 };
+/** Closed vocabularies — anything else is dropped, and the worker picks the stage's default. */
+const BRIEF_ENUM_FIELDS: Record<string, readonly string[]> = {
+    emailKind: CAMPAIGN_TYPES,
+    emailTrigger: EMAIL_TRIGGERS,
+};
 
 function cleanBrief(rec: Record<string, unknown>): Record<string, unknown> {
     // Accept the fields either flat on the order (the chat wire shape — simpler for a model to
@@ -77,6 +88,9 @@ function cleanBrief(rec: Record<string, unknown>): Record<string, unknown> {
     for (const [k, max] of Object.entries(BRIEF_TEXT_FIELDS)) {
         const v = src[k];
         if (typeof v === 'string' && v.trim()) out[k] = v.trim().slice(0, max);
+    }
+    for (const [k, allowed] of Object.entries(BRIEF_ENUM_FIELDS)) {
+        if (typeof src[k] === 'string' && allowed.includes(src[k] as string)) out[k] = src[k];
     }
     const dc = Math.floor(Number(src.discoveryCampaignId));
     if (Number.isInteger(dc) && dc > 0) out.discoveryCampaignId = dc;
@@ -101,9 +115,9 @@ export function normalisePlanOrders(raw: unknown): PlanOrder[] {
         if (!isOrderAction(rec.action)) continue;
         const spec = ORDER_ACTION_SPECS[rec.action];
         const q = Math.floor(Number(rec.quantity));
-        const quantity = spec.takesQuantity && Number.isFinite(q)
-            ? Math.max(1, Math.min(spec.maxQuantity, MAX_ORDER_QUANTITY, q))
-            : 1;
+        const quantity = !spec.takesQuantity ? 1
+            : Number.isFinite(q) ? Math.max(1, Math.min(spec.maxQuantity, MAX_ORDER_QUANTITY, q))
+            : (spec.defaultQuantity ?? 1);
         out.push({ action: rec.action, quantity, brief: cleanBrief(rec) });
         if (out.length >= MAX_PLAN_ORDERS) break;
     }

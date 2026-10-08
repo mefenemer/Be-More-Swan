@@ -524,6 +524,22 @@ email campaign for approval. ⚠️ `orchestration-target-role-decides-artifact`
 branch on the target's role or it produces a social post nobody finds. External ESPs stay out of
 scope until a customer asks.
 
+**✅ Built 2026-10-08 (not yet deployed). ⚠️ Needs `db/z-campaign-email-orders.sql` applied to
+BOTH envs BEFORE the code deploys — the Email Studio's bare reads break without it, not just
+campaigns.** Order `draft_email_campaign` → Email Marketing Assistant (`newsletter_editor` added to
+`ORCHESTRATABLE_ROLE_KEYS`), 2 tasks per email, default 4, max 7. Uses the Studio's own generator
+(`draftCampaignEmails`) and cadences. `emailTrigger: form` = a follow-up sequence for form signups
+(the nurture), `custom` = draft emails the user sends; the stage picks when unsaid. **It never
+sends:** sequences stay `is_enabled = false`, emails stay drafts; switching on is the user's in
+Email Studio. Drafting is a BACKGROUND job (`draft-campaign-emails-background`) because one model
+call per email would blow the plan-approval request's ~26s; awaited wake-up, atomic claim on the
+order, lost wake-ups re-sent by the hourly reconciler, failures cancelled + refunded through the
+reconciler's one settlement path. Emails/sequences carry `campaign_order_id`, which unlocks the
+`email_engagement` outcome (distinct people who opened or clicked; retention's default measure).
+Not done: a segment id on the campaign audience (the send-it-yourself drafts have no segment set —
+the user picks one when sending); no notification when the emails are ready (the order's row and
+Email Studio show it). Guarded by `tests/campaign-email-orders.test.ts`.
+
 ### 9.8 A/B testing & post-mortems
 
 **Exists:** paid variants (`ad_variants`) already test creatives.

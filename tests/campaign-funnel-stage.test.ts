@@ -77,9 +77,12 @@ async function main() {
         assert.strictEqual(outcomeForStage('retention', 'garbage'), stageOutcomes('retention')[0]);
     });
 
-    await check('signups are countable now; email engagement waits for §9.7', () => {
+    await check('signups (§9.6) and email engagement (§9.7) are both countable now', () => {
         assert.ok(isSelectableOutcomeMetric('signups'));
-        assert.ok(!isSelectableOutcomeMetric('email_engagement'));
+        assert.ok(isSelectableOutcomeMetric('email_engagement'),
+            'An email campaign now records the order that commissioned it, so its opens can be counted.');
+        assert.strictEqual(stageOutcomes('retention')[0], 'email_engagement',
+            'Retention\'s natural measure is the default once it can be counted.');
     });
 
     await check('pre-§9.6 campaigns are conversion campaigns, and retention includes customers', () => {

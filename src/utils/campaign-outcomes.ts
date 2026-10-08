@@ -76,6 +76,28 @@ function outcomeQuery(metric: CampaignOutcomeMetric, campaignId: number, orgId: 
             return sql`SELECT coalesce(sum(pi.total_interactions), 0)::int AS n FROM post_insights pi
                         WHERE pi.organisation_id = ${orgId}
                           AND pi.scheduled_post_id IN (${campaignPosts(campaignId, orgId)})`;
+        case 'email_engagement':
+            // DISTINCT PEOPLE who opened or clicked any email this campaign's orders drafted —
+            // one-off draft emails (newsletter_sends) and form follow-ups (newsletter_sequence_sends).
+            // People, not opens: one reader opening four emails is one engaged person.
+            // ⚠️ Only positive signals are counted. Opens cannot be seen at all from a tenant's own
+            // mailbox (engagement_tracked = false), so this undercounts there; it can never
+            // overcount, and "unopened" is never inferred from a missing open.
+            return sql`SELECT count(DISTINCT lower(x.email))::int AS n FROM (
+                         SELECT s.email FROM newsletter_sends s
+                           JOIN newsletter_issues i ON i.id = s.issue_id
+                           JOIN campaign_orders o ON o.id = i.campaign_order_id
+                          WHERE o.campaign_id = ${campaignId} AND o.organisation_id = ${orgId}
+                            AND s.organisation_id = ${orgId}
+                            AND (s.opened_at IS NOT NULL OR s.clicked_at IS NOT NULL)
+                         UNION ALL
+                         SELECT ss.email FROM newsletter_sequence_sends ss
+                           JOIN newsletter_sequences q ON q.id = ss.sequence_id
+                           JOIN campaign_orders o ON o.id = q.campaign_order_id
+                          WHERE o.campaign_id = ${campaignId} AND o.organisation_id = ${orgId}
+                            AND ss.organisation_id = ${orgId}
+                            AND (ss.opened_at IS NOT NULL OR ss.clicked_at IS NOT NULL)
+                       ) x WHERE x.email IS NOT NULL`;
         case 'clicks':
             return sql`SELECT count(*)::int AS n FROM campaign_click_events e
                         WHERE e.campaign_id = ${campaignId} AND e.organisation_id = ${orgId}

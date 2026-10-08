@@ -19,7 +19,7 @@
 // action the executor cannot dispatch. The one place free text belongs is `campaigns.objective`,
 // which is the founder's own sentence and is never parsed.
 
-import { BLOG_WRITER_ROLE_KEY, LEAD_GENERATOR_ROLE_KEY, SMM_ROLE_KEY } from '../constants/roles';
+import { BLOG_WRITER_ROLE_KEY, LEAD_GENERATOR_ROLE_KEY, NEWSLETTER_ROLE_KEY, SMM_ROLE_KEY } from '../constants/roles';
 
 // ── Campaign mode ────────────────────────────────────────────────────────────
 /**
@@ -81,7 +81,7 @@ export const CAMPAIGN_OUTCOME_LABELS: Record<CampaignOutcomeMetric, string> = {
     published_content: 'Pieces published',
     engagement: 'Engagements on its posts',
     clicks: 'Clicks on its tracked links',
-    email_engagement: 'Email opens and clicks',
+    email_engagement: 'People who opened or clicked its emails',
 };
 
 /**
@@ -95,17 +95,17 @@ export const CAMPAIGN_OUTCOME_SOURCES: Record<CampaignOutcomeMetric, string> = {
     published_content: 'scheduled_posts + blog_posts with a published state, commissioned by its orders',
     engagement: 'post_insights.total_interactions on the posts its orders produced',
     clicks: 'campaign_click_events on its tracked links, automated visits excluded',
-    email_engagement: 'NOT counted until an email campaign can belong to a campaign (§9.7)',
+    email_engagement: 'newsletter_sends + newsletter_sequence_sends opened or clicked, on emails its orders drafted (campaign_order_id) — distinct people',
 };
 
 /**
  * Outcomes that cannot be counted yet. The UI must not offer these as a target: an objective the
  * platform can never score is worse than no objective, because the campaign will read as failing
- * forever. `signups` left this list in §9.6 — Form Builder signups bind to tracked links through
- * campaign_attributions. `email_engagement` waits for §9.7, when an email campaign can belong to
- * a campaign; until then there is nothing to scope the opens to.
+ * forever. Empty since §9.7: `signups` left in §9.6 (Form Builder signups bind to tracked links
+ * through campaign_attributions) and `email_engagement` in §9.7 (an email campaign now records the
+ * order that commissioned it). Keep the list — the next unbuilt metric belongs here, not offered.
  */
-export const UNAVAILABLE_OUTCOME_METRICS: readonly CampaignOutcomeMetric[] = ['email_engagement'];
+export const UNAVAILABLE_OUTCOME_METRICS: readonly CampaignOutcomeMetric[] = [];
 
 // ── Funnel stage (plan §9.6) ─────────────────────────────────────────────────
 /**
@@ -183,6 +183,7 @@ export const CAMPAIGN_ORDER_ACTIONS = [
     'run_lead_search',
     'narrow_targeting',
     'adjust_messaging',
+    'draft_email_campaign',
 ] as const;
 export type CampaignOrderAction = typeof CAMPAIGN_ORDER_ACTIONS[number];
 
@@ -205,8 +206,10 @@ export interface OrderActionSpec {
      * campaign-orders.ts — pricing more than the executor writes charges for work nobody gets.
      */
     maxQuantity: number;
+    /** How many when the brief does not say. Absent = 1. */
+    defaultQuantity?: number;
     /** What comes back, matching campaign_orders.artefact_kind. */
-    artefactKind: 'scheduled_post' | 'blog_post' | 'discovery_campaign' | null;
+    artefactKind: 'scheduled_post' | 'blog_post' | 'discovery_campaign' | 'newsletter_sequence' | 'newsletter_issue' | null;
 }
 
 export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = {
@@ -256,6 +259,21 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
         takesQuantity: false,
         maxQuantity: 1,
         artefactKind: null,
+    },
+    draft_email_campaign: {
+        roleKey: NEWSLETTER_ROLE_KEY,
+        label: 'Write an email campaign',
+        description: 'Briefs the Email Marketing Assistant to write a short series of emails on this campaign\u2019s message — a follow-up for people who sign up through a form, or emails you send to a group yourself. Saved switched off in Email Studio: nothing is sent until you turn it on or send it.',
+        // Per email. Above a post (each email is a full piece with a subject and a job in a
+        // series) and well below a pillar article.
+        workItemsPerUnit: 2,
+        takesQuantity: true,
+        // MAX_CAMPAIGN_EMAILS in newsletter-campaign-chat-draft.ts — the generator's own ceiling.
+        maxQuantity: 7,
+        // The Email Studio's own cadences run three to four emails; one email is not a campaign.
+        defaultQuantity: 4,
+        // A form follow-up is a sequence; a send-it-yourself campaign is a set of draft emails.
+        artefactKind: 'newsletter_sequence',
     },
 };
 
