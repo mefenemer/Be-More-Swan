@@ -1722,6 +1722,15 @@ window.showComplianceModals = function showComplianceModals(force) {
             class="w-full px-3 py-2 rounded-lg text-left text-[11px] font-bold text-red-600 hover:bg-red-50 transition cursor-pointer">
             Don't publish this — reject &amp; archive
           </button>
+          <!-- Reject is FEEDBACK: its reason becomes a rule and a replacement is drafted. Sometimes
+               there is nothing to teach — a test, a duplicate, a topic that's simply gone stale — and
+               rejecting then plants a junk rule and spends a task on a redraft nobody wants. Discard
+               throws the draft away and does neither (the same soft-cancel as a draft of your own). -->
+          <button type="button" id="post-review-discard-btn" onclick="rqReviewDiscardDraft()"
+            class="w-full px-3 py-2 rounded-lg text-left text-[11px] text-gray-500 hover:bg-gray-50 transition cursor-pointer">
+            <span class="block font-bold">Discard this draft</span>
+            <span class="block text-[10px] text-gray-400">Throws it away. Nothing is learned and no replacement is written.</span>
+          </button>
         </div>
       </div>
       <!-- Per-platform connect notice — approving commits the post to the publisher, which needs a
@@ -1761,8 +1770,9 @@ window.showComplianceModals = function showComplianceModals(force) {
         </p>
         <!-- Only for a post you are writing: it exists as a real 'draft' row from the moment Create
              Post made it, so leaving already kept it — but nothing said so, and there was no way to
-             throw one away. An assistant's draft needs neither: it is already saved, and rejecting
-             it is a decision, which lives with the other decisions in step 7. -->
+             throw one away. An assistant's draft doesn't get this pair: it is already saved, and both
+             ways of saying no to it (Reject, which teaches, and Discard, which doesn't) live with the
+             other decisions in step 7. -->
         <div id="post-review-draft-actions" class="hidden items-center justify-center gap-2 pt-0.5 text-[11px] text-gray-400">
           <button onclick="rqReviewSaveDraft()" class="font-semibold underline hover:text-emerald-700 transition cursor-pointer">Save as a draft</button>
           <span>·</span>
@@ -17134,7 +17144,12 @@ async function rqReviewDiscardDraft() {
     const ids = _rqReviewGroupIds.length ? [..._rqReviewGroupIds] : (_rqReviewPostId != null ? [_rqReviewPostId] : []);
     if (!ids.length) { closePostReview(); return; }
     const what = ids.length > 1 ? `this post and its ${ids.length - 1} other platform${ids.length > 2 ? 's' : ''}` : 'this post';
-    const ok = await window.confirmModal('This cannot be undone from here.', {
+    // An assistant's draft can be discarded too (step 7, under Reject). Say what that does NOT do,
+    // because the difference from Reject is the whole point of the button.
+    const ownDraft = (_rqPostCache[_rqReviewPostId] || {}).status === 'draft';
+    const ok = await window.confirmModal(ownDraft
+        ? 'This cannot be undone from here.'
+        : 'It disappears from your queue. Your assistant won’t learn anything from it or write a replacement — if it got something wrong, use Reject instead. This cannot be undone from here.', {
         title: `Discard ${what}?`,
         confirmLabel: 'Yes, discard',
         cancelLabel: 'Keep it',

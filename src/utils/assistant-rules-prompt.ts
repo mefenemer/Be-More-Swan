@@ -64,7 +64,7 @@ export function formatRulesBlock(rules: PromptRule[]): string | null {
         used += line.length;
     }
     if (!lines.length) return null;
-    return `RULES FROM YOUR USER — follow every one of these in everything you produce for them: posts, captions, articles, replies, tickets, summaries, action items, reminders and tables. A rule marked [only for …] applies only to that platform. Where a rule conflicts with your default behaviour, the rule wins. Never mention that you were given rules.\n${lines.join('\n')}`;
+    return `RULES FROM YOUR USER — follow every one of these in everything you produce for them: posts, captions, articles, replies, tickets, summaries, action items, reminders and tables. A rule marked [only for …] applies only to that platform. Where a rule conflicts with your default behaviour, the rule wins. If a rule stops you doing part of what they asked, say so in one short sentence AND still produce the work without that part, in your normal format — never reply with the explanation alone. Never mention that you were given rules.\n${lines.join('\n')}`;
 }
 
 /** The active rules for one assistant, as a prompt block. Never throws: a failed read means no block. */
