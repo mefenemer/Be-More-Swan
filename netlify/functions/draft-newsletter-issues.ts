@@ -67,6 +67,13 @@ export default withLambda(async () => {
         // the whole difference between an assistant and spam.
         if (!perWeek) { note('on_demand'); continue; }
 
+        // "Day you usually send" (setup: newsletterSendDay — "only used to time the draft so it is
+        // ready before you need it"). It was asked at hire and read by NOTHING: drafts arrived on
+        // whatever day the cadence clock happened to land. For a weekly-or-slower cadence the draft
+        // is now written one or two days ahead of that day; more often than weekly, the send day
+        // means nothing and is ignored.
+        if (perWeek <= 1 && !isDraftDayForSend(now, actx.newsletterSendDay)) { note('not_draft_day'); continue; }
+
         try {
             const [outstanding] = await db
                 .select({ id: newsletterIssues.id })
@@ -155,3 +162,17 @@ export default withLambda(async () => {
     console.log('[draft-newsletter-issues]', JSON.stringify(out));
     return { statusCode: 200, body: JSON.stringify(out) };
 });
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/**
+ * Is today a good day to draft for an email the user sends on `sendDay`? One or two days before it
+ * (UTC), so the draft is waiting, reviewable, before the day it goes out. No send day set — or one
+ * we cannot read — means "any day", exactly as before the question was honoured.
+ */
+export function isDraftDayForSend(now: Date, sendDay: unknown): boolean {
+    const target = typeof sendDay === 'string' ? WEEKDAYS.indexOf(sendDay) : -1;
+    if (target === -1) return true;
+    const ahead = (target - now.getUTCDay() + 7) % 7;
+    return ahead === 1 || ahead === 2;
+}

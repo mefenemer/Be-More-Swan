@@ -5,6 +5,7 @@
 // media_generation_jobs, relationship_building_tasks, audit_logs (both resourceType variants),
 // tosAcceptances, dpaAcceptances, and contentRules (Kick Off meeting milestones).
 
+import { roleActivityItems } from '../../src/utils/role-activity';
 import { Handler } from '@netlify/functions';
 import { eq, and, desc, inArray, gte, sql } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
@@ -55,6 +56,7 @@ export default withLambda(async (event) => {
                 .select({
                     id: aiAssistants.id,
                     userId: aiAssistants.userId,
+                    roleKey: sql<string | null>`${aiAssistants.configuration} ->> 'type'`,
                 })
                 .from(aiAssistants)
                 .where(and(eq(aiAssistants.id, aId), eq(aiAssistants.organisationId, orgId)))
@@ -238,26 +240,30 @@ export default withLambda(async (event) => {
 
         const items: ActivityItem[] = [];
 
+        // The Blog Writer's drafting jobs live in the same table; they were described as "post
+        // drafts", which is the Social Media Assistant's word (seen on prod 2026-10-09).
+        const isBlog = ownedAssistant.roleKey === 'blog_writer';
+        const noun = isBlog ? 'blog post' : 'post';
         for (const j of genJobs) {
-            const platformLabel = j.platform ? ` for ${_platformName(j.platform)}` : '';
+            const platformLabel = j.platform && !(isBlog && j.platform === 'blog') ? ` for ${_platformName(j.platform)}` : '';
             const contextHint = j.contextPrompt ? ` based on: "${j.contextPrompt.slice(0, 60)}${j.contextPrompt.length > 60 ? '…' : ''}"` : '';
             let description: string;
             let icon: string;
             let status: ActivityStatus;
             if (j.status === 'completed') {
-                description = `Generated a post draft${platformLabel}${contextHint}.`;
+                description = `Generated a ${noun} draft${platformLabel}${contextHint}.`;
                 icon = 'sparkles';
                 status = 'success';
             } else if (j.status === 'failed') {
-                description = `Post generation attempt failed${platformLabel}.`;
+                description = `${isBlog ? 'Blog post' : 'Post'} generation attempt failed${platformLabel}.`;
                 icon = 'alert';
                 status = 'failed';
             } else if (j.status === 'processing') {
-                description = `Writing a post${platformLabel}…`;
+                description = `Writing a ${noun}${platformLabel}…`;
                 icon = 'sparkles';
                 status = 'in_progress';
             } else {
-                description = `Queued a post for generation${platformLabel}.`;
+                description = `Queued a ${noun} for generation${platformLabel}.`;
                 icon = 'sparkles';
                 status = 'in_progress';
             }
@@ -405,6 +411,16 @@ export default withLambda(async (event) => {
                 createdAt: r.createdAt,
                 status: 'info',
             });
+        }
+
+        // The role's own work (src/utils/role-activity.ts): emails, published articles, campaign
+        // orders, briefs, and every records role's invoices/tickets/enrichments/meetings — none of
+        // which live in the content tables above, so those roles' Activity read as "did nothing".
+        // Best-effort: one source failing must not empty the whole tab.
+        try {
+            items.push(...await roleActivityItems(db, { orgId, assistantId: aId, roleKey: ownedAssistant.roleKey, cutoff: cutoffDate, limit }));
+        } catch (err) {
+            console.error('[get-assistant-activity] role activity failed — shared feed only:', err);
         }
 
         // Sort all items newest-first, cap at limit

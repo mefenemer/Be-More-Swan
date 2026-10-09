@@ -49,9 +49,10 @@ check('the block is capped, keeping the newest rules (they come first)', () => {
 });
 
 console.log('scope');
-check('the three chat-only roles and the two posts roles read rules in chat — not leads or email', () => {
+check('the chat-reading roles, and not Email Marketing (its rules reach it through blueprint §4)', () => {
     assert.deepEqual([...RULE_READING_ROLES].sort(),
-        ['accounts_receivable_clerk', 'blog_writer', 'meeting_note_taker', 'social_media_manager', 'tier1_support_agent']);
+        ['accounts_receivable_clerk', 'blog_writer', 'brand_designer', 'campaign_orchestrator', 'crm_enricher',
+            'lead_qualifier', 'meeting_note_taker', 'social_media_manager', 'tier1_support_agent']);
 });
 check('a platform-only rule is labelled, a global one is not', () => {
     const b = formatRulesBlock([
@@ -105,7 +106,10 @@ check('the UI asks before rejecting, lets a blank answer just reject, and cancel
 });
 check('Learned Directives shows for the chat roles, without the social-only Tuning button', () => {
     const js = read('assistants.js');
-    assert.ok(js.includes("return (rq.kind || 'posts') === 'posts' || _rulesReachChat();"));
+    // A role whose queue is DEFAULTED to posts (it hides its queue — the Brand Designer) is not a posts
+    // role; a declared rulesScope is the other way rules reach a role (2026-10-09).
+    assert.ok(js.includes("return ((rq.kind || 'posts') === 'posts' && !rq.__defaulted) || _rulesReachChat();"));
+    assert.ok(js.includes('if (window._detailRulesScope) return true;'));
     assert.ok(js.includes("tuneBtn.classList.toggle('hidden', viaChat)"));
     assert.ok(read('assistant-detail.html').includes('id="btn-start-tuning"'));
 });

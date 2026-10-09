@@ -21,8 +21,7 @@ import { getDb } from '../../db/client';
 import {
     goals, goalTelemetry, aiAssistants, systemConnections,
     scheduledPosts, plans, masterPlans, assistantRecords, blogPosts,
-    audienceContacts, newsletterIssues,
-} from '../../db/schema';
+    audienceContacts, newsletterIssues, visualBriefOptions, visualBriefs } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { getSecret } from '../../src/utils/vault';
 import {
@@ -536,6 +535,23 @@ async function fetchMetric(
         // not a CHECK-constrained column on assistant_records.
         case 'orders_delivered':
             return countRecords(db, goal, 'campaign_order', sql`status ILIKE '%deliver%'`);
+        // Brand Designer — counted from visual_brief_options, not assistant_records.
+        case 'pictures_approved': {
+            // Brand Designer: options approved into the library, assistant-scoped through the brief.
+            return countOrUnmeasured(async () => {
+                const [row] = await db
+                    .select({ v: sql<number>`count(*)::int` })
+                    .from(visualBriefOptions)
+                    .innerJoin(visualBriefs, eq(visualBriefs.id, visualBriefOptions.briefId))
+                    .where(and(
+                        eq(visualBriefs.aiAssistantId, goal.assistantId),
+                        eq(visualBriefOptions.organisationId, goal.organisationId),
+                        eq(visualBriefOptions.status, 'approved'),
+                    ));
+                return Number(row?.v ?? 0);
+            });
+        }
+
         case 'cash_recovered': {
             // Sum the numeric amount stashed in data (invoices.0.amount or a top-level amount) for
             // invoices that have reached a settled/paid/recovered stage. Coerced defensively so a

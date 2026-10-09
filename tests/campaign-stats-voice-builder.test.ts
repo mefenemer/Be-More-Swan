@@ -109,7 +109,7 @@ check('the preview can rewrite the owner\'s own words, and refuses invented clai
     assert.match(a, /data-vb-suggest-never=/);
     assert.match(a, /new SpeechSynthesisUtterance\(/);
     // Writing voice lives in the builder now, not twice.
-    assert.match(a, /\.filter\(\(f\) => !\(f\.key === 'tone_of_voice' && _VB_ROLES\.includes\(data\.roleKey\)\)\);/);
+    assert.match(a, /\.filter\(\(f\) => !\(f\.key === 'tone_of_voice' && _VB_ROLES\.includes\(data\.roleKey\)\)\)/);
 });
 
 check('header quick switcher, Emails/Campaigns labels, welcome rename, header spacing', () => {

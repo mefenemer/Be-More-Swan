@@ -4427,7 +4427,10 @@ const _RQ_FEEDBACK_PLACEHOLDERS = {
 /** True where a content_rules row can actually reach a model — see _renderRunbookDirectives(). */
 function _rulesSteerThisAssistant() {
     const rq = window._detailReviewQueue || {};
-    return (rq.kind || 'posts') === 'posts' || _rulesReachChat();
+    if (window._detailRulesScope) return true;
+    // A role whose review is its own tab (hideReviewQueue) defaults to kind 'posts' without having
+    // any — it must declare a rulesScope or be told its rules reach nothing.
+    return ((rq.kind || 'posts') === 'posts' && !rq.__defaulted) || _rulesReachChat();
 }
 
 /** True for the roles whose records come from chat, whose chat prompt now carries their rules. */
@@ -4454,6 +4457,27 @@ function _applyAssistantRulesScope() {
     // bg-amber-50/70, which is not compiled) is the one that exists. Check before changing these.
     const AMBER = ['text-amber-800', 'bg-amber-50', 'border-amber-200'];
 
+    if (window._detailRulesScope === 'outreach') {
+        note.classList.remove(...AMBER);
+        note.classList.add(...EMERALD);
+        text.textContent = 'Your assistant follows these rules in every outreach email it drafts, and when you ask it for something in chat. They never change how leads are scored — to change who its searches find, edit the excluded domains and negative keywords on the search itself.';
+        if (subtitle) subtitle.textContent = 'Custom rules for this assistant — for example what a first email must never say.';
+        return;
+    }
+    if (window._detailRulesScope === 'chat') {
+        note.classList.remove(...AMBER);
+        note.classList.add(...EMERALD);
+        text.textContent = 'Your assistant follows these rules whenever you ask it for something, and in everything it proposes for you to approve. Changes apply from your next message.';
+        if (subtitle) subtitle.textContent = 'Custom rules for this assistant. It follows them in every reply and proposal it makes.';
+        return;
+    }
+    if (window._detailRulesScope === 'designer') {
+        note.classList.remove(...AMBER);
+        note.classList.add(...EMERALD);
+        text.textContent = 'Your Brand Designer follows these rules whenever it art-directs a brief and whenever you ask it for something in chat. Changes apply from the next round of options.';
+        if (subtitle) subtitle.textContent = 'Custom rules for this assistant — for example a colour to avoid, or a kind of picture you never want.';
+        return;
+    }
     if (_rulesReachChat()) {
         note.classList.remove(...AMBER);
         note.classList.add(...EMERALD);
@@ -5306,7 +5330,13 @@ function _applyDashboardRegistry(data) {
     // it (and the Overview shortcut that opens it) is always shown. Its data model comes from
     // cfg.reviewQueue { kind: 'posts' | 'records', recordType? } and is read by _detailRq* and
     // _activateMainTab. Default to posts for any legacy/unknown role.
-    window._detailReviewQueue = cfg.reviewQueue || { kind: 'posts' };
+    // `__defaulted` marks the fallback for a role that HIDES its queue (the Brand Designer): it has
+    // no post queue, so "posts" must not be read as "its rules reach post drafting".
+    window._detailReviewQueue = cfg.reviewQueue || { kind: 'posts', __defaulted: !!cfg.hideReviewQueue };
+    // Where this role's Rules actually reach, when the review-queue kind cannot say (registry
+    // `rulesScope`): 'brief' = its drafting reads blueprint §4 (Email Marketing), 'designer' = the
+    // Brand Designer's art direction and chat. Read by _applyAssistantRulesScope.
+    window._detailRulesScope = cfg.rulesScope || null;
     // Role-chosen landing tab (SMM opens on its "Posts" pipeline); null → HTML default (Data Hub).
     window._detailDefaultMainTab = cfg.defaultMainTab || null;
     // …except where a role's review IS another tab (cfg.hideReviewQueue): the Brand Designer's
@@ -5427,7 +5457,9 @@ function _applyDashboardRegistry(data) {
     // button moved out of this (Leads tab) action bar into the Signal Inbox toolbar, and
     // assistant-signal-inbox.js init()s the component itself on click. registry.discoveryCampaigns
     // still carries the config; the inbox reads it from the registry directly.
-    toggle('module-posting-schedule', mods.hasPostingSchedule !== false);
+    // hasScheduleCard lets a role keep its calendar presence (hasPostingSchedule) without the social
+    // schedule controls its engine does not read (the Email Marketing Assistant).
+    toggle('module-posting-schedule', mods.hasPostingSchedule !== false && mods.hasScheduleCard !== false);
     _applyScheduleModuleCopy(data.roleKey);
     // Autopilot status card (Overview) rides the same signal as the Posting Schedule it summarises —
     // only roles with a scheduled posting cadence have an autopilot to surface. Its neighbour, the
@@ -5742,8 +5774,15 @@ function _renderOperationSection(data) {
     if (!host) return;
     // "Writing voice" (tone_of_voice) is edited in the Voice builder on roles that have one — showing
     // it here as well gave the same setting two homes that could disagree (2026-10-06).
+    // Same rule for the cadence: where the Publishing/Posting Schedule card shows (it edits
+    // posting_frequency and the draft horizon, with days and times), the setup's own simpler
+    // dropdowns were a SECOND control for one setting, with different options (seen on the Blog
+    // Writer, 2026-10-09). The card wins; the setup wizard still asks them at hire.
+    const _mods = (window.AssistantDashboardRegistry?.get?.(data.roleKey) || {}).modules || {};
+    const scheduleCardShown = _mods.hasPostingSchedule !== false && _mods.hasScheduleCard !== false;
     const fields = _roleSchemaFields(data.roleKey)
-        .filter((f) => !(f.key === 'tone_of_voice' && _VB_ROLES.includes(data.roleKey)));
+        .filter((f) => !(f.key === 'tone_of_voice' && _VB_ROLES.includes(data.roleKey)))
+        .filter((f) => !(scheduleCardShown && (f.key === 'posting_frequency' || f.key === 'draft_horizon_days')));
     if (!fields.length) {
         host.innerHTML = '';
         if (generic) generic.classList.remove('hidden');
@@ -5937,8 +5976,15 @@ function _detailHydrate(data) {
 // brand → the deployer (the user's business) must label AI-generated media (EU AI Act
 // Art. 50). Conversational/other assistants need the "you're talking to an AI" notice.
 function _isSocialPostingAssistant(data) {
+    // Registry first. The keyword test below matched the catalogue CATEGORY "Marketing & Sales" on
+    // /marketing/, so the Campaign Assistant, Lead Generator, CRM Data Assistant and Brand Designer
+    // were all told they "label the content they publish" — three of them publish nothing (seen on
+    // prod 2026-10-09). A role that publishes (hasPostingSchedule) or makes pictures (the Brand
+    // Designer, briefsTab) labels content; every other known role gets the AI-interaction notice.
+    const reg = data.roleKey && window.AssistantDashboardRegistry?.REGISTRY?.[data.roleKey];
+    if (reg) return (reg.modules || {}).hasPostingSchedule !== false || !!reg.briefsTab;
     const role = `${data.role || ''} ${data.category || ''}`.toLowerCase();
-    if (/social|media|content|community|marketing|post/.test(role)) return true;
+    if (/social|media|content|community|post/.test(role)) return true;
     const platforms = []
         .concat(data.context?.primary_platforms || [])
         .concat(data.configuration?.inputs?.platforms || [])
@@ -7361,7 +7407,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                             <div class="w-6 h-6 rounded-full ${iconBg(log.icon)} flex items-center justify-center shrink-0 mt-0.5">${iconSvg(log.icon)}</div>
                             <div class="flex-1 min-w-0">
                                 <div class="flex items-start justify-between gap-2">
-                                    <p class="text-sm text-gray-700">${log.description || log.actionType}</p>
+                                    <p class="text-sm text-gray-700">${_escapeHtml(log.description || log.actionType)}</p>
                                     ${statusTag(log.status)}
                                 </div>
                                 <p class="text-xs text-gray-400 mt-0.5">${log.createdAt ? new Date(log.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</p>
@@ -8741,6 +8787,11 @@ function _setMetricsEmptyState(mode) {
         if (title) title.textContent = 'No blog activity to measure yet';
         if (body)  body.textContent  = 'These fill in as your assistant drafts posts, you approve them, and they go live. Open the Blogs tab to write the first one or review what is waiting.';
         if (note) note.textContent = '';
+    } else if (mode === 'records-no-data') {
+        // Not "nothing published" — this assistant publishes nothing. What is missing is its work.
+        if (title) title.textContent = 'Nothing to count yet';
+        if (body)  body.textContent  = 'These fill in as your assistant works and you approve or turn down what it produces. Give it something to do in chat, or import a spreadsheet on its Data Hub tab.';
+        if (note) note.textContent = '';
     } else if (mode === 'brand-no-data') {
         // This assistant publishes nothing, so "nothing has been published" would be permanently
         // true and point at the wrong thing. What is missing is a brief.
@@ -9034,6 +9085,39 @@ async function _loadCampaignMetrics(assistantId) {
     }
 }
 
+// ── Records assistants' KPI cards (AR Clerk, Support, CRM Data, Minute Taker) ──
+// Routed here by `metricsSource: 'records'`. Each card shows one count from assistant-records
+// ?metrics=1, in the order the registry's `metricKeys` names. All time. "Needs You" (awaiting) is
+// amber like every other role's — a number the user is meant to bring down.
+async function _loadRecordsMetrics(assistantId, roleKey) {
+    const valEl   = (k) => document.getElementById(`metric-${k}-value`);
+    const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
+    const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
+    document.getElementById('metric-value-wins')?.classList.add('hidden');
+    const keys = window.AssistantDashboardRegistry?.get?.(roleKey)?.metricKeys || ['made', 'approved', 'awaiting', 'turnedDown'];
+    try {
+        const res = await fetch(`/.netlify/functions/assistant-records?metrics=1&assistantId=${assistantId}`);
+        if (!res.ok) { _setMetricsEmptyState('error'); return; }
+        const data = await res.json();
+        if (!data.hasData) { _setMetricsEmptyState('records-no-data'); return; }
+        _setMetricsEmptyState('cards');
+        const note = document.getElementById('metrics-status-note');
+        if (note) note.textContent = 'All time';
+        const m = data.metrics || {};
+        ['engagement', 'reach', 'ctr', 'value'].forEach((card, i) => {
+            const key = keys[i];
+            if (!valEl(card) || !key) return;
+            const n = Number(m[key] ?? 0);
+            valEl(card).textContent = String(n);
+            _setKpiCard(card, { empty: !n });
+            if (trendEl(card)) trendEl(card).textContent = '—';
+            if (key === 'awaiting' && dotEl(card)) dotEl(card).className = 'w-2 h-2 rounded-full ' + (n ? 'bg-amber-400' : 'bg-gray-200');
+        });
+    } catch {
+        _setMetricsEmptyState('error');
+    }
+}
+
 // ── Brand Designer KPI cards ─────────────────────────────────────────────────
 // Routed here by `metricsSource: 'brand'`. Same markup as every role; the figures come from
 // brand-briefs.ts `performance`, because this assistant publishes nothing and the shared endpoint
@@ -9202,6 +9286,10 @@ async function _loadAssistantMetrics(assistantId, roleKey) {
     if (source === 'lead') {
         _setMetricsEmptyState('pending');
         return _loadLeadMetrics(assistantId);
+    }
+    if (source === 'records') {
+        _setMetricsEmptyState('pending');
+        return _loadRecordsMetrics(assistantId, roleKey);
     }
     if (source === 'brand') {
         _setMetricsEmptyState('pending');

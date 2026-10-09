@@ -510,6 +510,22 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         realism: { maxDailyDelta: 10 },
     },
     {
+        // Brand Designer (2026-10-09 — it had no goal metric, so its Goals tab offered nothing).
+        // Options the user APPROVED into the library — counted from visual_brief_options by
+        // poll-goal-telemetry.ts. Not options made: a designer that produces a hundred options nobody
+        // wants is the failure this should show.
+        key: 'pictures_approved',
+        label: 'Pictures Approved',
+        unit: 'pictures',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'outcome',
+        roles: ['brand_designer'],
+        description: 'Options from this assistant\'s briefs that you approved into your library.',
+        available: true,
+        realism: { maxDailyDelta: 50 },
+    },
+    {
         // Blog Writer's content lives in blog_posts (NOT assistant_records), so this is counted
         // from published blog_posts by poll-goal-telemetry.ts, mirroring 'content_published' for social.
         key: 'posts_published',

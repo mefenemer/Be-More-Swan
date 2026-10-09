@@ -67,7 +67,10 @@ export const ROLE_CONNECTIONS: Record<string, string[]> = {
     crm_enricher:              ['crm'],
     seo_content_strategist:    ['cms', 'search_console', 'knowledge'],
     blog_writer:               ['cms', 'search_console', 'knowledge', 'design'],
-    newsletter_editor:         ['email', 'cms'],
+    // 'cms' removed 2026-10-09: it is the BLOG-publishing category, and it put "LinkedIn (blog posts)"
+    // and The Swan Index byline on the Email Marketing Assistant's Connections — a role that publishes
+    // no blog. Nothing in the email pipeline read it (it dates from the generic June table).
+    newsletter_editor:         ['email'],
     vendor_communications_rep: ['email'],
     inventory_tracker:         ['inventory'],
     sop_writer:                ['knowledge'],

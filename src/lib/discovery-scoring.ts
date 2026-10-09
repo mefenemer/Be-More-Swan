@@ -373,6 +373,13 @@ export async function scoreCandidates(
     candidates: ScoreCandidate[],
     icp: Record<string, unknown>,
     sender: SenderIdentity,
+    /**
+     * The user's Rules for this assistant (Profile ▸ Rules — loadAssistantRulesBlock). Applied to the
+     * OUTREACH EMAILS only, never to the scores: before 2026-10-09 the Lead Generator's Rules tab said
+     * rules "won't change what it does", and a rule like "never mention pricing in a first email"
+     * reached nothing. Null = none.
+     */
+    rulesBlock: string | null = null,
     /** Recursion depth for the blank-card retry below. Callers never pass this. */
     depth = 0,
 ): Promise<ScoreResult> {
@@ -445,7 +452,9 @@ ${OUTREACH_SUBJECT_RULES}`;
             // The structural fix is to stop asking for an email for leads that have not been
             // scored yet — until then, the ceiling must clear a full batch with room to spare.
             max_tokens: 8192,
-            system,
+            system: rulesBlock
+                ? `${system}\n\nRULES FOR THE OUTREACH EMAILS — the business's own rules for this assistant. Follow every one in each outreachDraft. They never change a score.\n${rulesBlock}`
+                : system,
             messages: [{ role: 'user', content: `Score these ${candidates.length} candidates:\n${JSON.stringify(compact)}` }],
         });
         inputTokens = resp.usage.input_tokens;
@@ -478,7 +487,7 @@ ${OUTREACH_SUBJECT_RULES}`;
         const half = Math.ceil(blanks.length / 2);
         for (const group of [blanks.slice(0, half), blanks.slice(half)]) {
             if (group.length === 0) continue;
-            const retry = await scoreCandidates(group.map(({ i }) => candidates[i]), icp, sender, depth + 1);
+            const retry = await scoreCandidates(group.map(({ i }) => candidates[i]), icp, sender, rulesBlock, depth + 1);
             inputTokens += retry.inputTokens;
             outputTokens += retry.outputTokens;
             group.forEach(({ i }, k) => { cards[i] = retry.cards[k]; });

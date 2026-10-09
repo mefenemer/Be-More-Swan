@@ -156,6 +156,9 @@
     // NOT assistant_records — so no hubTab. All social-only modules are off (it has its own
     // review/approval + scheduling inside Blog Studio, not the social Review Queue / Posting Schedule).
     newsletter_editor: {
+      // Rules tab: its drafting reads blueprint §4 (newsletter-generate.ts → buildBlueprintGuardrailsBlock),
+      // so its rules DO reach every email — the review-queue kind ('newsletter') cannot say that.
+      rulesScope: 'brief',
       // ⚠️ Four cards the data can actually answer. There are no opens and no clicks here, and that
       // is deliberate: measuring either needs a tracking pixel or link rewriting, neither of which
       // is built, and a card labelled "Open Rate" over a number that can never populate is the exact
@@ -208,11 +211,19 @@
         // Every social-only module off: this role writes no posts and has no social strategy.
         hasReviewQueue: true,
         hasPostingSchedule: true,
+        // ⚠️ hasPostingSchedule stays true so its emails show on the Calendar — but the SOCIAL
+        // schedule card (frequency, preferred days/times, "generate posts ahead") drives nothing
+        // here: its autopilot reads the setup questions (Drafting cadence, Day you usually send).
+        // The card offered "Daily" for an email list, beside the real cadence control.
+        hasScheduleCard: false,
         hasSocialStrategy: false,
         hasImpactRoi: false,
         hasCreativeBrief: false,
         hasSalesContext: false,
-        hasContentAutomation: true,
+        // Off 2026-10-09. Content suggestions run for the Social Media Assistant only, and goal
+        // seeking may rewrite posting_frequency up to "twice a day" — which this role's autopilot
+        // reads as its EMAIL cadence. A switch that could email a list twice daily stays off.
+        hasContentAutomation: false,
         hasEmptyLibraryFallback: false,
         hasReviewCadence: true,
         hasContentPublishing: true,
@@ -380,6 +391,8 @@
     // social_media_manager, and for this role that fallback is wrong in every cell — it would show
     // "Engagement Rate by Reach" for an assistant that has never published anything.
     campaign_orchestrator: {
+      // Rules tab: read by its chat (RULE_READING_ROLES) — every plan/proposal comes from chat.
+      rulesScope: 'chat',
       // Campaign-LIFETIME window, not "last 30 days". A 30-day window across a 6-week flight is
       // arithmetic that cliff-drops at rollover; roi-hero-defaults-all-time already cost us this
       // once. Card 2 swaps its unit by campaign mode — an organic campaign showing
@@ -546,10 +559,16 @@
       briefsTab: {
         label: 'Briefs',
       },
+      // Calendar tab: briefs on their due date (calendar.js _datedItems).
+      calendarItems: 'briefs',
+      // Rules tab: read by its art direction and its chat (visual-briefs.ts, RULE_READING_ROLES).
+      rulesScope: 'designer',
       defaultMainTab: 'briefs',
     },
 
     lead_qualifier: {
+      // Rules tab: read by its outreach drafting (discovery scoring) and its chat — never its scores.
+      rulesScope: 'outreach',
       // These four cards are fed by get-lead-performance, NOT by the shared
       // get-assistant-performance the social roles use — that one reads post_insights, and this
       // assistant publishes nothing, so it returned hasData:false for ever and the section told
@@ -849,26 +868,33 @@
     },
 
     accounts_receivable_clerk: {
+      // Calendar tab: invoices on their due date (calendar.js _datedItems, assistant-records ?dated=1).
+      calendarItems: 'records',
+      // Overview cards: counts its records really hold (assistant-records ?metrics=1). The
+      // previous four (time saved, money recovered, resolution speed, accuracy) were measured by
+      // nothing and read the SOCIAL stats endpoint, so they said "nothing published" for ever.
+      metricsSource: 'records',
+      metricKeys: ['made', 'approved', 'awaiting', 'turnedDown'],
       kpis: [
         {
-          label: 'Collections Activity',
-          title: 'Invoices Chased',
-          desc: 'Overdue invoices followed up according to your collections cadence.',
+          label: 'Collections',
+          title: 'Invoices Picked Up',
+          desc: 'Overdue invoices your assistant has drafted a chase for.',
         },
         {
-          label: 'Money In',
-          title: 'Cash Recovered',
-          desc: 'Value of overdue invoices settled after this assistant chased them.',
-        },
-        {
-          label: 'Hours Reclaimed',
-          title: 'Time Saved',
-          desc: 'Chasing, reconciling and reminder-drafting hours handled for you.',
+          label: 'Approved',
+          title: 'Chases You Approved',
+          desc: 'Chasing emails you approved or scheduled.',
         },
         {
           label: 'Needs You',
-          title: 'Escalations',
-          desc: 'Accounts flagged for your personal attention — disputes or repeat non-payers.',
+          title: 'Waiting for You',
+          desc: 'Chases drafted and waiting for your approval.',
+        },
+        {
+          label: 'Turned Down',
+          title: 'Chases Rejected',
+          desc: 'Chases you turned down — what you said is used next time.',
         },
       ],
       modules: {
@@ -897,26 +923,31 @@
     },
 
     tier1_support_agent: {
+      // Overview cards: counts its records really hold (assistant-records ?metrics=1). The
+      // previous four (time saved, money recovered, resolution speed, accuracy) were measured by
+      // nothing and read the SOCIAL stats endpoint, so they said "nothing published" for ever.
+      metricsSource: 'records',
+      metricKeys: ['made', 'approved', 'awaiting', 'turnedDown'],
       kpis: [
         {
-          label: 'Deflection Rate',
-          title: 'Tickets Auto-Resolved',
-          desc: 'Customer queries answered end-to-end without a human touching them.',
+          label: 'Throughput',
+          title: 'Tickets Triaged',
+          desc: 'Support tickets your assistant has read, categorised and drafted a reply for.',
         },
         {
-          label: 'Speed',
-          title: 'Avg Resolution Time',
-          desc: 'How quickly customers get an answer, from first message to resolution.',
-        },
-        {
-          label: 'Hours Reclaimed',
-          title: 'Time Saved',
-          desc: 'Support hours this assistant has handled instead of your team.',
+          label: 'Approved',
+          title: 'Replies You Approved',
+          desc: 'Drafted replies you approved or scheduled.',
         },
         {
           label: 'Needs You',
-          title: 'Human Escalations',
-          desc: 'Conversations handed to a person — below your confidence threshold or by request.',
+          title: 'Waiting for You',
+          desc: 'Tickets with a drafted reply waiting for your approval.',
+        },
+        {
+          label: 'Turned Down',
+          title: 'Replies Rejected',
+          desc: 'Replies you turned down — what you said is used next time.',
         },
       ],
       modules: {
@@ -954,26 +985,33 @@
     },
 
     crm_enricher: {
+      // Rules tab: read by its chat (RULE_READING_ROLES) — every plan/proposal comes from chat.
+      rulesScope: 'chat',
+      // Overview cards: counts its records really hold (assistant-records ?metrics=1). The
+      // previous four (time saved, money recovered, resolution speed, accuracy) were measured by
+      // nothing and read the SOCIAL stats endpoint, so they said "nothing published" for ever.
+      metricsSource: 'records',
+      metricKeys: ['made', 'approved', 'awaiting', 'turnedDown'],
       kpis: [
         {
           label: 'Coverage',
-          title: 'Records Enriched',
-          desc: 'CRM records this assistant has researched and brought up to date.',
+          title: 'Records Researched',
+          desc: 'Contacts and companies your assistant has proposed updates for.',
         },
         {
-          label: 'Gaps Closed',
-          title: 'Blank Fields Populated',
-          desc: 'Missing fields — industry, size, location and more — filled in automatically.',
+          label: 'Approved',
+          title: 'Updates You Accepted',
+          desc: 'Proposed updates you approved.',
         },
         {
-          label: 'Hours Reclaimed',
-          title: 'Time Saved',
-          desc: 'Manual data-entry and research hours this assistant has absorbed.',
+          label: 'Needs You',
+          title: 'Waiting for You',
+          desc: 'Proposed updates waiting for your review.',
         },
         {
-          label: 'Trust Signal',
-          title: 'Data Accuracy',
-          desc: 'How reliably enriched values survive your review without correction.',
+          label: 'Turned Down',
+          title: 'Updates Rejected',
+          desc: 'Proposed updates you turned down.',
         },
       ],
       modules: {
@@ -1002,26 +1040,33 @@
     },
 
     meeting_note_taker: {
+      // Calendar tab: meetings on their own date (calendar.js _datedItems, assistant-records ?dated=1).
+      calendarItems: 'records',
+      // Overview cards: counts its records really hold (assistant-records ?metrics=1). The
+      // previous four (time saved, money recovered, resolution speed, accuracy) were measured by
+      // nothing and read the SOCIAL stats endpoint, so they said "nothing published" for ever.
+      metricsSource: 'records',
+      metricKeys: ['made', 'actionItems', 'approved', 'awaiting'],
       kpis: [
         {
           label: 'Throughput',
-          title: 'Meetings Summarized',
-          desc: 'Transcripts and rough notes turned into structured, shareable summaries.',
+          title: 'Meetings Written Up',
+          desc: 'Meetings turned into a summary, decisions and action items.',
         },
         {
           label: 'Follow-Through',
-          title: 'Action Items Extracted',
-          desc: 'Commitments captured with owners and deadlines, so nothing slips.',
+          title: 'Action Items Captured',
+          desc: 'Action items across every meeting write-up, each with an owner where one was named.',
         },
         {
-          label: 'Hours Reclaimed',
-          title: 'Time Saved',
-          desc: 'Write-up and minute-taking hours this assistant has taken over.',
+          label: 'Approved',
+          title: 'Write-Ups You Approved',
+          desc: 'Meeting write-ups you approved — approving runs your hand-off recipes.',
         },
         {
-          label: 'Connected Work',
-          title: 'Tasks Synced',
-          desc: 'Action items pushed into your task tool of choice, ready to work.',
+          label: 'Needs You',
+          title: 'Waiting for You',
+          desc: 'Meeting write-ups waiting in your Inbox.',
         },
       ],
       modules: {

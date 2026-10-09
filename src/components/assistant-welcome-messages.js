@@ -63,6 +63,9 @@
     campaign_orchestrator: {
       working: 'I’m ready to help you shape and coordinate your next campaign',
     },
+    newsletter_editor: {
+      working: 'I’m ready to write your emails — tell me what your subscribers should hear about next',
+    },
     brand_designer: {
       working: 'Tell me what a picture is for and I’ll put options in front of you to choose from',
     },
