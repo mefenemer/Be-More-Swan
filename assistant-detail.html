@@ -701,6 +701,14 @@
              Without it an empty amber pill shows until the first count lands. -->
         <span id="campaigns-live-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
+      <!-- Briefs — Brand Designer only (briefsTab: brand_designer). One card per brief, its options as
+           a grid to approve or turn down. Sits first: it is the only thing this role does.
+           assistant-briefs.js → brand-briefs.ts. Design: docs/brand-designer-plan.md §4 -->
+      <button type="button" id="maintab-btn-briefs" data-maintab="briefs" class="main-tab-btn hidden">
+        <span id="briefs-tab-label">Briefs</span>
+        <!-- `hidden` loses to `inline-flex` (equal specificity, later in style.css): pinned inline too. -->
+        <span id="briefs-review-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
+      </button>
       <button type="button" id="maintab-btn-signals" data-maintab="signals" class="main-tab-btn hidden">
         <span id="signals-tab-label">Searches</span>
         <!-- `hidden` loses to `inline-flex` (equal specificity, emitted later in style.css), so the
@@ -982,6 +990,12 @@
   <div id="maintab-campaigns" class="main-tab-content hidden">
     <div id="campaigns-host"></div>
   </div><!-- /maintab-campaigns -->
+
+  <!-- Briefs — Brand Designer only. Rendered lazily by assistant-briefs.js on first activation;
+       init() fetches eagerly because the count of briefs needing a decision drives the tab badge. -->
+  <div id="maintab-briefs" class="main-tab-content hidden">
+    <div id="briefs-host"></div>
+  </div><!-- /maintab-briefs -->
 
   <div id="maintab-email-campaigns" class="main-tab-content hidden">
     <div id="email-campaigns-host"></div>

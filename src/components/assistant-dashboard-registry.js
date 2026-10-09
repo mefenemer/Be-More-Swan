@@ -495,6 +495,60 @@
       defaultMainTab: 'campaigns',
     },
 
+    // Brand Designer (docs/brand-designer-plan.md §4). Its work is BRIEFS and the options they
+    // produce; nothing it makes is used until the user approves it, and an approved picture goes to
+    // the shared library rather than to a post of its own — so every social module is off.
+    //
+    // ⚠️ hideReviewQueue is load-bearing. The Review Queue tab is otherwise shown for EVERY role and
+    // defaults to the SOCIAL post queue; this role puts nothing in it, and its own review surface is
+    // the option grid on the Briefs tab. hideDataHub likewise: there is no record type to list.
+    brand_designer: {
+      // Fed by brand-briefs.ts `performance` (routed by metricsSource in assistants.js), NOT the
+      // shared post_insights endpoint, which would report hasData:false for ever — this assistant
+      // publishes nothing.
+      metricsSource: 'brand',
+      kpis: [
+        {
+          label: 'Pictures Approved',
+          title: 'In Your Library',
+          desc: 'Options you chose, now in your library for every assistant to use.',
+        },
+        {
+          label: 'Needs You',
+          title: 'Briefs Waiting',
+          desc: 'Briefs with options waiting for you to choose or turn down.',
+        },
+        {
+          label: 'Hit Rate',
+          title: 'Options You Used',
+          desc: 'Of the options you decided on, the share you approved.',
+        },
+        {
+          label: 'AI Credits',
+          title: 'Spent on Images',
+          desc: 'AI credits this assistant has used. Stock photos and branded cards are free.',
+        },
+      ],
+      hideReviewQueue: true,
+      hideDataHub: true,
+      modules: {
+        hasPostingSchedule: false, hasSocialStrategy: false,
+        hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
+        hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+        hasContentPublishing: false,
+      },
+      // A brief CAN be a conversation ("a square image for the spring offer, warm"), and the chat
+      // turns it into a card the user saves — so chat is an honest primary action. The Briefs tab's
+      // "New brief" form is the other door to the same server action.
+      primaryAction: { label: 'Brief a Picture', kind: 'chat' },
+      // ⚠️ If you rename this tab, grep the chat-orchestrator prompt: it names the tab to the
+      // assistant, and tests/brand-designer.test.ts fails until both agree.
+      briefsTab: {
+        label: 'Briefs',
+      },
+      defaultMainTab: 'briefs',
+    },
+
     lead_qualifier: {
       // These four cards are fed by get-lead-performance, NOT by the shared
       // get-assistant-performance the social roles use — that one reads post_insights, and this

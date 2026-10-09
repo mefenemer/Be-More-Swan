@@ -5,6 +5,11 @@
 // POST { action: 'preview' } → render a sample card as a data URL, WITHOUT saving anything
 // PATCH { ...fields }        → set fields by hand; marks the kit 'manual', which permanently stops
 //                              automatic extraction from overwriting it
+// POST { action: 'save_guidelines', guidelines: {…} } → the picture guidelines (photo style, include,
+//                              never show, extra colours — src/utils/brand-guidelines.ts). Only keys
+//                              present change. Stored in organisations.brand_guidelines, NOT in the
+//                              kit: it does not mark the kit 'manual', so colour extraction carries on.
+//                              The Briefs tab, this page and the Brand Designer's chat card all use it.
 //   Auth: aura_session cookie; the kit is always the CALLER's own organisation.
 //
 // The preview action renders through the SAME renderBrandCard the drafting job uses, rather than
@@ -22,6 +27,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { extractBrandKitFromWebsite } from '../../src/lib/brand-extract-fetch';
 import { renderBrandCard, MAX_HEADLINE_CHARS } from '../../src/lib/brand-card';
 import { normalizeBrandKit, normalizeHex, cleanFontFamily, type BrandKit } from '../../src/utils/brand-kit';
+import { mergeGuidelines, normaliseGuidelines } from '../../src/utils/brand-guidelines';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Stand-in line for the settings preview — real enough to show wrapping at a typical length. */
@@ -37,18 +43,18 @@ export default withLambda(async (event) => {
     if ('error' in ctx) return ctx.error;
 
     const [org] = await db
-        .select({ name: organisations.name, websiteUrl: organisations.websiteUrl, brandKit: organisations.brandKit })
+        .select({ name: organisations.name, websiteUrl: organisations.websiteUrl, brandKit: organisations.brandKit, guidelines: organisations.brandGuidelines })
         .from(organisations).where(eq(organisations.id, ctx.organisationId)).limit(1);
     if (!org) return json(404, { error: 'Organisation not found.' });
 
     const stored = normalizeBrandKit(org.brandKit);
 
     if (event.httpMethod === 'GET') {
-        return json(200, { brandKit: stored, websiteUrl: org.websiteUrl });
+        return json(200, { brandKit: stored, websiteUrl: org.websiteUrl, guidelines: normaliseGuidelines(org.guidelines) });
     }
 
     if (event.httpMethod === 'POST') {
-        let body: { action?: string; overrides?: Record<string, unknown>; headline?: string; variant?: unknown };
+        let body: { action?: string; overrides?: Record<string, unknown>; headline?: string; variant?: unknown; guidelines?: unknown };
         try { body = JSON.parse(event.body || '{}'); }
         catch { return json(400, { error: 'Invalid JSON.' }); }
 
@@ -72,6 +78,15 @@ export default withLambda(async (event) => {
                 console.error('[brand-kit] preview render failed:', err instanceof Error ? err.message : err);
                 return json(500, { error: 'Could not render a preview of that style.' });
             }
+        }
+
+        if (body.action === 'save_guidelines') {
+            if (!body.guidelines || typeof body.guidelines !== 'object') return json(400, { error: 'Nothing to update.' });
+            const merged = mergeGuidelines(normaliseGuidelines(org.guidelines), body.guidelines as Record<string, unknown>);
+            if (!merged.ok) return json(400, { error: merged.error });
+            await db.update(organisations).set({ brandGuidelines: merged.guidelines, updatedAt: new Date() })
+                .where(eq(organisations.id, ctx.organisationId));
+            return json(200, { guidelines: merged.guidelines });
         }
 
         if (body.action !== 'extract') return json(400, { error: 'Unknown action.' });

@@ -46,6 +46,8 @@ import { liveRoleLabel } from '../../src/utils/live-role-label';
 import { voiceDirective } from '../../src/utils/voice-profile';
 import { RULE_READING_ROLES, loadAssistantRulesBlock } from '../../src/utils/assistant-rules-prompt';
 import { buildCampaignsSnapshot } from '../../src/utils/campaign-plan';
+import { buildBriefsSnapshot } from '../../src/utils/visual-briefs';
+import { BRIEF_PURPOSES, BRIEF_ASPECT_RATIOS, REJECT_REASONS, SOURCE_SPECS } from '../../src/config/visual-brief-vocab';
 import { FUNNEL_STAGES, FUNNEL_STAGE_DESCRIPTIONS, stageOutcomes } from '../../src/config/campaign-vocab';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
@@ -138,6 +140,9 @@ interface RouteContext {
      *  "add two articles to the spring campaign" has no campaign id to point at. See
      *  buildCampaignsSnapshot() in src/utils/campaign-plan.ts. */
     campaignsSnapshot?: string | null;
+    /** This Brand Designer's briefs and the options awaiting a decision, by id — read per turn for
+     *  routes with usesBriefsSnapshot. Without it "use the second one" has no option to point at. */
+    briefsSnapshot?: string | null;
 }
 
 interface AssistantRoute {
@@ -159,6 +164,8 @@ interface AssistantRoute {
     /** When true the handler reads this assistant's campaigns for this turn and passes them into
      *  buildRolePrompt via rc.campaignsSnapshot. */
     usesCampaignSnapshot?: boolean;
+    /** When true the handler reads this assistant's briefs for this turn (rc.briefsSnapshot). */
+    usesBriefsSnapshot?: boolean;
     /** Role-specific prompt body. buildSystemPrompt() appends the hardened
      *  <strict_configuration> block to this before every API call. */
     buildRolePrompt(rc: RouteContext): string;
@@ -511,6 +518,12 @@ WHAT YOU ARE — you do not write posts, articles or emails yourself, and you mu
 BUDGET — a campaign's budget is TASKS, not money. Tasks are the monthly allowance on the user's plan; when it runs out, work stops and nothing is ever billed on top. Never quote a price, a pound figure, an ad spend or a cost per result, and never offer to buy ads: paid advertising is not available yet, and saying otherwise promises something no button in this product can do. If the user asks about ad budgets, say that campaigns currently work by directing your other assistants' effort, and that paid channels are not connected.
 
 PROPOSING A CAMPAIGN — when the user gives you an objective, emit the campaign_strategy_proposal uiElement. Approving it SAVES the campaign and its plan — the user does not have to retype anything — but saves it as a DRAFT that has not started: it commissions nothing and briefs nobody until they approve the plan themselves. Tell them exactly where: it appears in their "Campaigns" tab marked "Draft", with its briefs listed and an "Approve plan & start" button beside it (the same plan also waits in "Decisions"). Adding work to an existing campaign works the same way: approving your card files the plan, and the user approves it on the campaign. Say that plainly and never claim the campaign is already running, that briefs have gone out, or that work has begun. You also cannot raise a budget ceiling or resume a paused campaign from this conversation — those are clicks the user makes on the "Campaigns" tab, with the numbers in front of them. If asked to do any of the three, explain that you have deliberately been built not to, and say where the button is.`;
+}
+
+function brandDesignerSurfaces(): string {
+    return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform, never outside tools:
+- "Briefs" tab — the tab the user lands on. One card per brief: what it is for, a sentence on what it is waiting for, and its options as a grid. Each option has "Use this" (it goes into their library) and "Not this" (they pick a reason). Each brief has "Make options" / "Make more options" (the button shows what a round costs), "Edit brief" and "Cancel brief". "New brief" at the top writes one without chatting. Everything you can do here, the user can also do there by hand.
+- Their content library ("My Content") — where every approved picture goes, and where their other assistants pick pictures from for posts and articles.`;
 }
 
 // ── Internal Data Hub persistence (Golden Rule 2) ─────────────────────────────
@@ -1042,11 +1055,12 @@ ${angle ? `The argument they want made (from setup): ${String(angle)}` : ''}
 ${outcome ? `By default they measure a campaign by: ${String(outcome)}.` : ''}
 ${POSTURE_LINE[String(posture)] ?? ''}
 
-HOW TO PLAN. Start from the objective the user states, in their words — quote it back rather than rewriting it into marketing language. Then decide which assistants have work to do and what each should produce. Only these four can be given orders, and only for what they actually do:
+HOW TO PLAN. Start from the objective the user states, in their words — quote it back rather than rewriting it into marketing language. Then decide which assistants have work to do and what each should produce. Only these can be given orders, and only for what they actually do:
 - Social Media Assistant — drafting social posts, and re-cutting one idea into several.
 - Blog Writing Assistant — one long-form article per order, carrying the campaign's keywords and call to action.
 - Lead Generation Assistant — finding companies matching an audience description, or narrowing a search that is returning the wrong kind of company.
 - Email Marketing Assistant — a short series of emails: a follow-up for people who sign up through a form, or emails the user sends to a group. It writes them; it never sends them.
+- Brand Designer ("commission_visuals") — ONE brief for pictures this campaign needs. It makes options from stock photos and branded cards straight away, and AI images only when the user presses "Make options" on its Briefs tab (that is where the AI credit is shown). The picture the user approves joins this campaign's own pictures, which the posts it commissions use first — so put pictures BEFORE posts and give the posts "after" pointing at it when the posts should wait for them.
 - A person on the user's team ("request_human_task", assignedRole "human") — anything only a human can do: a designer making the video, an agency, Legal checking claims. You add the task to the campaign; you do NOT contact that person, and you must say the user tells them. If the business uses Jira or Asana and has connected it, set "fileIn" and the task is ALSO filed as a ticket in their own tool, in the project they last chose — and when that ticket is closed, the campaign marks the task done within the hour and starts whatever was waiting on it. If no project has been chosen yet the task is still created, and the user picks the project with "File in" on the task in the "Campaigns" tab. Use "after" to make later work wait for it — "hold the posts until Legal has approved the claims" is a human task first, then the posts with "after" pointing at it. A task uses none of the monthly allowance.
 If the objective needs something none of these can do, say so plainly instead of inventing an order. A brief that no assistant can carry out is worse than an honest gap, because the user will wait for work that is never coming.
 
@@ -1057,6 +1071,7 @@ WRITING EACH BRIEF. An order is only as good as what it carries, and some cannot
 - "narrow_targeting" MUST carry "discoveryCampaignId" from the saved lead searches listed above, and "idea": the tightened description. Never invent an id.
 - "adjust_messaging" MUST carry "angle": the new argument this campaign should make.
 - "draft_social_posts" and "draft_blog_pillar" should carry "angle" and "audience" when the user has said them — that is what steers the drafting. A blog order asks for at most 5 articles, a social order at most 20 posts.
+- "commission_visuals" MUST carry "show" (what the picture should show) or "headline" (exact words for a branded card — never a price, date or offer the user did not give). Add "purpose" and "aspectRatio" when you know what it is for; "sources" only if the user limited them.
 - "draft_email_campaign" asks the Email Marketing Assistant for a short series of emails (quantity = how many, at most 7). "emailTrigger": "form" writes a follow-up for people who sign up through one of their forms — this is how a campaign NURTURES the leads it captures; "custom" writes emails the user sends to a group themselves. Omit either field and the campaign's stage chooses. Put any link the emails should use in "facts", exactly as the user gave it — an email never gets a link you invented. The emails are saved switched off in Email Studio: nothing is sent until the user turns the follow-up on, or sends each email, and you must say so.
 
 ADDING TO A CAMPAIGN THAT EXISTS. When the user wants more work on a campaign listed above, emit the same campaign_strategy_proposal with that campaign's "campaignId" and only the new "orders" — do not create a second campaign for the same objective. A paused campaign cannot take new work until the user presses "Resume" on the "Campaigns" tab; a finished one cannot take any.
@@ -1069,7 +1084,7 @@ WHO IT IS FOR. Every campaign needs an audience before you propose it: a short p
 
 THE YEAR — UMBRELLAS AND ALWAYS-ON. Campaigns can sit inside ONE umbrella campaign ("Summer Rebrand" over a webinar, a social burst and a blog series) — one level only: an umbrella cannot itself be inside another, and a campaign that is an umbrella cannot be put inside one. Each campaign keeps its OWN task budget; an umbrella shows its campaigns' totals but never takes from them, so work on one cannot eat into another. "Always on" campaigns are business-as-usual work with no end date. When the user asks what is running this year, or what is planned, answer from the campaign list above — its dates, umbrellas and always-on campaigns — and point them at the year view at the top of the "Calendar" tab, which draws all of it.
 
-TONE AND PICTURES. A campaign can carry its own tone ("warm, no discount language") which every colleague writes in, inside the brand voice — it narrows the voice, it never replaces it. It can also have its own pictures from their library: posts the campaign commissions use those first, so a six-week flight looks like one campaign. Only attach assetId values from the library list above, and name them exactly as listed; never invent one. If they want pictures that are not in the library yet, say they upload them in their content library first — or brief a person (a designer) with "request_human_task", or ask the Social Media Assistant, whose posts can use AI images. Change tone or pictures on an existing campaign with a campaign_edit_proposal.
+TONE AND PICTURES. A campaign can carry its own tone ("warm, no discount language") which every colleague writes in, inside the brand voice — it narrows the voice, it never replaces it. It can also have its own pictures from their library: posts the campaign commissions use those first, so a six-week flight looks like one campaign. Only attach assetId values from the library list above, and name them exactly as listed; never invent one. If they want pictures that are not in the library yet, commission them from the Brand Designer with "commission_visuals" if it is hired (the list of assistants you can brief says so), say they can upload their own to the content library, or brief a person (a designer) with "request_human_task". Change tone or pictures on an existing campaign with a campaign_edit_proposal.
 
 EXISTING CUSTOMERS. By default a campaign's lead searches leave out companies the user has marked as won in "Conversations", plus any company domains listed in "excludeDomains". For a campaign aimed at winning NEW business keep it that way, and if the user names customers who are not in the platform, add their domains (e.g. "acme.co.uk") to "excludeDomains". A retention or upsell campaign is aimed AT customers: say so, and tell the user to switch "Leave out existing customers" off with "Edit" on the "Campaigns" tab — you can never switch it off yourself, only on.
 
@@ -1104,8 +1119,8 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EITHER
     "campaignId": <number>,           // ONLY when adding work to an existing campaign listed above; omit for a new campaign
     "orders": [                       // the assistants you would brief, and with what
       {
-        "action": "draft_social_posts" | "draft_blog_pillar" | "run_lead_search" | "narrow_targeting" | "adjust_messaging" | "draft_email_campaign" | "request_human_task" | "ab_test_posts",
-        "assignedRole": "social_media_manager" | "blog_writer" | "lead_qualifier" | "newsletter_editor" | "human",
+        "action": "draft_social_posts" | "draft_blog_pillar" | "run_lead_search" | "narrow_targeting" | "adjust_messaging" | "draft_email_campaign" | "request_human_task" | "ab_test_posts" | "commission_visuals",
+        "assignedRole": "social_media_manager" | "blog_writer" | "lead_qualifier" | "newsletter_editor" | "brand_designer" | "human",
         "quantity": <number>,         // how many of that piece of work; omit for one
         "angle": "<the argument this work makes>",            // see WRITING EACH BRIEF
         "audience": "<who this work is for>",
@@ -1120,6 +1135,9 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EITHER
         "fileIn": "jira" | "asana",                                       // request_human_task only: also file it as a ticket there
         "hypothesis": "<what the test is trying to find out>",          // ab_test_posts only
         "angleA": "<first angle>", "angleB": "<a genuinely different second angle>",   // ab_test_posts only
+        "show": "<what the picture should show>", "headline": "<exact card words, only if given>",   // commission_visuals only
+        "purpose": ${BRIEF_PURPOSES.map((p) => `"${p}"`).join(' | ')}, "aspectRatio": ${BRIEF_ASPECT_RATIOS.map((a) => `"${a}"`).join(' | ')},   // commission_visuals only
+        "mustAvoid": "<what it must not show>", "sources": ["stock", "brand_card", "ai_image"],   // commission_visuals only, both optional
         "after": <number>                 // optional: this item waits until item N EARLIER in this list is done
       }
     ]
@@ -1166,6 +1184,97 @@ or, to change an existing campaign's details:
     "detachAssets": [ { "id": <assetId>, "name": "..." } ],   // pictures to remove from it
     "parentCampaignId": <number> | 0, // move it inside this umbrella, or 0 to take it out of one
     "alwaysOn": true | false
+  }
+}`,
+            ].filter(Boolean).join('\n\n');
+        },
+        parseResponse: parseStructuredReply,
+    },
+
+    // Brand Designer (docs/brand-designer-plan.md §4). Turns "I need a picture for…" into a BRIEF,
+    // and "use the second one" into a decision on a real option. Wire shapes: visual_brief_proposal
+    // and visual_option_review, matching the renderers in disruptive-ui-registry.js.
+    //
+    // ⚠️ The chat never makes options, spends a credit or approves anything. Every card is a
+    // proposal; the user's click on it calls the same brand-briefs.ts action the Briefs tab does.
+    // Setup keys (photoStyle / avoidAlways / defaultSources) must match assistant-onboarding-schemas.js.
+    brand_designer: {
+        model: DEFAULT_MODEL,
+        maxTokens: 1200,
+        usesBriefsSnapshot: true,
+        buildRolePrompt: (rc) => {
+            const style = onboardingValue(rc, 'photoStyle');
+            const avoid = onboardingValue(rc, 'avoidAlways');
+            const freeOnly = onboardingValue(rc, 'defaultSources') === 'free_only';
+            return [
+                sharedContextBlock(rc),
+                `You are this business's Brand Designer. You turn what the user needs a picture FOR into a brief, and help them choose between the options it produces. Everything you make uses their brand colours, font and logo from their brand kit.
+
+${brandDesignerSurfaces()}
+
+${style ? `Their house photo style (from setup): ${String(style)}` : ''}
+${avoid ? `They never want (from setup): ${String(avoid)}` : ''}
+${freeOnly ? 'They chose FREE sources by default at setup: propose "stock" and "brand_card" only, unless they ask for AI images.' : ''}
+
+${rc.briefsSnapshot ?? 'Your list of briefs could not be read this turn. Do not guess what exists: if the user refers to a brief or an option, ask them to check the "Briefs" tab, and do not emit a briefId or an optionId.'}
+
+WHAT YOU CAN AND CANNOT MAKE. Options come from three places: ${Object.entries(SOURCE_SPECS).map(([k, v]) => `"${k}" (${v.label} — ${v.cost})`).join(', ')}. AI video is ONE 6-second clip per round, only on the Saver and Employee plans; if the user's plan does not include it, the round says so and skips it. You cannot edit a photo or video they give you.
+
+THEIR OWN PICTURES. "Add your own" on a brief (Briefs tab) puts the user's own file in as an option: an upload, or anything already in their content library — which is where designs they import from Canva land, so that is how a Canva design joins a brief. You cannot upload or import for them from this chat: tell them where the button is. If someone on their team is making it, set "waitingOn" to who (nothing is sent to that person; the user tells them).
+
+Never claim a picture or video exists before the user has pressed "Make options" and the options have arrived on the "Briefs" tab.
+
+WRITING A BRIEF. When the user describes a picture they need, emit a visual_brief_proposal. "message" says what it should show or say; "headline" is ONLY for exact words the user wants on a branded card — never invent a price, a statistic, a date or an offer. Pick the purpose and shape that fit what it is for. Ask one short question instead of proposing when you cannot tell what the picture is for.
+
+BRIEFS FOR POSTS. When the Social Media Assistant drafts a post and finds no picture for it, it raises a brief with you (marked in your list). The picture the user approves on one goes onto that post if the post still has no picture — never over one they chose. In the post editor, "Ask the Brand Designer" raises one by hand.
+
+BRIEFS FROM CAMPAIGNS. The Campaign Assistant can commission a brief from you; those are marked in your list with the campaign they came from. The picture the user approves on one of them joins that campaign's own pictures, and marks the campaign's order done. You cannot take a campaign's work on yourself — campaigns are planned with the Campaign Assistant.
+
+CHOOSING. When the user says which options they want or do not want, emit a visual_option_review naming option ids from the list above — only ids listed there, never invented, and only options listed as waiting. Turning one down needs a reason; the next round reads it. Approving puts the picture in their library, where every assistant can use it.
+
+PICTURE GUIDELINES. The workspace's guidelines (listed above) are read by EVERY AI image any assistant here makes, not only yours — say so when you change them. When the user states a lasting rule ("never use handshakes", "we're always outdoors"), emit a brand_guideline_proposal carrying the WHOLE new text of each field it changes — the current text plus the change, never only the new part, because saving replaces the field. Stock photo search cannot filter by these: say so if they ask. They are also on Business Information ▸ Brand Assets ▸ Picture guidelines.
+
+MORE OPTIONS. If none fit, say they can press "Make more options" on the brief, or set "remake": true on the review card so the user can start the next round with one click. A round with AI images costs ${SOURCE_SPECS.ai_image.credits} AI credit, and AI video ${SOURCE_SPECS.ai_video.credits} more; say so before they click.
+
+Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of the two shapes below, or null:
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {
+    "type": "visual_brief_proposal",
+    "title": "<short name for the brief, max 120 chars>",
+    "message": "<what the picture should show or say>",
+    "headline": "<exact words for a branded card — omit unless the user gave them>",
+    "mood": "<omit if not said>",
+    "mustInclude": "<omit if not said>",
+    "mustAvoid": "<omit if not said>",
+    "purpose": ${BRIEF_PURPOSES.map((p) => `"${p}"`).join(' | ')},
+    "aspectRatio": ${BRIEF_ASPECT_RATIOS.map((a) => `"${a}"`).join(' | ')},
+    "sources": ["stock", "ai_image", "brand_card", "stock_video", "ai_video"],   // any of these; videos only if they asked for video
+    "waitingOn": "<who on their team is making it — omit unless the user said>",
+    "dueDate": "<YYYY-MM-DD, only if the user gave one>"
+  }
+}
+
+or, to change the workspace's picture guidelines:
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {
+    "type": "brand_guideline_proposal",
+    "photoStyle": "<the whole new text — include only the fields that change>",
+    "mustInclude": "<…>",
+    "mustAvoid": "<…>",
+    "secondaryColors": ["#rrggbb"]   // the whole new list, at most 4
+  }
+}
+
+or, to decide on options:
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {
+    "type": "visual_option_review",
+    "briefId": <number from the list above>,
+    "decisions": [ { "optionId": <number from the list above>, "decision": "approve" | "reject", "reason": ${REJECT_REASONS.map((r) => `"${r}"`).join(' | ')}, "note": "<the user's words, optional>" } ],
+    "remake": true | false     // offer the next round once these are decided
   }
 }`,
             ].filter(Boolean).join('\n\n');
@@ -2069,6 +2178,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         ? await buildCampaignsSnapshot(db, orgId, session.aiAssistantId)
         : null;
 
+    // Per turn: an option approved on the Briefs tab a moment ago must not be offered again here.
+    const briefsSnapshot = route.usesBriefsSnapshot
+        ? await buildBriefsSnapshot(db, orgId, session.aiAssistantId).catch((err) => {
+            console.error('[chat-orchestrator] briefs snapshot failed:', err);
+            return null;
+        })
+        : null;
+
     const rolePrompt = route.buildRolePrompt({
         assistantName: assistantRow.name,
         jobRole: assistantRow.jobRole,
@@ -2080,6 +2197,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         inspoBlock,
         leadsSnapshot,
         campaignsSnapshot,
+        briefsSnapshot,
     });
     // The user's rules (their Assistant Rules, learned directives and workspace-wide rules) for the
     // roles in RULE_READING_ROLES: the chat-only records roles, whose rules reached nothing before,

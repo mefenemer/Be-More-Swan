@@ -922,6 +922,7 @@
       blog_writer: 'Blog Writing Assistant',
       lead_qualifier: 'Lead Generation Assistant',
       newsletter_editor: 'Email Marketing Assistant',
+      brand_designer: 'Brand Designer',
       human: 'A person on your team',
     };
 
@@ -984,7 +985,7 @@
           : Number.isFinite(Number(o.quantity)) && o.quantity !== null && o.quantity !== ''
             ? Math.max(1, Math.min(spec.maxQuantity, Math.floor(Number(o.quantity))))
             : (spec.defaultQuantity || 1);
-        const detail = [o.angle, o.idea, o.task, o.hypothesis].find((v) => typeof v === 'string' && v.trim());
+        const detail = [o.angle, o.idea, o.task, o.hypothesis, o.show, o.headline].find((v) => typeof v === 'string' && v.trim());
         // An A/B test (§9.8) shows BOTH angles — the user is approving a comparison, not one post.
         const testNote = o.action === 'ab_test_posts' && typeof o.angleA === 'string' && typeof o.angleB === 'string'
           ? `A: ${o.angleA.trim()} · B: ${o.angleB.trim()} — per angle, every post still comes to you`
@@ -998,6 +999,12 @@
             : o.emailTrigger === 'form'
               ? 'A follow-up for people who sign up through a form — saved switched off'
               : 'Saved in Email Studio, switched off — nothing is sent until you say')
+          : '';
+        // Pictures (Brand Designer, Phase 3) say where the choice happens and that AI waits for a
+        // click — approving this plan must not read as approving an AI-credit spend.
+        const sources = Array.isArray(o.sources) ? o.sources : null;
+        const pictureNote = o.action === 'commission_visuals'
+          ? `${sources && !sources.some((x) => x === 'ai_image' || x === 'ai_video') ? 'Stock and branded cards, made straight away' : 'Stock and branded cards straight away; AI images and video only when you press "Make options" on its Briefs tab'} — you choose; the picture joins this campaign`
           : '';
         // A person's task (§9.5) names who, says nothing is sent to them, and shows what waits.
         const humanNote = o.action === 'request_human_task'
@@ -1022,6 +1029,7 @@
           detail: detail ? String(detail).trim() : '',
           forWho,
           emailNote,
+          pictureNote,
           humanNote,
           testNote,
           afterNote,
@@ -1080,7 +1088,7 @@
         <p class="text-xs font-bold text-indigo-700 uppercase tracking-wide mb-1">Who I'd brief</p>
         <ul class="mb-3 space-y-1">
           ${orders.map((o) => `
-            <li class="text-xs text-gray-600">• ${esc(o.label)}${o.qty ? ` ×${esc(String(o.qty))}` : ''} — ${esc(o.role)}${o.detail ? `<span class="block pl-3 text-gray-500 italic break-words">${esc(o.detail)}</span>` : ''}${o.forWho ? `<span class="block pl-3 text-gray-500 break-words">For: ${esc(o.forWho)}</span>` : ''}${o.emailNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.emailNote)}</span>` : ''}${o.humanNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.humanNote)}</span>` : ''}${o.testNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.testNote)}</span>` : ''}${o.afterNote ? `<span class="block pl-3 text-gray-500">${esc(o.afterNote)}</span>` : ''}</li>
+            <li class="text-xs text-gray-600">• ${esc(o.label)}${o.qty ? ` ×${esc(String(o.qty))}` : ''} — ${esc(o.role)}${o.detail ? `<span class="block pl-3 text-gray-500 italic break-words">${esc(o.detail)}</span>` : ''}${o.forWho ? `<span class="block pl-3 text-gray-500 break-words">For: ${esc(o.forWho)}</span>` : ''}${o.emailNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.emailNote)}</span>` : ''}${o.pictureNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.pictureNote)}</span>` : ''}${o.humanNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.humanNote)}</span>` : ''}${o.testNote ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.testNote)}</span>` : ''}${o.afterNote ? `<span class="block pl-3 text-gray-500">${esc(o.afterNote)}</span>` : ''}</li>
           `).join('')}
         </ul>` : ''}
 
@@ -1461,6 +1469,194 @@
   }
 
   register('campaign_learning_proposal', renderCampaignLearningProposalCard);
+
+  // ── Built-in: Visual Brief Proposal Card (Brand Designer) ──────────────────
+  // { type: 'visual_brief_proposal', title, message?, headline?, mood?, mustInclude?, mustAvoid?,
+  //   purpose?, aspectRatio?, sources?: string[], dueDate? }
+  //
+  // The chat twin of "New brief" on the Briefs tab — same server action (brand-briefs.ts create).
+  // ⚠️ A card may only MAKE OPTIONS when every source is free. A brief that includes AI images is
+  // saved here and its round is started on the Briefs tab, where the button states the credit cost:
+  // a chat turn never spends (the Campaign Assistant's rule, and the user's).
+  function renderVisualBriefProposalCard(ui, esc) {
+    const clean = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+    const brief = {
+      title: clean(ui.title, 120), message: clean(ui.message, 1000), headline: clean(ui.headline, 120),
+      mood: clean(ui.mood, 300), mustInclude: clean(ui.mustInclude, 500), mustAvoid: clean(ui.mustAvoid, 500),
+      purpose: clean(ui.purpose, 40), aspectRatio: clean(ui.aspectRatio, 8),
+      sources: Array.isArray(ui.sources) ? ui.sources.filter((x) => ['stock', 'ai_image', 'brand_card', 'stock_video', 'ai_video'].includes(x)) : ['stock', 'ai_image', 'brand_card'],
+      waitingOn: clean(ui.waitingOn, 120),
+      dueDate: /^\d{4}-\d{2}-\d{2}$/.test(String(ui.dueDate || '')) ? String(ui.dueDate) : '',
+    };
+    if (!brief.sources.length) brief.sources = ['stock', 'brand_card'];
+    // Free = no AI image AND no AI video (PAID_SOURCES in visual-brief-vocab.ts).
+    const free = !brief.sources.some((x) => x === 'ai_image' || x === 'ai_video');
+    const SOURCE = { stock: 'Stock photos', ai_image: 'AI images', brand_card: 'Branded cards', stock_video: 'Stock videos', ai_video: 'AI video' };
+    const row = (label, v) => (v ? `<p class="text-xs text-gray-700 mt-1"><span class="font-bold">${label}:</span> ${esc(v)}</p>` : '');
+    const runnable = !!brief.title && !!(brief.message || brief.headline);
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">New brief · Approval needed</p>
+      <p class="text-sm font-bold text-gray-900 mt-2 break-words">${brief.title ? esc(brief.title) : '<span class="text-amber-700">No name was given.</span>'}</p>
+      ${row('Shows', brief.message)}
+      ${row('Words on the card', brief.headline)}
+      ${row('Mood', brief.mood)}
+      ${row('Must include', brief.mustInclude)}
+      ${row('Must avoid', brief.mustAvoid)}
+      ${row('Shape', brief.aspectRatio)}
+      ${row('Due', brief.dueDate)}
+      ${row('Someone on your team is making it', brief.waitingOn)}
+      <p class="text-xs text-gray-700 mt-1"><span class="font-bold">Options from:</span> ${brief.sources.map((x) => esc(SOURCE[x])).join(', ')}</p>
+      <p class="text-xs text-gray-600 mt-2">${free
+        ? 'Stock and branded cards are free. Nothing is used anywhere until you approve it.'
+        : 'Saved to your Briefs tab. Press "Make options" there — that button shows what the AI images or video cost before anything is spent.'}</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${free ? `<button type="button" data-vbp-save="generate" ${runnable ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save and make options</button>` : ''}
+        <button type="button" data-vbp-save="save" ${runnable ? '' : 'disabled'} class="${free ? 'btn-secondary border' : 'btn-primary'} px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save brief</button>
+        <button type="button" data-vbp-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-vbp-status></p>`;
+    const status = el.querySelector('[data-vbp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      const save = e.target.closest('[data-vbp-save]');
+      if (e.target.closest('[data-vbp-cancel]')) { setBusy(true); say('Not saved.'); return; }
+      if (!save) return;
+      setBusy(true);
+      const generate = save.dataset.vbpSave === 'generate' && free;
+      say(generate ? 'Saving and starting…' : 'Saving…');
+      el.dispatchEvent(new CustomEvent('brief:create', {
+        bubbles: true,
+        detail: {
+          brief, generate,
+          respond({ ok, error, roundStarted }) {
+            if (!ok) { setBusy(false); say(error || 'Could not save that — please try again.', 'error'); return; }
+            say(generate && roundStarted
+              ? 'Saved. Options are being made — they appear on the Briefs tab in about a minute.'
+              : (error ? `Saved, but options could not start: ${error}` : 'Saved to your Briefs tab.'));
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('visual_brief_proposal', renderVisualBriefProposalCard);
+
+  // ── Built-in: Visual Option Review Card (Brand Designer) ───────────────────
+  // { type: 'visual_option_review', briefId, decisions: [{ optionId, decision, reason?, note? }], remake? }
+  //
+  // The chat twin of "Use this" / "Not this" on the Briefs tab — the same brand-briefs.ts `decide`.
+  // Option ids come from the per-turn snapshot; a stale or invented one is refused by the server and
+  // the card says which, rather than claiming it was done.
+  function renderVisualOptionReviewCard(ui, esc) {
+    const decisions = (Array.isArray(ui.decisions) ? ui.decisions : [])
+      .map((d) => ({
+        optionId: Number(d && d.optionId),
+        decision: d && d.decision === 'approve' ? 'approve' : d && d.decision === 'reject' ? 'reject' : null,
+        reason: typeof (d && d.reason) === 'string' ? d.reason : 'other',
+        note: typeof (d && d.note) === 'string' ? d.note.slice(0, 300) : '',
+      }))
+      .filter((d) => Number.isInteger(d.optionId) && d.optionId > 0 && d.decision)
+      .slice(0, 12);
+    const label = (r) => String(r || 'other').replace(/_/g, ' ');
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Choose options · Approval needed</p>
+      ${decisions.length ? `<ul class="mt-2 space-y-1">${decisions.map((d) => `
+        <li class="text-sm text-gray-900">${d.decision === 'approve' ? '✓ Use' : '✗ Turn down'} option ${esc(d.optionId)}${d.decision === 'reject' ? ` <span class="text-xs text-gray-600">— ${esc(label(d.reason))}${d.note ? `: ${esc(d.note)}` : ''}</span>` : ''}</li>`).join('')}</ul>`
+        : '<p class="text-sm text-amber-700 mt-2">No options were named.</p>'}
+      <p class="text-xs text-gray-600 mt-2">Approved pictures go into your library for every assistant to use. Turned-down ones are deleted, and the next round reads why.${ui.remake === true ? ' For a new round, press "Make more options" on the brief in your Briefs tab.' : ''}</p>
+      <div class="flex items-center gap-2 mt-3">
+        <button type="button" data-vor-confirm ${decisions.length ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Confirm</button>
+        <button type="button" data-vor-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-vor-status></p>`;
+    const status = el.querySelector('[data-vor-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-vor-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-vor-confirm]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('brief:review', {
+        bubbles: true,
+        detail: {
+          decisions,
+          respond({ results }) {
+            const failed = (results || []).filter((r) => !r.ok);
+            const done = (results || []).length - failed.length;
+            // A brief raised for a post (Phase 5) says what happened to that post.
+            const notes = (results || []).map((r) => r.postNote).filter(Boolean);
+            if (!failed.length) { say(`Done — ${done} ${done === 1 ? 'option' : 'options'} decided.${notes.length ? ` ${notes[0]}` : ''}`); return; }
+            say(`${done} done. Not done: ${failed.map((r) => `option ${r.optionId} (${r.error})`).join('; ')}`, 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('visual_option_review', renderVisualOptionReviewCard);
+
+  // ── Built-in: Brand Guideline Proposal Card (Brand Designer) ───────────────
+  // { type: 'brand_guideline_proposal', photoStyle?, mustInclude?, mustAvoid?, secondaryColors? }
+  //
+  // The chat twin of "Save picture guidelines" on Business Information ▸ Brand Assets — the same
+  // brand-kit.ts `save_guidelines`. Each field present REPLACES that guideline, so the card shows the
+  // whole new text, and says plainly that every assistant's AI images read it.
+  function renderBrandGuidelineProposalCard(ui, esc) {
+    const clean = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : undefined);
+    const changes = {};
+    const p = clean(ui.photoStyle, 500); if (p !== undefined) changes.photoStyle = p || null;
+    const i = clean(ui.mustInclude, 300); if (i !== undefined) changes.mustInclude = i || null;
+    const a = clean(ui.mustAvoid, 300); if (a !== undefined) changes.mustAvoid = a || null;
+    if (Array.isArray(ui.secondaryColors)) changes.secondaryColors = ui.secondaryColors.map((c) => String(c).trim()).filter(Boolean).slice(0, 4);
+    const LABEL = { photoStyle: 'Photo style', mustInclude: 'Include where it fits', mustAvoid: 'Never show', secondaryColors: 'Extra colours' };
+    const keys = Object.keys(changes);
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Picture guidelines · Approval needed</p>
+      ${keys.length ? keys.map((k) => {
+        const v = changes[k];
+        const shown = Array.isArray(v) ? (v.length ? v.join(', ') : '(none)') : (v || '(cleared)');
+        return `<p class="text-xs text-gray-700 mt-2"><span class="font-bold">${esc(LABEL[k])}:</span> ${esc(shown)}</p>`;
+      }).join('') : '<p class="text-sm text-amber-700 mt-2">No change was written.</p>'}
+      <p class="text-xs text-gray-600 mt-2">Replaces what is there now. Every AI image your assistants make reads these — not only your Brand Designer's. You can change them any time on Business Information ▸ Brand Assets.</p>
+      <div class="flex items-center gap-2 mt-3">
+        <button type="button" data-bgp-save ${keys.length ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save guidelines</button>
+        <button type="button" data-bgp-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-bgp-status></p>`;
+    const status = el.querySelector('[data-bgp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-bgp-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-bgp-save]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('brand:saveGuidelines', {
+        bubbles: true,
+        detail: {
+          guidelines: changes,
+          respond({ ok, error }) {
+            if (ok) { say('Saved. New AI images will follow these.'); return; }
+            setBusy(false);
+            say(error || 'Could not save that — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('brand_guideline_proposal', renderBrandGuidelineProposalCard);
 
   // ── Built-in: Action Item Assignment Card ───────────────────────────────────
   // Renderer for the meeting-note-taker route's wire shape (chat-orchestrator.ts):

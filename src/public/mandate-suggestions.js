@@ -57,6 +57,15 @@
       { title: 'The Never-Ending Adjustment', text: 'Something is clearly not landing, but working out which part to change — the message, the audience, the channel — and then re-briefing everyone takes longer than the campaign.' },
     ],
 
+    // About the pain of GETTING pictures — not of writing or posting, which belongs to the other
+    // assistants and would point the user at the wrong hire.
+    brand_designer: [
+      { title: 'The Same Three Photos', text: 'Every post ends up using the same few pictures, because finding anything new and on-brand takes longer than writing the post.' },
+      { title: 'The Off-Brand Stock Photo', text: 'The stock photos we find look like everyone else’s, in colours that have nothing to do with our brand.' },
+      { title: 'The Design Bottleneck', text: 'Anything with our logo or a headline on it waits for whoever can use the design tool, so simple graphics take days.' },
+      { title: 'The Blank Prompt', text: 'AI image tools want a perfect prompt, and I just know what the picture is for, not how to describe it to a machine.' },
+    ],
+
     lead_qualifier: [
       { title: 'The Cold-Lead Time Sink', text: 'I spend hours every week researching inbound leads and manually deciding which ones are actually worth my sales team’s time.' },
       { title: 'The Inconsistent Scoring Problem', text: 'Every lead gets qualified differently depending on who picks it up, so good prospects slip through and weak ones eat up our calendar.' },

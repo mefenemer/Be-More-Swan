@@ -26,6 +26,13 @@
       'Which of my assistants should work on my next launch, and on what?',
       'How is my current campaign doing, and what would you change about it?',
     ],
+    // Each produces a BRIEF — what the picture is for — which is the only input this assistant
+    // needs. None asks it to generate or spend: making options is a click the user makes.
+    brand_designer: [
+      'I need a square image for a post about our spring offer — warm and bright.',
+      'Make a branded card that says "Booking now open for summer".',
+      'Which of the options on my latest brief would you pick, and why?',
+    ],
     lead_qualifier: [
       'Score these leads for me — I’ll paste in a list of company URLs.',
       'What information do you need from me to qualify a new lead?',

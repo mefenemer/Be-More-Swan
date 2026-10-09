@@ -281,7 +281,23 @@ const AUTHORED: RoleContent[] = [
             'Reallocates Effort When Something Is Not Landing',
         ],
         integrations: [],
-        worksWith: ['social_media_manager', 'blog_writer', 'lead_qualifier'],
+        // brand_designer added with its Phase 3 (commission_visuals) — db/z-campaign-visuals.sql
+        // appends it on existing databases.
+        worksWith: ['social_media_manager', 'blog_writer', 'lead_qualifier', 'brand_designer'],
+    },
+    // Brand Designer (docs/brand-designer-plan.md). Mirrors db/z-brand-designer.sql, which wrote the
+    // same copy onto existing databases. Works with the Campaign Assistant since Phase 3 (a campaign
+    // commissions pictures) — db/z-campaign-visuals.sql moved existing rows off 'standalone'.
+    {
+        roleKey: 'brand_designer',
+        tagline: 'Say what the picture is for. Approve the one that fits.',
+        keyFeatures: [
+            'Briefs, Not Prompts',
+            'Stock, AI and Branded Cards Side by Side',
+            'Nothing Is Used Until You Approve It',
+        ],
+        integrations: [],
+        worksWith: ['campaign_orchestrator'],
     },
 ];
 

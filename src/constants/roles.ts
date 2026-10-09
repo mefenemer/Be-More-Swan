@@ -31,6 +31,9 @@ export const CAMPAIGN_ORCHESTRATOR_ROLE_KEY = 'campaign_orchestrator';
 /** The Email Marketing Assistant (user-facing name). The role key predates the rename and stays. */
 export const NEWSLETTER_ROLE_KEY = 'newsletter_editor';
 
+/** The Brand Designer — briefs, a review grid of options, approved pictures into the library. */
+export const BRAND_DESIGNER_ROLE_KEY = 'brand_designer';
+
 /**
  * The roles the Campaign Assistant is allowed to issue orders to, and nothing else.
  *
@@ -47,4 +50,8 @@ export const ORCHESTRATABLE_ROLE_KEYS: string[] = [
     // §9.7 — an email campaign, saved switched OFF for the user to review in Email Studio. The
     // delegable unit is the drafted series; sending stays a human act in the Studio.
     NEWSLETTER_ROLE_KEY,
+    // Brand Designer plan, Phase 3 — a campaign commissions pictures. The delegable unit is ONE
+    // brief; the checkable artefact is that brief (visual_brief), delivered when the user approves
+    // an option. Nothing it makes is used until a human approves it.
+    BRAND_DESIGNER_ROLE_KEY,
 ];

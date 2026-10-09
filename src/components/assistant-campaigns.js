@@ -920,6 +920,8 @@
     draft_email_campaign: { field: 'angle', label: 'What should the emails get people to do? (optional)', placeholder: 'Leave blank to use this campaign\'s objective', required: false },
     request_human_task: { field: 'task', label: 'What are you asking them to do?', placeholder: 'e.g. Record a 30-second product video for the launch posts', required: true },
     ab_test_posts: { field: 'hypothesis', label: 'What are you testing?', placeholder: 'e.g. Does a customer story beat a how-to on LinkedIn?', required: true },
+    // Brand Designer, Phase 3. Required unless card words are given — checked on submit.
+    commission_visuals: { field: 'show', label: 'What should the picture show?', placeholder: 'e.g. A small team celebrating in a bright studio', required: false },
   };
 
   function actionSpec(key) {
@@ -986,6 +988,15 @@
           </label>` : '<p class="text-xs text-amber-700">There are no saved lead searches to narrow yet — use "Run a lead search" first.</p>') : ''}
         ${spec.key === 'draft_email_campaign' ? emailFields(id) : ''}
         ${spec.key === 'request_human_task' ? humanFields(id) : ''}
+        ${spec.key === 'commission_visuals' ? `
+          <label class="block text-xs font-bold text-gray-600">Exact words for a branded card (optional)
+            <input type="text" maxlength="120" data-cmp-aw-headline="${id}" data-keep="aw-headline-${id}" placeholder="e.g. Booking now open"
+              class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+          </label>
+          <label class="flex items-start gap-2 text-xs text-gray-700">
+            <input type="checkbox" data-cmp-aw-ai="${id}" data-keep="aw-ai-${id}" checked class="mt-0.5">
+            <span>Include AI images — made only when you press "Make options" on the Brand Designer's Briefs tab, where the AI credit is shown. Stock photos and branded cards are made straight away, free.</span>
+          </label>` : ''}
         ${spec.key === 'ab_test_posts' ? `
           <div class="flex flex-wrap gap-3">
             <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Angle A
@@ -2489,6 +2500,13 @@
         if (a.toLowerCase() === b.toLowerCase()) { say(id, 'The two angles need to be different.', 'error'); return; }
         brief.angleA = a;
         brief.angleB = b;
+      }
+      if (spec.key === 'commission_visuals') {
+        const headline = (document.querySelector(`[data-cmp-aw-headline="${id}"]`)?.value || '').trim();
+        if (headline) brief.headline = headline;
+        if (!brief.show && !headline) { say(id, 'Say what the picture should show, or the words it should carry.', 'error'); return; }
+        brief.sources = document.querySelector(`[data-cmp-aw-ai="${id}"]`)?.checked
+          ? ['stock', 'ai_image', 'brand_card'] : ['stock', 'brand_card'];
       }
       if (spec.key === 'request_human_task') {
         const assignee = (document.querySelector(`[data-cmp-aw-assignee="${id}"]`)?.value || '').trim();

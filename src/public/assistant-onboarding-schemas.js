@@ -265,6 +265,56 @@
     ],
     // Tier 1, Batch 1 — Lead Generator. Captures the ideal customer profile the
     // orchestrator scores every inbound lead against, then how it runs operationally.
+    // Brand Designer (docs/brand-designer-plan.md §4). These answers are read on EVERY round's art
+    // direction (src/utils/visual-briefs.ts readBriefContext) and by its chat route — the keys must
+    // match those lookups exactly, or a typo reads as "never answered" and the steer silently drops.
+    // Phase 2 (2026-10-08): the workspace's picture guidelines (organisations.brand_guidelines, edited
+    // on Business Information ▸ Brand Assets or from this assistant's chat) are what every AI image
+    // reads. These two answers only fill a guideline the workspace has left EMPTY
+    // (visual-briefs.ts withSetupFallback) — the help text below must keep saying exactly that.
+    brand_designer: [
+      {
+        title: 'Your look',
+        description: 'Your Brand Designer already uses your brand colours, font and logo. Tell it what your pictures should feel like — it reads this every time it makes options.',
+        fields: [
+          {
+            key: 'photoStyle',
+            label: 'What should your pictures look like?',
+            type: 'textarea',
+            required: false,
+            placeholder: 'e.g. Bright and natural, real people at work, never posed. Lots of white space.',
+            helpText: 'Optional. Used when your workspace has no photo style set under Business Information ▸ Brand Assets — that one applies to every assistant’s AI images.',
+          },
+          {
+            key: 'avoidAlways',
+            label: 'Anything it must never show?',
+            type: 'text',
+            required: false,
+            placeholder: 'e.g. handshakes, suits, stock-photo smiles',
+            helpText: 'Optional. Used when your workspace has no "never show" set under Business Information ▸ Brand Assets.',
+          },
+        ],
+      },
+      {
+        title: 'Operational set-up',
+        description: 'Where new briefs get their options from, unless you choose otherwise on the brief.',
+        operational: true,
+        fields: [
+          {
+            // Read by brand-briefs.ts `list` as the new-brief default. A brief can always change it.
+            key: 'defaultSources',
+            label: 'Where should options come from by default?',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'all', label: 'Stock photos, AI images and branded cards', description: 'The widest choice. AI images use 1 AI credit per round of four; the rest are free.' },
+              { value: 'free_only', label: 'Stock photos and branded cards only', description: 'Never spends AI credits unless you tick AI images on a brief.' },
+            ],
+          },
+        ],
+      },
+    ],
+
     lead_qualifier: [
       {
         title: 'Who is your ideal customer?',

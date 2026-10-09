@@ -19,6 +19,7 @@
     blog_writer: 'Blog Writing Assistant',
     newsletter_editor: 'Email Marketing Assistant',
     campaign_orchestrator: 'Campaign Assistant',
+    brand_designer: 'Brand Designer',
     lead_qualifier: 'Lead Generation Assistant',
     crm_enricher: 'CRM Data Assistant',
     tier1_support_agent: 'First-Line Support Assistant',

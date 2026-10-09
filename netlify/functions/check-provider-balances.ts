@@ -1,5 +1,6 @@
 // netlify/functions/check-provider-balances.ts
-// Is fal, Anthropic or Stability out of money (or refusing our key)? Emails the founder address when so.
+// Is fal, Anthropic or Stability out of money (or refusing our key)? Are AI images or videos failing
+// across workspaces for any other reason? Emails the founder address when so.
 //
 // Scheduled every 6h (netlify.toml). The probes and the rules live in src/utils/provider-balance.ts,
 // which says why this exists: two provider accounts ran dry within two weeks of each other and no
@@ -19,7 +20,7 @@ import { sendEmail } from '../../src/utils/email';
 import {
     readFalBalance, probeAnthropic, assessProviders, FAL_LOCK_PATTERN, DEFAULT_FAL_LOW_BALANCE_USD,
     readStabilityBalance, DEFAULT_STABILITY_LOW_BALANCE_CREDITS,
-    type FalLockEvidence, type ProviderProblem,
+    type FalLockEvidence, type MediaFailureEvidence, type ProviderProblem,
 } from '../../src/utils/provider-balance';
 import { recordHeartbeat } from '../../src/utils/monitor-heartbeat';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -61,6 +62,59 @@ async function readFalEvidence(): Promise<FalLockEvidence> {
 }
 
 /**
+ * AI image/video failures that are NOT the lock, per media type (see MediaFailureEvidence).
+ * ⚠️ Excludes what is not a platform fault: the lock pattern (its own rule — counting it twice would
+ * send two emails for one outage), operator clean-up (`Superseded:`, as in the content check), and a
+ * job whose owner was deleted. 'flagged' is a content-policy refusal of one user's prompt — never
+ * counted. A job queued or processing for over an hour is STUCK: the background function died and
+ * nothing will ever settle it.
+ */
+export async function readMediaFailureEvidence(db: Pick<ReturnType<typeof getDb>, 'execute'> = getDb()): Promise<MediaFailureEvidence[]> {
+    const rows = await db.execute<{ media_type: string; failures: number; stuck: number; organisations: number; latest_at: string | null; top_error: string | null; last_success_at: string | null }>(
+        `WITH bad AS (
+            SELECT media_type, organisation_id, updated_at,
+                   CASE WHEN status = 'failed' THEN left(error_message, 180)
+                        ELSE 'stuck in ' || status || ' for over an hour' END AS error,
+                   (status = 'failed') AS failed
+              FROM media_generation_jobs
+             WHERE (status = 'failed'
+                    AND updated_at > now() - interval '24 hours'
+                    AND coalesce(error_message, '') !~ '${FAL_LOCK_PATTERN}'
+                    AND coalesce(error_message, '') NOT LIKE 'Superseded:%'
+                    AND coalesce(error_message, '') <> 'Owning user no longer exists.')
+                OR (status IN ('queued', 'processing')
+                    AND created_at > now() - interval '24 hours'
+                    AND updated_at < now() - interval '1 hour')
+         ), top AS (
+            SELECT DISTINCT ON (media_type) media_type, error
+              FROM (SELECT media_type, error, count(*) AS n FROM bad GROUP BY media_type, error) e
+             ORDER BY media_type, n DESC
+         )
+         SELECT b.media_type,
+                count(*) FILTER (WHERE b.failed)::int AS failures,
+                count(*) FILTER (WHERE NOT b.failed)::int AS stuck,
+                count(DISTINCT b.organisation_id)::int AS organisations,
+                max(b.updated_at) AS latest_at,
+                max(t.error) AS top_error,
+                (SELECT max(created_at) FROM content_assets
+                  WHERE provider = 'fal' AND asset_type = b.media_type) AS last_success_at
+           FROM bad b LEFT JOIN top t ON t.media_type = b.media_type
+          GROUP BY b.media_type`
+    );
+    return rows
+        .filter(r => r.media_type === 'image' || r.media_type === 'video')
+        .map(r => ({
+            mediaType: r.media_type as 'image' | 'video',
+            failures: Number(r.failures ?? 0),
+            stuck: Number(r.stuck ?? 0),
+            organisations: Number(r.organisations ?? 0),
+            latestAt: r.latest_at ? new Date(r.latest_at).toISOString() : null,
+            topError: r.top_error ?? null,
+            lastSuccessAt: r.last_success_at ? new Date(r.last_success_at).toISOString() : null,
+        }));
+}
+
+/**
  * Run the check and stamp its heartbeat. ⚠️ A run that THROWS stamps nothing, deliberately: the
  * heartbeat goes stale and platform-watchdog reports the check as not running.
  */
@@ -81,7 +135,7 @@ async function evaluateProviderBalances() {
     const now = new Date();
     const lowLine = Number(process.env.FAL_LOW_BALANCE_USD) || DEFAULT_FAL_LOW_BALANCE_USD;
     const stabilityLow = Number(process.env.STABILITY_LOW_BALANCE_CREDITS) || DEFAULT_STABILITY_LOW_BALANCE_CREDITS;
-    const [fal, anthropic, stability, falEvidence] = await Promise.all([
+    const [fal, anthropic, stability, falEvidence, mediaFailures] = await Promise.all([
         readFalBalance(),
         probeAnthropic(),
         readStabilityBalance(),
@@ -89,11 +143,17 @@ async function evaluateProviderBalances() {
             console.error('[check-provider-balances] fal evidence query failed:', err);
             return { failures: 0, organisations: 0, latestAt: null, sample: null, lastSuccessAt: null };
         }),
+        // ⚠️ A failed read is logged and treated as "nothing seen" — same as the lock evidence: the
+        // balance probes must still run and alert when this query breaks.
+        readMediaFailureEvidence().catch((err): MediaFailureEvidence[] => {
+            console.error('[check-provider-balances] media failure query failed:', err);
+            return [];
+        }),
     ]);
     const problems = assessProviders({
-        fal, falEvidence, anthropic, falLowBalanceUsd: lowLine, stability, stabilityLowBalanceCredits: stabilityLow,
+        fal, falEvidence, anthropic, falLowBalanceUsd: lowLine, stability, stabilityLowBalanceCredits: stabilityLow, mediaFailures,
     });
-    const summary = { fal, anthropic, stability, falEvidence, problems: problems.map(p => p.headline) };
+    const summary = { fal, anthropic, stability, falEvidence, mediaFailures, problems: problems.map(p => p.headline) };
     // Always logged: with no alert, this line is the only record that the check ran and what it saw.
     console.log('[check-provider-balances]', JSON.stringify(summary));
 

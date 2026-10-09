@@ -55,6 +55,7 @@ const ASSIGNEE_NAMES: Record<string, string> = {
     blog_writer: 'Blog Writing Assistant',
     lead_qualifier: 'Lead Generation Assistant',
     newsletter_editor: 'Email Marketing Assistant',
+    brand_designer: 'Brand Designer',
     human: 'A person on your team',
 };
 

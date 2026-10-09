@@ -68,6 +68,9 @@ export const organisations = pgTable('organisations', {
   // the assistant's onboardingContext; this is the half a renderer needs. Shape + defaults in
   // src/utils/brand-kit.ts, never read raw. db/brand-kit.sql.
   brandKit: jsonb('brand_kit'),
+  // Picture guidelines — photo style, include / never show, extra colours (src/utils/brand-guidelines.ts,
+  // db/z-brand-guidelines.sql). NOT inside brand_kit: website extraction replaces that wholesale.
+  brandGuidelines: jsonb('brand_guidelines'),
   socialLinks: text('social_links'),
   // Per-platform social handles/URLs captured on Business Information, keyed by
   // lowercase platform slug ({ instagram, facebook, linkedin, x, tiktok, ... }).
@@ -4159,7 +4162,7 @@ export const campaignOrders = pgTable("campaign_orders", {
   check("campaign_orders_status_check", sql`${t.status} IN ('queued','issued','in_review','delivered','blocked','cancelled','rejected')`),
   check("campaign_orders_cost_check", sql`${t.costWorkItems} >= 0 AND ${t.costGbp} >= 0`),
   // Widened by db/z-campaign-email-orders.sql (§9.7) — an email order's artefact is a sequence or an email.
-  check("campaign_orders_artefact_check", sql`${t.artefactKind} IS NULL OR ${t.artefactKind} IN ('scheduled_post','blog_post','discovery_campaign','assistant_record','newsletter_sequence','newsletter_issue')`),
+  check("campaign_orders_artefact_check", sql`${t.artefactKind} IS NULL OR ${t.artefactKind} IN ('scheduled_post','blog_post','discovery_campaign','assistant_record','newsletter_sequence','newsletter_issue','visual_brief')`),
   check("campaign_orders_no_self_block_check", sql`${t.blockedOnOrderId} IS NULL OR ${t.blockedOnOrderId} <> ${t.id}`),
 ]);
 
@@ -5210,4 +5213,82 @@ export const productUpdateSends = pgTable("product_update_sends", {
   sentAt: timestamp("sent_at"),
 }, (t) => [
   uniqueIndex("product_update_sends_digest_user_uidx").on(t.digestId, t.userId),
+]);
+
+// ── Brand Designer (db/z-brand-designer.sql, docs/brand-designer-plan.md §4) ───────────────────
+// A brief says what a picture is FOR; each round of generation adds options; the user approves.
+// Options are NOT content_assets: the library lists every content_assets row, so candidates would
+// bury real pictures. Approving an option is what creates the content_assets row.
+export const visualBriefs = pgTable("visual_briefs", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  title: text().notNull(),
+  purpose: text().notNull().default("social_post"),
+  aspectRatio: text("aspect_ratio").notNull().default("1:1"),
+  mediaType: text("media_type").notNull().default("image"),
+  message: text(),
+  headline: text(),
+  mood: text(),
+  mustInclude: text("must_include"),
+  mustAvoid: text("must_avoid"),
+  sources: jsonb().notNull().default(["stock", "ai_image", "brand_card"]),
+  status: text().notNull().default("open"),
+  origin: text().notNull().default("user"),
+  dueDate: date("due_date"),
+  rounds: integer().notNull().default(0),
+  artDirection: jsonb("art_direction"),
+  // Credits held by the round in flight; settled and zeroed in ONE update, so only once.
+  creditHold: integer("credit_hold").notNull().default(0),
+  // The AI-VIDEO part of creditHold (db/z-brand-designer-sources.sql): images and a video succeed
+  // or fail separately, so each part is charged or refunded on its own.
+  creditHoldVideo: integer("credit_hold_video").notNull().default(0),
+  // "Someone on my team is making it" — who. Nothing is sent to them.
+  waitingOn: text("waiting_on"),
+  generationStartedAt: timestamp("generation_started_at"),
+  generationNote: text("generation_note"),
+  // A campaign's commission (db/z-campaign-visuals.sql). SET NULL: an approved picture outlives it.
+  campaignId: integer("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
+  campaignOrderId: integer("campaign_order_id").references(() => campaignOrders.id, { onDelete: "set null" }),
+  // The draft post this brief is finding a picture for (db/z-brand-designer-post-briefs.sql).
+  scheduledPostId: integer("scheduled_post_id").references(() => scheduledPosts.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("visual_briefs_campaign_order_idx").on(t.campaignOrderId),
+  index("visual_briefs_scheduled_post_idx").on(t.scheduledPostId),
+  index("visual_briefs_assistant_status_idx").on(t.organisationId, t.aiAssistantId, t.status),
+  check("visual_briefs_purpose_check", sql`${t.purpose} IN ('social_post','blog_header','ad','email_header','story','other')`),
+  check("visual_briefs_aspect_ratio_check", sql`${t.aspectRatio} IN ('1:1','4:5','16:9','9:16')`),
+  check("visual_briefs_media_type_check", sql`${t.mediaType} IN ('image','video')`),
+  check("visual_briefs_status_check", sql`${t.status} IN ('open','generating','in_review','approved','cancelled')`),
+  check("visual_briefs_origin_check", sql`${t.origin} IN ('user','chat','campaign','assistant')`),
+]);
+
+export const visualBriefOptions = pgTable("visual_brief_options", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  briefId: integer("brief_id").notNull().references(() => visualBriefs.id, { onDelete: "cascade" }),
+  round: integer().notNull(),
+  source: text().notNull(),
+  status: text().notNull().default("proposed"),
+  storageKey: text("storage_key"),
+  externalUrl: text("external_url"),
+  mimeType: text("mime_type"),
+  width: integer(),
+  height: integer(),
+  prompt: text(),
+  providerAssetId: text("provider_asset_id"),
+  attributionName: text("attribution_name"),
+  attributionUrl: text("attribution_url"),
+  renderParams: jsonb("render_params"),
+  rejectReason: text("reject_reason"),
+  contentAssetId: integer("content_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
+  decidedAt: timestamp("decided_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("visual_brief_options_brief_idx").on(t.briefId, t.round),
+  check("visual_brief_options_source_check", sql`${t.source} IN ('stock','ai_image','brand_card','stock_video','ai_video','own')`),
+  check("visual_brief_options_status_check", sql`${t.status} IN ('proposed','approved','rejected')`),
 ]);

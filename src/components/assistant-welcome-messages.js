@@ -63,6 +63,9 @@
     campaign_orchestrator: {
       working: 'I’m ready to help you shape and coordinate your next campaign',
     },
+    brand_designer: {
+      working: 'Tell me what a picture is for and I’ll put options in front of you to choose from',
+    },
     default: {
       role: 'your new assistant',
       working: 'I’m already getting to work',

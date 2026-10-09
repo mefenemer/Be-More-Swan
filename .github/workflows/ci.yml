@@ -60,3 +60,10 @@ jobs:
       # Prove Row-Level Security isolates tenants at the DB layer.
       - name: RLS enforcement test
         run: npx tsx tests/rls-enforcement.test.ts
+      # The AI media failure alert's SQL (check-provider-balances), on the same real schema.
+      # It also runs in test:all, where it skips — it refuses any database that is not on localhost.
+      - name: Media failure evidence query
+        run: npx tsx tests/media-failure-evidence.test.ts
+      # The Brand Designer's settle-once credit SQL (src/utils/visual-briefs.ts endRound), same schema.
+      - name: Brand Designer credit settlement
+        run: npx tsx tests/visual-briefs-db.test.ts

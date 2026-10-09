@@ -417,7 +417,8 @@ window.generateAssistantCardHTML = function(assistant) {
     const dReg = window.AssistantDashboardRegistry ? window.AssistantDashboardRegistry.get(assistant.roleKey) : null;
     const quickActions = dReg ? [
         ...(dReg.hideDataHub ? [] : [['🗂️', dReg.hubTab?.label || 'Data Hub', 'datahub']]),
-        ['✅', dReg.reviewQueue?.label || 'Review', 'review-queue'],
+        ...(dReg.briefsTab ? [['🎨', dReg.briefsTab.label || 'Briefs', 'briefs']] : []),
+        ...(dReg.hideReviewQueue ? [] : [['✅', dReg.reviewQueue?.label || 'Review', 'review-queue']]),
         ['📅', 'Calendar', 'calendar'],
     ] : [];
     const quickActionsHtml = quickActions.length ? `
@@ -917,6 +918,8 @@ window._activateMainTab = function(name) {
     // feeds both the tab badge and the control strip above the tab bar.
     if (name === 'campaigns') window.AssistantCampaigns?.activate();
     if (name === 'email-campaigns') window.AssistantEmailCampaigns?.activate();
+    // Briefs (Brand Designer) renders lazily too — init() already fetched for the badge.
+    if (name === 'briefs') window.AssistantBriefs?.activate();
     // Conversations already fetched at init() — its thread total feeds the tab's own count, so it
     // cannot wait for the tab to be opened. activate() repaints from that result rather than
     // refetching. (This comment used to say the opposite and was stale: the prefetch landed when
@@ -5306,7 +5309,10 @@ function _applyDashboardRegistry(data) {
     window._detailReviewQueue = cfg.reviewQueue || { kind: 'posts' };
     // Role-chosen landing tab (SMM opens on its "Posts" pipeline); null → HTML default (Data Hub).
     window._detailDefaultMainTab = cfg.defaultMainTab || null;
-    toggle('maintab-btn-review-queue', true);
+    // …except where a role's review IS another tab (cfg.hideReviewQueue): the Brand Designer's
+    // approval gate is the option grid on its Briefs tab, and the default here would be an empty
+    // SOCIAL post queue for an assistant that makes no posts.
+    toggle('maintab-btn-review-queue', !cfg.hideReviewQueue);
     // Social/blog retire the Data Hub tab (cfg.hideDataHub) — and the action bar with the primary
     // action ("Create a Post") lives INSIDE that tab's panel. Hiding the tab button alone left the
     // panel itself visible whenever _activateMainTab hadn't run yet, so it leaked in under the tab
@@ -5581,6 +5587,15 @@ function _applyDashboardRegistry(data) {
         // The strip lives outside the tab, so hiding the tab button is not enough to hide it. Every
         // other role must never see a capacity meter for a feature it does not have.
         document.getElementById('campaign-control-strip')?.classList.add('hidden');
+    }
+
+    // Briefs tab — Brand Designer only (briefsTab: brand_designer). init() loads eagerly: the count
+    // of briefs waiting for a decision is the tab badge, visible from every tab.
+    const briefsTab = cfg.briefsTab;
+    toggle('maintab-btn-briefs', !!briefsTab);
+    if (briefsTab) {
+        setText('briefs-tab-label', briefsTab.label || 'Briefs');
+        window.AssistantBriefs?.init({ assistantId: data.id });
     }
 
     // Signal Inbox tab — lead roles only (signalInbox: lead_qualifier): everything that came IN
@@ -8726,6 +8741,12 @@ function _setMetricsEmptyState(mode) {
         if (title) title.textContent = 'No blog activity to measure yet';
         if (body)  body.textContent  = 'These fill in as your assistant drafts posts, you approve them, and they go live. Open the Blogs tab to write the first one or review what is waiting.';
         if (note) note.textContent = '';
+    } else if (mode === 'brand-no-data') {
+        // This assistant publishes nothing, so "nothing has been published" would be permanently
+        // true and point at the wrong thing. What is missing is a brief.
+        if (title) title.textContent = 'No briefs yet';
+        if (body)  body.textContent  = 'These fill in as you brief pictures and choose between the options. Press "New brief" on the Briefs tab, or describe what you need in chat.';
+        if (note) note.textContent = '';
     } else if (mode === 'campaign-no-data') {
         // Distinct from 'no-data' on purpose. This assistant publishes nothing itself, so "nothing
         // has been published" would be both confusing and permanently true; what is actually
@@ -9013,6 +9034,54 @@ async function _loadCampaignMetrics(assistantId) {
     }
 }
 
+// ── Brand Designer KPI cards ─────────────────────────────────────────────────
+// Routed here by `metricsSource: 'brand'`. Same markup as every role; the figures come from
+// brand-briefs.ts `performance`, because this assistant publishes nothing and the shared endpoint
+// (post_insights) would report "nothing published" for ever.
+async function _loadBrandMetrics(assistantId) {
+    const valEl   = (k) => document.getElementById(`metric-${k}-value`);
+    const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
+    const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
+    document.getElementById('metric-value-wins')?.classList.add('hidden');
+    try {
+        const res = await fetch('/.netlify/functions/brand-briefs', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({ action: 'performance', assistantId }),
+        });
+        if (!res.ok) { _setMetricsEmptyState('error'); return; }
+        const data = await res.json();
+        if (!data.hasData) { _setMetricsEmptyState('brand-no-data'); return; }
+        _setMetricsEmptyState('cards');
+        const note = document.getElementById('metrics-status-note');
+        if (note) note.textContent = 'All time';
+        const m = data.metrics || {};
+
+        valEl('engagement').textContent = String(m.approved ?? 0);
+        _setKpiCard('engagement', { empty: !m.approved });
+        if (trendEl('engagement')) trendEl('engagement').textContent = '—';
+
+        // Amber, like the Campaign Assistant's "Needs You": a number the user is meant to bring down.
+        valEl('reach').textContent = String(m.waiting ?? 0);
+        _setKpiCard('reach', { empty: !m.waiting });
+        if (trendEl('reach')) trendEl('reach').textContent = '—';
+        if (dotEl('reach')) dotEl('reach').className = 'w-2 h-2 rounded-full ' + (m.waiting ? 'bg-amber-400' : 'bg-gray-200');
+
+        // Null until something has been decided — "0%" would say every option was turned down.
+        const hasRate = m.hitRate !== null && m.hitRate !== undefined;
+        valEl('ctr').textContent = hasRate ? `${Math.round(m.hitRate * 100)}%` : '—';
+        _setKpiCard('ctr', { empty: !hasRate });
+        if (trendEl('ctr')) trendEl('ctr').textContent = '—';
+
+        if (valEl('value')) {
+            valEl('value').textContent = String(m.creditsSpent ?? 0);
+            _setKpiCard('value', { empty: !m.creditsSpent });
+            if (trendEl('value')) trendEl('value').textContent = '—';
+        }
+    } catch {
+        _setMetricsEmptyState('error');
+    }
+}
+
 // ── Lead Generation Assistant KPI cards ──────────────────────────────────────
 // Same markup as every other role, different data source: get-lead-performance reads the revenue
 // ledger, because this assistant owns no posts and the shared endpoint (post_insights) reported
@@ -9133,6 +9202,10 @@ async function _loadAssistantMetrics(assistantId, roleKey) {
     if (source === 'lead') {
         _setMetricsEmptyState('pending');
         return _loadLeadMetrics(assistantId);
+    }
+    if (source === 'brand') {
+        _setMetricsEmptyState('pending');
+        return _loadBrandMetrics(assistantId);
     }
     if (source === 'blog') {
         _setMetricsEmptyState('pending');
