@@ -33,6 +33,7 @@ import { guidelinesPromptLines, hasGuidelines, normaliseGuidelines, readBrandGui
 import { holdCredits, settleHold, getBalance, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, tierCanGenerateVideo } from './ai-credits';
 import { getActiveTierKeyByOrg } from './plan-features';
 import { orgHasAssistantFeature } from './assistant-capabilities';
+import { loadAssistantRulesBlock } from './assistant-rules-prompt';
 import { PexelsRateLimitError, searchUniqueImages, searchUniqueVideos } from './pexels';
 import { BRAND_CARD_PROVIDER } from './brand-card-lifecycle';
 import { resolveAssetDisplayUrl } from './social-publish';
@@ -226,11 +227,14 @@ export function parseArtDirection(raw: string, fallback: ArtDirection, exactHead
     };
 }
 
-export async function writeArtDirection(brief: BriefRow, ctx: BriefContext, rejections: PastRejection[]): Promise<ArtDirection> {
+export async function writeArtDirection(db: Db, brief: BriefRow, ctx: BriefContext, rejections: PastRejection[]): Promise<ArtDirection> {
     const fallback = fallbackArtDirection(brief, ctx.kit, ctx.guidelines);
     try {
+        // The user's Rules for this assistant (its Rules tab) and the workspace-wide ones — the same
+        // block its chat reads. Never throws; null when there are none.
+        const rules = await loadAssistantRulesBlock(db, { assistantId: brief.aiAssistantId, organisationId: brief.organisationId });
         const res = await gatewayGenerate({
-            system: artDirectionSystemPrompt(),
+            system: artDirectionSystemPrompt() + (rules ? `\n\n${rules}` : ''),
             messages: [{ role: 'user', content: artDirectionUserPrompt(brief, ctx, rejections) }],
             maxTokens: 700,
             deadlineMs: 45_000,
@@ -418,7 +422,7 @@ export async function runRound(db: Db, briefId: number, userId: number | null): 
     try {
         const ctx = await readBriefContext(db, brief.organisationId, brief.aiAssistantId);
         const { rejections, shownStockIds } = await pastRejections(db, brief.id);
-        artDirection = await writeArtDirection(brief, ctx, rejections);
+        artDirection = await writeArtDirection(db, brief, ctx, rejections);
         const sources = Array.isArray(brief.sources) ? (brief.sources as string[]) : [];
         const base = { organisationId: brief.organisationId, briefId: brief.id, round: brief.rounds };
         const ad = artDirection;

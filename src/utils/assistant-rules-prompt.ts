@@ -22,9 +22,12 @@
 // assistant's own rules AND the workspace-wide ones (assistant_id NULL), with platform-only rules
 // labelled so a LinkedIn rule is not applied to an Instagram caption.
 //
-// ⚠️ Deliberately NOT every role. Leads have their own evidence path (lead_reject_feedback) and
-// their own consumer; Email Marketing's Rules tab says its rules don't steer it, and nothing here
-// should quietly make that untrue. Widen RULE_READING_ROLES only together with the Rules-tab copy.
+// ⚠️ Widen RULE_READING_ROLES only together with the Rules-tab copy. Widened 2026-10-09 (with that
+// copy — registry `rulesScope`) to the Brand Designer, Campaign Assistant, CRM Data Assistant and
+// Lead Generator, whose Rules tabs had said their rules reached nothing. The Lead Generator's
+// REJECTION evidence still has its own path (lead_reject_feedback); what is new is its manual rules
+// reaching its chat and its outreach drafts. Email Marketing reads its rules through blueprint §4
+// (newsletter-generate.ts), so it is not here — and its Rules tab now says so truthfully.
 
 import { and, desc, eq, isNull, or } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -34,6 +37,16 @@ import { contentRules } from '../../db/schema';
 export const RULE_READING_ROLES: ReadonlySet<string> = new Set([
     'tier1_support_agent', 'meeting_note_taker', 'accounts_receivable_clerk',
     'social_media_manager', 'blog_writer',
+    // The Brand Designer: its chat, and its art direction (visual-briefs.ts writeArtDirection),
+    // both read these. The Rules-tab copy says so (registry rulesScope 'designer').
+    'brand_designer',
+    // Campaign Assistant and CRM Data Assistant (2026-10-09): their work is planned and proposed in
+    // chat, and their Rules tab said rules "won't change what it does today" — true, and fixable.
+    // A rule like "never brief the Blog Writer about pricing" now reaches the planner.
+    'campaign_orchestrator', 'crm_enricher',
+    // Lead Generator: its chat scoring, and (separately, process-discovery-jobs → scoreCandidates)
+    // the outreach emails discovery drafts. Registry rulesScope 'outreach' says so on the Rules tab.
+    'lead_qualifier',
 ]);
 
 /** Record types those roles produce. Rejecting one of these may carry a free-text `feedback`. */

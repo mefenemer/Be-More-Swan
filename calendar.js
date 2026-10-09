@@ -210,6 +210,22 @@ let _scheduledRecords = [];
 let _followUps = [];
 let _leadOutreach = false;
 
+// Dated items for a records/briefs assistant (opts.datedItems): an AR Clerk's invoices on their due
+// date, a Minute Taker's meetings on their own date, a Brand Designer's briefs on their deadline.
+// Before this those calendars showed only completed runs — never one invoice, meeting or brief.
+// Read-only chips: the date belongs to the record, so moving it here would be editing a fact.
+// Shape: { key, kind, title, at: Date, derived, tab }.
+let _datedItems = [];
+let _datedSource = null;   // 'records' | 'briefs' | null
+// The locked assistant's roleKey (opts.roleKey) — only for wording the legend and the empty month.
+let _roleKey = null;
+const DATED_KIND_META = {
+    invoice_due: { icon: '💷', label: 'Invoice due' },
+    meeting:     { icon: '🗓', label: 'Meeting' },
+    notes_taken: { icon: '📝', label: 'Notes taken' },
+    brief_due:   { icon: '🎨', label: 'Brief due' },
+};
+
 // An assistant's identity colour — the user's own choice where they've made one, otherwise the
 // stable id-derived fallback. Resolved through window.AssistantColors (/assistant-colors.js) so the
 // calendar, the My Assistants cards, the detail hero and the notification inbox all agree.
@@ -244,13 +260,19 @@ function _matchesPlatformFilter(platform) {
 // assistantId: the global page always spans publishing and non-publishing assistants at once.
 // opts.leadOutreach (optional, default false) — true for the lead roles, which adds the pending
 // follow-up email chips and their drag-to-reschedule. Opt-in; see _followUps.
+// opts.datedItems (optional) — 'records' (invoices, meetings) or 'briefs' (Brand Designer); see
+// _datedItems. From the dashboard registry's calendarItems.
 window.initCalendar = async function (opts = {}) {
     if (opts.assistantId != null) {
         _assistantFilter = String(opts.assistantId);
         _lockedAssistant = true;
         _publishesContent = opts.publishesContent !== false;
         _leadOutreach = opts.leadOutreach === true;
+        _datedSource = opts.datedItems === 'records' || opts.datedItems === 'briefs' ? opts.datedItems : null;
+        _roleKey = typeof opts.roleKey === 'string' ? opts.roleKey : null;
     } else {
+        _datedSource = null;
+        _roleKey = null;
         _assistantFilter = 'all';
         _lockedAssistant = false;
         _publishesContent = true;
@@ -330,15 +352,20 @@ async function _loadAndRender() {
     try {
         const { from, to } = _getDateRange();
         // Posts, completed assistant activity, and the assistant list (for colours/filter) in parallel.
+        // An assistant that publishes nothing owns no posts, blog posts or emails — fetching all three
+        // on every month change was three round trips to a database across the Atlantic for rows the
+        // filter then threw away. `[]`-shaped empty answers keep the rest of the code unchanged.
+        const skipPublishing = _lockedAssistant && !_publishesContent;
+        const none = (key) => Promise.resolve({ ok: true, json: async () => ({ [key]: [] }) });
         const [postsRes, actRes, asstRes, blogRes, nlRes] = await Promise.all([
-            fetch(`/.netlify/functions/scheduled-posts?from=${from.toISOString()}&to=${to.toISOString()}`),
+            skipPublishing ? none('posts') : fetch(`/.netlify/functions/scheduled-posts?from=${from.toISOString()}&to=${to.toISOString()}`),
             fetch(`/.netlify/functions/get-calendar-activity?from=${from.toISOString()}&to=${to.toISOString()}`),
             _assistants.length ? Promise.resolve(null) : (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants')),
-            fetch(`/.netlify/functions/blog-posts?from=${from.toISOString()}&to=${to.toISOString()}`),
+            skipPublishing ? none('posts') : fetch(`/.netlify/functions/blog-posts?from=${from.toISOString()}&to=${to.toISOString()}`),
             // The from/to branch of newsletter-issues.ts, NOT its list response — that one carries
             // segments, custom fields, templates and the brand theme, and this refetches on every
             // month change.
-            fetch(`/.netlify/functions/newsletter-issues?from=${from.toISOString()}&to=${to.toISOString()}`),
+            skipPublishing ? none('issues') : fetch(`/.netlify/functions/newsletter-issues?from=${from.toISOString()}&to=${to.toISOString()}`),
         ]);
 
         // null = "no definitive answer" (a 500, say) — leave the previous value alone rather than
@@ -394,8 +421,30 @@ async function _loadAndRender() {
             } catch { followUps = []; }
         }
 
+        // Dated items (records or briefs). Swallowed on failure like the feeds above: a calendar that
+        // shows everything else beats one that shows nothing.
+        let dated = [];
+        if (_datedSource && _lockedAssistant && _assistantFilter !== 'all') {
+            try {
+                if (_datedSource === 'records') {
+                    const dr = await fetch(`/.netlify/functions/assistant-records?dated=1&assistantId=${_assistantFilter}&from=${from.toISOString()}&to=${to.toISOString()}`);
+                    const items = dr.ok ? ((await dr.json()).items || []) : [];
+                    dated = items.map((i) => ({ key: `r${i.id}`, kind: i.kind, title: i.title, at: new Date(i.at), derived: !!i.derived, tab: 'datahub' }));
+                } else {
+                    const br = await fetch('/.netlify/functions/brand-briefs', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+                        body: JSON.stringify({ action: 'calendar', assistantId: Number(_assistantFilter), from: _dateKey(from), to: _dateKey(to) }),
+                    });
+                    const items = br.ok ? ((await br.json()).items || []) : [];
+                    // A DATE column: noon local, so it can never slip a day across a timezone.
+                    dated = items.map((i) => ({ key: `b${i.id}`, kind: 'brief_due', title: i.title, at: new Date(`${i.dueDate}T12:00:00`), derived: false, tab: 'briefs', done: i.status === 'approved' }));
+                }
+            } catch { dated = []; }
+        }
+
         if (token !== _loadToken) return;   // superseded by a newer navigation
 
+        _datedItems = dated;
         if (posts) _posts = posts;
         if (activities) _activities = activities;
         if (assistants) {
@@ -477,6 +526,14 @@ function _renderStatusLegend() {
     if (!strip) return;
     const item = (marker, label) =>
         `<span class="inline-flex items-center gap-1.5 text-xs text-gray-500">${marker} ${label}</span>`;
+    // The dated kinds this assistant's grid can actually contain — listed only when it has them.
+    const datedLegend = () => {
+        const kinds = _datedSource === 'briefs' ? ['brief_due'] : _datedSource === 'records' ? ['invoice_due', 'meeting', 'notes_taken'] : [];
+        const role = _roleKey || '';
+        const relevant = kinds.filter((k) => _datedSource === 'briefs'
+            || (role === 'accounts_receivable_clerk' ? k === 'invoice_due' : role === 'meeting_note_taker' ? k !== 'invoice_due' : true));
+        return relevant.map((k) => item(`<span>${DATED_KIND_META[k].icon}</span>`, DATED_KIND_META[k].label)).join('');
+    };
     // The pending-outreach marker, lead roles only. It is listed FIRST because it is the only
     // thing on this grid that will act on a third party by itself — the reminder and the completed
     // run are both records of what a person did or has to do.
@@ -487,8 +544,9 @@ function _renderStatusLegend() {
         ? item('<span class="text-emerald-600 font-extrabold">✓</span>', 'Posted (live)') +
           item('<span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>', 'Scheduled') +
           item('<span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>', 'Overdue')
-        : outreachItem +
-          item('<span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>', _leadOutreach ? 'Chase reminder' : 'Scheduled') +
+        : outreachItem + datedLegend() +
+          // The Brand Designer schedules nothing: no records queue, so no yellow chip can ever appear.
+          (_datedSource === 'briefs' ? '' : item('<span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>', _leadOutreach ? 'Chase reminder' : 'Scheduled')) +
           item('<span class="text-gray-500 font-extrabold">✓</span>', 'Completed');
 }
 
@@ -574,7 +632,7 @@ function _renderMonth() {
         const dayFollowUps = _followUpsOnDate(date);
         // Pending outreach sits ABOVE the reminders and the completed runs: it is the only entry
         // in the cell that is going to do something on its own.
-        html += `<div class="space-y-1">${dayGroups.map(g => _postChip(g, 'month')).join('')}${dayBlogs.map(b => _blogChip(b, 'month')).join('')}${dayIssues.map(_issueChip).join('')}${dayFollowUps.map(f => _followUpChip(f, 'month')).join('')}${dayRecords.map(r => _recordChip(r, 'month')).join('')}${dayActs.map(a => _activityChip(a, 'month')).join('')}</div>`;
+        html += `<div class="space-y-1">${dayGroups.map(g => _postChip(g, 'month')).join('')}${dayBlogs.map(b => _blogChip(b, 'month')).join('')}${dayIssues.map(_issueChip).join('')}${dayFollowUps.map(f => _followUpChip(f, 'month')).join('')}${dayRecords.map(r => _recordChip(r, 'month')).join('')}${_datedItemsOnDate(date).map(_datedChip).join('')}${dayActs.map(a => _activityChip(a, 'month')).join('')}</div>`;
         html += `</div>`;
     }
 
@@ -608,7 +666,7 @@ function _renderWeek() {
             ondragover="window._calDragOver(event, '${dateKey}')"
             ondragleave="window._calDragLeave(event)"
             ondrop="window._calDrop(event, '${dateKey}')">
-            ${dayGroups.map(g => _postChip(g, 'week')).join('')}${_blogPostsOnDate(d).map(b => _blogChip(b, 'week')).join('')}${_newsletterIssuesOnDate(d).map(_issueChip).join('')}${_followUpsOnDate(d).map(f => _followUpChip(f, 'week')).join('')}${_scheduledRecordsOnDate(d).map(r => _recordChip(r, 'week')).join('')}${_activitiesOnDate(d).map(a => _activityChip(a, 'week')).join('')}
+            ${dayGroups.map(g => _postChip(g, 'week')).join('')}${_blogPostsOnDate(d).map(b => _blogChip(b, 'week')).join('')}${_newsletterIssuesOnDate(d).map(_issueChip).join('')}${_followUpsOnDate(d).map(f => _followUpChip(f, 'week')).join('')}${_scheduledRecordsOnDate(d).map(r => _recordChip(r, 'week')).join('')}${_datedItemsOnDate(d).map(_datedChip).join('')}${_activitiesOnDate(d).map(a => _activityChip(a, 'week')).join('')}
         </div>`;
     }
     html += `</div>`;
@@ -668,6 +726,8 @@ function _renderList() {
         // Pending follow-ups belong under "All" and "Scheduled" for the same reason records do —
         // they are future work, never a published or failed thing.
         let followUps = (_listFilter === 'all' || _listFilter === 'scheduled') ? _followUpsOnDate(date) : [];
+        // Dated items are facts, not states — they belong under "All" only.
+        const dated = _listFilter === 'all' ? _datedItemsOnDate(date) : [];
         if (allowedStatuses) {
             // Filter INSIDE each cross-post group, then drop groups the filter emptied — a post
             // whose Instagram sibling failed still belongs under "Needs Attention", showing only
@@ -681,21 +741,21 @@ function _renderList() {
             blogs = blogs.filter(p => allowedStatuses.has(p.status));
             issues = issues.filter(i => allowedStatuses.has(i.status));
         }
-        if (postGroups.length > 0 || blogs.length > 0 || issues.length > 0 || records.length > 0 || followUps.length > 0) {
-            days.push({ date, postGroups, blogs, issues, records, followUps });
+        if (postGroups.length > 0 || blogs.length > 0 || issues.length > 0 || records.length > 0 || followUps.length > 0 || dated.length > 0) {
+            days.push({ date, postGroups, blogs, issues, records, followUps, dated });
         }
     }
 
     if (days.length === 0) {
         html += `<div class="flex flex-col items-center justify-center py-24 text-gray-400 gap-3">
             <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-            <p class="text-sm font-medium">${_listFilter === 'all' ? 'Nothing scheduled this month. Approve a draft in the Review Queue to put it on the calendar.' : 'No posts in this filter this month.'}</p>
+            <p class="text-sm font-medium">${_listFilter === 'all' ? _emptyMonthMessage() : 'Nothing in this filter this month.'}</p>
         </div>`;
         return html;
     }
 
     html += `<div class="max-w-3xl mx-auto px-4 py-6 space-y-8">`;
-    days.forEach(({ date, postGroups, blogs, issues, records, followUps }) => {
+    days.forEach(({ date, postGroups, blogs, issues, records, followUps, dated }) => {
         const today = new Date(); today.setHours(0,0,0,0);
         const isToday = _dateKey(date) === _dateKey(today);
         html += `<div>
@@ -706,7 +766,7 @@ function _renderList() {
                 </span>
                 <div class="flex-1 h-px bg-gray-200"></div>
             </div>
-            <div class="space-y-2">${postGroups.map(g => _listRow(g)).join('')}${(blogs || []).map(b => _blogChip(b, 'list')).join('')}${(issues || []).map(_issueChip).join('')}${(followUps || []).map(_listFollowUpRow).join('')}${(records || []).map(_listRecordRow).join('')}</div>
+            <div class="space-y-2">${postGroups.map(g => _listRow(g)).join('')}${(blogs || []).map(b => _blogChip(b, 'list')).join('')}${(issues || []).map(_issueChip).join('')}${(followUps || []).map(_listFollowUpRow).join('')}${(records || []).map(_listRecordRow).join('')}${(dated || []).map(_datedChip).join('')}</div>
         </div>`;
     });
     html += `</div>`;
@@ -926,6 +986,38 @@ function _activityChip(act, viewType) {
 
 // Scheduled Data Hub record chip (assistant Calendar tab) — future work, not a completed run,
 // so it reads "🗓 scheduled" rather than the activity "✓ done" chip.
+// What an empty month should say depends on what this calendar can hold. "Approve a draft in the
+// Review Queue" was shown to every assistant, including ones that draft nothing.
+function _emptyMonthMessage() {
+    if (!_lockedAssistant || _publishesContent) return 'Nothing scheduled this month. Approve a draft in the Review Queue to put it on the calendar.';
+    if (_datedSource === 'briefs') return 'Nothing this month. Briefs with a due date appear here on that date.';
+    const role = _roleKey || '';
+    if (role === 'accounts_receivable_clerk') return 'Nothing this month. Invoices appear on their due date once your assistant has them.';
+    if (role === 'meeting_note_taker') return 'Nothing this month. Meetings appear on their date once your assistant has taken notes.';
+    if (_leadOutreach) return 'Nothing this month. Follow-up emails and chase reminders appear here once leads are contacted.';
+    return 'Nothing this month. Anything you schedule from the Review Queue appears here, with completed work.';
+}
+
+function _datedItemsOnDate(date) {
+    const key = _dateKey(date);
+    return _datedItems.filter((i) => _dateKey(i.at) === key);
+}
+// Read-only: the date is a fact about the record (an invoice's due date, a meeting's time), so it is
+// not draggable. Clicking opens the tab where the item lives.
+function _datedChip(it) {
+    const meta = DATED_KIND_META[it.kind] || { icon: '•', label: '' };
+    const note = it.derived ? ' — worked out from how overdue it was when recorded' : (it.done ? ' — done' : '');
+    return `<div onclick="window._activateMainTab && window._activateMainTab('${it.tab}')"
+        class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-gray-50 hover:bg-gray-100 shadow-sm cursor-pointer text-left w-full"
+        style="border-left:3px solid #6b7280" title="${_escHtml(meta.label + ': ' + (it.title || '') + note)}">
+        <span class="text-xs shrink-0">${meta.icon}</span>
+        <div class="flex-1 min-w-0">
+            <p class="text-[11px] font-bold text-gray-700 truncate">${_escHtml(meta.label)}${it.done ? ' ✓' : ''}</p>
+            <p class="text-[11px] text-gray-500 truncate leading-tight">${_escHtml(String(it.title || '').substring(0, 40))}</p>
+        </div>
+    </div>`;
+}
+
 function _scheduledRecordsOnDate(date) {
     const key = _dateKey(date);
     return _scheduledRecords.filter(r => r.scheduledFor && _dateKey(new Date(r.scheduledFor)) === key);

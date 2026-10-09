@@ -1023,7 +1023,8 @@ const ROUTES: Record<string, AssistantRoute> = {
     // the CampaignStrategyProposalCard renderer in disruptive-ui-registry.js.
     //
     // Defaults come from onboarding (src/config/assistant-onboarding-schemas.js) —
-    // campaignAudience / campaignAngle / defaultOutcomeMetric / capacityPosture / autonomyLevel.
+    // campaignAudience / campaignAngle / defaultOutcomeMetric / capacityPosture. (autonomyLevel was
+    // removed from setup 2026-10-09: nothing read it — every decision waits for a human anyway.)
     // The keys here must match that schema exactly; onboardingValue() is a plain lookup and a typo
     // reads as "the user never answered", which silently drops the steer rather than erroring.
     campaign_orchestrator: {
@@ -1523,7 +1524,7 @@ ${kb.excerpts}
 Support policy (from setup):
 - Helpdesk platform: ${platform ?? 'not specified'} — refer to it by name when talking about tickets and queues.
 - Auto-resolve confidence threshold: ${threshold ?? 75}% — only mark a ticket Resolved when your confidence is at or above this; below it, escalate.
-- Escalation email: ${escalationEmail ?? 'not specified'} — escalated tickets are flagged for this inbox.
+- Escalation contact: ${escalationEmail ?? 'not specified'} — the person who picks up escalated tickets. Nothing is emailed to them automatically; never tell the user or the customer that it was.
 - Support tone: ${supportTone ?? 'professional'} — the voice rules below apply to every customer-facing reply (draftReply), never to your notes to the user.
 
 ${voiceDirective(supportTone, { surface: 'support', fallback: 'professional' })}

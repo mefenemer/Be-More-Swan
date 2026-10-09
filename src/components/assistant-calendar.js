@@ -84,6 +84,10 @@
           assistantId: state.assistantId,
           publishesContent: publishesContent(),
           leadOutreach: hasLeadOutreach(),
+          // Invoices / meetings (records) or briefs (Brand Designer) on their own dates — the
+          // registry's calendarItems. Without it those calendars showed only completed runs.
+          datedItems: (window.AssistantDashboardRegistry?.get(state.roleKey) || {}).calendarItems || null,
+          roleKey: state.roleKey,
         });
       }
     } catch (err) {

@@ -51,7 +51,8 @@ check('an API failure THROWS rather than becoming null', () => {
 check('null is kept for the cases where it is TRUE', () => {
     // "No business context to ground on" and "the reply was unreadable" really are skip-this-slot,
     // and turning those into throws would park jobs that have a real content problem.
-    assert.ok(ideation.includes('if (!hasOrgContext && !inspoBlock) return null;'),
+    // Setup's Blog Topics also grounds a topic (2026-10-09), so it joins the two signals here.
+    assert.ok(ideation.includes('if (!hasOrgContext && !inspoBlock && !setupTopics) return null;'),
         'the genuinely ungroundable case no longer returns null');
     assert.ok(ideation.includes('if (!parsed) return null;'), 'an unreadable reply no longer returns null');
     assert.ok(ideation.includes('if (!title) return null;'), 'a title-less reply no longer returns null');

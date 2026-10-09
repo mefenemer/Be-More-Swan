@@ -55,6 +55,7 @@ import {
 } from '../../src/config/lead-retention';
 import { crmDescription, crmHeaders, crmRow, isCrmTarget, splitName, websiteUrl } from '../../src/config/crm-export';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { DATED_RECORD_TYPES, recordCalendarDate } from '../../src/utils/record-calendar-dates';
 
 const RECORD_TYPES = new Set(['lead', 'enrichment', 'meeting', 'invoice', 'ticket']);
 /**
@@ -284,6 +285,61 @@ export default withLambda(async (event) => {
     try {
         if (event.httpMethod === 'GET') {
             const assistantId = Number(event.queryStringParameters?.assistantId);
+
+            // The four Overview cards for a records assistant (registry metricsSource 'records'): counts
+            // its records really hold, all time. The cards these replace ("Cash Recovered", "Time Saved",
+            // "Avg Resolution Time", "Data Accuracy") read the SOCIAL stats endpoint and said "nothing
+            // published" for ever — and nothing in the platform measures any of them. `actionItems` is
+            // the Minute Taker's extra: the action items its meeting write-ups carry.
+            if (event.queryStringParameters?.metrics) {
+                if (!(await ownsAssistant(assistantId))) return json(404, { error: 'Assistant not found.' });
+                const [m] = await db.select({
+                    made: sql<number>`count(*)::int`,
+                    approved: sql<number>`count(*) FILTER (WHERE ${assistantRecords.approvalStatus} IN ('approved', 'scheduled'))::int`,
+                    awaiting: sql<number>`count(*) FILTER (WHERE ${assistantRecords.approvalStatus} = 'pending_approval')::int`,
+                    turnedDown: sql<number>`count(*) FILTER (WHERE ${assistantRecords.approvalStatus} = 'rejected')::int`,
+                    actionItems: sql<number>`coalesce(sum(CASE WHEN jsonb_typeof(${assistantRecords.data} -> 'tasks') = 'array' THEN jsonb_array_length(${assistantRecords.data} -> 'tasks') ELSE 0 END), 0)::int`,
+                }).from(assistantRecords).where(and(
+                    eq(assistantRecords.organisationId, orgId), eq(assistantRecords.aiAssistantId, assistantId),
+                ));
+                return json(200, {
+                    hasData: Number(m?.made ?? 0) > 0,
+                    metrics: {
+                        made: Number(m?.made ?? 0), approved: Number(m?.approved ?? 0),
+                        awaiting: Number(m?.awaiting ?? 0), turnedDown: Number(m?.turnedDown ?? 0),
+                        actionItems: Number(m?.actionItems ?? 0),
+                    },
+                });
+            }
+
+            // Dated-records feed for the assistant Calendar tab (record-calendar-dates.ts): invoices on
+            // their due date, meetings on their own date. The AR Clerk's and Minute Taker's calendars
+            // showed only completed runs before this — never an invoice, never a meeting. Rejected
+            // records are left off (the user turned them down); `data` is read server-side and never
+            // shipped, like the scheduled feed below.
+            if (event.queryStringParameters?.dated) {
+                if (!(await ownsAssistant(assistantId))) return json(404, { error: 'Assistant not found.' });
+                const from = event.queryStringParameters?.from ? new Date(event.queryStringParameters.from) : null;
+                const to = event.queryStringParameters?.to ? new Date(event.queryStringParameters.to) : null;
+                const rows = await db.select({
+                    id: assistantRecords.id, recordType: assistantRecords.recordType, title: assistantRecords.title,
+                    status: assistantRecords.status, data: assistantRecords.data, createdAt: assistantRecords.createdAt,
+                }).from(assistantRecords).where(and(
+                    eq(assistantRecords.organisationId, orgId),
+                    eq(assistantRecords.aiAssistantId, assistantId),
+                    inArray(assistantRecords.recordType, [...DATED_RECORD_TYPES]),
+                    sql`${assistantRecords.approvalStatus} IS DISTINCT FROM 'rejected'`,
+                )).orderBy(desc(assistantRecords.createdAt)).limit(1000);
+                const items = [];
+                for (const rec of rows) {
+                    const d = recordCalendarDate(rec.recordType, rec.data, rec.createdAt);
+                    if (!d) continue;
+                    if (from && !isNaN(from.getTime()) && d.at < from) continue;
+                    if (to && !isNaN(to.getTime()) && d.at > to) continue;
+                    items.push({ id: rec.id, recordType: rec.recordType, title: rec.title, status: rec.status, at: d.at.toISOString(), kind: d.kind, derived: d.derived });
+                }
+                return json(200, { items });
+            }
 
             // Scheduled-work feed for the assistant Calendar tab: every scheduled record for this
             // assistant (across record types), optionally within a from/to window. No recordType.

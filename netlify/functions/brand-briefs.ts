@@ -16,6 +16,7 @@
 //                                                     Content's own upload + safety check) or a library
 //                                                     picture — which is where a Canva import lands
 //   list_library {}                                 → the library, for that picker
+//   calendar     { assistantId, from, to }          → brief due dates, for the Calendar tab
 //   post_brief   { postId }                         → is there a Brand Designer, and a brief for this post? (Phase 5)
 //   brief_for_post { postId, context? }             → "Ask the Brand Designer" from the post editor
 
@@ -156,6 +157,23 @@ export default withLambda(async (event) => {
                 creditsSpent: Number(spent?.credits ?? 0),
             },
         });
+    }
+
+    // The Calendar tab: briefs on their due date. Cancelled briefs are left off; an approved one stays
+    // (it shows the deadline was met). Light on purpose — no options, no signed URLs.
+    if (action === 'calendar') {
+        const designer = await requireDesigner(body.assistantId);
+        if (!designer) return json(404, { error: 'Assistant not found.' });
+        const from = typeof body.from === 'string' ? body.from.slice(0, 10) : null;
+        const to = typeof body.to === 'string' ? body.to.slice(0, 10) : null;
+        const rows = await db.select({ id: visualBriefs.id, title: visualBriefs.title, status: visualBriefs.status, dueDate: visualBriefs.dueDate })
+            .from(visualBriefs).where(and(
+                eq(visualBriefs.organisationId, orgId), eq(visualBriefs.aiAssistantId, designer.id),
+                sql`${visualBriefs.dueDate} IS NOT NULL`, sql`${visualBriefs.status} <> 'cancelled'`,
+                ...(from && /^\d{4}-\d{2}-\d{2}$/.test(from) ? [sql`${visualBriefs.dueDate} >= ${from}`] : []),
+                ...(to && /^\d{4}-\d{2}-\d{2}$/.test(to) ? [sql`${visualBriefs.dueDate} <= ${to}`] : []),
+            )).limit(500);
+        return json(200, { items: rows.map((b) => ({ id: b.id, title: b.title, status: b.status, dueDate: String(b.dueDate) })) });
     }
 
     if (action === 'create') {

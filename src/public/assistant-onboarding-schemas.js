@@ -247,19 +247,6 @@
               { value: 'aggressive', label: 'Up to three quarters', description: 'Campaigns come first. Your other assistants will have less room in the same month.' },
             ],
           },
-          {
-            // The autonomy gate. Note that NONE of these settings can authorise starting a spend,
-            // raising a ceiling or resuming a paused campaign — those three always need a human
-            // click on the campaign surface, whatever is chosen here.
-            key: 'autonomyLevel',
-            label: 'When should it act without asking?',
-            type: 'radio',
-            required: true,
-            options: [
-              { value: 'propose_only', label: 'Ask me about everything', description: 'Every brief waits in your Decisions queue until you approve it.' },
-              { value: 'reallocate_freely', label: 'Let it move work between assistants', description: 'It can shift the remaining allowance between your assistants on its own. Starting a campaign, raising a limit and resuming a paused campaign still need you.' },
-            ],
-          },
         ],
       },
     ],
@@ -474,20 +461,9 @@
       },
       {
         title: 'Operational set-up',
-        description: 'How your AR Clerk runs — when it reviews receivables, which invoices are worth chasing, and how chasers go out.',
+        description: 'How your AR Clerk works — how often it chases, and which invoices are worth chasing. Every chaser it drafts waits for your approval; nothing is sent automatically.',
         operational: true,
         fields: [
-          {
-            key: 'chaseTrigger',
-            label: 'When should it review receivables?',
-            type: 'radio',
-            required: true,
-            options: [
-              { value: 'when_overdue', label: 'Automatically when overdue', description: 'It reviews invoices the moment they pass their due date.' },
-              { value: 'scheduled', label: 'Scheduled', description: 'It reviews the ledger on a regular schedule.' },
-              { value: 'on_demand', label: 'On demand', description: 'It reviews only when I ask.' },
-            ],
-          },
           {
             key: 'followUpCadence',
             label: 'Follow-up cadence',
@@ -509,16 +485,6 @@
             placeholder: 'e.g. 100',
             helpText: 'Invoices below this amount are left alone — chasing them costs more than they are worth.',
             min: 0,
-          },
-          {
-            key: 'sendMode',
-            label: 'How should chasers be sent?',
-            type: 'radio',
-            required: true,
-            options: [
-              { value: 'draft_for_approval', label: 'Draft for my approval', description: 'I review every chaser before it goes out.' },
-              { value: 'send_automatically', label: 'Send automatically', description: 'Chasers go out on cadence without me.' },
-            ],
           },
         ],
       },
@@ -555,30 +521,9 @@
       },
       {
         title: 'Operational set-up',
-        description: 'How your CRM Enricher runs — when it enriches, which records it processes, and whether it may replace existing values.',
+        description: 'How your CRM Enricher works — whether it may replace values you already have. It researches the records you give it in chat or by spreadsheet, and every change waits for your review.',
         operational: true,
         fields: [
-          {
-            key: 'enrichTrigger',
-            label: 'When should it enrich?',
-            type: 'radio',
-            required: true,
-            options: [
-              { value: 'on_create', label: 'On new record created', description: 'Each new company or contact is enriched as it appears.' },
-              { value: 'scheduled_sweep', label: 'Scheduled sweep', description: 'It works through records on a regular schedule.' },
-              { value: 'on_demand', label: 'On demand', description: 'It enriches only when I ask.' },
-            ],
-          },
-          {
-            key: 'enrichScope',
-            label: 'Which records should it process?',
-            type: 'radio',
-            required: true,
-            options: [
-              { value: 'new_only', label: 'New records only', description: 'Only records created from now on.' },
-              { value: 'new_and_backlog', label: 'New + existing backlog', description: 'Also work back through records already in the CRM.' },
-            ],
-          },
           {
             key: 'overwriteLogic',
             label: 'How should existing data be handled?',
@@ -635,36 +580,16 @@
       },
       {
         title: 'Operational set-up',
-        description: 'How your Support Agent runs — when it engages, whether replies auto-send, and when to hand off to a human.',
+        description: 'How your Support Agent works — when it may call a ticket resolved, and who picks up the ones it cannot. It drafts every reply for your review; nothing is sent to a customer automatically.',
         operational: true,
         fields: [
-          {
-            key: 'ticketTrigger',
-            label: 'When should it engage?',
-            type: 'radio',
-            required: true,
-            options: [
-              { value: 'real_time', label: 'Real-time on new ticket', description: 'It picks up every ticket as it arrives.' },
-              { value: 'on_demand', label: 'On demand', description: 'It works tickets only when I ask.' },
-            ],
-          },
-          {
-            key: 'replyMode',
-            label: 'How should replies be handled?',
-            type: 'radio',
-            required: true,
-            options: [
-              { value: 'auto_send', label: 'Auto-send confident replies', description: 'Replies above the confidence bar go out automatically.' },
-              { value: 'draft_for_review', label: 'Draft everything for review', description: 'I review every reply before it is sent.' },
-            ],
-          },
           {
             key: 'autoResolveThreshold',
             label: 'Auto-resolve confidence threshold (%)',
             type: 'number',
             required: true,
             placeholder: 'e.g. 80',
-            helpText: 'Tickets are only resolved automatically when the agent is at least this confident; anything below escalates.',
+            helpText: 'Your assistant marks a ticket Resolved, with a drafted reply, only when it is at least this confident; anything below is marked Escalated for a person.',
             min: 1,
             max: 100,
           },
@@ -674,7 +599,7 @@
             type: 'text',
             required: true,
             placeholder: 'e.g. support-team@yourbusiness.com',
-            helpText: 'Escalated tickets are flagged for this inbox with full context.',
+            helpText: 'Shown on escalated tickets as who should pick them up. Nothing is emailed to it automatically.',
           },
         ],
       },
@@ -719,19 +644,9 @@
       },
       {
         title: 'Operational set-up',
-        description: 'How your Note Taker runs — how it captures meetings, where action items sync, and when notes land.',
+        description: 'How your Minute Taker works — where its action items go. You give it a transcript or notes (paste them in chat, or import a spreadsheet); it writes the summary, decisions and action items for your review.',
         operational: true,
         fields: [
-          {
-            key: 'captureMethod',
-            label: 'How should it capture meetings?',
-            type: 'radio',
-            required: true,
-            options: [
-              { value: 'auto_join', label: 'Auto-join my calls', description: 'It joins scheduled meetings and captures them live.' },
-              { value: 'upload', label: 'I upload recordings & transcripts', description: 'I provide the recording or transcript afterwards.' },
-            ],
-          },
           {
             key: 'taskDestination',
             label: 'Where should action items go?',
@@ -742,17 +657,8 @@
               { value: 'notion', label: 'Notion' },
               { value: 'jira', label: 'Jira' },
               { value: 'asana', label: 'Asana' },
-              { value: 'monday', label: 'Monday.com' },
-            ],
-          },
-          {
-            key: 'deliveryTiming',
-            label: 'When should notes be delivered?',
-            type: 'radio',
-            required: true,
-            options: [
-              { value: 'immediately', label: 'Immediately after the meeting', description: 'Notes land as soon as the meeting ends.' },
-              { value: 'batched', label: 'Batched (end of day)', description: 'Notes are delivered together at the end of the day.' },
+              // Monday.com removed 2026-10-09: sync-action has no Monday handler, so choosing it gave a
+              // sync button that could only fail. Restore it in the commit that adds the handler.
             ],
           },
         ],

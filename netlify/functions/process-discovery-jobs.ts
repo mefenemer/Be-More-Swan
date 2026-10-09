@@ -17,6 +17,7 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
+import { loadAssistantRulesBlock } from '../../src/utils/assistant-rules-prompt';
 import {
     discoveryCampaigns, discoveryGuardrails, discoveredLeads, discoveryJobs,
     aiAssistants, assistantRecords,
@@ -593,7 +594,12 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
 
             // Score the newly-discovered candidates (one batched call).
             const toScore: ScoreCandidate[] = inserted.map((r) => ({ companyName: r.companyName, domain: r.domain, snippet: r.snippet }));
-            const scored = await scoreCandidates(toScore, icp, sender);
+            // The assistant's Rules reach its outreach emails (never its scores). Read per scoring call:
+            // cheap, never throws (null on failure), and a rule added mid-run applies to the next page.
+            const rulesBlock = campaign.aiAssistantId
+                ? await loadAssistantRulesBlock(db, { assistantId: campaign.aiAssistantId, organisationId: job.organisation_id })
+                : null;
+            const scored = await scoreCandidates(toScore, icp, sender, rulesBlock);
             tokensUsed += scored.inputTokens + scored.outputTokens;
             void logAiUsage({
                 workspaceId: job.organisation_id, assistantId: campaign.aiAssistantId,

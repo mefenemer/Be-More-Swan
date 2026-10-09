@@ -100,10 +100,14 @@ export async function ideateBlogTopic(
     // Inspo as a SUBJECT on a share of slots — see inspo-topics.ts. The style block below is
     // unchanged; this is the part of the library that says what to write ABOUT.
     const [asst] = await db
-        .select({ configuration: aiAssistants.configuration })
+        .select({ configuration: aiAssistants.configuration, onboardingContext: aiAssistants.onboardingContext })
         .from(aiAssistants)
         .where(eq(aiAssistants.id, assistantId))
         .limit(1);
+    // "Topics & themes" from the Blog Writer's own setup (assistant-onboarding-schemas.js blogTopics).
+    // It was asked at hire and read by NOTHING — the user named their subjects and autopilot ignored
+    // them. It is the most direct statement of what this blog is about, so it leads the brief.
+    const setupTopics = str((asst?.onboardingContext as Record<string, unknown> | null)?.blogTopics, 500);
     // A job that carries its own direction (a rejection's reason, a campaign brief) is ABOUT that;
     // an Inspo topic would compete with it, so it only applies to an undirected slot.
     const inspoTopic = guidance ? null : await pickInspoTopic(db, {
@@ -112,7 +116,7 @@ export async function ideateBlogTopic(
     if (inspoTopic) console.log(`ideateBlogTopic: assistant ${assistantId} slot built around inspo item ${inspoTopic.itemId}`);
 
     const inspoBlock = await buildInspoBlock(db, { assistantId, organisationId, topic: inspoTopic?.retrievalQuery ?? null });
-    if (!hasOrgContext && !inspoBlock) return null;
+    if (!hasOrgContext && !inspoBlock && !setupTopics) return null;
 
     // Recent titles across the whole org, not just this assistant: a duplicate is a duplicate to the
     // reader regardless of which assistant (or human) wrote the earlier one.
@@ -127,6 +131,7 @@ export async function ideateBlogTopic(
         org?.name ? `Business: ${org.name}` : '',
         org?.businessDescription ? `What they do: ${org.businessDescription}` : '',
         org?.targetAudience ? `Audience: ${org.targetAudience}` : '',
+        setupTopics ? `Topics they want this blog to cover (pick one of these, or something squarely within them): ${setupTopics}` : '',
         recent.length
             ? `Already written (choose something genuinely different):\n${recent.map(r => `- ${r.title}`).join('\n')}`
             : 'Nothing has been published yet — a strong foundational post is a good choice.',
