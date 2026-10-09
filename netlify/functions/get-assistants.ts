@@ -2,7 +2,7 @@ import { Handler } from '@netlify/functions';
 import { and, eq, gte, sql, count, inArray } from 'drizzle-orm';
 import { notStillGenerating } from '../../src/utils/blog-still-generating';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, assistantRecords, blogPosts, contentGenerationJobs, goals, masterAssistants, newsletterIssues, scheduledPosts, userProfiles } from '../../db/schema';
+import { aiAssistants, assistantRecords, blogPosts, campaignDecisions, campaignOrders, campaigns, contentGenerationJobs, goals, masterAssistants, newsletterIssues, scheduledPosts, userProfiles, visualBriefOptions, visualBriefs } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { RETENTION_DELETED_SQL_PATH } from '../../src/config/lead-retention';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
@@ -248,6 +248,9 @@ export default withLambda(async (event) => {
                     title: head.title,
                     metricLabel: metric?.label ?? head.metricKey,
                     unit: metric?.unit ?? '',
+                    // 'increase' | 'decrease' — the card's "N to go" line reads it (a cost goal is
+                    // met by going DOWN, and "to go" would point the wrong way).
+                    direction: metric?.direction ?? 'increase',
                     targetValue: head.targetValue,
                     latestValue: head.latestValue,
                     status: head.status,
@@ -396,6 +399,74 @@ export default withLambda(async (event) => {
             activeJobCount.set(r.assistantId, r.c);
         }
 
+        // --- Summary strips for the roles none of the three above describes ─────────────────────
+        // The Campaign Assistant files mirrors (campaign_order / campaign_decision records), which the
+        // records strip labelled "records / approved"; the Brand Designer files nothing those tables
+        // hold, so its card had no strip at all (seen on the prod dashboard 2026-10-09). Each gets
+        // its own three counts. Best-effort: a failure leaves the card exactly as it was before.
+        // Decisions waiting are NOT added to pendingReview — their mirrors (pending_approval) were
+        // already counted by the records loop above. Briefs waiting ARE added: nothing counted them.
+        type SummaryMetrics = { kind: 'campaign' | 'brand'; items: { n: number; label: string; attention?: boolean; title: string }[] };
+        const summaryMetrics = new Map<number, SummaryMetrics>();
+        // Only when someone HAS one of these roles: the pool is one connection, so every query here
+        // runs in series ahead of the dashboard's cards — five round trips for a team with neither
+        // role would be pure delay.
+        const roleOf = (a: unknown) => (a as { roleKey?: string | null }).roleKey;
+        const campIds = assistants.filter((a) => roleOf(a) === 'campaign_orchestrator').map((a) => a.id);
+        const brandIds = assistants.filter((a) => roleOf(a) === 'brand_designer').map((a) => a.id);
+        if (campIds.length || brandIds.length) {
+            try {
+                const none = Promise.resolve([] as any[]);
+                const [camp, dec, ord, briefs, approved] = await Promise.all([
+                    !campIds.length ? none : db.select({ assistantId: campaigns.aiAssistantId, c: sql<number>`count(*)::int` }).from(campaigns)
+                        .where(and(eq(campaigns.organisationId, orgId), inArray(campaigns.aiAssistantId, campIds), inArray(campaigns.status, ['active', 'throttled'])))
+                        .groupBy(campaigns.aiAssistantId),
+                    !campIds.length ? none : db.select({ assistantId: campaigns.aiAssistantId, c: sql<number>`count(*)::int` }).from(campaignDecisions)
+                        .innerJoin(campaigns, eq(campaigns.id, campaignDecisions.campaignId))
+                        .where(and(eq(campaignDecisions.organisationId, orgId), inArray(campaigns.aiAssistantId, campIds), eq(campaignDecisions.status, 'pending')))
+                        .groupBy(campaigns.aiAssistantId),
+                    !campIds.length ? none : db.select({ assistantId: campaigns.aiAssistantId, c: sql<number>`count(*)::int` }).from(campaignOrders)
+                        .innerJoin(campaigns, eq(campaigns.id, campaignOrders.campaignId))
+                        .where(and(eq(campaignOrders.organisationId, orgId), inArray(campaigns.aiAssistantId, campIds), eq(campaignOrders.status, 'delivered')))
+                        .groupBy(campaigns.aiAssistantId),
+                    !brandIds.length ? none : db.select({
+                        assistantId: visualBriefs.aiAssistantId,
+                        total: sql<number>`count(*)::int`,
+                        waiting: sql<number>`count(*) FILTER (WHERE ${visualBriefs.status} <> 'cancelled' AND EXISTS (SELECT 1 FROM visual_brief_options o WHERE o.brief_id = ${visualBriefs.id} AND o.status = 'proposed'))::int`,
+                    }).from(visualBriefs)
+                        .where(and(eq(visualBriefs.organisationId, orgId), inArray(visualBriefs.aiAssistantId, brandIds)))
+                        .groupBy(visualBriefs.aiAssistantId),
+                    !brandIds.length ? none : db.select({ assistantId: visualBriefs.aiAssistantId, c: sql<number>`count(*)::int` }).from(visualBriefOptions)
+                        .innerJoin(visualBriefs, eq(visualBriefs.id, visualBriefOptions.briefId))
+                        .where(and(eq(visualBriefOptions.organisationId, orgId), inArray(visualBriefs.aiAssistantId, brandIds), eq(visualBriefOptions.status, 'approved')))
+                        .groupBy(visualBriefs.aiAssistantId),
+                ]);
+                const by = (rows: { assistantId: number | null; c: number }[]) => new Map(rows.map((x) => [x.assistantId as number, Number(x.c)]));
+                const campN = by(camp), decN = by(dec), ordN = by(ord), apprN = by(approved);
+                for (const a of assistants) {
+                    if (roleOf(a) === 'campaign_orchestrator') {
+                        summaryMetrics.set(a.id, { kind: 'campaign', items: [
+                            { n: campN.get(a.id) ?? 0, label: 'running', title: 'Campaigns running now' },
+                            { n: decN.get(a.id) ?? 0, label: 'decisions waiting', attention: (decN.get(a.id) ?? 0) > 0, title: 'Decisions waiting for your answer' },
+                            { n: ordN.get(a.id) ?? 0, label: 'delivered', title: 'Pieces of work its campaigns commissioned and got back' },
+                        ] });
+                    }
+                }
+                for (const b of briefs) {
+                    const id = b.assistantId as number;
+                    const waiting = Number(b.waiting);
+                    summaryMetrics.set(id, { kind: 'brand', items: [
+                        { n: Number(b.total), label: Number(b.total) === 1 ? 'brief' : 'briefs', title: 'Briefs this assistant has been given' },
+                        { n: waiting, label: 'waiting for you', attention: waiting > 0, title: 'Briefs with options waiting for you to choose' },
+                        { n: apprN.get(id) ?? 0, label: 'approved', title: 'Pictures you approved into your library' },
+                    ] });
+                    if (waiting) pendingReviewCount.set(id, (pendingReviewCount.get(id) || 0) + waiting);
+                }
+            } catch (err) {
+                console.error('[get-assistants] summary strips failed — cards keep their previous strips:', err);
+            }
+        }
+
         // --- Hourly rate & ROI ---
         const prefs = (profileRow[0]?.preferences as Record<string, any>) || {};
         const hourlyRateGbp = prefs.hourlyRateGbp ? parseFloat(String(prefs.hourlyRateGbp)) : null;
@@ -439,6 +510,9 @@ export default withLambda(async (event) => {
                 // and last of the mutually exclusive strips; `kind` tells the card which nouns to
                 // use. Null for every other role.
                 longformMetrics: longformMetrics.get(a.id) ?? null,
+                // Campaign Assistant / Brand Designer: their own three counts (see above). When set,
+                // the card draws THIS strip and not the generic records one.
+                summaryMetrics: summaryMetrics.get(a.id) ?? null,
                 // Feeds the same "working" sub-state refinement (Executing Task / Awaiting
                 // Human Review / Idle) the assistant-detail pill uses, so the list card matches.
                 opSignals: {

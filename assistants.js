@@ -166,6 +166,24 @@ window._resolveAssistantBadge = function(data, opSignals) {
  * their own. Previously both were bucketed into a red "Off Track", which read as "your assistant is
  * failing" when the actual message was "we need a number from you".
  */
+/**
+ * The next step under an "Off Track" / "At Risk" headline goal. A red word with nothing after it
+ * told the user their assistant was failing and gave them nowhere to go (3 of Marvin's 4 goals on the
+ * prod dashboard, 2026-10-09). Says how far there is to go — in the goal's own direction — and opens
+ * the Goals tab, where the goal can be changed or its figure updated. Nothing when on track or unmeasured.
+ */
+function _goalNextStep(h, latest, target, goalsTab) {
+    if (!h || (h.status !== 'off_track' && h.status !== 'at_risk') || latest == null || !(target > 0)) return '';
+    const down = h.direction === 'decrease';
+    const gap = down ? latest - target : target - latest;
+    if (!(gap > 0)) return '';
+    const amount = _escapeHtml(_fmtGoalValue(Math.round(gap * 100) / 100, h.unit));
+    return `
+            <button type="button" onclick="${goalsTab}" class="link text-[11px] font-semibold mt-1 text-left">
+                ${down ? `${amount} above target` : `${amount} to go`} — open the goal to adjust it →
+            </button>`;
+}
+
 window._buildAssistantCardGoals = function (assistant) {
     const gs = assistant.goalSummary || {};
     const total = gs.total || 0;
@@ -203,7 +221,7 @@ window._buildAssistantCardGoals = function (assistant) {
             <div class="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
                 <div class="h-full ${meta.dot} transition-all" style="width:${pct}%"></div>
             </div>
-            <p class="text-[11px] text-gray-400 mt-1">${figures}</p>`;
+            <p class="text-[11px] text-gray-400 mt-1">${figures}</p>${_goalNextStep(h, latest, target, goalsTab)}`;
     }
 
     // ── Performance counts (coloured) ────────────────────────────────────────
@@ -387,10 +405,23 @@ window.generateAssistantCardHTML = function(assistant) {
                     </span>
                 </div>` : '';
 
+    // ── The Campaign Assistant and Brand Designer: their own three counts (get-assistants
+    // summaryMetrics). The Campaign card used to show its order mirrors as "records / approved";
+    // the Brand Designer card showed nothing at all. Ahead of the records strip for that reason.
+    const sm = assistant.summaryMetrics || null;
+    const summaryCountsHtml = sm && Array.isArray(sm.items) && sm.items.some((i) => i.n > 0) ? `
+                <div class="flex items-center gap-3 flex-wrap">
+                    ${sm.items.map((i) => `
+                    <span class="inline-flex items-center gap-1 text-xs font-semibold ${i.attention ? 'text-amber-700' : 'text-gray-700'}" title="${_escapeHtml(i.title)}">
+                        <span class="w-1.5 h-1.5 rounded-full ${i.attention ? 'bg-amber-500' : 'bg-emerald-500'}"></span>
+                        ${Number(i.n) || 0} ${_escapeHtml(i.label)}
+                    </span>`).join('')}
+                </div>` : '';
+
     // Posts win when an assistant somehow has both: a role that publishes is described by what it
     // published. In practice the three are mutually exclusive — the registry gives a role a posts
     // queue, a records queue or a long-form queue, never two of them.
-    const countsHtml = postCountsHtml || recordCountsHtml || longformCountsHtml;
+    const countsHtml = postCountsHtml || summaryCountsHtml || recordCountsHtml || longformCountsHtml;
 
     const metricsHtml = countsHtml ? `
         <div class="mt-3 mb-4 p-3 rounded-xl bg-gray-50 border border-gray-100">
