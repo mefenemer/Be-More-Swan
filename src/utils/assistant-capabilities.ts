@@ -42,7 +42,7 @@ export async function getOrgEnabledFeatures(db: Db, orgId: number): Promise<Set<
 
     // Enabled feature rows across the catalogue (owner-path; small table). The join against
     // assistant_feature_defs restricts to keys that still exist AND are globally enabled — a def
-    // switched off in Admin → Master Data → Assistant Features is treated as off everywhere,
+    // switched off platform-wide (Admin → Assistants, the Capabilities panel) is treated as off everywhere,
     // without having to clear each stored value.
     const rows = await db
         .select({
@@ -72,11 +72,12 @@ export async function orgHasAssistantFeature(db: Db, orgId: number, featureKey: 
 }
 
 // Convenience for the My Content media gates — both flags from a single resolution pass.
-export async function getOrgMediaCapabilities(db: Db, orgId: number): Promise<{ canImage: boolean; assistantCanVideo: boolean }> {
+export async function getOrgMediaCapabilities(db: Db, orgId: number): Promise<{ canImage: boolean; assistantCanVideo: boolean; canMusic: boolean }> {
     const enabled = await getOrgEnabledFeatures(db, orgId);
     return {
         canImage: enabled.has('ai_image_generation'),
         assistantCanVideo: enabled.has('ai_video_generation'),
+        canMusic: enabled.has('ai_music_generation'),
     };
 }
 

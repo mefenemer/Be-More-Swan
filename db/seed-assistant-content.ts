@@ -319,6 +319,13 @@ const FEATURE_DEFS = [
         category: 'Media',
     },
     {
+        // Grants: db/z-music-capability.sql (copied from the image grants on 2026-10-10).
+        key: 'ai_music_generation',
+        label: 'AI Music Generation',
+        description: 'Generate royalty-free background music with AI for posts.',
+        category: 'Media',
+    },
+    {
         key: 'relationship_building_checklist',
         label: 'Relationship Building Checklist',
         description: 'Daily AI-generated checklist of engagement, outreach, and community tasks. Reserved for a future assistant type — not available for Social Media Manager.',

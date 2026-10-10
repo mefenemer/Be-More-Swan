@@ -116,8 +116,9 @@ export default withLambda(async (event) => {
     const built = buildMusicPrompt(body);
     if (!built.ok) return json(400, { error: built.error, code: 'PROMPT_RULES' });
 
-    if (!await orgHasAssistantFeature(db, orgId, 'ai_image_generation')) {
-        return featureUnavailableResponse('None of your assistants can generate AI media.');
+    // Its own switch since 2026-10-10 (db/z-music-capability.sql) — it used to ride on AI images.
+    if (!await orgHasAssistantFeature(db, orgId, 'ai_music_generation')) {
+        return featureUnavailableResponse('None of your assistants can generate AI music.');
     }
 
     // The user's own words through the same moderation every other generator uses, before any spend.
