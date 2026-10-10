@@ -22,6 +22,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { unpublishBlogPost } from '../../src/utils/blog-publish';
 import { logAuditEvent } from '../../src/utils/audit';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { checkImpersonationBlock } from '../../src/utils/impersonation';
 import { requestSeoRebuild } from '../../src/utils/seo-rebuild';
 
 // External targets in `destinations` that still hold a live copy after the native retraction.
@@ -40,6 +41,10 @@ export function stillLiveTargets(destinations: unknown): Array<{ target: string;
 }
 
 export default withLambda(async (event: HandlerEvent) => {
+    // US-ADM-1.2.1: never during an admin impersonation session (src/utils/impersonation.ts).
+    const impersonationBlock = checkImpersonationBlock(event, 'blog_unpublish');
+    if (impersonationBlock) return impersonationBlock;
+
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();

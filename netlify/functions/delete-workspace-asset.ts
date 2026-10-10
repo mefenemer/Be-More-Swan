@@ -17,6 +17,7 @@ import { getDb } from '../../db/client';
 import { userOrganisations, workspaceAssets } from '../../db/schema';
 import { keyBelongsToOrg } from '../../src/utils/storage-keys';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { checkImpersonationBlock } from '../../src/utils/impersonation';
 
 const JWT_SECRET  = process.env.JWT_SECRET;
 const R2_ENDPOINT = process.env.R2_ENDPOINT;
@@ -33,6 +34,10 @@ function getR2Client(): S3Client {
 }
 
 export default withLambda(async (event) => {
+    // US-ADM-1.2.1: never during an admin impersonation session (src/utils/impersonation.ts).
+    const impersonationBlock = checkImpersonationBlock(event, 'asset_delete');
+    if (impersonationBlock) return impersonationBlock;
+
     if (event.httpMethod !== 'DELETE' && event.httpMethod !== 'POST') {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }

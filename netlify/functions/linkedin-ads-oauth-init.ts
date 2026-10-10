@@ -51,7 +51,8 @@ export default withLambda(async (event) => {
     if (!baseUrl) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
 
     const db = getDb();
-    const ctx = await requireTenant(event, db);
+    // mutates: starting a connect binds an account to this org — refused while impersonating.
+    const ctx = await requireTenant(event, db, { mutates: true });
     if ('error' in ctx) {
         return { statusCode: 302, headers: { Location: '/workspace.html?oauth_error=invalid_session' }, body: '' };
     }

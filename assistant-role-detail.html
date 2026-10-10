@@ -99,10 +99,8 @@ function renderRoleDetail(roleKey, c) {
     </li>`).join('');
 
   // integrations = EXTERNAL tools ("Connects with"). Assistant-to-assistant fit is worksWith below.
-  const apps = (c.integrations || []).map(app => `
-    <span class="inline-flex items-center gap-1.5 bg-white border border-gray-200 rounded-full px-2.5 py-1 text-[11px] font-semibold text-gray-600">
-      <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>${escHtml(app)}
-    </span>`).join('');
+  // One chip renderer for every surface — it marks "(coming soon)" entries as planned.
+  const apps = (c.integrations || []).map((app) => AssistantContent.integrationChip(app)).join('');
 
   // Role keys here resolve to the other assistant's current name and link to its own detail page.
   const peers = AssistantContent.resolveWorksWith(c.worksWith).map(p => {

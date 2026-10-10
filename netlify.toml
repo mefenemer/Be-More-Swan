@@ -1296,3 +1296,7 @@ node_bundler = "esbuild"
 # dashboard-agenda: four short queries in series on a one-connection pool.
 [functions.dashboard-agenda]
   timeout = 26
+
+# admin-assistants: "Suggest" on a go-live check waits on a model call.
+[functions.admin-assistants]
+  timeout = 26

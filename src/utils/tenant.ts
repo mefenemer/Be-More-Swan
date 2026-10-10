@@ -15,6 +15,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { userOrganisations } from '../../db/schema';
 import { requireSession, type JsonResponse } from './session';
+import { resolveImpersonation, impersonationWriteBlock } from './impersonation';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -28,6 +29,11 @@ export interface TenantContext {
     organisationId: number;
     /** The caller's role *within* organisationId, e.g. 'owner' | 'admin' | 'member' | 'viewer'. */
     role: string;
+    /**
+     * Present only when an admin is viewing this workspace through impersonation. `userId` is
+     * then the TARGET user; the real admin is here. Such a request is always a GET — see below.
+     */
+    impersonation?: { realAdminId: number; sessionId: string };
 }
 
 /**
@@ -104,10 +110,41 @@ export async function getOrgMembers(db: Db, orgId: number): Promise<number[]> {
 export async function requireTenant(
     event: HandlerEvent,
     db: Db,
-    opts?: { roles?: string[] },
+    opts?: {
+        roles?: string[];
+        /**
+         * The request changes state even though it is a GET — an OAuth connect start, say. Such a
+         * request is refused under impersonation exactly like a POST would be.
+         */
+        mutates?: boolean;
+    },
 ): Promise<TenantContext | { error: JsonResponse }> {
     const session = requireSession(event);
     if ('error' in session) return session;
+
+    // US-ADM-1.2.1: an admin impersonating a customer resolves the CUSTOMER's org, read-only.
+    // resolveImpersonation honours the cookie only when it is bound to this admin's session and
+    // the admin still holds the `impersonate` permission (src/utils/impersonation.ts).
+    const imp = await resolveImpersonation(db, event.headers?.cookie ?? event.headers?.Cookie, session.userId);
+    if (imp) {
+        const blocked = impersonationWriteBlock(opts?.mutates ? 'POST' : event.httpMethod, imp);
+        if (blocked) return { error: blocked };
+        const targetOrg = await resolveActiveOrg(db, imp.impersonatingUserId, imp.activeOrganisationId);
+        if (!targetOrg) {
+            return {
+                error: { statusCode: 403, body: JSON.stringify({ error: 'The impersonated user has no organisation.' }) },
+            };
+        }
+        if (opts?.roles && !opts.roles.includes(targetOrg.role)) {
+            return { error: { statusCode: 403, body: JSON.stringify({ error: 'Insufficient permissions for this organisation.' }) } };
+        }
+        return {
+            userId: imp.impersonatingUserId,
+            organisationId: targetOrg.organisationId,
+            role: targetOrg.role,
+            impersonation: { realAdminId: imp.realAdminId, sessionId: imp.sessionId },
+        };
+    }
 
     const org = await resolveActiveOrg(db, session.userId, session.activeOrganisationId);
     if (!org) {

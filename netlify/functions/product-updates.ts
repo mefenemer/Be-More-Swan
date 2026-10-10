@@ -6,10 +6,6 @@
 //                                         so next week's run starts where this one stopped
 //   POST ?resource=ingest               → a new draft (copy + base64 screenshots); emails the reminder
 //                                         to the business inbox. Never sends anything to customers.
-//                                         Also finishes an outstanding "draft now" request.
-//   GET  ?resource=draft-request-poll   → { hasWork, request } — has the admin asked for a draft?
-//   POST ?resource=draft-request-claim  → the Mac takes the request (so two runs don't both draft it)
-//   POST ?resource=draft-request-done   → { outcome, note } — how the run ended
 //
 // Admin routes (aura_session cookie, `manage_comms_templates`):
 //   GET   ?resource=list                → every email, newest first
@@ -20,8 +16,6 @@
 //   POST  ?resource=approve&id=N        → ready → sending, then the background worker delivers it
 //   POST  ?resource=resume&id=N         → re-trigger a worker for an email stuck in 'sending'
 //   POST  ?resource=discard&id=N        → ready → discarded
-//   GET   ?resource=draft-request       → the "draft now" request + a line describing it
-//   POST  ?resource=draft-request       → ask the Mac for a draft now (src/utils/product-update-draft-request.ts)
 //
 // See docs/weekly-product-update.md. ⚠️ Approve is the ONLY path that emails customers, and it is
 // cookie-authenticated: the machine token can create a draft but can never send one.
@@ -42,20 +36,6 @@ import {
 } from '../../src/utils/product-update-email';
 import { countRecipients } from '../../src/utils/product-update-recipients';
 import { withLambda } from '@netlify/aws-lambda-compat';
-import { CONFIG_KEYS, getPlatformConfig, invalidatePlatformConfig, setPlatformConfig } from '../../src/utils/platform-config';
-import {
-    claimRequest, describeRequest, finishRequest, hasWork, parseDraftRequest, raiseRequest, OUTCOMES,
-    type DraftRequest, type DraftRequestOutcome,
-} from '../../src/utils/product-update-draft-request';
-
-/** The one outstanding "draft now" request, read fresh (the config cache would hide a claim made seconds ago). */
-async function readDraftRequest(): Promise<DraftRequest | null> {
-    invalidatePlatformConfig(CONFIG_KEYS.PRODUCT_UPDATE_DRAFT_REQUEST);
-    return parseDraftRequest(await getPlatformConfig(CONFIG_KEYS.PRODUCT_UPDATE_DRAFT_REQUEST));
-}
-async function writeDraftRequest(req: DraftRequest, by?: number): Promise<void> {
-    await setPlatformConfig(CONFIG_KEYS.PRODUCT_UPDATE_DRAFT_REQUEST, req, by, 'whats-new draft request');
-}
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode,
@@ -118,27 +98,8 @@ export default withLambda(async (event) => {
     if (!baseUrl) return json(500, { error: 'BASE_URL is not configured.' });
 
     // ── Machine routes ──────────────────────────────────────────────────────────────────────
-    if (resource === 'last' || resource === 'ingest' || resource.startsWith('draft-request-')) {
+    if (resource === 'last' || resource === 'ingest') {
         if (!isMachine(event)) return json(401, { error: 'Unauthorised' });
-
-        if (resource === 'draft-request-poll' && method === 'GET') {
-            const req = await readDraftRequest();
-            return json(200, { hasWork: hasWork(req, new Date()), request: req });
-        }
-        if (resource === 'draft-request-claim' && method === 'POST') {
-            const claimed = claimRequest(await readDraftRequest(), new Date());
-            if (!claimed.ok) return json(409, { error: claimed.error });
-            await writeDraftRequest(claimed.next);
-            return json(200, { request: claimed.next });
-        }
-        if (resource === 'draft-request-done' && method === 'POST') {
-            let body: { outcome?: unknown; note?: unknown } = {};
-            try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON.' }); }
-            if (!OUTCOMES.includes(body.outcome as DraftRequestOutcome)) return json(400, { error: `outcome must be one of ${OUTCOMES.join(', ')}` });
-            const next = finishRequest(await readDraftRequest(), body.outcome as DraftRequestOutcome, body.note, new Date());
-            if (next) await writeDraftRequest(next);
-            return json(200, { request: next });
-        }
 
         if (resource === 'last' && method === 'GET') {
             const [row] = await db.select({
@@ -207,11 +168,6 @@ export default withLambda(async (event) => {
             } catch (err) {
                 console.error('[product-updates] draft saved but the reminder email failed for digest', id, err);
             }
-            // A draft that arrives answers an outstanding "draft now" request, whoever started the run.
-            try {
-                const done = finishRequest(await readDraftRequest(), 'uploaded', null, new Date());
-                if (done) await writeDraftRequest(done);
-            } catch (err) { console.error('[product-updates] could not close the draft request (non-fatal)', err); }
             return json(201, { id, reminded, reviewUrl: `${baseUrl}/admin.html?view=product-updates&id=${id}` });
         }
         return json(405, { error: 'Method Not Allowed' });
@@ -220,27 +176,6 @@ export default withLambda(async (event) => {
     // ── Admin routes ────────────────────────────────────────────────────────────────────────
     const admin = await requireAdmin(event);
     if (!admin) return json(401, { error: 'Unauthorised' });
-
-    if (resource === 'draft-request') {
-        const now = new Date();
-        if (method === 'GET') {
-            const req = await readDraftRequest();
-            return json(200, { request: req, description: describeRequest(req, now) });
-        }
-        if (method === 'POST') {
-            const [waiting] = await db.select({ id: productUpdateDigests.id }).from(productUpdateDigests)
-                .where(eq(productUpdateDigests.status, 'ready')).limit(1);
-            const raised = raiseRequest(await readDraftRequest(), { by: admin.email, draftWaiting: !!waiting, now });
-            if (!raised.ok) return json(409, { error: raised.error });
-            await writeDraftRequest(raised.next, admin.id);
-            await insertAdminAuditLog({
-                adminId: admin.id, action: 'product_update_draft_request', targetType: 'product_update_digest',
-                ipAddress: getAdminIp(event.headers as Record<string, string | undefined>), userAgent: event.headers['user-agent'],
-            });
-            return json(200, { request: raised.next, description: describeRequest(raised.next, now) });
-        }
-        return json(405, { error: 'Method Not Allowed' });
-    }
 
     if (resource === 'list' && method === 'GET') {
         const rows = await db.select({

@@ -3,9 +3,6 @@
 // The weekly "What's new" task's hand-off to the server (docs/weekly-product-update.md).
 //
 //   npx tsx scripts/product-updates/upload-draft.ts --last
-//   npx tsx scripts/product-updates/upload-draft.ts --pending            has the admin pressed "Draft now"? exit 0 = yes, 3 = no
-//   npx tsx scripts/product-updates/upload-draft.ts --claim              take that request before drafting
-//   npx tsx scripts/product-updates/upload-draft.ts --done <uploaded|nothing|failed|waiting_for_review> [--note "…"]
 //       → where last week's email stopped: { commitTo, periodEnd }. Start this week's window there.
 //
 //   npx tsx scripts/product-updates/upload-draft.ts --preview <draft.json> [--out <file.html>]
@@ -85,25 +82,6 @@ async function call(method: string, query: string, body?: unknown) {
 }
 
 async function main() {
-    // "Draft this week's email now" on Admin ▸ What's New (src/utils/product-update-draft-request.ts).
-    if (flag('pending')) {
-        const r = await call('GET', 'resource=draft-request-poll');
-        console.log(JSON.stringify(r.data, null, 2));
-        if (r.status !== 200) process.exit(1);
-        process.exit((r.data as { hasWork?: boolean })?.hasWork ? 0 : 3);
-    }
-    if (flag('claim')) {
-        const r = await call('POST', 'resource=draft-request-claim', {});
-        console.log(JSON.stringify(r.data, null, 2));
-        process.exit(r.status === 200 ? 0 : 1);
-    }
-    const doneOutcome = value('done');
-    if (doneOutcome) {
-        const r = await call('POST', 'resource=draft-request-done', { outcome: doneOutcome, note: value('note') || null });
-        console.log(JSON.stringify(r.data, null, 2));
-        process.exit(r.status === 200 ? 0 : 1);
-    }
-
     if (flag('last')) {
         const r = await call('GET', 'resource=last');
         console.log(JSON.stringify(r.data, null, 2));
@@ -136,7 +114,7 @@ async function main() {
         process.exit(r.status === 201 ? 0 : 1);
     }
 
-    console.error('Usage: --pending | --claim | --done <outcome> [--note "…"] | --last | --preview <draft.json> [--out file.html] | --upload <draft.json> [--replace]   [--base-url URL]');
+    console.error('Usage: --last | --preview <draft.json> [--out file.html] | --upload <draft.json> [--replace]   [--base-url URL]');
     process.exit(2);
 }
 

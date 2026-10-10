@@ -10,10 +10,15 @@ import { getDb } from '../../db/client';
 import { users, systemConnections, userOrganisations } from '../../db/schema';
 import { deleteSecret, deleteSecretsByPrefix } from '../../src/utils/vault';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { checkImpersonationBlock } from '../../src/utils/impersonation';
 
 const jwtSecret = process.env.JWT_SECRET;
 
 export default withLambda(async (event: HandlerEvent) => {
+    // US-ADM-1.2.1: never during an admin impersonation session (src/utils/impersonation.ts).
+    const impersonationBlock = checkImpersonationBlock(event, 'revoke_connections');
+    if (impersonationBlock) return impersonationBlock;
+
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }

@@ -20,6 +20,7 @@ import {
 import { sendEmail } from '../../src/utils/email';
 import { requireOnboarding } from '../../src/utils/onboarding-guard';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { checkImpersonationBlock } from '../../src/utils/impersonation';
 
 const jwtSecret = process.env.JWT_SECRET!;
 const BASE_URL  = process.env.BASE_URL || '';
@@ -31,6 +32,10 @@ function parseSession(event: any): number | null {
 }
 
 export default withLambda(async (event) => {
+    // US-ADM-1.2.1: never during an admin impersonation session (src/utils/impersonation.ts).
+    const impersonationBlock = checkImpersonationBlock(event, 'data_export');
+    if (impersonationBlock) return impersonationBlock;
+
     if (!['GET', 'POST'].includes(event.httpMethod)) return { statusCode: 405, body: 'Method Not Allowed' };
 
     const userId = parseSession(event);

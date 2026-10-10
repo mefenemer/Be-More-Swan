@@ -52,11 +52,12 @@ export const ROLE_CONNECTIONS: Record<string, string[]> = {
     // omitting this line would fail OPEN and hand the one assistant that commands the others a
     // connection policy of "anything". Do not delete it because it looks empty.
     campaign_orchestrator:     [],
-    // The Brand Designer (Phase 1) reads no external account: stock comes from Pexels and AI from
-    // fal through PLATFORM keys, and approved pictures go to the platform's own library. Empty on
-    // purpose, for the same fail-open reason as the line above. Phase 4 (Canva as a source) widens
-    // this to ['design'] in the commit that ships it — not before.
-    brand_designer:            [],
+    // The Brand Designer: stock comes from Pexels and AI from fal through PLATFORM keys, but a
+    // customer's own Canva designs are a real source — Phase 4 (099651b5, 2026-10-08) lets a Canva
+    // import in the library join a brief as an "own" option. The comment here promised 'design' "in
+    // the commit that ships it" and that commit forgot, so the Brand Designer could not connect
+    // Canva at all until 2026-10-10.
+    brand_designer:            ['design'],
     social_media_manager:      ['social', 'design'],
     review_reputation_manager: ['reviews', 'social'],
     inbox_manager:             ['email'],

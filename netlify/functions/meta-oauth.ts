@@ -247,7 +247,8 @@ export default withLambda(async (event) => {
         }
         // Session carries `activeOrganisationId`, not `organisationId` — resolve via requireTenant
         // (re-verifies current membership) rather than reading the JWT claim directly.
-        const ctx = await requireTenant(event, getDb());
+        // mutates: starting a connect binds an account to this org — refused while impersonating.
+        const ctx = await requireTenant(event, getDb(), { mutates: true });
         if ('error' in ctx) return ctx.error;
         const { organisationId, userId } = ctx;
 

@@ -308,10 +308,8 @@ function metaBlocks(a) {
   // master-assistants.ts) so the card matches the detail view exactly — they used to be hardcoded
   // in ROLE_META.apps and had drifted from the real integrations. Labelled "Connects with" because
   // these are EXTERNAL TOOLS; assistant-to-assistant fit is the separate "Works with" row below.
-  const apps = (Array.isArray(a.integrations) ? a.integrations : []).map(app => `
-    <span class="inline-flex items-center gap-1.5 bg-white border border-gray-200 rounded-full px-2.5 py-1 text-[11px] font-semibold text-gray-600">
-      <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>${escHtml(app)}
-    </span>`).join('');
+  // One chip renderer for every surface — it marks "(coming soon)" entries as planned.
+  const apps = (Array.isArray(a.integrations) ? a.integrations : []).map((app) => AssistantContent.integrationChip(app)).join('');
   const peers = worksWithPills(a.worksWith);
   if (!outcomes && !apps && !peers) return '';
   return `

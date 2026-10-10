@@ -15,10 +15,15 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
 import { xCreditPack, xPackPrice } from '../../src/utils/ai-credits';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { checkImpersonationBlock } from '../../src/utils/impersonation';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
 
 export default withLambda(async (event) => {
+    // US-ADM-1.2.1: never during an admin impersonation session (src/utils/impersonation.ts).
+    const impersonationBlock = checkImpersonationBlock(event, 'credit_checkout');
+    if (impersonationBlock) return impersonationBlock;
+
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
 
     const db = getDb();
