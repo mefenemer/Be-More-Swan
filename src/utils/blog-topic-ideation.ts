@@ -22,6 +22,7 @@ import { pickInspoTopic } from './inspo-topics';
 import { buildBlueprintGuardrailsBlock } from './blog-generate';
 import { currentDatePromptBlock } from './current-date-prompt';
 import { parseModelJson } from './model-json';
+import { loadProductsBlock } from './org-products';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -95,7 +96,9 @@ export async function ideateBlogTopic(
 
     // Without any business grounding the model can only produce generic filler, which is worse than
     // nothing when nobody is watching. Inspo alone is enough to proceed — it's user-authored signal.
-    const hasOrgContext = !!(org?.businessDescription || org?.targetAudience);
+    // Products count as grounding: a business that listed what it sells has told us what to write about.
+    const productsBlock = await loadProductsBlock(db, organisationId, org?.name ?? null);
+    const hasOrgContext = !!(org?.businessDescription || org?.targetAudience || productsBlock);
 
     // Inspo as a SUBJECT on a share of slots — see inspo-topics.ts. The style block below is
     // unchanged; this is the part of the library that says what to write ABOUT.
@@ -132,6 +135,7 @@ export async function ideateBlogTopic(
         org?.businessDescription ? `What they do: ${org.businessDescription}` : '',
         org?.targetAudience ? `Audience: ${org.targetAudience}` : '',
         setupTopics ? `Topics they want this blog to cover (pick one of these, or something squarely within them): ${setupTopics}` : '',
+        productsBlock ?? '',
         recent.length
             ? `Already written (choose something genuinely different):\n${recent.map(r => `- ${r.title}`).join('\n')}`
             : 'Nothing has been published yet — a strong foundational post is a good choice.',

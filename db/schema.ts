@@ -5292,3 +5292,28 @@ export const visualBriefOptions = pgTable("visual_brief_options", {
   check("visual_brief_options_source_check", sql`${t.source} IN ('stock','ai_image','brand_card','stock_video','ai_video','own')`),
   check("visual_brief_options_status_check", sql`${t.status} IN ('proposed','approved','rejected')`),
 ]);
+
+// ── Products & Services — what the business sells (Business Information ▸ Products & Services) ──
+// Read by every assistant: chat, social drafting, articles, emails, outreach and the quality review,
+// all through src/utils/org-products.ts (one loader, one renderer). Only `active` rows reach a
+// prompt. Requires db/z-org-products.sql.
+export const orgProducts = pgTable("org_products", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  kind: text().notNull().default("product"),
+  name: text().notNull(),
+  description: text(),
+  benefits: text(),
+  price: text(),
+  audience: text(),
+  url: text(),
+  status: text().notNull().default("active"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("org_products_org_status_idx").on(t.organisationId, t.status, t.sortOrder),
+  check("org_products_kind_check", sql`${t.kind} IN ('product','service')`),
+  check("org_products_status_check", sql`${t.status} IN ('active','archived')`),
+]);

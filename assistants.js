@@ -920,7 +920,7 @@ function _resizeBriefAutoGrow() {
     _AUTOGROW_FIELDS.forEach(id => _autoGrowField(document.getElementById(id)));
     // Per-assistant Assistant Rules rows (#tab-rules) are built dynamically and hit the
     // same display:none / scrollHeight:0 problem — recompute their height too.
-    document.querySelectorAll('#assistant-rules-editor .ar-input').forEach(_autoGrowField);
+    document.querySelectorAll('#assistant-rules-editor .ar-input, #strict-rules-list .sr-input').forEach(_autoGrowField);
 }
 
 // ── Assistant-detail tab switching (event delegation) ─────────────────────────
@@ -4961,7 +4961,7 @@ function _renderOnboardingSummary(data) {
 
     // Knowledge base + guardrail rules (strictRules) — strip the leading "- " bullet prefix.
     const rules = (Array.isArray(inputs.strictRules) ? inputs.strictRules : [])
-        .map(r => clean(r).replace(/^-\s*/, '')).filter(Boolean);
+        .map(r => _strictRuleText(clean(r))).filter(Boolean);
 
     if (!rows.length && !rules.length) {
         // Still surface the supported tools (Connections) even when no free-text answers
@@ -5986,7 +5986,7 @@ function _detailHydrate(data) {
     const allStrict = inputs.strictRules || [];
     const kbLine = allStrict.find(r => r.includes('KNOWLEDGE BASE (TEXT)'));
     const otherRules = allStrict.filter(r => !r.includes('KNOWLEDGE BASE (TEXT)'));
-    _detailSetVal('edit_strict_rules', otherRules.join('\n'));
+    _renderStrictRules(otherRules);
     if (kbLine) {
         const m = kbLine.match(/:\s*"([^"]+)"/);
         _detailSetVal('edit_knowledge', m ? m[1] : '');
@@ -6521,13 +6521,84 @@ function _collectContentMix(currentData) {
     return { key: cfg.key, value: on.length === boxes.length || !on.length ? null : on };
 }
 
+// ── Strict Rules: one row per rule ────────────────────────────────────────────
+// Entered like Assistant Rules — an "Add Rule" button and a row each — instead of a textarea that
+// asked the user to start every line with a dash. Storage is unchanged: configuration.inputs
+// .strictRules, one entry per rule in the "- NON-NEGOTIABLE: …" form onboarding writes
+// (src/utils/onboarding-guardrails.ts), so the blueprint's §3 reads exactly what it read before.
+// The prefix is machine format: shown to nobody, written back on every row.
+const STRICT_RULE_PREFIX = '- NON-NEGOTIABLE: ';
+function _strictRuleText(stored) {
+    return String(stored || '').replace(/^\s*[-–•]\s*/, '').replace(/^NON-NEGOTIABLE:\s*/i, '').trim();
+}
+function _buildStrictRuleRow(text) {
+    const row = document.createElement('div');
+    row.className = 'sr-row flex items-start gap-3 px-4 py-3 group';
+    row.innerHTML = `
+        <textarea rows="1" placeholder="e.g. Always use British English spelling"
+            class="sr-input flex-1 min-w-0 w-full px-3 py-2 text-sm rounded-lg border border-transparent hover:border-gray-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none bg-transparent focus:bg-white resize-none overflow-hidden">${_escapeHtml(text || '')}</textarea>
+        <button type="button" class="sr-del text-gray-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 mt-1.5" aria-label="Delete rule" title="Delete rule">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        </button>`;
+    return row;
+}
+function _strictRulesEmptyHint() {
+    const div = document.createElement('div');
+    div.className = 'sr-empty-hint px-4 py-3 text-sm text-gray-400';
+    div.textContent = 'No strict rules yet — click “Add Rule” to create one.';
+    return div;
+}
+function _renderStrictRules(stored) {
+    const list = document.getElementById('strict-rules-list');
+    if (!list) return;
+    list.innerHTML = '';
+    // A pre-change textarea save may hold several rules in one entry (one per line) — split them.
+    const texts = (Array.isArray(stored) ? stored : [])
+        .flatMap(r => String(r || '').split('\n')).map(_strictRuleText).filter(Boolean);
+    if (!texts.length) { list.appendChild(_strictRulesEmptyHint()); return; }
+    texts.forEach(t => list.appendChild(_buildStrictRuleRow(t)));
+    requestAnimationFrame(() => list.querySelectorAll('.sr-input').forEach(_autoGrowField));
+}
+function _collectStrictRules() {
+    return [...document.querySelectorAll('#strict-rules-list .sr-input')]
+        .map(el => _strictRuleText(el.value).replace(/\s*\n+\s*/g, ' '))
+        .filter(Boolean)
+        .map(t => STRICT_RULE_PREFIX + t);
+}
+// Bound once on the document (the detail view is re-injected on every navigation — see
+// never-bind-from-a-render-path). Edits reach the profile autosave through _strictRulesChanged,
+// which initAssistantDetail installs, the same hook pattern the posting-time rows use.
+document.addEventListener('click', (e) => {
+    const add = e.target.closest?.('#btn-add-strict-rule');
+    if (add) {
+        const list = document.getElementById('strict-rules-list');
+        if (!list) return;
+        list.querySelector('.sr-empty-hint')?.remove();
+        const row = _buildStrictRuleRow('');
+        list.appendChild(row);
+        row.querySelector('.sr-input')?.focus();
+        return; // an empty row saves nothing until it has text
+    }
+    const del = e.target.closest?.('#strict-rules-list .sr-del');
+    if (del) {
+        const list = document.getElementById('strict-rules-list');
+        del.closest('.sr-row')?.remove();
+        if (list && !list.querySelector('.sr-row')) list.appendChild(_strictRulesEmptyHint());
+        window._strictRulesChanged?.();
+    }
+});
+document.addEventListener('input', (e) => {
+    if (!e.target.matches?.('#strict-rules-list .sr-input')) return;
+    _autoGrowField(e.target);
+    window._strictRulesChanged?.();
+});
+
 function _detailCollect(currentData) {
     // Platforms are managed via the dynamic platforms tab — preserve existing values
     const platforms = currentData.context?.primary_platforms || [];
     const platformsRaw = currentData.configuration?.inputs?.platforms || [];
 
-    const strictLines = (document.getElementById('edit_strict_rules')?.value || '')
-        .split('\n').map(l => l.trim()).filter(Boolean);
+    const strictLines = _collectStrictRules();
     const knowledge = document.getElementById('edit_knowledge')?.value || '';
     if (knowledge) strictLines.push(`- KNOWLEDGE BASE (TEXT): Consider the following brand stories and context: "${knowledge}"`);
 
@@ -6845,6 +6916,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         // listener — the outcome line has to be refreshed here too, or adding a time updates the
         // saved schedule while the sentence under the days keeps describing the old one.
         window._postingScheduleChanged = () => { triggerAutoSave(); window._syncScheduleOutcome?.(); };
+        window._strictRulesChanged = triggerAutoSave;
 
         const addBtn = document.getElementById('btn-add-posting-time');
         if (addBtn) addBtn.addEventListener('click', () => {
@@ -10764,7 +10836,7 @@ window._editBriefFromReview = function () {
     document.getElementById('modal-review-progress')?.classList.add('hidden');
     document.querySelector('.detail-tab-btn[data-tab="rules"]')?.click();
     setTimeout(() => {
-        const el = document.getElementById('edit_strict_rules');
+        const el = document.querySelector('#strict-rules-list .sr-input') || document.getElementById('btn-add-strict-rule');
         if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); }
     }, 120);
 };

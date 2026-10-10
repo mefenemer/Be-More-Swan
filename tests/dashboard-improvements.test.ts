@@ -158,7 +158,9 @@ check('recent work reads every assistant (not notifications) and escapes what it
     assert.ok(r.includes('esc(x.description)') && r.includes('esc(x.assistantName)'), 'unescaped lead/web text');
 });
 check('agenda shows only BOOKED items — status scheduled in every source', () => {
-    const fn = read('netlify/functions/dashboard-agenda.ts');
+    // The reading moved to src/utils/team-activity.ts (loadBooked) so chat shares it.
+    assert.ok(read('netlify/functions/dashboard-agenda.ts').includes('loadBooked('));
+    const fn = slice(read('src/utils/team-activity.ts'), 'export async function loadBooked(', '// ── The chat block');
     assert.strictEqual((fn.match(/\.status, 'scheduled'\)/g) || []).length, 3, 'a source not limited to scheduled rows');
     assert.ok(!/pending_approval|'draft'/.test(fn.replace(/\/\/.*$/gm, '')), 'agenda reads unbooked rows');
     const r = slice(dash, 'async function renderAgenda(el)', 'async function renderCapacity');

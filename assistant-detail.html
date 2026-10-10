@@ -1765,19 +1765,27 @@
   <!-- ── TAB: Rules ─────────────────────────────────────────────── -->
   <div id="tab-rules" class="detail-tab-content hidden space-y-6">
 
-    <!-- Assistant-specific strict rules -->
+    <!-- Assistant-specific strict rules. One row per rule with an "Add Rule" button, the same way
+         Assistant Rules below are entered — it used to be a textarea that asked the user to start
+         every line with a dash. Stored unchanged in configuration.inputs.strictRules (one
+         "- NON-NEGOTIABLE: …" entry per row, the format onboarding writes); rows are built by
+         _renderStrictRules() and collected by _collectStrictRules() in assistants.js. -->
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
-      <div class="mb-6">
-        <h3 class="text-lg font-bold text-gray-900">Strict Rules</h3>
-        <p class="text-sm text-gray-500 mt-1">Hard constraints specific to this assistant. These override any AI-generated suggestions and protect your brand from compliance risk.</p>
+      <div class="flex items-start justify-between mb-5 gap-4 flex-wrap">
+        <div>
+          <h3 class="text-lg font-bold text-gray-900">Strict Rules</h3>
+          <p class="text-sm text-gray-500 mt-1">Hard constraints specific to this assistant. These override any AI-generated suggestions and protect your brand from compliance risk.</p>
+        </div>
+        <button type="button" id="btn-add-strict-rule"
+          class="btn-primary text-sm font-bold flex items-center gap-1 px-3 py-1.5 rounded-md transition-colors shrink-0">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>Add Rule</button>
       </div>
-      <div>
-        <label for="edit_strict_rules" class="block text-sm font-bold text-gray-700 mb-1">Strict Rules</label>
-        <textarea id="edit_strict_rules" rows="6"
-          class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm resize-y"
-          placeholder="- ALWAYS use British English spelling&#10;- NEVER promise pricing, discounts or delivery dates you haven't given it&#10;- NEVER mention competitor brand names"></textarea>
-        <p class="text-xs text-gray-400 mt-1">Start each rule with a dash (–). Use MUST DO / NEVER DO for clarity.</p>
+      <div class="border border-gray-200 rounded-xl overflow-hidden">
+        <div id="strict-rules-list" class="divide-y divide-gray-100">
+          <div class="sr-empty-hint px-4 py-3 text-sm text-gray-400">No strict rules yet — click “Add Rule” to create one.</div>
+        </div>
       </div>
+      <p class="text-xs text-gray-400 mt-2">One rule per row, e.g. “Always use British English spelling” or “Never mention competitor brand names”.</p>
     </div>
 
     <!-- Per-assistant Assistant Rules (injected into this assistant's brief) -->

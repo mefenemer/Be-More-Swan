@@ -47,6 +47,8 @@ import { voiceDirective } from '../../src/utils/voice-profile';
 import { RULE_READING_ROLES, loadAssistantRulesBlock } from '../../src/utils/assistant-rules-prompt';
 import { buildCampaignsSnapshot } from '../../src/utils/campaign-plan';
 import { buildBriefsSnapshot } from '../../src/utils/visual-briefs';
+import { loadProductsBlock } from '../../src/utils/org-products';
+import { buildTeamActivityBlock } from '../../src/utils/team-activity';
 import { BRIEF_PURPOSES, BRIEF_ASPECT_RATIOS, REJECT_REASONS, SOURCE_SPECS } from '../../src/config/visual-brief-vocab';
 import { FUNNEL_STAGES, FUNNEL_STAGE_DESCRIPTIONS, stageOutcomes } from '../../src/config/campaign-vocab';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -2207,7 +2209,22 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const rulesBlock = assistantRow.roleKey && RULE_READING_ROLES.has(assistantRow.roleKey)
         ? await loadAssistantRulesBlock(db, { assistantId: session.aiAssistantId, organisationId: orgId })
         : null;
-    const promptWithRules = rulesBlock ? `${rolePrompt}\n\n${rulesBlock}` : rolePrompt;
+    // Every role, every turn — both are workspace-wide, not role-specific:
+    //  • Products & Services (Business Information): what the business sells, so an answer that
+    //    names a product names a real one at its real price. src/utils/org-products.ts.
+    //  • Team activity: what this assistant AND its teammates did in the last 14 days and what is
+    //    booked to go out, so "write this week's post" already knows the newsletter covered the
+    //    topic on Tuesday. Read per turn (like the leads snapshot) so work finished a minute ago is
+    //    in the next answer. src/utils/team-activity.ts.
+    // Both never throw: a failed read is a missing block, not a failed turn.
+    const productsBlock = await loadProductsBlock(db, orgId, orgRow?.name ?? null);
+    const teamBlock = await buildTeamActivityBlock(db, orgId, session.aiAssistantId, {
+        timezone: resolvePostingSchedule(
+            assistantRow.onboardingContext && typeof assistantRow.onboardingContext === 'object' && !Array.isArray(assistantRow.onboardingContext)
+                ? assistantRow.onboardingContext as Record<string, unknown> : null,
+        ).timezone,
+    });
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, teamBlock].filter(Boolean).join('\n\n');
 
     const system = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -2307,7 +2324,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                     baseSystemPrompt: shadowRow?.systemPrompt ?? null,
                     onboardingContext: shadowRow?.onboardingContext ?? null,
                     business,
-                }),
+                }) + (productsBlock ? `\n\n${productsBlock}` : ''),
                 shadowRow?.onboardingContext ?? null,
             );
 

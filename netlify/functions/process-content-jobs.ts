@@ -39,6 +39,7 @@ import { fitForPlatform, isShortForm, type BrandHashtags } from '../../src/utils
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { operationalSetupLines } from '../../src/utils/operational-setup';
 import { renderBlueprintPrompt } from '../../src/utils/blueprint-prompt';
+import { loadProductsBlock } from '../../src/utils/org-products';
 import { campaignDirectiveForJob } from '../../src/utils/campaign-job-directive';
 import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
 import { resolvePostingSchedule } from '../../src/config/posting-cadence';
@@ -710,6 +711,11 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             topic: inspoRetrievalTopic,
         });
         if (inspoBlock) systemPrompt += `\n\n${inspoBlock}`;
+
+        // Products & Services (Business Information) — read live, not from the blueprint, so a
+        // product added a minute ago is in the next draft without a recompile. Never throws.
+        const productsBlock = await loadProductsBlock(db, job.organisation_id, (onboarding as { businessName?: string | null }).businessName ?? null);
+        if (productsBlock) systemPrompt += `\n\n${productsBlock}`;
 
         systemPrompt += `\n\n${CONTENT_QUALITY_STANDARDS}`;
         systemPrompt += `\n\n${AURA_SAFE_CONTENT_BENCHMARK}`;

@@ -28,6 +28,7 @@ import {
     normaliseLayoutIr,
 } from './layout-ir';
 import { sourceBlogImages, MAX_SOURCED_IMAGES } from './blog-media-source';
+import { loadProductsBlock } from './org-products';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -275,6 +276,8 @@ export async function generateBlogBody(
         org?.targetAudience ? `Audience: ${org.targetAudience}` : '',
         org?.businessDescription ? `Business context: ${org.businessDescription}` : '',
         notes ? `Author notes / source material:\n${notes}` : '',
+        // What the business sells (Business Information ▸ Products & Services). Never throws.
+        await loadProductsBlock(db, organisationId, org?.name ?? null),
     ].filter(Boolean).join('\n');
 
     // Inspo (AC5) — the styles/tones the user parked in the Inspo tab. This is the SECOND
