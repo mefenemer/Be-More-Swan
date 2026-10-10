@@ -3097,7 +3097,8 @@
     // inside the modal — the picker used to open on the very first click, before the user had been
     // told what shape the file should be, which is precisely backwards for the one action here that
     // cannot be undone by pressing something else.
-    importBtn.addEventListener('click', () => openImportModal(fileInput, importBtn, status));
+    // A noImport hub (Orders) draws no Import button, so there is nothing to wire.
+    importBtn?.addEventListener('click', () => openImportModal(fileInput, importBtn, status));
 
     host.querySelector('[data-hub-export]').addEventListener('click', () => {
       // Leads get the modal: their export has three shapes and a live alternative (push straight to

@@ -70,7 +70,7 @@ check('nothing explains the CSV on the page any more', () => {
 console.log('\n──── the picker opens after the instructions, not before ────');
 
 check('Import CSV opens the modal, and the file dialog waits for a click inside it', () => {
-    const wiring = HUB.slice(landmark(HUB, "importBtn.addEventListener('click'"));
+    const wiring = HUB.slice(landmark(HUB, "importBtn?.addEventListener('click'"));
     assert.ok(/openImportModal\(/.test(wiring.slice(0, 200)),
         'the toolbar button must open the modal. It used to call fileInput.click() directly, which '
         + 'threw up an OS file dialog before the user had been told what the file should contain.');
