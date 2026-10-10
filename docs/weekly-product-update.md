@@ -38,6 +38,31 @@ deletion cooling-off) that has not turned off **What's new at Be More Swan** (`e
 Customers can turn it off from the email's Unsubscribe link (or Gmail's one-click button), or from
 Account settings → Notification Preferences. Account, billing and security emails are unaffected.
 
+## Drafting on demand — "Draft this week's email now"
+
+The admin page has a **Draft this week's email now** button. The draft is written on the founder's Mac
+(the screenshots need a signed-in browser there), and nothing on the internet can start a process on
+that Mac — so the button records a request (`platform_config` key `product_updates.draft_request`,
+`src/utils/product-update-draft-request.ts`) and the Mac asks for it.
+
+The asking is done by **`scripts/whats-new-draft-watcher.mjs`**, kept alive by launchd like the dev
+issue-fixer. It makes one plain HTTP request a minute — no Claude, no usage — and only when a request is
+waiting does it claim it and start **one** `claude -p --chrome` run, which does the weekly run below
+with the screenshots taken in **your Chrome** (Claude in Chrome). So Chrome must be open, the extension
+connected, and bemoreswan.com signed in to the Be More Swan workspace; if not, the run reports `failed`
+with that reason and the admin page shows it. A run that ends without uploading or reporting is marked
+failed by the watcher, so the button never stays stuck.
+
+Turn it on once (you, not the assistant):
+```bash
+cp scripts/com.aura.whats-new-watcher.plist ~/Library/LaunchAgents/
+```
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.aura.whats-new-watcher.plist
+```
+Logs: `~/Library/Logs/aura-whats-new-watcher.log`. Nothing on this path can send an email: Approve & send
+is still the only way.
+
 ---
 
 ## One-off setup

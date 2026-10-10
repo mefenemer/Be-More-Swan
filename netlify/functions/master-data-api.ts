@@ -425,6 +425,10 @@ async function handleMasterAssistants(event: any, adminId: number, ip?: string, 
             integrations: normaliseStringList(body.integrations) ?? [],
             worksWith: normaliseStringList(body.worksWith) ?? [],
             video: normaliseVideo(body.video),
+            // A new role starts HIDDEN. The column default is is_active=true with coming_soon=false,
+            // which made a just-created record hireable by every customer before it had copy, a
+            // prompt or any code behind it. It goes live through Admin ▸ Assistants, after the checks.
+            isActive: false, comingSoon: false, lifecycleState: 'draft',
         }).returning();
 
         // Create initial version if systemPrompt provided
@@ -451,7 +455,10 @@ async function handleMasterAssistants(event: any, adminId: number, ip?: string, 
         // roleKey is deliberately absent: it's the join key across ai_assistants.configuration->>'type',
         // the cron role lists and the onboarding schemas, so renaming it would strand hired assistants.
         // It's set once at create and read-only thereafter (the form disables it on edit).
-        const allowed = ['name', 'description', 'tagline', 'category', 'iconKey', 'iconColor', 'comingSoon', 'isActive', 'lifecycleState', 'riskClassification', 'milestoneTasksRequired', 'specialCategoryClauseEnabled', 'replacementAssistantId'];
+        // Status (isActive / comingSoon / lifecycleState) is deliberately absent: it is set only by
+        // the status control on Admin ▸ Assistants (admin-assistants.ts), which runs the go-live
+        // checks first and announces a launch. Writing it here skipped both.
+        const allowed = ['name', 'description', 'tagline', 'category', 'iconKey', 'iconColor', 'riskClassification', 'milestoneTasksRequired', 'specialCategoryClauseEnabled', 'replacementAssistantId'];
         for (const key of allowed) {
             if (otherFields[key] !== undefined) updates[key] = otherFields[key];
         }
@@ -954,7 +961,10 @@ async function handleAssistantFeatureValues(event: any, adminId: number, role: s
             name: masterAssistants.name,
             roleKey: masterAssistants.roleKey,
             lifecycleState: masterAssistants.lifecycleState,
-        }).from(masterAssistants).where(eq(masterAssistants.isActive, true)).orderBy(masterAssistants.name);
+            isActive: masterAssistants.isActive,
+        // Every role, not only active ones: a role is HIDDEN until its go-live checks pass, and
+        // setting its capabilities is one of the things done before that (Admin ▸ Assistants).
+        }).from(masterAssistants).orderBy(masterAssistants.name);
 
         const rows = await db.select({
             masterAssistantId: assistantFeatures.masterAssistantId,
