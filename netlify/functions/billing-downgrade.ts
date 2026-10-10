@@ -12,7 +12,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans, masterPlans, aiAssistants, userOrganisations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
-import { checkImpersonationBlock } from '../../src/utils/impersonation-guard';
+import { checkImpersonationBlock } from '../../src/utils/impersonation';
 import { resolveMonthlyPriceId } from '../../src/utils/stripe-price';
 import { sendPlanDowngradeAlert } from '../../src/utils/founder-alerts';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -36,7 +36,7 @@ export default withLambda(async (event) => {
     }
     // US-ADM-1.2.1: Block Stripe billing changes during impersonation
     if (event.httpMethod !== 'GET') {
-        const block = checkImpersonationBlock(event);
+        const block = checkImpersonationBlock(event, 'billing_downgrade');
         if (block) return block;
     }
 

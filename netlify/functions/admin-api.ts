@@ -41,7 +41,7 @@ import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { resolveEnvironment, runWithEnvironment } from '../../src/utils/env-context';
 import { sendMagicLinkEmail } from '../../src/utils/email';
 import { isAdminRole, hasPermission, requirePermission, permissionsForRole } from '../../src/utils/rbac';
-import { checkImpersonationBlock } from '../../src/utils/impersonation-guard';
+import { checkImpersonationBlock } from '../../src/utils/impersonation';
 import { SPECIAL_CATEGORY_CLAUSE } from './get-dpa-content';
 import { deleteUserAndSoleOrgs } from '../../src/utils/user-deletion';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -552,7 +552,7 @@ export default withLambda(async (event) => {
         // ── POST: Initiate email address change — US-ADM-1.1.1 ───────────────
         // Requires billing_admin or above. Sends double-opt-in confirmation links.
         if (event.httpMethod === 'POST' && resource === 'email-change') {
-            const impersonationErr = checkImpersonationBlock(event);
+            const impersonationErr = checkImpersonationBlock(event, 'email_change');
             if (impersonationErr) return impersonationErr;
             const permErr = requirePermission(adminRole, 'email_change');
             if (permErr) return permErr;

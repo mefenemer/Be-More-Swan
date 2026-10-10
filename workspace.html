@@ -58,15 +58,114 @@
 <body class="bg-gray-50 text-gray-900 font-sans antialiased min-h-screen overflow-x-hidden">
 
 <!-- US-ADM-1.2.1: Admin Impersonation Banner — shown only during active impersonation sessions -->
-<div id="impersonation-banner" class="hidden fixed top-0 left-0 right-0 z-[100] bg-amber-400 text-amber-900 text-sm font-bold flex items-center justify-between px-4 py-2 shadow-md">
-  <div class="flex items-center gap-2">
+<div id="impersonation-banner" role="status" aria-live="polite" class="hidden fixed top-0 left-0 right-0 z-[100] bg-amber-400 text-amber-900 text-sm font-bold items-center justify-between px-4 py-2 shadow-md" style="display:none">
+  <div class="flex items-center gap-2 min-w-0">
     <svg class="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
-    <span id="impersonation-label">Impersonation active</span>
+    <span id="impersonation-label" class="truncate">Impersonation active</span>
   </div>
-  <button id="end-impersonation-btn" class="btn-primary ml-4 px-3 py-1 text-xs font-bold rounded-lg transition cursor-pointer shrink-0">
-    End Session
+  <button id="end-impersonation-btn" type="button" class="btn-primary ml-4 px-3 py-1 text-xs font-bold rounded-lg transition cursor-pointer shrink-0">
+    End impersonation
   </button>
 </div>
+
+<script>
+// US-ADM-1.2.1: defined at parse time and bound to the button here, never from a render path
+// (never-bind-handlers-from-a-render-path). The DOMContentLoaded block calls init.
+(function () {
+  let _ending = false;
+
+  async function endImpersonation(why) {
+    if (_ending) return;
+    _ending = true;
+    const btn = document.getElementById('end-impersonation-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Ending…'; }
+    let redirect = '/admin.html';
+    try {
+      const res = await fetch('/.netlify/functions/admin-impersonate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'end' }),
+        keepalive: why === 'expired',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+      redirect = data.redirect || redirect;
+    } catch (e) {
+      if (why !== 'expired') {
+        _ending = false;
+        if (btn) { btn.disabled = false; btn.textContent = 'End impersonation'; }
+        window.showToast?.('Could not end impersonation. Please try again.', { icon: '⚠️' });
+        return;
+      }
+      // Expired: the cookie is gone on its own (Max-Age) — go back regardless.
+    }
+    window.location.href = redirect;
+  }
+
+  function label(imp) {
+    const who = imp.targetName || imp.targetEmail || 'customer';
+    const email = imp.targetName && imp.targetEmail ? ' (' + imp.targetEmail + ')' : '';
+    const mins = imp.expiresAt ? Math.max(0, Math.ceil((imp.expiresAt - Date.now()) / 60000)) : 15;
+    return '⚠ Viewing ' + who + email + '\'s workspace as an admin — read-only · ends in ' + mins + ' min';
+  }
+
+  // While impersonating, every write comes back 403 { impersonation: true }. Say why, once per
+  // burst, instead of leaving a button that looks broken. Installed ONLY when a session is active.
+  function explainBlockedWrites() {
+    const orig = window.fetch;
+    let lastToast = 0;
+    window.fetch = async function (...args) {
+      const res = await orig.apply(this, args);
+      if (res.status === 403) {
+        res.clone().json().then((d) => {
+          if (d && d.impersonation && Date.now() - lastToast > 4000) {
+            lastToast = Date.now();
+            window.showToast?.('Read-only while impersonating — end impersonation to make changes.', { icon: '🔒' });
+          }
+        }).catch(() => {});
+      }
+      return res;
+    };
+  }
+
+  window.initImpersonationBanner = async function () {
+    let imp;
+    try {
+      const res = await fetch('/.netlify/functions/admin-impersonate', { credentials: 'same-origin', cache: 'no-store' });
+      if (!res.ok) return;
+      imp = await res.json();
+    } catch { return; }
+    if (!imp || !imp.active) return;
+
+    const banner = document.getElementById('impersonation-banner');
+    const text = document.getElementById('impersonation-label');
+    if (!banner || !text) return;
+    text.textContent = label(imp);
+    banner.classList.remove('hidden');
+    banner.style.display = 'flex';
+    document.body.style.paddingTop = '40px';
+    document.documentElement.dataset.impersonating = '1';
+    explainBlockedWrites();
+
+    if (imp.expiresAt) {
+      const tick = setInterval(() => {
+        const left = imp.expiresAt - Date.now();
+        if (left <= 5000) {
+          clearInterval(tick);
+          text.textContent = '⚠ Impersonation session over — returning to the admin portal…';
+          banner.classList.remove('bg-amber-400', 'text-amber-900');
+          banner.classList.add('bg-red-500', 'text-white');
+          endImpersonation('expired');
+          return;
+        }
+        text.textContent = label(imp);
+      }, 1000);
+    }
+  };
+
+  document.getElementById('end-impersonation-btn')?.addEventListener('click', () => endImpersonation('clicked'));
+})();
+</script>
 
 <!-- US-AUD-5.2.1: Success-Triggered Upgrade Moment Modal -->
 <div id="upgrade-moment-modal" class="hidden fixed inset-0 z-[55] items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
@@ -2396,67 +2495,12 @@ function formatCurrency(amount, currency) {
     await loadSidebar("sidebar-placeholder");
     if (window.i18n) window.i18n.apply(document.getElementById('sidebar-placeholder'));
 
-    // US-ADM-1.2.1: Impersonation banner — detect scope='impersonate' in JWT
-    (function initImpersonationBanner() {
-      try {
-        const cookie = document.cookie.split('; ').find(r => r.startsWith('aura_session='));
-        if (!cookie) return;
-        const token = cookie.split('=')[1];
-        const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-        if (payload.scope !== 'impersonate') return;
-
-        const banner = document.getElementById('impersonation-banner');
-        const label  = document.getElementById('impersonation-label');
-        const endBtn = document.getElementById('end-impersonation-btn');
-
-        const targetName  = payload.targetUserName  || payload.targetUserEmail || `User #${payload.userId}`;
-        const adminName   = payload.realAdminName   || `Admin #${payload.realUserId}`;
-        label.textContent = `⚠ Impersonating ${targetName} — ${adminName} | Session expires in 15 min`;
-        banner.classList.remove('hidden');
-        banner.classList.add('flex');
-
-        // Push body down so banner doesn't overlap content
-        document.body.style.paddingTop = '40px';
-
-        // Store the original token + session metadata in sessionStorage so end-session can restore it
-        const originalToken = sessionStorage.getItem('admin_original_token');
-        const sessionStartedAt = parseInt(sessionStorage.getItem('impersonation_started_at') || '0') || Date.now();
-
-        endBtn.addEventListener('click', async () => {
-          endBtn.disabled = true;
-          endBtn.textContent = 'Ending…';
-          try {
-            const res = await fetch('/.netlify/functions/admin-end-impersonation', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                originalToken,
-                sessionId: payload.sessionId,
-                startedAt: sessionStartedAt,
-              }),
-            });
-            const data = await res.json();
-            sessionStorage.removeItem('admin_original_token');
-            sessionStorage.removeItem('impersonation_started_at');
-            window.location.href = data.redirect || '/admin.html';
-          } catch (e) {
-            endBtn.disabled = false;
-            endBtn.textContent = 'End Session';
-            window.showToast?.('Failed to end session. Please try again.', { icon: '⚠️' });
-          }
-        });
-
-        // Auto-end on JWT expiry
-        const expiresIn = payload.exp ? (payload.exp * 1000 - Date.now()) : 900_000;
-        if (expiresIn > 0) {
-          setTimeout(() => {
-            label.textContent = '⚠ Impersonation session expired — click End Session to return';
-            banner.classList.remove('bg-amber-400', 'text-amber-900');
-            banner.classList.add('bg-red-500', 'text-white');
-          }, expiresIn);
-        }
-      } catch (e) { /* non-critical */ }
-    })();
+    // US-ADM-1.2.1: Impersonation banner. aura_impersonation is HttpOnly, so the page cannot see
+    // it — admin-impersonate GET says whether this page is being served to an admin viewing a
+    // customer's workspace. The workspace is READ-ONLY then (requireTenant refuses every write);
+    // the banner says so, and "End impersonation" records the end and returns to the portal.
+    // Not awaited: an ordinary customer pays one cheap no-DB request and nothing else.
+    window.initImpersonationBanner();
 
     // US-ADM-5.2.2: Reveal Admin Portal launcher for dual-role users.
     // Read adminRole claim from the JWT stored in the aura_session cookie (client-side decode, no verify needed).

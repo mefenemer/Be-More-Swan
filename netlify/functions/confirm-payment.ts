@@ -7,12 +7,17 @@ import { users, plans, payments, masterPlans } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { resolveActionNotifications, PAYMENT_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { checkImpersonationBlock } from '../../src/utils/impersonation';
 import { backfillPlanRefs, backfillLivePlanForOrg, findLivePlanForOrg } from '../../src/utils/plan-stripe-refs';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
 const jwtSecret = process.env.JWT_SECRET!;
 
 export default withLambda(async (event) => {
+    // US-ADM-1.2.1: never during an admin impersonation session (src/utils/impersonation.ts).
+    const impersonationBlock = checkImpersonationBlock(event, 'confirm_payment');
+    if (impersonationBlock) return impersonationBlock;
+
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     try {

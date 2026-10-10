@@ -8928,25 +8928,19 @@ async function startImpersonation(targetId, targetEmail) {
   ))) return;
 
   try {
-    // Store the current admin session token so workspace.html can restore it on end
-    const adminToken = document.cookie.split('; ').find(r => r.startsWith('aura_session='))?.split('=')[1] || '';
-
+    // action: 'start' is required — without it admin-impersonate 400s, which is why impersonation
+    // never worked before 2026-10-10. The response sets an HttpOnly aura_impersonation cookie;
+    // the admin's own aura_session is untouched, and the workspace reads the customer's data
+    // (read-only) because requireTenant honours that cookie. Nothing is stored client-side.
     const d = await api('/.netlify/functions/admin-impersonate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ targetUserId: targetId, reason: reason.trim() }),
+      body: JSON.stringify({ action: 'start', targetUserId: Number(targetId), reason: reason.trim() }),
     });
-
-    // Persist the original admin token + start time so workspace.html can restore it
-    sessionStorage.setItem('admin_original_token', adminToken);
-    sessionStorage.setItem('impersonation_started_at', String(Date.now()));
-
-    // The Set-Cookie header from the response has already replaced aura_session
-    // Navigate to workspace to start impersonation
-    window.location.href = '/workspace.html';
+    window.location.href = d?.redirect || '/workspace.html';
   } catch(e) {
     window.alertModal(
-      `${window.escapeHtml(e.message)}<br><br>Check your role — impersonation requires platform_admin or super_admin.`,
+      `${window.escapeHtml(e.message)}<br><br>Impersonation requires the super_admin role.`,
       { title: 'Impersonation failed', confirmColor: '#dc2626' },
     );
   }

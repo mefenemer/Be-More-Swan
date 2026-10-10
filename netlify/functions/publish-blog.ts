@@ -15,9 +15,14 @@ import { publishBlogPost } from '../../src/utils/blog-publish';
 import { summariseSyndication } from '../../src/utils/blog-destinations/syndicate';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { checkImpersonationBlock } from '../../src/utils/impersonation';
 import { requestSeoRebuild } from '../../src/utils/seo-rebuild';
 
 export default withLambda(async (event: HandlerEvent) => {
+    // US-ADM-1.2.1: never during an admin impersonation session (src/utils/impersonation.ts).
+    const impersonationBlock = checkImpersonationBlock(event, 'blog_publish');
+    if (impersonationBlock) return impersonationBlock;
+
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
