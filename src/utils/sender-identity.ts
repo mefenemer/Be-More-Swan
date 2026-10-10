@@ -13,6 +13,7 @@ import type { getDb } from '../../db/client';
 import { aiAssistants, organisations } from '../../db/schema';
 import { signatureFromContext } from './outreach-signature';
 import type { SenderIdentity } from '../config/sender-identity';
+import { loadProductsBlock } from './org-products';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -48,6 +49,8 @@ export async function loadSenderIdentity(db: Db, organisationId: number, assista
             businessDescription: org?.businessDescription ?? null,
             industry: org?.industry ?? null,
             websiteUrl: org?.websiteUrl ?? null,
+            // Never throws — no products (or no table yet) is simply no block.
+            productsBlock: await loadProductsBlock(db, organisationId, org?.name ?? null),
             signature,
         };
     } catch (err) {

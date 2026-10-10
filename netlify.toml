@@ -1280,3 +1280,19 @@ node_bundler = "esbuild"
 # always cover. The round itself runs in generate-brief-options-background, not here.
 [functions.brand-briefs]
   timeout = 26
+
+# The dashboard's "Recent work" widget reads a few rows per assistant across several tables. The
+# pool is one connection (db/client.ts), so those queries run in series against a database across
+# the Atlantic (functions-region-vs-db-region) — more than the 10 s default allows with a full team.
+[functions.dashboard-recent-work]
+  timeout = 26
+
+# get-assistants feeds the dashboard cards, the "Needs you" strip and My Assistants. Seven grouped
+# queries in series on a one-connection pool, to a database across the Atlantic; the 10 s default
+# left no margin (2026-10-09, when the Campaign/Brand summary strips were added).
+[functions.get-assistants]
+  timeout = 26
+
+# dashboard-agenda: four short queries in series on a one-connection pool.
+[functions.dashboard-agenda]
+  timeout = 26

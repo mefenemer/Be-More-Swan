@@ -11,6 +11,7 @@
 // side by side. Cohesion does not come from one call seeing the others' COPY; it comes from every
 // call seeing the whole PLAN (every email's day and job) and the same fixed greeting and sign-off.
 
+import { loadProductsBlock } from './org-products';
 import Anthropic from '@anthropic-ai/sdk';
 import { eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
@@ -57,6 +58,8 @@ export async function draftCampaignEmails(db: Db, input: CampaignPlanInput): Pro
     }).from(organisations).where(eq(organisations.id, input.organisationId)).limit(1);
     const business = org?.name || 'the business';
     const kind = cadenceFor(input.campaignType);
+    // What the business sells (Business Information ▸ Products & Services). Never throws.
+    const productsBlock = await loadProductsBlock(db, input.organisationId, org?.name ?? null);
 
     const plan = steps.map((s, i) => `  Email ${i + 1} — Day ${s.day}: ${s.role}`).join('\n');
     const system = [
@@ -70,7 +73,10 @@ Who is in it: ${input.audience || org?.targetAudience || 'their subscribers'}
 ${input.triggerEvent === 'subscribed' ? 'They enter the moment they subscribe.' : input.triggerEvent === 'form' ? 'They enter the moment they fill in a sign-up form (and confirm their email).' : 'The business sends each email to this group by hand on its day.'}
 The whole plan (you write ONE of these; the others are written separately, in the same voice):
 ${plan}`,
-        input.facts ? `Facts and links the business gave you — the ONLY facts and URLs you may use:\n${input.facts}` : 'The business gave no links. Write no URLs at all.',
+        input.facts
+            ? `Facts and links the business gave you — the ONLY facts and URLs you may use${productsBlock ? ', together with the products below' : ''}:\n${input.facts}`
+            : productsBlock ? 'The business gave no other links: the only URLs you may write are the product links below.' : 'The business gave no links. Write no URLs at all.',
+        productsBlock ?? '',
         input.avoid ? `Avoid: ${input.avoid}` : '',
         kind.note ? `For this kind of campaign: ${kind.note}` : '',
         `HOW EVERY EMAIL IN THIS CAMPAIGN IS WRITTEN — so they read as one series:
@@ -118,7 +124,8 @@ ${plan}`,
             trigger: { event: input.triggerEvent, description: input.audience }, tone,
             newsletters: written,
         },
-    }, [input.facts, input.goal, input.audience].join('\n'));
+    // The product links are supplied links too — the prompt offered them, so grounding must keep them.
+    }, [input.facts, input.goal, input.audience, productsBlock ?? ''].join('\n'));
     if (!draft) throw new Error('The emails came back in a form we could not read. Try again.');
     return draft;
 }

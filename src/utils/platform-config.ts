@@ -84,6 +84,8 @@ export const CONFIG_KEYS = {
     // Stamped by every run of the two checks above, read by platform-watchdog. Without it a check
     // that stopped running is indistinguishable from one that found nothing. See monitor-heartbeat.ts.
     MONITOR_HEARTBEAT:         'monitoring.heartbeat',
+    // "Draft this week's email now" on Admin ▸ What's New — src/utils/product-update-draft-request.ts.
+    PRODUCT_UPDATE_DRAFT_REQUEST: 'product_updates.draft_request',
 } as const;
 
 export type ConfigKey = typeof CONFIG_KEYS[keyof typeof CONFIG_KEYS];

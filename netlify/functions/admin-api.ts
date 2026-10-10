@@ -419,25 +419,11 @@ export default withLambda(async (event) => {
             };
         }
 
-        // ── PATCH: catalog toggle ─────────────────────────────────────────────
-        if (event.httpMethod === 'PATCH' && resource === 'catalog') {
-            const id = parseInt(qs.id || '');
-            if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id required.' }) };
 
-            const body = JSON.parse(event.body || '{}');
-            const allowed = ['comingSoon', 'isActive', 'name', 'description', 'category'];
-            const updates: Record<string, any> = {};
-            for (const f of allowed) { if (body[f] !== undefined) updates[f] = body[f]; }
-
-            const [updated] = await db.update(masterAssistants).set(updates).where(eq(masterAssistants.id, id)).returning();
-            await audit(db, adminId, 'UPDATE', 'master_assistants', id, updates);
-
-            return {
-                statusCode: 200,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ assistant: updated }),
-            };
-        }
+        // Assistant status (Hidden / Coming soon / Beta / Live / Retired) is changed ONLY by
+        // netlify/functions/admin-assistants.ts, which runs the go-live checks first. The catalog
+        // PATCH, lifecycle transition and bulk publish that used to live here wrote the same columns
+        // with no checks and were removed on 2026-10-10.
 
         // ── POST: send passwordless login link to user (US6 Sc2) ─────────────
         if (event.httpMethod === 'POST' && resource === 'send-login-link') {
@@ -2068,114 +2054,7 @@ export default withLambda(async (event) => {
             return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
         }
 
-        // ── US-ADM-4.1.1: Assistant lifecycle state transition ────────────────
-        // POST ?resource=assistant-lifecycle&id=N  { newState, changeNote }
-        if (event.httpMethod === 'POST' && resource === 'assistant-lifecycle') {
-            const uid2 = parseInt(qs.id || '');
-            if (!uid2) return { statusCode: 400, body: JSON.stringify({ error: 'id required.' }) };
 
-            const body = JSON.parse(event.body || '{}');
-            const { newState, changeNote } = body;
-
-            const VALID_TRANSITIONS: Record<string, string[]> = {
-                draft:       ['review'],
-                review:      ['beta', 'draft'],
-                beta:        ['live', 'review'],
-                live:        ['deprecated'],
-                deprecated:  ['archived', 'live'],
-                archived:    [],
-            };
-
-            const [assistant] = await db
-                .select({ id: masterAssistants.id, name: masterAssistants.name, lifecycleState: masterAssistants.lifecycleState })
-                .from(masterAssistants).where(eq(masterAssistants.id, uid2)).limit(1);
-            if (!assistant) return { statusCode: 404, body: JSON.stringify({ error: 'Assistant not found.' }) };
-
-            const allowed = VALID_TRANSITIONS[assistant.lifecycleState] ?? [];
-            if (!allowed.includes(newState)) {
-                return {
-                    statusCode: 400,
-                    body: JSON.stringify({
-                        error: `Invalid transition: ${assistant.lifecycleState} → ${newState}. Valid next states: [${allowed.join(', ') || 'none'}]`,
-                    }),
-                };
-            }
-            if (!changeNote?.trim()) {
-                return { statusCode: 400, body: JSON.stringify({ error: 'A changelog note is required for all lifecycle transitions.' }) };
-            }
-
-            await db.update(masterAssistants)
-                .set({ lifecycleState: newState, updatedAt: new Date() })
-                .where(eq(masterAssistants.id, uid2));
-
-            await insertAdminAuditLog({
-                adminId, action: 'assistant_state_change',
-                targetType: 'assistant', targetId: uid2,
-                previousState: { lifecycleState: assistant.lifecycleState },
-                newState: { lifecycleState: newState },
-                reason: changeNote,
-                ipAddress: getAdminIp(event.headers),
-                metadata: { assistantName: assistant.name },
-            });
-
-            return {
-                statusCode: 200,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ success: true, previousState: assistant.lifecycleState, newState }),
-            };
-        }
-
-        // ── US-ADM-4.1.1: Bulk publish (beta → live) ─────────────────────────
-        // POST ?resource=assistant-bulk-publish  { assistants: [{id, changeNote}] }
-        if (event.httpMethod === 'POST' && resource === 'assistant-bulk-publish') {
-            const body = JSON.parse(event.body || '{}');
-            const items: { id: number; changeNote: string }[] = body.assistants || [];
-
-            if (!items.length) {
-                return { statusCode: 400, body: JSON.stringify({ error: 'assistants array required.' }) };
-            }
-            for (const item of items) {
-                if (!item.changeNote?.trim()) {
-                    return { statusCode: 400, body: JSON.stringify({ error: `changeNote required for each assistant. Missing on id=${item.id}` }) };
-                }
-            }
-
-            const ids = items.map(i => i.id);
-            // Verify all are in 'beta' state
-            const rows = await db.select({ id: masterAssistants.id, lifecycleState: masterAssistants.lifecycleState, name: masterAssistants.name })
-                .from(masterAssistants).where(and(eq(masterAssistants.lifecycleState, 'beta'), inArray(masterAssistants.id, ids)));
-
-            if (rows.length !== ids.length) {
-                const foundIds = rows.map(r => r.id);
-                const notBeta  = ids.filter(i => !foundIds.includes(i));
-                return { statusCode: 400, body: JSON.stringify({ error: `These assistants are not in beta state: [${notBeta.join(', ')}]` }) };
-            }
-
-            // Transition all to live in one update
-            await db.update(masterAssistants)
-                .set({ lifecycleState: 'live', updatedAt: new Date() })
-                .where(inArray(masterAssistants.id, ids));
-
-            // Write audit log per assistant
-            for (const item of items) {
-                const assistant = rows.find(r => r.id === item.id)!;
-                await insertAdminAuditLog({
-                    adminId, action: 'assistant_state_change',
-                    targetType: 'assistant', targetId: item.id,
-                    previousState: { lifecycleState: 'beta' },
-                    newState: { lifecycleState: 'live' },
-                    reason: item.changeNote,
-                    ipAddress: getAdminIp(event.headers),
-                    metadata: { bulkPublish: true, assistantName: assistant.name },
-                });
-            }
-
-            return {
-                statusCode: 200,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ success: true, published: ids.length }),
-            };
-        }
 
         // ── US-ADM-4.1.1: List assistant versions ────────────────────────────
         // GET ?resource=assistant-versions&id=N

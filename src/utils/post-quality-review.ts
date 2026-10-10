@@ -38,9 +38,10 @@
 // Getting this backwards is what made the feature user-hostile, so keep the default safe: any new
 // caller that forgets to pass withSuggestions gets the terminating behaviour.
 
+import { loadOrgProducts, renderProductFacts } from './org-products';
 import { and, desc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiBlueprints, scheduledPosts } from '../../db/schema';
+import { aiAssistants, aiBlueprints, scheduledPosts } from '../../db/schema';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { parseModelJson } from './model-json';
 
@@ -297,6 +298,15 @@ export async function runQualityReview(
             if (rules.length > 0) contentRulesText = JSON.stringify(s4);
             knownFacts = collectKnownFacts(sections);
         }
+        // The workspace catalogue (Business Information ▸ Products & Services) — a listed price is
+        // the business's own, so the reviewer stops flagging it; a price NOT listed still gets
+        // flagged, which is how an invented one is caught. Never throws.
+        try {
+            const [owner] = await db.select({ orgId: aiAssistants.organisationId }).from(aiAssistants)
+                .where(eq(aiAssistants.id, post.assistantId)).limit(1);
+            const productFacts = owner ? renderProductFacts(await loadOrgProducts(db, owner.orgId)) : '';
+            if (productFacts) knownFacts = [knownFacts, productFacts].filter(Boolean).join('\n');
+        } catch { /* no products is no change */ }
     }
 
     const caption = post.caption || '';

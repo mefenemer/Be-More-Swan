@@ -48,6 +48,21 @@
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full pb-20">
 
     <!-- ════════════════════════════════════════════════════════════════════
+         Platform status (dashboard review 2026-10-09). Shown only while an AI provider is failing
+         for every workspace — so the user knows it is not their setup. From platform-status.ts.
+         ════════════════════════════════════════════════════════════════════ -->
+    <div id="platform-status-banner" class="ps-banner" style="display:none" role="status"></div>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         "Needs you" (dashboard review 2026-10-09). COUNTS ONLY, each linking to where the work lives.
+         ⚠️ Not a list: a "Requires your attention" list used to sit on this page and was removed
+         because it duplicated the Review Queue and disagreed with it whenever one was stale. These
+         counts come from the SAME get-assistants response the cards below render (opSignals
+         .pendingReview), so the strip and the cards cannot disagree.
+         ════════════════════════════════════════════════════════════════════ -->
+    <section id="needs-you" class="ny-wrap" style="display:none" aria-label="Waiting for you"></section>
+
+    <!-- ════════════════════════════════════════════════════════════════════
          US-DASH-1: "Wow" Metrics + Activity Heatmap (Swan Command Center)
          AC1 animated Hours Saved / Tasks Handled · AC2 Estimated Money Saved
          · AC3 24/7 activity heatmap. Driven by roi-stats + dashboard-heatmap.
@@ -69,10 +84,12 @@
         </div>
 
         <div class="cc-metrics">
-          <!-- AC1: Hours Saved -->
-          <div class="cc-tile">
+          <!-- AC1: Hours Saved. ESTIMATED, like the money tile beside it — worked out from tasks handled at
+               a set number of minutes per kind of task (roi-stats), never measured. It used to be the
+               only one of the two not labelled as an estimate (dashboard review 2026-10-09). -->
+          <div class="cc-tile" title="Worked out from the tasks your assistants handled, at a set number of minutes per kind of task — an estimate, not a timesheet.">
             <div class="cc-tile-icon">⏱️</div>
-            <div class="cc-tile-label">Hours Saved</div>
+            <div class="cc-tile-label">Estimated Hours Saved</div>
             <div class="cc-tile-value"><span id="cc-hours" data-count="0"><span class="cc-skel-text"></span></span><span class="cc-unit">hrs</span></div>
             <div class="cc-tile-sub" id="cc-hours-sub">this month</div>
           </div>
@@ -435,6 +452,81 @@
 </script>
 
 <style>
+  /* Platform status + Needs you — scoped plain CSS (immune to the prebuilt Tailwind build). */
+  .ps-banner { margin-bottom: 18px; padding: 12px 16px; border-radius: 14px; background: #fffbeb; border: 1px solid #fcd34d;
+    color: #92400e; font-size: 14px; line-height: 1.45; }
+  .ps-banner strong { color: #78350f; }
+  .ny-wrap { margin-bottom: 28px; padding: 16px 18px; border-radius: 18px; background: #fff; border: 1px solid rgba(245,158,11,0.35);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+  .ny-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .ny-title { font-size: 16px; font-weight: 800; color: #0f172a; margin: 0; }
+  .ny-sub { font-size: 13px; color: #64748b; }
+  .ny-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .ny-chip { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; cursor: pointer;
+    background: #fffbeb; border: 1px solid #fde68a; color: #78350f; font-size: 13px; font-weight: 600; }
+  .ny-chip:hover { background: #fef3c7; }
+  .ny-n { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 7px;
+    border-radius: 999px; background: #f59e0b; color: #fff; font-size: 12px; font-weight: 800; }
+  .ny-clear { font-size: 13px; color: #64748b; }
+</style>
+
+<script>
+  (function () {
+    // ── Needs you: what is waiting, per assistant, from the cards' own data ─────────────────
+    const host = document.getElementById('needs-you');
+    if (!host) return;
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    // Where an assistant's waiting work lives: its own review surface, by registry (the Brand
+    // Designer reviews on Briefs; everyone else on the Review Queue tab, whatever it is labelled).
+    const tabFor = (a) => {
+      const reg = window.AssistantDashboardRegistry && window.AssistantDashboardRegistry.get(a.roleKey);
+      if (reg && reg.hideReviewQueue && reg.briefsTab) return { tab: 'briefs', label: reg.briefsTab.label || 'Briefs' };
+      return { tab: 'review-queue', label: (reg && reg.reviewQueue && reg.reviewQueue.label) || 'Review' };
+    };
+    async function render() {
+      try {
+        const res = await (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants'));
+        const d = await res.json();
+        const team = (d.assistants || []).filter((a) => a.lifecycleStatus !== 'archived');
+        if (!team.length) { host.style.display = 'none'; return; }
+        const waiting = team.map((a) => ({ a, n: Number(a.opSignals && a.opSignals.pendingReview) || 0 })).filter((x) => x.n > 0)
+          .sort((x, y) => y.n - x.n);
+        const total = waiting.reduce((t, x) => t + x.n, 0);
+        host.innerHTML = total
+          ? `<div class="ny-head"><h3 class="ny-title">${total} thing${total === 1 ? '' : 's'} waiting for you</h3>
+               <span class="ny-sub">Nothing goes out until you approve it. Tap one to open it.</span></div>
+             <div class="ny-row">${waiting.map(({ a, n }) => {
+               const t = tabFor(a);
+               return `<button type="button" class="ny-chip" data-ny-id="${esc(a.id)}" data-ny-tab="${esc(t.tab)}" title="Open ${esc(a.name)}'s ${esc(t.label)}">
+                 <span class="ny-n">${n}</span>${esc(a.name)} · ${esc(t.label)}</button>`;
+             }).join('')}</div>`
+          : `<div class="ny-head"><h3 class="ny-title">Nothing waiting for you</h3><span class="ny-clear">Your assistants will put anything that needs a decision here.</span></div>`;
+        host.style.display = '';
+        host.querySelectorAll('[data-ny-id]').forEach((b) => b.addEventListener('click', () => {
+          window._assistantDetailInitialTab = b.dataset.nyTab;
+          window.routeToAssistantDetail && window.routeToAssistantDetail(b.dataset.nyId);
+        }));
+      } catch (_) { host.style.display = 'none'; }
+    }
+    render();
+
+    // ── Platform status: an AI outage that is OURS, said plainly (platform-status.ts) ───────────
+    (async function () {
+      const banner = document.getElementById('platform-status-banner');
+      if (!banner) return;
+      try {
+        const res = await fetch('/.netlify/functions/platform-status');
+        if (!res.ok) return;
+        const issues = ((await res.json()).issues || []);
+        if (!issues.length) return;
+        banner.innerHTML = `<strong>It's not you.</strong> ${issues.map((i) => esc(i.message)).join(' ')}`;
+        banner.style.display = '';
+      } catch (_) { /* no banner */ }
+    })();
+  })();
+</script>
+
+<style>
   /* US-DASH-2 — Action Stream. Scoped plain CSS (immune to prebuilt-Tailwind). */
   .as-head { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; }
   .as-h3 { font-size: 16px; font-weight: 800; color: #0f172a; margin: 0; }
@@ -641,11 +733,14 @@
       'roi-mini':      { title: 'Value this week', icon: '💷', desc: 'Hours & money saved', render: renderRoiMini },
       'team-status':   { title: 'Your assistants', icon: '👥', desc: 'Who is working right now', render: renderTeamStatus },
       'notifications': { title: 'Latest updates', icon: '🔔', desc: 'Your most recent activity', render: renderNotifications },
+      'recent-work':   { title: 'Recent work', icon: '✅', desc: 'What every assistant did this week', render: renderRecentWork },
+      'agenda':        { title: 'Next 7 days', icon: '📅', desc: 'Everything booked to go out', render: renderAgenda },
+      'capacity':      { title: 'This month', icon: '📊', desc: 'Tasks and AI credits left', render: renderCapacity },
       'tips':          { title: 'Tip', icon: '💡', desc: 'Get more from your team', render: renderTips },
       'referral':      { title: 'Invite a teammate', icon: '🎁', desc: 'Share Be More Swan', render: renderReferral },
     };
-    const ORDER = ['roi-mini', 'team-status', 'notifications', 'tips', 'referral'];
-    const DEFAULT_ON = { 'roi-mini': true, 'team-status': true, 'notifications': true, 'tips': false, 'referral': false };
+    const ORDER = ['roi-mini', 'team-status', 'recent-work', 'agenda', 'capacity', 'notifications', 'tips', 'referral'];
+    const DEFAULT_ON = { 'roi-mini': true, 'team-status': true, 'recent-work': true, 'agenda': true, 'capacity': true, 'notifications': true, 'tips': false, 'referral': false };
 
     let layout = [];
     let editing = false;
@@ -655,7 +750,10 @@
     const defaultLayout = () => ORDER.map(k => ({ key: k, enabled: DEFAULT_ON[k] }));
     function mergeCatalog(l) {
       const have = new Set(l.map(w => w.key));
-      ORDER.forEach(k => { if (!have.has(k)) l.push({ key: k, enabled: false }); });
+      // A widget added to the catalog after someone saved their layout arrives with its DEFAULT
+      // state, not switched off — 'off' here meant every saved layout (i.e. every returning
+      // customer) never saw a new widget unless they went looking in Customize.
+      ORDER.forEach(k => { if (!have.has(k)) l.push({ key: k, enabled: !!DEFAULT_ON[k] }); });
       return l.filter(w => CATALOG[w.key]);
     }
     function save() { // AC3: silent debounced persistence
@@ -746,7 +844,7 @@
       try {
         const d = await (await fetch('/.netlify/functions/roi-stats?period=week')).json();
         const money = (d.gbpSaved != null) ? fmtGBP(d.gbpSaved) : null;
-        el.innerHTML = `<div class="dw-stat">${d.hoursSaved ?? 0}<span style="font-size:15px;color:#94a3b8;font-weight:600"> hrs</span></div>
+        el.innerHTML = `<div class="dw-stat">~${d.hoursSaved ?? 0}<span style="font-size:15px;color:#94a3b8;font-weight:600"> hrs (est.)</span></div>
           <div class="dw-stat-sub">${money ? money + ' saved · ' : ''}${d.taskCount ?? 0} task${(d.taskCount ?? 0) === 1 ? '' : 's'} this week</div>`;
       } catch { el.innerHTML = '<div class="dw-stat-sub">Unavailable right now.</div>'; }
     }
@@ -769,6 +867,63 @@
           ? `<ul class="dw-list">${n.map(x => `<li><span class="t">${esc(x.title || 'Update')}</span></li>`).join('')}</ul><span class="dw-link">View all →</span>`
           : `<div class="dw-stat-sub">You're all caught up. 🎉</div>`;
         const link = el.querySelector('.dw-link'); if (link) link.onclick = () => window.loadView && window.loadView('notifications');
+      } catch { el.innerHTML = '<div class="dw-stat-sub">Unavailable right now.</div>'; }
+    }
+    const ago = iso => {
+      const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+      if (m < 60) return m <= 1 ? 'just now' : m + 'm ago';
+      const h = Math.round(m / 60); if (h < 24) return h + 'h ago';
+      const d = Math.round(h / 24); return d + 'd ago';
+    };
+    const when = iso => new Date(iso).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+    // Every assistant's work, not just social: the same sources each Activity tab reads
+    // (netlify/functions/dashboard-recent-work.ts). Notifications stay as "Latest updates".
+    async function renderRecentWork(el) {
+      try {
+        const res = await fetch('/.netlify/functions/dashboard-recent-work');
+        if (!res.ok) throw new Error(String(res.status));
+        const items = ((await res.json()).items || []).slice(0, 5);
+        el.innerHTML = items.length
+          ? `<ul class="dw-list">${items.map(x => `<li style="justify-content:space-between"><span class="t"><strong>${esc(x.assistantName)}</strong> · ${esc(x.description)}</span><span class="dw-stat-sub" style="margin:0;white-space:nowrap">${esc(ago(x.createdAt))}</span></li>`).join('')}</ul>`
+          : `<div class="dw-stat-sub">Nothing finished in the last 7 days yet.</div>`;
+      } catch { el.innerHTML = '<div class="dw-stat-sub">Unavailable right now.</div>'; }
+    }
+    // Only what is BOOKED — scheduled posts, articles and emails. Drafts are not on it on purpose.
+    async function renderAgenda(el) {
+      try {
+        const res = await fetch('/.netlify/functions/dashboard-agenda');
+        if (!res.ok) throw new Error(String(res.status));
+        const d = await res.json();
+        const items = (d.items || []).slice(0, 5);
+        const more = (d.total || 0) - items.length;
+        el.innerHTML = items.length
+          ? `<ul class="dw-list">${items.map(x => `<li style="justify-content:space-between"><span class="t">${esc(x.label)}${x.assistantName ? ` <span style="color:#94a3b8">· ${esc(x.assistantName)}</span>` : ''}</span><span class="dw-stat-sub" style="margin:0;white-space:nowrap">${esc(when(x.at))}</span></li>`).join('')}</ul>${more > 0 ? `<div class="dw-stat-sub">and ${more} more</div>` : ''}<span class="dw-link">Open calendar →</span>`
+          : `<div class="dw-stat-sub">Nothing booked for the next 7 days.</div><span class="dw-link">Open calendar →</span>`;
+        el.querySelector('.dw-link').onclick = () => window.loadView && window.loadView('calendar');
+      } catch { el.innerHTML = '<div class="dw-stat-sub">Unavailable right now.</div>'; }
+    }
+    // Tasks are a hard monthly cap (never an overage charge) and credits pay for pictures, video
+    // and music — the two limits that stop work, shown before they are hit rather than after.
+    async function renderCapacity(el) {
+      try {
+        const get = u => (window.bmsCachedFetch ? window.bmsCachedFetch(u) : fetch(u)).then(r => r.ok ? r.json() : null).catch(() => null);
+        const [cap, cr] = await Promise.all([get('/.netlify/functions/check-capacity'), get('/.netlify/functions/get-ai-credit-balance')]);
+        if (!cap && !cr) throw new Error('none');
+        const rows = [];
+        if (cap && cap.taskLimit != null) {
+          const left = Math.max(0, cap.taskLimit - (cap.taskCount || 0));
+          const pct = cap.taskLimit ? Math.min(100, Math.round(((cap.taskCount || 0) / cap.taskLimit) * 100)) : 0;
+          rows.push({ label: 'Tasks left', value: `${left.toLocaleString('en-GB')} of ${cap.taskLimit.toLocaleString('en-GB')}`, pct });
+        } else if (cap) {
+          rows.push({ label: 'Tasks', value: 'Unlimited', pct: null });
+        }
+        if (cr && cr.balance != null) {
+          const pct = cr.monthlyCredits ? Math.min(100, Math.round(((cr.monthlyCredits - cr.balance) / cr.monthlyCredits) * 100)) : null;
+          rows.push({ label: 'AI credits left', value: cr.monthlyCredits ? `${cr.balance} of ${cr.monthlyCredits}` : String(cr.balance), pct: pct != null ? Math.max(0, pct) : null });
+        }
+        el.innerHTML = rows.map(x => `<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#64748b">${esc(x.label)}</span><strong style="color:#0f172a">${esc(x.value)}</strong></div>${x.pct != null ? `<div style="height:6px;background:#f1f5f9;border-radius:999px;margin-top:4px;overflow:hidden"><div style="height:100%;width:${x.pct}%;background:${x.pct >= 90 ? '#ef4444' : x.pct >= 75 ? '#f59e0b' : '#ec4899'}"></div></div>` : ''}</div>`).join('')
+          + `<span class="dw-link">Plan &amp; billing →</span>`;
+        el.querySelector('.dw-link').onclick = () => window.loadView && window.loadView('billing');
       } catch { el.innerHTML = '<div class="dw-stat-sub">Unavailable right now.</div>'; }
     }
     function renderTips(el) {

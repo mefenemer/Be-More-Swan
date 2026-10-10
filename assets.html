@@ -24,6 +24,7 @@
   <div class="mb-8 border-b border-gray-200 overflow-x-auto overflow-y-hidden">
     <nav id="bizinfo-tabs" class="-mb-px flex gap-x-6" aria-label="Business information tabs">
       <button type="button" class="bizinfo-tab active" data-tab="profile">Business Profile</button>
+      <button type="button" class="bizinfo-tab" data-tab="products">Products &amp; Services</button>
       <button type="button" class="bizinfo-tab" data-tab="legal">Legal &amp; Billing</button>
       <button type="button" class="bizinfo-tab" data-tab="team">Team Members</button>
       <button type="button" class="bizinfo-tab" data-tab="assets">Brand Assets</button>
@@ -176,6 +177,237 @@
     </div>
   </section>
   </div><!-- /panel: profile -->
+
+  <!-- ══ Products & Services ═══════════════════════════════════════════════ -->
+  <!-- What the business sells, read by EVERY assistant (src/utils/org-products.ts): chat, social
+       drafting, articles, emails, outreach and the quality review. Only Active entries reach a
+       prompt; Archive is the reversible way to stop using one. Saved through
+       netlify/functions/org-products.ts. Requires db/z-org-products.sql. -->
+  <div class="bizinfo-tab-panel hidden" data-panel="products">
+  <section class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8">
+    <div class="flex items-start justify-between gap-4 flex-wrap mb-5">
+      <div>
+        <h2 class="text-lg font-extrabold text-gray-900">Products &amp; services</h2>
+        <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">Everything you sell. Every one of your assistants reads this list, so posts, articles, emails and outreach name your products correctly and quote only the prices you give here.</p>
+      </div>
+      <button type="button" id="op-add" class="btn-primary text-sm font-bold flex items-center gap-1 px-3 py-1.5 rounded-md transition-colors shrink-0">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>Add Product or Service</button>
+    </div>
+    <div id="op-error" class="hidden mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3"></div>
+    <div id="op-editor-slot"></div>
+    <div id="op-list" class="space-y-3">
+      <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading…</div>
+    </div>
+    <details id="op-archived-wrap" class="mt-6 hidden">
+      <summary class="text-sm font-semibold text-gray-600 cursor-pointer select-none">Archived <span id="op-archived-count"></span> — not used by your assistants</summary>
+      <div id="op-archived" class="space-y-3 mt-3"></div>
+    </details>
+  </section>
+
+  <script>
+  (function () {
+    const API = '/.netlify/functions/org-products';
+    const listEl = document.getElementById('op-list');
+    if (!listEl) return;
+    const slot = document.getElementById('op-editor-slot');
+    const errEl = document.getElementById('op-error');
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    let products = [];
+
+    const showError = (msg) => { errEl.textContent = msg || ''; errEl.classList.toggle('hidden', !msg); };
+    async function call(method, body, query) {
+      const res = await fetch(API + (query || ''), {
+        method, headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Something went wrong. Please try again.');
+      return data;
+    }
+
+    function card(p, i, active) {
+      const meta = [p.price ? `<span class="font-semibold text-gray-800">${esc(p.price)}</span>` : '', p.audience ? `For ${esc(p.audience)}` : ''].filter(Boolean).join(' · ');
+      return `<div class="op-card border border-gray-200 rounded-xl p-4" data-id="${p.id}">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <h3 class="text-sm font-bold text-gray-900">${esc(p.name)}</h3>
+              <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-100 rounded px-1.5 py-0.5">${p.kind === 'service' ? 'Service' : 'Product'}</span>
+            </div>
+            ${meta ? `<p class="text-xs text-gray-500 mt-1">${meta}</p>` : ''}
+            ${p.description ? `<p class="text-sm text-gray-600 mt-2 whitespace-pre-line">${esc(p.description)}</p>` : ''}
+            ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer" class="link text-xs mt-1 inline-block break-all">${esc(p.url)}</a>` : ''}
+          </div>
+          <div class="flex items-center gap-1 shrink-0">
+            ${active ? `<button type="button" class="op-up btn-utility text-xs px-2 py-1 rounded" title="Move up" aria-label="Move up" ${i === 0 ? 'disabled' : ''}>↑</button>
+            <button type="button" class="op-down btn-utility text-xs px-2 py-1 rounded" title="Move down" aria-label="Move down">↓</button>
+            <button type="button" class="op-edit btn-utility text-xs font-bold px-2.5 py-1 rounded">Edit</button>
+            <button type="button" class="op-archive btn-utility text-xs font-bold px-2.5 py-1 rounded">Archive</button>`
+            : `<button type="button" class="op-restore btn-utility text-xs font-bold px-2.5 py-1 rounded">Restore</button>
+            <button type="button" class="op-delete btn-destructive text-xs font-bold px-2.5 py-1 rounded">Delete</button>`}
+          </div>
+        </div>
+      </div>`;
+    }
+
+    function render() {
+      const active = products.filter(p => p.status === 'active');
+      const archived = products.filter(p => p.status !== 'active');
+      listEl.innerHTML = active.length
+        ? active.map((p, i) => card(p, i, true)).join('')
+        : `<div class="text-sm text-gray-500 bg-gray-50 border border-dashed border-gray-200 rounded-xl px-4 py-6 text-center">No products or services yet — click “Add Product or Service” to add your first. Until you do, your assistants only know what the Business Profile says you do.</div>`;
+      const lastDown = listEl.querySelectorAll('.op-down');
+      if (lastDown.length) lastDown[lastDown.length - 1].disabled = true;
+      const wrap = document.getElementById('op-archived-wrap');
+      wrap.classList.toggle('hidden', !archived.length);
+      document.getElementById('op-archived-count').textContent = archived.length ? `(${archived.length})` : '';
+      document.getElementById('op-archived').innerHTML = archived.map((p, i) => card(p, i, false)).join('');
+    }
+
+    async function load() {
+      try {
+        products = (await call('GET')).products || [];
+        showError('');
+        render();
+      } catch (e) {
+        listEl.innerHTML = '';
+        showError('Your products could not be loaded right now. Please refresh and try again.');
+      }
+    }
+
+    // One editor at a time: a new product opens at the top, an edit replaces that card in place.
+    function openEditor(p) {
+      closeEditor();
+      // Looked up AFTER closeEditor(): it re-renders the list, so a card found before it is detached.
+      const anchor = p ? listEl.querySelector(`.op-card[data-id="${p.id}"]`) : null;
+      const f = document.createElement('div');
+      f.id = 'op-editor';
+      f.className = 'border-2 border-emerald-200 bg-emerald-50/30 rounded-xl p-4 mb-3';
+      const v = p || { kind: 'product' };
+      const field = (id, label, value, opts) => `<div class="${opts && opts.wide ? 'sm:col-span-2' : ''}">
+          <label for="${id}" class="block text-sm font-semibold text-gray-700 mb-1">${label}</label>
+          ${opts && opts.area
+            ? `<textarea id="${id}" rows="${opts.rows || 3}" maxlength="${opts.max}" placeholder="${esc(opts.ph || '')}" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-emerald-600 outline-none">${esc(value || '')}</textarea>`
+            : `<input id="${id}" type="text" maxlength="${opts.max}" value="${esc(value || '')}" placeholder="${esc(opts.ph || '')}" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-emerald-600 outline-none">`}
+        </div>`;
+      f.innerHTML = `
+        <div class="flex items-center gap-4 mb-3 text-sm">
+          <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="op-kind" value="product" ${v.kind !== 'service' ? 'checked' : ''}> Product</label>
+          <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="op-kind" value="service" ${v.kind === 'service' ? 'checked' : ''}> Service</label>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          ${field('op-name', 'Name <span class="text-red-500">*</span>', v.name, { max: 120, ph: 'e.g. Sourdough Starter Kit' })}
+          ${field('op-price', 'Price', v.price, { max: 120, ph: 'e.g. £29, from £450, £15/month — leave blank to keep it off' })}
+          ${field('op-description', 'What it is', v.description, { area: true, max: 1200, wide: true, ph: 'What the customer gets, in a sentence or two.' })}
+          ${field('op-benefits', 'Key benefits', v.benefits, { area: true, rows: 2, max: 1200, wide: true, ph: 'Why people buy it — the results or features you want mentioned.' })}
+          ${field('op-audience', 'Who it’s for', v.audience, { max: 400, ph: 'e.g. home bakers starting out' })}
+          ${field('op-url', 'Link', v.url, { max: 500, ph: 'https://yourbusiness.com/product' })}
+        </div>
+        <p class="text-xs text-gray-500 mt-3">Your assistants quote prices exactly as written here, and never state one you leave blank.</p>
+        <div class="flex items-center justify-end gap-2 mt-3">
+          <button type="button" id="op-cancel" class="btn-secondary text-sm font-bold px-3 py-1.5 rounded-md border">Cancel</button>
+          <button type="button" id="op-save" class="btn-primary text-sm font-bold px-3 py-1.5 rounded-md">${p ? 'Save Changes' : 'Add'}</button>
+        </div>`;
+      if (anchor) anchor.replaceWith(f); else slot.appendChild(f);
+      f.dataset.id = p ? String(p.id) : '';
+      f.querySelector('#op-name').focus();
+    }
+    function closeEditor() {
+      const open = document.getElementById('op-editor');
+      if (!open) return;
+      open.remove();
+      render(); // puts back the card an in-place edit replaced
+    }
+
+    async function save() {
+      const f = document.getElementById('op-editor');
+      if (!f) return;
+      const get = id => f.querySelector('#' + id).value;
+      const body = {
+        kind: (f.querySelector('input[name="op-kind"]:checked') || {}).value || 'product',
+        name: get('op-name'), price: get('op-price'), description: get('op-description'),
+        benefits: get('op-benefits'), audience: get('op-audience'), url: get('op-url'),
+      };
+      if (!body.name.trim()) { showError('Give the product or service a name.'); f.querySelector('#op-name').focus(); return; }
+      const btn = f.querySelector('#op-save');
+      btn.disabled = true;
+      try {
+        if (f.dataset.id) {
+          const { product } = await call('PATCH', { id: Number(f.dataset.id), ...body });
+          products = products.map(x => x.id === product.id ? product : x);
+        } else {
+          const { product } = await call('POST', body);
+          products.push(product);
+        }
+        showError('');
+        f.remove();
+        render();
+      } catch (e) { showError(e.message); btn.disabled = false; }
+    }
+
+    async function setStatus(id, status) {
+      try {
+        const { product } = await call('PATCH', { id, status });
+        products = products.map(x => x.id === product.id ? product : x);
+        showError(''); render();
+      } catch (e) { showError(e.message); }
+    }
+
+    async function move(id, dir) {
+      const active = products.filter(p => p.status === 'active');
+      const i = active.findIndex(p => p.id === id), j = i + dir;
+      if (i < 0 || j < 0 || j >= active.length) return;
+      [active[i], active[j]] = [active[j], active[i]];
+      active.forEach((p, n) => { p.sortOrder = n; });
+      products = [...active, ...products.filter(p => p.status !== 'active')];
+      render();
+      try {
+        await Promise.all([active[i], active[j]].map(p => call('PATCH', { id: p.id, sortOrder: p.sortOrder })));
+      } catch (e) { showError(e.message); load(); }
+    }
+
+    // Bound on the section, which this script owns for the life of the page (never re-rendered).
+    const section = listEl.closest('section');
+    section.addEventListener('click', async (e) => {
+      const t = e.target.closest('button');
+      if (!t) return;
+      const id = Number(t.closest('.op-card')?.dataset.id);
+      if (t.id === 'op-add') return openEditor(null);
+      if (t.id === 'op-cancel') return closeEditor();
+      if (t.id === 'op-save') return save();
+      if (t.classList.contains('op-edit')) return openEditor(products.find(p => p.id === id));
+      if (t.classList.contains('op-archive')) return setStatus(id, 'archived');
+      if (t.classList.contains('op-restore')) return setStatus(id, 'active');
+      if (t.classList.contains('op-up')) return move(id, -1);
+      if (t.classList.contains('op-down')) return move(id, 1);
+      if (t.classList.contains('op-delete')) {
+        const p = products.find(x => x.id === id);
+        const ok = window.confirmModal
+          ? await window.confirmModal(`“${p ? p.name : 'This product'}” will be removed for good. Archive keeps it without your assistants using it.`, { title: 'Delete this product?', confirmLabel: 'Yes, delete', cancelLabel: 'Keep it' })
+          : false;
+        if (!ok) return;
+        try { await call('DELETE', null, '?id=' + id); products = products.filter(x => x.id !== id); showError(''); render(); }
+        catch (err) { showError(err.message); }
+      }
+    });
+    section.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.target.matches('#op-editor input[type="text"]')) { e.preventDefault(); save(); }
+      if (e.key === 'Escape' && e.target.closest('#op-editor')) closeEditor();
+    });
+
+    // Load on first reveal, like Brand Assets: most visits never open this tab.
+    const panel = document.querySelector('.bizinfo-tab-panel[data-panel="products"]');
+    let loaded = false;
+    const maybeLoad = () => {
+      if (loaded || !panel || panel.classList.contains('hidden')) return;
+      loaded = true;
+      load();
+    };
+    new MutationObserver(maybeLoad).observe(panel, { attributes: true, attributeFilter: ['class'] });
+    maybeLoad();
+  })();
+  </script>
+  </div><!-- /panel: products -->
 
   <!-- ══ Legal & Billing ════════════════════════════════════════════════════ -->
   <div class="bizinfo-tab-panel hidden" data-panel="legal">

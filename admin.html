@@ -244,29 +244,21 @@
       </section>
 
       <!-- ── Catalog ────────────────────────────────────────────────── -->
+      <!-- ── Assistants — one page per role: details, prompt, capabilities, go-live checks ──────
+           Replaced "Assistant Catalog" + "Master Data → Assistants" on 2026-10-10. One status per
+           role (Hidden · Coming soon · Beta · Live · Retired, src/utils/assistant-go-live.ts), changed
+           only through netlify/functions/admin-assistants.ts, which refuses a move while a check
+           fails. View key stays 'catalog' so existing links and the assistant_catalog permission hold. -->
       <section id="view-catalog" class="admin-view hidden">
-        <p class="text-sm text-gray-500 mb-5">Toggle &#34;Coming Soon&#34; / &#34;Live&#34; status. Switching to Live triggers the waitlist notification loop.</p>
-        <div class="flex flex-wrap items-center gap-3 mb-4 bg-white rounded-2xl border border-gray-200 p-4">
-          <label class="text-xs text-gray-600 font-semibold">Sort by
-            <select id="catalog-sort" onchange="setCatalogSort(this.value)" class="ml-1 border border-gray-200 rounded px-2 py-1 text-xs font-normal">
-              <option value="name">Role</option>
-              <option value="category">Category</option>
-              <option value="lifecycleState">Lifecycle</option>
-              <option value="waitlistCount">Waitlist</option>
-            </select>
-          </label>
-          <button id="catalog-sort-dir" onclick="toggleCatalogSortDir()" title="Toggle sort direction"
-            class="btn-utility px-3 py-1.5 text-xs font-semibold border rounded-lg transition">↑ Ascending</button>
-          <label class="text-xs text-gray-600 font-semibold">Group by
-            <select id="catalog-group" onchange="setCatalogGroup(this.value)" class="ml-1 border border-gray-200 rounded px-2 py-1 text-xs font-normal">
-              <option value="none">None</option>
-              <option value="category">Category</option>
-              <option value="status">Launched / Coming Soon</option>
-            </select>
-          </label>
-          <span id="catalog-count" class="text-xs text-gray-400 ml-auto"></span>
+        <div class="flex items-start justify-between flex-wrap gap-3 mb-4">
+          <p class="text-sm text-gray-500 max-w-3xl">Every assistant role, its status and whether it is ready for customers. Open one to edit its details, prompt and capabilities, and to change its status — <strong>Live</strong> and <strong>Beta</strong> stay locked until every go-live check passes.</p>
+          <button type="button" onclick="aaOpenCreate()" class="btn-primary px-3 py-2 text-sm font-bold rounded-lg transition">+ Add Assistant</button>
         </div>
-        <div id="catalog-grid" class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <div class="flex flex-wrap items-center gap-2 mb-4 bg-white rounded-2xl border border-gray-200 p-3">
+          <div id="aa-filter" class="flex flex-wrap gap-1.5"></div>
+          <input id="aa-search" type="search" placeholder="Search name or role key" oninput="aaRender()" class="ml-auto border border-gray-200 rounded-lg px-3 py-1.5 text-sm w-56">
+        </div>
+        <div id="aa-list" class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
           <div class="px-5 py-8 text-center text-gray-400">Loading…</div>
         </div>
       </section>
@@ -537,7 +529,6 @@
         <div class="flex gap-1 overflow-x-auto mb-5 border-b border-gray-200 pb-0" id="md-tab-bar">
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="plans" onclick="mdSwitchTab('plans')">Plans</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="plan-features" onclick="mdSwitchTab('plan-features')">Plan Features</button>
-          <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="assistants" onclick="mdSwitchTab('assistants')">Assistants</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="assistant-features" onclick="mdSwitchTab('assistant-features')">Assistant Features</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="assistant-versions" onclick="mdSwitchTab('assistant-versions')">Versions</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="feature-flags-md" onclick="mdSwitchTab('feature-flags-md')">Flag Definitions</button>
@@ -576,22 +567,6 @@
           </div>
           <div id="md-plan-features-body" class="bg-white rounded-2xl border border-gray-200 overflow-x-auto p-1">
             <div class="px-5 py-8 text-center text-gray-400">Loading…</div>
-          </div>
-        </div>
-
-        <!-- Assistants tab -->
-        <div id="md-pane-assistants" class="md-pane hidden">
-          <div class="flex items-center justify-between mb-3">
-            <h2 class="text-sm font-bold text-gray-700">Master Assistants</h2>
-            <button onclick="mdOpenAdd('assistants')" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition">+ Add Assistant</button>
-          </div>
-          <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
-            <table class="w-full text-sm admin-responsive-table">
-              <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide">
-                <tr><th class="px-4 py-3 text-left">Name</th><th class="px-4 py-3 text-left">Category</th><th class="px-4 py-3 text-left">Risk</th><th class="px-4 py-3 text-center">Active</th><th class="px-4 py-3 text-left">Actions</th></tr>
-              </thead>
-              <tbody id="md-assistants-tbody"><tr><td colspan="5" class="px-5 py-8 text-center text-gray-400">Loading…</td></tr></tbody>
-            </table>
           </div>
         </div>
 
@@ -1326,7 +1301,7 @@
               <div id="bp-test-strict-rules" class="space-y-1.5 mt-2"></div>
               <div id="bp-test-compliance-note" class="hidden text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-3 mt-2">
                 <strong>Compliance failure detected.</strong> Consider refining the system prompt or strict rules for this assistant.
-                <a id="bp-test-edit-link" href="#" onclick="adminGoTo('master-data'); return false;" class="ml-1 underline font-semibold">Navigate to Master Data → Assistants to edit.</a>
+                <a id="bp-test-edit-link" href="#" onclick="adminGoTo('catalog'); return false;" class="ml-1 underline font-semibold">Open Configuration → Assistants to edit.</a>
               </div>
             </div>
 
@@ -1915,9 +1890,15 @@
             <h2 class="text-lg font-extrabold text-gray-900">What's New Emails</h2>
             <p class="text-sm text-gray-500 mt-0.5">The weekly email telling customers about new features. Each week's draft arrives here with its screenshots. Review and edit it, send yourself a test, then approve it. Nothing is sent until you do.</p>
           </div>
-          <button type="button" onclick="loadProductUpdates()" class="btn-utility px-3 py-2 text-sm font-semibold border rounded-lg transition">↻ Refresh</button>
+          <div class="flex items-center gap-2">
+            <!-- Asks the Mac for a draft now instead of waiting for the weekly run. It never sends:
+                 the draft arrives below as "Waiting for review" (src/utils/product-update-draft-request.ts). -->
+            <button type="button" id="pu-draft-now" onclick="puRequestDraft()" class="btn-primary px-3 py-2 text-sm font-bold rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">✍️ Draft this week's email now</button>
+            <button type="button" onclick="loadProductUpdates()" class="btn-utility px-3 py-2 text-sm font-semibold border rounded-lg transition">↻ Refresh</button>
+          </div>
         </div>
 
+        <p id="pu-draft-request" class="hidden mb-4 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2"></p>
         <div id="pu-status" class="hidden mb-4 text-sm rounded-lg px-3 py-2"></div>
 
         <div class="bg-white border border-gray-200 rounded-xl mb-6 overflow-hidden">
@@ -2148,24 +2129,26 @@
      matter what — so `classList.remove('hidden')` on the modal itself did nothing and
      the buttons read as dead. They sat inside #view-audit-log until 2026-09-03. Keep any
      dialog reachable from more than one view at body level. ──────────────────────── -->
-<!-- Lifecycle Transition Modal — US-ADM-4.1.1 -->
-<div id="lifecycle-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
-  <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 relative">
-    <button onclick="document.getElementById('lifecycle-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold">✕</button>
-    <h3 class="text-base font-bold text-gray-900 mb-1">Change Lifecycle State</h3>
-    <p id="lifecycle-modal-label" class="text-sm text-gray-500 mb-4"></p>
-    <div class="space-y-3">
-      <div>
-        <label class="text-xs font-bold text-gray-500 uppercase">New State</label>
-        <select id="lifecycle-new-state" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></select>
+<!-- Assistant drawer — Admin ▸ Assistants. Body level, like the other cross-view dialogs. -->
+<div id="aa-drawer" class="hidden fixed inset-0 z-40 flex justify-end bg-gray-900/40" onclick="if (event.target === this) aaClose()">
+  <div class="bg-white w-full max-w-3xl h-full overflow-y-auto shadow-2xl flex flex-col">
+    <div class="px-6 pt-5 pb-3 border-b border-gray-200 sticky top-0 bg-white z-10">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <h2 id="aa-title" class="text-lg font-extrabold text-gray-900 truncate">Assistant</h2>
+          <p id="aa-subtitle" class="text-xs text-gray-500 font-mono"></p>
+        </div>
+        <button type="button" onclick="aaClose()" class="text-gray-400 hover:text-gray-700 text-xl font-bold" aria-label="Close">✕</button>
       </div>
-      <div>
-        <label class="text-xs font-bold text-gray-500 uppercase">Changelog Note <span class="text-red-500">*</span></label>
-        <textarea id="lifecycle-note" rows="2" placeholder="Reason for this transition…" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none"></textarea>
+      <div id="aa-status-bar" class="mt-3"></div>
+      <div class="flex gap-1 mt-3 -mb-3" id="aa-tabs">
+        <button type="button" class="aa-tab px-3 py-2 text-sm font-semibold border-b-2" data-tab="checks" onclick="aaTab('checks')">Go-live checks</button>
+        <button type="button" class="aa-tab px-3 py-2 text-sm font-semibold border-b-2" data-tab="details" onclick="aaTab('details')">Details</button>
+        <button type="button" class="aa-tab px-3 py-2 text-sm font-semibold border-b-2" data-tab="prompt" onclick="aaTab('prompt')">Prompt &amp; versions</button>
+        <button type="button" class="aa-tab px-3 py-2 text-sm font-semibold border-b-2" data-tab="capabilities" onclick="aaTab('capabilities')">Capabilities</button>
       </div>
-      <div id="lifecycle-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
-      <button onclick="submitLifecycleTransition()" class="btn-primary w-full py-2.5 text-sm font-bold rounded-lg">Apply Transition</button>
     </div>
+    <div id="aa-body" class="p-6 flex-1"></div>
   </div>
 </div>
 
@@ -2194,18 +2177,6 @@
       </div>
     </div>
     <div id="version-history-list" class="overflow-y-auto flex-1 space-y-2"></div>
-  </div>
-</div>
-
-<!-- Bulk Publish Modal — US-ADM-4.1.1 -->
-<div id="bulk-publish-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
-  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative max-h-[80vh] overflow-y-auto">
-    <button onclick="document.getElementById('bulk-publish-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold">✕</button>
-    <h3 class="text-base font-bold text-gray-900 mb-1">Bulk Publish — Beta → Live</h3>
-    <p class="text-sm text-gray-500 mb-4">Each assistant requires an individual changelog note before publishing.</p>
-    <div id="bulk-publish-list" class="space-y-3 mb-4"></div>
-    <div id="bulk-publish-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3"></div>
-    <button onclick="submitBulkPublish()" class="btn-golive w-full py-2.5 text-sm font-bold rounded-lg">🚀 Publish All to Live</button>
   </div>
 </div>
 
@@ -2674,7 +2645,7 @@ function debounce(fn, ms) {
 // ── Navigation — US-ADM-1.4.1 Two-tier nav ───────────────────────────────────
 const VIEW_LABELS = {
   dashboard: 'Dashboard', users: 'All Users', tickets: 'Support Tickets',
-  catalog: 'Assistant Catalog', analytics: 'Analytics', 'model-config': 'AI Model Config',
+  catalog: 'Assistants', analytics: 'Analytics', 'model-config': 'AI Model Config',
   logs: 'System Logs', 'audit-log': 'Audit Log', 'security-abuse': 'Security & Abuse', cogs: 'COGS Dashboard',
   reconciliation: 'Stripe Reconciliation', dunning: 'Dunning Queue', disputes: 'Disputes',
   'publish-pipeline': 'Publishing Pipeline',
@@ -2734,7 +2705,7 @@ const ADMIN_CATS = {
     { view: 'cogs',           icon: '💰', label: 'COGS Dashboard',        perm: 'view_cogs' },
   ]},
   assistants: { label: 'Assistants', children: [
-    { view: 'catalog',              icon: '🤖', label: 'Assistant Catalog',   perm: 'assistant_catalog', group: 'Configuration' },
+    { view: 'catalog',              icon: '🤖', label: 'Assistants',          perm: 'assistant_catalog', group: 'Configuration' },
     // Assistant Features moved to Master Data → Assistant Features, where its catalog is now
     // DB-driven and sits alongside the assistant copy fields it relates to.
     { view: 'blueprint-inspector',  icon: '🔬', label: 'Blueprint Inspector', perm: 'assistant_catalog', group: 'Configuration' },
@@ -3083,7 +3054,7 @@ function adminNav(view) {
   if (view === 'dashboard')    loadDashboard();
   if (view === 'users')        loadUsers();
   if (view === 'tickets')      loadTickets();
-  if (view === 'catalog')      loadCatalog();
+  if (view === 'catalog')      loadAssistantsAdmin();
   if (view === 'analytics')    { loadAnalytics(); loadChurnSignals(); }
   if (view === 'model-config') loadModelConfig();
   if (view === 'logs')         loadLogs();
@@ -6792,152 +6763,281 @@ async function submitReply(tid) {
   } catch(e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
-// ── Catalog ───────────────────────────────────────────────────────────────────
-// Rows are fetched once and kept here so sorting / grouping re-render without a refetch.
-let _catalogRows    = [];
-let _catalogSortKey  = 'name';   // name | category | lifecycleState | waitlistCount
-let _catalogSortDir  = 'asc';
-let _catalogGroupBy  = 'status'; // none | category | status
+// ── Assistants (Configuration) ───────────────────────────────────────────────────
+// One page per assistant role, replacing "Assistant Catalog" + "Master Data → Assistants" (2026-10-10).
+// Status: Hidden · Coming soon · Beta · Live · Retired — src/utils/assistant-go-live.ts. Changed only
+// through admin-assistants.ts (?action=status), which refuses while a blocking go-live check fails.
+// Details save through master-data-api (?resource=master-assistants), which no longer takes status.
+const AA_API = '/.netlify/functions/admin-assistants';
+const AA_STATUS = {
+  hidden:      { label: 'Hidden',      cls: 'bg-gray-100 text-gray-600',      means: 'Not in the catalogue. Nobody can see or hire it.' },
+  coming_soon: { label: 'Coming soon', cls: 'bg-amber-100 text-amber-800',    means: 'Listed in the catalogue; customers can only join the waitlist.' },
+  beta:        { label: 'Beta',        cls: 'bg-blue-100 text-blue-700',      means: 'Hireable only by workspaces with beta access.' },
+  live:        { label: 'Live',        cls: 'bg-emerald-100 text-emerald-700', means: 'Hireable by every customer.' },
+  retired:     { label: 'Retired',     cls: 'bg-red-100 text-red-600',        means: 'Removed from the catalogue. Assistants already hired keep working.' },
+};
+const AA_ORDER = ['hidden', 'coming_soon', 'beta', 'live', 'retired'];
+const AA_GROUPS = { details: 'Details', prompt: 'Prompt', built: 'Built and working', capabilities: 'Capabilities' };
+const _aa = { rows: [], filter: 'all', current: null, tab: 'checks', creating: false, caps: null, capsDirty: {} };
+const _aaEsc = (v) => escAdm(v == null ? '' : String(v));
+const _aaBadge = (st) => `<span class="text-xs font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${AA_STATUS[st]?.cls || ''}">${AA_STATUS[st]?.label || st}</span>`;
 
-async function loadCatalog() {
-  const el = document.getElementById('catalog-grid');
-  el.innerHTML = '<div class="px-5 py-8 text-center text-gray-400 animate-pulse">Loading…</div>';
+async function loadAssistantsAdmin() {
+  const host = document.getElementById('aa-list');
+  if (!host) return;
+  host.innerHTML = '<div class="px-5 py-8 text-center text-gray-400 animate-pulse">Loading…</div>';
   try {
-    const d = await api('/.netlify/functions/admin-api?resource=catalog');
-    _catalogRows = d.catalog || [];
-    renderCatalog();
-  } catch(e) {
-    _catalogRows = [];
-    el.innerHTML = `<div class="px-5 py-5 text-red-500 text-sm">${e.message}</div>`;
+    _aa.rows = (await api(AA_API)).assistants || [];
+    aaRender();
+  } catch (e) {
+    host.innerHTML = `<div class="px-5 py-5 text-red-500 text-sm">${_aaEsc(e.message)}</div>`;
   }
 }
 
-function setCatalogSort(key)      { _catalogSortKey = key; renderCatalog(); }
-function setCatalogGroup(group)   { _catalogGroupBy = group; renderCatalog(); }
-function toggleCatalogSortDir()   { _catalogSortDir = _catalogSortDir === 'asc' ? 'desc' : 'asc'; renderCatalog(); }
+function aaSetFilter(f) { _aa.filter = f; aaRender(); }
 
-// Lifecycle is ordered by pipeline position, not alphabetically — draft → archived reads as progress.
-const CATALOG_LIFECYCLE_ORDER = ['draft','review','beta','live','deprecated','archived'];
-
-function _catalogCompare(a, b) {
-  const dir = _catalogSortDir === 'asc' ? 1 : -1;
-  let cmp;
-  if (_catalogSortKey === 'waitlistCount') {
-    cmp = (a.waitlistCount || 0) - (b.waitlistCount || 0);
-  } else if (_catalogSortKey === 'lifecycleState') {
-    cmp = CATALOG_LIFECYCLE_ORDER.indexOf(a.lifecycleState || 'draft')
-        - CATALOG_LIFECYCLE_ORDER.indexOf(b.lifecycleState || 'draft');
-  } else {
-    cmp = String(a[_catalogSortKey] || '').localeCompare(String(b[_catalogSortKey] || ''), undefined, { sensitivity:'base' });
-  }
-  // Role name is the tie-breaker, and always A→Z — flipping it with the primary
-  // sort would shuffle equal rows for no reason the reader can see.
-  if (cmp === 0 && _catalogSortKey !== 'name') return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity:'base' });
-  return cmp * dir;
+function aaRender() {
+  const host = document.getElementById('aa-list');
+  const chips = document.getElementById('aa-filter');
+  if (!host || !chips) return;
+  const counts = Object.fromEntries(AA_ORDER.map((s) => [s, _aa.rows.filter((r) => r.status === s).length]));
+  chips.innerHTML = [['all', `All · ${_aa.rows.length}`], ...AA_ORDER.map((s) => [s, `${AA_STATUS[s].label} · ${counts[s]}`])]
+    .map(([k, label]) => `<button type="button" onclick="aaSetFilter('${k}')" class="px-2.5 py-1 text-xs font-bold rounded-full border ${_aa.filter === k ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}">${label}</button>`).join('');
+  const q = (document.getElementById('aa-search')?.value || '').trim().toLowerCase();
+  const rows = _aa.rows
+    .filter((r) => _aa.filter === 'all' || r.status === _aa.filter)
+    .filter((r) => !q || r.name.toLowerCase().includes(q) || r.roleKey.toLowerCase().includes(q))
+    .sort((a, b) => AA_ORDER.indexOf(b.status) - AA_ORDER.indexOf(a.status) || a.name.localeCompare(b.name));
+  const ready = (r) => !r.built
+    ? '<span class="text-xs font-semibold text-gray-400">Not built yet</span>'
+    : r.liveBlockers
+      ? `<span class="text-xs font-semibold text-amber-700">${r.liveBlockers} check${r.liveBlockers === 1 ? '' : 's'} to fix</span>`
+      : `<span class="text-xs font-semibold text-emerald-700">✓ Ready${r.warnings ? ` · ${r.warnings} warning${r.warnings === 1 ? '' : 's'}` : ''}</span>`;
+  host.innerHTML = `<table class="w-full text-sm">
+    <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase"><tr>
+      <th class="px-5 py-3 text-left">Assistant</th><th class="px-5 py-3 text-left">Category</th><th class="px-5 py-3 text-left">Status</th>
+      <th class="px-5 py-3 text-left">Ready to go live</th><th class="px-5 py-3 text-right">Waitlist</th><th class="px-5 py-3 text-right">Hired</th>
+    </tr></thead>
+    <tbody>${rows.map((r) => `<tr class="border-t border-gray-100 hover:bg-gray-50 cursor-pointer" onclick="aaOpen(${r.id})">
+      <td class="px-5 py-3"><div class="font-semibold text-gray-900">${_aaEsc(r.name)}</div><div class="text-[11px] text-gray-400 font-mono">${_aaEsc(r.roleKey)}</div></td>
+      <td class="px-5 py-3 text-xs text-gray-500">${_aaEsc(r.category)}</td>
+      <td class="px-5 py-3">${_aaBadge(r.status)}</td>
+      <td class="px-5 py-3">${ready(r)}</td>
+      <td class="px-5 py-3 text-right text-xs">${r.waitlistCount}</td>
+      <td class="px-5 py-3 text-right text-xs">${r.hiredCount}</td>
+    </tr>`).join('') || '<tr><td colspan="6" class="px-5 py-8 text-center text-gray-400">No assistants match.</td></tr>'}</tbody></table>`;
 }
 
-function renderCatalog() {
-  const el = document.getElementById('catalog-grid');
-  if (!el) return;
+function aaClose() {
+  document.getElementById('aa-drawer').classList.add('hidden');
+  _aa.current = null; _aa.creating = false;
+}
 
-  const dirBtn = document.getElementById('catalog-sort-dir');
-  if (dirBtn) dirBtn.textContent = _catalogSortDir === 'asc' ? '↑ Ascending' : '↓ Descending';
-  const sortSel = document.getElementById('catalog-sort');
-  if (sortSel) sortSel.value = _catalogSortKey;
-  const groupSel = document.getElementById('catalog-group');
-  if (groupSel) groupSel.value = _catalogGroupBy;
-  const countEl = document.getElementById('catalog-count');
-  if (countEl) countEl.textContent = `${_catalogRows.length} assistant role${_catalogRows.length === 1 ? '' : 's'}`;
-
-  // Bulk publish controls for beta assistants
-  const betaAssistants = _catalogRows.filter(a => a.lifecycleState === 'beta');
-  const bulkPublishBar = betaAssistants.length
-    ? `<div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
-         <span class="text-sm text-blue-700 font-semibold">${betaAssistants.length} assistant${betaAssistants.length > 1 ? 's' : ''} in beta — ready to bulk publish</span>
-         <button onclick="openBulkPublish()" class="btn-golive px-4 py-1.5 text-sm font-bold rounded-lg">🚀 Bulk Publish to Live</button>
-       </div>`
-    : '';
-
-  const sorted = _catalogRows.slice().sort(_catalogCompare);
-
-  // Build [groupLabel, rows] pairs — a single unlabelled group when grouping is off.
-  let groups;
-  if (_catalogGroupBy === 'category') {
-    const buckets = new Map();
-    sorted.forEach(a => {
-      const k = a.category || 'Uncategorised';
-      if (!buckets.has(k)) buckets.set(k, []);
-      buckets.get(k).push(a);
-    });
-    groups = [...buckets.entries()].sort((x, y) => x[0].localeCompare(y[0], undefined, { sensitivity:'base' }));
-  } else if (_catalogGroupBy === 'status') {
-    const launched = sorted.filter(a => !a.comingSoon);
-    const soon     = sorted.filter(a => a.comingSoon);
-    groups = [['🚀 Launched', launched], ['⏸ Coming Soon', soon]].filter(g => g[1].length);
-  } else {
-    groups = [[null, sorted]];
+async function aaOpen(id, tab) {
+  _aa.creating = false;
+  _aa.caps = null; _aa.capsDirty = {};
+  document.getElementById('aa-drawer').classList.remove('hidden');
+  document.getElementById('aa-body').innerHTML = '<p class="text-gray-400 text-sm animate-pulse">Loading…</p>';
+  document.getElementById('aa-tabs').classList.remove('hidden');
+  try {
+    _aa.current = await api(`${AA_API}?id=${id}`);
+    _aa.tab = tab || _aa.tab || 'checks';
+    aaPaintHeader();
+    aaTab(_aa.tab);
+  } catch (e) {
+    document.getElementById('aa-body').innerHTML = `<p class="text-red-500 text-sm">${_aaEsc(e.message)}</p>`;
   }
+}
 
-  const body = groups.map(([label, rows]) => {
-    const header = label
-      ? `<tr class="bg-gray-100/70 border-t border-gray-200">
-           <td colspan="5" class="px-5 py-2 text-xs font-bold text-gray-600 uppercase tracking-wide">${label} <span class="text-gray-400 font-semibold normal-case">· ${rows.length}</span></td>
-         </tr>`
-      : '';
-    return header + rows.map(_catalogRowHtml).join('');
+function aaPaintHeader() {
+  const d = _aa.current;
+  document.getElementById('aa-title').textContent = d.assistant.name;
+  document.getElementById('aa-subtitle').textContent = `${d.assistant.roleKey} · ${d.waitlistCount} on waitlist · ${d.hiredCount} hired`;
+  const blockersOf = (st) => (d.blockers[st] || []);
+  const btns = AA_ORDER.map((st) => {
+    const current = st === d.status;
+    const blocked = !current && blockersOf(st).length > 0;
+    const title = current ? 'Current status' : blocked ? `Fix ${blockersOf(st).length} check(s) first: ${blockersOf(st).map((c) => c.label).join('; ')}` : AA_STATUS[st].means;
+    return `<button type="button" ${current || blocked ? 'disabled' : ''} title="${_aaEsc(title)}" onclick="aaSetStatus('${st}')"
+      class="px-3 py-1.5 text-xs font-bold rounded-lg border transition ${current ? `${AA_STATUS[st].cls} border-transparent cursor-default` : blocked ? 'bg-white text-gray-300 border-gray-200 cursor-not-allowed' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}">
+      ${current ? '● ' : blocked ? '🔒 ' : ''}${AA_STATUS[st].label}</button>`;
   }).join('');
-
-  el.innerHTML = bulkPublishBar + `<table class="w-full text-sm">
-    <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase">
-      <tr>
-        <th class="px-5 py-3 text-left">Role</th>
-        <th class="px-5 py-3 text-left">Category</th>
-        <th class="px-5 py-3 text-left">Lifecycle</th>
-        <th class="px-5 py-3 text-left">Waitlist</th>
-        <th class="px-5 py-3 text-left">Actions</th>
-      </tr>
-    </thead>
-    <tbody>${body || '<tr><td colspan="5" class="px-5 py-8 text-center text-gray-400">No assistant roles.</td></tr>'}</tbody>
-  </table>`;
+  document.getElementById('aa-status-bar').innerHTML = `<div class="flex flex-wrap items-center gap-1.5">${btns}</div>
+    <p class="text-xs text-gray-500 mt-1.5">${_aaBadge(d.status)} <span class="ml-1">${AA_STATUS[d.status].means}</span></p>`;
 }
 
-function _catalogRowHtml(a) {
-  const lcColors = {draft:'bg-gray-100 text-gray-600', review:'bg-yellow-100 text-yellow-700', beta:'bg-blue-100 text-blue-700', live:'bg-emerald-100 text-emerald-700', deprecated:'bg-orange-100 text-orange-700', archived:'bg-red-100 text-red-600'};
-  const lcBadge = `<span class="text-xs font-bold px-2 py-0.5 rounded-full ${lcColors[a.lifecycleState]||'bg-gray-100 text-gray-500'}">${a.lifecycleState||'draft'}</span>`;
-  return `<tr class="border-t border-gray-50 hover:bg-gray-50 transition">
-    <td class="px-5 py-3 font-medium">${a.name}</td>
-    <td class="px-5 py-3 text-xs text-gray-500">${a.category}</td>
-    <td class="px-5 py-3">${lcBadge}</td>
-    <td class="px-5 py-3 text-xs">${a.waitlistCount || 0} entries</td>
-    <td class="px-5 py-3 flex gap-2 flex-wrap">
-      <button onclick="toggleCatalogStatus(${a.id}, ${a.comingSoon})"
-        class="px-2.5 py-1 text-xs font-bold ${a.comingSoon?'bg-emerald-600 text-white hover:bg-emerald-700':'bg-amber-100 text-amber-700 hover:opacity-80'} rounded-lg transition">
-        ${a.comingSoon ? '🚀 Launch' : '⏸ Coming Soon'}
-      </button>
-      <button onclick="openLifecycleTransition(${a.id},'${a.name}','${a.lifecycleState||'draft'}')" class="btn-secondary px-2.5 py-1 text-xs font-bold border rounded-lg hover:opacity-80">
-        🔄 State
-      </button>
-      <button onclick="openVersionHistory(${a.id},'${a.name}')" class="btn-secondary px-2.5 py-1 text-xs font-bold border rounded-lg hover:opacity-80">
-        📜 Versions
-      </button>
-    </td>
-  </tr>`;
+function aaTab(tab) {
+  _aa.tab = tab;
+  document.querySelectorAll('.aa-tab').forEach((b) => {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle('border-indigo-600', on); b.classList.toggle('text-indigo-600', on);
+    b.classList.toggle('border-transparent', !on); b.classList.toggle('text-gray-500', !on);
+  });
+  if (tab === 'checks') aaRenderChecks();
+  else if (tab === 'details') aaRenderDetails();
+  else if (tab === 'prompt') aaRenderPrompt();
+  else if (tab === 'capabilities') aaRenderCapabilities();
 }
 
-async function toggleCatalogStatus(id, currentlyComingSoon) {
-  const action = currentlyComingSoon ? 'launch this role live' : 'mark this role as Coming Soon';
-  if (!(await window.confirmModal(`${currentlyComingSoon ? 'This will trigger the waitlist email blast.' : ''}`, { title: `Are you sure you want to ${window.escapeHtml(action)}?` }))) return;
+function aaRenderChecks() {
+  const d = _aa.current;
+  const groups = Object.keys(AA_GROUPS).map((g) => {
+    const items = d.checks.filter((c) => c.group === g);
+    if (!items.length) return '';
+    return `<div class="mb-5"><h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">${AA_GROUPS[g]}</h3>
+      <ul class="space-y-1.5">${items.map((c) => `<li class="flex items-start gap-2 text-sm">
+        <span class="shrink-0 mt-0.5">${c.ok ? '✅' : c.severity === 'blocking' ? '❌' : '⚠️'}</span>
+        <span><span class="${c.ok ? 'text-gray-700' : 'font-semibold text-gray-900'}">${_aaEsc(c.label)}</span>
+        ${!c.ok && c.fix ? `<span class="block text-xs ${c.severity === 'blocking' ? 'text-red-600' : 'text-amber-700'}">${_aaEsc(c.fix)}</span>` : ''}</span></li>`).join('')}</ul></div>`;
+  }).join('');
+  const need = (st, what) => {
+    const b = d.blockers[st] || [];
+    return `<li><strong>${AA_STATUS[st].label}</strong> needs ${what} — ${b.length ? `<span class="text-red-600">${b.length} still failing</span>` : '<span class="text-emerald-700">ready</span>'}</li>`;
+  };
+  document.getElementById('aa-body').innerHTML = `
+    <div class="mb-5 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3">
+      <p class="font-semibold text-gray-700 mb-1">What each status needs</p>
+      <ul class="space-y-0.5">${need('coming_soon', 'the Details checks (its catalogue card is public)')}${need('beta', 'every blocking check')}${need('live', 'every blocking check')}</ul>
+      <p class="mt-1.5">❌ blocks the status · ⚠️ is a warning and never blocks. "Built and working" can only be fixed by a developer.</p>
+    </div>${groups}`;
+}
+
+function aaDetailFields(creating) {
+  // The Master Data field list, minus the prompt (its own tab) — except on create, where it becomes v1.
+  return (MD_FIELDS['master-assistants'] || []).filter((f) => creating || f.key !== 'systemPrompt');
+}
+
+function aaFieldHtml(f, record, creating) {
+  const val = mdGetPath(record, f.key) ?? '';
+  const req = f.required ? ' <span class="text-red-500">*</span>' : '';
+  const help = f.help ? `<p class="text-xs text-gray-400 mt-1">${_aaEsc(f.help)}</p>` : '';
+  const locked = !creating && f.readOnlyOnEdit;
+  const ph = _aaEsc(f.placeholder || '');
+  const base = 'w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none';
+  if (f.type === 'checkbox') return `<label class="flex items-start gap-2 sm:col-span-2"><input type="checkbox" id="aa-f-${f.key}" class="w-4 h-4 mt-0.5 accent-indigo-600" ${val ? 'checked' : ''}><span class="text-sm text-gray-700">${_aaEsc(f.label)}${help}</span></label>`;
+  if (f.type === 'list') return `<div class="sm:col-span-2"><label class="block text-xs font-bold text-gray-500 mb-1">${_aaEsc(f.label)}</label><textarea id="aa-f-${f.key}" rows="4" placeholder="${ph}" class="${base}">${_aaEsc(Array.isArray(val) ? val.join('\n') : val)}</textarea>${help}</div>`;
+  if (f.type === 'textarea') return `<div class="sm:col-span-2"><label class="block text-xs font-bold text-gray-500 mb-1">${_aaEsc(f.label)}${req}</label><textarea id="aa-f-${f.key}" rows="${f.key === 'systemPrompt' ? 8 : 4}" placeholder="${ph}" class="${base}">${_aaEsc(val)}</textarea>${help}</div>`;
+  return `<div><label class="block text-xs font-bold text-gray-500 mb-1">${_aaEsc(f.label)}${req}</label><input id="aa-f-${f.key}" type="${f.type}" value="${_aaEsc(val)}" placeholder="${ph}" ${locked ? 'disabled' : ''} class="${base} ${locked ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}">${help}</div>`;
+}
+
+function aaRenderDetails() {
+  const creating = _aa.creating;
+  const record = creating ? {} : _aa.current.assistant;
+  document.getElementById('aa-body').innerHTML = `
+    ${creating ? '<p class="text-sm text-gray-600 mb-4">A new assistant starts <strong>Hidden</strong>. Once saved, work through its go-live checks, then set its status.</p>' : ''}
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">${aaDetailFields(creating).map((f) => aaFieldHtml(f, record, creating)).join('')}</div>
+    <div class="flex justify-end gap-2 mt-5">
+      ${creating ? '<button type="button" onclick="aaClose()" class="btn-secondary px-4 py-2 text-sm font-bold border rounded-lg">Cancel</button>' : ''}
+      <button type="button" id="aa-save" onclick="aaSaveDetails()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">${creating ? 'Create Assistant' : 'Save Details'}</button>
+    </div>`;
+}
+
+async function aaSaveDetails() {
+  const creating = _aa.creating;
+  const body = {};
+  for (const f of aaDetailFields(creating)) {
+    const el = document.getElementById('aa-f-' + f.key);
+    if (!el || (!creating && f.readOnlyOnEdit)) continue;
+    let value;
+    if (f.type === 'checkbox') value = el.checked;
+    else if (f.type === 'number') value = el.value !== '' ? Number(el.value) : null;
+    else if (f.type === 'list') value = el.value.split('\n').map((x) => x.trim()).filter(Boolean);
+    else value = el.value;
+    if (f.required && (value === '' || value === null)) { window.showToast?.(`${f.label} is required.`, { icon: '⚠️' }); el.focus(); return; }
+    mdSetPath(body, f.key, value);
+  }
+  const btn = document.getElementById('aa-save');
+  btn.disabled = true;
   try {
-    // Use master-assistants PATCH which also handles notification fan-out
-    const r = await fetch(`/.netlify/functions/master-assistants?id=${id}`, {
-      method:'PATCH', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ comingSoon: !currentlyComingSoon }),
-    });
-    if (!r.ok) throw new Error((await r.json()).error || 'Failed');
-    const d = await r.json();
-    if (d.notifiedCount) window.showToast?.(`Role launched! ${d.notifiedCount} users notified.`, { icon: '✅' });
-    loadCatalog();
-  } catch(e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+    const url = MD_API + '?resource=master-assistants' + (creating ? '' : '&id=' + _aa.current.assistant.id);
+    const saved = await api(url, { method: creating ? 'POST' : 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    window.showToast?.(creating ? 'Assistant created — it is Hidden until its checks pass.' : 'Details saved.', { icon: '✅' });
+    await aaOpen(creating ? saved.id : _aa.current.assistant.id, 'checks');
+    loadAssistantsAdmin();
+  } catch (e) {
+    window.showToast?.('Save failed: ' + e.message, { icon: '⚠️' });
+    btn.disabled = false;
+  }
+}
+
+function aaOpenCreate() {
+  _aa.creating = true; _aa.current = null;
+  document.getElementById('aa-drawer').classList.remove('hidden');
+  document.getElementById('aa-title').textContent = 'New assistant';
+  document.getElementById('aa-subtitle').textContent = '';
+  document.getElementById('aa-status-bar').innerHTML = _aaBadge('hidden') + ' <span class="text-xs text-gray-500 ml-1">New assistants start Hidden.</span>';
+  document.getElementById('aa-tabs').classList.add('hidden');
+  aaRenderDetails();
+}
+
+function aaRenderPrompt() {
+  const a = _aa.current.assistant;
+  const versionCheck = _aa.current.checks.find((c) => c.key === 'version');
+  document.getElementById('aa-body').innerHTML = `
+    <p class="text-sm text-gray-600 mb-3">Every prompt change is a new, permanent version, and any earlier one can be restored.</p>
+    <p class="text-sm mb-4">${versionCheck && versionCheck.ok ? '✅ This assistant has a current prompt version.' : '❌ No prompt version yet — create the first one.'}</p>
+    <button type="button" onclick="openVersionHistory(${a.id}, ${_aaEsc(JSON.stringify(a.name))})" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Open versions</button>
+    <p class="text-xs text-gray-400 mt-3">Close the versions window to come back here; reopen this assistant to refresh its checks.</p>`;
+}
+
+async function aaRenderCapabilities() {
+  const body = document.getElementById('aa-body');
+  body.innerHTML = '<p class="text-gray-400 text-sm animate-pulse">Loading…</p>';
+  try {
+    if (!_aa.caps) _aa.caps = await api(MD_API + '?resource=assistant-feature-values');
+    const { features, values } = _aa.caps;
+    const id = _aa.current.assistant.id;
+    const mine = values[id] || {};
+    body.innerHTML = `
+      <p class="text-sm text-gray-600 mb-4">What a hired ${_aaEsc(_aa.current.assistant.name)} is allowed to do. A capability switched off platform-wide shows greyed out.</p>
+      <div class="space-y-2">${features.map((f) => {
+        const on = (f.key in _aa.capsDirty) ? _aa.capsDirty[f.key] : mine[f.key] === true;
+        return `<label class="flex items-start gap-3 p-3 border border-gray-200 rounded-xl ${f.isEnabled ? '' : 'opacity-50'}">
+          <input type="checkbox" ${on ? 'checked' : ''} ${f.isEnabled ? '' : 'disabled'} onchange="_aa.capsDirty[${_aaEsc(JSON.stringify(f.key))}] = this.checked; document.getElementById('aa-caps-save').disabled = false" class="w-4 h-4 mt-0.5 accent-emerald-600">
+          <span><span class="text-sm font-semibold text-gray-800">${_aaEsc(f.label)}</span> <span class="text-[11px] text-gray-400 font-mono">${_aaEsc(f.key)}</span>
+          ${f.description ? `<span class="block text-xs text-gray-500">${_aaEsc(f.description)}</span>` : ''}</span></label>`;
+      }).join('') || '<p class="text-sm text-gray-400">No capabilities are defined.</p>'}</div>
+      <div class="flex justify-end mt-4"><button type="button" id="aa-caps-save" disabled onclick="aaSaveCapabilities()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">Save Capabilities</button></div>`;
+  } catch (e) {
+    body.innerHTML = `<p class="text-red-500 text-sm">${_aaEsc(e.message)}</p>`;
+  }
+}
+
+async function aaSaveCapabilities() {
+  const id = _aa.current.assistant.id;
+  const updates = Object.entries(_aa.capsDirty).map(([key, value]) => ({ assistantId: id, key, value }));
+  if (!updates.length) return;
+  try {
+    await api(MD_API + '?resource=assistant-feature-values', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updates }) });
+    window.showToast?.('Capabilities saved — live immediately.', { icon: '✅' });
+    await aaOpen(id, 'capabilities');
+    loadAssistantsAdmin();
+  } catch (e) { window.showToast?.('Save failed: ' + e.message, { icon: '⚠️' }); }
+}
+
+async function aaSetStatus(next) {
+  const d = _aa.current;
+  const from = d.status;
+  const effects = {
+    live: from === 'live' ? '' : `Every customer will be able to hire it.${d.waitlistCount ? ` The ${d.waitlistCount} people on its waitlist are emailed,` : ''} and users who opted in to new-assistant alerts get a notification.`,
+    beta: 'Only workspaces with beta access will be able to hire it. Nobody is notified.',
+    coming_soon: 'It appears in the catalogue with a waitlist button. Nobody can hire it yet.',
+    hidden: `It disappears from the catalogue.${d.hiredCount ? ` The ${d.hiredCount} already hired keep working.` : ''}`,
+    retired: `It is removed from the catalogue for good.${d.hiredCount ? ` The ${d.hiredCount} already hired keep working.` : ''}`,
+  };
+  const ok = await window.confirmModal(effects[next] || '', {
+    title: `Set ${d.assistant.name} to ${AA_STATUS[next].label}?`,
+    confirmLabel: `Set ${AA_STATUS[next].label}`, cancelLabel: 'Cancel',
+  });
+  if (!ok) return;
+  try {
+    const r = await api(`${AA_API}?id=${d.assistant.id}&action=status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: next }) });
+    window.showToast?.(`${d.assistant.name} is now ${AA_STATUS[next].label}.${r.notifiedCount ? ` ${r.notifiedCount} users notified.` : ''}`, { icon: '✅' });
+  } catch (e) {
+    window.showToast?.(e.message, { icon: '⚠️' });
+  }
+  await aaOpen(d.assistant.id);
+  loadAssistantsAdmin();
 }
 
 // ── System Logs ───────────────────────────────────────────────────────────────
@@ -8392,48 +8492,6 @@ async function createModelConfig() {
 }
 
 // ── US-ADM-4.1.1: Assistant Lifecycle & Version Control ──────────────────────
-const LIFECYCLE_TRANSITIONS = {
-  draft: ['review'],
-  review: ['beta', 'draft'],
-  beta: ['live', 'review'],
-  live: ['deprecated'],
-  deprecated: ['archived', 'live'],
-  archived: [],
-};
-
-let _lcAssistantId = null;
-
-function openLifecycleTransition(id, name, currentState) {
-  _lcAssistantId = id;
-  document.getElementById('lifecycle-modal-label').textContent = `${name} — current: ${currentState}`;
-  document.getElementById('lifecycle-note').value = '';
-  document.getElementById('lifecycle-error').classList.add('hidden');
-  const select = document.getElementById('lifecycle-new-state');
-  const options = LIFECYCLE_TRANSITIONS[currentState] || [];
-  select.innerHTML = options.length
-    ? options.map(s => `<option value="${s}">${s}</option>`).join('')
-    : '<option disabled>No valid transitions from this state</option>';
-  document.getElementById('lifecycle-modal').classList.remove('hidden');
-}
-
-async function submitLifecycleTransition() {
-  const newState  = document.getElementById('lifecycle-new-state').value;
-  const note      = document.getElementById('lifecycle-note').value.trim();
-  const errEl     = document.getElementById('lifecycle-error');
-  errEl.classList.add('hidden');
-  if (!note) { errEl.textContent = 'Changelog note is required.'; errEl.classList.remove('hidden'); return; }
-  try {
-    const res  = await fetch(`/.netlify/functions/admin-api?resource=assistant-lifecycle&id=${_lcAssistantId}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ newState, changeNote: note }),
-    });
-    const data = await res.json();
-    if (!res.ok) { errEl.textContent = data.error || res.statusText; errEl.classList.remove('hidden'); return; }
-    document.getElementById('lifecycle-modal').classList.add('hidden');
-    loadCatalog();
-  } catch(e) { errEl.textContent = e.message; errEl.classList.remove('hidden'); }
-}
-
 let _versionAssistantId = null;
 let _versionCurrentId   = null;
 
@@ -8509,46 +8567,6 @@ async function rollbackToVersion(versionId, versionNumber) {
     window.showToast?.(`Rolled back to v${versionNumber}. New version v${data.versionNumber} created.`, { icon: '✅' });
     await refreshVersionHistory();
   } catch(e) { window.showToast?.(e.message, { icon: '⚠️' }); }
-}
-
-// Bulk publish
-let _betaCatalog = [];
-
-async function openBulkPublish() {
-  const res  = await fetch('/.netlify/functions/admin-api?resource=catalog');
-  const data = await res.json();
-  _betaCatalog = (data.catalog || []).filter(a => a.lifecycleState === 'beta');
-  const list = document.getElementById('bulk-publish-list');
-  list.innerHTML = _betaCatalog.map((a, i) => `
-    <div class="p-3 border border-gray-200 rounded-xl">
-      <p class="text-sm font-semibold text-gray-800 mb-2">${a.name}</p>
-      <input type="text" id="bulk-note-${a.id}" placeholder="Changelog note for ${a.name} *" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-    </div>
-  `).join('');
-  document.getElementById('bulk-publish-error').classList.add('hidden');
-  document.getElementById('bulk-publish-modal').classList.remove('hidden');
-}
-
-async function submitBulkPublish() {
-  const errEl = document.getElementById('bulk-publish-error');
-  errEl.classList.add('hidden');
-  const assistants = _betaCatalog.map(a => ({
-    id: a.id,
-    changeNote: document.getElementById(`bulk-note-${a.id}`)?.value.trim() || '',
-  }));
-  const missing = assistants.filter(a => !a.changeNote);
-  if (missing.length) { errEl.textContent = 'All assistants require a changelog note.'; errEl.classList.remove('hidden'); return; }
-  try {
-    const res  = await fetch('/.netlify/functions/admin-api?resource=assistant-bulk-publish', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ assistants }),
-    });
-    const data = await res.json();
-    if (!res.ok) { errEl.textContent = data.error || res.statusText; errEl.classList.remove('hidden'); return; }
-    document.getElementById('bulk-publish-modal').classList.add('hidden');
-    window.showToast?.(`${data.published} assistant${data.published > 1 ? 's' : ''} published to Live.`, { icon: '✅' });
-    loadCatalog();
-  } catch(e) { errEl.textContent = e.message; errEl.classList.remove('hidden'); }
 }
 
 // ── US-ADM-2.1.1: Billing Override Console ───────────────────────────────────
@@ -8929,7 +8947,36 @@ function _puFlash(text, kind = 'ok') {
   el.classList.remove('hidden');
 }
 
+// "Draft this week's email now". The draft is written on the founder's Mac (screenshots need its
+// signed-in browser), so this only RAISES a request; the scheduled Mac task polls for it.
+function _puRenderDraftRequest(d) {
+  const line = document.getElementById('pu-draft-request');
+  const btn = document.getElementById('pu-draft-now');
+  if (!line || !btn) return;
+  line.textContent = d && d.description ? d.description : '';
+  line.classList.toggle('hidden', !(d && d.description));
+  const st = d && d.request ? d.request.status : null;
+  btn.disabled = st === 'pending' || st === 'working';
+  btn.title = btn.disabled ? 'Already asked for — your Mac picks it up next time it checks.' : 'Ask your Mac to draft the email now. Nothing is sent until you approve it.';
+}
+async function _puLoadDraftRequest() {
+  try { _puRenderDraftRequest(await _puFetch('resource=draft-request')); } catch { _puRenderDraftRequest(null); }
+}
+async function puRequestDraft() {
+  const btn = document.getElementById('pu-draft-now');
+  btn.disabled = true;
+  try {
+    const d = await _puFetch('resource=draft-request', { method: 'POST' });
+    _puRenderDraftRequest(d);
+    _puFlash('Asked for a draft. Your Mac picks it up within a minute while it is on, and the draft takes a while to write and screenshot — it arrives here as "Waiting for review", and nothing is sent until you approve it.');
+  } catch (e) {
+    _puFlash(e.message, 'err');
+    _puLoadDraftRequest();
+  }
+}
+
 async function loadProductUpdates() {
+  _puLoadDraftRequest();
   const list = document.getElementById('pu-list');
   try {
     const { digests } = await _puFetch('resource=list');
@@ -9423,7 +9470,6 @@ const MD_API = '/.netlify/functions/master-data-api';
 
 const MD_TAB_RESOURCE = {
   'plans':              'master-plans',
-  'assistants':         'master-assistants',
   'assistant-versions': 'assistant-versions',
   'feature-flags-md':   'feature-flags',
   'languages':          'supported-languages',
@@ -9469,11 +9515,11 @@ const MD_FIELDS = {
       help: 'Leave blank to keep the current prompt. Any text here creates a new immutable version.' },
     { key: 'riskClassification', label: 'Risk',             type: 'text' },
     { key: 'milestoneTasksRequired', label: 'Milestone Tasks Required', type: 'number' },
-    // comingSoon is deliberately NOT here. Clearing it launches a role, and that has to go through
-    // master-assistants.ts so the waitlist launch-notification fan-out fires. Editing it here would
-    // write master_assistants directly and launch the role silently. Use Assistants → Assistant
-    // Catalog, which is the surface that owns launch/lifecycle state.
-    { key: 'isActive',          label: 'Active',            type: 'checkbox' },
+    // Status (Active / Coming soon / lifecycle) is deliberately NOT here: it is changed only by the
+    // status control on Configuration → Assistants, which runs the go-live checks first and announces
+    // a launch (netlify/functions/admin-assistants.ts). master-data-api rejects nothing but ignores it.
+    { key: 'specialCategoryClauseEnabled', label: 'Special-category refusal clause is in the prompt', type: 'checkbox',
+      help: 'Tick only once the current prompt refuses special-category personal data (health, religion, ethnicity…). A go-live check.' },
   ],
   'feature-flags': [
     { key: 'key',               label: 'Flag Key',          type: 'text',   required: true },
@@ -9970,7 +10016,6 @@ function mdRenderRow(tab, r) {
                            : '<span class="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs">Inactive</span>';
   const delBtn = (dbTable, id, lbl) => `<button onclick='openCascadeDeleteSheet("${dbTable}",${JSON.stringify(id)},"${String(lbl).replace(/"/g,"&quot;")}",()=>mdLoadTab(_mdActiveTab))' class="text-xs text-red-500 hover:underline font-semibold">Delete</button>`;
   if (tab === 'plans') { const priceBtn = `<button onclick='managePriceOpen(${JSON.stringify(r.id)})' class="text-xs text-emerald-600 hover:underline font-semibold mr-2">Manage Price</button>`; return `<tr class="border-t border-gray-100"><td class="px-4 py-3 font-medium">${r.name||''}</td><td class="px-4 py-3 text-gray-500">${r.tierKey||''}</td><td class="px-4 py-3 text-right font-mono">£${(r.monthlyPriceGbp||0)}</td><td class="px-4 py-3 text-center">${activeChip(r.isActive)}</td><td class="px-4 py-3 flex gap-2">${priceBtn}${editBtn}${delBtn('master_plans',r.id,r.name||'Plan')}</td></tr>`; }
-  if (tab === 'assistants') return `<tr class="border-t border-gray-100"><td class="px-4 py-3 font-medium">${r.name||''}</td><td class="px-4 py-3 text-gray-500">${r.category||''}</td><td class="px-4 py-3 text-gray-500">${r.riskClassification||''}</td><td class="px-4 py-3 text-center">${activeChip(r.isActive)}</td><td class="px-4 py-3 flex gap-2">${editBtn}${delBtn('master_assistants',r.id,r.name||'Assistant')}</td></tr>`;
   if (tab === 'assistant-versions') return `<tr class="border-t border-gray-100"><td class="px-4 py-3">${r.masterAssistantId||''}</td><td class="px-4 py-3 text-center font-mono">v${r.versionNumber||''}</td><td class="px-4 py-3 text-gray-500 max-w-xs truncate">${r.changeNote||''}</td><td class="px-4 py-3 text-gray-400 text-xs">${r.createdAt?new Date(r.createdAt).toLocaleDateString('en-GB'):''}</td></tr>`;
   if (tab === 'feature-flags-md') return `<tr class="border-t border-gray-100"><td class="px-4 py-3 font-mono text-xs">${r.key||''}</td><td class="px-4 py-3 text-gray-500 max-w-xs truncate">${r.description||''}</td><td class="px-4 py-3 text-center">${activeChip(r.isActive)}</td><td class="px-4 py-3 text-center font-mono">${r.rolloutPercentage??0}%</td><td class="px-4 py-3 flex gap-2">${editBtn}${delBtn('feature_flags',r.key,r.key||'Flag')}</td></tr>`;
   if (tab === 'languages') return `<tr class="border-t border-gray-100"><td class="px-4 py-3 font-mono">${r.code||''}</td><td class="px-4 py-3">${r.name||''}</td><td class="px-4 py-3 text-gray-500">${r.nativeName||''}</td><td class="px-4 py-3 text-center">${activeChip(r.isActive)}</td><td class="px-4 py-3 flex gap-2">${editBtn}${delBtn('supported_languages',r.code,r.name||r.code)}</td></tr>`;

@@ -59,7 +59,9 @@ function overlays(): { id: string; owner: string | null }[] {
 
 check('the page still looks the way these checks assume', () => {
     assert.ok($('.admin-view').length > 20, `expected many .admin-view sections, found ${$('.admin-view').length}`);
-    assert.ok(overlays().length >= 12, `expected at least 12 overlays with ids, found ${overlays().length}`);
+    // 11 since 2026-10-10: #lifecycle-modal and #bulk-publish-modal went with the old Assistant Catalog
+    // (their routes wrote status with no go-live checks); #aa-drawer arrived with Admin ▸ Assistants.
+    assert.ok(overlays().length >= 11, `expected at least 11 overlays with ids, found ${overlays().length}`);
 });
 
 check('no dialog is trapped inside a view section it is not opened from', () => {
@@ -84,10 +86,12 @@ check('the VIEW_LOCAL allow-list has not gone stale', () => {
     }
 });
 
-check('the six dialogs that were dead in production are at body level', () => {
+check('the dialogs that were dead in production are at body level (and the Assistants drawer)', () => {
+    // bulk-publish-modal and lifecycle-modal were removed with the old Assistant Catalog on 2026-10-10;
+    // aa-drawer is opened from Configuration → Assistants and must not be trapped either.
     const regressed = [
-        'billing-override-modal', 'ai-credits-modal', 'bulk-publish-modal',
-        'version-modal', 'lifecycle-modal', 'swan-read-panel',
+        'billing-override-modal', 'ai-credits-modal',
+        'version-modal', 'swan-read-panel', 'aa-drawer',
     ];
     for (const id of regressed) {
         assert.equal($(`[id="${id}"]`).length, 1, `#${id} should appear exactly once in admin.html`);

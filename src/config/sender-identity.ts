@@ -34,6 +34,12 @@ export interface SenderIdentity {
     industry?: string | null;
     websiteUrl?: string | null;
     /**
+     * The business's Products & Services, already rendered by renderProductsBlock()
+     * (src/utils/org-products.ts) — carried as text so this file stays free of DB imports. An
+     * outreach email that names a product names a real one, at its real price, or none at all.
+     */
+    productsBlock?: string | null;
+    /**
      * The sending assistant's email signature (src/utils/outreach-signature.ts), when one is set.
      * Its presence changes ONE instruction: the draft must not sign off, because the signature is
      * appended in code after the last sentence and a model sign-off would print twice.
@@ -71,6 +77,9 @@ export function senderIdentityBlock(sender: SenderIdentity): string {
 
     const website = (sender.websiteUrl || '').trim();
     if (website) lines.push(`Their website: ${website}`);
+
+    const products = (sender.productsBlock || '').trim();
+    if (products) lines.push(products);
 
     return lines.join('\n');
 }
