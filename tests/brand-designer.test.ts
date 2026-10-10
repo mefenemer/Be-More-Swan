@@ -217,9 +217,11 @@ check('the route reads the briefs every turn and names only real options', () =>
 
 console.log('\n──── registered everywhere a role must be ────');
 
-check('connection policy is EXPLICITLY empty — a missing entry fails open', () => {
+check('connection policy is EXPLICIT — Design (Canva) only; a missing entry fails open', () => {
     assert.ok(Object.prototype.hasOwnProperty.call(ROLE_CONNECTIONS, 'brand_designer'));
-    assert.deepStrictEqual(ROLE_CONNECTIONS.brand_designer, []);
+    // Canva designs join a brief through the library (Phase 4), so the Brand Designer must be able
+    // to connect Canva — and nothing else: no social account, no inbox.
+    assert.deepStrictEqual(ROLE_CONNECTIONS.brand_designer, ['design']);
 });
 
 check('dashboard: own tab, own KPIs, no social Review Queue or empty Data Hub', () => {

@@ -1890,15 +1890,9 @@
             <h2 class="text-lg font-extrabold text-gray-900">What's New Emails</h2>
             <p class="text-sm text-gray-500 mt-0.5">The weekly email telling customers about new features. Each week's draft arrives here with its screenshots. Review and edit it, send yourself a test, then approve it. Nothing is sent until you do.</p>
           </div>
-          <div class="flex items-center gap-2">
-            <!-- Asks the Mac for a draft now instead of waiting for the weekly run. It never sends:
-                 the draft arrives below as "Waiting for review" (src/utils/product-update-draft-request.ts). -->
-            <button type="button" id="pu-draft-now" onclick="puRequestDraft()" class="btn-primary px-3 py-2 text-sm font-bold rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">✍️ Draft this week's email now</button>
-            <button type="button" onclick="loadProductUpdates()" class="btn-utility px-3 py-2 text-sm font-semibold border rounded-lg transition">↻ Refresh</button>
-          </div>
+          <button type="button" onclick="loadProductUpdates()" class="btn-utility px-3 py-2 text-sm font-semibold border rounded-lg transition">↻ Refresh</button>
         </div>
 
-        <p id="pu-draft-request" class="hidden mb-4 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2"></p>
         <div id="pu-status" class="hidden mb-4 text-sm rounded-lg px-3 py-2"></div>
 
         <div class="bg-white border border-gray-200 rounded-xl mb-6 overflow-hidden">
@@ -6885,10 +6879,13 @@ function aaRenderChecks() {
     const items = d.checks.filter((c) => c.group === g);
     if (!items.length) return '';
     return `<div class="mb-5"><h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">${AA_GROUPS[g]}</h3>
-      <ul class="space-y-1.5">${items.map((c) => `<li class="flex items-start gap-2 text-sm">
+      <ul class="space-y-1.5">${items.map((c) => `<li class="text-sm" data-aa-check="${_aaEsc(c.key)}">
+        <div class="flex items-start gap-2">
         <span class="shrink-0 mt-0.5">${c.ok ? '✅' : c.severity === 'blocking' ? '❌' : '⚠️'}</span>
-        <span><span class="${c.ok ? 'text-gray-700' : 'font-semibold text-gray-900'}">${_aaEsc(c.label)}</span>
-        ${!c.ok && c.fix ? `<span class="block text-xs ${c.severity === 'blocking' ? 'text-red-600' : 'text-amber-700'}">${_aaEsc(c.fix)}</span>` : ''}</span></li>`).join('')}</ul></div>`;
+        <span class="flex-1"><span class="${c.ok ? 'text-gray-700' : 'font-semibold text-gray-900'}">${_aaEsc(c.label)}</span>
+        ${!c.ok && c.fix ? `<span class="block text-xs ${c.severity === 'blocking' ? 'text-red-600' : 'text-amber-700'}">${_aaEsc(c.fix)}</span>` : ''}</span>
+        ${c.ok ? '' : aaRemedyButton(c)}</div>
+        <div class="aa-proposal hidden ml-6 mt-2"></div></li>`).join('')}</ul></div>`;
   }).join('');
   const need = (st, what) => {
     const b = d.blockers[st] || [];
@@ -6900,6 +6897,82 @@ function aaRenderChecks() {
       <ul class="space-y-0.5">${need('coming_soon', 'the Details checks (its catalogue card is public)')}${need('beta', 'every blocking check')}${need('live', 'every blocking check')}</ul>
       <p class="mt-1.5">❌ blocks the status · ⚠️ is a warning and never blocks. "Built and working" can only be fixed by a developer.</p>
     </div>${groups}`;
+}
+
+// ── Fix / Suggest beside a failing check (src/utils/go-live-fixes.ts) ──
+// Fix = a rule-based correction, confirmed then applied. Suggest = a draft from Claude in an
+// editable box; nothing is written until Apply. Goto opens the tab where it is set; developer
+// checks have no button — no button can write code.
+function aaRemedyButton(c) {
+  const r = c.remedy || {};
+  if (r.remedy === 'developer') return '<span class="shrink-0 text-[11px] font-semibold text-gray-400 whitespace-nowrap">Needs a developer</span>';
+  if (r.remedy === 'goto') return `<button type="button" onclick="aaTab('${r.tab}')" class="btn-utility shrink-0 px-2.5 py-1 text-xs font-bold border rounded-lg">${_aaEsc(r.label || 'Open')}</button>`;
+  const label = r.remedy === 'fix' ? 'Fix' : 'Suggest';
+  return `<button type="button" onclick="aaSuggest('${_aaEsc(c.key)}', this)" class="${r.remedy === 'fix' ? 'btn-primary' : 'btn-assistant'} shrink-0 px-2.5 py-1 text-xs font-bold rounded-lg">${label}</button>`;
+}
+
+async function aaSuggest(key, btn) {
+  const li = btn.closest('[data-aa-check]');
+  const box = li.querySelector('.aa-proposal');
+  btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = was === 'Fix' ? 'Fixing…' : 'Thinking…';
+  try {
+    const { proposal } = await api(`${AA_API}?id=${_aa.current.assistant.id}&action=suggest`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) });
+    if (proposal.direct) {
+      // A rule-based fix: say exactly what changes, then apply.
+      const shown = Array.isArray(proposal.value) ? proposal.value.join(', ')
+        : typeof proposal.value === 'object' ? Object.values(proposal.value).join(' · ') : String(proposal.value);
+      const ok = await window.confirmModal(`${_aaEsc(proposal.explanation)}<br><br><strong>New value:</strong> ${_aaEsc(shown)}`, { title: 'Apply this fix?', confirmLabel: 'Apply', cancelLabel: 'Cancel' });
+      if (ok) await aaApply(key, proposal.value);
+      return;
+    }
+    aaShowProposal(box, proposal);
+  } catch (e) {
+    window.showToast?.(e.message, { icon: '⚠️' });
+  } finally {
+    btn.disabled = false; btn.textContent = was;
+  }
+}
+
+function aaShowProposal(box, p) {
+  const base = 'w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none';
+  let field;
+  if (p.kind === 'confirm') field = '';
+  else if (p.kind === 'choice') field = `<select class="aa-prop-input ${base}">${(p.options || []).map((o) => `<option value="${_aaEsc(o)}" ${o === p.value ? 'selected' : ''}>${_aaEsc(o)}</option>`).join('')}</select>`;
+  else if (p.kind === 'list') field = `<textarea class="aa-prop-input ${base}" rows="${Math.max(3, (p.value || []).length + 1)}">${_aaEsc((p.value || []).join('\n'))}</textarea><p class="text-[11px] text-gray-400 mt-1">One per line.</p>`;
+  else if (p.kind === 'prompt') field = `<textarea class="aa-prop-input ${base} font-mono text-xs" rows="10">${_aaEsc(p.value)}</textarea>`;
+  else field = `<textarea class="aa-prop-input ${base}" rows="${String(p.value).length > 90 ? 3 : 1}">${_aaEsc(p.value)}</textarea>`;
+  box.innerHTML = `<div class="border border-indigo-200 bg-indigo-50/40 rounded-xl p-3">
+    <p class="text-xs text-gray-600 mb-2">${_aaEsc(p.explanation)}</p>
+    ${field}
+    <div class="flex justify-end gap-2 mt-2">
+      <button type="button" class="aa-prop-cancel btn-secondary px-3 py-1 text-xs font-bold border rounded-lg">Cancel</button>
+      <button type="button" class="aa-prop-apply btn-primary px-3 py-1 text-xs font-bold rounded-lg">${p.kind === 'confirm' ? 'Confirm' : 'Apply'}</button>
+    </div></div>`;
+  box.classList.remove('hidden');
+  box.querySelector('.aa-prop-cancel').onclick = () => { box.classList.add('hidden'); box.innerHTML = ''; };
+  box.querySelector('.aa-prop-apply').onclick = async (ev) => {
+    const input = box.querySelector('.aa-prop-input');
+    let value = p.value;
+    if (input) value = p.kind === 'list' ? input.value.split('\n').map((x) => x.trim()).filter(Boolean) : input.value;
+    ev.target.disabled = true;
+    await aaApply(p.key, value);
+    ev.target.disabled = false;
+  };
+}
+
+async function aaApply(key, value) {
+  try {
+    await api(`${AA_API}?id=${_aa.current.assistant.id}&action=apply`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, value }) });
+    window.showToast?.('Applied.', { icon: '✅' });
+    await aaOpen(_aa.current.assistant.id, 'checks');
+    loadAssistantsAdmin();
+  } catch (e) {
+    window.showToast?.('Could not apply: ' + e.message, { icon: '⚠️' });
+  }
 }
 
 function aaDetailFields(creating) {
@@ -8947,36 +9020,7 @@ function _puFlash(text, kind = 'ok') {
   el.classList.remove('hidden');
 }
 
-// "Draft this week's email now". The draft is written on the founder's Mac (screenshots need its
-// signed-in browser), so this only RAISES a request; the scheduled Mac task polls for it.
-function _puRenderDraftRequest(d) {
-  const line = document.getElementById('pu-draft-request');
-  const btn = document.getElementById('pu-draft-now');
-  if (!line || !btn) return;
-  line.textContent = d && d.description ? d.description : '';
-  line.classList.toggle('hidden', !(d && d.description));
-  const st = d && d.request ? d.request.status : null;
-  btn.disabled = st === 'pending' || st === 'working';
-  btn.title = btn.disabled ? 'Already asked for — your Mac picks it up next time it checks.' : 'Ask your Mac to draft the email now. Nothing is sent until you approve it.';
-}
-async function _puLoadDraftRequest() {
-  try { _puRenderDraftRequest(await _puFetch('resource=draft-request')); } catch { _puRenderDraftRequest(null); }
-}
-async function puRequestDraft() {
-  const btn = document.getElementById('pu-draft-now');
-  btn.disabled = true;
-  try {
-    const d = await _puFetch('resource=draft-request', { method: 'POST' });
-    _puRenderDraftRequest(d);
-    _puFlash('Asked for a draft. Your Mac picks it up within a minute while it is on, and the draft takes a while to write and screenshot — it arrives here as "Waiting for review", and nothing is sent until you approve it.');
-  } catch (e) {
-    _puFlash(e.message, 'err');
-    _puLoadDraftRequest();
-  }
-}
-
 async function loadProductUpdates() {
-  _puLoadDraftRequest();
   const list = document.getElementById('pu-list');
   try {
     const { digests } = await _puFetch('resource=list');
@@ -9502,7 +9546,7 @@ const MD_FIELDS = {
     { key: 'iconKey',           label: 'Icon Key',          type: 'text',   placeholder: 'megaphone' },
     { key: 'iconColor',         label: 'Icon Colour',       type: 'text',   placeholder: 'pink' },
     { key: 'keyFeatures',       label: 'Key Features',      type: 'list',   help: 'One per line. Shown as the bullet list on the detail page.' },
-    { key: 'integrations',      label: 'Integrations',      type: 'list',   help: 'One per line. External tools only — shown as the "Connects with" chips.' },
+    { key: 'integrations',      label: 'Integrations',      type: 'list',   help: 'One per line. External tools only — shown as the "Connects with" chips. End a line with "(coming soon)" to show a planned connection as a muted Coming soon chip.' },
     // Assistant-to-assistant fit, NOT external tools. Kept separate from integrations because the
     // public card renders them as two different sections with two different meanings.
     { key: 'worksWith',         label: 'Works With',        type: 'list',

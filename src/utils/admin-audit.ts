@@ -62,7 +62,6 @@ export type AdminAction =
     // (and what the copy said at that moment) must be answerable afterwards.
     | 'product_update_edit'
     | 'product_update_approve'
-    | 'product_update_draft_request'
     | 'product_update_discard';
 
 export interface AdminAuditParams {

@@ -93,7 +93,29 @@
       });
   }
 
+  /**
+   * One "Connects with" chip. An entry ending "(coming soon)" — set on Admin ▸ Assistants → Details
+   * → Integrations — renders muted with a "Coming soon" label instead of the green dot, so a planned
+   * connection (the Marketing Campaign Orchestrator's paid-ads networks, 2026-10-10) is announced
+   * without reading as something a customer can connect today. ONE renderer for the catalogue card,
+   * the detail modal and the role detail page, so the three cannot disagree.
+   */
+  var COMING_SOON = /\s*[(\[]\s*coming soon\s*[)\]]\s*$/i;
+  function isComingSoonIntegration(app) { return COMING_SOON.test(String(app || '')); }
+  function integrationChip(app) {
+    var raw = String(app == null ? '' : app);
+    var esc = function (v) { return v.replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); };
+    if (isComingSoonIntegration(raw)) {
+      return '<span class="inline-flex items-center gap-1.5 bg-gray-50 border border-dashed border-gray-300 rounded-full px-2.5 py-1 text-[11px] font-semibold text-gray-400" title="Planned — not available to connect yet">'
+        + '<span class="w-1.5 h-1.5 rounded-full bg-gray-300"></span>' + esc(raw.replace(COMING_SOON, ''))
+        + '<span class="ml-0.5 text-[10px] font-bold uppercase tracking-wide text-gray-500">Coming soon</span></span>';
+    }
+    return '<span class="inline-flex items-center gap-1.5 bg-white border border-gray-200 rounded-full px-2.5 py-1 text-[11px] font-semibold text-gray-600">'
+      + '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>' + esc(raw) + '</span>';
+  }
+
   window.AssistantContent = {
     prime: prime, load: load, get: get, all: all, resolveWorksWith: resolveWorksWith,
+    integrationChip: integrationChip, isComingSoonIntegration: isComingSoonIntegration,
   };
 })();

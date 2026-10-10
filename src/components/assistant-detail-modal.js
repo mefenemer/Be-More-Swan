@@ -189,10 +189,8 @@
     // integrations = EXTERNAL tools, labelled "Connects with". Assistant-to-assistant fit is the
     // separate worksWith field below — the two used to share the "Works with" label, which read
     // wrong for a list of third-party apps.
-    const apps = (c.integrations || []).map(app => `
-      <span class="inline-flex items-center gap-1.5 bg-white border border-gray-200 rounded-full px-2.5 py-1 text-[11px] font-semibold text-gray-600">
-        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>${escHtml(app)}
-      </span>`).join('');
+    // One chip renderer for every surface — it marks "(coming soon)" entries as planned.
+    const apps = (c.integrations || []).map((app) => window.AssistantContent.integrationChip(app)).join('');
 
     const peers = window.AssistantContent.resolveWorksWith(c.worksWith).map(p => p.standalone
       ? `<span class="inline-flex items-center gap-1.5 bg-gray-100 border border-gray-200 rounded-full px-2.5 py-1 text-[11px] font-semibold text-gray-600">
