@@ -12,7 +12,7 @@ import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
-import { checkImpersonationBlock } from '../../src/utils/impersonation-guard';
+import { checkImpersonationBlock } from '../../src/utils/impersonation';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET!;
@@ -31,7 +31,7 @@ export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     // US-ADM-1.2.1: Block account deletion during impersonation sessions
-    const impersonationBlock = checkImpersonationBlock(event);
+    const impersonationBlock = checkImpersonationBlock(event, 'account_delete');
     if (impersonationBlock) return impersonationBlock;
 
     const userId = parseSession(event);

@@ -26,6 +26,7 @@ import {
 import { createNotification } from '../../src/utils/notify';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { checkImpersonationBlock } from '../../src/utils/impersonation';
 import { requirePermission } from '../../src/utils/rbac';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -52,9 +53,9 @@ export default withLambda(async (event) => {
     let adminId: number;
     try {
         const tok = jwt.verify(match[1], jwtSecret) as any;
-        if (tok.scope === 'impersonate') {
-            return { statusCode: 403, body: JSON.stringify({ error: 'Action blocked during impersonation session.' }) };
-        }
+        // US-ADM-1.2.1: no data export while ANY impersonation session is live (cookie or legacy token).
+        const impersonationBlock = checkImpersonationBlock(event, 'sar_export');
+        if (impersonationBlock) return impersonationBlock;
         adminId = tok.userId;
     } catch {
         return { statusCode: 401, body: JSON.stringify({ error: 'Invalid session.' }) };

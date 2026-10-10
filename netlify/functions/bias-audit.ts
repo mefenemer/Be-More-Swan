@@ -20,6 +20,7 @@ import {
 } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { checkImpersonationBlock } from '../../src/utils/impersonation';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -133,6 +134,9 @@ export default withLambda(async (event) => {
 
     // ── POST: ack — deployer acknowledges corrective actions; reactivates assistant ──
     if (event.httpMethod === 'POST' && resource === 'ack') {
+        // US-ADM-1.2.1: an ack is the DEPLOYER's statement — an impersonating admin must not make it for them.
+        const impersonationBlock = checkImpersonationBlock(event, 'bias_incident_ack');
+        if (impersonationBlock) return impersonationBlock;
         let body: any = {};
         try { body = JSON.parse(event.body || '{}'); } catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON.' }) }; }
         const { incidentId, ackNote } = body;

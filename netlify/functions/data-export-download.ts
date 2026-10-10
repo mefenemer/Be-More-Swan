@@ -8,8 +8,13 @@ import { eq, and, gte } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { dataExportRequests } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { checkImpersonationBlock } from '../../src/utils/impersonation';
 
 export default withLambda(async (event): Promise<HandlerResponse> => {
+    // US-ADM-1.2.1: never during an admin impersonation session (src/utils/impersonation.ts).
+    const impersonationBlock = checkImpersonationBlock(event, 'data_export_download');
+    if (impersonationBlock) return impersonationBlock;
+
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const token = event.queryStringParameters?.token;

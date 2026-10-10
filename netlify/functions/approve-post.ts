@@ -25,6 +25,7 @@ import { resolveLiveSocialConnections } from '../../src/utils/live-social-connec
 import { needsVideoRender, renderableAudio } from '../../src/lib/audio-overlays';
 import { readCachedReview, openWarnings } from '../../src/utils/post-quality-review';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { checkImpersonationBlock } from '../../src/utils/impersonation';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 
@@ -147,6 +148,10 @@ function getUserId(event: any): number | null {
 }
 
 export default withLambda(async (event) => {
+    // US-ADM-1.2.1: never during an admin impersonation session (src/utils/impersonation.ts).
+    const impersonationBlock = checkImpersonationBlock(event, 'post_approve');
+    if (impersonationBlock) return impersonationBlock;
+
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }

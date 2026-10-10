@@ -6,11 +6,16 @@ import { getDb } from '../../db/client';
 import { users, userProfiles, userOrganisations } from '../../db/schema';
 import { logAuditEvent } from '../../src/utils/audit';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { checkImpersonationBlock } from '../../src/utils/impersonation';
 
 const jwtSecret = process.env.JWT_SECRET;
 
 // Removed the unused 'context' parameter to satisfy TS6133
 export default withLambda(async (event: HandlerEvent) => {
+    // US-ADM-1.2.1: never during an admin impersonation session (src/utils/impersonation.ts).
+    const impersonationBlock = event.httpMethod !== 'GET' ? checkImpersonationBlock(event, 'profile_update') : null;
+    if (impersonationBlock) return impersonationBlock;
+
     if (!jwtSecret) {
         console.error("CRITICAL: JWT_SECRET is missing.");
         return { statusCode: 500, body: JSON.stringify({ error: 'Server configuration error.' }) };

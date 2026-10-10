@@ -33,7 +33,8 @@ export default withLambda(async (event) => {
     // JWT field — the session token carries activeOrganisationId, not organisationId; reading
     // the latter yielded `undefined`, which broke the callback's relevance/org scoping).
     const db = getDb();
-    const ctx = await requireTenant(event, db);
+    // mutates: starting a connect binds an account to this org — refused while impersonating.
+    const ctx = await requireTenant(event, db, { mutates: true });
     if ('error' in ctx) {
         return { statusCode: 302, headers: { Location: '/workspace.html?oauth_error=invalid_session' }, body: '' };
     }
