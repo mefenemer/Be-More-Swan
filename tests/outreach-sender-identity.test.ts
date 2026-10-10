@@ -135,7 +135,11 @@ check('optional org fields are rendered when present and omitted when not', () =
         assert.ok(full.includes(fragment), `expected the block to carry "${fragment}"`);
     }
     const bare = senderIdentityBlock({ businessName: 'Restorative Futures' });
-    assert.strictEqual(bare.split('\n').length, 1, 'an org with no profile fields must render one line, not empty ones');
+    // Every block now ends with the special-category rule (src/constants/special-category-rule.ts,
+    // 2026-10-10) — the IDENTITY part before it is what must stay one line with no empty ones.
+    const identity = bare.split('\n<special_category_data>')[0];
+    assert.ok(bare.includes('<special_category_data>'), 'the special-category rule is missing from the sender block');
+    assert.strictEqual(identity.split('\n').length, 1, 'an org with no profile fields must render one line, not empty ones');
 });
 
 check('an UNNAMED sender is told not to guess', () => {

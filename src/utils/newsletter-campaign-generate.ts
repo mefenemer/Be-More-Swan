@@ -11,6 +11,7 @@
 // side by side. Cohesion does not come from one call seeing the others' COPY; it comes from every
 // call seeing the whole PLAN (every email's day and job) and the same fixed greeting and sign-off.
 
+import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import { loadProductsBlock } from './org-products';
 import Anthropic from '@anthropic-ai/sdk';
 import { eq } from 'drizzle-orm';
@@ -77,6 +78,7 @@ ${plan}`,
             ? `Facts and links the business gave you — the ONLY facts and URLs you may use${productsBlock ? ', together with the products below' : ''}:\n${input.facts}`
             : productsBlock ? 'The business gave no other links: the only URLs you may write are the product links below.' : 'The business gave no links. Write no URLs at all.',
         productsBlock ?? '',
+        SPECIAL_CATEGORY_RULE,
         input.avoid ? `Avoid: ${input.avoid}` : '',
         kind.note ? `For this kind of campaign: ${kind.note}` : '',
         `HOW EVERY EMAIL IN THIS CAMPAIGN IS WRITTEN — so they read as one series:

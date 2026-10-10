@@ -112,9 +112,15 @@ export function runGoLiveChecks(a: GoLiveInput): GoLiveCheck[] {
     add({ group: 'details', key: 'video', label: 'Has a demo video', ok: filled(a.video?.url ?? ''), severity: 'warning', fix: 'Without one the detail page shows a placeholder.' });
 
     // ── Prompt ──
-    add({ group: 'prompt', key: 'version', label: 'Has a current prompt version', ok: !!a.currentVersionId, severity: 'blocking', fix: 'Create the first version on the Prompt & versions tab.' });
+    // A BUILT role's prompts live in code (chat route + its drafting seams), not in the master version,
+    // which is only a fallback the drafting prompt withholds (src/utils/blueprint.ts §2). And every one
+    // of those code prompts carries SPECIAL_CATEGORY_RULE — tests/special-category-rule.test.ts fails if
+    // one stops. So for a built role both checks are answered by the code that runs; for an unbuilt role
+    // they still read the master version and the admin's confirmation.
+    const inCode = !!build;
+    add({ group: 'prompt', key: 'version', label: inCode ? 'Has its prompts (in code)' : 'Has a current prompt version', ok: inCode || !!a.currentVersionId, severity: 'blocking', fix: 'Create the first version on the Prompt & versions tab.' });
     add({ group: 'prompt', key: 'risk', label: 'Risk level set', ok: RISK_VALUES.includes(a.riskClassification ?? ''), severity: 'blocking', fix: `One of ${RISK_VALUES.join(', ')}.` });
-    add({ group: 'prompt', key: 'specialCategory', label: 'Special-category refusal clause confirmed', ok: !!a.specialCategoryClauseEnabled, severity: 'blocking', fix: 'Confirm the prompt refuses special-category personal data (health, religion, etc.), then tick it on the Details tab.' });
+    add({ group: 'prompt', key: 'specialCategory', label: inCode ? 'Refuses special-category personal data (in every prompt it runs)' : 'Special-category refusal clause confirmed', ok: inCode || !!a.specialCategoryClauseEnabled, severity: 'blocking', fix: 'Confirm the prompt refuses special-category personal data (health, religion, etc.), then tick it on the Details tab.' });
 
     // ── Built and working: the code a hired assistant needs (assistant-build-manifest.ts) ──
     add({ group: 'built', key: 'setup', label: 'Has set-up questions or a set-up wizard', ok: !!build, severity: 'blocking', fix: 'No set-up exists for this role in the code — a developer must build it first.' });

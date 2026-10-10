@@ -10,6 +10,7 @@
 // The caller is responsible for authorisation: it passes the organisationId it has already
 // established, and every query here is scoped by it.
 
+import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
@@ -278,6 +279,7 @@ export async function generateBlogBody(
         notes ? `Author notes / source material:\n${notes}` : '',
         // What the business sells (Business Information ▸ Products & Services). Never throws.
         await loadProductsBlock(db, organisationId, org?.name ?? null),
+        SPECIAL_CATEGORY_RULE,
     ].filter(Boolean).join('\n');
 
     // Inspo (AC5) — the styles/tones the user parked in the Inspo tab. This is the SECOND
