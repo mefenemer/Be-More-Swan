@@ -258,6 +258,10 @@
           <div id="aa-filter" class="flex flex-wrap gap-1.5"></div>
           <input id="aa-search" type="search" placeholder="Search name or role key" oninput="aaRender()" class="ml-auto border border-gray-200 rounded-lg px-3 py-1.5 text-sm w-56">
         </div>
+        <!-- Platform-wide capability switches (assistant_feature_defs.is_enabled). Moved here from
+             Master Data → Assistant Features on 2026-10-10; per-role grants are on each role's
+             Capabilities tab. -->
+        <div id="aa-caps-panel" class="hidden mb-4 bg-white rounded-2xl border border-gray-200 p-4"></div>
         <div id="aa-list" class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
           <div class="px-5 py-8 text-center text-gray-400">Loading…</div>
         </div>
@@ -529,7 +533,6 @@
         <div class="flex gap-1 overflow-x-auto mb-5 border-b border-gray-200 pb-0" id="md-tab-bar">
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="plans" onclick="mdSwitchTab('plans')">Plans</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="plan-features" onclick="mdSwitchTab('plan-features')">Plan Features</button>
-          <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="assistant-features" onclick="mdSwitchTab('assistant-features')">Assistant Features</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="assistant-versions" onclick="mdSwitchTab('assistant-versions')">Versions</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="feature-flags-md" onclick="mdSwitchTab('feature-flags-md')">Flag Definitions</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="languages" onclick="mdSwitchTab('languages')">Languages</button>
@@ -566,25 +569,6 @@
             </div>
           </div>
           <div id="md-plan-features-body" class="bg-white rounded-2xl border border-gray-200 overflow-x-auto p-1">
-            <div class="px-5 py-8 text-center text-gray-400">Loading…</div>
-          </div>
-        </div>
-
-        <!-- Assistant Features tab — capability matrix (feature rows × assistant columns).
-             Distinct from the "Key Features" marketing bullets on the Assistants tab: these are
-             capability gates (AI image/video generation), enforced by assistant-capabilities.ts. -->
-        <div id="md-pane-assistant-features" class="md-pane hidden">
-          <div class="flex items-center justify-between mb-3">
-            <div>
-              <h2 class="text-sm font-bold text-gray-700">Assistant Features</h2>
-              <p class="text-xs text-gray-400 mt-0.5">Switch each capability on or off per assistant type, or disable one entirely. Gates what a hired assistant can actually do.</p>
-            </div>
-            <div class="flex items-center gap-2">
-              <button onclick="afOpenAddFeature()" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition">+ Add Feature</button>
-              <button id="af-save-btn" onclick="afSave()" disabled class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">Save changes</button>
-            </div>
-          </div>
-          <div id="md-assistant-features-body" class="bg-white rounded-2xl border border-gray-200 overflow-x-auto p-1">
             <div class="px-5 py-8 text-center text-gray-400">Loading…</div>
           </div>
         </div>
@@ -2700,8 +2684,8 @@ const ADMIN_CATS = {
   ]},
   assistants: { label: 'Assistants', children: [
     { view: 'catalog',              icon: '🤖', label: 'Assistants',          perm: 'assistant_catalog', group: 'Configuration' },
-    // Assistant Features moved to Master Data → Assistant Features, where its catalog is now
-    // DB-driven and sits alongside the assistant copy fields it relates to.
+    // Assistant capabilities live on this page: platform-wide switches above the list, per-role
+    // grants on each role's Capabilities tab.
     { view: 'blueprint-inspector',  icon: '🔬', label: 'Blueprint Inspector', perm: 'assistant_catalog', group: 'Configuration' },
     { view: 'model-config',         icon: '⚙️', label: 'AI Model Config',     perm: 'platform_config',   group: 'Configuration' },
     // Publishing is what the content assistants actually do, so its pipeline reads
@@ -6772,7 +6756,7 @@ const AA_STATUS = {
 };
 const AA_ORDER = ['hidden', 'coming_soon', 'beta', 'live', 'retired'];
 const AA_GROUPS = { details: 'Details', prompt: 'Prompt', built: 'Built and working', capabilities: 'Capabilities' };
-const _aa = { rows: [], filter: 'all', current: null, tab: 'checks', creating: false, caps: null, capsDirty: {} };
+const _aa = { rows: [], filter: 'all', current: null, tab: 'checks', creating: false, caps: null, capsDirty: {}, capsAll: null };
 const _aaEsc = (v) => escAdm(v == null ? '' : String(v));
 const _aaBadge = (st) => `<span class="text-xs font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${AA_STATUS[st]?.cls || ''}">${AA_STATUS[st]?.label || st}</span>`;
 
@@ -6781,7 +6765,15 @@ async function loadAssistantsAdmin() {
   if (!host) return;
   host.innerHTML = '<div class="px-5 py-8 text-center text-gray-400 animate-pulse">Loading…</div>';
   try {
-    _aa.rows = (await api(AA_API)).assistants || [];
+    // Capabilities are a second, optional read: it needs the feature_flags permission, and an admin
+    // without it still gets the list — just no capability column or platform switches.
+    const [list, caps] = await Promise.all([
+      api(AA_API),
+      api(MD_API + '?resource=assistant-feature-values').catch(() => null),
+    ]);
+    _aa.rows = list.assistants || [];
+    _aa.capsAll = caps;
+    aaRenderCapsPanel();
     aaRender();
   } catch (e) {
     host.innerHTML = `<div class="px-5 py-5 text-red-500 text-sm">${_aaEsc(e.message)}</div>`;
@@ -6810,16 +6802,66 @@ function aaRender() {
   host.innerHTML = `<table class="w-full text-sm">
     <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase"><tr>
       <th class="px-5 py-3 text-left">Assistant</th><th class="px-5 py-3 text-left">Category</th><th class="px-5 py-3 text-left">Status</th>
-      <th class="px-5 py-3 text-left">Ready to go live</th><th class="px-5 py-3 text-right">Waitlist</th><th class="px-5 py-3 text-right">Hired</th>
+      <th class="px-5 py-3 text-left">Ready to go live</th>${_aa.capsAll ? '<th class="px-5 py-3 text-left">Capabilities</th>' : ''}<th class="px-5 py-3 text-right">Waitlist</th><th class="px-5 py-3 text-right">Hired</th>
     </tr></thead>
     <tbody>${rows.map((r) => `<tr class="border-t border-gray-100 hover:bg-gray-50 cursor-pointer" onclick="aaOpen(${r.id})">
       <td class="px-5 py-3"><div class="font-semibold text-gray-900">${_aaEsc(r.name)}</div><div class="text-[11px] text-gray-400 font-mono">${_aaEsc(r.roleKey)}</div></td>
       <td class="px-5 py-3 text-xs text-gray-500">${_aaEsc(r.category)}</td>
       <td class="px-5 py-3">${_aaBadge(r.status)}</td>
       <td class="px-5 py-3">${ready(r)}</td>
+      ${_aa.capsAll ? `<td class="px-5 py-3">${aaCapChips(r.id)}</td>` : ''}
       <td class="px-5 py-3 text-right text-xs">${r.waitlistCount}</td>
       <td class="px-5 py-3 text-right text-xs">${r.hiredCount}</td>
-    </tr>`).join('') || '<tr><td colspan="6" class="px-5 py-8 text-center text-gray-400">No assistants match.</td></tr>'}</tbody></table>`;
+    </tr>`).join('') || `<tr><td colspan="${_aa.capsAll ? 7 : 6}" class="px-5 py-8 text-center text-gray-400">No assistants match.</td></tr>`}</tbody></table>`;
+}
+
+// The capabilities granted to one role, as chips. A grant whose capability is switched off
+// platform-wide is shown struck through — it is stored but does nothing.
+function aaCapChips(id) {
+  const { features, values } = _aa.capsAll;
+  const mine = values[id] || {};
+  const on = features.filter((f) => mine[f.key] === true);
+  if (!on.length) return '<span class="text-xs text-gray-300">—</span>';
+  return `<div class="flex flex-wrap gap-1">${on.map((f) => `<span title="${_aaEsc(f.isEnabled ? f.description || '' : 'Switched off platform-wide')}"
+    class="text-[11px] font-semibold px-1.5 py-0.5 rounded ${f.isEnabled ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-100 text-gray-400 line-through'}">${_aaEsc(f.label.replace(/^AI /, '').replace(/ Generation$/, ''))}</span>`).join('')}</div>`;
+}
+
+// Platform-wide switches: one per capability. Off = off for every workspace, whatever each role
+// grants — the kill switch for e.g. a provider outage. Adding a capability is a code change (a call
+// site must check it), so it ships as a seed/SQL file, not from here.
+function aaRenderCapsPanel() {
+  const host = document.getElementById('aa-caps-panel');
+  if (!host) return;
+  const features = _aa.capsAll?.features || [];
+  host.classList.toggle('hidden', !features.length);
+  if (!features.length) return;
+  const granted = (key) => Object.values(_aa.capsAll.values).filter((v) => v[key] === true).length;
+  host.innerHTML = `<div class="flex items-baseline justify-between flex-wrap gap-2 mb-3">
+      <h2 class="text-sm font-bold text-gray-700">Capabilities — platform-wide</h2>
+      <p class="text-xs text-gray-400">Switching one off stops it for every workspace immediately. Which roles grant it is set on each role's Capabilities tab.</p>
+    </div>
+    <div class="flex flex-wrap gap-2">${features.map((f) => `<div class="flex items-center gap-2 border border-gray-200 rounded-xl px-3 py-2" title="${_aaEsc(f.description || '')}">
+      <div><div class="text-sm font-semibold text-gray-800 ${f.isEnabled ? '' : 'opacity-50'}">${_aaEsc(f.label)}</div>
+      <div class="text-[11px] text-gray-400">${granted(f.key) === 1 ? '1 role grants it' : `${granted(f.key)} roles grant it`}</div></div>
+      <button type="button" onclick="aaToggleCapability(${f.id}, ${f.isEnabled ? 'false' : 'true'}, ${_aaEsc(JSON.stringify(f.label))})"
+        class="ml-2 px-2.5 py-1 text-xs font-bold rounded-full ${f.isEnabled ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}">${f.isEnabled ? 'On' : 'Off'}</button>
+    </div>`).join('')}</div>`;
+}
+
+async function aaToggleCapability(id, turnOn, label) {
+  const msg = turnOn
+    ? 'Every workspace with a role that grants it can use it again immediately.'
+    : 'It stops working for every workspace immediately, whatever each role grants.';
+  const ok = await window.confirmModal(msg, {
+    title: `Switch ${label} ${turnOn ? 'on' : 'off'}?`,
+    confirmLabel: turnOn ? 'Switch on' : 'Switch off', cancelLabel: 'Cancel',
+  });
+  if (!ok) return;
+  try {
+    await api(MD_API + '?resource=assistant-feature-defs&id=' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isEnabled: turnOn }) });
+    window.showToast?.(`${label} switched ${turnOn ? 'on' : 'off'} platform-wide.`, { icon: '✅' });
+    await loadAssistantsAdmin();
+  } catch (e) { window.showToast?.('Failed: ' + e.message, { icon: '⚠️' }); }
 }
 
 function aaClose() {
@@ -7062,7 +7104,8 @@ async function aaRenderCapabilities() {
     const id = _aa.current.assistant.id;
     const mine = values[id] || {};
     body.innerHTML = `
-      <p class="text-sm text-gray-600 mb-4">What a hired ${_aaEsc(_aa.current.assistant.name)} is allowed to do. A capability switched off platform-wide shows greyed out.</p>
+      <p class="text-sm text-gray-600 mb-2">Capabilities this role unlocks. ⚠️ They apply to the <strong>whole workspace</strong>, not just this assistant: if any active assistant in a workspace grants one, every screen in that workspace can use it.</p>
+      <p class="text-xs text-gray-400 mb-4">A capability switched off platform-wide (above the Assistants list) shows greyed out.</p>
       <div class="space-y-2">${features.map((f) => {
         const on = (f.key in _aa.capsDirty) ? _aa.capsDirty[f.key] : mine[f.key] === true;
         return `<label class="flex items-start gap-3 p-3 border border-gray-200 rounded-xl ${f.isEnabled ? '' : 'opacity-50'}">
@@ -9605,8 +9648,6 @@ async function mdLoadTab(tab) {
   if (tab === 'help-articles') { await mdLoadHelpArticles(); return; }
   // Plan Features tab renders a matrix (features × plans), not the standard CRUD table.
   if (tab === 'plan-features') { await mdLoadPlanFeatures(); return; }
-  // Assistant Features likewise renders a matrix (assistants × capabilities).
-  if (tab === 'assistant-features') { await mdLoadAssistantFeatures(); return; }
 
   const resource = MD_TAB_RESOURCE[tab];
   if (!resource) return;
@@ -9884,164 +9925,6 @@ async function pfSubmitAddFeature() {
     pfCloseAddFeature();
     window.showToast?.('Feature added.', { icon: '✅' });
     await mdLoadPlanFeatures();
-  } catch (e) {
-    window.showToast?.('Failed to add: ' + (e.message || e), { icon: '⚠️' });
-  }
-}
-
-// ── Assistant Features matrix (DB-driven capability catalog) ────────────────
-// The capability gates enforced by src/utils/assistant-capabilities.ts — NOT the "Key Features"
-// marketing bullets, which are per-assistant copy on the Assistants tab.
-//
-// Orientation is transposed vs the Plan Features matrix: there are many assistants and few
-// capabilities, so assistants are ROWS and capabilities are COLUMNS (3 columns beats 20). The
-// behaviours are the same — dirty-cell batching, an immediate per-def Enabled toggle, add-def modal.
-// No apply-mode chooser: capabilities have no subscriber cohort, so changes are always live.
-let _afData = null;                 // { features:[], assistants:[], values:{[assistantId]:{[key]:bool}} }
-let _afDirty = {};                  // { "assistantId::key": bool } — pending edits
-
-async function mdLoadAssistantFeatures() {
-  const host = document.getElementById('md-assistant-features-body');
-  if (!host) return;
-  host.innerHTML = '<div class="px-5 py-8 text-center text-gray-400">Loading…</div>';
-  _afDirty = {};
-  afUpdateSaveBtn();
-  try {
-    _afData = await api(MD_API + '?resource=assistant-feature-values');
-    afRenderMatrix();
-  } catch (e) {
-    host.innerHTML = '<div class="px-5 py-8 text-center text-red-400">Failed to load: ' + escAdm(e.message || e) + '</div>';
-  }
-}
-
-function afRenderMatrix() {
-  const host = document.getElementById('md-assistant-features-body');
-  if (!host || !_afData) return;
-  const { features, assistants, values } = _afData;
-  if (!features.length) {
-    host.innerHTML = '<div class="px-5 py-8 text-center text-gray-400">No feature definitions yet. Apply db/assistant-content.sql and run db/seed-assistant-content.ts, or add one.</div>';
-    return;
-  }
-  if (!assistants.length) {
-    host.innerHTML = '<div class="px-5 py-8 text-center text-gray-400">No active assistants.</div>';
-    return;
-  }
-
-  // Header row 1 — category bands spanning their features.
-  let bands = '<th></th>';
-  let i = 0;
-  while (i < features.length) {
-    let j = i;
-    while (j < features.length && features[j].category === features[i].category) j++;
-    bands += `<th colspan="${j - i}" class="px-3 pt-3 pb-1 text-center text-[10px] font-bold uppercase tracking-wider text-gray-400 border-b border-gray-100">${escAdm(features[i].category)}</th>`;
-    i = j;
-  }
-
-  // Header row 2 — one column per capability, each with its own global Enabled toggle.
-  const cols = features.map(def => {
-    const toggle = `<button onclick="afToggleEnabled(${def.id}, ${def.isEnabled ? 'false' : 'true'})" `
-      + `class="mt-1 px-2 py-0.5 text-[10px] font-bold rounded-full ${def.isEnabled ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}">`
-      + `${def.isEnabled ? 'Enabled' : 'Disabled'}</button>`;
-    return `<th class="px-3 py-2 text-center align-top ${def.isEnabled ? '' : 'opacity-50'}" title="${escAdm(def.description || '')}">`
-      + `<div class="font-bold text-gray-600 text-xs whitespace-nowrap">${escAdm(def.label)}</div>`
-      + `<div class="text-[10px] font-normal text-gray-400 font-mono">${escAdm(def.key)}</div>${toggle}</th>`;
-  }).join('');
-
-  const rows = assistants.map(a => {
-    const cells = features.map(def => {
-      const on = (values[a.id] || {})[def.key] === true;
-      const dis = def.isEnabled ? '' : 'disabled';
-      return `<td class="px-3 py-2.5 text-center align-middle ${def.isEnabled ? '' : 'opacity-50'}">`
-        + `<input type="checkbox" id="af-${a.id}-${escAdm(def.key)}" ${on ? 'checked' : ''} ${dis} `
-        + `onchange="afEdit(${a.id}, '${escAdm(def.key)}', this.checked)" class="w-4 h-4 cursor-pointer accent-emerald-600"></td>`;
-    }).join('');
-    const beta = a.lifecycleState === 'beta' ? ' <span class="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[10px] font-bold align-middle">beta</span>' : '';
-    return `<tr class="border-t border-gray-100">`
-      + `<td class="px-4 py-2.5 align-top"><div class="font-medium text-gray-800 text-sm">${escAdm(a.name)}${beta}</div>`
-      + `<div class="text-[11px] text-gray-400 font-mono">${escAdm(a.roleKey)}</div></td>${cells}</tr>`;
-  }).join('');
-
-  host.innerHTML = `<table class="w-full text-sm"><thead class="border-b border-gray-200">`
-    + `<tr>${bands}</tr><tr><th class="px-4 py-2 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Assistant</th>${cols}</tr>`
-    + `</thead><tbody>${rows}</tbody></table>`;
-}
-
-function afEdit(assistantId, key, value) {
-  _afDirty[assistantId + '::' + key] = value;
-  afUpdateSaveBtn();
-}
-
-function afUpdateSaveBtn() {
-  const btn = document.getElementById('af-save-btn');
-  if (!btn) return;
-  const n = Object.keys(_afDirty).length;
-  btn.disabled = n === 0;
-  btn.textContent = n ? `Save ${n} change${n === 1 ? '' : 's'}` : 'Save changes';
-}
-
-async function afToggleEnabled(id, newVal) {
-  try {
-    await api(MD_API + '?resource=assistant-feature-defs&id=' + id, { method: 'PATCH', body: JSON.stringify({ isEnabled: newVal }) });
-    window.showToast?.('Feature ' + (newVal ? 'enabled' : 'disabled') + '.', { icon: '✅' });
-    await mdLoadAssistantFeatures();
-  } catch (e) {
-    window.showToast?.('Failed: ' + (e.message || e), { icon: '⚠️' });
-  }
-}
-
-async function afSave() {
-  const updates = Object.entries(_afDirty).map(([k, value]) => {
-    const idx = k.indexOf('::');
-    return { assistantId: Number(k.slice(0, idx)), key: k.slice(idx + 2), value };
-  });
-  if (!updates.length) return;
-  try {
-    const r = await api(MD_API + '?resource=assistant-feature-values', { method: 'PATCH', body: JSON.stringify({ updates }) });
-    window.showToast?.(`Saved ${r.applied} change(s) — live immediately.`, { icon: '✅' });
-    await mdLoadAssistantFeatures();
-  } catch (e) {
-    window.showToast?.('Save failed: ' + (e.message || e), { icon: '⚠️' });
-  }
-}
-
-// Add a new capability definition (compact modal).
-function afOpenAddFeature() {
-  const ov = document.createElement('div');
-  ov.id = 'af-add-overlay';
-  ov.className = 'fixed inset-0 bg-black/40 flex items-center justify-center z-50';
-  ov.innerHTML = `<div class="bg-white rounded-2xl shadow-xl max-w-lg w-full mx-4 p-6">
-    <h3 class="text-base font-bold text-gray-800 mb-4">Add assistant capability</h3>
-    <div class="grid grid-cols-2 gap-3 text-sm">
-      <label class="col-span-2 block"><span class="text-xs font-semibold text-gray-500">Key (snake_case)</span><input id="af-add-key" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg" placeholder="e.g. ai_audio_generation"></label>
-      <label class="col-span-2 block"><span class="text-xs font-semibold text-gray-500">Label</span><input id="af-add-label" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg"></label>
-      <label class="col-span-2 block"><span class="text-xs font-semibold text-gray-500">Description</span><input id="af-add-desc" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg"></label>
-      <label class="block"><span class="text-xs font-semibold text-gray-500">Category</span><input id="af-add-cat" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg" placeholder="e.g. Media"></label>
-    </div>
-    <p class="text-[11px] text-gray-400 mt-3">Adding a key here surfaces the column. A capability only takes effect once the matching call site gates on <code>orgHasAssistantFeature</code>.</p>
-    <div class="mt-5 flex justify-end gap-2">
-      <button onclick="afCloseAddFeature()" class="px-4 py-2 text-sm font-semibold text-gray-500 hover:text-gray-700">Cancel</button>
-      <button onclick="afSubmitAddFeature()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Add</button>
-    </div>
-  </div>`;
-  document.body.appendChild(ov);
-}
-function afCloseAddFeature() { document.getElementById('af-add-overlay')?.remove(); }
-
-async function afSubmitAddFeature() {
-  const key = document.getElementById('af-add-key').value.trim();
-  const label = document.getElementById('af-add-label').value.trim();
-  const category = document.getElementById('af-add-cat').value.trim();
-  if (!key || !label || !category) { window.showToast?.('Key, label and category are required.', { icon: '⚠️' }); return; }
-  const body = {
-    key, label, category,
-    description: document.getElementById('af-add-desc').value.trim() || null,
-    displayOrder: (_afData?.features?.length || 0) + 100,
-  };
-  try {
-    await api(MD_API + '?resource=assistant-feature-defs', { method: 'POST', body: JSON.stringify(body) });
-    afCloseAddFeature();
-    window.showToast?.('Capability added.', { icon: '✅' });
-    await mdLoadAssistantFeatures();
   } catch (e) {
     window.showToast?.('Failed to add: ' + (e.message || e), { icon: '⚠️' });
   }

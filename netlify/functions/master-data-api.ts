@@ -882,7 +882,9 @@ async function handlePlanFeatureValues(event: any, adminId: number, ip?: string,
 // ── Assistant Features (DB-driven capability catalog + per-assistant matrix) ─────
 // Mirrors the Plan Features pair above: assistant_feature_defs is the catalog (metadata only),
 // the VALUES live in assistant_features (one row per master_assistant × key; absent row = off).
-// Replaces the hardcoded ASSISTANT_FEATURES list, so a new capability no longer needs a deploy.
+// Admin UI: Assistants page only (platform-wide switches + each role's Capabilities tab) — the
+// Master Data → Assistant Features matrix was removed 2026-10-10. POST/DELETE on defs have no UI:
+// a new capability needs a call site that checks it, so it ships as a SQL file with that code.
 // Unlike plan features there is no applyMode — capabilities have no subscriber cohort to freeze.
 
 async function handleAssistantFeatureDefs(event: any, adminId: number, role: string, ip?: string, ua?: string) {

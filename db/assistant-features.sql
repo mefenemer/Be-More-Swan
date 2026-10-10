@@ -30,7 +30,7 @@ CREATE INDEX IF NOT EXISTS assistant_features_master_idx
 
 -- Seed: pre-enable AI media generation for the live content roles.
 -- All other roles start disabled; admins enable per-type as those roles go live via
--- Admin → Master Data → Assistant Features.
+-- Admin → Assistants → (role) → Capabilities.
 --
 -- ⚠️ role_key MUST be a CANONICAL catalog key from db/seed-catalog.ts. This seed originally
 -- targeted the legacy key 'social_media', which db/rolekey-namespace-unification.sql merged

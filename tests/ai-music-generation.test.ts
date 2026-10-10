@@ -203,6 +203,15 @@ check('the worker settles as audio, and refunds on every failure', () => {
         'charged before the asset exists');
 });
 
+check('music has its own capability switch, not AI images', () => {
+    // It used to ride on ai_image_generation, so switching images off (a fal outage) took music down too.
+    assert.ok(fn.includes("orgHasAssistantFeature(db, orgId, 'ai_music_generation')"), 'music is not gated on its own key');
+    assert.ok(!fn.includes("'ai_image_generation'"), 'music still checks the image switch');
+    const sql = read('db/z-music-capability.sql');
+    assert.ok(sql.includes("'ai_music_generation'") && sql.includes("af.feature_key = 'ai_image_generation'"),
+        'the migration must copy the image grants, or music disappears on deploy');
+});
+
 check('an audio settle is ledgered as music_generation', () => {
     assert.ok(credits.includes("params.mediaType === 'audio' ? 'music_generation'"));
     assert.ok(/export const MUSIC_CREDIT_COST = \d+;/.test(credits));
