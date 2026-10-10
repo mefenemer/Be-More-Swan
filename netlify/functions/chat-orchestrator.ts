@@ -13,6 +13,7 @@
 // payload; the client should show its own loading state between send and response.
 // Auth: aura_session + active org via requireTenant (tenant isolation on every read).
 
+import { SPECIAL_CATEGORY_RULE } from '../../src/constants/special-category-rule';
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
@@ -237,7 +238,8 @@ function buildSystemPrompt(baseSystemPrompt: string, onboardingContext: unknown)
     const entries = ctxRecord
         ? Object.entries(ctxRecord).filter(([, v]) => v !== null && v !== undefined && v !== '')
         : [];
-    if (entries.length === 0) return dated;
+    // Every role, live turn and handoff alike — src/constants/special-category-rule.ts.
+    if (entries.length === 0) return `${dated}\n\n${SPECIAL_CATEGORY_RULE}`;
 
     const parameters = entries
         .map(([key, value]) => `- ${humanizeConfigKey(key)}: ${formatConfigValue(value)}`)
@@ -249,7 +251,9 @@ function buildSystemPrompt(baseSystemPrompt: string, onboardingContext: unknown)
 The user has configured your specific behavior with the following parameters. You MUST obey these rules at all times. If these rules conflict with your base instructions, these rules take priority:
 
 ${parameters}
-</strict_configuration>`;
+</strict_configuration>
+
+${SPECIAL_CATEGORY_RULE}`;
 }
 
 // Plain conversational reply, no structured UI. This is the fallback for every roleKey

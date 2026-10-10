@@ -23,6 +23,8 @@
 // src/utils/sender-identity.ts — the same split as icp-profile.ts / icp-snapshot.ts: config renders,
 // utils reads the DB.
 
+import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
+
 /**
  * The sender's own business, as the prospect should perceive it. Every field except `businessName`
  * is optional because the Business Information page does not require them.
@@ -80,6 +82,9 @@ export function senderIdentityBlock(sender: SenderIdentity): string {
 
     const products = (sender.productsBlock || '').trim();
     if (products) lines.push(products);
+
+    // Every outreach prompt — src/constants/special-category-rule.ts.
+    lines.push(SPECIAL_CATEGORY_RULE);
 
     return lines.join('\n');
 }

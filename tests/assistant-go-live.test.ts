@@ -76,10 +76,20 @@ check('Coming soon needs its public card right; Hidden and Retired need nothing'
     assert.strictEqual(blockersFor('hidden', c).length, 0);
     assert.strictEqual(blockersFor('retired', c).length, 0);
 });
-check('no prompt version, unconfirmed special-category clause, or a typo in "works with" blocks Live', () => {
-    const c = runGoLiveChecks({ ...complete, currentVersionId: null, specialCategoryClauseEnabled: false, worksWith: ['blog_writr'] });
-    assert.deepStrictEqual(blockersFor('live', c).map((x) => x.key).sort(), ['specialCategory', 'version', 'worksWith']);
+check('a typo in "works with" blocks Live', () => {
+    const c = runGoLiveChecks({ ...complete, worksWith: ['blog_writr'] });
+    assert.deepStrictEqual(blockersFor('live', c).map((x) => x.key), ['worksWith']);
     assert.ok(/blog_writr/.test(c.find((x) => x.key === 'worksWith')!.fix!));
+});
+check('a BUILT role\'s prompt and special-category checks are answered by its code prompts, not the master version', () => {
+    const c = runGoLiveChecks({ ...complete, currentVersionId: null, specialCategoryClauseEnabled: false });
+    assert.ok(c.find((x) => x.key === 'version')!.ok && c.find((x) => x.key === 'specialCategory')!.ok);
+    assert.ok(/in code/.test(c.find((x) => x.key === 'version')!.label));
+});
+check('an UNBUILT role still needs a master prompt version and the admin\'s confirmation', () => {
+    const c = runGoLiveChecks({ ...complete, roleKey: 'sop_writer', currentVersionId: null, specialCategoryClauseEnabled: false, knownRoleKeys: [...complete.knownRoleKeys, 'sop_writer'] });
+    const keys = blockersFor('live', c).map((x) => x.key);
+    assert.ok(keys.includes('version') && keys.includes('specialCategory'));
 });
 check('missing integrations, video or capabilities warn but never block', () => {
     const c = runGoLiveChecks({ ...complete, integrations: [], video: null, capabilityRowCount: 0 });

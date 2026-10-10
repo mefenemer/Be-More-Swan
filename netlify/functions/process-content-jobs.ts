@@ -7,6 +7,7 @@
 // released at autocommit before any work starts. Never remove the WHERE clause on the strength of
 // SKIP LOCKED being present.
 
+import { SPECIAL_CATEGORY_RULE } from '../../src/constants/special-category-rule';
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
 import { eq, and, inArray, isNotNull, sql } from 'drizzle-orm';
@@ -717,6 +718,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         const productsBlock = await loadProductsBlock(db, job.organisation_id, (onboarding as { businessName?: string | null }).businessName ?? null);
         if (productsBlock) systemPrompt += `\n\n${productsBlock}`;
 
+        systemPrompt += `\n\n${SPECIAL_CATEGORY_RULE}`;
         systemPrompt += `\n\n${CONTENT_QUALITY_STANDARDS}`;
         systemPrompt += `\n\n${AURA_SAFE_CONTENT_BENCHMARK}`;
 

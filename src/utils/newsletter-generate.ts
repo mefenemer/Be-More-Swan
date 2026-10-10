@@ -17,6 +17,7 @@
 //    site. Same rule as src/config/outreach-footer.ts, for the same two reasons: a model paraphrases
 //    or drops it, and a reviewer editing the draft deletes it without knowing what it is.
 
+import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import { loadProductsBlock } from './org-products';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, eq, sql } from 'drizzle-orm';
@@ -329,6 +330,7 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
         notes ? `Source material / author notes:\n${notes}` : '',
         // What the business sells (Business Information ▸ Products & Services). Never throws.
         await loadProductsBlock(db, organisationId, org?.name ?? null),
+        SPECIAL_CATEGORY_RULE,
     ].filter(Boolean).join('\n');
 
     const inspoBlock = issue.assistantId
@@ -801,6 +803,7 @@ export async function draftSequenceEmail(db: Db, opts: SequenceDraftOptions): Pr
         org?.targetAudience ? `Audience: ${org.targetAudience}` : '',
         str(opts.notes, 4000) ? `The author wants this email to cover:\n${str(opts.notes, 4000)}` : '',
         await loadProductsBlock(db, organisationId, org?.name ?? null),
+        SPECIAL_CATEGORY_RULE,
     ].filter(Boolean).join('\n') || 'Write the email from what you know about the business.';
 
     // A welcome email is an email: it gets the same layout treatment an issue does, unless the step

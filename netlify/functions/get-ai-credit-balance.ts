@@ -1,6 +1,6 @@
 // netlify/functions/get-ai-credit-balance.ts
 // Epic 2, US4: returns the org's AI generation credit balance (applies the monthly grant first).
-// GET → { balance, held, monthlyCredits, imageCost, videoCost, canImage, assistantCanVideo, tierCanVideo }
+// GET → { balance, held, monthlyCredits, imageCost, videoCost, canImage, assistantCanVideo, canMusic, tierCanVideo }
 //
 // canImage / assistantCanVideo reflect the admin-managed per-assistant-type capability
 // (assistant_features). tierCanVideo reflects the plan tier. The My Content modal shows the
@@ -24,7 +24,7 @@ export default withLambda(async (event) => {
 
     const { balance, held } = await getBalance(db, ctx.organisationId);
     const tierKey = await getActiveTierKeyByOrg(db, ctx.organisationId);
-    const { canImage, assistantCanVideo } = await getOrgMediaCapabilities(db, ctx.organisationId);
+    const { canImage, assistantCanVideo, canMusic } = await getOrgMediaCapabilities(db, ctx.organisationId);
     const monthlyCredits = await monthlyAllowance(db, ctx.organisationId);
     return {
         statusCode: 200,
@@ -35,6 +35,7 @@ export default withLambda(async (event) => {
             imageCost: IMAGE_CREDIT_COST, videoCost: VIDEO_CREDIT_COST, musicCost: MUSIC_CREDIT_COST, musicSharedCost: MUSIC_SHARED_CREDIT_COST,
             canImage,
             assistantCanVideo,
+            canMusic,
             tierCanVideo: tierCanGenerateVideo(tierKey),
         }),
     };
