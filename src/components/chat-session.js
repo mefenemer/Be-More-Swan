@@ -65,6 +65,23 @@
       .join('');
   }
 
+  /**
+   * A model quoting a draft back ("here's the revised post") often fences it or indents it four
+   * spaces, which Markdown renders as a code block: monospace, one unwrapped line per paragraph,
+   * and a horizontal scrollbar across the whole bubble. Nobody in this chat is reading code, so a
+   * block reads as quoted copy instead — the bubble's own font, wrapped, set off by a rule.
+   * Inline styles, not Tailwind classes: arbitrary variants here need a CSS rebuild to exist.
+   */
+  function softenCodeBlocks(root) {
+    root.querySelectorAll('pre').forEach((pre) => {
+      pre.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;font-size:inherit;'
+        + 'line-height:1.6;margin:0;padding:2px 0 2px 12px;border-left:3px solid #e5e7eb;background:none;overflow:visible;';
+      pre.querySelectorAll('code').forEach((code) => {
+        code.style.cssText = 'font-family:inherit;font-size:inherit;background:none;padding:0;white-space:inherit;';
+      });
+    });
+  }
+
   function mount(props) {
     const { container, assistantName } = props || {};
     if (!(container instanceof HTMLElement)) {
@@ -180,6 +197,7 @@
       } else {
         bubble.className = 'bg-white border border-gray-200 rounded-2xl rounded-bl-md px-4 py-3 text-sm text-gray-800 max-w-[85%] sm:max-w-md break-words shadow-sm space-y-2 [&_p]:leading-relaxed [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5';
         bubble.innerHTML = renderMarkdown(message.content);
+        softenCodeBlocks(bubble);
       }
       row.appendChild(bubble);
 

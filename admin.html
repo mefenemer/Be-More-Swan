@@ -61,9 +61,15 @@
       </button>
       <button data-cat="assistants" onclick="adminCatNav('assistants')"
         class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
-        aria-label="Assistants" title="Assistants — catalog, blueprints, models, publishing and The Swan Index">
+        aria-label="Assistants" title="Assistants — catalog, blueprints, models, publishing and music">
         <span class="text-xl">🤖</span>
         <span class="admin-cat-label group-hover:text-white">Assistants</span>
+      </button>
+      <button data-cat="swan-index" onclick="adminCatNav('swan-index')"
+        class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
+        aria-label="Swan Index" title="The Swan Index — review queue, front page, contributors and opt-outs">
+        <span class="text-xl">🦢</span>
+        <span class="admin-cat-label group-hover:text-white">Swan Index</span>
       </button>
       <button data-cat="platform" onclick="adminCatNav('platform')"
         class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
@@ -2655,7 +2661,7 @@ const VIEW_LABELS = {
 //
 // A category is shown when at least one of its children is — no separate cat gate.
 //
-// Seven top-level categories, down from ten. The rail is the scarcest space in the
+// Eight top-level categories, down from ten. The rail is the scarcest space in the
 // portal — it has to stay readable at a glance without truncating labels or
 // scrolling — so anything that could sit one level deeper does. Children may carry
 // an optional `group`, which renders as a heading inside the sub-menu; that keeps
@@ -2691,21 +2697,19 @@ const ADMIN_CATS = {
     // Publishing is what the content assistants actually do, so its pipeline reads
     // better next to them than buried in a ten-deep Platform list.
     { view: 'publish-pipeline',     icon: '📡', label: 'Publishing Pipeline', perm: 'platform_config',   group: 'Configuration' },
-    // The Swan Index — the editorial desk for theswanindex.com. Curation is a genuinely different
-    // job from configuring an assistant, and on its own it would argue for an eighth rail entry.
-    // It does not get one: the rail was deliberately cut from ten categories to seven because it
-    // is the scarcest space in the portal (see the note above this object), and a `group` heading
-    // buys the separation without spending rail. Promote it later if the desk gets daily use —
-    // that is one category object plus a button in the sidebar and the More drawer.
-    { view: 'swan-queue',        icon: '📥', label: 'Review Queue',  perm: 'curate_swan_index', group: 'The Swan Index' },
-    { view: 'swan-front-page',   icon: '🗞️', label: 'Front Page',    perm: 'curate_swan_index', group: 'The Swan Index' },
-    { view: 'swan-contributors', icon: '✍️', label: 'Contributors',  perm: 'curate_swan_index', group: 'The Swan Index' },
-    // Customers opt out by email (Terms); this is where an editor records it.
-    { view: 'swan-optouts',      icon: '🚫', label: 'Opt-outs',      perm: 'curate_swan_index', group: 'The Swan Index' },
     // What the post editor offers as music — and the only place a community-shared track that
     // should not be in the library can be taken out. platform_config: an existing permission, so no
     // role data has to change before it works.
     { view: 'music-library',     icon: '🎵', label: 'Music Library', perm: 'platform_config',   group: 'Content Library' },
+  ]},
+  // The Swan Index — the editorial desk for theswanindex.com. Curation is a different job from
+  // configuring an assistant, so it has its own rail entry rather than a group inside Assistants.
+  'swan-index': { label: 'The Swan Index', children: [
+    { view: 'swan-queue',        icon: '📥', label: 'Review Queue',  perm: 'curate_swan_index' },
+    { view: 'swan-front-page',   icon: '🗞️', label: 'Front Page',    perm: 'curate_swan_index' },
+    { view: 'swan-contributors', icon: '✍️', label: 'Contributors',  perm: 'curate_swan_index' },
+    // Customers opt out by email (Terms); this is where an editor records it.
+    { view: 'swan-optouts',      icon: '🚫', label: 'Opt-outs',      perm: 'curate_swan_index' },
   ]},
   platform: { label: 'Platform', children: [
     { view: 'master-data',          icon: '🗂️', label: 'Master Data',           perm: 'platform_config',         group: 'Configuration' },
@@ -11031,6 +11035,9 @@ async function swanToggleSuspend(id, next, handle, livePieces) {
   <div id="admin-more-drawer-panel">
     <button class="admin-more-item" data-cat="dashboard" onclick="adminCatNav('dashboard');closeMoreDrawer()">
       <span class="more-icon">📊</span>Dashboard
+    </button>
+    <button class="admin-more-item" data-cat="swan-index" onclick="adminCatNav('swan-index');closeMoreDrawer()">
+      <span class="more-icon">🦢</span>Swan Index
     </button>
     <button class="admin-more-item" data-cat="comms" onclick="adminCatNav('comms');closeMoreDrawer()">
       <span class="more-icon">✉️</span>Comms

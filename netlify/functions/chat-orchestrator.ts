@@ -187,6 +187,9 @@ function sharedContextBlock(rc: RouteContext): string {
         rc.onboardingContext
             ? 'The <strict_configuration> block at the end of these instructions holds the answers this business gave during setup — never ask for information already answered there.'
             : 'No onboarding context has been captured for this assistant yet.',
+        // The chat renders Markdown. A post quoted back inside ``` fences or indented four spaces
+        // became a monospace code box with every paragraph on one unwrapped line.
+        'When you show the user copy in your reply (a post, a revised draft, an email), write it as ordinary paragraphs, or as a > blockquote to set it apart. Never put it in a code block — no ``` fences and no lines indented with spaces.',
     ].filter(Boolean).join('\n\n');
 }
 
