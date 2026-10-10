@@ -11,10 +11,9 @@
 // Differences, each deliberate:
 //   • No tier gate. Video is premium-only; music is priced like it but gated like IMAGES — any paid
 //     tier with credits. A track under a photo post is as ordinary as an AI image is.
-//   • Gated by the 'ai_image_generation' assistant feature. There is no music feature key, and adding
-//     one would mean a master-data row on both databases before a single customer could use this —
-//     the AI media gate was dead in prod for weeks over exactly that kind of seed. Image is the
-//     feature every role that can make media already has.
+//   • Gated by its own 'ai_music_generation' assistant feature (2026-10-10). It used to borrow the
+//     AI-image switch, so turning images off for a fal outage took music down too, though music runs
+//     on Stability. db/z-music-capability.sql copied the image grants so nobody lost music on deploy.
 //   • No mock mode. A placeholder track would sit on a real post looking like generated music; with
 //     no STABILITY_API_KEY the button says it is not available instead.
 
