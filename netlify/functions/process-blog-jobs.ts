@@ -28,6 +28,7 @@ import { createNotification } from '../../src/utils/notify';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { isUpstreamBlocked } from '../../src/lib/ai-gateway';
+import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
 
 const BACKOFF_SECS = [30, 120, 300];
 /**
@@ -194,6 +195,15 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
     let jobCompleted = false;
 
     try {
+        // Monthly task allowance (src/utils/work-metering.ts). Before any model call; terminal,
+        // because the allowance does not come back until the 1st. An interactive draft's own post is
+        // left untouched — the author keeps what they wrote and sees why nothing was added.
+        if (job.trigger_type !== 'admin_test' && !(await hasTaskCapacity(db, job.organisation_id))) {
+            console.warn(`[process-blog-jobs] job ${job.job_id}: org ${job.organisation_id} is out of tasks — not drafting.`);
+            await failJob(db, job, attempt, TASK_LIMIT_MESSAGE, { terminal: true });
+            return;
+        }
+
         const [assistant] = await db
             .select({ id: aiAssistants.id, name: aiAssistants.name })
             .from(aiAssistants)
@@ -361,6 +371,8 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
             .where(eq(contentGenerationJobs.id, job.id));
         // The body is written and the job is settled. Nothing below may re-queue it.
         jobCompleted = true;
+        // One task per article, charged only now it exists (never throws).
+        if (job.trigger_type !== 'admin_test') await recordCompletedWork(db, job.organisation_id, 'blog_article', 1, job.job_id);
 
         // Autopilot's follow-ups. An interactive draft wants neither: the author is looking at the
         // post, so a "your draft is ready" notification is noise, and a hand-off on 'drafts_a_post'

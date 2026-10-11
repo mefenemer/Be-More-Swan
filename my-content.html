@@ -1,8 +1,11 @@
 <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full pb-24">
 
-  <!-- Header -->
-  <div class="flex items-start justify-between mb-8 gap-4">
-    <div>
+  <!-- Header. The title block is hidden when this fragment is embedded as the My Content tab on an
+       assistant's page (src/components/assistant-my-content.js) — that page already has its own
+       header and tab bar, so a second "My Content" heading inside the tab reads as a page in a page.
+       The credit pill and Add Content button stay. -->
+  <div class="flex items-start justify-between mb-8 gap-4" id="mc-header">
+    <div id="mc-page-title">
       <h1 class="text-3xl font-extrabold text-gray-900">My Content</h1>
       <p class="text-gray-500 mt-1">Upload images, videos, and links — or generate images and videos with AI — for your assistants to use. Track where each asset is in the publishing pipeline.</p>
     </div>

@@ -24,7 +24,7 @@ import { and, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     audienceConsentEvents, audienceContactSegments, audienceContacts, audienceImportJobs,
-    audienceSegments, leadOptOuts, newsletterIssues, newsletterSends,
+    audienceSegments, auditLogs, leadOptOuts, newsletterIssues, newsletterSends, users,
 } from '../../db/schema';
 import { cleanName, looksLikeEmail, normaliseEmail } from '../../src/utils/audience-contacts';
 import {
@@ -65,6 +65,13 @@ const IMPORT_CHUNK_MAX = 500;
  * the alternative is arbitrary keys written into every contact's JSONB where nothing lists them and
  * nothing can clean them up.
  */
+/** A YYYY-MM-DD from the toolbar's date filters, as UTC midnight; anything else is ignored. */
+export function parseDay(raw: string | undefined): Date | null {
+    if (!raw || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+    const d = new Date(`${raw}T00:00:00Z`);
+    return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export function pickDefined(raw: unknown, allowed: Set<string>): Record<string, string> {
     const out: Record<string, string> = {};
     if (!raw || typeof raw !== 'object') return out;
@@ -216,6 +223,42 @@ export default withLambda(async (event: HandlerEvent) => {
             });
         }
 
+        // Sign-ups per week by how they joined, for the Audience page's growth chart. Twelve whole
+        // weeks, Monday-based in UTC; weeks with nobody are filled in by the client.
+        if (event.queryStringParameters?.growth === '1') {
+            try {
+                const rows = await db.execute<{ week: string; source: string; n: number }>(sql`
+                    SELECT to_char(date_trunc('week', ${audienceContacts.createdAt}), 'YYYY-MM-DD') AS week,
+                           ${audienceContacts.source} AS source, count(*)::int AS n
+                      FROM ${audienceContacts}
+                     WHERE ${audienceContacts.organisationId} = ${orgId}
+                       AND ${audienceContacts.createdAt} >= date_trunc('week', now()) - interval '11 weeks'
+                     GROUP BY 1, 2 ORDER BY 1`);
+                return json(200, { weeks: rows });
+            } catch (err) {
+                console.error('[audience-contacts] growth query failed', { orgId, err });
+                return json(200, { weeks: [], unavailable: true });
+            }
+        }
+
+        // Who exported the audience, when, and what — read back from audit_logs (written by the
+        // 'exported' action below). Personal data left the product each time; the tenant should be
+        // able to see that it did without asking us.
+        if (event.queryStringParameters?.exports === '1') {
+            const rows = await db
+                .select({ id: auditLogs.id, userId: auditLogs.userId, newState: auditLogs.newState, createdAt: auditLogs.createdAt,
+                    firstName: users.firstName, lastName: users.lastName, email: users.email })
+                .from(auditLogs)
+                .leftJoin(users, eq(users.id, auditLogs.userId))
+                .where(and(eq(auditLogs.resourceType, 'audience_export'), eq(auditLogs.resourceId, String(orgId))))
+                .orderBy(desc(auditLogs.createdAt))
+                .limit(20);
+            return json(200, { exports: rows.map((r) => ({
+                id: r.id, createdAt: r.createdAt, details: r.newState,
+                by: [r.firstName, r.lastName].filter(Boolean).join(' ') || r.email || 'Someone on your team',
+            })) });
+        }
+
         // ⚠️ The card on an assistant's Overview wants the SHAPE of the list — how many subscribed,
         // how many left, how many never confirmed — and none of the contacts. Without this it had
         // to fetch a capped page of up to LIST_CAP rows and throw every one of them away, on a
@@ -253,12 +296,44 @@ export default withLambda(async (event: HandlerEvent) => {
             }
         }
 
-        const status = (event.queryStringParameters?.status || '').trim();
-        const segmentId = Number(event.queryStringParameters?.segmentId || '');
-        const q = (event.queryStringParameters?.q || '').trim();
+        const qs = event.queryStringParameters || {};
+        const status = (qs.status || '').trim();
+        const segmentId = Number(qs.segmentId || '');
+        const q = (qs.q || '').trim();
+        // Narrowing filters from the Audience toolbar. Applied HERE rather than in the browser
+        // because the list is capped: a filter run over the 2,000 rows we shipped would quietly
+        // miss everyone past the cap, and the export (which pages through `offset`) must see the
+        // same population the table does.
+        const source = (qs.source || '').trim();
+        const joinedFrom = parseDay(qs.from);
+        const joinedTo = parseDay(qs.to);
+        const fieldKey = (qs.field || '').trim().slice(0, 64);
+        const fieldValue = (qs.fieldValue || '').trim().slice(0, 200);
+        const offset = Math.max(0, Math.min(Number(qs.offset) || 0, 1_000_000));
+        const engagement = (qs.engagement || '').trim();
 
         const filters = [eq(audienceContacts.organisationId, orgId)];
         if (status) filters.push(eq(audienceContacts.status, status));
+        if (source) filters.push(eq(audienceContacts.source, source));
+        if (joinedFrom) filters.push(sql`${audienceContacts.createdAt} >= ${joinedFrom.toISOString()}::timestamptz`);
+        if (joinedTo) filters.push(sql`${audienceContacts.createdAt} < (${joinedTo.toISOString()}::timestamptz + interval '1 day')`);
+        // Engagement presets compile through the SAME rule compiler a segment uses, so "Saved as a
+        // segment" from this filter reaches exactly the people the table showed.
+        const ENGAGEMENT_RULE: Record<string, { field: string; op: string; value?: number }> = {
+            opened_90: { field: 'opened', op: 'within', value: 90 },
+            not_opened_180: { field: 'opened', op: 'not_within', value: 180 },
+            never_emailed: { field: 'emailed', op: 'never' },
+            emailed: { field: 'emailed', op: 'ever' },
+        };
+        if (ENGAGEMENT_RULE[engagement]) {
+            const cond = buildSegmentCondition(orgId, { match: 'all', conditions: [ENGAGEMENT_RULE[engagement]] });
+            if (cond) filters.push(cond);
+        }
+        if (fieldKey && /^[a-z0-9_]+$/.test(fieldKey)) {
+            filters.push(fieldValue
+                ? sql`${audienceContacts.customFields} ->> ${fieldKey} ILIKE ${'%' + fieldValue.replace(/[%_\\]/g, (m) => `\\${m}`) + '%'}`
+                : sql`COALESCE(${audienceContacts.customFields} ->> ${fieldKey}, '') <> ''`);
+        }
         if (q) {
             const like = `%${q.replace(/[%_]/g, (m) => `\\${m}`)}%`;
             const match = or(
@@ -277,11 +352,16 @@ export default withLambda(async (event: HandlerEvent) => {
                 firstName: audienceContacts.firstName,
                 lastName: audienceContacts.lastName,
                 company: audienceContacts.company,
+                phone: audienceContacts.phone,
                 status: audienceContacts.status,
                 source: audienceContacts.source,
                 consentBasis: audienceContacts.consentBasis,
                 confirmedAt: audienceContacts.confirmedAt,
+                unsubscribedAt: audienceContacts.unsubscribedAt,
                 lastSentAt: audienceContacts.lastSentAt,
+                timezone: audienceContacts.timezone,
+                emailFrequency: audienceContacts.emailFrequency,
+                customFields: audienceContacts.customFields,
                 createdAt: audienceContacts.createdAt,
             })
             .from(audienceContacts);
@@ -321,18 +401,21 @@ export default withLambda(async (event: HandlerEvent) => {
             rows = segmentIsDynamic && dynamicRule
                 ? await base
                     .where(and(...filters, dynamicRule))
-                    .orderBy(desc(audienceContacts.createdAt))
+                    .orderBy(desc(audienceContacts.createdAt), desc(audienceContacts.id))
                     .limit(LIST_CAP + 1)
+                    .offset(offset)
                 : Number.isFinite(segmentId) && segmentId
                 ? await base
                     .innerJoin(audienceContactSegments, eq(audienceContactSegments.contactId, audienceContacts.id))
                     .where(and(...filters, eq(audienceContactSegments.segmentId, segmentId)))
-                    .orderBy(desc(audienceContacts.createdAt))
+                    .orderBy(desc(audienceContacts.createdAt), desc(audienceContacts.id))
                     .limit(LIST_CAP + 1)
+                    .offset(offset)
                 : await base
                     .where(and(...filters))
-                    .orderBy(desc(audienceContacts.createdAt))
-                    .limit(LIST_CAP + 1);
+                    .orderBy(desc(audienceContacts.createdAt), desc(audienceContacts.id))
+                    .limit(LIST_CAP + 1)
+                    .offset(offset);
         } catch (err) {
             const code = (err as { code?: string; cause?: { code?: string } })?.code
                 ?? (err as { cause?: { code?: string } })?.cause?.code;
@@ -354,9 +437,61 @@ export default withLambda(async (event: HandlerEvent) => {
         let total = 0;
         for (const c of counts) { byStatus[c.status] = c.n; total += c.n; }
 
+        // Manual segments and tags each contact belongs to — for the Tags column, grouping by tag
+        // and the export. Dynamic segments hold no membership rows (their rule IS the membership),
+        // so they never appear here; the sidebar is where a rule-based segment is browsed.
+        const page = rows.slice(0, LIST_CAP);
+        const segmentIdsByContact = new Map<number, number[]>();
+        if (page.length) {
+            try {
+                const links = await db
+                    .select({ contactId: audienceContactSegments.contactId, segmentId: audienceContactSegments.segmentId })
+                    .from(audienceContactSegments)
+                    .where(inArray(audienceContactSegments.contactId, page.map((r) => r.id)));
+                for (const l of links) {
+                    const list = segmentIdsByContact.get(l.contactId) || [];
+                    list.push(l.segmentId);
+                    segmentIdsByContact.set(l.contactId, list);
+                }
+            } catch (err) {
+                // A courtesy column: losing it must not lose the list.
+                console.error('[audience-contacts] segment memberships failed to load', { orgId, err });
+            }
+        }
+
+        // Opens and sends per contact, for the Engagement columns. One grouped query for the page;
+        // fail soft, like the memberships above — and `engagementUnavailable` says so, because
+        // "0 opens" and "we could not read opens" must not look the same.
+        const engagementByContact = new Map<number, { sends: number; opens: number; lastOpenedAt: string | null }>();
+        let engagementUnavailable = false;
+        if (page.length) {
+            try {
+                const stats = await db
+                    .select({
+                        contactId: newsletterSends.contactId,
+                        sends: sql<number>`count(*) FILTER (WHERE ${newsletterSends.sentAt} IS NOT NULL)::int`,
+                        opens: sql<number>`count(*) FILTER (WHERE ${newsletterSends.openedAt} IS NOT NULL)::int`,
+                        lastOpenedAt: sql<string | null>`max(${newsletterSends.openedAt})`,
+                    })
+                    .from(newsletterSends)
+                    .where(and(eq(newsletterSends.organisationId, orgId), inArray(newsletterSends.contactId, page.map((r) => r.id))))
+                    .groupBy(newsletterSends.contactId);
+                for (const st of stats) if (st.contactId != null) engagementByContact.set(st.contactId, { sends: st.sends, opens: st.opens, lastOpenedAt: st.lastOpenedAt });
+            } catch (err) {
+                engagementUnavailable = true;
+                console.error('[audience-contacts] engagement stats failed to load', { orgId, err });
+            }
+        }
+
         return json(200, {
-            contacts: rows.slice(0, LIST_CAP),
+            engagementUnavailable,
+            contacts: page.map((r) => ({
+                ...r,
+                segmentIds: segmentIdsByContact.get(r.id) || [],
+                ...(engagementByContact.get(r.id) || { sends: 0, opens: 0, lastOpenedAt: null }),
+            })),
             truncated: rows.length > LIST_CAP,
+            offset,
             cap: LIST_CAP,
             counts: byStatus,
             total,
@@ -430,15 +565,36 @@ export default withLambda(async (event: HandlerEvent) => {
 
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
 
-    // ── Write ───────────────────────────────────────────────────────────────
-    const ctx = await requireTenant(event, db, { roles: WRITE_ROLES });
-    if ('error' in ctx) return ctx.error;
-    const orgId = ctx.organisationId;
-
     let body: any;
     try { body = JSON.parse(event.body || '{}'); }
     catch { return json(400, { error: 'Invalid JSON body.' }); }
     const action = String(body.action || '');
+
+    // ── Record an export ────────────────────────────────────────────────────
+    // Before the write-role gate on purpose: anyone who can READ the audience can export it (the
+    // file is built from the list they already see), so a viewer's export must be recorded too —
+    // gating the record on write access would leave exactly those exports unlogged.
+    // Who, how many, which fields — never the data itself.
+    if (action === 'exported') {
+        const readCtx = await requireTenant(event, db);
+        if ('error' in readCtx) return readCtx.error;
+        const count = Math.max(0, Math.floor(Number(body.count) || 0));
+        const fields = Array.isArray(body.fields) ? body.fields.map((f: unknown) => String(f).slice(0, 80)).slice(0, 60) : [];
+        const scope = ['selected', 'filtered', 'all'].includes(body.scope) ? body.scope : 'all';
+        await db.insert(auditLogs).values({
+            userId: readCtx.userId,
+            actionType: 'EXPORT',
+            resourceType: 'audience_export',
+            resourceId: String(readCtx.organisationId),
+            newState: { count, fields, scope },
+        });
+        return json(200, { recorded: true });
+    }
+
+    // ── Write ───────────────────────────────────────────────────────────────
+    const ctx = await requireTenant(event, db, { roles: WRITE_ROLES });
+    if ('error' in ctx) return ctx.error;
+    const orgId = ctx.organisationId;
 
     if (action === 'create') {
         const email = normaliseEmail(body.email);
@@ -593,6 +749,25 @@ export default withLambda(async (event: HandlerEvent) => {
             else await addToSegment(db, c.id, segmentId, ctx.userId);
         }
         return json(200, { affected: owned.length });
+    }
+
+    // Set (or clear) one custom field on many contacts at once — the Audience's bulk "Set field".
+    if (action === 'customBulk') {
+        const key = String(body.key || '');
+        const value = String(body.value ?? '').trim().slice(0, 500);
+        const ids: number[] = Array.isArray(body.contactIds) ? body.contactIds.map(Number).filter(Number.isFinite) : [];
+        if (!ids.length) return json(400, { error: 'No contacts selected.' });
+        const [def] = await db.select({ key: audienceCustomFields.key }).from(audienceCustomFields)
+            .where(and(eq(audienceCustomFields.organisationId, orgId), eq(audienceCustomFields.key, key))).limit(1);
+        if (!def) return json(400, { error: 'That custom field does not exist.' });
+        const next = value
+            ? sql`(COALESCE(${audienceContacts.customFields}, '{}'::jsonb) || ${JSON.stringify({ [key]: value })}::jsonb)`
+            : sql`(COALESCE(${audienceContacts.customFields}, '{}'::jsonb) - ${key})`;
+        const updated = await db.update(audienceContacts)
+            .set({ customFields: next, updatedAt: new Date() })
+            .where(and(eq(audienceContacts.organisationId, orgId), inArray(audienceContacts.id, ids.slice(0, IMPORT_CHUNK_MAX))))
+            .returning({ id: audienceContacts.id });
+        return json(200, { updated: updated.length });
     }
 
     if (action === 'import') {

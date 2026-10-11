@@ -61,6 +61,7 @@ import { formatPlatformStrategyBrief, platformStrategyFor, type PlatformStrategy
 import { parseModelJson } from '../../src/utils/model-json';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { reviewDraftGroup } from '../../src/utils/post-quality-review';
+import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
 import type { MediaSource } from '../../src/utils/publish-policy';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -279,6 +280,19 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             );
             return;
         }
+    }
+
+    // ── Monthly task allowance (src/utils/work-metering.ts) ─────────────────────────────────────
+    // Asked here — after the duplicate guards, which complete a job without drafting and so cost
+    // nothing — and before the idea claim and any model call. Refused work fails without retries:
+    // the allowance does not come back until the 1st, and task-volume-check pauses the assistants
+    // and tells the owner. Admin test generations are never charged to the tenant.
+    if (job.trigger_type !== 'admin_test' && !(await hasTaskCapacity(db, job.organisation_id))) {
+        console.warn(`[process-content-jobs] job ${job.job_id}: org ${job.organisation_id} is out of tasks — not drafting.`);
+        await db.execute(
+            `UPDATE content_generation_jobs SET status = 'failed', error_message = '${TASK_LIMIT_MESSAGE.replace(/'/g, "''")}', updated_at = now() WHERE id = ${job.id}`
+        );
+        return;
     }
 
     // "Create Post" → Suggest an idea: when a scheduled/conversion job carries no context of its
@@ -1273,6 +1287,9 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             `UPDATE content_generation_jobs SET status = 'completed', result_post_id = ${post.id}${tokenCols}, updated_at = now() WHERE id = ${job.id}`
         );
         jobCompleted = true;
+        // One task per job, however many platforms it fanned out to: a cross-post is one piece of
+        // work adapted per platform. Charged only now the post exists (never throws).
+        if (!isAdminTest) await recordCompletedWork(db, job.organisation_id, 'social_post', 1, job.job_id);
 
         // Admin test jobs do not notify the consumer
         if (!isAdminTest) {

@@ -549,22 +549,63 @@ window.initBrandAssets = function() {
     }
 
     // ── Social media handles (Business Information is the source of truth) ──────
-    // Each input carries data-platform="<slug>". Collect them into a { slug: value }
-    // object for organisation-profile; these gate which Connections can be enabled.
+    // Each input carries data-platform="<slug>" and holds only the HANDLE; the platform's address is
+    // fixed in front of it (LinkedIn's is a picker: company/ vs in/). What is saved is the full
+    // profile URL, built by window.SocialProfileUrl — these gate which Connections can be enabled.
+    const SPU = () => window.SocialProfileUrl;
+
+    function socialPathFor(platform) {
+        const sel = document.querySelector(`#bp-social-grid [data-social-path="${platform}"]`);
+        return sel ? sel.value : '';
+    }
+
     function collectSocialHandles() {
         const out = {};
         document.querySelectorAll('#bp-social-grid input[data-platform]').forEach(el => {
             const v = (el.value || '').trim();
-            if (v) out[el.dataset.platform] = v;
+            if (!v) return;
+            const p = el.dataset.platform;
+            // Without the helper (script failed to load) save what was typed rather than nothing.
+            if (!SPU()) { out[p] = v; return; }
+            // Parsed, not just prefixed: auto-save can fire on a pasted full link before the box is
+            // tidied on blur, and prefixing that would save "tiktok.com/@https://tiktok.com/@…".
+            const parts = SPU().split(p, v);
+            out[p] = SPU().compose(p, parts.explicitPath ? parts.path : socialPathFor(p), parts.handle) || v;
         });
         return out;
+    }
+
+    // Put a stored value (or a pasted link) back into the box as just the handle, and point
+    // LinkedIn's picker at the section the link was under.
+    function showSocialHandle(el, raw) {
+        const p = el.dataset.platform;
+        if (!SPU()) { el.value = raw || ''; return; }
+        const { path, handle } = SPU().split(p, raw);
+        el.value = handle;
+        const sel = document.querySelector(`#bp-social-grid [data-social-path="${p}"]`);
+        if (sel && path) sel.value = path;
     }
 
     function fillSocialHandles(handles) {
         const map = handles || {};
         document.querySelectorAll('#bp-social-grid input[data-platform]').forEach(el => {
-            el.value = map[el.dataset.platform] || '';
+            showSocialHandle(el, map[el.dataset.platform] || '');
         });
+    }
+
+    // A pasted full link (or "@name") is tidied into the handle when the customer leaves the box —
+    // not while typing, which would move the caret under their fingers.
+    function wireSocialHandles(onChange) {
+        document.querySelectorAll('#bp-social-grid input[data-platform]').forEach(el => {
+            el.addEventListener('input', onChange);
+            el.addEventListener('blur', () => {
+                const before = el.value;
+                showSocialHandle(el, before.trim());
+                if (el.value !== before) onChange();
+            });
+        });
+        document.querySelectorAll('#bp-social-grid [data-social-path]')
+            .forEach(sel => sel.addEventListener('change', onChange));
     }
 
     // ── Load + wire auto-save ─────────────────────────────────────────────────
@@ -638,8 +679,7 @@ window.initBrandAssets = function() {
         // "Other links" is a list of rows rather than one input — same auto-save.
         wireOtherLinks(bpSave);
         // Per-platform social handle inputs share the same auto-save.
-        document.querySelectorAll('#bp-social-grid input[data-platform]')
-            .forEach(el => el.addEventListener('input', bpSave));
+        wireSocialHandles(bpSave);
 
         const bdSave = debounce(saveBilling, 700);
         ['bd-input-name','bd-input-email','bd-input-vat','bd-input-addr1','bd-input-addr2','bd-input-city','bd-input-postal','bd-input-state','bd-input-country']

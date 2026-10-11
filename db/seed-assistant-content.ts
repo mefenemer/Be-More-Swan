@@ -290,14 +290,18 @@ const AUTHORED: RoleContent[] = [
     // commissions pictures) — db/z-campaign-visuals.sql moved existing rows off 'standalone'.
     {
         roleKey: 'brand_designer',
-        tagline: 'Say what the picture is for. Approve the one that fits.',
+        // Rewritten in plain words 2026-10-11 (db/z-copy-brand-designer.sql): it handles videos too,
+        // and the old features described how it is built rather than what a customer gets.
+        tagline: 'Tell it what you need a picture or video for. Pick the one you like.',
+        description: 'Tell it what a picture or video is for. It finds stock photos and videos, makes AI images and videos, and designs simple graphics in your brand colours with your logo. You pick the ones you like, and they are saved to your library for all your assistants to use.',
         keyFeatures: [
-            'Briefs, Not Prompts',
-            'Stock, AI and Branded Cards Side by Side',
+            "Just Say What It's For",
+            'Photos, Videos and Graphics to Choose From',
             'Nothing Is Used Until You Approve It',
+            'Use Your Own Files and Canva Designs',
         ],
-        integrations: [],
-        worksWith: ['campaign_orchestrator'],
+        integrations: ['Canva'],
+        worksWith: ['standalone', 'social_media_manager', 'blog_writer', 'campaign_orchestrator'],
     },
 ];
 

@@ -14,6 +14,10 @@
   const IMPORT_CHUNK = 500;
 
   const esc = (s) => window.escapeHtml ? window.escapeHtml(s) : String(s ?? '');
+  // Everything the toolbar can narrow by. All of it is applied by the SERVER (see filterParams).
+  function emptyFilters() {
+    return { q: '', status: '', segmentId: '', source: '', from: '', to: '', field: '', fieldValue: '', engagement: '' };
+  }
   const $ = (id) => document.getElementById(id);
 
   const state = {
@@ -24,10 +28,15 @@
     truncated: false,
     page: 1,
     selected: new Set(),
-    filters: { q: '', status: '', segmentId: '' },
+    filters: emptyFilters(),
+    // Grouping and sorting rearrange the rows already loaded; they never refetch.
+    groupBy: '',
+    sort: { key: 'added', dir: 'desc' },
     customFields: [],
     apiKeys: [],
     searchTimer: null,
+    columns: [],
+    engagementUnavailable: false,
     needsSetup: false,
   };
 
@@ -127,11 +136,32 @@
     fillSegmentSelects();
   }
 
-  async function loadContacts() {
+  // The query string for the current filters. Shared by the list and the export, so "what I'm
+  // looking at" and "what I downloaded" can never be two different populations.
+  function filterParams() {
     const params = new URLSearchParams();
-    if (state.filters.q) params.set('q', state.filters.q);
-    if (state.filters.status) params.set('status', state.filters.status);
-    if (state.filters.segmentId) params.set('segmentId', state.filters.segmentId);
+    const f = state.filters;
+    if (f.q) params.set('q', f.q);
+    if (f.status) params.set('status', f.status);
+    if (f.segmentId) params.set('segmentId', f.segmentId);
+    if (f.source) params.set('source', f.source);
+    if (f.from) params.set('from', f.from);
+    if (f.to) params.set('to', f.to);
+    if (f.engagement) params.set('engagement', f.engagement);
+    if (f.field) {
+      params.set('field', f.field);
+      if (f.fieldValue) params.set('fieldValue', f.fieldValue);
+    }
+    return params;
+  }
+
+  function hasFilters() {
+    const f = state.filters;
+    return !!(f.q || f.status || f.segmentId || f.source || f.from || f.to || f.field || f.engagement);
+  }
+
+  async function loadContacts() {
+    const params = filterParams();
 
     try {
       const data = await api(`${CONTACTS_API}?${params.toString()}`);
@@ -139,6 +169,7 @@
       state.counts = data.counts || {};
       state.total = data.total || 0;
       state.truncated = !!data.truncated;
+      state.engagementUnavailable = !!data.engagementUnavailable;
       state.selected.clear();
       // The environment has the code but not the tables (db/audience.sql not applied here). Say
       // that, rather than rendering a confident empty audience — "you have no contacts" and "this
@@ -148,11 +179,14 @@
       renderTruncation(data.cap);
       renderRows();
       renderBulk();
+      renderFilterState();
+      // The sidebar's "Everyone" count is the audience total, which only this response knows.
+      renderSegments();
     } catch (err) {
       console.error('[audience] contacts failed to load', err);
       const tbody = $('aud-rows');
       if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="6" class="p-8 text-center text-red-600 text-sm">${esc(err.message)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${colCount()}" class="p-8 text-center text-red-600 text-sm">${esc(err.message)}</td></tr>`;
       }
     }
   }
@@ -450,6 +484,8 @@
   }
 
   function renderCustomFields() {
+    fillFieldSelect();
+    renderHead();
     const host = $('aud-fields');
     if (!host) return;
     if (!state.customFields.length) {
@@ -559,33 +595,42 @@
       'No tags yet. Tag people to describe them, then build a segment from the tag.');
   }
 
+  // Drawn as a vertical list in the left-hand sidebar. Same markup and data attributes for segments
+  // and tags, so one click handler serves both.
   function renderChips(host, list, withEveryone, emptyText) {
     if (!host) return;
+    const everyone = withEveryone
+      ? `<div class="aud-side-row ${!state.filters.segmentId ? 'is-active' : ''}">
+          <button type="button" data-segment="" class="flex-1 min-w-0 flex items-center justify-between gap-2 px-2 py-1.5 text-sm text-left cursor-pointer ${!state.filters.segmentId ? 'font-bold text-gray-900' : 'text-gray-700'}">
+            <span class="truncate">Everyone</span>
+            <span class="text-xs text-gray-400">${Number(state.total || 0).toLocaleString()}</span>
+          </button>
+        </div>`
+      : '';
     if (!list.length) {
-      host.innerHTML = `<p class="text-sm text-gray-400">${esc(emptyText)}</p>`;
+      host.innerHTML = everyone + `<p class="text-xs text-gray-400 px-2 py-1">${esc(emptyText)}</p>`;
       return;
     }
-    const all = withEveryone
-      ? `<button type="button" data-segment="" class="px-3 py-1.5 text-xs font-bold rounded-full border transition cursor-pointer ${!state.filters.segmentId ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'}">Everyone</button>`
-      : '';
-    host.innerHTML = all + list.map((s) => {
+    host.innerHTML = everyone + list.map((s) => {
       const active = String(state.filters.segmentId) === String(s.id);
       const dyn = s.kind === 'dynamic';
       // The rule in words, on hover. A count alone is not checkable — "412" looks equally right
       // whatever the rule says.
       const title = dyn ? ` title="${esc(s.rulesError || s.description || '')}"` : '';
-      return `<span class="inline-flex items-center rounded-full border ${s.rulesError ? 'bg-red-50 border-red-300' : active ? 'bg-emerald-600 border-emerald-600' : 'bg-white border-gray-300'}"${title}>
-        <button type="button" data-segment="${s.id}" class="px-3 py-1.5 text-xs font-bold rounded-full cursor-pointer ${active ? 'text-white' : 'text-gray-700'}">
-          ${dyn ? `<span class="${active ? 'text-emerald-100' : 'text-emerald-600'}">◆</span> ` : ''}${esc(s.name)}
+      return `<div class="aud-side-row ${active ? 'is-active' : ''}"${title}>
+        <button type="button" data-segment="${s.id}" class="flex-1 min-w-0 flex items-center justify-between gap-2 px-2 py-1.5 text-sm text-left cursor-pointer ${active ? 'font-bold text-gray-900' : 'text-gray-700'}">
+          <span class="truncate">${dyn ? '<span class="text-emerald-600">◆</span> ' : s.kind === 'tag' ? '<span class="text-gray-400">#</span> ' : ''}${esc(s.name)}</span>
           ${s.rulesError
-            ? '<span class="text-red-600">rules broken</span>'
-            : `<span class="${active ? 'text-emerald-100' : 'text-gray-400'}">${Number(s.subscribedCount || 0).toLocaleString()}</span>`}
+            ? '<span class="text-[11px] font-bold text-red-600 whitespace-nowrap">rules broken</span>'
+            : `<span class="text-xs text-gray-400" title="Subscribed">${Number(s.subscribedCount || 0).toLocaleString()}</span>`}
         </button>
-        ${dyn ? `<button type="button" data-segment-rules="${s.id}" title="Edit the rule"
-          class="px-1 text-xs ${active ? 'text-emerald-100 hover:text-white' : 'text-gray-400 hover:text-emerald-700'} cursor-pointer">edit</button>` : ''}
-        <button type="button" data-segment-delete="${s.id}" title="Delete segment"
-          class="pr-3 pl-1 text-xs ${active ? 'text-emerald-100 hover:text-white' : 'text-gray-300 hover:text-red-500'} cursor-pointer">&times;</button>
-      </span>`;
+        <span class="aud-side-actions flex items-center shrink-0 pr-1">
+          ${dyn ? `<button type="button" data-segment-rules="${s.id}" title="Edit the rule" aria-label="Edit the rule for ${esc(s.name)}"
+            class="p-1 text-xs text-gray-400 hover:text-emerald-700 cursor-pointer">edit</button>` : ''}
+          <button type="button" data-segment-delete="${s.id}" title="Delete" aria-label="Delete ${esc(s.name)}"
+            class="p-1 text-sm leading-none text-gray-300 hover:text-red-500 cursor-pointer">&times;</button>
+        </span>
+      </div>`;
     }).join('');
   }
 
@@ -605,7 +650,7 @@
 
     if (!state.contacts.length) {
       if (state.needsSetup) {
-        tbody.innerHTML = `<tr><td colspan="6" class="p-10 text-center">
+        tbody.innerHTML = `<tr><td colspan="${colCount()}" class="p-10 text-center">
           <p class="text-sm font-bold text-gray-900">Audience is not set up on this environment yet</p>
           <p class="text-sm text-gray-500 mt-1">The database migration has not been applied here. Nothing is lost — apply <span class="font-mono text-xs bg-gray-100 px-1 rounded">db/audience.sql</span> and reload.</p>
         </td></tr>`;
@@ -613,11 +658,11 @@
         if (pagerEl) pagerEl.innerHTML = '';
         return;
       }
-      const filtered = state.filters.q || state.filters.status || state.filters.segmentId;
-      tbody.innerHTML = `<tr><td colspan="6" class="p-10 text-center">
+      const filtered = hasFilters();
+      tbody.innerHTML = `<tr><td colspan="${colCount()}" class="p-10 text-center">
         <p class="text-sm font-bold text-gray-900">${filtered ? 'No contacts match those filters' : 'No contacts yet'}</p>
         <p class="text-sm text-gray-500 mt-1">${filtered
-          ? 'Try clearing the search or choosing a different status.'
+          ? 'Try clearing the search or loosening a filter.'
           : 'Add someone by hand, import a CSV, or put your sign-up form on your website.'}</p>
       </td></tr>`;
       const pager = $('aud-pager');
@@ -625,31 +670,256 @@
       return;
     }
 
-    const info = window.ListPager.page(state.contacts, state.page, PAGE_SIZE);
+    const rows = arrangeRows();
+    const info = window.ListPager.page(rows, state.page, PAGE_SIZE);
     state.page = info.page;
 
-    tbody.innerHTML = info.items.map((c) => {
-      const st = STATUS[c.status] || { label: c.status, cls: 'bg-gray-100 text-gray-600 border-gray-200' };
+    // Group headers carry the group's size across ALL loaded rows, not just this page — "Imported
+    // (3)" on page two of a 400-person group would be a wrong number, not a page count.
+    const groupSize = new Map();
+    if (state.groupBy) rows.forEach((r) => groupSize.set(r.groupKey, (groupSize.get(r.groupKey) || 0) + 1));
+    let lastGroup = null;
+
+    tbody.innerHTML = info.items.map(({ c, groupKey, groupLabel }) => {
+      let head = '';
+      if (state.groupBy && groupKey !== lastGroup) {
+        lastGroup = groupKey;
+        head = `<tr class="aud-group-row"><td colspan="${colCount()}" class="px-4 py-2 text-xs font-bold text-gray-700 uppercase tracking-wide">
+          ${esc(groupLabel)} <span class="text-gray-400 font-semibold">· ${Number(groupSize.get(groupKey) || 0).toLocaleString()}</span></td></tr>`;
+      }
       const name = [c.firstName, c.lastName].filter(Boolean).join(' ');
-      return `<tr class="hover:bg-gray-50">
+      return head + `<tr class="hover:bg-gray-50">
         <td class="px-4 py-3"><input type="checkbox" data-select="${c.id}" data-email="${esc(c.email)}" ${state.selected.has(c.id) ? 'checked' : ''}
-          class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer"></td>
+          aria-label="Select ${esc(name || c.email)}" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer"></td>
         <td class="px-4 py-3">
-          <p class="font-bold text-gray-900">${esc(name || c.email)}</p>
+          <button type="button" data-open="${c.id}" class="text-left font-bold text-gray-900 hover:text-emerald-700 cursor-pointer">${esc(name || c.email)}</button>
           ${name ? `<p class="text-xs text-gray-500">${esc(c.email)}</p>` : ''}
           ${c.company ? `<p class="text-xs text-gray-400">${esc(c.company)}</p>` : ''}
         </td>
-        <td class="px-4 py-3"><span class="inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border ${st.cls}">${esc(st.label)}</span></td>
-        <td class="px-4 py-3 text-gray-600">${esc(SOURCE_LABEL[c.source] || c.source || '—')}</td>
-        <td class="px-4 py-3 text-gray-500">${esc(fmtDate(c.createdAt))}</td>
+        ${visibleColumns().map((col) => `<td class="px-4 py-3 ${col.cls || ''}">${col.cell(c)}</td>`).join('')}
         <td class="px-4 py-3 text-right">
           <button type="button" data-open="${c.id}" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">View</button>
         </td>
       </tr>`;
     }).join('');
 
+    renderSortMarks();
+    const all = $('aud-select-all');
+    if (all) all.checked = info.items.length > 0 && info.items.every(({ c }) => state.selected.has(c.id));
     const pager = $('aud-pager');
     if (pager) pager.innerHTML = window.ListPager.controlsHtml(info, { attr: 'data-aud-page', noun: 'contacts' });
+  }
+
+  // ── Sort & group ─────────────────────────────────────────────────────────
+  // Both work on the loaded rows. With a capped list that is the most recent 2,000 — the truncation
+  // banner already says so, and narrowing with a filter (server-side) is how to reach the rest.
+
+  const STATUS_ORDER = ['subscribed', 'pending', 'unsubscribed', 'bounced', 'complained', 'suppressed'];
+
+  function contactName(c) {
+    return [c.firstName, c.lastName].filter(Boolean).join(' ') || c.email || '';
+  }
+
+  /** Tags on a contact, by name — manual segments are left out (a tag column, not a segment one). */
+  function contactTags(c) {
+    const byId = new Map(state.segments.map((s) => [s.id, s]));
+    return (c.segmentIds || []).map((id) => byId.get(id)).filter((s) => s && s.kind === 'tag');
+  }
+
+  function contactSegments(c) {
+    const byId = new Map(state.segments.map((s) => [s.id, s]));
+    return (c.segmentIds || []).map((id) => byId.get(id)).filter((s) => s && s.kind !== 'tag');
+  }
+
+  const SORTERS = {
+    name: (c) => contactName(c).toLowerCase(),
+    status: (c) => STATUS_ORDER.indexOf(c.status),
+    source: (c) => (SOURCE_LABEL[c.source] || c.source || '').toLowerCase(),
+    company: (c) => (c.company || '\uffff').toLowerCase(),
+    lastSent: (c) => (c.lastSentAt ? new Date(c.lastSentAt).getTime() : 0),
+    lastOpened: (c) => (c.lastOpenedAt ? new Date(c.lastOpenedAt).getTime() : 0),
+    // Open RATE, so one open from one email outranks one open from twenty.
+    opens: (c) => (c.sends ? c.opens / c.sends : -1),
+    added: (c) => new Date(c.createdAt).getTime() || 0,
+  };
+  const sorterFor = (key) => SORTERS[key]
+    || (key.startsWith('custom:') ? (c) => String((c.customFields || {})[key.slice(7)] || '\uffff').toLowerCase() : SORTERS.added);
+  // Dates and engagement start biggest-first; text starts A→Z.
+  const DESC_FIRST = new Set(['added', 'lastSent', 'lastOpened', 'opens']);
+
+  // ── Columns ────────────────────────────────────────────────────────────────
+  // Which columns show is a per-browser choice (Columns ▾), remembered in localStorage — a viewing
+  // preference, so losing it just means the defaults come back.
+  const COLUMNS_PREF_KEY = 'bms.audience.columns';
+  const DEFAULT_COLUMNS = ['status', 'source', 'tags', 'lastSent', 'added'];
+  const muted = (t) => `<span class="text-gray-300">${t}</span>`;
+
+  function columnDefs() {
+    return [
+      { key: 'status', label: 'Status', sort: 'status', cell: (c) => {
+        const st = STATUS[c.status] || { label: c.status, cls: 'bg-gray-100 text-gray-600 border-gray-200' };
+        return `<span class="inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border whitespace-nowrap ${st.cls}">${esc(st.label)}</span>`;
+      } },
+      { key: 'source', label: 'Source', sort: 'source', cls: 'text-gray-600 whitespace-nowrap', cell: (c) => esc(SOURCE_LABEL[c.source] || c.source || '—') },
+      { key: 'tags', label: 'Tags', cell: (c) => {
+        const tags = contactTags(c);
+        if (!tags.length) return muted('—');
+        return `<div class="flex flex-wrap gap-1">${tags.slice(0, 3).map((t) => `<span class="inline-flex px-2 py-0.5 text-[11px] font-semibold rounded-full bg-gray-100 text-gray-600 whitespace-nowrap">${esc(t.name)}</span>`).join('')}${tags.length > 3 ? `<span class="text-[11px] text-gray-400" title="${esc(tags.slice(3).map((t) => t.name).join(', '))}">+${tags.length - 3}</span>` : ''}</div>`;
+      } },
+      { key: 'company', label: 'Company', sort: 'company', cls: 'text-gray-600', cell: (c) => (c.company ? esc(c.company) : muted('—')) },
+      { key: 'phone', label: 'Phone', cls: 'text-gray-600 whitespace-nowrap', cell: (c) => (c.phone ? esc(c.phone) : muted('—')) },
+      { key: 'lastSent', label: 'Last emailed', sort: 'lastSent', cls: 'text-gray-500 whitespace-nowrap', cell: (c) => (c.lastSentAt ? esc(fmtDate(c.lastSentAt)) : muted('Never')) },
+      { key: 'lastOpened', label: 'Last opened', sort: 'lastOpened', cls: 'text-gray-500 whitespace-nowrap', cell: (c) => (state.engagementUnavailable ? muted('—') : c.lastOpenedAt ? esc(fmtDate(c.lastOpenedAt)) : muted(c.sends ? 'Not yet' : '—')) },
+      // "2 of 5" rather than a percentage: 100% of one email and 100% of forty are not the same reader.
+      { key: 'opens', label: 'Opens', sort: 'opens', cls: 'text-gray-500 whitespace-nowrap', cell: (c) => (state.engagementUnavailable || !c.sends ? muted('—') : `${Number(c.opens || 0).toLocaleString()} of ${Number(c.sends).toLocaleString()}`) },
+      { key: 'added', label: 'Added', sort: 'added', cls: 'text-gray-500 whitespace-nowrap', cell: (c) => esc(fmtDate(c.createdAt)) },
+      ...state.customFields.map((f) => ({
+        key: `custom:${f.key}`, label: f.label, sort: `custom:${f.key}`, cls: 'text-gray-600',
+        cell: (c) => { const v = (c.customFields || {})[f.key]; return v ? esc(v) : muted('—'); },
+      })),
+    ];
+  }
+
+  function loadColumnPref() {
+    try {
+      const list = JSON.parse(localStorage.getItem(COLUMNS_PREF_KEY) || 'null');
+      if (Array.isArray(list)) return list;
+    } catch { /* fall through to the defaults */ }
+    return DEFAULT_COLUMNS.slice();
+  }
+
+  function visibleColumns() {
+    const want = new Set(state.columns);
+    return columnDefs().filter((c) => want.has(c.key));
+  }
+
+  // Checkbox + Contact + the chosen columns + the View link.
+  function colCount() { return visibleColumns().length + 3; }
+
+  function renderHead() {
+    const head = $('aud-head');
+    if (!head) return;
+    const th = (label, sort) => sort
+      ? `<th class="aud-sort px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide whitespace-nowrap" data-sort="${esc(sort)}" tabindex="0">${esc(label)} <span data-sort-mark></span></th>`
+      : `<th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide whitespace-nowrap">${esc(label)}</th>`;
+    head.innerHTML = `<tr>
+      <th class="px-4 py-3 w-10"><input type="checkbox" id="aud-select-all" aria-label="Select all on this page" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer"></th>
+      ${th('Contact', 'name')}
+      ${visibleColumns().map((c) => th(c.label, c.sort)).join('')}
+      <th class="px-4 py-3"></th>
+    </tr>`;
+  }
+
+  function renderColumnsMenu() {
+    const menu = $('aud-columns-menu');
+    if (!menu) return;
+    const on = new Set(state.columns);
+    menu.innerHTML = `<p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1">Show columns</p>`
+      + columnDefs().map((c) => `<label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+          <input type="checkbox" data-col="${esc(c.key)}" ${on.has(c.key) ? 'checked' : ''} class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600">
+          <span class="truncate">${esc(c.label)}</span></label>`).join('')
+      + `<button type="button" data-col-reset class="mt-1 text-xs font-bold text-gray-600 hover:text-gray-900 cursor-pointer">Reset to default</button>`;
+  }
+
+  function setColumns(list) {
+    state.columns = list;
+    try { localStorage.setItem(COLUMNS_PREF_KEY, JSON.stringify(list)); } catch { /* per-browser nicety only */ }
+    renderHead();
+    renderRows();
+  }
+
+  // One contact can sit under several tags, so grouping by tag can list a person more than once.
+  function groupKeysFor(c) {
+    switch (state.groupBy) {
+      case 'status': return [[String(STATUS_ORDER.indexOf(c.status)).padStart(2, '0'), (STATUS[c.status] || { label: c.status }).label]];
+      case 'source': return [[SOURCE_LABEL[c.source] || c.source || '—', SOURCE_LABEL[c.source] || c.source || 'Unknown']];
+      case 'company': {
+        const v = (c.company || '').trim();
+        return [[v ? `0${v.toLowerCase()}` : '1', v || 'No company']];
+      }
+      case 'domain': {
+        const d = String(c.email || '').split('@')[1] || '';
+        return [[d ? `0${d.toLowerCase()}` : '1', d || 'Unknown']];
+      }
+      case 'month': {
+        const d = new Date(c.createdAt);
+        if (Number.isNaN(d.getTime())) return [['0', 'Unknown']];
+        // Newest month first: invert the key so an ascending sort puts it at the top.
+        const ym = d.getFullYear() * 12 + d.getMonth();
+        return [[String(999999 - ym).padStart(6, '0'), d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })]];
+      }
+      case 'tag': {
+        const tags = contactTags(c);
+        return tags.length ? tags.map((t) => [`0${t.name.toLowerCase()}`, t.name]) : [['1', 'No tag']];
+      }
+      default: return [['', '']];
+    }
+  }
+
+  function arrangeRows() {
+    const get = sorterFor(state.sort.key);
+    const dir = state.sort.dir === 'asc' ? 1 : -1;
+    const rows = [];
+    state.contacts.forEach((c) => groupKeysFor(c).forEach(([groupKey, groupLabel]) => rows.push({ c, groupKey, groupLabel })));
+    rows.sort((a, b) => {
+      if (a.groupKey !== b.groupKey) return a.groupKey < b.groupKey ? -1 : 1;
+      const x = get(a.c), y = get(b.c);
+      return x < y ? -dir : x > y ? dir : 0;
+    });
+    return rows;
+  }
+
+  function renderSortMarks() {
+    document.querySelectorAll('[data-sort]').forEach((th) => {
+      const mark = th.querySelector('[data-sort-mark]');
+      const on = th.getAttribute('data-sort') === state.sort.key;
+      th.setAttribute('aria-sort', on ? (state.sort.dir === 'asc' ? 'ascending' : 'descending') : 'none');
+      if (mark) mark.textContent = on ? (state.sort.dir === 'asc' ? '↑' : '↓') : '';
+    });
+  }
+
+  // ── Filter state (summary line, Clear, the More filters badge) ─────────────
+  function renderFilterState() {
+    const f = state.filters;
+    const extra = [f.from, f.to, f.field, f.engagement].filter(Boolean).length;
+    const badge = $('aud-more-count');
+    if (badge) {
+      badge.textContent = extra ? `(${extra})` : '';
+      badge.classList.toggle('hidden', !extra);
+    }
+    const clear = $('aud-clear-filters');
+    if (hasFilters()) show(clear, 'inline'); else hide(clear);
+    const save = $('aud-save-segment');
+    if (hasFilters()) show(save, 'inline'); else hide(save);
+
+    const summary = $('aud-result-summary');
+    if (!summary) return;
+    const seg = f.segmentId ? state.segments.find((s) => String(s.id) === String(f.segmentId)) : null;
+    const n = state.contacts.length;
+    const shown = `${n.toLocaleString()}${state.truncated ? '+' : ''} ${n === 1 ? 'contact' : 'contacts'}`;
+    summary.textContent = seg
+      ? `${shown} in “${seg.name}”${hasFilters() && Object.keys(f).some((k) => k !== 'segmentId' && f[k]) ? ', filtered' : ''}`
+      : hasFilters() ? `${shown} match your filters` : `${shown}`;
+  }
+
+  function fillSourceSelect() {
+    const sel = $('aud-source');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Any source</option>' + Object.entries(SOURCE_LABEL)
+      .map(([v, label]) => `<option value="${esc(v)}">${esc(label)}</option>`).join('');
+    sel.value = state.filters.source;
+  }
+
+  function fillFieldSelect() {
+    const sel = $('aud-field');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Any</option>' + state.customFields
+      .map((f) => `<option value="${esc(f.key)}">${esc(f.label)}</option>`).join('');
+    // A field deleted since it was picked is no longer a filter.
+    if (state.filters.field && !state.customFields.some((f) => f.key === state.filters.field)) state.filters.field = '';
+    sel.value = state.filters.field;
+    const val = $('aud-field-value');
+    if (val) val.disabled = !state.filters.field;
   }
 
   function renderBulk() {
@@ -1067,6 +1337,403 @@
 
   const FORMS_API = '/.netlify/functions/audience-forms';   // still read by the contact filters above
 
+  // ── Export to Excel ────────────────────────────────────────────────────────
+  // Built in the browser by src/components/xlsx-writer.js. The field choice is remembered per
+  // browser — a convenience, so a failure to store it just means ticking the boxes again.
+
+  const EXPORT_PREF_KEY = 'bms.audience.exportFields';
+  const CONSENT_LABEL = {
+    double_opt_in: 'Confirmed by email',
+    single_opt_in: 'Signed up (single opt-in)',
+    imported_declared: 'Imported — permission declared',
+    soft_opt_in: 'Existing customer (soft opt-in)',
+    manual_entry: 'Added by hand',
+  };
+  const FREQUENCY_LABEL = { all: 'Every email', monthly: 'At most monthly' };
+
+  const fmtExportDate = (v) => {
+    if (!v) return '';
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return '';
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+
+  // `on` = ticked the first time someone exports. The rest are one click away.
+  function exportFields() {
+    return [
+      { key: 'email', label: 'Email', on: true, get: (c) => c.email },
+      { key: 'firstName', label: 'First name', on: true, get: (c) => c.firstName },
+      { key: 'lastName', label: 'Last name', on: true, get: (c) => c.lastName },
+      { key: 'fullName', label: 'Full name', get: (c) => [c.firstName, c.lastName].filter(Boolean).join(' ') },
+      { key: 'company', label: 'Company', on: true, get: (c) => c.company },
+      { key: 'phone', label: 'Phone', get: (c) => c.phone },
+      { key: 'status', label: 'Status', on: true, get: (c) => (STATUS[c.status] || { label: c.status }).label },
+      { key: 'source', label: 'How they joined', on: true, get: (c) => SOURCE_LABEL[c.source] || c.source },
+      { key: 'tags', label: 'Tags', on: true, get: (c) => contactTags(c).map((t) => t.name).join(', ') },
+      { key: 'segments', label: 'Manual segments', get: (c) => contactSegments(c).map((t) => t.name).join(', ') },
+      { key: 'consentBasis', label: 'How they gave permission', get: (c) => CONSENT_LABEL[c.consentBasis] || c.consentBasis },
+      { key: 'confirmedAt', label: 'Confirmed', get: (c) => fmtExportDate(c.confirmedAt) },
+      { key: 'unsubscribedAt', label: 'Unsubscribed', get: (c) => fmtExportDate(c.unsubscribedAt) },
+      { key: 'lastSentAt', label: 'Last emailed', get: (c) => fmtExportDate(c.lastSentAt) },
+      { key: 'lastOpenedAt', label: 'Last opened', get: (c) => fmtExportDate(c.lastOpenedAt) },
+      { key: 'emailsSent', label: 'Emails sent', get: (c) => (c.sends == null ? '' : c.sends) },
+      { key: 'emailsOpened', label: 'Emails opened', get: (c) => (c.opens == null ? '' : c.opens) },
+      { key: 'createdAt', label: 'Added', on: true, get: (c) => fmtExportDate(c.createdAt) },
+      { key: 'timezone', label: 'Timezone', get: (c) => c.timezone },
+      { key: 'emailFrequency', label: 'Email frequency', get: (c) => FREQUENCY_LABEL[c.emailFrequency] || c.emailFrequency },
+      ...state.customFields.map((f) => ({
+        key: `custom:${f.key}`, label: f.label, get: (c) => (c.customFields || {})[f.key],
+      })),
+    ];
+  }
+
+  function savedExportKeys() {
+    try {
+      const raw = localStorage.getItem(EXPORT_PREF_KEY);
+      const list = raw ? JSON.parse(raw) : null;
+      return Array.isArray(list) ? new Set(list) : null;
+    } catch { return null; }
+  }
+
+  function openExport(selectedOnly) {
+    const modal = $('aud-export-modal');
+    if (!modal) return;
+    const saved = savedExportKeys();
+    $('aud-export-fields').innerHTML = exportFields().map((f) => `
+      <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+        <input type="checkbox" data-export-field="${esc(f.key)}" ${(saved ? saved.has(f.key) : f.on) ? 'checked' : ''}
+          class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600">
+        <span class="truncate">${esc(f.label)}${f.key.startsWith('custom:') ? ' <span class="text-[11px] text-gray-400">custom</span>' : ''}</span>
+      </label>`).join('');
+
+    // Who: the selection (if any), what the list is showing, or everyone.
+    const sel = state.selected.size;
+    const scopes = [];
+    if (sel) scopes.push({ value: 'selected', label: `The ${sel.toLocaleString()} selected ${sel === 1 ? 'contact' : 'contacts'}` });
+    if (hasFilters()) scopes.push({ value: 'filtered', label: 'Everyone matching your current filters and segment' });
+    scopes.push({ value: 'all', label: `Your whole audience (${Number(state.total || 0).toLocaleString()})` });
+    const pick = selectedOnly && sel ? 'selected' : scopes[0].value;
+    $('aud-export-scope').innerHTML = scopes.map((o) => `
+      <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+        <input type="radio" name="aud-export-scope" value="${o.value}" ${o.value === pick ? 'checked' : ''} class="border-gray-300 text-emerald-600 focus:ring-emerald-600">
+        ${esc(o.label)}
+      </label>`).join('');
+
+    const progress = $('aud-export-progress');
+    if (progress) { progress.textContent = ''; progress.classList.add('hidden'); }
+    updateExportButton();
+    show(modal);
+  }
+
+  function setExportChecks(on) {
+    document.querySelectorAll('#aud-export-fields [data-export-field]').forEach((b) => { b.checked = on; });
+    updateExportButton();
+  }
+
+  function updateExportButton() {
+    const any = document.querySelector('#aud-export-fields [data-export-field]:checked');
+    const btn = $('aud-export-start');
+    if (btn) btn.disabled = !any;
+  }
+
+  // Pages through the list endpoint past its display cap, with the same filters, until a page
+  // comes back short. Bounded so a runaway loop cannot hammer the function.
+  async function fetchAllContacts(params, onProgress) {
+    const out = [];
+    for (let page = 0; page < 200; page++) {
+      params.set('offset', String(out.length));
+      const data = await api(`${CONTACTS_API}?${params.toString()}`);
+      const rows = data.contacts || [];
+      out.push(...rows);
+      if (onProgress) onProgress(out.length);
+      if (!data.truncated || !rows.length) break;
+    }
+    return out;
+  }
+
+  async function runExport() {
+    const keys = [...document.querySelectorAll('#aud-export-fields [data-export-field]:checked')]
+      .map((b) => b.getAttribute('data-export-field'));
+    if (!keys.length) return;
+    try { localStorage.setItem(EXPORT_PREF_KEY, JSON.stringify(keys)); } catch { /* per-browser nicety only */ }
+
+    const scope = (document.querySelector('input[name="aud-export-scope"]:checked') || {}).value || 'all';
+    const btn = $('aud-export-start');
+    const progress = $('aud-export-progress');
+    const say = (t) => { if (progress) { progress.textContent = t; progress.classList.remove('hidden'); } };
+    if (btn) btn.disabled = true;
+
+    try {
+      let contacts;
+      if (scope === 'selected') {
+        contacts = state.contacts.filter((c) => state.selected.has(c.id));
+      } else {
+        say('Gathering contacts…');
+        const params = scope === 'filtered' ? filterParams() : new URLSearchParams();
+        contacts = await fetchAllContacts(params, (n) => say(`Gathering contacts… ${n.toLocaleString()}`));
+      }
+      if (!contacts.length) { say('Nobody to export — no contacts match.'); return; }
+
+      const fields = exportFields().filter((f) => keys.includes(f.key));
+      const rows = contacts.map((c) => fields.map((f) => {
+        const v = f.get(c);
+        return v == null ? '' : String(v);
+      }));
+      const stamp = new Date().toISOString().slice(0, 10);
+      window.XlsxWriter.download(`audience-${stamp}.xlsx`, 'Audience', fields.map((f) => f.label), rows);
+      window.showToast(`Exported ${contacts.length.toLocaleString()} ${contacts.length === 1 ? 'contact' : 'contacts'}.`);
+      // Recorded for the Export history. The file is already downloaded, so a failure here is logged
+      // and nothing more — but it IS logged, because an export nobody can see happened is the gap.
+      api(CONTACTS_API, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'exported', count: contacts.length, fields: fields.map((f) => f.label), scope }),
+      }).then(() => { if ($('aud-exports')?.open) loadExports(); })
+        .catch((err) => console.error('[audience] export happened but was not recorded', err));
+      hide($('aud-export-modal'));
+    } catch (err) {
+      console.error('[audience] export failed', err);
+      say(err.message || 'The export could not be completed. Please try again.');
+    } finally {
+      updateExportButton();
+    }
+  }
+
+  // ── Save the current filters as a rule-based segment ───────────────────────
+  // Maps each toolbar filter onto the rule vocabulary (src/utils/audience-segment-rules.ts) and
+  // saves through the same endpoint as the rule builder, so the server validates it the same way.
+  // Some filters have no rule equivalent — those are named, not silently dropped.
+  const ENGAGEMENT_RULES = {
+    opened_90: { field: 'opened', op: 'within', value: 90 },
+    not_opened_180: { field: 'opened', op: 'not_within', value: 180 },
+    never_emailed: { field: 'emailed', op: 'never' },
+    emailed: { field: 'emailed', op: 'ever' },
+  };
+
+  function filtersToRules() {
+    const f = state.filters;
+    const conditions = [];
+    const left = [];
+    if (f.source) conditions.push({ field: 'source', op: 'is', value: f.source });
+    if (f.segmentId) {
+      const seg = state.segments.find((x) => String(x.id) === String(f.segmentId));
+      if (seg && seg.kind !== 'dynamic') conditions.push({ field: 'tag', op: 'in', value: seg.id });
+      else left.push(`the rule-based segment “${seg ? seg.name : ''}” (a rule cannot contain another rule)`);
+    }
+    if (f.from) {
+      const days = Math.ceil((Date.now() - new Date(`${f.from}T00:00:00Z`).getTime()) / 86400000);
+      if (days >= 1) conditions.push({ field: 'joined', op: 'within', value: days });
+    }
+    if (f.field) {
+      conditions.push(f.fieldValue
+        ? { field: 'custom', op: 'contains', key: f.field, value: f.fieldValue }
+        : { field: 'custom', op: 'is_set', key: f.field });
+    }
+    if (ENGAGEMENT_RULES[f.engagement]) conditions.push(ENGAGEMENT_RULES[f.engagement]);
+    if (f.q) left.push('the search text');
+    if (f.status) left.push('the status (sends only ever go to subscribed people anyway)');
+    if (f.to) left.push('the “joined up to” date');
+    return { conditions, left };
+  }
+
+  async function saveFiltersAsSegment() {
+    const { conditions, left } = filtersToRules();
+    if (!conditions.length) {
+      window.showToast('None of these filters can be saved as a rule. Source, tag, joined from, custom field and engagement can.');
+      return;
+    }
+    const note = left.length ? ` Left out, because a rule cannot express it: ${left.join('; ')}.` : '';
+    const name = await window.promptModal(
+      `A rule-based segment keeps itself up to date — new people who match join it automatically.${note}`,
+      { title: 'Save as segment', placeholder: 'e.g. Engaged Leeds customers', confirmLabel: 'Save segment', required: true });
+    if (!name || !name.trim()) return;
+    try {
+      const { segment } = await api(SEGMENTS_API, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create', name: name.trim(), kind: 'dynamic', rules: { match: 'all', conditions } }),
+      });
+      window.showToast(`Saved “${name.trim()}”.`);
+      await loadSegments();
+      if (segment && segment.id) {
+        state.filters = emptyFilters();
+        state.filters.segmentId = String(segment.id);
+        ['aud-search', 'aud-status', 'aud-source', 'aud-from', 'aud-to', 'aud-field', 'aud-field-value', 'aud-engagement']
+          .forEach((id) => { const el = $(id); if (el) el.value = ''; });
+        state.page = 1;
+        renderSegments();
+        await loadContacts();
+      }
+    } catch (err) { window.showToast(err.message); }
+  }
+
+  // ── More bulk actions ──────────────────────────────────────────────────────
+
+  async function bulkUntag() {
+    const ids = [...state.selected];
+    if (!ids.length) return;
+    // Only what the selected people actually carry — offering every tag would let "remove" report
+    // success on a tag none of them had.
+    const held = new Set();
+    state.contacts.filter((c) => state.selected.has(c.id)).forEach((c) => (c.segmentIds || []).forEach((id) => held.add(id)));
+    const targets = state.segments.filter((x) => x.kind !== 'dynamic' && held.has(x.id));
+    if (!targets.length) { window.showToast('None of the selected contacts has a tag or manual segment to remove.'); return; }
+    const choice = await window.choiceModal('Remove the selected contacts from…',
+      targets.map((x) => ({ label: `${x.kind === 'tag' ? '# ' : ''}${x.name}`, value: String(x.id) })), { title: 'Remove tag' });
+    if (!choice) return;
+    try {
+      await api(CONTACTS_API, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'segment', segmentId: Number(choice), contactIds: ids, remove: true }),
+      });
+      window.showToast('Removed.');
+      await loadSegments();
+      await loadContacts();
+    } catch (err) { window.showToast(err.message); }
+  }
+
+  async function bulkSetField() {
+    const ids = [...state.selected];
+    if (!ids.length) return;
+    if (!state.customFields.length) { window.showToast('Create a custom field first (left-hand side, Custom fields).'); return; }
+    const key = await window.choiceModal('Which field?',
+      state.customFields.map((f) => ({ label: f.label, value: f.key })), { title: 'Set a field' });
+    if (!key) return;
+    const field = state.customFields.find((f) => f.key === key);
+    const value = await window.promptModal(
+      `Set “${field ? field.label : key}” for ${ids.length.toLocaleString()} ${ids.length === 1 ? 'contact' : 'contacts'}. Leave it blank to clear the field.`,
+      { title: 'Set a field', placeholder: 'Value', confirmLabel: 'Apply' });
+    if (value === null || value === undefined) return;
+    try {
+      const { updated } = await api(CONTACTS_API, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'customBulk', key, value, contactIds: ids }),
+      });
+      window.showToast(`Updated ${Number(updated || 0).toLocaleString()} ${updated === 1 ? 'contact' : 'contacts'}.`);
+      await loadContacts();
+    } catch (err) { window.showToast(err.message); }
+  }
+
+  async function bulkDelete() {
+    const ids = [...state.selected];
+    if (!ids.length) return;
+    // Says what is kept: deleting someone who unsubscribed keeps their opt-out, so they can never be
+    // silently re-added (the DELETE RULE in audience-contacts.ts).
+    const ok = await window.confirmModal(
+      `Delete ${ids.length.toLocaleString()} ${ids.length === 1 ? 'contact' : 'contacts'}? Their details are removed for good. Anyone who had unsubscribed stays blocked, so they can't be added back by accident.`,
+      { title: 'Delete these contacts?', confirmLabel: 'Delete' });
+    if (!ok) return;
+    let done = 0;
+    let failed = 0;
+    for (const id of ids) {
+      try { await api(`${CONTACTS_API}?id=${id}`, { method: 'DELETE' }); done++; } catch { failed++; }
+    }
+    window.showToast(failed
+      ? `Deleted ${done}; ${failed} could not be deleted — please try those again.`
+      : `Deleted ${done} ${done === 1 ? 'contact' : 'contacts'}.`);
+    await loadSegments();
+    await loadContacts();
+  }
+
+  // ── Growth chart ───────────────────────────────────────────────────────────
+  // New contacts per week, twelve weeks. One series in the brand colour; the split by how people
+  // joined is in the tooltip. Plain HTML bars so it needs no chart library and reflows on a phone.
+
+  function mondayUtc(d) {
+    const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7));
+    return x;
+  }
+
+  async function loadGrowth() {
+    const host = $('aud-growth-chart');
+    if (!host) return;
+    host.innerHTML = '<p class="text-sm text-gray-400 py-6 text-center">Loading…</p>';
+    let rows;
+    try { rows = (await api(`${CONTACTS_API}?growth=1`)).weeks || []; }
+    catch (err) { host.innerHTML = `<p class="text-sm text-red-600">${esc(err.message)}</p>`; return; }
+
+    const start = mondayUtc(new Date());
+    start.setUTCDate(start.getUTCDate() - 7 * 11);
+    const weeks = Array.from({ length: 12 }, (_, i) => {
+      const d = new Date(start);
+      d.setUTCDate(d.getUTCDate() + 7 * i);
+      return { key: d.toISOString().slice(0, 10), date: d, total: 0, bySource: {} };
+    });
+    const byKey = new Map(weeks.map((w) => [w.key, w]));
+    rows.forEach((r) => {
+      const w = byKey.get(String(r.week));
+      if (!w) return;
+      w.total += Number(r.n) || 0;
+      w.bySource[r.source] = (w.bySource[r.source] || 0) + (Number(r.n) || 0);
+    });
+
+    const max = Math.max(1, ...weeks.map((w) => w.total));
+    const sum = weeks.reduce((n, w) => n + w.total, 0);
+    const headline = $('aud-growth-headline');
+    if (headline) headline.textContent = `${weeks[11].total.toLocaleString()} this week · ${sum.toLocaleString()} in 12 weeks`;
+    if (!sum) {
+      host.innerHTML = '<p class="text-sm text-gray-500 py-6 text-center">Nobody new in the last 12 weeks yet. Put a sign-up form on your website to start growing your list.</p>';
+      return;
+    }
+    const label = (d) => d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' });
+    const BAR = 'var(--color-emerald-700, #ff007f)';   // ⚠️ 700, not 600: emerald 300–600 are still GREEN here
+    host.innerHTML = `
+      <div style="display:flex;gap:8px;align-items:stretch">
+        <div style="display:flex;flex-direction:column;justify-content:space-between;font-size:11px;color:var(--color-gray-400,#9ca3af);text-align:right;height:128px;min-width:1.5rem">
+          <span>${max.toLocaleString()}</span><span>0</span>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div role="img" aria-label="New contacts per week for the last 12 weeks" style="display:flex;align-items:flex-end;gap:2px;height:128px;border-bottom:1px solid var(--color-gray-200,#e5e7eb);background-image:linear-gradient(var(--color-gray-100,#f3f4f6) 1px,transparent 1px);background-size:100% 50%">
+            ${weeks.map((w, i) => `<div data-week="${i}" tabindex="0" style="flex:1;height:100%;display:flex;align-items:flex-end;cursor:default;outline-offset:2px">
+              <div style="width:100%;height:${w.total ? Math.max(2, (w.total / max) * 100) : 0}%;background:${BAR};border-radius:4px 4px 0 0"></div></div>`).join('')}
+          </div>
+          <div style="display:flex;gap:2px;margin-top:4px;font-size:11px;color:var(--color-gray-400,#9ca3af)">
+            ${weeks.map((w, i) => `<span style="flex:1;text-align:center;white-space:nowrap;overflow:hidden">${i % 2 === 0 ? esc(label(w.date)) : ''}</span>`).join('')}
+          </div>
+        </div>
+      </div>
+      <div data-growth-tip class="hidden" style="display:none;position:absolute;z-index:10;pointer-events:none;background:#fff;border:1px solid var(--color-gray-200,#e5e7eb);border-radius:8px;box-shadow:0 8px 20px -8px rgba(0,0,0,.25);padding:8px 10px;font-size:12px;min-width:150px"></div>`;
+
+    const tip = host.querySelector('[data-growth-tip]');
+    const showTip = (el) => {
+      const w = weeks[Number(el.getAttribute('data-week'))];
+      const lines = Object.entries(w.bySource).sort((a, b) => b[1] - a[1])
+        .map(([src, n]) => `<div style="display:flex;justify-content:space-between;gap:12px;color:var(--color-gray-600,#4b5563)"><span>${esc(SOURCE_LABEL[src] || src)}</span><span>${n.toLocaleString()}</span></div>`).join('');
+      tip.innerHTML = `<div style="font-weight:700;color:var(--color-gray-900,#111827);margin-bottom:4px">Week of ${esc(label(w.date))} · ${w.total.toLocaleString()}</div>${lines || '<div style="color:var(--color-gray-400,#9ca3af)">Nobody new</div>'}`;
+      show(tip, 'block');
+      const hostBox = host.getBoundingClientRect();
+      const box = el.getBoundingClientRect();
+      const left = Math.min(Math.max(0, box.left - hostBox.left + box.width / 2 - tip.offsetWidth / 2), hostBox.width - tip.offsetWidth);
+      tip.style.left = `${left}px`;
+      tip.style.top = `${Math.max(0, box.top - hostBox.top - tip.offsetHeight + 40)}px`;
+    };
+    host.querySelectorAll('[data-week]').forEach((el) => {
+      el.addEventListener('mouseenter', () => showTip(el));
+      el.addEventListener('focus', () => showTip(el));
+      el.addEventListener('mouseleave', () => hide(tip));
+      el.addEventListener('blur', () => hide(tip));
+    });
+  }
+
+  // ── Export history ─────────────────────────────────────────────────────────
+  async function loadExports() {
+    const host = $('aud-exports-list');
+    if (!host) return;
+    try {
+      const { exports } = await api(`${CONTACTS_API}?exports=1`);
+      host.innerHTML = (exports || []).length
+        ? exports.map((x) => {
+          const d = x.details || {};
+          const fields = Array.isArray(d.fields) ? d.fields : [];
+          return `<div class="text-xs text-gray-600" title="${esc(fields.join(', '))}">
+            <p class="font-semibold text-gray-800">${esc(fmtDateTime(x.createdAt))}</p>
+            <p>${esc(x.by)} · ${Number(d.count || 0).toLocaleString()} ${d.count === 1 ? 'contact' : 'contacts'} · ${fields.length} ${fields.length === 1 ? 'field' : 'fields'}</p>
+          </div>`;
+        }).join('')
+        : '<p class="text-xs text-gray-400">Nobody has exported your audience yet.</p>';
+    } catch (err) { host.innerHTML = `<p class="text-xs text-red-600">${esc(err.message)}</p>`; }
+  }
+
   // ── Wiring ─────────────────────────────────────────────────────────────────
 
   function wire() {
@@ -1090,6 +1757,126 @@
         loadContacts();
       });
     }
+
+    // Each narrowing control writes one filter and refetches — the server applies them all.
+    const refetch = () => { state.page = 1; loadContacts(); };
+    $('aud-source')?.addEventListener('change', (e) => { state.filters.source = e.target.value; refetch(); });
+    $('aud-from')?.addEventListener('change', (e) => { state.filters.from = e.target.value; refetch(); });
+    $('aud-to')?.addEventListener('change', (e) => { state.filters.to = e.target.value; refetch(); });
+    $('aud-field')?.addEventListener('change', (e) => {
+      state.filters.field = e.target.value;
+      const val = $('aud-field-value');
+      if (val) { val.disabled = !state.filters.field; if (!state.filters.field) { val.value = ''; state.filters.fieldValue = ''; } }
+      refetch();
+    });
+    $('aud-field-value')?.addEventListener('input', (e) => {
+      clearTimeout(state.searchTimer);
+      state.searchTimer = setTimeout(() => { state.filters.fieldValue = e.target.value.trim(); refetch(); }, 300);
+    });
+
+    const moreBtn = $('aud-more-filters');
+    moreBtn?.addEventListener('click', () => {
+      const panel = $('aud-more-panel');
+      const open = panel && panel.style.display === 'none';
+      if (open) show(panel, 'grid'); else hide(panel);
+      moreBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+
+    $('aud-clear-filters')?.addEventListener('click', () => {
+      state.filters = emptyFilters();
+      [['aud-search', ''], ['aud-status', ''], ['aud-source', ''], ['aud-from', ''], ['aud-to', ''], ['aud-field', ''], ['aud-field-value', ''], ['aud-engagement', '']]
+        .forEach(([id, v]) => { const el = $(id); if (el) el.value = v; });
+      const val = $('aud-field-value');
+      if (val) val.disabled = true;
+      refetch();
+    });
+
+    // The status cards double as shortcuts. "Unsubscribed" there counts bounces and spam reports
+    // too, but the filter is the plain status — the dropdown says which it is.
+    $('aud-kpis')?.addEventListener('click', (e) => {
+      const card = e.target.closest('[data-kpi-filter]');
+      if (!card) return;
+      state.filters.status = card.getAttribute('data-kpi-filter') || '';
+      const sel = $('aud-status');
+      if (sel) sel.value = state.filters.status;
+      refetch();
+    });
+
+    $('aud-group')?.addEventListener('change', (e) => { state.groupBy = e.target.value; state.page = 1; renderRows(); });
+
+    // The header is rebuilt whenever the columns change, so sorting and select-all are delegated.
+    const head = $('aud-head');
+    const sortBy = (th) => {
+      const key = th.getAttribute('data-sort');
+      state.sort = state.sort.key === key
+        ? { key, dir: state.sort.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: DESC_FIRST.has(key) ? 'desc' : 'asc' };
+      state.page = 1;
+      renderRows();
+    };
+    head?.addEventListener('click', (e) => { const th = e.target.closest('[data-sort]'); if (th) sortBy(th); });
+    head?.addEventListener('keydown', (e) => {
+      const th = e.target.closest('[data-sort]');
+      if (th && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); sortBy(th); }
+    });
+    head?.addEventListener('change', (e) => {
+      if (e.target.id !== 'aud-select-all') return;
+      // Selects the VISIBLE page only. A checkbox that silently selected 2,000 unseen rows and
+      // then unsubscribed them is not a convenience.
+      const checked = e.target.checked;
+      document.querySelectorAll('#aud-rows [data-select]').forEach((b) => {
+        const id = Number(b.getAttribute('data-select'));
+        b.checked = checked;
+        if (checked) state.selected.add(id); else state.selected.delete(id);
+      });
+      renderBulk();
+    });
+
+    const colBtn = $('aud-columns-btn');
+    const colMenu = $('aud-columns-menu');
+    colBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = colMenu.style.display === 'none';
+      if (open) { renderColumnsMenu(); show(colMenu, 'block'); } else hide(colMenu);
+      colBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    colMenu?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (e.target.closest('[data-col-reset]')) { setColumns(DEFAULT_COLUMNS.slice()); renderColumnsMenu(); }
+    });
+    colMenu?.addEventListener('change', (e) => {
+      const box = e.target.closest('[data-col]');
+      if (!box) return;
+      const key = box.getAttribute('data-col');
+      // Kept in definition order, so ticking a column puts it where it belongs rather than last.
+      const on = new Set(state.columns);
+      if (box.checked) on.add(key); else on.delete(key);
+      setColumns(columnDefs().map((c) => c.key).filter((k) => on.has(k)));
+    });
+    document.addEventListener('click', (e) => {
+      if (colMenu && colMenu.style.display !== 'none' && !e.target.closest('#aud-columns-menu')) {
+        hide(colMenu); colBtn?.setAttribute('aria-expanded', 'false');
+      }
+    });
+
+    $('aud-engagement')?.addEventListener('change', (e) => { state.filters.engagement = e.target.value; refetch(); });
+    $('aud-save-segment')?.addEventListener('click', saveFiltersAsSegment);
+    $('aud-bulk-untag')?.addEventListener('click', bulkUntag);
+    $('aud-bulk-field')?.addEventListener('click', bulkSetField);
+    $('aud-bulk-delete')?.addEventListener('click', bulkDelete);
+    $('aud-growth')?.addEventListener('toggle', (e) => { if (e.target.open) loadGrowth(); });
+    $('aud-exports')?.addEventListener('toggle', (e) => { if (e.target.open) loadExports(); });
+
+    // "+ New key" sits inside the API keys <summary>; without this the click also folds the section.
+    $('aud-new-key')?.addEventListener('click', (e) => e.preventDefault());
+
+    $('aud-export-btn')?.addEventListener('click', () => openExport(false));
+    $('aud-bulk-export')?.addEventListener('click', () => openExport(true));
+    document.querySelectorAll('[data-aud-export-close]').forEach((el) => el.addEventListener('click', () => hide($('aud-export-modal'))));
+    $('aud-export-all')?.addEventListener('click', () => setExportChecks(true));
+    $('aud-export-none')?.addEventListener('click', () => setExportChecks(false));
+    $('aud-export-fields')?.addEventListener('change', updateExportButton);
+    $('aud-export-start')?.addEventListener('click', runExport);
 
     // Both chip rows share one handler: they render the same markup and mean the same thing.
     [$('aud-segments'), $('aud-tags')].filter(Boolean).forEach((segHost) => {
@@ -1230,20 +2017,6 @@
       });
     }
 
-    const selectAll = $('aud-select-all');
-    if (selectAll) {
-      selectAll.addEventListener('change', () => {
-        // Selects the VISIBLE page only. A checkbox that silently selected 2,000 unseen rows and
-        // then unsubscribed them is not a convenience.
-        const boxes = document.querySelectorAll('#aud-rows [data-select]');
-        boxes.forEach((b) => {
-          const id = Number(b.getAttribute('data-select'));
-          b.checked = selectAll.checked;
-          if (selectAll.checked) state.selected.add(id); else state.selected.delete(id);
-        });
-        renderBulk();
-      });
-    }
 
     const pager = $('aud-pager');
     if (pager && window.ListPager) {
@@ -1404,7 +2177,12 @@
   window.initAudience = async function initAudience() {
     state.page = 1;
     state.selected.clear();
-    state.filters = { q: '', status: '', segmentId: '' };
+    state.filters = emptyFilters();
+    state.groupBy = '';
+    state.sort = { key: 'added', dir: 'desc' };
+    state.columns = loadColumnPref();
+    renderHead();
+    fillSourceSelect();
     wire();
     await loadCustomFields();
     await loadApiKeys();

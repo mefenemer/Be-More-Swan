@@ -41,12 +41,12 @@
     </div>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <div class="sm:col-span-2">
-        <label for="bp-input-name" class="block text-sm font-semibold text-gray-700 mb-1.5">Business name <span class="text-red-500">*</span></label>
+        <label for="bp-input-name" data-explain="acct-business-name" class="block text-sm font-semibold text-gray-700 mb-1.5">Business name <span class="text-red-500">*</span></label>
         <input type="text" id="bp-input-name" placeholder="Loading…" autocomplete="off"
           class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
       </div>
       <div>
-        <label for="bp-input-industry" class="block text-sm font-semibold text-gray-700 mb-1.5">Industry / sector</label>
+        <label for="bp-input-industry" data-explain="acct-industry" class="block text-sm font-semibold text-gray-700 mb-1.5">Industry / sector</label>
         <!-- US4 AC3: searchable dropdown via datalist; US4 AC2: free typing still allowed. -->
         <input type="text" id="bp-input-industry" list="bp-industry-options" autocomplete="off"
           placeholder="Search or type your industry…"
@@ -88,7 +88,7 @@
         </datalist>
       </div>
       <div>
-        <label for="bp-input-website" class="block text-sm font-semibold text-gray-700 mb-1.5">Website</label>
+        <label for="bp-input-website" data-explain="acct-website" class="block text-sm font-semibold text-gray-700 mb-1.5">Website</label>
         <input type="text" id="bp-input-website" placeholder="https://yourbusiness.com"
           class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
       </div>
@@ -96,7 +96,7 @@
            Billing on purpose: the billing address is the card-holder's (often a home address) and
            must never be published to prospects. See db/lead-outreach-unsubscribe.sql. -->
       <div class="sm:col-span-2">
-        <label for="bp-input-postal-address" class="block text-sm font-semibold text-gray-700 mb-1.5">Business postal address</label>
+        <label for="bp-input-postal-address" data-explain="acct-postal-address" class="block text-sm font-semibold text-gray-700 mb-1.5">Business postal address</label>
         <p class="text-xs text-gray-400 mb-2"><span class="font-semibold text-gray-500">Required to send outreach.</span> Added to the footer of every email your Lead Generator sends. Anti-spam law in the US (CAN-SPAM) and Canada (CASL) requires a physical postal address in every marketing email. Use your registered business address — not a home address, since prospects will see it.</p>
         <input type="text" id="bp-input-postal-address" placeholder="Unit 4, 12 High Street, Manchester, M1 2AB, United Kingdom"
           class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
@@ -105,53 +105,86 @@
         <p id="bp-postal-address-warning" class="hidden mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"></p>
       </div>
       <div class="sm:col-span-2">
-        <label class="block text-sm font-semibold text-gray-700 mb-1.5">Social media accounts</label>
-        <p class="text-xs text-gray-400 mb-3">Add the handle or URL for each platform your assistant should manage. You'll be able to connect these accounts later, during your assistant's setup.</p>
+        <label class="block text-sm font-semibold text-gray-700 mb-1.5" data-explain="acct-social-accounts">Social media accounts</label>
+        <p class="text-xs text-gray-400 mb-3">Type just your handle — the part after the web address — for each platform your assistant should manage. Pasting a full link works too. You'll be able to connect these accounts later, during your assistant's setup.</p>
+        <!-- Each box takes the HANDLE only; the platform's address is fixed in front of it, and the
+             saved value is the full profile URL — built by src/components/social-profile-url.js,
+             which also reads older "@handle" / pasted-URL values back into the box. -->
         <div id="bp-social-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label for="bp-social-instagram" class="block text-xs font-medium text-gray-500 mb-1">Instagram</label>
-            <input type="text" id="bp-social-instagram" data-platform="instagram" placeholder="@yourbrand"
-              class="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+            <label for="bp-social-instagram" class="block text-xs font-medium text-gray-500 mb-1" data-explain="acct-social-instagram">Instagram</label>
+            <div class="flex items-stretch w-full border border-gray-300 rounded-xl overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 transition">
+              <span class="flex items-center px-3 bg-gray-50 border-r border-gray-200 text-sm text-gray-500 whitespace-nowrap select-none" aria-hidden="true">instagram.com/</span>
+              <input type="text" id="bp-social-instagram" data-platform="instagram" placeholder="yourbrand" autocomplete="off" spellcheck="false"
+                class="flex-1 min-w-0 px-3 py-2.5 text-sm outline-none bg-transparent">
+            </div>
           </div>
           <div>
-            <label for="bp-social-facebook" class="block text-xs font-medium text-gray-500 mb-1">Facebook</label>
-            <input type="text" id="bp-social-facebook" data-platform="facebook" placeholder="https://facebook.com/yourpage"
-              class="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+            <label for="bp-social-facebook" class="block text-xs font-medium text-gray-500 mb-1" data-explain="acct-social-facebook">Facebook</label>
+            <div class="flex items-stretch w-full border border-gray-300 rounded-xl overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 transition">
+              <span class="flex items-center px-3 bg-gray-50 border-r border-gray-200 text-sm text-gray-500 whitespace-nowrap select-none" aria-hidden="true">facebook.com/</span>
+              <input type="text" id="bp-social-facebook" data-platform="facebook" placeholder="yourpage" autocomplete="off" spellcheck="false"
+                class="flex-1 min-w-0 px-3 py-2.5 text-sm outline-none bg-transparent">
+            </div>
           </div>
           <div>
-            <label for="bp-social-linkedin" class="block text-xs font-medium text-gray-500 mb-1">LinkedIn</label>
-            <input type="text" id="bp-social-linkedin" data-platform="linkedin" placeholder="https://linkedin.com/company/yourbrand"
-              class="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+            <label for="bp-social-linkedin" class="block text-xs font-medium text-gray-500 mb-1" data-explain="acct-social-linkedin">LinkedIn</label>
+            <div class="flex items-stretch w-full border border-gray-300 rounded-xl overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 transition">
+              <select id="bp-social-linkedin-path" data-social-path="linkedin" aria-label="LinkedIn page type"
+                class="flex items-center px-3 bg-gray-50 border-r border-gray-200 text-sm text-gray-500 whitespace-nowrap select-none cursor-pointer outline-none pr-1">
+                <option value="company/">linkedin.com/company/</option>
+                <option value="in/">linkedin.com/in/</option>
+                <option value="showcase/">linkedin.com/showcase/</option>
+                <option value="school/">linkedin.com/school/</option>
+              </select>
+              <input type="text" id="bp-social-linkedin" data-platform="linkedin" placeholder="yourbrand" autocomplete="off" spellcheck="false"
+                class="flex-1 min-w-0 px-3 py-2.5 text-sm outline-none bg-transparent">
+            </div>
           </div>
           <div>
-            <label for="bp-social-x" class="block text-xs font-medium text-gray-500 mb-1">X (Twitter)</label>
-            <input type="text" id="bp-social-x" data-platform="x" placeholder="@yourbrand"
-              class="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+            <label for="bp-social-x" class="block text-xs font-medium text-gray-500 mb-1" data-explain="acct-social-x">X (Twitter)</label>
+            <div class="flex items-stretch w-full border border-gray-300 rounded-xl overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 transition">
+              <span class="flex items-center px-3 bg-gray-50 border-r border-gray-200 text-sm text-gray-500 whitespace-nowrap select-none" aria-hidden="true">x.com/</span>
+              <input type="text" id="bp-social-x" data-platform="x" placeholder="yourbrand" autocomplete="off" spellcheck="false"
+                class="flex-1 min-w-0 px-3 py-2.5 text-sm outline-none bg-transparent">
+            </div>
           </div>
           <div>
-            <label for="bp-social-tiktok" class="block text-xs font-medium text-gray-500 mb-1">TikTok</label>
-            <input type="text" id="bp-social-tiktok" data-platform="tiktok" placeholder="@yourbrand"
-              class="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+            <label for="bp-social-tiktok" class="block text-xs font-medium text-gray-500 mb-1" data-explain="acct-social-tiktok">TikTok</label>
+            <div class="flex items-stretch w-full border border-gray-300 rounded-xl overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 transition">
+              <span class="flex items-center px-3 bg-gray-50 border-r border-gray-200 text-sm text-gray-500 whitespace-nowrap select-none" aria-hidden="true">tiktok.com/@</span>
+              <input type="text" id="bp-social-tiktok" data-platform="tiktok" placeholder="yourbrand" autocomplete="off" spellcheck="false"
+                class="flex-1 min-w-0 px-3 py-2.5 text-sm outline-none bg-transparent">
+            </div>
           </div>
           <div>
-            <label for="bp-social-youtube" class="block text-xs font-medium text-gray-500 mb-1">YouTube</label>
-            <input type="text" id="bp-social-youtube" data-platform="youtube" placeholder="https://youtube.com/@yourbrand"
-              class="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+            <label for="bp-social-youtube" class="block text-xs font-medium text-gray-500 mb-1" data-explain="acct-social-youtube">YouTube</label>
+            <div class="flex items-stretch w-full border border-gray-300 rounded-xl overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 transition">
+              <span class="flex items-center px-3 bg-gray-50 border-r border-gray-200 text-sm text-gray-500 whitespace-nowrap select-none" aria-hidden="true">youtube.com/@</span>
+              <input type="text" id="bp-social-youtube" data-platform="youtube" placeholder="yourchannel" autocomplete="off" spellcheck="false"
+                class="flex-1 min-w-0 px-3 py-2.5 text-sm outline-none bg-transparent">
+            </div>
           </div>
           <div>
-            <label for="bp-social-pinterest" class="block text-xs font-medium text-gray-500 mb-1">Pinterest</label>
-            <input type="text" id="bp-social-pinterest" data-platform="pinterest" placeholder="https://pinterest.com/yourbrand"
-              class="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+            <label for="bp-social-pinterest" class="block text-xs font-medium text-gray-500 mb-1" data-explain="acct-social-pinterest">Pinterest</label>
+            <div class="flex items-stretch w-full border border-gray-300 rounded-xl overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 transition">
+              <span class="flex items-center px-3 bg-gray-50 border-r border-gray-200 text-sm text-gray-500 whitespace-nowrap select-none" aria-hidden="true">pinterest.com/</span>
+              <input type="text" id="bp-social-pinterest" data-platform="pinterest" placeholder="yourbrand" autocomplete="off" spellcheck="false"
+                class="flex-1 min-w-0 px-3 py-2.5 text-sm outline-none bg-transparent">
+            </div>
           </div>
           <div>
-            <label for="bp-social-threads" class="block text-xs font-medium text-gray-500 mb-1">Threads</label>
-            <input type="text" id="bp-social-threads" data-platform="threads" placeholder="@yourbrand"
-              class="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+            <label for="bp-social-threads" class="block text-xs font-medium text-gray-500 mb-1" data-explain="acct-social-threads">Threads</label>
+            <div class="flex items-stretch w-full border border-gray-300 rounded-xl overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 transition">
+              <span class="flex items-center px-3 bg-gray-50 border-r border-gray-200 text-sm text-gray-500 whitespace-nowrap select-none" aria-hidden="true">threads.com/@</span>
+              <input type="text" id="bp-social-threads" data-platform="threads" placeholder="yourbrand" autocomplete="off" spellcheck="false"
+                class="flex-1 min-w-0 px-3 py-2.5 text-sm outline-none bg-transparent">
+            </div>
           </div>
         </div>
       </div>
       <div class="sm:col-span-2">
-        <label class="block text-sm font-semibold text-gray-700 mb-1.5">Other links <span class="text-xs font-normal text-gray-400">(optional)</span></label>
+        <label class="block text-sm font-semibold text-gray-700 mb-1.5" data-explain="acct-other-links">Other links <span class="text-xs font-normal text-gray-400">(optional)</span></label>
         <p class="text-xs text-gray-500 mb-2">Any other links your assistant should know — e.g. Linktree, review pages. Add them one at a time.</p>
         <!-- Rows are rendered by assets.js (bp-links-*); each row is one link. -->
         <div id="bp-links-list" class="space-y-2"></div>
@@ -161,12 +194,12 @@
         </button>
       </div>
       <div class="sm:col-span-2">
-        <label for="bp-input-description" class="block text-sm font-semibold text-gray-700 mb-1.5">What your business does</label>
+        <label for="bp-input-description" data-explain="acct-business-description" class="block text-sm font-semibold text-gray-700 mb-1.5">What your business does</label>
         <textarea id="bp-input-description" rows="3" placeholder="Briefly describe your products/services and what makes you different."
           class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition resize-none"></textarea>
       </div>
       <div class="sm:col-span-2">
-        <label for="bp-input-audience" class="block text-sm font-semibold text-gray-700 mb-1.5">Target audience</label>
+        <label for="bp-input-audience" data-explain="target-audience" class="block text-sm font-semibold text-gray-700 mb-1.5">Target audience</label>
         <textarea id="bp-input-audience" rows="2" placeholder="Who are your customers? e.g. independent cafés in the UK, busy parents, B2B founders."
           class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition resize-none"></textarea>
       </div>
@@ -285,23 +318,24 @@
       f.className = 'border-2 border-emerald-200 bg-emerald-50/30 rounded-xl p-4 mb-3';
       const v = p || { kind: 'product' };
       const field = (id, label, value, opts) => `<div class="${opts && opts.wide ? 'sm:col-span-2' : ''}">
-          <label for="${id}" class="block text-sm font-semibold text-gray-700 mb-1">${label}</label>
+          <label for="${id}"${opts && opts.explain ? ` data-explain="${opts.explain}"` : ''} class="block text-sm font-semibold text-gray-700 mb-1">${label}</label>
           ${opts && opts.area
             ? `<textarea id="${id}" rows="${opts.rows || 3}" maxlength="${opts.max}" placeholder="${esc(opts.ph || '')}" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-emerald-600 outline-none">${esc(value || '')}</textarea>`
             : `<input id="${id}" type="text" maxlength="${opts.max}" value="${esc(value || '')}" placeholder="${esc(opts.ph || '')}" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-emerald-600 outline-none">`}
         </div>`;
       f.innerHTML = `
         <div class="flex items-center gap-4 mb-3 text-sm">
+          <span class="font-semibold text-gray-700" data-explain="acct-product-kind">Type</span>
           <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="op-kind" value="product" ${v.kind !== 'service' ? 'checked' : ''}> Product</label>
           <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="op-kind" value="service" ${v.kind === 'service' ? 'checked' : ''}> Service</label>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          ${field('op-name', 'Name <span class="text-red-500">*</span>', v.name, { max: 120, ph: 'e.g. Sourdough Starter Kit' })}
-          ${field('op-price', 'Price', v.price, { max: 120, ph: 'e.g. £29, from £450, £15/month — leave blank to keep it off' })}
-          ${field('op-description', 'What it is', v.description, { area: true, max: 1200, wide: true, ph: 'What the customer gets, in a sentence or two.' })}
-          ${field('op-benefits', 'Key benefits', v.benefits, { area: true, rows: 2, max: 1200, wide: true, ph: 'Why people buy it — the results or features you want mentioned.' })}
-          ${field('op-audience', 'Who it’s for', v.audience, { max: 400, ph: 'e.g. home bakers starting out' })}
-          ${field('op-url', 'Link', v.url, { max: 500, ph: 'https://yourbusiness.com/product' })}
+          ${field('op-name', 'Name <span class="text-red-500">*</span>', v.name, { max: 120, ph: 'e.g. Sourdough Starter Kit', explain: 'acct-product-name' })}
+          ${field('op-price', 'Price', v.price, { max: 120, ph: 'e.g. £29, from £450, £15/month — leave blank to keep it off', explain: 'acct-product-price' })}
+          ${field('op-description', 'What it is', v.description, { area: true, max: 1200, wide: true, ph: 'What the customer gets, in a sentence or two.', explain: 'acct-product-description' })}
+          ${field('op-benefits', 'Key benefits', v.benefits, { area: true, rows: 2, max: 1200, wide: true, ph: 'Why people buy it — the results or features you want mentioned.', explain: 'acct-product-benefits' })}
+          ${field('op-audience', 'Who it’s for', v.audience, { max: 400, ph: 'e.g. home bakers starting out', explain: 'acct-product-audience' })}
+          ${field('op-url', 'Link', v.url, { max: 500, ph: 'https://yourbusiness.com/product', explain: 'acct-product-url' })}
         </div>
         <p class="text-xs text-gray-500 mt-3">Your assistants quote prices exactly as written here, and never state one you leave blank.</p>
         <div class="flex items-center justify-end gap-2 mt-3">
@@ -338,6 +372,8 @@
         } else {
           const { product } = await call('POST', body);
           products.push(product);
+          // The setup wizard's "Products & services" step ticks on the first active product.
+          window.SetupWizard?.refresh?.();
         }
         showError('');
         f.remove();
@@ -421,47 +457,47 @@
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div class="sm:col-span-2">
-          <label for="bd-input-name" class="block text-sm font-semibold text-gray-700 mb-1.5">Legal Name / Company Name <span class="text-red-500">*</span> <span class="text-xs font-normal text-gray-400">(defaults to your business name)</span></label>
+          <label for="bd-input-name" data-explain="acct-legal-name" class="block text-sm font-semibold text-gray-700 mb-1.5">Legal Name / Company Name <span class="text-red-500">*</span> <span class="text-xs font-normal text-gray-400">(defaults to your business name)</span></label>
           <input type="text" id="bd-input-name" placeholder="Loading…" autocomplete="off"
             class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
         </div>
         <div>
-          <label for="bd-input-email" class="block text-sm font-semibold text-gray-700 mb-1.5">Billing Email</label>
+          <label for="bd-input-email" data-explain="acct-billing-email" class="block text-sm font-semibold text-gray-700 mb-1.5">Billing Email</label>
           <input type="email" id="bd-input-email" placeholder="billing@yourcompany.com" autocomplete="email"
             class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
         </div>
         <div>
-          <label for="bd-input-vat" class="block text-sm font-semibold text-gray-700 mb-1.5">VAT / Tax ID <span class="text-xs font-normal text-gray-400">(optional)</span></label>
+          <label for="bd-input-vat" data-explain="acct-vat" class="block text-sm font-semibold text-gray-700 mb-1.5">VAT / Tax ID <span class="text-xs font-normal text-gray-400">(optional)</span></label>
           <input type="text" id="bd-input-vat" placeholder="GB123456789"
             class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition uppercase">
         </div>
         <div class="sm:col-span-2">
-          <label for="bd-input-addr1" class="block text-sm font-semibold text-gray-700 mb-1.5">Address Line 1</label>
+          <label for="bd-input-addr1" data-explain="acct-address-1" class="block text-sm font-semibold text-gray-700 mb-1.5">Address Line 1</label>
           <input type="text" id="bd-input-addr1" placeholder="123 Business Street" autocomplete="address-line1"
             class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
         </div>
         <div class="sm:col-span-2">
-          <label for="bd-input-addr2" class="block text-sm font-semibold text-gray-700 mb-1.5">Address Line 2 <span class="text-xs font-normal text-gray-400">(optional)</span></label>
+          <label for="bd-input-addr2" data-explain="acct-address-2" class="block text-sm font-semibold text-gray-700 mb-1.5">Address Line 2 <span class="text-xs font-normal text-gray-400">(optional)</span></label>
           <input type="text" id="bd-input-addr2" placeholder="Suite 100" autocomplete="address-line2"
             class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
         </div>
         <div>
-          <label for="bd-input-city" class="block text-sm font-semibold text-gray-700 mb-1.5">City</label>
+          <label for="bd-input-city" data-explain="acct-city" class="block text-sm font-semibold text-gray-700 mb-1.5">City</label>
           <input type="text" id="bd-input-city" placeholder="London" autocomplete="address-level2"
             class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
         </div>
         <div>
-          <label for="bd-input-postal" class="block text-sm font-semibold text-gray-700 mb-1.5">Postcode / ZIP</label>
+          <label for="bd-input-postal" data-explain="acct-postcode" class="block text-sm font-semibold text-gray-700 mb-1.5">Postcode / ZIP</label>
           <input type="text" id="bd-input-postal" placeholder="EC1A 1BB" autocomplete="postal-code"
             class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
         </div>
         <div>
-          <label for="bd-input-state" class="block text-sm font-semibold text-gray-700 mb-1.5">County / State <span class="text-xs font-normal text-gray-400">(optional)</span></label>
+          <label for="bd-input-state" data-explain="acct-state" class="block text-sm font-semibold text-gray-700 mb-1.5">County / State <span class="text-xs font-normal text-gray-400">(optional)</span></label>
           <input type="text" id="bd-input-state" placeholder="England" autocomplete="address-level1"
             class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
         </div>
         <div>
-          <label for="bd-input-country" class="block text-sm font-semibold text-gray-700 mb-1.5">Country</label>
+          <label for="bd-input-country" data-explain="acct-country" class="block text-sm font-semibold text-gray-700 mb-1.5">Country</label>
           <input type="text" id="bd-input-country" placeholder="United Kingdom" autocomplete="country-name"
             class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
         </div>
@@ -550,12 +586,12 @@
       </div>
       <div class="px-6 py-5 space-y-4">
         <div>
-          <label class="block text-xs font-semibold text-gray-600 mb-1">Email address</label>
+          <label class="block text-xs font-semibold text-gray-600 mb-1" data-explain="acct-invite-email">Email address</label>
           <input id="invite-email" type="email" placeholder="colleague@example.com"
                  class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
         </div>
         <div>
-          <label class="block text-xs font-semibold text-gray-600 mb-1">Role</label>
+          <label class="block text-xs font-semibold text-gray-600 mb-1" data-explain="acct-invite-role">Role</label>
           <select id="invite-role"
                   class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
             <option value="member">Member — can use assistants and manage content</option>
@@ -587,7 +623,7 @@
       <div class="px-6 py-5 space-y-4">
         <p id="role-modal-name" class="text-sm text-gray-700 font-medium"></p>
         <div>
-          <label class="block text-xs font-semibold text-gray-600 mb-1">New role</label>
+          <label class="block text-xs font-semibold text-gray-600 mb-1" data-explain="acct-invite-role">New role</label>
           <select id="role-modal-select"
                   class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
             <option value="admin">Admin</option>
@@ -954,7 +990,7 @@
       <div class="space-y-4">
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
-            <label for="bk-primaryColor" class="block text-sm font-bold text-gray-700 mb-1">Accent</label>
+            <label for="bk-primaryColor" data-explain="acct-brand-accent" class="block text-sm font-bold text-gray-700 mb-1">Accent</label>
             <div class="flex items-center gap-2">
               <input type="color" id="bk-primaryColor" class="h-10 w-12 rounded border border-gray-300 cursor-pointer bg-white p-1">
               <input type="text" id="bk-primaryColor-hex" maxlength="7" spellcheck="false"
@@ -962,7 +998,7 @@
             </div>
           </div>
           <div>
-            <label for="bk-backgroundColor" class="block text-sm font-bold text-gray-700 mb-1">Background</label>
+            <label for="bk-backgroundColor" data-explain="acct-brand-background" class="block text-sm font-bold text-gray-700 mb-1">Background</label>
             <div class="flex items-center gap-2">
               <input type="color" id="bk-backgroundColor" class="h-10 w-12 rounded border border-gray-300 cursor-pointer bg-white p-1">
               <input type="text" id="bk-backgroundColor-hex" maxlength="7" spellcheck="false"
@@ -970,7 +1006,7 @@
             </div>
           </div>
           <div>
-            <label for="bk-textColor" class="block text-sm font-bold text-gray-700 mb-1">Text</label>
+            <label for="bk-textColor" data-explain="acct-brand-text" class="block text-sm font-bold text-gray-700 mb-1">Text</label>
             <div class="flex items-center gap-2">
               <input type="color" id="bk-textColor" class="h-10 w-12 rounded border border-gray-300 cursor-pointer bg-white p-1">
               <input type="text" id="bk-textColor-hex" maxlength="7" spellcheck="false"
@@ -981,24 +1017,24 @@
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label for="bk-wordmark" class="block text-sm font-bold text-gray-700 mb-1">Wordmark</label>
+            <label for="bk-wordmark" data-explain="acct-brand-wordmark" class="block text-sm font-bold text-gray-700 mb-1">Wordmark</label>
             <input type="text" id="bk-wordmark" maxlength="32" placeholder="Your business name"
               class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none">
             <p class="text-xs text-gray-400 mt-1">Small line at the top of the card.</p>
           </div>
           <div>
-            <label for="bk-website" class="block text-sm font-bold text-gray-700 mb-1">Footer line</label>
+            <label for="bk-website" data-explain="acct-brand-footer" class="block text-sm font-bold text-gray-700 mb-1">Footer line</label>
             <input type="text" id="bk-website" maxlength="64" placeholder="yourbusiness.com"
               class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none">
           </div>
           <div>
-            <label for="bk-fontFamily" class="block text-sm font-bold text-gray-700 mb-1">Font</label>
+            <label for="bk-fontFamily" data-explain="acct-brand-font" class="block text-sm font-bold text-gray-700 mb-1">Font</label>
             <input type="text" id="bk-fontFamily" maxlength="48" placeholder="Plus Jakarta Sans" spellcheck="false"
               class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none">
             <p class="text-xs text-gray-400 mt-1">Any <a href="https://fonts.google.com" target="_blank" rel="noopener" class="text-emerald-700 font-semibold hover:underline">Google Font</a> name. Leave blank for our default.</p>
           </div>
           <div>
-            <label for="bk-logoUrl" class="block text-sm font-bold text-gray-700 mb-1">Logo URL (optional)</label>
+            <label for="bk-logoUrl" data-explain="acct-brand-logo" class="block text-sm font-bold text-gray-700 mb-1">Logo URL (optional)</label>
             <input type="url" id="bk-logoUrl" placeholder="https://yourbusiness.com/logo.png"
               class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none">
             <p class="text-xs text-gray-400 mt-1">PNG or JPG. Replaces the wordmark — check it reads on both card styles.</p>
@@ -1048,24 +1084,24 @@
   <section class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8">
     <div class="space-y-4">
       <div>
-        <label for="bg-photoStyle" class="block text-sm font-bold text-gray-700 mb-1">Photo style</label>
+        <label for="bg-photoStyle" data-explain="acct-photo-style" class="block text-sm font-bold text-gray-700 mb-1">Photo style</label>
         <textarea id="bg-photoStyle" maxlength="500" rows="2" placeholder="e.g. Bright and natural, real people at work, never posed. Lots of white space."
           class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none"></textarea>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label for="bg-mustInclude" class="block text-sm font-bold text-gray-700 mb-1">Include where it fits</label>
+          <label for="bg-mustInclude" data-explain="acct-must-include" class="block text-sm font-bold text-gray-700 mb-1">Include where it fits</label>
           <input type="text" id="bg-mustInclude" maxlength="300" placeholder="e.g. our pink, a laptop, the Leeds skyline"
             class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none">
         </div>
         <div>
-          <label for="bg-mustAvoid" class="block text-sm font-bold text-gray-700 mb-1">Never show</label>
+          <label for="bg-mustAvoid" data-explain="acct-must-avoid" class="block text-sm font-bold text-gray-700 mb-1">Never show</label>
           <input type="text" id="bg-mustAvoid" maxlength="300" placeholder="e.g. handshakes, suits, stock-photo smiles"
             class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none">
         </div>
       </div>
       <div>
-        <label for="bg-secondaryColors" class="block text-sm font-bold text-gray-700 mb-1">Extra colours (optional)</label>
+        <label for="bg-secondaryColors" data-explain="acct-extra-colours" class="block text-sm font-bold text-gray-700 mb-1">Extra colours (optional)</label>
         <input type="text" id="bg-secondaryColors" spellcheck="false" placeholder="#ffd166, #06d6a0"
           class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none font-mono">
         <p class="text-xs text-gray-400 mt-1">Up to 4 hex codes, separated by commas. AI images may use them alongside your accent.</p>
@@ -1158,7 +1194,7 @@
             </div>
 
             <div>
-              <label for="asset-category" class="block text-sm font-bold text-gray-700 mb-1">Asset Category</label>
+              <label for="asset-category" data-explain="acct-asset-category" class="block text-sm font-bold text-gray-700 mb-1">Asset Category</label>
               <select id="asset-category" required class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none bg-white cursor-pointer">
                 <option value="" disabled selected>Select a category...</option>
                 <option value="tone_of_voice">Tone of Voice / Style</option>
@@ -1184,7 +1220,7 @@
             </div>
 
             <div id="zone-url" class="hidden">
-              <label for="external-url" class="block text-sm font-bold text-gray-700 mb-1">External Resource URL</label>
+              <label for="external-url" data-explain="acct-external-url" class="block text-sm font-bold text-gray-700 mb-1">External Resource URL</label>
               <input type="url" id="external-url" placeholder="https://yourcompany.com/about" class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none transition-all">
               <p class="text-xs text-gray-400 mt-1.5">Press Enter to add the URL.</p>
             </div>

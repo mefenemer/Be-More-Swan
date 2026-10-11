@@ -22,7 +22,7 @@
   <!-- Markdown rendering for the in-workspace Help Center article reader (merged from help.html) -->
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
-  <script src="./explainers.js?v=20261008-brand-designer-4" defer></script>
+  <script src="./explainers.js?v=20261011-my-account" defer></script>
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
   <!-- The APP manifest, not favicon/manifest.json (which is only an icon set — no start_url, no
@@ -5584,6 +5584,7 @@ function formatCurrency(amount, currency) {
      Review Queue, the Data Hub table). Loaded beside platform-constants for the same reason: three
      modules below read it, and a pager that arrives after the list it pages renders nothing. -->
 <script src="/src/components/list-pager.js"></script>
+<script src="/src/components/social-profile-url.js"></script>
 <script src="/integrations.js"></script>
 <script src="/assets.js"></script>
 <!-- One source of truth for assistant icon colours (user-chosen, with the old id-derived
@@ -5597,6 +5598,7 @@ function formatCurrency(amount, currency) {
 <script src="/help.js"></script>
 <script src="/my-content.js"></script>
 <!-- Shared Audience view (audience.html). Org-scoped; reads no assistant context. -->
+<script src="/src/components/xlsx-writer.js"></script>
 <script src="/audience.js"></script>
 <!-- The sign-up form renderer (library mode — no data-bms-form, so it only defines window.BmsForm)
      and the visual form builder that previews with it. The SAME subscribe.js customers paste on
@@ -21299,6 +21301,9 @@ async function gpSubmitReject() {
           window.routeToAssistantDetail(data.primaryAssistantId);
           return;
         }
+        // Products & services is a tab of Business Information — open the page on that tab
+        // (the one-shot hint assets.html reads as it loads).
+        if (key === 'products') window._bizinfoInitialTab = 'products';
         if (window.loadView) window.loadView(view);
       });
     });
