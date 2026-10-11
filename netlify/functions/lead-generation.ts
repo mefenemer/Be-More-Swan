@@ -80,7 +80,8 @@ import { evaluateDoNotContact } from '../../src/config/do-not-contact';
 import { normaliseLeadCard, type LeadScoringCard } from '../../src/lib/discovery-scoring';
 import { classifyEmailKind } from '../../src/config/lead-email-kind';
 import { voiceDirective } from '../../src/utils/voice-profile';
-import { withLambda } from '@netlify/aws-lambda-compat';
+import { withLambda } from '@netlify/aws-lambda-compat';import { addWonCustomerToAudience } from '../../src/utils/won-customer-audience';
+
 
 /** Chase reminder for an approved+contacted lead: 3 days out at 09:00, nudged off weekends. */
 function chaseDate(): Date {
@@ -178,6 +179,8 @@ export default withLambda(async (event) => {
         outcome?: string; lossReason?: string; valueGbp?: number | string | null; confirmChange?: boolean;
         editReason?: string; provider?: string; note?: string;
         email?: string; confirmErase?: boolean; eraseScope?: string;
+        // set_outcome on a win: the owner ticked "Add to my Audience" (soft opt-in — see won-customer-audience.ts).
+        addToAudience?: boolean;
     };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
@@ -978,7 +981,24 @@ ${OUTREACH_SUBJECT_RULES}`;
                 },
             });
 
-            return json(200, { recordId, dealOutcome, sequencesHalted });
+            // Won → optionally into the Audience, as a customer (src/utils/won-customer-audience.ts).
+            // Only when the owner ticked "Add to my Audience" — the tick is the opt-in moment soft
+            // opt-in needs. Never fails the outcome: the deal is recorded either way, and the reply
+            // says what happened so the dialog can tell them.
+            let audience: Awaited<ReturnType<typeof addWonCustomerToAudience>> | { result: 'failed' } | null = null;
+            if (outcome === 'won' && body.addToAudience === true) {
+                try {
+                    audience = await addWonCustomerToAudience(db, {
+                        organisationId: orgId, userId: userId ?? null, recordId,
+                        company: rec.title ?? null, data,
+                    });
+                } catch (err) {
+                    console.error('[lead-generation] won customer could not be added to the Audience', { orgId, recordId }, err);
+                    audience = { result: 'failed' };
+                }
+            }
+
+            return json(200, { recordId, dealOutcome, sequencesHalted, audience });
         }
 
         // ── Flag WHY a drafted message was edited (plan §2.6, the ⭐ option) ──────

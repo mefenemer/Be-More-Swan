@@ -53,14 +53,16 @@
     suppressed:   { label: 'Suppressed',   cls: 'bg-gray-100 text-gray-600 border-gray-200' },
   };
 
-  // ⚠️ No 'From a lead' row. A lead is never promoted into the audience — the two populations are
-  // deliberately separate (see the ContactSource note in src/utils/audience-store.ts). Both readers
-  // fall back to the raw value, so a source this map does not know still renders.
+  // A PROSPECT is never in the Audience; a lead that became a CUSTOMER can be ('lead_promotion' —
+  // see the ContactSource note in src/utils/audience-store.ts). Both readers fall back to the raw
+  // value, so a source this map does not know still renders.
   const SOURCE_LABEL = {
     web_form: 'Sign-up form',
     csv_import: 'Imported',
     manual: 'Added by hand',
     api: 'API',
+    // A won lead whose owner chose to add them (src/utils/won-customer-audience.ts). Customers only.
+    lead_promotion: 'Became a customer',
   };
 
   // Mirrors newsletter_sends.status. ⚠️ 'sent' means it left here and 'delivered' means the
@@ -84,7 +86,7 @@
     bounced: 'Email bounced',
     complained: 'Marked an email as spam',
     imported: 'Imported from a file',
-    promoted: 'Promoted from a lead',
+    promoted: 'Became a customer — added to the Audience',
     manual_added: 'Added by hand',
     erased: 'Removed from the audience',
   };
@@ -233,7 +235,7 @@
   // SOURCE_VALUES there, so offering an option it would reject builds a segment nobody can save.
   const SOURCE_OPTS = {
     web_form: 'a sign-up form', csv_import: 'an import', manual: 'being added by hand',
-    api: 'the API',
+    api: 'the API', lead_promotion: 'becoming a customer',
   };
 
   let ruleState = { id: null, name: '', match: 'all', conditions: [{ field: 'opened', op: 'within', value: 90 }] };

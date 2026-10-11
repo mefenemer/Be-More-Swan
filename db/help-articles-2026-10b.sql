@@ -54,6 +54,21 @@ When you first sign in, the **setup guide** opens on the right of your workspace
 
 Steps unlock one at a time. If **Onboard your assistant** looks stuck, the guide shows which setup is still open and who started it, with buttons to resume or cancel it.
 
+## Recommended for you
+
+Under the steps, the guide suggests extras that make your assistants better, picked for the assistants you've hired. None of them hold anything up, and each ticks itself when it's done:
+
+| Suggested when you've hired | Step |
+|-----------------------------|------|
+| Lead Generation or Email Marketing | Add your business postal address — required in every marketing email |
+| Lead Generation | Connect your Gmail or Outlook, so outreach is sent from your own address |
+| Email Marketing | Add your first contacts, put a sign-up form on your website, and set up your sending domain |
+| Blog Writing | Put your blog on your website with the embed snippet |
+| Social Media, Blog Writing, Email Marketing or Brand Designer | Add your logo and brand colours |
+| Any assistant | Set your first goal, invite a teammate, and set your hourly rate |
+
+They stay in the guide after your assistant goes live, so you can come back to them from **My Account ▸ Resume setup guide**.
+
 ## Why products and services matter
 
 Every assistant reads your products and services list. With it, posts, articles, emails and outreach name what you sell correctly and quote only the prices you give. Without it, they can only describe your business in general terms. See [Business Information and Products & Services](#business-information-and-products-services).
@@ -156,7 +171,11 @@ Tick contacts (the box in the heading ticks the whole page), then use the bar th
 
 ## Do my leads appear here?
 
-**No — never.** Leads found by your Lead Generation Assistant are companies you might contact once, and none of them has agreed to receive your newsletter. They stay in that assistant's own tabs and are never copied into your Audience. To add someone who has since agreed to hear from you, use **Add contact**, an import or a sign-up form.
+**Not while they're prospects.** Leads found by your Lead Generation Assistant are companies you might contact once, and they haven't agreed to receive your newsletter, so they stay in that assistant's own tabs.
+
+**When a lead becomes a customer, you can add them.** Mark the lead **Won** (Record outcome, on the lead or its conversation) and leave **Add them to my Audience** ticked. They join as **Subscribed**, with *Became a customer* as how they joined. The law allows you to email existing customers about similar products as long as every email lets them unsubscribe — and every email from your Email Marketing Assistant does. Untick the box for a customer who shouldn't get marketing.
+
+A won lead is not added if it has no email address, or if that person asked not to be contacted. Someone already in your Audience keeps their status — an unsubscribe is never undone.
 
 What *does* cross over is a refusal. Someone who unsubscribes or pauses emails here is not sent cold outreach either, and a lead who opts out of outreach is never sent a newsletter.
 
@@ -296,7 +315,7 @@ Find your symptom, read the most likely cause, and follow the quick fix.
 | Cannot hire another assistant | Your plan's assistant limit is reached | Change your plan, or pause an assistant you don't need |
 | A platform isn't offered for a new post | It's switched off for this assistant, or has no handle in Business Information | Add the handle under **Business Information ▸ Social media accounts**, then switch it on under **Assistant Profile ▸ Connections** |
 | I'm not sure what to type in a field | — | Hover over (or tap) the pink **i** beside it for an explanation and an example |
-| My leads aren't in my Audience | By design — leads haven't agreed to hear from you | See [Your Audience](#your-audience-contacts-segments-and-consent). Add people who have agreed with **Add contact**, an import or a sign-up form |
+| My leads aren't in my Audience | Only leads you mark **Won** are added, and only if you leave **Add them to my Audience** ticked | Record the outcome as Won with the box ticked. See [Your Audience](#your-audience-contacts-segments-and-consent) |
 | A post says its format can't carry the media | The format needs a different kind of media (a video for a Reel, for example) | Swap the media, or press the suggested format to switch |
 | A goal's figure looks out of date | Goals are measured by a background check | Press **Check again now** on the Goal Progress card |
 | I don't get alerts I expect | Notifications are set per assistant | **Assistant Profile ▸ Notifications**, or your workspace settings in **Inbox** |

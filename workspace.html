@@ -21200,6 +21200,61 @@ async function gpSubmitReject() {
     return `<div class="mt-2 ml-10 mr-1 space-y-2 border-l border-gray-200 pl-3">${items}</div>`;
   }
 
+  // "Recommended for you" (src/utils/onboarding-recommendations.ts): non-blocking extras tailored
+  // to the assistants hired — never counted in the progress bar, never gating go-live. Undone first.
+  function renderRecommended(data) {
+    const recs = Array.isArray(data.recommended) ? data.recommended : [];
+    if (!recs.length) return '';
+    const todo = recs.filter(r => !r.done).length;
+    const sorted = [...recs].sort((a, b) => Number(a.done) - Number(b.done));
+    const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+    return `
+      <div class="mt-6 pt-5 border-t border-gray-100 text-left">
+        <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Recommended for you</p>
+        <p class="text-xs text-gray-500 mb-3">${todo ? `${todo} optional ${todo === 1 ? 'step' : 'steps'} that make your assistants better. None of these hold anything up.` : 'All done — nice work.'}</p>
+        <ul class="space-y-2">${sorted.map(r => `
+          <li>
+            <button type="button" class="setup-wizard-rec w-full flex items-start gap-3 text-left rounded-xl border ${r.done ? 'border-gray-100 bg-gray-50' : 'border-gray-200 hover:border-emerald-200 hover:bg-emerald-50/40'} px-3 py-2.5 transition cursor-pointer" data-rec="${esc(r.key)}">
+              ${r.done
+                ? '<svg class="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>'
+                : '<svg class="w-4 h-4 text-gray-300 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="2"/></svg>'}
+              <span class="min-w-0">
+                <span class="block text-sm font-semibold ${r.done ? 'text-gray-400 line-through' : 'text-gray-800'}">${esc(r.label)}</span>
+                ${r.done ? '' : `<span class="block text-xs text-gray-500 mt-0.5">${esc(r.benefit)}</span>`}
+              </span>
+            </button>
+          </li>`).join('')}
+        </ul>
+      </div>`;
+  }
+
+  // Each recommendation's route (see RecommendationRoute in onboarding-recommendations.ts).
+  function goRecommended(route) {
+    collapse();
+    const r = route || {};
+    if (r.assistantId && window.routeToAssistantDetail) {
+      if (r.assistantTab) window._assistantDetailInitialTab = r.assistantTab;
+      window.routeToAssistantDetail(r.assistantId);
+      return;
+    }
+    if (r.action === 'blog-studio') { window.openBlogStudio?.({}); return; }
+    if (r.bizTab) window._bizinfoInitialTab = r.bizTab;
+    Promise.resolve(r.view ? window.loadView?.(r.view) : null).then(() => {
+      // Actions that need the view's own controls, which exist only once it has loaded.
+      if (r.action === 'signup-forms') window.SignupForms?.open?.();
+      if (r.action === 'sending-setup') setTimeout(() => document.getElementById('nl-sending')?.click(), 300);
+    });
+  }
+
+  function wireRecommended(data) {
+    body.querySelectorAll('.setup-wizard-rec').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const rec = (data.recommended || []).find(x => x.key === btn.getAttribute('data-rec'));
+        if (rec) goRecommended(rec.route);
+      });
+    });
+  }
+
   function render(data) {
     const steps = data.steps || [];
     const done = data.completedCount ?? steps.filter(s => s.done).length;
@@ -21219,7 +21274,9 @@ async function gpSubmitReject() {
           <p class="text-sm text-gray-500 mb-6">Everything's set up — your assistant is working for you. You can revisit any step from My Account.</p>
           <button type="button" id="setup-wizard-done-btn" class="btn-primary font-bold text-sm rounded-xl px-5 py-2.5 transition cursor-pointer">Done</button>
           <button type="button" id="setup-wizard-tour-btn" class="block mx-auto mt-3 text-sm font-semibold text-emerald-700 hover:text-emerald-800 hover:underline cursor-pointer">🦢 Take a quick tour of the platform &rarr;</button>
+          ${renderRecommended(data)}
         </div>`;
+      wireRecommended(data);
       const doneBtn = document.getElementById('setup-wizard-done-btn');
       if (doneBtn) doneBtn.addEventListener('click', () => collapse());
       // Setup (the wizard) is finished — orientation (the tour) is the natural next step.
@@ -21265,7 +21322,8 @@ async function gpSubmitReject() {
           </button>
           ${subHtml}
         </li>`;
-    }).join('')}</ul>`;
+    }).join('')}</ul>${renderRecommended(data)}`;
+    wireRecommended(data);
 
     body.querySelectorAll('.setup-wizard-step').forEach(btn => {
       const key  = btn.getAttribute('data-key');

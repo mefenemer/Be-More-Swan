@@ -20,12 +20,12 @@ import { emitWebhook, type WebhookEvent } from './webhooks';
 type Db = ReturnType<typeof getDb>;
 
 export type ContactStatus = 'pending' | 'subscribed' | 'unsubscribed' | 'bounced' | 'complained' | 'suppressed';
-// ⚠️ There is deliberately no 'lead_promotion'. A lead is never promoted into the audience
-// (decided 2026-08-21): Lead Generator contacts are speculative, with no permission to send them a
-// newsletter or a blog, so the two populations stay separate. A REFUSAL still crosses, both ways —
-// see src/utils/audience-objection.ts. The value survives only in the CHECK constraint, because
-// dropping it there needs DDL on two databases for no gain.
-export type ContactSource = 'web_form' | 'csv_import' | 'manual' | 'api';
+// 'lead_promotion' = a lead that BECAME A CUSTOMER (marked Won) and whose owner ticked "Add to my
+// Audience" — src/utils/won-customer-audience.ts is its only writer. Decided 2026-10-11, narrowing
+// the 2026-08-21 rule ("leads and the Audience stay separate"): a prospect still never enters the
+// Audience, but a customer may, under soft opt-in (UK PECR reg. 22(3)), with every email carrying the
+// unsubscribe link. A REFUSAL still crosses both ways — see src/utils/audience-objection.ts.
+export type ContactSource = 'web_form' | 'csv_import' | 'manual' | 'api' | 'lead_promotion';
 export type ConsentBasis = 'double_opt_in' | 'single_opt_in' | 'imported_declared' | 'soft_opt_in' | 'manual_entry';
 export type ConsentEventName =
     | 'subscribe_requested' | 'confirmed' | 'unsubscribed' | 'bounced' | 'complained'
