@@ -541,9 +541,10 @@
       </a>
     </div>
 
-    <!-- Member table (SC2) -->
-    <div class="border border-gray-200 rounded-xl overflow-hidden">
-      <table class="w-full text-sm">
+    <!-- Member table (SC2). Scrolls sideways on a phone — overflow-hidden used to clip the Actions
+         column off-screen, leaving no way to change a role or remove someone. -->
+    <div class="border border-gray-200 rounded-xl overflow-x-auto">
+      <table class="w-full text-sm" style="min-width:520px">
         <thead class="bg-gray-50 border-b border-gray-200">
           <tr>
             <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Member</th>

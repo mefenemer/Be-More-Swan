@@ -206,7 +206,7 @@ check('the route reads the briefs every turn and names only real options', () =>
     assert.match(route, /usesBriefsSnapshot: true/);
     assert.match(route, /onboardingValue\(rc, 'photoStyle'\)/);
     assert.match(route, /only ids listed there, never invented/);
-    assert.match(route, /AI video is ONE 6-second clip per round, only on the Saver and Employee plans/, 'the plan lock is stated, not hidden');
+    assert.match(route, /AI video is ONE 6-second clip per round, only on the Busywork Buster and Digital Employee plans/, 'the plan lock is stated, not hidden');
     assert.match(route, /You cannot upload or import for them from this chat: tell them where the button is/, 'chat cannot upload — it must say so, not pretend');
     assert.match(orch, /route\.usesBriefsSnapshot\s*\? await buildBriefsSnapshot/);
     // The prompt names the tab; the registry names the tab. They must agree.

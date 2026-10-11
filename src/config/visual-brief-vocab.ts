@@ -49,9 +49,9 @@ export const SOURCE_SPECS: Record<BriefSource, { label: string; cost: string; op
     ai_image:   { label: 'AI images',     cost: `${IMAGE_CREDIT_COST} AI credit for 4 images`,          optionsPerRound: 4, credits: IMAGE_CREDIT_COST },
     brand_card: { label: 'Branded cards', cost: 'Free — your colours, font and logo',                   optionsPerRound: 2, credits: 0 },
     stock_video: { label: 'Stock videos', cost: 'Free (Pexels)',                                         optionsPerRound: 2, credits: 0 },
-    // One clip per round: four clips would be 20 credits for one brief. Saver and Employee plans only
+    // One clip per round: four clips would be 20 credits for one brief. Busywork Buster and Digital Employee plans only
     // (tierCanGenerateVideo) — the same lock as AI video everywhere else.
-    ai_video:   { label: 'AI video',      cost: `${VIDEO_CREDIT_COST} AI credits for one 6-second clip (Saver and Employee plans)`, optionsPerRound: 1, credits: VIDEO_CREDIT_COST },
+    ai_video:   { label: 'AI video',      cost: `${VIDEO_CREDIT_COST} AI credits for one 6-second clip (Busywork Buster and Digital Employee plans)`, optionsPerRound: 1, credits: VIDEO_CREDIT_COST },
 };
 
 /** The sources whose options are VIDEOS. */

@@ -35,9 +35,13 @@ export const MUSIC_SHARED_CREDIT_COST = 3;
 export function musicCreditCost(shared: boolean): number {
     return shared ? MUSIC_SHARED_CREDIT_COST : MUSIC_CREDIT_COST;
 }
-// Video generation is restricted to premium tiers (decided 2026-06-24). Image generation
+// Video generation is restricted to the two upper plans (decided 2026-06-24). Image generation
 // is available on any paid tier with credits.
-export const VIDEO_TIERS = ['saver', 'employee'] as const;
+// ⚠️ The tier keys read BACKWARDS from the plan names: 'saver' is the £29 Workflow Saver (the ENTRY
+// plan), 'buster' the £79 Busywork Buster, 'employee' the £349 Digital Employee. This list said
+// ['saver', 'employee'] until 2026-10-11 — so the £29 plan got AI video and the £79 plan, which
+// master_plans.features (ai_video_generation) and the pricing page sell it on, was refused.
+export const VIDEO_TIERS = ['buster', 'employee'] as const;
 export function tierCanGenerateVideo(tierKey: string | null | undefined): boolean {
     const t = featureTierKey(tierKey);   // beta gets its source tier's video access
     return !!t && (VIDEO_TIERS as readonly string[]).includes(t);

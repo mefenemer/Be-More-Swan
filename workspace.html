@@ -5723,7 +5723,7 @@ function formatCurrency(amount, currency) {
      email). Must load BEFORE calendar.js is USED, not before it is parsed — calendar.js only
      looks the component up inside a click handler — but keeping it above avoids the question. -->
 <script src="/src/components/lead-calendar-modal.js"></script>
-<script src="/calendar.js?v=20261009-dated-items"></script>
+<script src="/calendar.js?v=20261011-phone-list"></script>
 <!-- Per-assistant Calendar tab on assistant-detail.html — reuses calendar.js rendering
      scoped to the current assistant (scheduled posts + records with scheduled_for + task runs,
      plus the pending outreach emails on the lead roles). -->
@@ -20670,7 +20670,7 @@ async function gpAiGenerateVideo() {
             body: JSON.stringify({ prompt: _gpAiMediaPrompt || 'On-brand social media video', aspectRatio: '9:16', durationSeconds: 6 }),
         });
         const d = await res.json().catch(() => ({}));
-        if (res.status === 403 && d.error === 'video_requires_upgrade') { gpAiMediaStatus(d.message || 'AI video is available on the Saver and Employee plans.', 'error'); gpAiMediaBusy(false); return; }
+        if (res.status === 403 && d.error === 'video_requires_upgrade') { gpAiMediaStatus(d.message || 'AI video is available on the Busywork Buster and Digital Employee plans.', 'error'); gpAiMediaBusy(false); return; }
         if (res.status === 402) { gpAiMediaStatus("You're out of video credits — upgrade to generate more.", 'error'); gpAiMediaBusy(false); return; }
         if (res.status === 422) { gpAiMediaStatus(d.error || 'That description was flagged. Try different wording.', 'error'); gpAiMediaBusy(false); return; }
         if (!res.ok || !d.jobId) { gpAiMediaStatus(d.error || d.message || 'Could not start video generation.', 'error'); gpAiMediaBusy(false); return; }

@@ -5,7 +5,7 @@
 //          → submit to Fal → create processing job → trigger background poller → { jobId }   (<500ms)
 //   GET  ?jobId=N                                  → { status, assetId?, errorMessage? }  (frontend polls)
 //
-// Video is restricted to premium tiers (saver/employee) — tierCanGenerateVideo(). Credits are
+// Video is restricted to the two upper plans (buster/employee) — tierCanGenerateVideo(). Credits are
 // held at submit and settled by the background worker (debit on success, refund on failure).
 
 import { Handler } from '@netlify/functions';
@@ -97,7 +97,7 @@ export default withLambda(async (event) => {
     // ── Tier gate: video is premium-only ─────────────────────────────────────────
     const tierKey = await getActiveTierKeyByOrg(db, orgId);
     if (!tierCanGenerateVideo(tierKey)) {
-        return { statusCode: 403, body: JSON.stringify({ error: 'video_requires_upgrade', message: 'AI video generation is available on the Saver and Employee plans.' }) };
+        return { statusCode: 403, body: JSON.stringify({ error: 'video_requires_upgrade', message: 'AI video generation is available on the Busywork Buster and Digital Employee plans.' }) };
     }
 
     let body: { prompt?: string; aspectRatio?: string; durationSeconds?: number };

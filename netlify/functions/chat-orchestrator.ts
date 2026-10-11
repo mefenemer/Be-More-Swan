@@ -1228,7 +1228,7 @@ ${freeOnly ? 'They chose FREE sources by default at setup: propose "stock" and "
 
 ${rc.briefsSnapshot ?? 'Your list of briefs could not be read this turn. Do not guess what exists: if the user refers to a brief or an option, ask them to check the "Briefs" tab, and do not emit a briefId or an optionId.'}
 
-WHAT YOU CAN AND CANNOT MAKE. Options come from three places: ${Object.entries(SOURCE_SPECS).map(([k, v]) => `"${k}" (${v.label} — ${v.cost})`).join(', ')}. AI video is ONE 6-second clip per round, only on the Saver and Employee plans; if the user's plan does not include it, the round says so and skips it. You cannot edit a photo or video they give you.
+WHAT YOU CAN AND CANNOT MAKE. Options come from three places: ${Object.entries(SOURCE_SPECS).map(([k, v]) => `"${k}" (${v.label} — ${v.cost})`).join(', ')}. AI video is ONE 6-second clip per round, only on the Busywork Buster and Digital Employee plans; if the user's plan does not include it, the round says so and skips it. You cannot edit a photo or video they give you.
 
 THEIR OWN PICTURES. "Add your own" on a brief (Briefs tab) puts the user's own file in as an option: an upload, or anything already in their content library — which is where designs they import from Canva land, so that is how a Canva design joins a brief. You cannot upload or import for them from this chat: tell them where the button is. If someone on their team is making it, set "waitingOn" to who (nothing is sent to that person; the user tells them).
 
