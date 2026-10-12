@@ -1088,12 +1088,21 @@ export default withLambda(async (event) => {
             });
         }
 
-        if (userId) {
-            // Mark plans as cancelled — capture cancelledAt for win-back email scheduling (US-GAP-4.2.1)
+        // A deleted subscription that no plans row points at (prod user 38's stray £0 sub, 2026-10-12)
+        // is not the customer's plan. This handler used to cancel EVERY plan the user had, so
+        // cancelling the stray sub in Stripe cancelled the real paid plan and paused every assistant.
+        if (userId && await _isUntrackedSubscription(db, userId, sub.id)) {
+            console.error('[stripe-webhook] untracked subscription deleted — leaving plans and assistants alone:', { subscriptionId: sub.id, userId });
+        } else if (userId) {
+            // Mark THIS subscription's plan as cancelled — capture cancelledAt for win-back email scheduling (US-GAP-4.2.1)
             const cancelledNow = new Date();
             await db.update(plans)
                 .set({ status: 'cancelled', cancelledAt: cancelledNow, updatedAt: cancelledNow })
-                .where(and(eq(plans.userId, userId), inArray(plans.status, ['active', 'cancelling', 'past_due'])));
+                .where(and(
+                    eq(plans.userId, userId),
+                    eq(plans.stripeSubscriptionId, sub.id),
+                    inArray(plans.status, ['active', 'cancelling', 'past_due']),
+                ));
 
             // Pause ALL active assistants — no active subscription
             await db.update(aiAssistants)
