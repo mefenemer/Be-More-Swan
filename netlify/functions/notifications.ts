@@ -9,6 +9,7 @@ import { isInAppEnabledFor, resolveInAppPrefs, type AssistantOverrideMap } from 
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 import { liveRoleLabel } from '../../src/utils/live-role-label';
+import { readCombineCrossPosts, loadPostGroups, combineCrossPostNotes, expandCrossPostIds } from '../../src/utils/crosspost-view';
 const jwtSecret = process.env.JWT_SECRET;
 
 // Notification "kind" classification (action vs info) lives in src/utils/notification-actions.ts
@@ -103,6 +104,12 @@ export default withLambda(async (event: HandlerEvent) => {
                 n.assistantId ?? (n.metadata as any)?.assistantId ?? (n.metadata as any)?.assistant_id ?? null;
             allNotes = allNotes.filter(n => isInAppEnabledFor(inAppPrefs, assistantOverrides, assistantIdOf(n), n.type));
 
+            // One cross-post, one notification (user preference, default on — crosspost-view.ts).
+            // Done BEFORE the counts so the badge and the list agree about how many items there are.
+            if (await readCombineCrossPosts(db, userId)) {
+                allNotes = combineCrossPostNotes(allNotes, await loadPostGroups(db, allNotes));
+            }
+
             // Counts for the sidebar badge. actionCount = UNREAD, unresolved action items — reading
             // (muting) an action drops it from the badge, but the item stays in the inbox list until
             // it's truly resolved (resolvedAt). This mirrors the inbox tab pill so the two never
@@ -179,6 +186,12 @@ export default withLambda(async (event: HandlerEvent) => {
             const { notificationId } = body;
 
             if (!notificationId) return { statusCode: 400, body: JSON.stringify({ error: 'Missing notificationId' }) };
+            if (!Number.isInteger(Number(notificationId))) return { statusCode: 400, body: JSON.stringify({ error: 'Invalid notificationId' }) };
+
+            // A combined cross-post row carries the newest sibling's id; act on every platform's row.
+            const targetIds = await readCombineCrossPosts(db, userId)
+                ? await expandCrossPostIds(db, userId, [Number(notificationId)])
+                : [Number(notificationId)];
 
             // US3 — Strict Dismissal Rules. dismiss:true hides the item, but ONLY if its type is
             // dismissible. critical_action is hardcoded non-dismissible (AC3.2): the X is hidden
@@ -195,7 +208,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 }
                 await db.update(notifications)
                     .set({ dismissedAt: new Date() })
-                    .where(and(eq(notifications.id, notificationId), eq(notifications.userId, userId)));
+                    .where(and(inArray(notifications.id, targetIds), eq(notifications.userId, userId)));
                 return { statusCode: 200, body: JSON.stringify({ success: true }) };
             }
 
@@ -212,7 +225,7 @@ export default withLambda(async (event: HandlerEvent) => {
             // Ensure the user owns this notification before updating
             await db.update(notifications)
                 .set(setValues)
-                .where(and(eq(notifications.id, notificationId), eq(notifications.userId, userId)));
+                .where(and(inArray(notifications.id, targetIds), eq(notifications.userId, userId)));
 
             return { statusCode: 200, body: JSON.stringify({ success: true }) };
         }
@@ -229,7 +242,11 @@ export default withLambda(async (event: HandlerEvent) => {
                 ? putBody.ids.filter((n: unknown): n is number => Number.isInteger(n))
                 : null;
             const conds = [eq(notifications.userId, userId), eq(notifications.isRead, false)];
-            if (ids && ids.length) conds.push(inArray(notifications.id, ids));
+            if (ids && ids.length) {
+                // The tab's ids are the combined rows' ids; widen to their platform siblings.
+                const scoped = await readCombineCrossPosts(db, userId) ? await expandCrossPostIds(db, userId, ids) : ids;
+                conds.push(inArray(notifications.id, scoped));
+            }
 
             await db.update(notifications).set({ isRead: true }).where(and(...conds));
 

@@ -1196,7 +1196,7 @@ function _listRow(group) {
                 <span class="text-sm font-extrabold text-gray-900">${multi ? 'Multiple' : plat.label}</span>
                 ${platStrip}
                 <span class="text-xs font-bold text-gray-400">${time}</span>
-                ${post.isAutonomous ? `<span class="text-[10px] font-bold text-violet-700 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded-full">100% AI</span>` : ''}
+                ${post.isAutonomous ? `<span class="text-[10px] font-bold text-violet-700 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded-full">Created by ${_escHtml(post.assistantId != null ? _assistantName(post.assistantId) : 'your assistant')}</span>` : ''}
             </div>
             <p class="text-sm text-gray-600 truncate">${_escHtml((post.caption || '').substring(0, 120) || '(No caption)')}</p>
             ${post.hashtags ? `<p class="text-xs text-blue-500 mt-1 truncate">${_escHtml(post.hashtags.substring(0, 80))}</p>` : ''}

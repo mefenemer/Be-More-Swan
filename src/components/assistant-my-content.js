@@ -39,12 +39,18 @@
     if (page) { page.classList.remove('py-10', 'max-w-5xl', 'px-4', 'sm:px-6', 'lg:px-8'); page.classList.add('pt-2'); }
   }
 
+  // The assistant whose page this is — names its media in the source badges ("Created by Ava")
+  // when the server can't attribute an asset to a post.
+  function hostAssistantName() {
+    return (document.getElementById('detail-name-input')?.value || '').trim();
+  }
+
   async function show() {
     const host = document.getElementById(HOST_ID);
     if (!host) return;
 
     if (host.dataset.ready === '1') {
-      if (typeof window.initMyContent === 'function') await window.initMyContent();
+      if (typeof window.initMyContent === 'function') await window.initMyContent({ assistantName: hostAssistantName() });
       return;
     }
 
@@ -55,7 +61,7 @@
       host.innerHTML = await res.text();
       embedTweaks(host);
       host.dataset.ready = '1';
-      if (typeof window.initMyContent === 'function') await window.initMyContent();
+      if (typeof window.initMyContent === 'function') await window.initMyContent({ assistantName: hostAssistantName() });
     } catch (err) {
       host.dataset.ready = '';
       host.innerHTML = `<div class="bg-red-50 border border-red-200 rounded-2xl p-6 text-sm font-semibold text-red-700">${

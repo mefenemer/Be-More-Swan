@@ -149,7 +149,29 @@
     </div>
 
     <!-- ══ Notification Preferences (unified matrix) ══════════════ -->
-    <div class="settings-tab-panel hidden" data-panel="notifications">
+    <div class="settings-tab-panel hidden space-y-6" data-panel="notifications">
+        <!-- Cross-posts: one item or one per platform. The same saved setting as the "Combine
+             platforms" boxes on the inbox and on an assistant's Activity card
+             (src/components/crosspost-view.js); the server does the merging. Default ON. -->
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
+                <h3 class="text-lg font-bold text-gray-900">Posts on several platforms</h3>
+                <p class="text-sm text-gray-500">How a post that goes out to more than one platform appears in your notifications and in your assistant's Activity.</p>
+            </div>
+            <div class="p-6">
+                <div class="flex items-start justify-between gap-6">
+                    <div class="flex-1">
+                        <p class="text-sm font-semibold text-gray-900 mb-1">Show it as one post</p>
+                        <p class="text-sm text-gray-500">On: one entry, e.g. "Post published to Instagram, LinkedIn and X". Off: a separate entry for each platform. A failure on one platform is always shown on its own.</p>
+                    </div>
+                    <button type="button" id="toggle-combine-crossposts" data-crosspost-toggle
+                        class="bg-emerald-500 relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                        role="switch" aria-checked="true" aria-label="Show a post on several platforms as one post">
+                        <span aria-hidden="true" class="translate-x-5 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
                 <h3 class="text-lg font-bold text-gray-900">Notification Preferences</h3>

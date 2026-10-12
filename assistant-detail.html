@@ -817,12 +817,20 @@
   <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Activity</h3>
+      <div class="flex items-center gap-3 flex-wrap justify-end">
+      <!-- One row per cross-post instead of one per platform — the same saved setting as the
+           notification inbox (src/components/crosspost-view.js). The server does the merging. -->
+      <label id="activity-crosspost-toggle" class="flex items-center gap-1.5 text-xs font-medium text-gray-500 cursor-pointer select-none" title="When a post goes to several platforms, show it once instead of once per platform">
+        <input type="checkbox" data-crosspost-toggle checked class="h-3.5 w-3.5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer">
+        Combine platforms
+      </label>
       <div id="activity-timeframe-btns" class="flex gap-1">
         <button data-tf="1d"  class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-indigo-500 bg-indigo-50 text-indigo-700 font-semibold">1d</button>
         <button data-tf="7d"  class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">7d</button>
         <button data-tf="30d" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">30d</button>
         <button data-tf="90d" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">90d</button>
         <button data-tf="all" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">All</button>
+      </div>
       </div>
     </div>
     <div id="recent-activity-list" class="space-y-3">
@@ -1916,7 +1924,7 @@
       </div>
       <div id="autonomous-on-msg" class="hidden mt-4 flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-800">
         <svg class="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-        <span>When your content hub is empty, this assistant will still prepare <strong>draft posts</strong> (text-only or AI-assisted media) and send them to your <strong>Review</strong> for approval — they are never published on their own. AI-media drafts are flagged <strong>"100% AI-Generated"</strong> so you can spot them at a glance.</span>
+        <span>When your content hub is empty, this assistant will still prepare <strong>draft posts</strong> (text-only or AI-assisted media) and send them to your <strong>Review</strong> for approval — they are never published on their own. AI-media drafts carry a <strong>"Created by"</strong> pill naming this assistant, so you can spot them at a glance.</span>
       </div>
       <div id="autonomous-off-msg" class="mt-4 flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
         <svg class="w-4 h-4 shrink-0 mt-0.5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>

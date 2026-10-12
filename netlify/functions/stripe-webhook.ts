@@ -38,6 +38,33 @@ function getInvoiceSubscriptionId(invoice: Stripe.Invoice): string | null {
     return typeof sub === 'string' ? sub : sub?.id ?? null;
 }
 
+// The period the customer is now paid up to. On a subscription_cycle invoice the
+// invoice-level period_start/period_end describe the period that just ENDED (Stripe
+// bills licensed prices in advance but dates the invoice by the elapsed usage period),
+// so "Active until {invoice.period_end}" named today. The subscription line items carry
+// the period actually being paid for; fall back to period_end only when there are none.
+function getInvoicePaidThrough(invoice: Stripe.Invoice): number | null {
+    const lineEnds = (invoice.lines?.data ?? [])
+        .map(l => l.period?.end)
+        .filter((e): e is number => typeof e === 'number');
+    if (lineEnds.length) return Math.max(...lineEnds);
+    return invoice.period_end ?? null;
+}
+
+// A Stripe subscription on this customer that no plans row points at, in ANY status.
+// Prod user 38 had one from an abandoned first checkout (July 2026): a £0 sub that renewed
+// an hour before the real one every month, so every renewal produced two "Subscription
+// Renewed" and two "invoice ready" notifications. Status is deliberately ignored —
+// a downgrading / cancelling / past_due plan is still ours.
+async function _isUntrackedSubscription(db: ReturnType<typeof getDb>, userId: number, subscriptionId: string | null): Promise<boolean> {
+    if (!subscriptionId) return false;
+    const [row] = await db.select({ id: plans.id })
+        .from(plans)
+        .where(and(eq(plans.userId, userId), eq(plans.stripeSubscriptionId, subscriptionId)))
+        .limit(1);
+    return !row;
+}
+
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
@@ -463,6 +490,14 @@ export default withLambda(async (event) => {
     if (stripeEvent.type === 'invoice.upcoming') {
         const invoice = stripeEvent.data.object as Stripe.Invoice;
         const userId  = await _resolveUserId(invoice.customer as string);
+        // Same rule as invoice.paid: a free renewal of a subscription we hold no plan for
+        // is not the customer's renewal — don't warn them about it.
+        if (userId && !invoice.amount_due && await _isUntrackedSubscription(db, userId, getInvoiceSubscriptionId(invoice))) {
+            console.error('[stripe-webhook] invoice.upcoming for an untracked £0 subscription — skipped:', {
+                userId, subscriptionId: getInvoiceSubscriptionId(invoice), customer: invoice.customer,
+            });
+            return { statusCode: 200, body: JSON.stringify({ received: true, untrackedSubscription: true }) };
+        }
         if (userId) {
             const amount     = invoice.amount_due ? `£${(invoice.amount_due / 100).toFixed(2)}` : '';
             const renewalDay = invoice.period_end
@@ -529,10 +564,23 @@ export default withLambda(async (event) => {
         }
 
         const userId = await _resolveUserId(invoice.customer as string);
+
+        // A free invoice from a subscription we hold no plan for is noise to the customer —
+        // nothing was charged and nothing in their workspace depends on it. Say nothing and
+        // leave a loud log so it gets cancelled in Stripe. A PAID one still runs the full path
+        // below: money was taken, so the customer gets the invoice and the notification.
+        if (userId && !invoice.amount_paid && await _isUntrackedSubscription(db, userId, getInvoiceSubscriptionId(invoice))) {
+            console.error('[stripe-webhook] invoice.paid for an untracked £0 subscription — no plan row; skipped notifications. Cancel it in Stripe:', {
+                userId, invoiceId: invoice.id, subscriptionId: getInvoiceSubscriptionId(invoice), customer: invoice.customer,
+            });
+            return { statusCode: 200, body: JSON.stringify({ received: true, untrackedSubscription: true }) };
+        }
+
         if (userId) {
             const amount     = invoice.amount_paid ? `£${(invoice.amount_paid / 100).toFixed(2)}` : '';
-            const periodEnd  = invoice.period_end
-                ? new Date(invoice.period_end * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+            const paidThrough = getInvoicePaidThrough(invoice);
+            const periodEnd  = paidThrough
+                ? new Date(paidThrough * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/London' })
                 : null;
 
             // Resolve card details from the invoice's charge
@@ -669,7 +717,7 @@ export default withLambda(async (event) => {
                     metadata: {
                         invoiceId: invoice.id,
                         amountPaid: invoice.amount_paid,
-                        periodEnd: invoice.period_end ? new Date(invoice.period_end * 1000).toISOString() : null,
+                        periodEnd: paidThrough ? new Date(paidThrough * 1000).toISOString() : null,
                     },
                 });
             } else {

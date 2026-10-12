@@ -71,6 +71,8 @@ export default withLambda(async (event: HandlerEvent) => {
                     soundOnMilestone: prefs.soundOnMilestone !== false,
                     soundOnNotification: prefs.soundOnNotification !== false,
                     tourNarrationEnabled: prefs.tourNarrationEnabled !== false,
+                    // Show a cross-post as one post (Activity feed + inbox) — default-on, crosspost-view.ts.
+                    combineCrossPosts: prefs.combineCrossPosts !== false,
                     // US-UX-1.1 SC1: role fields for header badges and settings display
                     platformRole: user?.role || 'user',
                     organisationRole: orgMembership?.role || 'member',
@@ -177,8 +179,8 @@ export default withLambda(async (event: HandlerEvent) => {
                     .set({ workingHours: whVal, updatedAt: new Date() })
                     .where(eq(userProfiles.userId, userId));
 
-            } else if (fieldKey === 'soundOnLogin' || fieldKey === 'soundOnMilestone' || fieldKey === 'soundOnNotification' || fieldKey === 'tourNarrationEnabled') {
-                // Sound preferences — stored in userProfiles.preferences (boolean, default-on).
+            } else if (fieldKey === 'soundOnLogin' || fieldKey === 'soundOnMilestone' || fieldKey === 'soundOnNotification' || fieldKey === 'tourNarrationEnabled' || fieldKey === 'combineCrossPosts') {
+                // Sound preferences + combineCrossPosts — stored in userProfiles.preferences (boolean, default-on).
                 targetTable = 'user_profiles';
                 const currentPrefs = (currentProfile?.preferences as Record<string, any>) || {};
                 const boolVal = value === true || value === 'true';

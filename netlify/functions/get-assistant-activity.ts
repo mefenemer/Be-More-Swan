@@ -22,6 +22,7 @@ import {
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { readCombineCrossPosts, joinPlatformLabels } from '../../src/utils/crosspost-view';
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') {
@@ -81,6 +82,7 @@ export default withLambda(async (event) => {
                 triggerType: contentGenerationJobs.triggerType,
                 contextPrompt: contentGenerationJobs.contextPrompt,
                 createdAt: contentGenerationJobs.createdAt,
+                crosspostGroupId: contentGenerationJobs.crosspostGroupId,
             })
             .from(contentGenerationJobs)
             .where(withCutoff(contentGenerationJobs.createdAt, and(
@@ -100,6 +102,7 @@ export default withLambda(async (event) => {
                 postFormat: scheduledPosts.postFormat,
                 isAutonomous: scheduledPosts.isAutonomous,
                 createdAt: scheduledPosts.createdAt,
+                crosspostGroupId: scheduledPosts.crosspostGroupId,
             })
             .from(scheduledPosts)
             .where(withCutoff(scheduledPosts.createdAt, and(
@@ -240,12 +243,35 @@ export default withLambda(async (event) => {
 
         const items: ActivityItem[] = [];
 
+        // One cross-post, one row (the viewer's "show a cross-post as one post" preference,
+        // default on — crosspost-view.ts). Siblings collapse only while they share a STATUS: an
+        // Instagram row that failed beside a LinkedIn row that published is two different facts,
+        // and folding them would bury the failure under a success.
+        const combine = await readCombineCrossPosts(db, ctx.userId);
+        const collapse = <R extends { platform: string | null; status: string | null; crosspostGroupId: string | null }>(rows: R[]) => {
+            const out: Array<R & { platformLabels: string[] }> = [];
+            const byKey = new Map<string, R & { platformLabels: string[] }>();
+            for (const r of rows) {
+                const label = r.platform ? _platformName(r.platform) : '';
+                const key = combine && r.crosspostGroupId ? `${r.crosspostGroupId}|${r.status}` : null;
+                const hit = key ? byKey.get(key) : undefined;
+                if (hit) {
+                    if (label && !hit.platformLabels.includes(label)) hit.platformLabels.push(label);
+                    continue;
+                }
+                const row = { ...r, platformLabels: label ? [label] : [] };
+                out.push(row);
+                if (key) byKey.set(key, row);
+            }
+            return out;
+        };
+
         // The Blog Writer's drafting jobs live in the same table; they were described as "post
         // drafts", which is the Social Media Assistant's word (seen on prod 2026-10-09).
         const isBlog = ownedAssistant.roleKey === 'blog_writer';
         const noun = isBlog ? 'blog post' : 'post';
-        for (const j of genJobs) {
-            const platformLabel = j.platform && !(isBlog && j.platform === 'blog') ? ` for ${_platformName(j.platform)}` : '';
+        for (const j of collapse(genJobs)) {
+            const platformLabel = j.platform && !(isBlog && j.platform === 'blog') ? ` for ${joinPlatformLabels(j.platformLabels)}` : '';
             const contextHint = j.contextPrompt ? ` based on: "${j.contextPrompt.slice(0, 60)}${j.contextPrompt.length > 60 ? '…' : ''}"` : '';
             let description: string;
             let icon: string;
@@ -270,8 +296,8 @@ export default withLambda(async (event) => {
             items.push({ id: `gen-${j.id}`, type: 'content_generation', icon, description, createdAt: j.createdAt, status });
         }
 
-        for (const p of posts) {
-            const platformLabel = _platformName(p.platform);
+        for (const p of collapse(posts)) {
+            const platformLabel = joinPlatformLabels(p.platformLabels);
             const dateLabel = p.publishDate ? ` on ${new Date(p.publishDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : '';
             let description: string;
             let icon: string;
