@@ -6,7 +6,7 @@ config({ path: path.resolve(process.cwd(), '.env') });
 import { Handler, HandlerResponse } from '@netlify/functions';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, count } from 'drizzle-orm';
 import {
   users,
   organisations,
@@ -16,7 +16,9 @@ import {
   onboardingDrafts,
   dpaAcceptances,
   contentRules,
+  taskRuns,
 } from '../../db/schema';
+import { hireDecision, statusOf } from '../../src/utils/assistant-go-live';
 import { dpaAcceptedVersionClause } from './accept-dpa';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
 import { checkRateLimit } from '../../src/utils/rate-limit';
@@ -184,6 +186,62 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
       }
     }
 
+    // 1b. LOOK UP MASTER ASSISTANT — by roleKey only (resolved above).
+    // This used to fall back to `WHERE master_assistants.name = <display name>`. Since name became
+    // admin-editable, a rename made that lookup return nothing — and the code then carried on and
+    // created the assistant with masterAssistantId: null, jobRole 'General Assistant' and
+    // configuration.type 'custom', permanently severing the master link and landing it on the wrong
+    // dashboard registry, silently. Fail loudly instead: a role we can't identify is a bug, not a
+    // custom assistant.
+    if (!resolvedRoleKey) {
+      console.error('Onboarding: could not resolve a roleKey.', { assistantName, roleKey: body.roleKey });
+      return { statusCode: 400, body: JSON.stringify({ error: 'Could not identify which assistant to set up. Please restart the setup wizard.' }) };
+    }
+    const [assistantRecord] = await db.select().from(masterAssistants)
+      .where(eq(masterAssistants.roleKey, resolvedRoleKey))
+      .limit(1);
+    if (!assistantRecord) {
+      console.error('Onboarding: no master_assistants row for roleKey.', { resolvedRoleKey });
+      return { statusCode: 400, body: JSON.stringify({ error: 'That assistant is not available. Please restart the setup wizard.' }) };
+    }
+
+    // 1c. STATUS GATE — the same rule hire-assistant.ts enforces (assistant-go-live.ts hireDecision).
+    // This endpoint creates an ai_assistants row too, and used to do it for ANY master row the roleKey
+    // named: hidden, retired, or coming soon (teasers, mostly unbuilt — crm_enricher was parked there
+    // for fabricating data). The catalogue hides those Hire buttons, but the wizard URL takes a roleKey,
+    // so the browser was the only gate. Runs before the dedup below, which deletes a pending row, and
+    // before the profile/org writes, so a refusal changes nothing.
+    const status = statusOf(assistantRecord);
+    if (status !== 'live') {
+      let betaAccess = false;
+      let completedTasks = 0;
+      if (status === 'beta') {
+        const [[org], [{ completedCount }]] = await Promise.all([
+          db.select({ betaAccess: organisations.betaAccess }).from(organisations).where(eq(organisations.id, orgId)).limit(1),
+          db.select({ completedCount: count() }).from(taskRuns)
+            .where(and(eq(taskRuns.userId, currentUserId), eq(taskRuns.status, 'completed'))),
+        ]);
+        betaAccess = org?.betaAccess ?? false;
+        completedTasks = Number(completedCount) || 0;
+      }
+      const decision = hireDecision({
+        status, betaAccess, completedTasks,
+        milestoneTasksRequired: assistantRecord.milestoneTasksRequired,
+      });
+      if (!decision.ok) {
+        const error = decision.code === 'COMING_SOON'
+          ? `${assistantRecord.name} is coming soon and can't be hired yet — turn on "Notify me" and we'll tell you when it launches.`
+          : decision.code === 'BETA_LOCKED'
+            ? `${assistantRecord.name} is in early access — complete ${decision.required} tasks to unlock it.`
+            : 'That assistant is not available. Please restart the setup wizard.';
+        return {
+          statusCode: 403,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ error, code: decision.code }),
+        };
+      }
+    }
+
     const targetName = customAssistantName?.trim() || 'Digital Assistant';
 
     // 2. DEDUP CHECK — names are unique per organisation; allow retry if previously incomplete
@@ -249,24 +307,7 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
       throw new Error('Failed to generate Assistant Blueprint due to missing or invalid data.');
     }
 
-    // 5. LOOK UP MASTER ASSISTANT — by roleKey only (resolved above).
-    // This used to fall back to `WHERE master_assistants.name = <display name>`. Since name became
-    // admin-editable, a rename made that lookup return nothing — and the code then carried on and
-    // created the assistant with masterAssistantId: null, jobRole 'General Assistant' and
-    // configuration.type 'custom', permanently severing the master link and landing it on the wrong
-    // dashboard registry, silently. Fail loudly instead: a role we can't identify is a bug, not a
-    // custom assistant.
-    if (!resolvedRoleKey) {
-      console.error('Onboarding: could not resolve a roleKey.', { assistantName, roleKey: body.roleKey });
-      return { statusCode: 400, body: JSON.stringify({ error: 'Could not identify which assistant to set up. Please restart the setup wizard.' }) };
-    }
-    const [assistantRecord] = await db.select().from(masterAssistants)
-      .where(eq(masterAssistants.roleKey, resolvedRoleKey))
-      .limit(1);
-    if (!assistantRecord) {
-      console.error('Onboarding: no master_assistants row for roleKey.', { resolvedRoleKey });
-      return { statusCode: 400, body: JSON.stringify({ error: 'That assistant is not available. Please restart the setup wizard.' }) };
-    }
+    // 5. MASTER ASSISTANT — looked up and status-gated above (step 1b), before anything was written.
 
     // Resolve the Visual Strategy → Media Source priority list. Validate/de-dupe what the
     // client sent; null when nothing was sent so the resolver applies its DEFAULT_ORDER.
