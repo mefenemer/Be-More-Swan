@@ -3,8 +3,9 @@
 -- line with what the code actually does. Idempotent: every statement is guarded on the old value.
 --   • Advanced Reporting / Custom Reporting — every plan sees the same dashboard (roi-stats has no
 --     tier gate) and no custom reporting exists → rows off.
---   • Early Access to New Roles — earned by completed tasks on ANY plan (hire-assistant.ts), not
---     sold by tier → row off.
+--   • Early Access to New Roles — not sold by tier: a BETA role opens to a workspace with Beta access
+--     or a user who reaches its task milestone, on any plan (assistant-go-live.ts hireDecision);
+--     coming-soon roles are never hireable → row off.
 --   • Roadmap voting — nothing gates it → ticked on every plan.
 --   • Basic Reporting described the never-scheduled weekly-digest as a "monthly summary" → now names
 --     the in-app Time-Saved Dashboard.
