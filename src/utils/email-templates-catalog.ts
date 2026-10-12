@@ -262,9 +262,12 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
         name: 'Weekly Digest',
         category: 'Engagement',
         subject: 'Your Be More Swan week in review',
+        preheader: 'What your assistants got done in the last 7 days.',
         bodyHtml: greet +
-            p('Here’s a quick summary of what your assistants got done this week in {{workspace.name | "your workspace"}}.') +
-            button('View full report', 'link.action_url') + signoff,
+            p('Here’s what your assistants got done in {{workspace.name | "your workspace"}} over the last 7 days.') +
+            p('<strong>{{digest.tasks_handled}}</strong> tasks handled, about <strong>{{digest.hours_saved}} hours</strong> of work saved.') +
+            p('Tasks used this month: {{digest.tasks_used}} of {{digest.task_allowance}}.') +
+            button('Open your dashboard', 'link.action_url') + signoff,
     },
     {
         triggerKey: 'post_due',

@@ -147,7 +147,7 @@ export interface EmailVariable {
     key: string;
     /** Human label for the dropdown. */
     label: string;
-    group: 'User' | 'Workspace' | 'Assistant' | 'Billing' | 'System';
+    group: 'User' | 'Workspace' | 'Assistant' | 'Billing' | 'Digest' | 'System';
     /** Dummy value used when rendering a test send / preview. */
     sample: string;
 }
@@ -162,6 +162,11 @@ export const EMAIL_VARIABLES: EmailVariable[] = [
     { key: 'billing.amount', label: 'Amount', group: 'Billing', sample: '£49.00' },
     { key: 'billing.plan_name', label: 'Plan name', group: 'Billing', sample: 'Growth' },
     { key: 'billing.portal_url', label: 'Billing portal URL', group: 'Billing', sample: `${BASE_URL}/billing.html` },
+    // Weekly digest figures (netlify/functions/weekly-digest.ts) — counted through roi-activity.ts.
+    { key: 'digest.tasks_handled', label: 'Tasks handled (7 days)', group: 'Digest', sample: '42' },
+    { key: 'digest.hours_saved', label: 'Hours saved (7 days)', group: 'Digest', sample: '6.5' },
+    { key: 'digest.tasks_used', label: 'Tasks used this month', group: 'Digest', sample: '118' },
+    { key: 'digest.task_allowance', label: 'Monthly task allowance', group: 'Digest', sample: '500' },
     { key: 'link.action_url', label: 'Primary action URL', group: 'System', sample: `${BASE_URL}/dashboard.html` },
     { key: 'system.app_url', label: 'App URL', group: 'System', sample: BASE_URL },
 ];

@@ -1,136 +1,144 @@
 // netlify/functions/weekly-digest.ts
 // US-GAP-6.3.1: Weekly Usage Digest Email
 //
-// Scheduled every Monday at 08:00 UTC (schedule: "0 8 * * 1")
-// Sends a personalised weekly activity digest to active users who:
-//   - have at least one provisioned assistant (SC1)
-//   - had at least one task_run in the last 7 days (SC3 suppression)
-//   - have not opted out via emailPreferences.weekly_digest = false (SC4)
-//   - have an 'active' plan (SC5 — exclude 'cancelled' / 'past_due')
+// ⚠️ NOT SCHEDULED. There is deliberately no `[functions.weekly-digest]` entry in netlify.toml and
+// no caller in .github/workflows, so this has never run anywhere. The digest is not sold — pricing
+// describes basic reporting as the in-app Time-Saved Dashboard (2026-10-12) — and turning it on
+// emails every paying workspace's owners weekly, so that is a product decision, not a deploy step.
+// To enable: add `[functions.weekly-digest] schedule = "0 8 * * 1"` (Monday 08:00 UTC) next to the
+// other crons in netlify.toml, and remember Netlify runs scheduled functions on PRODUCTION only —
+// staging needs a poke from .github/workflows/staging-crons.yml to be exercised at all.
+//
+// One digest per WORKSPACE, not per user. A plan row is org-scoped (`plans.user_id` is only the
+// purchaser and is nullable), so the first version's `plans.user_id = users.id` join reached the
+// buyer alone, never an invited admin, and sent one email per plan row a person had bought.
+//
+// For each org with an `active` plan (beta plans included — they are `active` with plan_type 'beta';
+// `past_due` is skipped, a dunning week is the wrong time for a "look what you got" email):
+//   - skip if it has no non-archived assistant, or nothing was produced in the last 7 days
+//   - count the week's work through src/utils/roi-activity.ts — the SAME module the dashboard's
+//     "Tasks Handled / Hours Saved" tiles use, so the email can never disagree with the page it
+//     links to. A degraded count (a source query failed) is not sent rather than sent low.
+//   - read tasks used from usage_counters, the counter the task cap actually enforces, against
+//     resolveTaskLimit() — not a raw task_runs count, which misses background work entirely
+//   - send to the org's OWNERS and ADMINS (the people who manage the workspace and its allowance),
+//     each gated on their own "Assistant Tasks & Summaries" email preference, plus the legacy
+//     `weekly_digest: false` key so an old opt-out stays honoured
+//   - render through the admin-editable `weekly_digest` template (email-templates-catalog.ts), so
+//     copy, branding and the unsubscribe footer come from the shared shell
+//
+// Queries are batched per org, not per user: functions run in us-east-1 against a London DB at
+// 0.5–4 s a round trip, and a per-user N+1 would run into the scheduled-function time limit.
 
-import type { Handler } from '@netlify/functions';
-import { eq, and, gte, count, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, userProfiles, plans, masterPlans, aiAssistants, taskRuns, scheduledPosts } from '../../db/schema';
-import { sendEmail } from '../../src/utils/email';
+import { organisations, plans, userOrganisations, userProfiles, users } from '../../db/schema';
+import { sendTemplatedEmail } from '../../src/utils/email';
 import { isEmailEnabled } from '../../src/utils/notification-prefs';
+import { activeAssistantIds, countRoiActivity } from '../../src/utils/roi-activity';
+import { getTimeMultipliers } from '../../src/utils/platform-config';
+import { resolveTaskLimit } from '../../src/utils/task-credit';
+import { getPeriodStart } from '../../src/utils/atomic-cap-check';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BASE_URL = process.env.BASE_URL || '';
 
-async function runWeeklyDigest() {
-    const db   = getDb();
-    const now  = new Date();
-    const week = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+/** Roles that receive the digest. Plain members can see the same figures on the dashboard. */
+export const DIGEST_ROLES = ['owner', 'admin'];
 
-    // All active users with active plans and at least one assistant
-    const eligibleRows = await db
-        .select({
-            userId:          users.id,
-            email:           users.email,
-            firstName:       users.firstName,
-            planId:          plans.id,
-            masterPlanId:    plans.masterPlanId,
-            planStatus:      plans.status,
-            monthlyTaskLimit: masterPlans.monthlyTaskLimit,
-            emailPrefs:      userProfiles.emailPreferences,
-        })
-        .from(users)
-        .innerJoin(plans, and(eq(plans.userId, users.id), eq(plans.status, 'active')))
-        .leftJoin(masterPlans, eq(masterPlans.id, plans.masterPlanId))
-        .leftJoin(userProfiles, eq(userProfiles.userId, users.id))
-        .where(eq(users.status, 'active'));
+export async function runWeeklyDigest(now = new Date()) {
+    const db = getDb();
+    const windowStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const periodStart = getPeriodStart();
+    const multipliers = await getTimeMultipliers();
+
+    // plans_one_active_per_org_unique guarantees at most one active plan per org, so this is one
+    // row per org.
+    const orgRows = await db
+        .select({ organisationId: plans.organisationId, workspaceName: organisations.name })
+        .from(plans)
+        .innerJoin(organisations, eq(organisations.id, plans.organisationId))
+        .where(eq(plans.status, 'active'));
 
     let sent = 0;
     let skipped = 0;
 
-    for (const row of eligibleRows) {
-        // SC4: opt-out check. Honour the new "Assistant Tasks & Summaries" email category
-        // (account settings → Notification Preferences) and the legacy weekly_digest key, so
-        // a user who opted out under either mechanism stays opted out.
-        const prefs = (row.emailPrefs || {}) as Record<string, boolean>;
-        if (prefs.weekly_digest === false || !isEmailEnabled(prefs, 'assistant_task')) { skipped++; continue; }
+    for (const org of orgRows) {
+        try {
+            const assistantIds = await activeAssistantIds(db, org.organisationId);
+            if (assistantIds.length === 0) { skipped++; continue; }
 
-        // SC1: must have at least one provisioned assistant
-        const activeAssistants = await db
-            .select({ id: aiAssistants.id, name: aiAssistants.name, isActive: aiAssistants.isActive, assistantRole: (aiAssistants as any).assistantRole })
-            .from(aiAssistants)
-            .where(eq(aiAssistants.userId, row.userId));
+            const activity = await countRoiActivity(db, {
+                organisationId: org.organisationId, assistantIds, windowStart, multipliers,
+            });
+            if (activity.degraded) {
+                console.warn(`[weekly-digest] org=${org.organisationId}: activity count degraded — not sending`);
+                skipped++; continue;
+            }
+            if (activity.completedTasks === 0) { skipped++; continue; }
 
-        if (activeAssistants.length === 0) { skipped++; continue; }
+            const recipients = await db
+                .select({
+                    userId: users.id,
+                    email: users.email,
+                    firstName: users.firstName,
+                    emailPrefs: userProfiles.emailPreferences,
+                })
+                .from(userOrganisations)
+                .innerJoin(users, eq(users.id, userOrganisations.userId))
+                .leftJoin(userProfiles, eq(userProfiles.userId, users.id))
+                .where(and(
+                    eq(userOrganisations.organisationId, org.organisationId),
+                    inArray(userOrganisations.role, DIGEST_ROLES),
+                    eq(users.status, 'active'),
+                ));
 
-        // SC3: must have task_runs in last 7 days
-        const [taskStats] = await db
-            .select({ weekCount: count() })
-            .from(taskRuns)
-            .where(and(eq(taskRuns.userId, row.userId), gte(taskRuns.createdAt, week)));
+            const wanted = recipients.filter(r => {
+                const prefs = (r.emailPrefs || {}) as Record<string, boolean>;
+                return prefs.weekly_digest !== false && isEmailEnabled(prefs, 'assistant_task');
+            });
+            if (wanted.length === 0) { skipped++; continue; }
 
-        const weeklyTaskCount = taskStats?.weekCount ?? 0;
-        if (weeklyTaskCount === 0) { skipped++; continue; }
+            const { limit } = await resolveTaskLimit(db, org.organisationId);
+            const usageRows = await db.execute(sql`
+                SELECT task_count FROM usage_counters
+                 WHERE organisation_id = ${org.organisationId} AND period_start = ${periodStart.toISOString()}
+                 LIMIT 1`);
+            const tasksUsed = Number((usageRows as unknown as Array<{ task_count: number }>)[0]?.task_count ?? 0);
 
-        // Month-to-date task count (for usage vs limit)
-        const [monthStats] = await db
-            .select({ monthCount: count() })
-            .from(taskRuns)
-            .where(and(eq(taskRuns.userId, row.userId), gte(taskRuns.createdAt, monthStart)));
-        const monthlyTaskCount = monthStats?.monthCount ?? 0;
-
-        // Posts scheduled/published in last 7 days (for Social Media users, SC2b)
-        const [postStats] = await db
-            .select({ postCount: count() })
-            .from(scheduledPosts)
-            .where(and(
-                eq(scheduledPosts.userId, row.userId),
-                gte(scheduledPosts.createdAt, week),
-                inArray(scheduledPosts.status, ['scheduled', 'published']),
-            ));
-        const weeklyPostCount = postStats?.postCount ?? 0;
-
-        // Build assistant status lines
-        const assistantLines = activeAssistants
-            .map(a => `<li>${a.name} — <strong style="color:${a.isActive ? '#059669' : '#9ca3af'}">${a.isActive ? 'Active' : 'Paused'}</strong></li>`)
-            .join('');
-
-        const taskLimitLine = row.monthlyTaskLimit != null
-            ? `<p>📊 <strong>This month's usage:</strong> ${monthlyTaskCount} of ${row.monthlyTaskLimit} tasks used</p>`
-            : `<p>📊 <strong>This month's tasks:</strong> ${monthlyTaskCount} completed</p>`;
-
-        const postsLine = weeklyPostCount > 0
-            ? `<p>📅 <strong>Posts scheduled/published this week:</strong> ${weeklyPostCount}</p>`
-            : '';
-
-        const name = row.firstName || 'there';
-
-        await sendEmail({
-            to: row.email,
-            subject: `Your Be More Swan weekly digest — ${weeklyTaskCount} task${weeklyTaskCount === 1 ? '' : 's'} completed`,
-            html: `<p>Hi ${name},</p>
-                   <p>Here's what your Be More Swan assistants have been up to this week:</p>
-                   <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:20px;margin:16px 0;">
-                     <p>✅ <strong>Tasks completed (last 7 days):</strong> ${weeklyTaskCount}</p>
-                     ${postsLine}
-                     ${taskLimitLine}
-                     <p>🤖 <strong>Your assistants:</strong></p>
-                     <ul style="margin:4px 0;padding-left:1.2rem;line-height:1.8">${assistantLines}</ul>
-                   </div>
-                   <p style="margin-top:20px;">
-                     <a href="${BASE_URL}/workspace.html" style="background:#059669;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">
-                       View Full Activity →
-                     </a>
-                   </p>
-                   <p style="margin-top:16px;font-size:0.8rem;color:#9ca3af;">
-                     You're receiving this because you have weekly digests enabled.
-                     <a href="${BASE_URL}/workspace.html#notifications" style="color:#9ca3af;">Manage preferences</a>
-                   </p>
-                   <p>The Be More Swan Team</p>`,
-        }).then(() => { sent++; }).catch(err => {
-            console.warn(`[weekly-digest] Email failed for userId=${row.userId}:`, err);
+            for (const r of wanted) {
+                try {
+                    const result = await sendTemplatedEmail({
+                        triggerKey: 'weekly_digest',
+                        to: r.email,
+                        vars: {
+                            user: { first_name: r.firstName ?? '' },
+                            workspace: { name: org.workspaceName },
+                            digest: {
+                                tasks_handled: String(activity.completedTasks),
+                                hours_saved: String(activity.hoursSaved),
+                                tasks_used: String(tasksUsed),
+                                task_allowance: limit == null ? 'unlimited' : String(limit),
+                            },
+                            link: { action_url: `${BASE_URL}/workspace.html` },
+                        },
+                    });
+                    // null = template missing or deactivated by an admin; nothing was sent.
+                    if (result === null) skipped++; else sent++;
+                } catch (err) {
+                    console.warn(`[weekly-digest] Email failed for userId=${r.userId}:`, err);
+                    skipped++;
+                }
+            }
+        } catch (err) {
+            // One org's fault must not stop every later org's digest.
+            console.error(`[weekly-digest] org=${org.organisationId} failed:`, err);
             skipped++;
-        });
+        }
     }
 
     console.log(`[weekly-digest] Done — sent=${sent}, skipped=${skipped}`);
+    return { sent, skipped };
 }
 
 export default withLambda(async () => {
