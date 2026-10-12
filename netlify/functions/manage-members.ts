@@ -19,12 +19,12 @@ import {
     users,
     userOrganisations,
     organisations,
-    plans,
-    masterPlans,
     jwtBlocklist,
 } from '../../db/schema';
 import { sendMagicLinkEmail } from '../../src/utils/email';
 import { tombstoneOrgMemberAssets } from '../../src/utils/gdpr-asset-purge';
+import { requireTenant } from '../../src/utils/tenant';
+import { getTeamAllowance, canAddSeat } from '../../src/utils/team-seats';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret  = process.env.JWT_SECRET;
@@ -39,28 +39,16 @@ function getAuth(event: any): number | null {
 }
 
 export default withLambda(async (event) => {
-    const callerId = getAuth(event);
-    if (!callerId) return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized.' }) };
+    if (!getAuth(event)) return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized.' }) };
 
     const db = getDb();
 
-    // Resolve caller's org membership and role
-    const [callerUser] = await db.select({ organisationId: userOrganisations.organisationId })
-        .from(userOrganisations).where(eq(userOrganisations.userId, callerId)).limit(1);
-    if (!callerUser?.organisationId) {
-        return { statusCode: 403, body: JSON.stringify({ error: 'No organisation found.' }) };
-    }
-    const orgId = callerUser.organisationId;
-
-    const [callerMembership] = await db.select({ role: userOrganisations.role })
-        .from(userOrganisations)
-        .where(and(eq(userOrganisations.userId, callerId), eq(userOrganisations.organisationId, orgId)))
-        .limit(1);
-
-    // Only owners and admins can manage members
-    if (!callerMembership || !['owner', 'admin'].includes(callerMembership.role || '')) {
-        return { statusCode: 403, body: JSON.stringify({ error: 'Insufficient permissions.' }) };
-    }
+    // Only owners and admins can manage members — of the ACTIVE workspace (requireTenant), not of
+    // whichever membership row came back first for a person who belongs to several.
+    const ctx = await requireTenant(event, db, { roles: ['owner', 'admin'] });
+    if ('error' in ctx) return ctx.error;
+    const callerId = ctx.userId;
+    const orgId = ctx.organisationId;
 
     try {
 
@@ -81,20 +69,18 @@ export default withLambda(async (event) => {
                 .where(eq(userOrganisations.organisationId, orgId))
                 .orderBy(userOrganisations.joinedAt);
 
-            // Resolve seat limit from the org owner's active plan
-            const [ownerPlanRow] = await db
-                .select({ seatLimit: masterPlans.seatLimit })
-                .from(plans)
-                .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
-                .where(and(eq(plans.userId, callerId), eq(plans.status, 'active')))
-                .limit(1);
+            // Workspace Collaboration + seats — the same rule invite-member.ts enforces.
+            const allowance = await getTeamAllowance(db, orgId);
 
             return {
                 statusCode: 200,
                 body: JSON.stringify({
                     members,
                     seatCount: members.length,
-                    seatLimit: ownerPlanRow?.seatLimit ?? null,
+                    seatLimit: allowance.maxSeats,          // null = no cap
+                    collaboration: allowance.collaboration,
+                    planName: allowance.planName,
+                    canInvite: canAddSeat(allowance, members.length),
                 }),
             };
         }

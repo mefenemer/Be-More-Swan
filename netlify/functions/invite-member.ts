@@ -6,7 +6,8 @@
 //
 // SC2: If the invitee is already a registered Be More Swan user → add directly to org + in-app notification
 //       If not registered → send magic-link invite email (creates account + joins org in one click)
-// SC3: Check seat limit from org owner's masterPlan.seatLimit (null=1 seat, 0=unlimited)
+// SC3: Workspace Collaboration must be on the plan, and the seat cap (if any) not reached —
+//      src/utils/team-seats.ts holds the rule
 // SC4: Invite email contains inviter name, org name, role, 7-day expiry link
 // SC6: Resend invalidates previous token (overwrites verificationToken + tokenExpiresAt)
 
@@ -18,12 +19,12 @@ import { getDb } from '../../db/client';
 import {
     users,
     userOrganisations,
-    plans,
-    masterPlans,
     organisations,
 } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
 import { createNotification } from '../../src/utils/notify';
+import { requireTenant } from '../../src/utils/tenant';
+import { getTeamAllowance, canAddSeat, seatRefusal } from '../../src/utils/team-seats';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret  = process.env.JWT_SECRET;
@@ -44,26 +45,18 @@ export default withLambda(async (event) => {
 
     const db = getDb();
 
-    // Resolve caller's org
+    // The active workspace (session claim, else latest membership) — not whichever membership row
+    // happens to come back first, which put a multi-workspace user's invite in the wrong org.
+    const ctx = await requireTenant(event, db, { roles: ['owner', 'admin'] });
+    if ('error' in ctx) {
+        return String(ctx.error.body).includes('Insufficient permissions')
+            ? { statusCode: 403, body: JSON.stringify({ error: 'Only workspace owners and admins can invite members.' }) }
+            : ctx.error;
+    }
+    const orgId = ctx.organisationId;
     const [callerUser] = await db
-        .select({ organisationId: userOrganisations.organisationId, email: users.email, firstName: users.firstName, lastName: users.lastName })
-        .from(users).leftJoin(userOrganisations, eq(users.id, userOrganisations.userId)).where(eq(users.id, callerId)).limit(1);
-
-    if (!callerUser?.organisationId) {
-        return { statusCode: 403, body: JSON.stringify({ error: 'You must be part of an organisation to invite members.' }) };
-    }
-    const orgId = callerUser.organisationId;
-
-    // Check caller is owner or admin
-    const [callerMembership] = await db
-        .select({ role: userOrganisations.role })
-        .from(userOrganisations)
-        .where(and(eq(userOrganisations.userId, callerId), eq(userOrganisations.organisationId, orgId)))
-        .limit(1);
-
-    if (!['owner', 'admin'].includes(callerMembership?.role || '')) {
-        return { statusCode: 403, body: JSON.stringify({ error: 'Only workspace owners and admins can invite members.' }) };
-    }
+        .select({ email: users.email, firstName: users.firstName, lastName: users.lastName })
+        .from(users).where(eq(users.id, ctx.userId)).limit(1);
 
     let body: { email?: string; role?: string; resend?: boolean };
     try { body = JSON.parse(event.body || '{}'); } catch {
@@ -77,56 +70,8 @@ export default withLambda(async (event) => {
     if (!['member', 'admin', 'viewer'].includes(role)) {
         return { statusCode: 400, body: JSON.stringify({ error: 'Role must be "member", "admin", or "viewer".' }) };
     }
-    if (email.toLowerCase() === callerUser.email?.toLowerCase()) {
+    if (email.toLowerCase() === callerUser?.email?.toLowerCase()) {
         return { statusCode: 400, body: JSON.stringify({ error: 'You cannot invite yourself.' }) };
-    }
-
-    // SC3: Seat limit — find org owner's master plan
-    const [orgOwner] = await db
-        .select({ id: users.id })
-        .from(users)
-        .innerJoin(userOrganisations, and(
-            eq(userOrganisations.userId, users.id),
-            eq(userOrganisations.organisationId, orgId),
-            eq(userOrganisations.role, 'owner'),
-        ))
-        .limit(1);
-
-    let seatLimit: number | null = 1;
-    if (orgOwner) {
-        const [ownerPlan] = await db
-            .select({ seatLimit: masterPlans.seatLimit })
-            .from(plans)
-            .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
-            .where(and(eq(plans.userId, orgOwner.id), eq(plans.status, 'active')))
-            .limit(1);
-        seatLimit = ownerPlan?.seatLimit ?? 1;
-    }
-
-    const [{ value: currentSeats }] = await db
-        .select({ value: count() })
-        .from(userOrganisations)
-        .where(and(eq(userOrganisations.organisationId, orgId), eq(userOrganisations.role, 'invited')
-            // count all non-invited too — effective seats = active members
-        ));
-
-    // Re-count all active (non-invited) seats for limit check
-    const [{ value: activeSeats }] = await db
-        .select({ value: count() })
-        .from(userOrganisations)
-        .where(eq(userOrganisations.organisationId, orgId));
-
-    const effectiveLimit = seatLimit === null ? 1 : seatLimit;
-    if (effectiveLimit !== 0 && activeSeats >= effectiveLimit) {
-        return {
-            statusCode: 403,
-            body: JSON.stringify({
-                error: 'You have reached your team member limit for your plan. Upgrade to add more seats.',
-                code: 'SEAT_LIMIT_REACHED',
-                currentSeats: activeSeats,
-                seatLimit: effectiveLimit,
-            }),
-        };
     }
 
     // Check if they're already an active member
@@ -144,12 +89,28 @@ export default withLambda(async (event) => {
         return { statusCode: 409, body: JSON.stringify({ error: 'This person is already a member of your workspace.' }) };
     }
 
+    // SC3: Workspace Collaboration + seats (src/utils/team-seats.ts). A resend re-uses the seat its
+    // pending invite already holds, so only a NEW person is counted. Pending invites count as seats.
+    if (!existingMembership) {
+        const allowance = await getTeamAllowance(db, orgId);
+        const [{ value: seats }] = await db
+            .select({ value: count() })
+            .from(userOrganisations)
+            .where(eq(userOrganisations.organisationId, orgId));
+        if (!canAddSeat(allowance, Number(seats) || 0)) {
+            return {
+                statusCode: 403,
+                body: JSON.stringify({ ...seatRefusal(allowance), currentSeats: Number(seats) || 0, seatLimit: allowance.maxSeats }),
+            };
+        }
+    }
+
     // Fetch org name + inviter name for emails
     const [org] = await db
         .select({ name: organisations.name })
         .from(organisations).where(eq(organisations.id, orgId)).limit(1);
     const orgName    = org?.name || 'your workspace';
-    const inviterName = [callerUser.firstName, callerUser.lastName].filter(Boolean).join(' ') || callerUser.email?.split('@')[0] || 'A team member';
+    const inviterName = [callerUser?.firstName, callerUser?.lastName].filter(Boolean).join(' ') || callerUser?.email?.split('@')[0] || 'A team member';
 
     // SC2: Check if the invitee is already a registered Be More Swan user
     const [existingUser] = await db

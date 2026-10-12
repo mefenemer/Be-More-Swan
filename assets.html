@@ -692,16 +692,15 @@
       const callout   = document.getElementById('seat-limit-callout');
       const calloutMsg = document.getElementById('seat-limit-callout-msg');
       const seatCount = data.seatCount || 0;
-      const seatLimit = data.seatLimit; // null = solo plan (no teams), 0 = unlimited, N = max N
-
-      // Determine whether inviting is allowed
-      // seatLimit null means the plan is solo-only (1 seat, no team feature)
-      const isSoloPlan  = seatLimit === null || seatLimit === 1;
-      const isAtLimit   = seatLimit > 1 && seatCount >= seatLimit;
-      const canInvite   = !isSoloPlan && !isAtLimit;
+      const seatLimit = data.seatLimit;            // null = no cap (only meaningful with collaboration)
+      // Inviting people IS the Workspace Collaboration plan feature (src/utils/team-seats.ts) —
+      // the server decides; this only mirrors it.
+      const collaboration = !!data.collaboration;
+      const isAtLimit = collaboration && seatLimit != null && seatCount >= seatLimit;
+      const canInvite = data.canInvite != null ? !!data.canInvite : (collaboration && !isAtLimit);
 
       // SC1: Seat usage pill
-      if (seatLimit != null && seatLimit > 1) {
+      if (collaboration && seatLimit != null) {
         const pct = Math.round((seatCount / seatLimit) * 100);
         pill.textContent = `${seatCount} / ${seatLimit} seats used`;
         pill.className = `text-xs font-semibold px-3 py-1.5 rounded-full border ${
@@ -710,30 +709,28 @@
                       'bg-gray-50 border-gray-200 text-gray-700'
         }`;
         pill.classList.remove('hidden');
-      } else if (seatLimit === 0) {
-        pill.textContent = `${seatCount} seat${seatCount === 1 ? '' : 's'}`;
+      } else if (collaboration) {
+        pill.textContent = `${seatCount} member${seatCount === 1 ? '' : 's'}`;
         pill.className = 'text-xs font-semibold px-3 py-1.5 rounded-full border bg-gray-50 border-gray-200 text-gray-700';
         pill.classList.remove('hidden');
       } else {
         pill.classList.add('hidden');
       }
 
-      // Disable Invite button and show upgrade callout when plan doesn't support teams
-      if (inviteBtn) {
-        if (!canInvite) {
-          inviteBtn.disabled = true;
-          inviteBtn.className = 'px-4 py-2 bg-gray-200 text-gray-400 rounded-xl text-sm font-semibold cursor-not-allowed transition';
-        } else {
-          inviteBtn.disabled = false;
-          inviteBtn.className = 'px-4 py-2 bg-emerald-700 text-white rounded-xl text-sm font-semibold hover:bg-emerald-800 transition';
-        }
-      }
+      // Disable Invite and explain why when the plan doesn't include collaboration or is full
+      if (inviteBtn) inviteBtn.disabled = !canInvite;
       if (callout) {
-        if (isSoloPlan) {
-          calloutMsg.textContent = 'Team collaboration is available on higher plans. Upgrade to invite colleagues to your workspace.';
+        const title = callout.querySelector('p.font-semibold');
+        const upgrade = callout.querySelector('a');
+        if (!collaboration) {
+          if (title) title.textContent = 'Team members come with Workspace Collaboration';
+          calloutMsg.textContent = `Inviting colleagues, managers or clients to review and approve work is part of The Digital Employee plan${data.planName ? ` — you're on ${data.planName}` : ''}. Anyone already in your workspace keeps their access.`;
+          if (upgrade) upgrade.classList.remove('hidden');
           callout.classList.remove('hidden');
         } else if (isAtLimit) {
-          calloutMsg.textContent = `You've used all ${seatLimit} seats on your plan. Upgrade to add more team members.`;
+          if (title) title.textContent = 'All seats in use';
+          calloutMsg.textContent = `You've used all ${seatLimit} seats on your plan. Remove a member, or contact us to add more.`;
+          if (upgrade) upgrade.classList.add('hidden');
           callout.classList.remove('hidden');
         } else {
           callout.classList.add('hidden');
