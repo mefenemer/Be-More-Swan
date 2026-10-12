@@ -7540,9 +7540,23 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         }
         }; // end loadActivity
 
+        let _activityTf = '1d';
         document.querySelectorAll('.activity-tf-btn').forEach(btn => {
-            btn.addEventListener('click', () => loadActivity(btn.dataset.tf));
+            btn.addEventListener('click', () => { _activityTf = btn.dataset.tf; loadActivity(_activityTf); });
         });
+        // "Combine platforms" (crosspost-view.js) — the server merges, so a change is a re-fetch of
+        // the timeframe on screen. This view is rebuilt per navigation: replace, never stack.
+        // Only a social-posting role fans one post out to several platforms; elsewhere the
+        // control would be a switch that changes nothing.
+        const _rq = _activityCfg.reviewQueue || {};
+        const _crossPosts = _activityCfg.activitySource !== 'lead' && _rq.kind === 'posts' && !_rq.source;
+        const _cpWrap = document.getElementById('activity-crosspost-toggle');
+        if (_cpWrap) { _cpWrap.classList.toggle('hidden', !_crossPosts); _cpWrap.style.display = _crossPosts ? '' : 'none'; }
+        window.CrossPostView?.hydrate();
+        window.CrossPostView?.sync();
+        if (window._activityCrossPostListener) window.removeEventListener('bms:crosspost-view', window._activityCrossPostListener);
+        window._activityCrossPostListener = () => { if (document.body.contains(activityList)) loadActivity(_activityTf); };
+        window.addEventListener('bms:crosspost-view', window._activityCrossPostListener);
         _loads.push(loadActivity('1d'));
     }
 
@@ -10823,7 +10837,7 @@ window._renderReviewChart = async function (goalId) {
         // The assistant's own advice — the assistant colour; quieter (secondary) when the One-Click
         // Fix beside it is the action that matters.
         const recsCls = offPace ? 'btn-secondary border' : 'btn-assistant shadow';
-        const assistantName = document.getElementById('detail-name-input')?.value?.trim() || 'AI';
+        const assistantName = document.getElementById('detail-name-input')?.value?.trim() || 'Your assistant';
         const recsBtn = `<button type="button" onclick="window._getAiRecommendations(${goalId})" class="px-5 py-2 ${recsCls} text-sm font-bold rounded-lg transition cursor-pointer">${lock}${_escapeHtml(assistantName)}'s Recommendations</button>`;
         const editBtn = offPace
             ? `<button type="button" onclick="window._editBriefFromReview()" class="btn-secondary px-5 py-2 border text-sm font-bold rounded-lg transition cursor-pointer">Edit Assistant Brief</button>`
@@ -11107,7 +11121,7 @@ window._getAiRecommendations = async function (goalId) {
         const funnelTag = data.funnelStage
             ? `<span class="text-[10px] font-bold uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded">${_escapeHtml(data.funnelStage)}</span>`
             : '';
-        const assistantName = document.getElementById('detail-name-input')?.value?.trim() || 'AI';
+        const assistantName = document.getElementById('detail-name-input')?.value?.trim() || 'Your assistant';
         if (box) box.innerHTML = `<div class="mt-3 space-y-3">
             <div class="flex items-center gap-2 flex-wrap">
                 <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">${_escapeHtml(assistantName)}'s Recommendations</p>

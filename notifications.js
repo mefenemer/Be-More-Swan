@@ -993,6 +993,14 @@ window.initNotifications = async function() {
         renderList();
     });
 
+    // "One post per cross-post" (crosspost-view.js). The server does the combining, so a change
+    // is a re-fetch. The inbox view is re-injected on every visit and this init runs each time,
+    // so the previous visit's listener is swapped out rather than stacked.
+    window.CrossPostView?.hydrate();
+    window.CrossPostView?.sync();
+    if (window._notifCrossPostListener) window.removeEventListener('bms:crosspost-view', window._notifCrossPostListener);
+    window._notifCrossPostListener = () => { if (document.body.contains(listEl)) loadData(); };
+    window.addEventListener('bms:crosspost-view', window._notifCrossPostListener);
     restoreGroupBy();
     loadData();
 };
