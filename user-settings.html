@@ -320,6 +320,24 @@
                 </div>
             </div>
         </div>
+
+        <!-- Self-serve data export (DPA v1.1 §9: "export your workspace data at any time from My
+             Account"). Filled by renderDataExport() and wired by the "Data export" script in
+             workspace.html; what the file contains is src/utils/workspace-export.ts. -->
+        <div id="data-export-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
+                <h3 class="text-lg font-bold text-gray-900">Your data</h3>
+                <p id="data-export-scope" class="text-sm text-gray-500">Download a copy of your data as a machine-readable JSON file.</p>
+            </div>
+            <div class="p-6">
+                <div class="flex flex-wrap items-center gap-3">
+                    <button type="button" id="data-export-btn" class="btn-utility border border-gray-200 px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer">Export my data</button>
+                    <a id="data-export-download" href="#" class="hidden btn-utility border border-gray-200 px-4 py-2 rounded-lg text-sm font-semibold">Download export</a>
+                </div>
+                <p id="data-export-status" class="text-xs text-gray-500 mt-3" aria-live="polite"></p>
+                <p class="text-xs text-gray-400 mt-2">One export a day. The download link lasts 24 hours and is emailed to you as well; after that the file is deleted. Media files are listed by name — download the files themselves from your media library.</p>
+            </div>
+        </div>
     </div>
 
     <div class="settings-tab-panel hidden space-y-8" data-panel="agency">

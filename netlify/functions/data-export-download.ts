@@ -1,9 +1,15 @@
 // netlify/functions/data-export-download.ts
 // US-GAP-2.2.1 SC4: Serve the data export file via a time-limited token
 //
-// GET ?token=<downloadToken>  → streams JSON file, then marks request as expired
+// GET ?token=<downloadToken>  → the export file, as many times as wanted until the link expires (24h).
+//
+// The token in the link is the credential (it is emailed, and shown in My Account). Where the file is
+// depends on data-export-background.ts: `r2:<key>` → a 5-minute signed R2 URL we redirect to;
+// `b64:<json>` (no R2, e.g. a local run) or a pre-2026-10-12 bare base64 row → served from here.
 
-import { Handler, HandlerResponse } from '@netlify/functions';
+import { HandlerResponse } from '@netlify/functions';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { eq, and, gte } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { dataExportRequests } from '../../db/schema';
@@ -31,7 +37,7 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
         .where(eq(dataExportRequests.downloadToken, token))
         .limit(1);
 
-    if (!request || request.status === 'expired') {
+    if (!request || request.status === 'expired' || request.status === 'failed') {
         return {
             statusCode: 410,
             headers: { 'Content-Type': 'text/html' },
@@ -56,17 +62,31 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
         return { statusCode: 503, body: 'Export not ready yet. Please wait and try again.' };
     }
 
-    // Decode the base64 payload and serve as JSON file
-    const jsonPayload = Buffer.from(request.downloadUrl, 'base64').toString('utf8');
+    const filename = `be-more-swan-data-export-${new Date().toISOString().slice(0, 10)}.json`;
+    const stored = request.downloadUrl;
 
-    // Mark as expired so the link can only be used once (optional — comment out to allow re-downloads within 24h)
-    // await db.update(dataExportRequests).set({ status: 'expired' }).where(eq(dataExportRequests.id, request.id));
+    if (stored.startsWith('r2:')) {
+        const s3 = new S3Client({
+            region: 'auto',
+            endpoint: process.env.R2_ENDPOINT,
+            credentials: { accessKeyId: process.env.R2_ACCESS_KEY_ID!, secretAccessKey: process.env.R2_SECRET_ACCESS_KEY! },
+        });
+        const signed = await getSignedUrl(s3, new GetObjectCommand({
+            Bucket: process.env.R2_BUCKET_NAME,
+            Key: stored.slice(3),
+            ResponseContentDisposition: `attachment; filename="${filename}"`,
+            ResponseContentType: 'application/json',
+        }), { expiresIn: 300 });
+        return { statusCode: 302, headers: { Location: signed, 'Cache-Control': 'no-store' }, body: '' };
+    }
 
+    const jsonPayload = Buffer.from(stored.startsWith('b64:') ? stored.slice(4) : stored, 'base64').toString('utf8');
     return {
         statusCode: 200,
         headers: {
             'Content-Type': 'application/json',
-            'Content-Disposition': `attachment; filename="aura-data-export-${new Date().toISOString().slice(0, 10)}.json"`,
+            'Content-Disposition': `attachment; filename="${filename}"`,
+            'Cache-Control': 'no-store',
         },
         body: jsonPayload,
     };

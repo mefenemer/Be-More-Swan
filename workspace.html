@@ -5027,6 +5027,7 @@ function formatCurrency(amount, currency) {
     };
 
     window.renderMyAgreements();
+    window.renderDataExport?.();
 
     // ── US8 AC2: re-open the setup wizard from My Account ──
     const resumeBtn = document.getElementById('resume-wizard-btn');
@@ -21799,6 +21800,94 @@ async function gpSubmitReject() {
   });
   document.addEventListener('click', (e) => { if (!e.target.closest('#nav-assistant-switcher')) setOpen(false); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setOpen(false); });
+})();
+</script>
+
+<!-- Data export — the "Your data" card in My Account → My Agreements (user-settings.html).
+     GET data-export → paint the card; POST → queue a build (data-export-background), then poll until
+     the file is ready. The click is bound once on document; renderDataExport() only paints, and is
+     called each time the settings page renders (never bind handlers from a render path). -->
+<script>
+(function () {
+  const ENDPOINT = '/.netlify/functions/data-export';
+  let pollTimer = null;
+
+  const fmt = (iso) => {
+    try { return new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); }
+    catch { return ''; }
+  };
+
+  function paint(data) {
+    const btn = document.getElementById('data-export-btn');
+    if (!btn) return null;
+    const status = document.getElementById('data-export-status');
+    const dl = document.getElementById('data-export-download');
+    const scope = document.getElementById('data-export-scope');
+    if (data && scope) {
+      scope.textContent = data.scope === 'workspace'
+        ? 'Download a copy of your data as a machine-readable JSON file: your organisation\'s workspace — assistants, posts, blogs, leads, audience, email, campaigns, products, goals and connections — and your own account records.'
+        : 'Download a copy of your own account records as a machine-readable JSON file. Your organisation\'s workspace data can be exported by its owner or an admin.';
+    }
+    const req = data && data.recentRequest;
+    dl.classList.add('hidden'); dl.style.display = 'none';
+    btn.disabled = false; btn.textContent = 'Export my data';
+    status.textContent = '';
+    if (req && req.status === 'pending') {
+      btn.disabled = true; btn.textContent = 'Preparing…';
+      status.textContent = 'Your export is being prepared — usually a minute or two. We\'ll email you the link too.';
+    } else if (req && req.status === 'ready' && req.downloadUrl) {
+      btn.disabled = true;
+      dl.href = req.downloadUrl;
+      dl.classList.remove('hidden'); dl.style.display = '';
+      status.textContent = 'Your export is ready. The link works until ' + fmt(req.expiresAt) + '.';
+    } else if (data && data.failed) {
+      status.textContent = 'Your last export didn\'t finish. Please try again.';
+    }
+    return req;
+  }
+
+  async function load() {
+    try {
+      const r = await fetch(ENDPOINT, { credentials: 'same-origin' });
+      if (!r.ok) return null;
+      return await r.json();
+    } catch { return null; }
+  }
+
+  function poll() {
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(async () => {
+      if (!document.getElementById('data-export-btn')) return; // left the page
+      const req = paint(await load());
+      if (req && req.status === 'pending') poll();
+    }, 5000);
+  }
+
+  window.renderDataExport = async function renderDataExport() {
+    if (!document.getElementById('data-export-btn')) return;
+    const req = paint(await load());
+    if (req && req.status === 'pending') poll();
+  };
+
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('#data-export-btn');
+    if (!btn || btn.disabled) return;
+    btn.disabled = true; btn.textContent = 'Starting…';
+    const status = document.getElementById('data-export-status');
+    try {
+      const r = await fetch(ENDPOINT, { method: 'POST', credentials: 'same-origin' });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok && r.status !== 429) {
+        btn.disabled = false; btn.textContent = 'Export my data';
+        if (status) status.textContent = body.error || 'We couldn\'t start your export. Please try again.';
+        return;
+      }
+      await window.renderDataExport();
+    } catch {
+      btn.disabled = false; btn.textContent = 'Export my data';
+      if (status) status.textContent = 'We couldn\'t start your export. Please check your connection and try again.';
+    }
+  });
 })();
 </script>
 </body>

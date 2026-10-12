@@ -1,34 +1,32 @@
 // netlify/functions/data-export.ts
-// US-GAP-2.2.1: User Requests Personal Data Export (GDPR Right of Portability)
+// US-GAP-2.2.1: Self-serve data export (GDPR portability; DPA v1.1 §9 "export your workspace data at
+// any time from My Account"). The button is in My Account → My Agreements → "Your data".
 //
-//  POST → SC2: queues export job (async), returns "preparing" message
-//  GET  → SC1: entry point info (returns status of any pending export)
+//  GET  → the caller's latest export in the last 24h: { status, requestedAt, expiresAt, downloadUrl,
+//         scope } — so the page can offer the download again without another request.
+//  POST → queues an export and triggers data-export-background (which builds it, stores the file
+//         and emails the link). Returns 202. One per person per 24 hours (SC5).
 //
-// The export is built in-process (synchronous for simplicity — typical accounts are small).
-// SC4: Download link is a signed URL in the response, valid 24 hours.
-// SC5: Rate limit — one export per user per 24 hours.
+// What is in it lives in src/utils/workspace-export.ts. Owners and admins get the organisation's
+// workspace data as well as their own; other members get their own records.
 
-import { Handler } from '@netlify/functions';
-import jwt from 'jsonwebtoken';
 import * as crypto from 'crypto';
 import { eq, and, desc, gte } from 'drizzle-orm';
-import { getDb, withUpdatedAt } from '../../db/client';
-import {
-    users, userProfiles, aiAssistants, contentAssets, billingInformation,
-    invoices, supportTickets, systemConnections, notifications, dataExportRequests, plans,
-} from '../../db/schema';
-import { sendEmail } from '../../src/utils/email';
+import { getDb } from '../../db/client';
+import { dataExportRequests } from '../../db/schema';
+import { requireTenant } from '../../src/utils/tenant';
 import { requireOnboarding } from '../../src/utils/onboarding-guard';
+import { resolveBaseUrl } from '../../src/utils/base-url';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
+import { EXPORT_WORKSPACE_ROLES, exportJobSignature } from '../../src/utils/workspace-export';
 
-const jwtSecret = process.env.JWT_SECRET!;
-const BASE_URL  = process.env.BASE_URL || '';
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** A build that has not finished in this long died (background functions stop at 15 min). */
+const STUCK_MS = 20 * 60 * 1000;
 
-function parseSession(event: any): number | null {
-    const match = (event.headers.cookie || '').match(/aura_session=([^;]+)/);
-    if (!match) return null;
-    try { return (jwt.verify(match[1], jwtSecret) as { userId: number }).userId; } catch { return null; }
+function json(statusCode: number, body: unknown) {
+    return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
 export default withLambda(async (event) => {
@@ -36,160 +34,84 @@ export default withLambda(async (event) => {
     const impersonationBlock = checkImpersonationBlock(event, 'data_export');
     if (impersonationBlock) return impersonationBlock;
 
-    if (!['GET', 'POST'].includes(event.httpMethod)) return { statusCode: 405, body: 'Method Not Allowed' };
-
-    const userId = parseSession(event);
-    if (!userId) return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized.' }) };
+    if (!['GET', 'POST'].includes(event.httpMethod)) return json(405, { error: 'Method Not Allowed' });
 
     const db = getDb();
+    const ctx = await requireTenant(event, db);
+    if ('error' in ctx) return ctx.error;
 
     // US3 (AC3.1/AC3.2): Export is gated until onboarding is complete.
-    const denied = await requireOnboarding(db, userId);
+    const denied = await requireOnboarding(db, ctx.userId);
     if (denied) return denied;
 
-    // SC5: Rate limit — one export per 24 hours
-    const cutoff24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const [recentExport] = await db
-        .select({ id: dataExportRequests.id, status: dataExportRequests.status })
+    const includeWorkspace = EXPORT_WORKSPACE_ROLES.includes(ctx.role);
+
+    const [recent] = await db
+        .select()
         .from(dataExportRequests)
-        .where(and(eq(dataExportRequests.userId, userId), gte(dataExportRequests.requestedAt, cutoff24h)))
+        .where(and(eq(dataExportRequests.userId, ctx.userId), gte(dataExportRequests.requestedAt, new Date(Date.now() - DAY_MS))))
         .orderBy(desc(dataExportRequests.requestedAt))
         .limit(1);
 
+    // A build that never finished, or failed, must not hold the one-a-day slot.
+    const stuck = recent && recent.status === 'pending' && Date.now() - new Date(recent.requestedAt).getTime() > STUCK_MS;
+    const live = recent && !stuck && recent.status !== 'failed' ? recent : null;
+
     if (event.httpMethod === 'GET') {
-        return {
-            statusCode: 200,
-            body: JSON.stringify({
-                recentRequest: recentExport
-                    ? { status: recentExport.status, requestedAt: recentExport.id }
-                    : null,
-            }),
-        };
+        return json(200, {
+            scope: includeWorkspace ? 'workspace' : 'personal',
+            recentRequest: live ? {
+                status: live.status,
+                requestedAt: live.requestedAt,
+                expiresAt: live.expiresAt,
+                downloadUrl: live.status === 'ready' && live.downloadToken
+                    ? `/.netlify/functions/data-export-download?token=${live.downloadToken}` : null,
+            } : null,
+            failed: !!recent && !live,
+        });
     }
 
-    // POST: trigger export
-    if (recentExport) {
-        return {
-            statusCode: 429,
-            body: JSON.stringify({ error: 'An export was recently requested. Please check your email.' }),
-        };
+    // POST
+    if (live) {
+        return json(429, {
+            error: live.status === 'ready'
+                ? 'You already have an export from the last 24 hours — download it below.'
+                : 'Your export is already being prepared.',
+        });
     }
 
-    // Create the request record
-    const downloadToken = crypto.randomBytes(32).toString('hex');
-    const expiresAt     = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-    const [exportRequest] = await db.insert(dataExportRequests).values({
-        userId,
-        downloadToken,
-        expiresAt,
+    const [row] = await db.insert(dataExportRequests).values({
+        userId: ctx.userId,
+        downloadToken: crypto.randomBytes(32).toString('hex'),
         status: 'pending',
-    }).returning();
+    }).returning({ id: dataExportRequests.id });
 
-    // Build the export payload (SC3: contents specification)
-    const [user] = await db
-        .select({ email: users.email, firstName: users.firstName, lastName: users.lastName,
-                  createdAt: users.createdAt, role: users.role })
-        .from(users).where(eq(users.id, userId)).limit(1);
+    // Background function: acks 202 at once, then builds for up to 15 min. Awaited so the trigger is
+    // delivered before this handler returns (a fire-and-forget fetch is dropped on Lambda freeze).
+    const baseUrl = resolveBaseUrl(event.headers);
+    let triggered = false;
+    if (baseUrl) {
+        try {
+            const res = await fetch(`${baseUrl}/.netlify/functions/data-export-background`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    requestId: row.id, organisationId: ctx.organisationId, includeWorkspace,
+                    sig: exportJobSignature(row.id, ctx.organisationId, includeWorkspace),
+                }),
+            });
+            triggered = res.ok || res.status === 202;
+        } catch (err) {
+            console.error('[data-export] background trigger failed:', err);
+        }
+    }
+    if (!triggered) {
+        await db.update(dataExportRequests).set({ status: 'failed' }).where(eq(dataExportRequests.id, row.id));
+        return json(502, { error: 'We couldn\'t start your export. Please try again in a minute.' });
+    }
 
-    const [profile] = await db
-        .select({ timezone: userProfiles.timezone, notifyBilling: userProfiles.notifyBilling,
-                  emailPreferences: userProfiles.emailPreferences, language: userProfiles.language })
-        .from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1)
-        .catch(() => [null]);
-
-    const assistantList = await db
-        .select({ name: aiAssistants.name, assistantRole: (aiAssistants as any).assistantRole, createdAt: aiAssistants.createdAt })
-        .from(aiAssistants).where(eq(aiAssistants.userId, userId));
-
-    const assetList = await db
-        .select({ name: contentAssets.name, assetType: contentAssets.assetType, createdAt: contentAssets.createdAt })
-        .from(contentAssets).where(eq(contentAssets.userId, userId))
-        .catch(() => []);
-
-    const [billing] = await db
-        .select({ fullName: billingInformation.fullName, addressLine1: billingInformation.addressLine1,
-                  city: billingInformation.city, country: billingInformation.country })
-        .from(billingInformation).where(eq(billingInformation.userId, userId)).limit(1)
-        .catch(() => [null]);
-
-    const invoiceList = await db
-        .select({ invoiceNumber: invoices.invoiceNumber, amount: invoices.total,
-                  currency: invoices.currency, issueDate: invoices.issueDate })
-        .from(invoices).where(eq(invoices.userId, userId))
-        .catch(() => []);
-
-    const ticketList = await db
-        .select({ subject: supportTickets.subject, status: supportTickets.status, category: supportTickets.category })
-        .from(supportTickets).where(eq(supportTickets.userId, userId))
-        .catch(() => []);
-
-    const connectionList = await db
-        .select({ serviceName: systemConnections.serviceName, status: systemConnections.status })
-        .from(systemConnections).where(eq(systemConnections.userId, userId))
-        .catch(() => []);
-
-    const exportData = {
-        exportedAt: new Date().toISOString(),
-        profile: {
-            firstName: user?.firstName,
-            lastName: user?.lastName,
-            email: user?.email,
-            role: user?.role,
-            createdAt: user?.createdAt,
-            timezone: profile?.timezone,
-            language: profile?.language,
-            emailPreferences: profile?.emailPreferences,
-        },
-        assistants: assistantList,
-        contentAssets: assetList,
-        billingInformation: billing ? {
-            fullName: billing.fullName,
-            addressLine1: billing.addressLine1,
-            city: billing.city,
-            country: billing.country,
-        } : null,
-        invoices: invoiceList,
-        supportTickets: ticketList,
-        integrationConnections: connectionList,
-    };
-
-    const exportJson = JSON.stringify(exportData, null, 2);
-
-    // SC4: Build a signed download URL embedded in a data: URI proxy
-    // For production, this would upload to S3/Blob and return a signed URL.
-    // Here we store the payload inline (base64) and serve via a download endpoint.
-    const encodedPayload = Buffer.from(exportJson).toString('base64');
-
-    await db.update(dataExportRequests)
-        .set(withUpdatedAt({
-            status: 'ready',
-            downloadUrl: encodedPayload, // stored as base64 — served by data-export-download.ts
-        }))
-        .where(eq(dataExportRequests.id, exportRequest.id));
-
-    const downloadUrl = `${BASE_URL}/.netlify/functions/data-export-download?token=${downloadToken}`;
-
-    // SC4: Send email with download link
-    sendEmail({
-        to: user?.email || '',
-        subject: 'Your Be More Swan data export is ready',
-        html: `<p>Hi ${user?.firstName || 'there'},</p>
-               <p>Your personal data export is ready. Click the button below to download it — the link is valid for 24 hours.</p>
-               <p style="margin-top:20px;">
-                 <a href="${downloadUrl}" style="background:#2563eb;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">
-                   Download My Data →
-                 </a>
-               </p>
-               <p style="font-size:0.8rem;color:#9ca3af;margin-top:12px;">This link expires in 24 hours. After that, you can request a new export from your account settings.</p>
-               <p>The Be More Swan Team</p>`,
-    }).catch(() => {});
-
-    return {
-        statusCode: 200,
-        body: JSON.stringify({
-            success: true,
-            message: 'Your data export is being prepared. You\'ll receive an email when it\'s ready.',
-        }),
-    };
+    return json(202, {
+        success: true,
+        scope: includeWorkspace ? 'workspace' : 'personal',
+        message: 'Your export is being prepared. It usually takes a minute or two — we\'ll email you the link too.',
+    });
 });
