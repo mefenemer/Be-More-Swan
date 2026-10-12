@@ -95,6 +95,17 @@ check('billing: a £0 renewal of an untracked subscription notifies nobody', () 
     assert.ok(/!invoice\.amount_paid && await _isUntrackedSubscription/.test(src), 'only FREE invoices are skipped — a paid one still notifies');
 });
 
+check('billing: deleting one subscription cancels only that subscription\'s plan', () => {
+    const src = read('netlify/functions/stripe-webhook.ts');
+    const deleted = src.indexOf("if (stripeEvent.type === 'customer.subscription.deleted')");
+    const guard = src.indexOf('_isUntrackedSubscription(db, userId, sub.id)', deleted);
+    const cancel = src.indexOf("status: 'cancelled', cancelledAt: cancelledNow", deleted);
+    const pause = src.indexOf("provisioningStatus: 'paused_payment' as const", deleted);
+    assert.ok(deleted > 0 && guard > deleted && cancel > guard && pause > cancel, 'untracked guard sits before the cancel and the pause');
+    const scoped = src.indexOf('eq(plans.stripeSubscriptionId, sub.id)', cancel);
+    assert.ok(scoped > cancel && scoped < pause, 'the cancel is scoped to the deleted subscription, not every plan the user has');
+});
+
 check('billing: "Active until" names the period being paid for, not the one that ended', () => {
     const src = read('netlify/functions/stripe-webhook.ts');
     assert.ok(src.includes('const paidThrough = getInvoicePaidThrough(invoice);'));
