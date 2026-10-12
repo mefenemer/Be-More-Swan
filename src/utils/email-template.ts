@@ -129,6 +129,28 @@ export function renderMergeVars(text: string, context: MergeContext, escape = tr
     });
 }
 
+/**
+ * Merge a template's subject, HTML body and text part against a context. Each part gets the
+ * escaping its format needs — merge values are user-controlled (first names, workspace and
+ * assistant names), so getting this wrong lets a name render as markup:
+ *   • body  — HTML: admin input sanitised, merged values HTML-escaped. URL vars land in
+ *             href="..." attributes, where `&` → `&amp;` is the correct encoding.
+ *   • subject / text — plain text: merged values verbatim (escaping would show `&lt;` literally).
+ * The text part, when not supplied, is derived from the sanitised body BEFORE merging, so tags
+ * survive the tag-stripper and the two parts can't drift.
+ */
+export function mergeTemplateParts(
+    parts: { subject: string; bodyHtml: string; bodyText?: string | null },
+    vars: MergeContext,
+): { subject: string; body: string; text: string } {
+    const sanitisedBody = sanitiseBodyHtml(parts.bodyHtml);
+    return {
+        subject: renderMergeVars(parts.subject, vars, false),
+        body: renderMergeVars(sanitisedBody, vars, true),
+        text: renderMergeVars(parts.bodyText ?? htmlToPlainText(sanitisedBody), vars, false),
+    };
+}
+
 function resolvePath(obj: MergeContext, path: string): unknown {
     return path.split('.').reduce<unknown>((acc, key) => {
         if (acc && typeof acc === 'object' && key in (acc as Record<string, unknown>)) {

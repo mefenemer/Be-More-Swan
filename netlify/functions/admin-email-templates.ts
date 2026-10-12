@@ -254,7 +254,7 @@ export default withLambda(async (event) => {
 
             // test → deliver to the logged-in admin's own inbox.
             if (!admin.email) return json(400, { error: 'Your admin account has no email address on file.' });
-            await sendEmail({ to: admin.email, subject: `[TEST] ${rendered.subject}`, html: rendered.html });
+            await sendEmail({ to: admin.email, subject: `[TEST] ${rendered.subject}`, html: rendered.html, text: rendered.text });
             return json(200, { ok: true, sentTo: admin.email });
         }
 
