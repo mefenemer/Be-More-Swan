@@ -90,7 +90,7 @@ const DEFS: Def[] = [
     // plan_features.is_enabled = true again — when a media-credit checkout ships.
 
     // ── Core Features — included on every plan ─────────────────────────────────
-    { key: 'safe_content_benchmark', label: 'Be More Swan Safe Content Benchmark', description: 'Built-in safety rules that keep every output on-brand and legally compliant',
+    { key: 'safe_content_benchmark', label: 'Be More Swan Safe Content Benchmark', description: 'Brand-safety rules placed ahead of your own instructions in every assistant',
       category: 'Core Features — included on every plan', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: CHECK, buster: CHECK, employee: CHECK } },
     { key: 'brand_memory', label: 'Brand Memory', description: 'Your assistant learns your voice, values, and history from day one',
@@ -108,20 +108,16 @@ const DEFS: Def[] = [
     { key: 'my_content_hub', label: '"My Content" Hub', description: 'Drop in photos, videos, and links for your assistant to use as source material',
       category: 'Core Features — included on every plan', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: CHECK, buster: CHECK, employee: CHECK } },
-    { key: 'brand_protection', label: 'Brand Protection Guarantee', description: 'Your assistants are governed by our Safe Content Benchmark on every plan',
+    { key: 'brand_protection', label: 'Brand Protection', description: 'Your assistants are governed by our Safe Content Benchmark on every plan',
       category: 'Core Features — included on every plan', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: CHECK, buster: CHECK, employee: CHECK } },
 
     // ── Reporting ─────────────────────────────────────────────────────────────
-    { key: 'basic_reporting', label: 'Basic Reporting', description: 'A clear monthly summary of what your assistant completed',
+    { key: 'basic_reporting', label: 'Time-Saved Dashboard', description: 'See what your assistants completed and the hours they saved you',
       category: 'Reporting', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: CHECK, buster: CHECK, employee: CHECK } },
-    { key: 'advanced_reporting', label: 'Advanced Reporting', description: 'Detailed breakdowns of assistant performance, output quality, and time saved',
-      category: 'Reporting', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
-      values: { saver: DASH, buster: CHECK, employee: CHECK } },
-    { key: 'custom_reporting', label: 'Custom Reporting', description: 'Tailored dashboards built around the metrics that matter most to your business',
-      category: 'Reporting', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
-      values: { saver: DASH, buster: DASH, employee: CHECK } },
+    // 'advanced_reporting' + 'custom_reporting' withdrawn 2026-10-12: every plan sees the same dashboard
+    // and no custom reporting exists. db/z-plan-copy-matches-code.sql switches both rows off.
 
     // ── Team & Advanced Features ──────────────────────────────────────────────
     { key: 'quality_reviewer', label: 'The Quality Reviewer', description: 'A dedicated assistant that checks and critiques the work of your other assistants',
@@ -152,7 +148,7 @@ const DEFS: Def[] = [
     // ── Support ───────────────────────────────────────────────────────────────
     { key: 'support_channel', label: 'Support Channel', description: 'How you can reach our team when you need help',
       category: 'Support', valueType: 'text', storageTarget: 'feature', enterpriseValue: 'Dedicated Account Manager',
-      values: { saver: 'Email & Help Centre', buster: 'Priority Email & Chat', employee: 'Priority + Strategy Call' } },
+      values: { saver: 'Email & Help Centre', buster: 'Priority Email', employee: 'Priority + Strategy Call' } },
     { key: 'onboarding_call', label: '1-on-1 Strategy & Onboarding Call', description: 'A dedicated session with a Be More Swan expert to set up and optimise your workspace',
       category: 'Support', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: DASH, buster: DASH, employee: CHECK } },
@@ -161,9 +157,8 @@ const DEFS: Def[] = [
     { key: 'free_upgrades', label: 'Free Capability Upgrades', description: 'Your assistants automatically improve as we release new capabilities — no extra cost ever',
       category: 'Continuous Evolution', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: CHECK, buster: CHECK, employee: CHECK } },
-    { key: 'early_access_roles', label: 'Early Access to New Roles', description: 'Be first to try new assistant roles before they launch to the general public',
-      category: 'Continuous Evolution', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
-      values: { saver: DASH, buster: CHECK, employee: CHECK } },
+    // 'early_access_roles' withdrawn 2026-10-12: early access is earned by completed tasks on any plan
+    // (hire-assistant.ts), not sold by tier. db/z-plan-copy-matches-code.sql switches the row off.
     { key: 'roadmap_voting', label: 'Roadmap Influence & Voting', description: 'Vote on which features and assistant types we prioritise building next',
       category: 'Continuous Evolution', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: DASH, buster: DASH, employee: CHECK } },

@@ -150,3 +150,45 @@ export function blockersFor(status: AssistantStatus, checks: GoLiveCheck[]): GoL
 export function announcesLaunch(from: AssistantStatus, to: AssistantStatus): boolean {
     return to === 'live' && from !== 'live';
 }
+
+// ── Who may hire, by status ─────────────────────────────────────────────────────────────────────
+// The task-count milestone ("complete 25 tasks for early access", US-AUD-2.3.1) used to unlock
+// COMING-SOON roles. Coming soon means the role is a teaser — most are not built at all, and
+// crm_enricher was parked there because it fabricated data — so earning 25 tasks let any plan hire
+// an assistant that could only make small talk, or worse. Early access now means what it says: a
+// BETA role (built, passed every go-live check) is hireable by a workspace with Beta access OR a
+// user who has reached that role's milestone. A coming-soon role is never hireable, whatever the
+// count. hire-assistant enforces this; master-assistants, milestone-progress and both catalogue
+// pages show the same rule.
+
+export const DEFAULT_MILESTONE_TASKS = 25;
+
+/** Has this user's completed-task count reached the role's early-access milestone? */
+export function milestoneReached(completedTasks: number, milestoneTasksRequired: number | null | undefined): boolean {
+    return (Number(completedTasks) || 0) >= (milestoneTasksRequired ?? DEFAULT_MILESTONE_TASKS);
+}
+
+/** The statuses the early-access milestone can open. Only beta: coming soon is not built. */
+export function milestoneCanUnlock(status: AssistantStatus): boolean {
+    return status === 'beta';
+}
+
+export type HireRefusalCode = 'NOT_AVAILABLE' | 'COMING_SOON' | 'BETA_LOCKED';
+export type HireDecision = { ok: true } | { ok: false; code: HireRefusalCode; required?: number };
+
+export interface HireGateInput {
+    status: AssistantStatus;
+    /** organisations.beta_access — the 50-hours-saved Beta Program grant. */
+    betaAccess: boolean;
+    completedTasks: number;
+    milestoneTasksRequired: number | null | undefined;
+}
+
+export function hireDecision(i: HireGateInput): HireDecision {
+    if (i.status === 'hidden' || i.status === 'retired') return { ok: false, code: 'NOT_AVAILABLE' };
+    if (i.status === 'coming_soon') return { ok: false, code: 'COMING_SOON' };
+    if (i.status === 'beta' && !i.betaAccess && !milestoneReached(i.completedTasks, i.milestoneTasksRequired)) {
+        return { ok: false, code: 'BETA_LOCKED', required: i.milestoneTasksRequired ?? DEFAULT_MILESTONE_TASKS };
+    }
+    return { ok: true };
+}

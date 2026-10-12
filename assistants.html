@@ -369,33 +369,32 @@ function renderCard(a) {
   const iconSvg = ICONS[a.iconKey] || ICONS.document;
   const iconClass = `icon-${a.iconColor || 'blue'}`;
 
-  if (a.comingSoon) {
-    // US-AUD-2.3.1 SC1/SC3/SC4: milestone progress bar card
-    const required = a.milestoneTasksRequired ?? 25;
-    const completed = a.completedTasks ?? 0;
-    const pct = a.pct ?? Math.min(Math.round((completed / required) * 100), 100);
-    const unlocked = a.unlocked ?? (completed >= required);
-    const notifyOn = a.notifyEnabled ?? a.onWaitlist ?? false;
-    const toGo = Math.max(required - completed, 0);
+  if (a.beta) {
+    // Early access (US-AUD-2.3.1 / AC3.1.2): a BETA role — built and past every go-live check.
+    // master-assistants only returns one to a workspace with Beta access or a user who reached its
+    // task milestone, i.e. exactly who hire-assistant lets hire it.
+    return `
+      <div class="assistant-card bg-white rounded-2xl border-2 border-emerald-400 shadow-md overflow-hidden flex flex-col relative hover:shadow-lg transition-shadow">
+        <div class="absolute top-4 right-4 bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold border border-emerald-200">🎉 Early Access</div>
+        <div class="p-6 flex-grow">
+          <div class="w-12 h-12 rounded-xl ${iconClass} flex items-center justify-center mb-4">${iconSvg}</div>
+          <h2 class="text-xl font-bold text-gray-900 mb-1 pr-28">${escHtml(a.name)}</h2>
+          <p class="text-sm text-gray-500 font-medium mb-3">${escHtml(a.category)}</p>
+          <p class="text-sm text-gray-600 leading-relaxed mb-4">${escHtml(a.description || '')}</p>
+          ${metaBlocks(a)}
+          <p class="text-sm font-semibold text-emerald-700">You've unlocked early access!</p>
+        </div>
+        <div class="p-4 bg-emerald-50 border-t border-emerald-100 flex justify-between items-center gap-3">
+          <span class="text-xs font-bold text-emerald-700 uppercase tracking-wider">Beta</span>
+          <button onclick="hireAssistant('${escAttr(a.roleKey)}')" class="btn-golive px-4 py-2 rounded-lg text-sm font-semibold transition">Hire Role</button>
+        </div>
+      </div>`;
+  }
 
-    if (unlocked) {
-      return `
-        <div class="assistant-card bg-white rounded-2xl border-2 border-emerald-400 shadow-md overflow-hidden flex flex-col relative hover:shadow-lg transition-shadow">
-          <div class="absolute top-4 right-4 bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold border border-emerald-200">🎉 Early Access</div>
-          <div class="p-6 flex-grow">
-            <div class="w-12 h-12 rounded-xl ${iconClass} flex items-center justify-center mb-4">${iconSvg}</div>
-            <h2 class="text-xl font-bold text-gray-900 mb-1 pr-28">${escHtml(a.name)}</h2>
-            <p class="text-sm text-gray-500 font-medium mb-3">${escHtml(a.category)}</p>
-            <p class="text-sm text-gray-600 leading-relaxed mb-4">${escHtml(a.description || '')}</p>
-            ${metaBlocks(a)}
-            <p class="text-sm font-semibold text-emerald-700">You've unlocked early access!</p>
-          </div>
-          <div class="p-4 bg-emerald-50 border-t border-emerald-100 flex justify-between items-center gap-3">
-            <span class="text-xs font-bold text-emerald-700 uppercase tracking-wider">${required} tasks completed</span>
-            <button onclick="hireAssistant('${escAttr(a.roleKey)}')" class="btn-golive px-4 py-2 rounded-lg text-sm font-semibold transition">Hire Role</button>
-          </div>
-        </div>`;
-    }
+  if (a.comingSoon) {
+    // Coming soon = a teaser, mostly not built yet. No task count unlocks it (hire-assistant refuses
+    // it outright), so there is no progress bar here — just Notify me and the vote.
+    const notifyOn = a.notifyEnabled ?? a.onWaitlist ?? false;
 
     // Intent-capture card: faded, "Coming Soon" badge, and a Vote button in place of Hire.
     const voted = _votedRoles().includes(a.roleKey);
@@ -414,13 +413,6 @@ function renderCard(a) {
           <p class="text-sm text-gray-500 font-medium mb-3">${escHtml(a.category)}</p>
           <p class="text-sm text-gray-600 leading-relaxed mb-4">${escHtml(a.description || '')}</p>
           ${metaBlocks(a)}
-          <div class="mb-1 mt-3 flex justify-between items-center">
-            <span class="text-xs font-semibold text-gray-700">${completed} tasks completed — ${toGo} to go for early access</span>
-          </div>
-          <div class="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
-            <div class="h-2 rounded-full bg-emerald-500 transition-all duration-700 ease-out" style="width:${pct}%"></div>
-          </div>
-          <p class="text-xs text-gray-400 mt-1">${pct}% of ${required} tasks needed to unlock</p>
         </div>
         <div class="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center gap-3">
           <div class="flex items-center gap-2">
@@ -515,12 +507,13 @@ async function loadCatalog() {
     // The detail modal reads copy from this same payload — prime it rather than re-fetching.
     if (window.AssistantContent) window.AssistantContent.prime(_all);
 
-    // US-AUD-2.3.1: Merge milestone progress into coming-soon cards
+    // US-AUD-2.3.1: Merge milestone progress into early-access (beta) cards. The GET also sends the
+    // one-off "Early access unlocked" notification. Coming-soon roles get no progress: nothing unlocks them.
     if (milestoneRes.ok) {
       const { assistants: milestoneData } = await milestoneRes.json();
       if (Array.isArray(milestoneData)) {
         const byId = Object.fromEntries(milestoneData.map(m => [m.id, m]));
-        _all = _all.map(a => a.comingSoon && byId[a.id] ? { ...a, ...byId[a.id] } : a);
+        _all = _all.map(a => a.beta && byId[a.id] ? { ...a, ...byId[a.id] } : a);
       }
     }
   } catch {

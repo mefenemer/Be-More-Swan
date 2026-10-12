@@ -5,9 +5,7 @@ import { getDb } from '../../db/client';
 import { emailTemplates } from '../../db/schema';
 import {
     renderMasterTemplate,
-    renderMergeVars,
-    sanitiseBodyHtml,
-    htmlToPlainText,
+    mergeTemplateParts,
     type MergeContext,
 } from './email-template';
 import { getTemplateDefault } from './email-templates-catalog';
@@ -218,17 +216,11 @@ export async function renderTemplate(
     const bodyRaw = opts.overrideBody ?? src?.bodyHtml ?? '';
     const transactional = opts.transactional ?? src?.transactional ?? false;
 
-    // Subjects are plain text (don't HTML-escape); bodies are HTML (sanitise admin input).
-    const subject = renderMergeVars(subjectRaw, vars, false);
-    const sanitisedBody = sanitiseBodyHtml(bodyRaw);
-    const body = renderMergeVars(sanitisedBody, vars, false);
+    const { subject, body, text } = mergeTemplateParts(
+        { subject: subjectRaw, bodyHtml: bodyRaw, bodyText: opts.overrideText ?? src?.bodyText ?? null },
+        vars,
+    );
     const html = renderMasterTemplate(body, { preheader: src?.preheader ?? undefined, transactional });
-
-    // Text part: an admin override wins, otherwise derive from the same body the HTML part
-    // used, so the two can't drift. Derive BEFORE merging so tags survive the tag-stripper,
-    // then merge — hence htmlToPlainText on the raw body, not on the rendered one.
-    const textRaw = opts.overrideText ?? src?.bodyText ?? htmlToPlainText(sanitisedBody);
-    const text = renderMergeVars(textRaw, vars, false);
 
     return { subject, html, text, isActive: src?.isActive ?? true, usedFallback };
 }

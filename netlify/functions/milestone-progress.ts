@@ -1,11 +1,14 @@
 // netlify/functions/milestone-progress.ts
-// US-AUD-2.3.1: Returns milestone unlock progress for coming-soon assistants
+// US-AUD-2.3.1: Returns early-access milestone progress for BETA assistants.
+// Coming-soon roles are deliberately absent: they are teasers (mostly not built), so no task count
+// unlocks them — see hireDecision in src/utils/assistant-go-live.ts, which hire-assistant enforces.
 import { HandlerEvent } from '@netlify/functions';
 import { eq, and, count } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
 import { createNotification } from '../../src/utils/notify';
 import { masterAssistants, taskRuns, waitlist, notifications } from '../../db/schema';
+import { milestoneCanUnlock, milestoneReached, statusOf, DEFAULT_MILESTONE_TASKS } from '../../src/utils/assistant-go-live';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -37,7 +40,7 @@ export default withLambda(async (event: HandlerEvent) => {
 
     const db = getDb();
 
-    // GET: Return progress for all coming-soon assistants
+    // GET: Return progress for every beta (early-access) assistant
     if (event.httpMethod === 'GET') {
         try {
             // Count completed tasks for this user (SC3)
@@ -48,8 +51,9 @@ export default withLambda(async (event: HandlerEvent) => {
 
             const n = Number(completedCount) || 0;
 
-            // Fetch all active coming-soon assistants
-            const comingSoonAssistants = await db
+            // Active roles the milestone can open: beta only (built, passed go-live). Filtered through
+            // statusOf so this reads the columns exactly as hire-assistant does.
+            const earlyAccessAssistants = (await db
                 .select({
                     id: masterAssistants.id,
                     roleKey: masterAssistants.roleKey,
@@ -57,9 +61,12 @@ export default withLambda(async (event: HandlerEvent) => {
                     description: masterAssistants.description,
                     milestoneTasksRequired: masterAssistants.milestoneTasksRequired,
                     comingSoon: masterAssistants.comingSoon,
+                    isActive: masterAssistants.isActive,
+                    lifecycleState: masterAssistants.lifecycleState,
                 })
                 .from(masterAssistants)
-                .where(and(eq(masterAssistants.comingSoon, true), eq(masterAssistants.isActive, true)));
+                .where(and(eq(masterAssistants.lifecycleState, 'beta'), eq(masterAssistants.isActive, true))))
+                .filter(a => milestoneCanUnlock(statusOf(a)));
 
             // Fetch which ones this user has joined waitlist for (notify toggle)
             const userWaitlist = await db
@@ -70,7 +77,7 @@ export default withLambda(async (event: HandlerEvent) => {
             const notifySet = new Set(userWaitlist.map(w => w.masterAssistantId));
 
             // SC4: fire in-app notification on first milestone crossing (fire-and-forget)
-            const unlockedAssistants = comingSoonAssistants.filter(a => n >= (a.milestoneTasksRequired ?? 25));
+            const unlockedAssistants = earlyAccessAssistants.filter(a => milestoneReached(n, a.milestoneTasksRequired));
             if (unlockedAssistants.length > 0) {
                 void (async () => {
                     try {
@@ -104,10 +111,10 @@ export default withLambda(async (event: HandlerEvent) => {
                 })();
             }
 
-            const results = comingSoonAssistants.map(a => {
-                const required = a.milestoneTasksRequired ?? 25;
+            const results = earlyAccessAssistants.map(a => {
+                const required = a.milestoneTasksRequired ?? DEFAULT_MILESTONE_TASKS;
                 const pct = Math.min(Math.round((n / required) * 100), 100);
-                const unlocked = n >= required;
+                const unlocked = milestoneReached(n, a.milestoneTasksRequired);
                 return {
                     id: a.id,
                     roleKey: a.roleKey,
