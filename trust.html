@@ -108,7 +108,7 @@
                 <span class="text-xs font-bold uppercase tracking-widest text-emerald-700">Infrastructure</span>
                 <h2 class="text-3xl font-extrabold text-gray-900 tracking-tight mt-2 mb-4">Hardened hosting, watched around the clock.</h2>
                 <p class="text-gray-600 leading-relaxed mb-4">
-                    Be More Swan runs on secure, managed cloud infrastructure with UK/EU data residency, continuous monitoring, and regular penetration testing. All traffic is encrypted with TLS&nbsp;1.3 and all storage with AES-256.
+                    Be More Swan runs on secure, managed cloud infrastructure with UK/EU data residency and continuous monitoring. All traffic is encrypted with TLS&nbsp;1.3 and all storage with AES-256.
                 </p>
                 <p class="text-gray-600 leading-relaxed">
                     The API keys and OAuth credentials that connect your business tools are stored with AES-256-GCM application-layer encryption. Plaintext credentials are never logged and never returned to a browser.
@@ -320,15 +320,20 @@
         </ul>
     </section>
 
-    <!-- Section: Penetration Testing -->
+    <!-- Section: Security Testing -->
+    <!-- No independent penetration test has been commissioned yet (checked 2026-10-12). When one is,
+         add its date and the tester here — never a quarter we can't evidence. -->
     <section class="mb-10">
-        <h2 class="text-xl font-bold text-gray-900 mb-3">Penetration Testing</h2>
+        <h2 class="text-xl font-bold text-gray-900 mb-3">Security Testing</h2>
+        <p class="text-sm text-gray-700 leading-relaxed mb-3">
+            We have not yet commissioned an independent penetration test. When we do, we will publish the date here
+            and share a summary with customers on request.
+        </p>
         <p class="text-sm text-gray-700 leading-relaxed">
-            Be More Swan undergoes regular security assessments.
-            Our last penetration test was conducted in <strong>Q2 2026</strong>.
-            A summary report is available on request to enterprise customers — please email
+            Until then, every change must pass our automated test suite before it reaches production, including tests
+            that check one workspace cannot read another's records or files. To report a security concern, email
             <a href="mailto:hello@bemoreswan.com" class="text-emerald-600 underline hover:text-emerald-800">hello@bemoreswan.com</a>
-            with the subject <em>"Security Report Request"</em>.
+            with the subject <em>"Security"</em>.
         </p>
     </section>
 
