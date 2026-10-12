@@ -63,6 +63,16 @@ function fakeDb() {
         assert.deepStrictEqual(Object.keys(out).sort(), ['email', 'hashtags', 'id']);
     });
 
+    await check('stripSecrets also strips keys nested in jsonb (audit state, metadata), keeps Dates', () => {
+        const when = new Date('2026-10-12T00:00:00Z');
+        const out: any = stripSecrets({
+            id: 1, createdAt: when,
+            newState: { r2Key: 'k', name: 'logo.png', nested: [{ accessToken: 'a', ok: true }] },
+        });
+        assert.strictEqual(out.createdAt, when);
+        assert.deepStrictEqual(out.newState, { name: 'logo.png', nested: [{ ok: true }] });
+    });
+
     await check('a member gets their own records and NO workspace table is read', async () => {
         const { db, queried } = fakeDb();
         const out: any = await buildDataExport(db, { userId: 7, organisationId: 3, includeWorkspace: false });

@@ -2942,7 +2942,7 @@ function formatCurrency(amount, currency) {
             // the plans were re-ordered, so £99 customers were shown a downgrade as their upgrade.
             const TIER_DELTA = {
               saver:    ['Up to 3 active assistants', '2,500 tasks per month', 'Connect up to 10 standard apps', 'Autonomous goal tracking'],
-              buster:   ['Up to 10 active assistants', '10,000 tasks per month', 'Connect up to 15 apps incl. premium tools', 'Workspace collaboration for your team'],
+              buster:   ['Up to 10 active assistants', '10,000 tasks per month', 'Connect up to 15 apps', 'Workspace collaboration for your team'],
               employee: ['Unlimited assistants', 'Dedicated account manager', 'Custom SLA & priority support'],
             };
             const delta = TIER_DELTA[cap.tierKey] || ['More active assistants', 'Higher monthly task volume'];

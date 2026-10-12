@@ -246,7 +246,7 @@ async function detectUpgradeIntentNotConverted(db: any) {
                     to: user.email,
                     subject: 'You were checking out our plans — here\'s what you\'re missing',
                     html: `<p>Hi ${user.firstName || 'there'},</p>
-                           <p>We noticed you were checking out our plans recently. Higher tiers unlock features like brand voice analysis, compliance checking, priority support, and more assistants.</p>
+                           <p>We noticed you were checking out our plans recently. Higher plans add more assistants and monthly tasks, the In-House Editor that reviews every draft before it reaches you, AI video, and priority support.</p>
                            <p><a href="${process.env.BASE_URL}/pricing.html">See what you're missing →</a></p>
                            <p>The Be More Swan Team</p>`,
                 });
