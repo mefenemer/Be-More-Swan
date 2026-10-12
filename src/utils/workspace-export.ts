@@ -31,11 +31,21 @@ export function exportJobSignature(requestId: number, orgId: number, includeWork
 /** Columns never exported: credentials, vault references, internal storage keys, opaque hashes. */
 const SECRET_COLUMN = /password|secret|token|vaultRef|^r2Key$|^storageKey$|^ipHash$|^definitionHash$|^embedding$/i;
 
-/** Pure: drop secret columns from a row (exported for tests). */
+/**
+ * Pure: drop secret columns from a row (exported for tests). Recursive: jsonb columns (an audit
+ * log's previous/new state, metadata) can carry the same keys — the first prod export found
+ * `activityLog[].newState.r2Key` (null that time, but nothing guaranteed it).
+ */
 export function stripSecrets<T extends Record<string, unknown>>(row: T): Partial<T> {
+    return stripDeep(row) as Partial<T>;
+}
+
+function stripDeep(v: unknown): unknown {
+    if (Array.isArray(v)) return v.map(stripDeep);
+    if (!v || typeof v !== 'object' || v instanceof Date) return v;
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(row || {})) if (!SECRET_COLUMN.test(k)) out[k] = v;
-    return out as Partial<T>;
+    for (const [k, x] of Object.entries(v)) if (!SECRET_COLUMN.test(k)) out[k] = stripDeep(x);
+    return out;
 }
 
 /**
