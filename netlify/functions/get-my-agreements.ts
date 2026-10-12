@@ -126,6 +126,7 @@ export default withLambda(async (event) => {
             currentVersion: CURRENT_DPA_VERSION,
             acceptedAt: latestDpa?.acceptedAt ?? null,
             upToDate: latestDpa?.version === CURRENT_DPA_VERSION,
+            reviewUrl: '/dpa.html',
             history: dpaHistory,
         },
         {

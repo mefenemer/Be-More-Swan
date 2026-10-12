@@ -31,7 +31,7 @@ import {
 import { requireTenant } from '../../src/utils/tenant';
 import { createNotification } from '../../src/utils/notify';
 import { checkRateLimit } from '../../src/utils/rate-limit';
-import { CURRENT_DPA_VERSION } from './accept-dpa';
+import { dpaAcceptedVersionClause } from './accept-dpa';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 // Instance default only — chat routes pick their own model per roleKey (chat-orchestrator ROUTES).
@@ -88,11 +88,11 @@ export default withLambda(async (event) => {
             }
         }
 
-        // ── 2. US-GDPR-1.1.1: org must have accepted the current DPA ──────────────
+        // ── 2. US-GDPR-1.1.1: org must have accepted the DPA ──────────────
         const [dpa] = await db
             .select({ id: dpaAcceptances.id })
             .from(dpaAcceptances)
-            .where(and(eq(dpaAcceptances.organisationId, orgId), eq(dpaAcceptances.version, CURRENT_DPA_VERSION)))
+            .where(and(eq(dpaAcceptances.organisationId, orgId), dpaAcceptedVersionClause()))
             .limit(1);
         if (!dpa) {
             return json(403, { error: 'Please review and accept our Data Processing Agreement before hiring an assistant.', code: 'DPA_REQUIRED' });

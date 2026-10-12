@@ -1,54 +1,31 @@
 // netlify/functions/check-dpa.ts
 // US-GDPR-1.1.1: Check whether the authenticated user's organisation has accepted the DPA.
 // GET /.netlify/functions/check-dpa
-//   Returns { accepted: boolean, version: string | null, acceptedAt: string | null }
+//   Returns { accepted, version, acceptedAt, currentVersion, upToDate, canAccept }
+//   accepted  — some version still in DPA_VERSIONS_STILL_VALID is on record (work may continue)
+//   upToDate  — the CURRENT version is on record (otherwise owners are asked to accept it)
+//   canAccept — the caller may accept for the organisation (owner/admin); others are never prompted
 
-import { Handler } from '@netlify/functions';
-import jwt from 'jsonwebtoken';
 import { eq, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, dpaAcceptances, userOrganisations } from '../../db/schema';
-import { CURRENT_DPA_VERSION } from './accept-dpa';
+import { dpaAcceptances } from '../../db/schema';
+import { CURRENT_DPA_VERSION, DPA_VERSIONS_STILL_VALID, DPA_ACCEPT_ROLES } from './accept-dpa';
+import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
-
-const jwtSecret = process.env.JWT_SECRET;
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
 
-    if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
-
-    const match = (event.headers.cookie || '').match(/aura_session=([^;]+)/);
-    if (!match) return { statusCode: 401, body: JSON.stringify({ error: 'Not authenticated.' }) };
-
-    let userId: number;
-    try {
-        userId = (jwt.verify(match[1], jwtSecret) as { userId: number }).userId;
-    } catch {
-        return { statusCode: 401, body: JSON.stringify({ error: 'Invalid session.' }) };
-    }
-
     const db = getDb();
-    const [user] = await db
-        .select({ organisationId: userOrganisations.organisationId })
-        .from(userOrganisations)
-        .where(eq(userOrganisations.userId, userId))
-        .limit(1);
-
-    if (!user?.organisationId) {
-        return {
-            statusCode: 200,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ accepted: false, version: null, acceptedAt: null, currentVersion: CURRENT_DPA_VERSION }),
-        };
-    }
+    const ctx = await requireTenant(event, db);
+    if ('error' in ctx) return ctx.error;
 
     const [latest] = await db
         .select({ version: dpaAcceptances.version, acceptedAt: dpaAcceptances.acceptedAt })
         .from(dpaAcceptances)
-        .where(eq(dpaAcceptances.organisationId, user.organisationId))
+        .where(eq(dpaAcceptances.organisationId, ctx.organisationId))
         .orderBy(desc(dpaAcceptances.acceptedAt))
         .limit(1);
 
@@ -56,11 +33,12 @@ export default withLambda(async (event) => {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            accepted: !!latest,
+            accepted: !!latest && DPA_VERSIONS_STILL_VALID.includes(latest.version),
             version: latest?.version ?? null,
             acceptedAt: latest?.acceptedAt ?? null,
             currentVersion: CURRENT_DPA_VERSION,
             upToDate: latest?.version === CURRENT_DPA_VERSION,
+            canAccept: DPA_ACCEPT_ROLES.includes(ctx.role) && !ctx.impersonation,
         }),
     };
 });

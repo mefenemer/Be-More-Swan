@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Processing Agreement | Be More Swan</title>
+    <!-- SEO: canonical + social share metadata -->
+    <meta name="description" content="The Data Processing Agreement between Be More Swan and its customers under UK GDPR Article 28 — instructions, security, sub-processors, breaches, transfers and deletion.">
+    <link rel="canonical" href="https://bemoreswan.com/dpa">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Be More Swan">
+    <meta property="og:title" content="Data Processing Agreement">
+    <meta property="og:description" content="The Data Processing Agreement between Be More Swan and its customers under UK GDPR Article 28 — instructions, security, sub-processors, breaches, transfers and deletion.">
+    <meta property="og:url" content="https://bemoreswan.com/dpa">
+    <meta property="og:image" content="https://bemoreswan.com/images/og-default.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="607">
+    <meta property="og:image:alt" content="Be More Swan — your digital workforce">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Data Processing Agreement">
+    <meta name="twitter:description" content="The Data Processing Agreement between Be More Swan and its customers under UK GDPR Article 28 — instructions, security, sub-processors, breaches, transfers and deletion.">
+    <meta name="twitter:image" content="https://bemoreswan.com/images/og-default.png">
+    <meta name="twitter:image:alt" content="Be More Swan — your digital workforce">
+    <!-- /SEO -->
+    <!--    <script src="https://cdn.tailwindcss.com"></script>-->
+    <link href="./style.css" rel="stylesheet">
+    <script src="/site-theme.js"></script>
+    <link rel="icon" href="/favicon/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
+    <link rel="manifest" href="/favicon/manifest.json">
+  <script src="/waitlist-mode.js" defer></script>
+</head>
+<body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
+
+<div id="nav-placeholder"></div>
+
+<style>
+    /* The agreement text comes from get-dpa-content (plain h2/h3/p/ul) — give it the legal-page look. */
+    #dpa-body h2 { display: none; }
+    #dpa-body h3 { font-size: 1.15rem; font-weight: 700; color: #111827; margin: 2rem 0 .5rem; }
+    #dpa-body p { margin: .5rem 0; line-height: 1.7; color: #374151; }
+    #dpa-body ul { list-style: disc; padding-left: 1.25rem; margin: .5rem 0; color: #374151; line-height: 1.7; }
+    #dpa-body a { color: #2563eb; text-decoration: underline; }
+</style>
+
+<main class="flex-grow w-full max-w-3xl mx-auto px-4 py-16">
+    <h1 class="text-4xl font-extrabold text-gray-900 mb-3">Data Processing Agreement</h1>
+    <p id="dpa-meta" class="text-gray-500 mb-6">Loading…</p>
+
+    <div class="bg-white border border-gray-200 rounded-2xl p-6 mb-8 text-sm text-gray-600 leading-relaxed">
+        <p>This is the agreement your organisation accepts in the workspace before your assistants work with personal data. Our current sub-processors are listed on the <a href="/trust.html#sub-processors" class="text-blue-600 underline">Trust page</a>. Need a countersigned copy? Use the <a href="/trust.html#dpa-request" class="text-blue-600 underline">request form</a>.</p>
+        <p id="dpa-versions" class="mt-3 hidden"></p>
+    </div>
+
+    <article id="dpa-body" class="bg-white border border-gray-200 rounded-2xl p-6 sm:p-8"></article>
+</main>
+
+<script>
+    // Component Loader Engine
+    async function loadComponent(placeholderId, filePath) {
+        try {
+            const response = await fetch(filePath);
+            if (response.ok) {
+                document.getElementById(placeholderId).innerHTML = await response.text();
+            }
+        } catch (error) {
+            console.error(`Error loading component ${filePath}:`, error);
+        }
+    }
+
+    // Execute System Router Checks
+    document.addEventListener("DOMContentLoaded", async () => {
+        // 1. Core payload inject
+        await loadComponent("nav-placeholder", "./components/nav.html");
+        loadComponent("footer-placeholder", "./components/footer.html");
+
+        // 2. Identify active URL path filename
+        const currentPage = window.location.pathname.split("/").pop();
+
+        // 3. Dynamic Title Routing Dictionary
+        const titleMap = {
+            "index.html": "Welcome",
+            "": "Welcome", // Fallback parameter for root folders
+            "pricing.html": "Pricing",
+            "dashboard.html": "Dashboard",
+            "billing.html": "Billing",
+            "logout.html": "See you Soon"
+        };
+
+        // Inject Context Title seamlessly
+        const targetTitleSpan = document.getElementById("nav-page-title");
+        if (targetTitleSpan && titleMap[currentPage]) {
+            targetTitleSpan.innerText = `| ${titleMap[currentPage]}`;
+        }
+
+        // 3b. This page is opened as a standalone tab (e.g. via window.open() from the
+        // Settings "My Agreements" review link or a compliance modal), so a fresh tab has no
+        // browser history to go "back" through. Surface an explicit back action: close the tab
+        // if we were opened from another one, otherwise fall back to returning to the workspace.
+        const backBtn = document.getElementById("privacy-back-btn");
+        if (backBtn) {
+            backBtn.classList.remove("hidden");
+            backBtn.addEventListener("click", () => {
+                if (window.opener) {
+                    window.close();
+                } else if (window.history.length > 1) {
+                    window.history.back();
+                } else {
+                    window.location.href = "/workspace.html";
+                }
+            });
+        }
+
+        // 4. Internal App Portal State Management
+        if (currentPage === "dashboard.html" || currentPage === "billing.html") {
+            const publicMenu = document.getElementById("nav-public-links");
+            const appMenu = document.getElementById("nav-app-links");
+
+            if (publicMenu && appMenu) {
+                publicMenu.classList.add("hidden");
+                appMenu.classList.remove("hidden");
+
+                // Highlight active links based on context
+                if (currentPage === "dashboard.html") {
+                    const dashTab = document.getElementById("nav-link-dashboard");
+                    if (dashTab) dashTab.classList.add("text-emerald-700", "font-bold");
+                } else if (currentPage === "billing.html") {
+                    const billTab = document.getElementById("nav-link-billing");
+                    if (billTab) billTab.classList.add("text-emerald-700", "font-bold");
+                }
+            }
+        }
+    });
+</script>
+<script>
+    (async function () {
+        const meta = document.getElementById('dpa-meta');
+        const body = document.getElementById('dpa-body');
+        const versions = document.getElementById('dpa-versions');
+        const wanted = new URLSearchParams(location.search).get('version');
+        try {
+            const url = '/.netlify/functions/get-dpa-content' + (wanted ? '?version=' + encodeURIComponent(wanted) : '');
+            const res = await fetch(url);
+            if (!res.ok) throw new Error('not found');
+            const d = await res.json();
+            // Our own server's text — not user content.
+            body.innerHTML = d.html;
+            const current = d.version === d.currentVersion;
+            meta.textContent = 'Version ' + d.version + ' · effective ' + new Date(d.effectiveDate + 'T00:00:00Z')
+                .toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
+                + (current ? ' · current version' : ' · superseded — see the current version below');
+            if (Array.isArray(d.versions) && d.versions.length > 1) {
+                versions.classList.remove('hidden');
+                versions.innerHTML = 'Versions: ' + d.versions.map((v) => v.version === d.version
+                    ? '<strong>' + v.version + '</strong>'
+                    : '<a class="text-blue-600 underline" href="/dpa.html' + (v.version === d.currentVersion ? '' : '?version=' + encodeURIComponent(v.version)) + '">' + v.version + '</a>').join(' · ');
+            }
+        } catch {
+            meta.textContent = 'We could not load the agreement just now. Please refresh, or email privacy@bemoreswan.com for a copy.';
+        }
+    })();
+</script>
+<script src="./mobileMenu.js"></script>
+<div id="footer-placeholder"></div>
+
+</body>
+</html>

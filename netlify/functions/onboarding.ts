@@ -17,7 +17,7 @@ import {
   dpaAcceptances,
   contentRules,
 } from '../../db/schema';
-import { CURRENT_DPA_VERSION } from './accept-dpa';
+import { dpaAcceptedVersionClause } from './accept-dpa';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import { resolveBaseUrl } from '../../src/utils/base-url';
@@ -129,13 +129,13 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
       return { statusCode: 403, body: JSON.stringify({ error: 'Account pending verification or missing organisation.' }) };
     }
 
-    // US-GDPR-1.1.1: Block provisioning if organisation has not accepted the current DPA version
+    // US-GDPR-1.1.1: Block provisioning if organisation has not accepted the DPA (any version still in DPA_VERSIONS_STILL_VALID)
     const [dpa] = await db
       .select({ id: dpaAcceptances.id })
       .from(dpaAcceptances)
       .where(and(
         eq(dpaAcceptances.organisationId, orgId),
-        eq(dpaAcceptances.version, CURRENT_DPA_VERSION),
+        dpaAcceptedVersionClause(),
       ))
       .limit(1);
     if (!dpa) {

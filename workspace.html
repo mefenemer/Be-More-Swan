@@ -194,47 +194,90 @@
   </div>
 </div>
 
-<!-- US-GDPR-1.1.1: DPA acceptance required modal — blocks assistant access until accepted -->
+<!-- US-GDPR-1.1.1: DPA acceptance modal. Shown (a) when a gate answers DPA_REQUIRED, (b) from "Review
+     agreements", and (c) at login to an owner/admin whose organisation accepted an OLDER version. -->
 <div id="modal-dpa-required" class="hidden fixed inset-0 z-[70] items-center justify-center p-4 bg-gray-900/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="dpa-modal-title">
-  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-8">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-8 overflow-y-auto" style="max-height:90vh">
     <div class="flex items-start gap-3 mb-4">
       <span class="text-2xl flex-shrink-0">📋</span>
       <div>
-        <h2 id="dpa-modal-title" class="text-xl font-bold text-gray-900">Data Processing Agreement Required</h2>
-        <p class="text-sm text-gray-500 mt-1">Before activating your AI assistant, your organisation must accept our Data Processing Agreement (DPA) as required by UK GDPR Article 28.</p>
+        <h2 id="dpa-modal-title" class="text-xl font-bold text-gray-900">Data Processing Agreement</h2>
+        <p id="dpa-modal-intro" class="text-sm text-gray-500 mt-1">Before your assistants can work with personal data, your organisation needs to accept our Data Processing Agreement (DPA), as UK GDPR Article 28 requires.</p>
       </div>
     </div>
-    <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-5 max-h-48 overflow-y-auto text-sm text-gray-700 leading-relaxed">
-      <p class="font-bold mb-2">Data Processing Agreement — Summary</p>
-      <p class="mb-2">By accepting this agreement, your organisation (the Data Controller) authorises Be More Swan (the Data Processor) to process personal data on your behalf solely to provide the Be More Swan platform services, in accordance with your instructions.</p>
-      <p class="mb-2">Be More Swan commits to: (1) process data only on documented instructions; (2) ensure confidentiality; (3) implement appropriate technical and organisational security measures; (4) assist with data subject rights requests; (5) delete or return all personal data at contract end; (6) provide audit assistance.</p>
-      <p>Sub-processors are listed in our Privacy Policy. You will be notified of any intended changes to sub-processors. Full agreement available at <a href="/privacy.html" target="_blank" class="text-emerald-700 underline">bemoreswan.com/privacy</a>.</p>
+    <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-5 max-h-56 overflow-y-auto text-sm text-gray-700 leading-relaxed">
+      <div id="dpa-whats-new" class="hidden mb-3 pb-3 border-b border-gray-200">
+        <p class="font-bold mb-2">What changed in version 1.1 (12 October 2026)</p>
+        <ul class="list-disc list-inside space-y-1">
+          <li>Written for UK GDPR and the Data Protection Act 2018.</li>
+          <li>Our sub-processors are listed in one place, the Trust page, and we email you 14 days before adding one — you can object.</li>
+          <li>New annexes set out what data we process for you and how we keep it secure.</li>
+          <li>A clause on transfers outside the UK and the safeguards we use.</li>
+          <li>We tell you about a personal data breach without undue delay and within 48 hours.</li>
+          <li>You can export your workspace data yourself from My Account.</li>
+        </ul>
+      </div>
+      <p class="font-bold mb-2">In short</p>
+      <p class="mb-2">Your organisation (the controller) authorises Be More Swan (the processor) to process personal data on your behalf, only to provide the platform and only on your instructions.</p>
+      <p>We commit to: keep it confidential and secure; use only the sub-processors on our <a href="/trust.html#sub-processors" target="_blank" class="text-emerald-700 underline">published list</a>; help you answer people's data requests; tell you promptly about any breach; return or delete your data when you leave; and support your audits.</p>
     </div>
-    <label class="flex items-start gap-3 mb-6 cursor-pointer">
-      <input type="checkbox" id="dpa-agree-checkbox" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500">
-      <span class="text-sm text-gray-700">I have read and agree to the <a href="/privacy.html#dpa" target="_blank" class="text-emerald-700 underline font-medium">Data Processing Agreement</a> on behalf of my organisation.</span>
-    </label>
-    <button id="btn-dpa-accept" onclick="submitDpaAcceptance(this)"
-      class="btn-primary w-full py-3 font-bold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed"
-      disabled>
-      Accept DPA &amp; Continue
-    </button>
-    <p class="text-xs text-gray-400 text-center mt-3">Your acceptance is recorded with timestamp and IP address as legally admissible evidence under UK GDPR Article 28(9).</p>
+    <div id="dpa-accept-area">
+      <label class="flex items-start gap-3 mb-6 cursor-pointer">
+        <input type="checkbox" id="dpa-agree-checkbox" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500">
+        <span class="text-sm text-gray-700">I have read and agree to the <a href="/dpa.html" target="_blank" class="text-emerald-700 underline font-medium">Data Processing Agreement</a> (v1.1) on behalf of my organisation.</span>
+      </label>
+      <button id="btn-dpa-accept" onclick="submitDpaAcceptance(this)"
+        class="btn-primary w-full py-3 font-bold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed"
+        disabled>
+        Accept DPA &amp; Continue
+      </button>
+      <p class="text-xs text-gray-400 text-center mt-3">Your acceptance is recorded with the date, time and IP address as evidence of the agreement.</p>
+    </div>
+    <div id="dpa-owner-only" class="hidden">
+      <p class="text-sm text-gray-700 bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">Only your workspace owner or an admin can accept this agreement for your organisation. Please ask them to sign in and accept it — you can <a href="/dpa.html" target="_blank" class="text-emerald-700 underline font-medium">read the full agreement</a> here.</p>
+      <button type="button" onclick="closeDpaModal()" class="btn-secondary w-full py-3 font-bold rounded-xl">Close</button>
+    </div>
+    <button type="button" id="btn-dpa-later" onclick="closeDpaModal()" class="hidden w-full mt-2 text-sm text-gray-500 hover:text-gray-700 py-2">Remind me later</button>
   </div>
 </div>
 
 <script>
-// US-GDPR-1.1.1: Enable accept button only when checkbox is ticked; check DPA on load
+// US-GDPR-1.1.1: Enable accept button only when checkbox is ticked.
 document.addEventListener('DOMContentLoaded', function () {
     const cb = document.getElementById('dpa-agree-checkbox');
     const btn = document.getElementById('btn-dpa-accept');
     if (cb && btn) cb.addEventListener('change', () => { btn.disabled = !cb.checked; });
 
-    // NOTE: no longer auto-checked on login. The compliance modals are surfaced on demand
-    // from the Setup Wizard's "Compliance & data use" step (window.showComplianceModals).
-    // The DPA modal is still shown contextually when opening an assistant that requires it
-    // (DPA_REQUIRED gate in assistants.js).
+    // A NEW organisation accepts in the Setup Wizard's "Compliance & data use" step, and the modal
+    // also opens when a gate answers DPA_REQUIRED (assistants.js). But an organisation that accepted
+    // an OLDER version must be told when the DPA changes — a version bump otherwise reaches nobody
+    // (the same trap as the Terms in 2026-10). Only an owner/admin is asked; work carries on meanwhile
+    // because the gates still honour every version in DPA_VERSIONS_STILL_VALID.
+    fetch('/.netlify/functions/check-dpa').then((r) => (r.ok ? r.json() : null)).then((d) => {
+        if (d && d.version && !d.upToDate && d.canAccept) showDpaModal(d, { dismissable: d.accepted });
+    }).catch(() => { /* never block the workspace on this */ });
 });
+
+function showDpaModal(d, opts) {
+    const modal = document.getElementById('modal-dpa-required');
+    if (!modal) return;
+    const renewal = !!(d && d.version && !d.upToDate);
+    document.getElementById('dpa-whats-new')?.classList.toggle('hidden', !renewal);
+    const intro = document.getElementById('dpa-modal-intro');
+    if (intro && renewal) intro.textContent = 'We have updated our Data Processing Agreement. Please review the changes and accept version ' + d.currentVersion + ' for your organisation.';
+    const canAccept = !d || d.canAccept !== false;
+    const area = document.getElementById('dpa-accept-area');
+    const ownerOnly = document.getElementById('dpa-owner-only');
+    if (area) area.classList.toggle('hidden', !canAccept);
+    if (ownerOnly) ownerOnly.classList.toggle('hidden', canAccept);
+    document.getElementById('btn-dpa-later')?.classList.toggle('hidden', !(canAccept && opts && opts.dismissable));
+    modal.classList.remove('hidden'); modal.classList.add('flex');
+}
+
+function closeDpaModal() {
+    const modal = document.getElementById('modal-dpa-required');
+    if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+}
 
 async function checkDpaAcceptance(force) {
     try {
@@ -242,10 +285,7 @@ async function checkDpaAcceptance(force) {
         if (!res.ok) return; // Non-blocking — don't prevent workspace loading on auth errors
         const data = await res.json();
         // `force` (the "Review agreements" button) shows the modal even when already accepted.
-        if (force || !data.upToDate) {
-            const modal = document.getElementById('modal-dpa-required');
-            if (modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
-        }
+        if (force || !data.upToDate) showDpaModal(data, { dismissable: force || data.accepted });
     } catch {
         // Non-blocking
     }
@@ -255,15 +295,13 @@ async function submitDpaAcceptance(btn) {
     btn.disabled = true;
     btn.textContent = 'Recording acceptance…';
     try {
-        const res = await fetch('/.netlify/functions/accept-dpa', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ version: '1.0' }),
-        });
-        if (!res.ok) throw new Error('Failed');
-        // Hide modal and reload the assistant detail to retry get-assistant-context
-        const modal = document.getElementById('modal-dpa-required');
-        if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+        // The server records the CURRENT version — the client never says which one was accepted.
+        const res = await fetch('/.netlify/functions/accept-dpa', { method: 'POST' });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to record acceptance. Please try again.');
+        }
+        closeDpaModal();
         const assistantId = btn.dataset.assistantId;
         if (assistantId && typeof window.loadAssistantDetail === 'function') {
             window.loadAssistantDetail(assistantId);
@@ -275,10 +313,10 @@ async function submitDpaAcceptance(btn) {
         } else {
             window.location.reload();
         }
-    } catch {
+    } catch (e) {
         btn.disabled = false;
         btn.textContent = 'Accept DPA & Continue';
-        window.showToast?.('Failed to record acceptance. Please try again.', { icon: '⚠️' });
+        window.showToast?.(e.message || 'Failed to record acceptance. Please try again.', { icon: '⚠️' });
     }
 }
 </script>

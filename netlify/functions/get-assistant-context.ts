@@ -3,7 +3,7 @@ import { eq, and, sql } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, dpaAcceptances, masterAssistants } from '../../db/schema';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
-import { CURRENT_DPA_VERSION } from './accept-dpa';
+import { dpaAcceptedVersionClause } from './accept-dpa';
 import { requireTenant } from '../../src/utils/tenant';
 import { AUTONOMOUS_DRAFT_PLATFORMS, describeAutoPublishVolume } from '../../src/utils/publish-policy';
 import { resolveHorizonDays } from '../../src/config/posting-cadence';
@@ -63,14 +63,14 @@ export default withLambda(async (event) => {
 
         if (!row) return { statusCode: 404, body: JSON.stringify({ error: 'Assistant not found.' }) };
 
-        // US-GDPR-1.1.1: Block if organisation has not accepted the current DPA version
+        // US-GDPR-1.1.1: Block if organisation has not accepted the DPA (any version still in DPA_VERSIONS_STILL_VALID)
         if (row.organisationId) {
             const [dpa] = await tx
                 .select({ id: dpaAcceptances.id })
                 .from(dpaAcceptances)
                 .where(and(
                     eq(dpaAcceptances.organisationId, row.organisationId),
-                    eq(dpaAcceptances.version, CURRENT_DPA_VERSION),
+                    dpaAcceptedVersionClause(),
                 ))
                 .limit(1);
             if (!dpa) {
