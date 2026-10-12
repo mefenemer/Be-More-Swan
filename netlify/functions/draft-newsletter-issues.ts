@@ -23,6 +23,7 @@ import { generateIssueBody } from '../../src/utils/newsletter-generate';
 import { createNotification } from '../../src/utils/notify';
 import { postsPerWeekFor } from '../../src/config/posting-cadence';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { capacityMemo, recordCompletedWork } from '../../src/utils/work-metering';
 
 /** Statuses that mean "a human still owes this issue a decision". */
 const AWAITING_HUMAN = ['draft', 'pending_approval', 'in_review'];
@@ -58,6 +59,7 @@ export default withLambda(async () => {
         return { statusCode: 500, body: JSON.stringify({ error: 'lookup failed' }) };
     }
 
+    const hasCapacity = capacityMemo(db);
     for (const a of assistants) {
         out.considered++;
         const actx = (a.onboardingContext as Record<string, unknown> | null) ?? {};
@@ -104,6 +106,10 @@ export default withLambda(async () => {
                 continue;
             }
 
+            // Monthly task allowance (src/utils/work-metering.ts) — asked before the draft row and
+            // the model call exist, so a refusal leaves nothing half-made behind.
+            if (!(await hasCapacity(a.organisationId))) { note('task_limit_reached'); continue; }
+
             const [issue] = await db.insert(newsletterIssues).values({
                 organisationId: a.organisationId,
                 userId: a.userId,
@@ -135,6 +141,8 @@ export default withLambda(async () => {
                 .set({ status: 'pending_approval', updatedAt: new Date() })
                 .where(eq(newsletterIssues.id, issue.id))
                 .returning({ subject: newsletterIssues.subject });
+            // One task per issue, charged now the draft exists (never throws).
+            await recordCompletedWork(db, a.organisationId, 'email_issue', 1, issue.id);
 
             // ⚠️ THE POINT OF THE WHOLE CRON. Nothing here sends, so an issue nobody is told about
             // is an issue nobody approves — this function drafted in complete silence until

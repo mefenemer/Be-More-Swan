@@ -17,6 +17,7 @@ import { aiAssistants, masterAssistants } from '../../db/schema';
 import { enqueueScheduleGapFill, GAP_FILL_ATTENTION_REASONS } from '../../src/utils/schedule-gap-fill';
 import { SMM_ROLE_KEYS } from '../../src/constants/roles';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { capacityMemo } from '../../src/utils/work-metering';
 
 /**
  * What an operator reading the invocation log should do about each stuck assistant. The user gets
@@ -71,8 +72,15 @@ export default withLambda(async (event) => {
     // quietly does nothing for a tenant should be legible in the invocation log without a DB query.
     const needsAttention: { assistantId: number; organisationId: number; reason: string }[] = [];
 
+    // Out of tasks this month → enqueue nothing. The worker would refuse each job anyway
+    // (src/utils/work-metering.ts), and a failed job does not cover its slot, so the next tick would
+    // enqueue another — a refused job every hour per slot until the daily pause lands.
+    const hasCapacity = capacityMemo(db);
+    let overTaskLimit = 0;
+
     for (const assistant of smmAssistants) {
         try {
+            if (!(await hasCapacity(assistant.organisationId))) { overTaskLimit++; continue; }
             const result = await enqueueScheduleGapFill(db, assistant, now);
             jobsEnqueued += result.enqueued;
             if (result.reason && result.reason !== 'ok' && skipped[result.reason] !== undefined) {
@@ -99,7 +107,7 @@ export default withLambda(async (event) => {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            ran: true, assistantsChecked: smmAssistants.length, jobsEnqueued, skipped, needsAttention,
+            ran: true, assistantsChecked: smmAssistants.length, jobsEnqueued, skipped, overTaskLimit, needsAttention,
         }),
     };
 });

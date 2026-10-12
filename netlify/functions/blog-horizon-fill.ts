@@ -17,6 +17,7 @@ import { aiAssistants, masterAssistants } from '../../db/schema';
 import { enqueueBlogGapFill } from '../../src/utils/blog-gap-fill';
 import { BLOG_WRITER_ROLE_KEYS } from '../../src/constants/roles';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { capacityMemo } from '../../src/utils/work-metering';
 
 /** Core top-up pass, exported so staging can drive it over HTTP (see run-blog-jobs.ts). */
 export async function fillBlogHorizons(now: Date = new Date()) {
@@ -41,8 +42,13 @@ export async function fillBlogHorizons(now: Date = new Date()) {
     let jobsEnqueued = 0;
     const skipped: Record<string, number> = { on_demand: 0, fully_covered: 0 };
 
+    // Out of tasks this month → enqueue nothing (same reasoning as draft-horizon-fill.ts).
+    const hasCapacity = capacityMemo(db);
+    let overTaskLimit = 0;
+
     for (const assistant of writers) {
         try {
+            if (!(await hasCapacity(assistant.organisationId))) { overTaskLimit++; continue; }
             const result = await enqueueBlogGapFill(db, assistant, now);
             jobsEnqueued += result.enqueued;
             if (result.reason && result.reason !== 'ok' && skipped[result.reason] !== undefined) {
@@ -53,7 +59,7 @@ export async function fillBlogHorizons(now: Date = new Date()) {
         }
     }
 
-    return { assistantsChecked: writers.length, jobsEnqueued, skipped };
+    return { assistantsChecked: writers.length, jobsEnqueued, skipped, overTaskLimit };
 }
 
 export default withLambda(async (event) => {

@@ -58,6 +58,8 @@ import { draftCampaignEmails } from '../../src/utils/newsletter-campaign-generat
 import { suggestEmailLine } from '../../src/utils/newsletter-suggest';
 import { CAMPAIGN_CADENCES } from '../../src/config/email-campaign-cadences';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
+
 
 /**
  * The zone a wall-clock time on this issue means.
@@ -806,6 +808,8 @@ export default withLambda(async (event: HandlerEvent) => {
     }
 
     if (action === 'generate') {
+        // Monthly task allowance (src/utils/work-metering.ts): asked first, charged on success.
+        if (!(await hasTaskCapacity(db, orgId))) return json(429, { error: TASK_LIMIT_MESSAGE });
         try {
             const result = await generateIssueBody(db, {
                 issueId: id,
@@ -816,6 +820,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 tone: body.tone,
                 purpose: body.purpose,
             });
+            await recordCompletedWork(db, orgId, 'email_issue', 1, id);
 
             // ⚠️ generateIssueBody writes body_markdown directly, which is right for a plain issue
             // and would leave a DESIGNED one showing the old copy in its blocks while the mirror
@@ -859,6 +864,7 @@ export default withLambda(async (event: HandlerEvent) => {
     }
 
     if (action === 'refine') {
+        if (!(await hasTaskCapacity(db, orgId))) return json(429, { error: TASK_LIMIT_MESSAGE });
         try {
             // ⚠️ RETURNS, DOES NOT SAVE. The author reads the revision and presses Keep, which is an
             // ordinary 'update'. A rewrite written straight over the top of copy somebody has
@@ -870,6 +876,8 @@ export default withLambda(async (event: HandlerEvent) => {
                 mode: body.mode,
                 instruction: body.instruction,
             });
+            // A rewrite is a piece of work, like the social editor's Rewrite button (one task).
+            await recordCompletedWork(db, orgId, 'email_issue', 1, id);
             return json(200, result);
         } catch (err) {
             if (err instanceof IssueNotFoundError) return json(404, { error: err.message });

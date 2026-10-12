@@ -161,10 +161,15 @@
       // for exactly the posts whose framing matters most.
       const isVideo = (asset.assetType || '').toLowerCase() === 'video'
         || /^video\//i.test(asset.mimeType || '');
+      // Absolutely positioned to FILL the box. The box gets its shape from the padding-bottom
+      // ratio trick (height 0 + padding), so an in-flow child's height:100% resolves against 0 and
+      // falls back to the image's natural size — a square card in a 4:5 or 9:16 slot rendered at
+      // the top with the rest of the padding showing as a black band beneath it.
+      const fill = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
       const media = isVideo
         ? `<video src="${_escHtml(src)}" muted playsinline controls preload="metadata"
-             style="width:100%;height:100%;object-fit:cover;background:#000;"></video>`
-        : `<img src="${_escHtml(src)}" alt="post media" style="width:100%;height:100%;object-fit:cover;">`;
+             style="${fill}background:#000;"></video>`
+        : `<img src="${_escHtml(src)}" alt="post media" style="${fill}">`;
       return `<div style="position:relative;width:100%;${aspectClass}overflow:hidden;background:#000;border-radius:4px;">
         ${media}
         ${warnBanner}

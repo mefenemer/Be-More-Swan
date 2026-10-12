@@ -2204,7 +2204,7 @@
         ${tile('Completed', pct(t.completionRate), 'reached the last email')}
       </div>
       ${untracked > 0 ? `<p class="text-[11px] text-amber-700 mb-2">${untracked.toLocaleString()} email${untracked === 1 ? ' was' : 's were'} sent from a connected mailbox, which cannot report opens or clicks — verify a sending domain in Sending to track them.</p>` : ''}
-      ${stats.steps.length ? `<table class="w-full text-xs mt-1">
+      ${stats.steps.length ? `<div class="overflow-x-auto"><table class="w-full text-xs mt-1">
         <thead><tr class="text-left text-gray-500"><th class="py-1 font-semibold">Email</th><th class="py-1 font-semibold text-right">Sent</th><th class="py-1 font-semibold text-right">Opens</th><th class="py-1 font-semibold text-right">Clicks</th><th class="py-1 font-semibold text-right">Bounced</th></tr></thead>
         <tbody>${stats.steps.map((r) => {
           const st = seqState.steps.find((x) => x.stepNumber === r.stepNumber);
@@ -2213,7 +2213,7 @@
             <td class="py-1.5 text-right">${pct(r.openRate)}</td>
             <td class="py-1.5 text-right">${pct(r.clickRate)}</td>
             <td class="py-1.5 text-right">${r.bounced.toLocaleString()}</td></tr>`;
-        }).join('')}</tbody></table>` : ''}
+        }).join('')}</tbody></table></div>` : ''}
     </div>`;
   }
 

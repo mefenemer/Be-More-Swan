@@ -287,6 +287,17 @@ window.initCalendar = async function (opts = {}) {
     document.querySelectorAll('.cal-view-btn').forEach(btn => {
         btn.addEventListener('click', () => _setView(btn.dataset.view));
     });
+    // On a phone a seven-column month is ~50px a day — every chip truncates to nothing. Open on the
+    // List view there instead (the buttons still switch to Month or Week). Set before the first
+    // load so it is one load, not a month load followed by a list load.
+    if (window.matchMedia && window.matchMedia('(max-width: 639px)').matches && _view === 'month') _view = 'list';
+    // The toolbar markup is re-injected on every visit with Month highlighted, while _view survives
+    // from the last visit — so a return visit showed the Week or List grid under a Month button.
+    // Always paint the buttons from the view actually being rendered.
+    document.querySelectorAll('.cal-view-btn').forEach(btn => {
+        const active = btn.dataset.view === _view;
+        btn.className = `cal-view-btn px-3 py-1.5 text-sm font-bold rounded-lg transition cursor-pointer ${active ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`;
+    });
     await _loadAndRender();
 };
 

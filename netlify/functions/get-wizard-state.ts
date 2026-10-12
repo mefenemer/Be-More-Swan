@@ -14,6 +14,7 @@ import { getDb } from '../../db/client';
 import { requireTenant } from '../../src/utils/tenant';
 import { computeOnboardingProgress } from '../../src/utils/onboarding-progress';
 import { computeAssistantReadiness } from './get-assistant-readiness';
+import { computeRecommendations } from '../../src/utils/onboarding-recommendations';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
@@ -65,8 +66,15 @@ export default withLambda(async (event) => {
         }
     }
 
+    // "Recommended for you" — non-blocking, tailored to the hired roles (onboarding-recommendations.ts).
+    // Never allowed to break the wizard: it fails soft per item inside, and wholesale here.
+    let recommended: Awaited<ReturnType<typeof computeRecommendations>> = [];
+    try { recommended = await computeRecommendations(db, orgId, userId); }
+    catch (err) { console.warn('[get-wizard-state] recommendations unavailable (non-blocking):', err); }
+
     return json(200, {
         steps,
+        recommended,
         currentStep: progress.currentStep,
         allDone: progress.allDone,
         completedCount: progress.completedCount,

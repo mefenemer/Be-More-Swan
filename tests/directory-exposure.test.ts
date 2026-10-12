@@ -50,6 +50,7 @@ const PUBLIC_DIRS: Record<string, string> = {
     favicon: 'icons referenced from every page head',
     images: 'site imagery',
     locales: 'i18n bundles fetched by src/i18n.js',
+    videos: 'assistant overview videos + posters played on assistant.html (rendered by scripts/render-assistant-videos.mjs)',
     src: 'MIXED — see PUBLIC_SRC_DIRS; the rest is blocked per-subdirectory',
 };
 

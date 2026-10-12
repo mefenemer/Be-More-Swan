@@ -39,6 +39,7 @@ import { resolveBaseUrl } from './base-url';
 import { audienceLine } from '../config/campaign-audience';
 import { isFunnelStage, ORDER_ACTION_SPECS, type FunnelStage } from '../config/campaign-vocab';
 import { mirrorOrder } from './campaign-mirror';
+import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -145,6 +146,9 @@ export type DraftOutcome =
 export async function draftEmailCampaignForOrder(db: Db, orderId: number): Promise<DraftOutcome> {
     const order = await claimOrder(db, orderId);
     if (!order) return { ok: false, orderId, message: 'Not claimable — already drafted or being drafted', settle: false };
+    // Monthly task allowance (src/utils/work-metering.ts). Settled as failed, so the order is
+    // cancelled and its campaign budget released, with the reason the owner can act on.
+    if (!(await hasTaskCapacity(db, order.organisationId))) return { ok: false, orderId, message: TASK_LIMIT_MESSAGE, settle: true };
 
     const [campaign] = await db.select({
         id: campaigns.id, objective: campaigns.objective, audience: campaigns.audience,
@@ -286,6 +290,8 @@ export async function draftEmailCampaignForOrder(db: Db, orderId: number): Promi
         resultSummary: summary,
     });
 
+    // One task for the campaign's emails, however many are in it (never throws).
+    await recordCompletedWork(db, order.organisationId, 'email_campaign', 1, orderId);
     return { ok: true, orderId, emails: emails.length, artefactKind, artefactId };
 }
 

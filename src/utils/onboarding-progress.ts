@@ -1,5 +1,5 @@
 // src/utils/onboarding-progress.ts
-// Single source of truth for the Frictionless Onboarding Wizard's 8-step journey.
+// Single source of truth for the Frictionless Onboarding Wizard's 9-step journey.
 //
 // Extracted from netlify/functions/get-wizard-state.ts so the same step-by-step
 // progress can be consumed elsewhere — notably the Swan Command Bar ("Ask your team
@@ -14,7 +14,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
-    organisations, userProfiles, plans, aiAssistants, onboardingDrafts, users,
+    organisations, userProfiles, plans, aiAssistants, onboardingDrafts, users, orgProducts,
 } from '../../db/schema';
 
 type Db = ReturnType<typeof getDb>;
@@ -72,6 +72,9 @@ export interface OnboardingScope {
 const STEP_DEFS: { key: string; label: string; view: string | null; benefit: string }[] = [
     { key: 'plan',                 label: 'Choose your plan',            view: 'billing',    benefit: 'Pick the plan that fits and activate your account to unlock your digital team.' },
     { key: 'business_info',        label: 'Business information',        view: 'assets',     benefit: 'Tell us about your business so your assistant matches your brand, industry and audience.' },
+    // Every assistant reads this list (src/utils/org-products.ts) — without it, posts, articles and
+    // emails can only describe the business in general terms and never name or price what it sells.
+    { key: 'products',             label: 'Products & services',         view: 'assets',     benefit: 'Add what you sell, with prices if you like, so your assistants name your products correctly and only quote the prices you give.' },
     { key: 'profile',              label: 'Your profile',                view: 'settings',   benefit: 'Set your working hours and timezone so your assistant works to your schedule.' },
     { key: 'compliance',           label: 'Compliance & data use',       view: 'settings',   benefit: 'Review and accept your agreements in My Account → My Agreements to keep your company data safe.' },
     { key: 'assistant_selection',  label: 'Choose your assistant',       view: 'catalog',    benefit: 'Pick the assistant persona that matches the work you want done for you.' },
@@ -158,9 +161,25 @@ export async function computeOnboardingProgress(
     // description + audience) so the two stay consistent.
     const businessProfile = Boolean(org?.industry && org?.businessDescription && org?.targetAudience);
 
+    // Products & services: at least one ACTIVE entry (archived ones reach no prompt). Two ways it
+    // counts as done without one, both deliberate:
+    //   • the workspace already has a live assistant — this step was added on 2026-10-11, and a
+    //     customer who finished setup before then must not have the wizard reopen over their work;
+    //   • the lookup fails (db/z-org-products.sql not applied here) — a missing table must never be
+    //     what blocks someone's onboarding.
+    let hasProducts = true;
+    try {
+        hasProducts = (await db.select({ id: orgProducts.id }).from(orgProducts)
+            .where(and(eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active'))).limit(1)).length > 0;
+    } catch (err) {
+        console.error('[onboarding-progress] products lookup failed — treating the step as done', { orgId, err });
+    }
+    const anyLive = assistantRows.some(a => a.provisioningStatus === 'complete' && a.isActive === true);
+
     const doneByKey: Record<string, boolean> = {
         plan:                 planActive,
         business_info:        businessProfile,
+        products:             hasProducts || anyLive,
         profile:              profile?.workingHours != null,
         compliance:           org?.complianceAcceptedAt != null,
         // Selecting a role = an assistant row OR a draft has been started.

@@ -253,7 +253,6 @@
 <script src="./mobileMenu.js"></script>
 <script src="/src/public/assistant-content.js"></script>
 <script src="/src/components/scroll-lock.js"></script>
-<script src="/src/components/assistant-detail-modal.js"></script>
 <script>
 // ── Icons ────────────────────────────────────────────────────────────────────
 const ICONS = {
@@ -267,39 +266,23 @@ const ICONS = {
   cog:      `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>`,
 };
 
-// ── Role metadata: core outcomes rendered on each card ───────────────────────
-// Keyed by roleKey (see db/seed-catalog.ts). Roles without an entry simply
-// render without the outcomes list. NOTE: the "Connects with" / "Works with"
-// chips are NOT here — they come from the DB (master_assistants.integrations
-// and .works_with, served by master-assistants.ts) so the card matches the
-// detail view. Only these benefit bullets remain hardcoded.
-const ROLE_META = {
-  inbox_manager:             { outcomes: ['Drafts replies to routine email', 'Flags urgent messages instantly', 'Keeps your inbox at zero'] },
-  calendar_coordinator:      { outcomes: ['Negotiates times across time zones', 'Prepares daily schedule briefings', 'Ends booking ping-pong for good'] },
-  travel_logistics_booker:   { outcomes: ['Sources flights & hotels in budget', 'Builds complete itineraries', 'Books within your guardrails'] },
-  document_organizer:        { outcomes: ['Auto-files and tags documents', 'Keeps cloud folders tidy', 'Finds any file in seconds'] },
-  social_media_manager:      { outcomes: ['Auto-schedules posts', 'Matches brand tone', 'Tracks engagement'] },
-  lead_qualifier:            { outcomes: ['Scores every inbound lead', 'Drafts personalised outreach', 'Keeps sales focused on winners'] },
-  seo_content_strategist:    { outcomes: ['Researches winning keywords', 'Drafts SEO-ready posts', 'Keeps brand voice consistent'] },
-  crm_enricher:              { outcomes: ['Fills missing contact data', 'Enriches every new lead', 'Keeps your CRM spotless'] },
-  newsletter_editor:         { outcomes: ['Curates weekly industry news', 'Formats ready-to-send campaigns', 'Grows your audience on schedule'] },
-  vendor_communications_rep: { outcomes: ['Chases suppliers for updates', 'Collects and compares quotes', 'Keeps procurement moving'] },
-  inventory_tracker:         { outcomes: ['Monitors stock in real time', 'Drafts reorder requests', 'Prevents costly stockouts'] },
-  sop_writer:                { outcomes: ['Turns voice notes into manuals', 'Documents processes as you work', 'Standardises your operations'] },
-  tier1_support_agent:       { outcomes: ['Resolves common FAQs instantly', 'Escalates with full context', 'Cuts first-response times'] },
-  client_onboarding_guide:   { outcomes: ['Sends polished welcome packets', 'Chases missing forms politely', 'Schedules every kick-off call'] },
-  review_reputation_manager: { outcomes: ['Monitors reviews 24/7', 'Drafts on-brand responses', 'Protects your reputation'] },
-  standup_summarizer:        { outcomes: ['Chases daily updates for you', 'Compiles one clean summary', 'Replaces status meetings'] },
-  meeting_note_taker:        { outcomes: ['Transcribes every meeting', 'Extracts clear action items', 'Assigns owners instantly'] },
-  status_report_generator:   { outcomes: ['Pulls live project data', 'Writes executive summaries', 'Keeps leadership in the loop'] },
-  accounts_receivable_clerk: { outcomes: ['Chases unpaid invoices', 'Drafts payment reminders', 'Protects your cash flow'] },
-  expense_categorizer:       { outcomes: ['Reads scanned receipts', 'Matches tax categories', 'Keeps books audit-ready'] },
-};
+// The card's ticked bullets are the role's KEY FEATURES from the database (master_assistants.key_features
+// — Admin ▸ Assistants ▸ Details), the same list the assistant page and the admin portal show. They used
+// to come from a hardcoded ROLE_META.outcomes list in this file, which the admin portal could not edit,
+// had drifted from the product ("Curates weekly industry news") and had no entry at all for newer roles —
+// so Blog, Campaign Orchestrator and Brand Designer cards showed no bullets.
+// At most three, so every card is the same shape; a "Title: longer explanation" entry shows its title.
+const CARD_FEATURES = 3;
+function cardFeatures(a) {
+  return (Array.isArray(a.keyFeatures) ? a.keyFeatures : [])
+    .map((f) => String(f || '').split(/:\s/)[0].trim())
+    .filter(Boolean)
+    .slice(0, CARD_FEATURES);
+}
 
-// Renders the core-outcomes bullets + connected-app chips for a card
+// Renders the key-feature bullets + connected-app chips for a card
 function metaBlocks(a) {
-  const meta = ROLE_META[a.roleKey];
-  const outcomes = ((meta && meta.outcomes) || []).map(o => `
+  const outcomes = cardFeatures(a).map(o => `
     <li class="flex items-start gap-2 text-sm text-gray-600">
       <svg class="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
       <span>${escHtml(o)}</span>
@@ -467,7 +450,7 @@ function renderCard(a) {
   // Every card opens the detail modal on click (buttons/links excluded). This used to be gated on
   // the role having an entry in the hardcoded copy file, which silently hid the link for most of
   // the catalogue; copy is now a DB field on every row and the modal degrades if it's blank.
-  const detailAttrs = ` data-rolekey="${escHtml(a.roleKey)}" role="button" tabindex="0" aria-haspopup="dialog"`;
+  const detailAttrs = ` data-rolekey="${escHtml(a.roleKey)}" role="link" tabindex="0"`;
   const detailHint = `<span class="text-sm font-semibold text-emerald-700">View Details</span>`;
 
   return `
@@ -763,19 +746,16 @@ function rememberIntendedRole(roleKey) {
   try { localStorage.setItem('bms_intended_role', roleKey); } catch (e) {}
 }
 
-// ── Assistant detail modal (shared component) ────────────────────────────────
-// Same CTA rule as the cards: logged-in users drop into the setup wizard,
-// visitors go to pricing to pick a plan first.
+// ── Assistant detail page ────────────────────────────────────────────────────
+// Each card opens the assistant's own long-form page (assistant.html: overview, how it works,
+// screenshots, an overview video, FAQs). It replaced the small detail pop-up on 2026-10-11 — the
+// pop-up had room for a tagline and four bullets, which is not enough to decide to hire someone.
+// The page applies the same CTA rules as the cards.
 function openAssistantDetail(roleKey) {
   // Opening a specific role's detail is itself a statement of intent — capture it here too, so it
-  // survives whether they convert from the card CTA or from inside the modal.
+  // survives whether they convert from the card CTA or from the page.
   if (!_isLoggedIn) rememberIntendedRole(roleKey);
-  window.AssistantDetailModal.open(roleKey, _isLoggedIn
-    ? { ctaLabel: 'Hire Role', ctaHref: `assistant-setup.html?roleKey=${encodeURIComponent(roleKey)}` }
-    : _waitlistOn
-    // ?role= records this assistant as their area of interest (pre-selected in the waitlist form).
-    ? { ctaLabel: 'Join the waitlist', ctaHref: `/waitlist.html?role=${encodeURIComponent(roleKey)}` }
-    : { ctaLabel: 'Get Started', ctaHref: 'pricing.html' });
+  window.location.href = `assistant.html?role=${encodeURIComponent(roleKey)}`;
 }
 
 // Card click → detail modal (ignore clicks on the card's own buttons/links/toggles)

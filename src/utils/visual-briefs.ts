@@ -318,7 +318,7 @@ export async function startRound(db: Db, args: { orgId: number; brief: BriefRow 
 /** Why AI video cannot be made here, in words — or null when it can. Same two gates as My Content. */
 export async function videoUnavailableReason(db: Db, orgId: number): Promise<string | null> {
     if (!(await orgHasAssistantFeature(db, orgId, 'ai_video_generation'))) return 'AI video is not switched on for this workspace.';
-    if (!tierCanGenerateVideo(await getActiveTierKeyByOrg(db, orgId))) return 'AI video is on the Saver and Employee plans.';
+    if (!tierCanGenerateVideo(await getActiveTierKeyByOrg(db, orgId))) return 'AI video is on the Busywork Buster and Digital Employee plans.';
     return null;
 }
 

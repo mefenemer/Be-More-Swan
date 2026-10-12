@@ -460,8 +460,12 @@ async function _loadSocialHandles() {
 }
 
 function _handleFor(platform) {
-    const v = _socialHandles[(platform.id || '').toLowerCase()];
-    return (typeof v === 'string' && v.trim()) ? v.trim() : '';
+    const key = (platform.id || '').toLowerCase();
+    const v = _socialHandles[key];
+    if (!(typeof v === 'string' && v.trim())) return '';
+    // Business Information saves a full profile URL; the Connect form asks for "@name" on some
+    // platforms and a link on others, so hand it the shape its label asks for.
+    return window.SocialProfileUrl ? (window.SocialProfileUrl.handleForConnect(key, v) || v.trim()) : v.trim();
 }
 
 function _relevantPlatforms() {

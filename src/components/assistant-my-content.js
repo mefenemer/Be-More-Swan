@@ -28,6 +28,17 @@
   const HOST_ID = 'mycontent-host';
   const FRAGMENT_URL = '/my-content.html?v=detail-mycontent';
 
+  // The fragment is a full page; inside the tab the assistant page already supplies the header,
+  // so drop the "My Content" title and the page-level padding, and keep only the actions.
+  function embedTweaks(host) {
+    const title = host.querySelector('#mc-page-title');
+    if (title) title.remove();
+    const header = host.querySelector('#mc-header');
+    if (header) { header.classList.remove('justify-between', 'mb-8'); header.classList.add('justify-end', 'mb-4'); }
+    const page = host.firstElementChild;
+    if (page) { page.classList.remove('py-10', 'max-w-5xl', 'px-4', 'sm:px-6', 'lg:px-8'); page.classList.add('pt-2'); }
+  }
+
   async function show() {
     const host = document.getElementById(HOST_ID);
     if (!host) return;
@@ -42,6 +53,7 @@
       const res = await fetch(FRAGMENT_URL);
       if (!res.ok) throw new Error(`My Content failed to load (${res.status}).`);
       host.innerHTML = await res.text();
+      embedTweaks(host);
       host.dataset.ready = '1';
       if (typeof window.initMyContent === 'function') await window.initMyContent();
     } catch (err) {

@@ -42,6 +42,28 @@ export async function consumeTaskCredit(
     organisationId: number,
     increment = 1,
 ): Promise<TaskCreditResult> {
+    const plan = await resolveTaskLimit(db, organisationId);
+
+    // No plan at all → paywall. Without this, a no-plan org resolves to limit=null and
+    // atomicCapCheck would wave every task through as "unlimited".
+    if (!plan.hasPlan) {
+        return { allowed: false, limitMessage: 'Choose a plan to activate your assistant and start running tasks.' };
+    }
+
+    return atomicCapCheck({
+        organisationId,
+        counterKey: 'taskCount',
+        limit: plan.limit,
+        increment,
+    });
+}
+
+/**
+ * The org's monthly task limit. `hasPlan: false` = no active/past_due plan at all; `limit: null` =
+ * a legitimately uncapped paid tier. Shared with src/utils/work-metering.ts so chat and background
+ * work are held to the same number.
+ */
+export async function resolveTaskLimit(db: Db, organisationId: number): Promise<{ hasPlan: boolean; limit: number | null }> {
     const [plan] = await db
         .select({ monthlyTaskLimit: masterPlans.monthlyTaskLimit, featureOverrides: plans.featureOverrides })
         .from(plans)
@@ -50,18 +72,10 @@ export async function consumeTaskCredit(
         // 'active' sorts before 'past_due', so an active plan always wins.
         .orderBy(asc(plans.status), asc(plans.startedAt))
         .limit(1);
-
-    // No plan at all → paywall. Without this, a no-plan org resolves to limit=null and
-    // atomicCapCheck would wave every task through as "unlimited".
-    if (!plan) {
-        return { allowed: false, limitMessage: 'Choose a plan to activate your assistant and start running tasks.' };
-    }
-
-    return atomicCapCheck({
-        organisationId,
-        counterKey: 'taskCount',
+    if (!plan) return { hasPlan: false, limit: null };
+    return {
+        hasPlan: true,
         // Plan Features: prefer a "new subscribers only" frozen snapshot over the live master limit.
         limit: effectiveLimit(plan.featureOverrides as FeatureOverrides | null, 'monthlyTaskLimit', plan.monthlyTaskLimit ?? null),
-        increment,
-    });
+    };
 }

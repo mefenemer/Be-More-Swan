@@ -1106,6 +1106,15 @@
       ],
       "port": 4503,
       "autoPort": false
+    },
+    {
+      "name": "harness-my-account-audience",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/f6d89d9f-1899-4f0d-8c4c-8548ba405a15/scratchpad/harness/server.mjs"
+      ],
+      "port": 4733,
+      "autoPort": false
     }
   ]
 }

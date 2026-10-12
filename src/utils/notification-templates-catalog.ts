@@ -1178,7 +1178,7 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         // NB: manual/on-command tasks are NOT exempt. atomicCapCheck gates every task, including
         // chat turns (chat-orchestrator.ts → consumeTaskCredit), so the old "manual tasks still
         // work" line promised something the enforcement code refuses.
-        message: 'You\'ve used all {{usage.limit}} tasks included in your {{plan.tier_name}} plan for {{usage.month}}, so your assistants have paused. You are never charged for going over — the limit is a hard stop, not an overage. Upgrade to resume straight away, or your assistants restart automatically on the 1st of next month.',
+        message: 'You\'ve used all {{usage.limit}} tasks included in your {{plan.tier_name}} plan for {{usage.month}}, so your assistants have paused. You are never charged for going over — the limit is a hard stop, not an overage. Upgrade for a higher allowance and they restart overnight, or they restart automatically on the 1st of next month.',
         variables: [
             v('usage.limit', 'Task limit', '2,500'),
             v('plan.tier_name', 'Plan tier name', 'Growth'),

@@ -159,7 +159,7 @@ check('the tab never charges for a source the round will skip, and plays videos'
 check('the chat states the video lock and that it cannot upload', () => {
     const orch = read('netlify/functions/chat-orchestrator.ts');
     const route = span(orch, '    brand_designer: {', 'parseResponse: parseStructuredReply', 'the brand_designer route');
-    assert.match(route, /only on the Saver and Employee plans/);
+    assert.match(route, /only on the Busywork Buster and Digital Employee plans/);
     assert.match(route, /which is where designs they import from Canva land/);
     assert.match(route, /"waitingOn"/);
     assert.match(read('src/components/disruptive-ui-registry.js'), /stock_video: 'Stock videos', ai_video: 'AI video'/);

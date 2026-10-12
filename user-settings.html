@@ -47,22 +47,22 @@
             <div class="p-6 space-y-6">
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
                     <div>
-                        <label for="input-first-name" class="block text-sm font-medium text-gray-700 mb-1">First Name</label>
+                        <label for="input-first-name" data-explain="acct-first-name" class="block text-sm font-medium text-gray-700 mb-1">First Name</label>
                         <input type="text" id="input-first-name" data-field="firstName" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all">
                     </div>
                     <div>
-                        <label for="input-last-name" class="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
+                        <label for="input-last-name" data-explain="acct-last-name" class="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
                         <input type="text" id="input-last-name" data-field="lastName" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all">
                     </div>
                 </div>
 
                 <div>
-                    <label for="input-email" class="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
+                    <label for="input-email" data-explain="acct-email" class="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
                     <input type="email" id="input-email" data-field="email" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all">
                 </div>
 
                 <div>
-                    <label for="input-language" class="block text-sm font-medium text-gray-700 mb-1">Language</label>
+                    <label for="input-language" data-explain="acct-language" class="block text-sm font-medium text-gray-700 mb-1">Language</label>
                     <select id="input-language" data-field="language" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none bg-white cursor-pointer">
                         <option value="en">English</option>
                         <option value="fr">Français</option>
@@ -74,7 +74,7 @@
                 </div>
 
                 <div>
-                    <label for="input-timezone" class="block text-sm font-medium text-gray-700 mb-1">Timezone</label>
+                    <label for="input-timezone" data-explain="acct-timezone" class="block text-sm font-medium text-gray-700 mb-1">Timezone</label>
                     <select id="input-timezone" data-field="timezone" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none bg-white cursor-pointer">
                         <option value="Europe/Athens">Eastern European Time (Athens)</option>
                         <option value="Europe/London">Greenwich Mean Time (London)</option>
@@ -86,7 +86,7 @@
 
                 <!-- Onboarding Wizard Step 3 — Working Hours (US5 AC2) -->
                 <div id="working-hours-card">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Working hours</label>
+                    <label class="block text-sm font-medium text-gray-700 mb-1" data-explain="acct-working-hours">Working hours</label>
                     <p class="text-xs text-gray-500 mb-3">When should your assistant focus on your work? Pick a preset or set your own.</p>
                     <div class="flex flex-wrap gap-2 mb-3">
                         <button type="button" class="btn-secondary wh-preset px-3 py-1.5 text-sm font-semibold rounded-full border transition cursor-pointer" data-preset="standard_9_5" data-start="09:00" data-end="17:00">Standard 9–5</button>
@@ -113,7 +113,7 @@
 
                 <!-- US-AUD-1.1.2: Hourly Rate for ROI Calculation -->
                 <div>
-                    <label for="input-hourly-rate" class="block text-sm font-medium text-gray-700 mb-1">
+                    <label for="input-hourly-rate" data-explain="acct-hourly-rate" class="block text-sm font-medium text-gray-700 mb-1">
                         Your Hourly Rate (£)
                         <span class="ml-1 text-gray-400 font-normal text-xs">— optional, used only to calculate time savings in £</span>
                     </label>
@@ -383,7 +383,7 @@
                     </button>
                 </div>
                 <div id="ai-disclosure-text-section" class="hidden space-y-2">
-                    <label for="ai-disclosure-text" class="block text-sm font-semibold text-gray-700">Footer text</label>
+                    <label for="ai-disclosure-text" data-explain="acct-ai-footer-text" class="block text-sm font-semibold text-gray-700">Footer text</label>
                     <div class="flex gap-2 items-start">
                         <input type="text" id="ai-disclosure-text" maxlength="500"
                             placeholder="Composed with your assistant, our Be More Swan AI Digital Assistant. What's yours called 😉?"

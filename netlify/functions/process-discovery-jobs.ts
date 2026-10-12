@@ -54,6 +54,7 @@ import {
     DEFAULT_MAX_TOKENS_PER_RUN,
 } from '../../src/config/discovery-limits';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { hasTaskCapacity, recordCompletedWork } from '../../src/utils/work-metering';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -322,6 +323,26 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
         let tokensUsed = state?.tokensUsed ?? 0;
         let costGbp = Number(state?.costGbp ?? 0);
         const cursor = (state?.cursor && typeof state.cursor === 'object' ? state.cursor : null) as Cursor | null;
+
+        // ── Monthly task allowance (src/utils/work-metering.ts) ───────────────────
+        // Asked only as a run STARTS (no cursor yet): a run already under way finishes — stopping
+        // halfway would bank half a search and still have spent the paid lookups. Deferred, not
+        // failed, for the same reason as the pause above: the search starts by itself on the 1st,
+        // when the allowance comes back. The run is charged once, when it publishes its results.
+        if ((!cursor || !Array.isArray(cursor.flat)) && !(await hasTaskCapacity(db, job.organisation_id))) {
+            const now = new Date();
+            const nextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 30));
+            await db.update(discoveryJobs)
+                .set({
+                    status: 'queued',
+                    nextRetryAt: nextMonth,
+                    errorMessage: 'Waiting — your monthly task allowance is used up. This search starts by itself on the 1st, when it resets.',
+                    updatedAt: new Date(),
+                })
+                .where(eq(discoveryJobs.id, job.id));
+            console.log(`[process-discovery-jobs] job ${job.job_id} deferred to ${nextMonth.toISOString()}: org ${job.organisation_id} is out of tasks`);
+            return;
+        }
 
         // ── STAGE query_gen: generate queries once, cache, resume next tick ──────
         if (!cursor || !Array.isArray(cursor.flat)) {
@@ -938,6 +959,9 @@ async function publishSignals(db: Db, job: JobRow): Promise<void> {
             .where(and(eq(discoveryJobs.id, job.id), isNull(discoveryJobs.signalsPublishedAt)))
             .returning({ id: discoveryJobs.id, leadsFound: discoveryJobs.leadsFound, cursor: discoveryJobs.cursor });
         if (claimed.length === 0) return; // already published by an earlier tick
+        // One task per finished search run — counted here because this claim happens exactly once
+        // per logical run, however many slices and retries it took (never throws).
+        await recordCompletedWork(db, job.organisation_id, 'lead_search', 1, job.job_id);
 
         const found = claimed[0].leadsFound ?? 0;
         // ⚠️ A ZERO-LEAD RUN USED TO NOTIFY NOBODY — `if (found === 0) return`. The user started a

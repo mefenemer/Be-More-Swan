@@ -101,6 +101,17 @@
             <span class="block text-xs text-gray-400 mt-1">In £. Leave blank if you'd rather not say.</span>
           </label>
 
+          <!-- Won only: a customer may join the Audience under soft opt-in, and this tick is the
+               owner's decision that they should (src/utils/won-customer-audience.ts). Ticked by
+               default; untick for a customer who shouldn't get marketing emails. -->
+          <label class="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3 cursor-pointer" data-oc-audience-wrap hidden>
+            <input type="checkbox" name="addToAudience" checked class="mt-0.5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-600">
+            <span class="text-xs text-gray-700">
+              <span class="block font-bold text-gray-900">Add them to my Audience</span>
+              Your Email Marketing Assistant can then send them emails, and every email lets them unsubscribe. Untick for a customer who shouldn't get marketing.
+            </span>
+          </label>
+
           <p class="hidden text-xs font-semibold" data-oc-status></p>
           <div class="flex items-center justify-end gap-2 pt-1">
             <button type="button" data-oc-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 rounded-lg cursor-pointer">Cancel</button>
@@ -119,6 +130,7 @@
     const submit = overlay.querySelector('[data-oc-submit]');
     const reasonWrap = overlay.querySelector('[data-oc-reason-wrap]');
     const valueWrap = overlay.querySelector('[data-oc-value-wrap]');
+    const audienceWrap = overlay.querySelector('[data-oc-audience-wrap]');
     let chosen = null;
 
     // `hidden` loses to a class that sets display (these wrappers are `block`), so pin
@@ -126,6 +138,7 @@
     const setShown = (el, on) => { el.hidden = !on; el.style.display = on ? 'block' : 'none'; };
     setShown(reasonWrap, false);
     setShown(valueWrap, false);
+    setShown(audienceWrap, false);
 
     overlay.querySelector('[data-oc-outcomes]').addEventListener('click', (e) => {
       const btn = e.target.closest('[data-oc-outcome]');
@@ -136,6 +149,7 @@
       });
       setShown(reasonWrap, RC.needsLossReason(chosen));
       setShown(valueWrap, chosen === 'won');
+      setShown(audienceWrap, chosen === 'won');
       if (!RC.needsLossReason(chosen)) form.elements.lossReason.value = '';
       if (chosen !== 'won') form.elements.valueGbp.value = '';
       submit.disabled = false;
@@ -167,6 +181,7 @@
           ...(lossReason ? { lossReason } : {}),
           ...(chosen === 'won' && rawValue !== '' ? { valueGbp: Number(rawValue) } : {}),
           ...(confirmChange ? { confirmChange: true } : {}),
+          ...(chosen === 'won' && form.elements.addToAudience.checked ? { addToAudience: true } : {}),
         }),
       });
 
@@ -192,9 +207,19 @@
         close();
         const halted = Number(data.sequencesHalted) || 0;
         opts.onSaved?.(data.dealOutcome, { sequencesHalted: halted });
+        // What happened with the Audience, in words — "added" is not the only answer, and a
+        // customer silently NOT added (no address, or they opted out) must not look like one who was.
+        const AUD = {
+          added: ' Added to your Audience.',
+          already: ' Already in your Audience — their status is unchanged.',
+          no_email: ' Not added to your Audience — this lead has no email address.',
+          opted_out: ' Not added to your Audience — they asked not to be contacted.',
+          failed: ' Could not add them to your Audience — try again from the Audience page.',
+        };
         window.showToast?.(
           `Outcome recorded: ${RC.outcomeLabel(chosen)}.`
           + (halted ? ' Follow-up emails stopped.' : '')
+          + (data.audience && AUD[data.audience.result] ? AUD[data.audience.result] : '')
         );
       } catch (err) {
         submit.disabled = false;
