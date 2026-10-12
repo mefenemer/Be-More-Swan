@@ -201,7 +201,7 @@
     "headline": "New customers found, researched and contacted — with your approval.",
     "overview": [
       "The Lead Generation Assistant finds businesses that match your ideal customer, scores each one against what you told it, finds their published contact details and drafts a personal email for each good fit.",
-      "You review every email before it is sent, from your own Gmail or Outlook. Replies come back into the assistant, follow-ups are handled for you, and when a deal is won you can add the new customer to your Audience in one click."
+      "You review every email before it is sent, from your own Gmail or Outlook. Replies come back into the assistant, follow-ups are sent for you if you want them, and when a deal is won you can add the new customer to your Audience in one click."
     ],
     "highlights": [
       "Searches the web for you",
@@ -230,11 +230,15 @@
     "features": [
       {
         "title": "Every lead, explained",
-        "body": "See why each company scored the way it did, with links to the pages the assistant read. Research a company further, correct its details, or move it on to outreach."
+        "body": "See why each company scored the way it did, with links to the pages the assistant read. Research a company further, correct its details, or move it on to outreach.",
+        "image": "/images/assistants/lead_qualifier/leads.jpg",
+        "alt": "Leads scored hot, warm or cold, each with a suggested next step"
       },
       {
         "title": "Personal outreach, not mail merge",
-        "body": "Each email is written for that company, in your sales tone, and waits for your approval. Approving is what sends."
+        "body": "Each email is written for that company, in your sales tone, and waits for your approval. Approving is what sends.",
+        "image": "/images/assistants/lead_qualifier/outreach.jpg",
+        "alt": "A personal outreach email drafted for one café, waiting for approval"
       },
       {
         "title": "Conversations and outcomes in one place",
@@ -244,11 +248,11 @@
     "faqs": [
       {
         "q": "Will it email people without asking me?",
-        "a": "No. Every outreach email waits for your approval. Nothing is sent until you press approve."
+        "a": "No. Every outreach email waits for your approval — approving is what sends it. If you've chosen to chase leads who don't reply, approving also schedules up to three follow-ups, which stop as soon as they reply or you record an outcome."
       },
       {
         "q": "Why don't all leads have an email address?",
-        "a": "It only uses contact details a business publishes — about one in three small businesses do. You can add one yourself, or ask it to look again later."
+        "a": "It only uses contact details it can find for that business — roughly one small business in three has a findable address. You can add one yourself with Edit, or ask it to look again later."
       },
       {
         "q": "What do I need before sending?",
@@ -263,7 +267,7 @@
   "campaign_orchestrator": {
     "headline": "One objective. Every assistant pulling the same way.",
     "overview": [
-      "The Marketing Campaign Assistant turns a single goal — fifty new leads by March, a product launch, a busy season — into coordinated work for your other assistants. It plans the campaign, writes briefs for each assistant, and tracks what comes back.",
+      "The Marketing Campaign Orchestrator turns a single goal — fifty new leads by March, a product launch, a busy season — into coordinated work for your other assistants. It plans the campaign, writes briefs for each assistant, and tracks what comes back.",
       "Every piece of work still comes to you for approval, and you decide how much of your monthly allowance a campaign may use. It explains each decision it wants to make, with the evidence behind it, before acting."
     ],
     "highlights": [
@@ -293,7 +297,9 @@
     "features": [
       {
         "title": "A plan you can read",
-        "body": "Every order to another assistant shows what was asked, what it cost and what came back."
+        "body": "Every order to another assistant shows what was asked, what it cost and what came back.",
+        "image": "/images/assistants/campaign_orchestrator/campaigns.jpg",
+        "alt": "Two running campaigns with progress against their targets and task budgets"
       },
       {
         "title": "Decisions with the evidence attached",
@@ -348,7 +354,9 @@
     "features": [
       {
         "title": "Options from every source",
-        "body": "Free stock photos and videos, branded graphics in your own colours and font, and AI images or video when you want something unique."
+        "body": "Free stock photos and videos, branded graphics in your own colours and font, and AI images or video when you want something unique.",
+        "image": "/images/assistants/brand_designer/briefs.jpg",
+        "alt": "A brief with four branded options to choose from"
       },
       {
         "title": "Your brand rules, followed",
@@ -362,7 +370,7 @@
     "faqs": [
       {
         "q": "Does it cost credits?",
-        "a": "Stock pictures and branded graphics are free. AI images and video use AI media credits."
+        "a": "Stock photos, stock videos and branded graphics are free. AI images use 1 AI media credit for a round of four, and an AI video clip uses 5 — AI video is on the Busywork Buster and Digital Employee plans."
       },
       {
         "q": "Can I use my own photos?",

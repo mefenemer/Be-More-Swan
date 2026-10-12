@@ -31,7 +31,14 @@ import {
     REMEDIES, applyFix, deterministicFix, specialCategoryProposal, suggestionBrief, type Proposal,
 } from '../../src/utils/go-live-fixes';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
-import { parseModelJson } from '../../src/utils/model-json';
+import { parseModelJson } from '../../src/utils/model-json';import { randomUUID } from 'node:crypto';
+import { sql } from 'drizzle-orm';
+import { normaliseShowcase, SHOWCASE_MEDIA_PREFIX, showcaseMediaUrl } from '../../src/utils/assistant-showcase';
+import { putR2Object } from '../../src/lib/media-persist';
+
+
+const pgCode = (err: unknown) => (err as { code?: string; cause?: { code?: string } })?.code
+    ?? (err as { cause?: { code?: string } })?.cause?.code;
 
 const strList = (v: unknown) => (Array.isArray(v) ? v.map((x) => String(x ?? '').trim()).filter(Boolean) : []);
 
@@ -95,6 +102,59 @@ export default withLambda(async (event) => {
         const knownRoleKeys = (await db.select({ k: masterAssistants.roleKey }).from(masterAssistants)).map((r) => r.k);
         const checks = await checksFor(db, row, knownRoleKeys);
         const status = statusOf(row);
+
+        // ── Website page (assistant.html) — src/utils/assistant-showcase.ts ──────────────────────
+        // Its own table, not a master_assistants column: see db/z-assistant-showcases.sql.
+        if (event.httpMethod === 'GET' && q.showcase === '1') {
+            try {
+                const rows = await db.execute<{ content: unknown; updated_at: string }>(
+                    sql`SELECT content, updated_at FROM assistant_showcases WHERE role_key = ${row.roleKey} LIMIT 1`);
+                const r0 = (rows as unknown as Array<{ content: unknown; updated_at: string }>)[0];
+                return json(200, { roleKey: row.roleKey, showcase: r0?.content ?? null, updatedAt: r0?.updated_at ?? null });
+            } catch (err) {
+                if (pgCode(err) === '42P01') return json(200, { roleKey: row.roleKey, showcase: null, needsSetup: true });
+                throw err;
+            }
+        }
+
+        if (event.httpMethod === 'POST' && q.action === 'showcase') {
+            let body: { showcase?: unknown } = {};
+            try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON.' }); }
+            const res = normaliseShowcase(body.showcase);
+            if (!res.ok) return json(400, { error: res.error });
+            try {
+                await db.execute(sql`
+                    INSERT INTO assistant_showcases (role_key, content, updated_at)
+                    VALUES (${row.roleKey}, ${JSON.stringify(res.showcase)}::jsonb, now())
+                    ON CONFLICT (role_key) DO UPDATE SET content = EXCLUDED.content, updated_at = now()`);
+            } catch (err) {
+                if (pgCode(err) === '42P01') return json(409, { error: 'The website page table is not set up here yet — apply db/z-assistant-showcases.sql first.' });
+                throw err;
+            }
+            await insertAdminAuditLog({
+                adminId, action: 'assistant_showcase_update', targetType: 'master_assistant', targetId: id,
+                previousState: {}, newState: { roleKey: row.roleKey, features: res.showcase.features.length, faqs: res.showcase.faqs.length },
+                reason: 'Website page edited', ipAddress: getAdminIp(event.headers as Record<string, string | undefined>),
+                userAgent: event.headers['user-agent'], metadata: { assistantName: row.name, roleKey: row.roleKey },
+            });
+            return json(200, { showcase: res.showcase });
+        }
+
+        // A screenshot for the website page. Stored in R2 under showcase/<roleKey>/ and served by
+        // showcase-media.ts. Sent as base64 in JSON: images are small and this keeps it one request.
+        if (event.httpMethod === 'POST' && q.action === 'upload-image') {
+            let body: { contentType?: unknown; dataBase64?: unknown } = {};
+            try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON.' }); }
+            const EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+            const ext = EXT[String(body.contentType || '')];
+            if (!ext) return json(400, { error: 'Upload a PNG, JPG or WebP image.' });
+            const bytes = Buffer.from(String(body.dataBase64 || ''), 'base64');
+            if (!bytes.length) return json(400, { error: 'The image was empty.' });
+            if (bytes.length > 4 * 1024 * 1024) return json(413, { error: 'Images must be under 4 MB.' });
+            const key = `${SHOWCASE_MEDIA_PREFIX}${row.roleKey}/${Date.now().toString(36)}-${randomUUID().slice(0, 8)}.${ext}`;
+            await putR2Object({ key, bytes, contentType: String(body.contentType) });
+            return json(200, { url: showcaseMediaUrl(key) });
+        }
 
         if (event.httpMethod === 'GET') {
             const [[wl], [hired]] = await Promise.all([

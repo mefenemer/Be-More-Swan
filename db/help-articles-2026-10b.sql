@@ -279,9 +279,9 @@ Your plan comes with two allowances. They measure different things, so they're k
 |-----------|-------------------|---------------------------|
 | **Social Media Assistant** | Each drafted post (once, however many platforms it goes to), each quality review, rewrite or suggestion you apply, copying a post to another platform | AI images (1 credit), AI video (5), AI music (5, or 3 if you share the track) |
 | **Blog Writing Assistant** | Each drafted article | AI images for an article |
-| **Email Marketing Assistant** | Each drafted email — on its own schedule, or when you ask it to draft or rewrite one in Email Studio — and each email campaign written for a Campaign Assistant order | — |
+| **Email Marketing Assistant** | Each drafted email — on its own schedule, or when you ask it to draft or rewrite one in Email Studio — and each email campaign written for a Marketing Campaign Orchestrator order | — |
 | **Lead Generation Assistant** | Each finished lead search, however many leads it finds | — |
-| **Marketing Campaign Assistant** | Nothing itself — the posts, articles, searches and emails it asks your other assistants for are counted where they're made | — |
+| **Marketing Campaign Orchestrator** | Nothing itself — the posts, articles, searches and emails it asks your other assistants for are counted where they're made | — |
 | **Any assistant, in chat** | Each message you send | — |
 
 ## What doesn't use either

@@ -35,6 +35,7 @@ export type AdminAction =
     | 'emergency_token_revocation'
     | 'regulator_notification_submitted'
     | 'assistant_state_change'
+    | 'assistant_showcase_update'
     | 'record_delete'
     | 'retry_failed_post'
     | 'sandbox_purge'

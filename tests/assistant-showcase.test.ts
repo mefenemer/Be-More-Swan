@@ -49,4 +49,43 @@ check('the library opens the page, not the old pop-up', () => {
 check('the explainer is NOT in the Lambda-deployed Remotion bundle', () => {
     assert.ok(!/AssistantExplainer/.test(read('remotion/Root.tsx')));
 });
+// ── Admin editing (Admin ▸ Assistants ▸ Website page) ─────────────────────────
+import { normaliseShowcase, cleanImageUrl, SHOWCASE_KEY_RE } from '../src/utils/assistant-showcase';
+
+check('the admin save refuses unsafe screenshot links rather than storing them', () => {
+    for (const bad of ['javascript:alert(1)', 'data:image/png;base64,AAAA', '//evil.example/x.png', 'http://insecure.example/x.png']) {
+        assert.strictEqual(cleanImageUrl(bad), '', bad);
+    }
+    const r = normaliseShowcase({ headline: 'H', features: [{ title: 'T', body: 'B', image: 'javascript:alert(1)' }] });
+    assert.ok(!r.ok, 'a refused link must fail the save with a reason, not vanish silently');
+});
+check('our own paths, uploads and https links are kept', () => {
+    for (const ok of ['/images/assistants/x.jpg', '/.netlify/functions/showcase-media?key=showcase%2Fa%2Fb.png', 'https://cdn.example.com/a.png']) {
+        assert.strictEqual(cleanImageUrl(ok), ok, ok);
+    }
+});
+check('a headline is required, and lists are trimmed to their limits', () => {
+    assert.ok(!normaliseShowcase({ headline: '  ' }).ok);
+    const r = normaliseShowcase({ headline: 'H', highlights: Array(20).fill('x'), faqs: [{ q: 'Q', a: '' }, { q: 'Q2', a: 'A2' }] });
+    assert.ok(r.ok);
+    if (r.ok) { assert.strictEqual(r.showcase.highlights.length, 6); assert.strictEqual(r.showcase.faqs.length, 1, 'an unanswered question is dropped'); }
+});
+check('every seeded showcase passes the same validation the admin save uses', () => {
+    for (const [role, sc] of Object.entries<any>(DATA)) {
+        if (role.startsWith('_')) continue;
+        const r = normaliseShowcase(sc);
+        assert.ok(r.ok, `${role}: ${(r as any).error}`);
+    }
+});
+check('the media endpoint only serves keys of the exact shape the upload writes', () => {
+    assert.ok(SHOWCASE_KEY_RE.test('showcase/lead_qualifier/lzq1abc-1a2b3c4d.png'));
+    for (const bad of ['org-5/assets/secret.png', 'showcase/../org-5/a.png', 'showcase/x/../../a.png']) assert.ok(!SHOWCASE_KEY_RE.test(bad), bad);
+});
+check('every assistant with a page has at least one real screenshot', () => {
+    for (const [role, sc] of Object.entries<any>(DATA)) {
+        if (role.startsWith('_')) continue;
+        assert.ok((sc.features || []).some((f: any) => f.image), `${role} has no screenshot`);
+    }
+});
+
 console.log(`\n${passed} checks passed.`);
