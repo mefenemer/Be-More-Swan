@@ -159,9 +159,10 @@ const DEFS: Def[] = [
       values: { saver: CHECK, buster: CHECK, employee: CHECK } },
     // 'early_access_roles' withdrawn 2026-10-12: early access is earned by completed tasks on any plan
     // (hire-assistant.ts), not sold by tier. db/z-plan-copy-matches-code.sql switches the row off.
+    // Every plan since 2026-10-12: anyone can vote on the Board (db/z-plan-copy-matches-code.sql).
     { key: 'roadmap_voting', label: 'Roadmap Influence & Voting', description: 'Vote on which features and assistant types we prioritise building next',
       category: 'Continuous Evolution', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
-      values: { saver: DASH, buster: DASH, employee: CHECK } },
+      values: { saver: CHECK, buster: CHECK, employee: CHECK } },
     { key: 'vip_engineering', label: '➕ Premium Add-On: VIP Engineering Co-Creation', description: 'Commission our core engineering team to architect and build completely bespoke Digital Assistants exclusive to your private organisation. (Scoped and billed per project)',
       category: 'Continuous Evolution', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: DASH, buster: DASH, employee: DASH } },
