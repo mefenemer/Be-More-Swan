@@ -112,7 +112,7 @@ const MIGRATED: RoleContent[] = [
         keyFeatures: [
             'Automated Lead Scoring',
             'Personalised Outreach Drafting',
-            'Handoff to CRM Enricher for missing data',
+            'You Approve Every Send',  // was 'Handoff to CRM Enricher for missing data' — that role is not live; see db/z-copy-lead-features.sql
         ],
         integrations: ['HubSpot', 'Salesforce', 'LinkedIn', 'Gmail'],
     },
