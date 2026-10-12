@@ -130,9 +130,9 @@ const DEFS: Def[] = [
     { key: 'workspace_collaboration', label: 'Workspace Collaboration', description: 'Invite team members, managers, or clients to view and approve outputs',
       category: 'Team & Advanced Features', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: DASH, buster: DASH, employee: CHECK } },
-    { key: 'advanced_tool_vault', label: 'Advanced Tool Vault', description: 'Access to premium and specialist third-party integrations beyond the standard set',
-      category: 'Team & Advanced Features', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
-      values: { saver: DASH, buster: DASH, employee: CHECK } },
+    // 'advanced_tool_vault' ("Advanced Tool Vault") withdrawn 2026-10-12: no integration was ever
+    // marked premium, so the row sold nothing. db/z-plan-tool-vault-withdrawn.sql sets its
+    // plan_features.is_enabled = false. Restore both if a premium integration tier ships.
     { key: 'internal_systems_access', label: 'Custom Systems Integration', description: 'Built to order: we connect your assistants to your private databases and legacy business software',
       category: 'Team & Advanced Features', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: DASH, buster: DASH, employee: DASH } },
