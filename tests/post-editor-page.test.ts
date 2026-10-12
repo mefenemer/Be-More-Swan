@@ -27,7 +27,9 @@ check('an empty post is not a failed review', () => {
 check('the editor is laid out as a page beside the sidebar and under the header', () => {
     assert.match(W, /<div id="post-review-modal" class="pr-page /);
     assert.match(W, /#post-review-modal\.pr-page \{ top: 64px; left: 0;/);
-    assert.match(W, /@media \(min-width: 768px\) \{ #post-review-modal\.pr-page \{ left: 16rem; \} \}/);
+    // Beside the side menu at whatever width it is: 16rem, or 4.5rem when collapsed to icons.
+    assert.match(W, /@media \(min-width: 768px\) \{ #post-review-modal\.pr-page \{ left: var\(--sidebar-w, 16rem\); \} \}/);
+    assert.match(W, /html\.sb-collapsed \{ --sidebar-w: 4\.5rem; \}/);
 });
 
 check('it has breadcrumbs back, and leaving for another page closes it', () => {

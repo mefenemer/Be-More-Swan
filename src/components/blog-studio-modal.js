@@ -163,10 +163,11 @@
     + '-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);display:none;overflow-y:auto;}'
     + '#bms-blog-backdrop.bs-open{display:block;}'
     // PAGE mode inside the workspace (2026-10-02) — like the Email Studio and the social post editor:
-    // under the 64px header, beside the 16rem sidebar (md and up), full size, no backdrop, breadcrumbs.
+    // under the 64px header, beside the sidebar (md and up; --sidebar-w, set by workspace.html, is
+    // 16rem or 4.5rem when collapsed), full size, no backdrop, breadcrumbs.
     // The standalone blog-studio.html has no header or sidebar, so it keeps the pop-up look.
     + '#bms-blog-backdrop.bs-page{top:64px;left:0;background:#f9fafb;-webkit-backdrop-filter:none;backdrop-filter:none;}'
-    + '@media (min-width:768px){#bms-blog-backdrop.bs-page{left:16rem;}}'
+    + '@media (min-width:768px){#bms-blog-backdrop.bs-page{left:var(--sidebar-w,16rem);}}'
     + '#bms-blog-backdrop.bs-page .bms-blog-panel{max-width:none;margin:0;border-radius:0;box-shadow:none;min-height:100%;}'
     + '.bs-crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:14px;color:#6b7280;margin-bottom:6px;}'
     + '.bs-crumbs button{background:none;border:0;padding:0;font:inherit;font-weight:600;color:#6b7280;cursor:pointer;}'

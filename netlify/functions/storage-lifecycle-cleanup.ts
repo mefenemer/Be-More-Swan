@@ -14,9 +14,9 @@
 import { isSharedLibraryKey } from '../../src/lib/music-library';
 import { Handler } from '@netlify/functions';
 import { S3Client, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
-import { eq, and, lt, or, isNull, sql } from 'drizzle-orm';
+import { eq, and, lt, or, isNull, isNotNull, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { workspaceAssets, storageUsage, adminAuditLog } from '../../db/schema';
+import { workspaceAssets, storageUsage, adminAuditLog, dataExportRequests } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const R2_ENDPOINT = process.env.R2_ENDPOINT;
@@ -109,6 +109,28 @@ export default withLambda(async () => {
         summary[orgId].reclaimedBytes += row.file_size_bytes ?? 0;
     }
 
+    // Data exports (data-export-background.ts, admin-sar-export.ts): once the link has expired the
+    // file has no reason to exist — the privacy policy says export links last 24 hours. Delete the R2
+    // object (`r2:<key>`) or the inline copy held in download_url, and mark the request expired.
+    const expiredExports = await db
+        .select({ id: dataExportRequests.id, downloadUrl: dataExportRequests.downloadUrl })
+        .from(dataExportRequests)
+        .where(and(lt(dataExportRequests.expiresAt, now), isNotNull(dataExportRequests.downloadUrl)))
+        .limit(500);
+    let exportsPurged = 0;
+    for (const row of expiredExports) {
+        const stored = row.downloadUrl || '';
+        if (stored.startsWith('r2:') && !(await deleteFromR2(s3, stored.slice(3)))) {
+            console.warn(`[storage-lifecycle-cleanup] Failed to delete export ${row.id} from R2 — will retry next run`);
+            continue;
+        }
+        await db.update(dataExportRequests)
+            .set({ downloadUrl: null, status: 'expired' })
+            .where(eq(dataExportRequests.id, row.id));
+        exportsPurged++;
+    }
+    if (exportsPurged) console.log(`[storage-lifecycle-cleanup] purged ${exportsPurged} expired data export(s)`);
+
     // AC9: log summary to admin_audit_log
     if (Object.keys(summary).length > 0) {
         await db.insert(adminAuditLog).values({
@@ -125,5 +147,5 @@ export default withLambda(async () => {
     const totalBytes   = Object.values(summary).reduce((s, o) => s + o.reclaimedBytes, 0);
     console.log(`[storage-lifecycle-cleanup] deleted=${totalDeleted} reclaimedBytes=${totalBytes}`);
 
-    return { statusCode: 200, body: JSON.stringify({ deleted: totalDeleted, reclaimedBytes: totalBytes }) };
+    return { statusCode: 200, body: JSON.stringify({ deleted: totalDeleted, reclaimedBytes: totalBytes, exportsPurged }) };
 });

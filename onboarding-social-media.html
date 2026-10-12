@@ -2460,19 +2460,18 @@
     <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-5 max-h-48 overflow-y-auto text-sm text-gray-700 leading-relaxed">
       <p class="font-bold mb-2">Data Processing Agreement — Summary</p>
       <p class="mb-2">By accepting this agreement, your organisation (the Data Controller) authorises Be More Swan (the Data Processor) to process personal data on your behalf solely to provide the Be More Swan platform services, in accordance with your instructions.</p>
-      <p class="mb-2">Be More Swan commits to: (1) process data only on documented instructions; (2) ensure confidentiality; (3) implement appropriate technical and organisational security measures; (4) assist with data subject rights requests; (5) delete or return all personal data at contract end; (6) provide audit assistance.</p>
-      <p>Sub-processors are listed in our Privacy Policy. Full agreement available at <a href="/privacy.html" target="_blank" class="text-emerald-700 underline">bemoreswan.com/privacy</a>.</p>
+      <p>We commit to: keep it confidential and secure; use only the sub-processors on our <a href="/trust.html#sub-processors" target="_blank" class="text-emerald-700 underline">published list</a>; help you answer people's data requests; tell you promptly about any breach; return or delete your data when you leave; and support your audits.</p>
     </div>
     <label class="flex items-start gap-3 mb-6 cursor-pointer">
       <input type="checkbox" id="dpa-onboarding-checkbox" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500" onchange="document.getElementById('btn-dpa-onboarding-accept').disabled=!this.checked">
-      <span class="text-sm text-gray-700">I have read and agree to the <a href="/privacy.html#dpa" target="_blank" class="text-emerald-700 underline font-medium">Data Processing Agreement</a> on behalf of my organisation.</span>
+      <span class="text-sm text-gray-700">I have read and agree to the <a href="/dpa.html" target="_blank" class="text-emerald-700 underline font-medium">Data Processing Agreement</a> (v1.1) on behalf of my organisation.</span>
     </label>
     <button id="btn-dpa-onboarding-accept" onclick="acceptDpaAndRetry()"
       class="btn-golive w-full py-3 font-bold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed"
       disabled>
       Accept DPA &amp; Activate Assistant
     </button>
-    <p class="text-xs text-gray-400 text-center mt-3">Your acceptance is recorded with timestamp and IP address as legally admissible evidence under UK GDPR Article 28(9).</p>
+    <p class="text-xs text-gray-400 text-center mt-3">Your acceptance is recorded with timestamp and IP address as evidence of the agreement.</p>
   </div>
 </div>
 
@@ -2482,22 +2481,22 @@ async function acceptDpaAndRetry() {
   btn.disabled = true;
   btn.textContent = 'Recording acceptance…';
   try {
-    const res = await fetch('/.netlify/functions/accept-dpa', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ version: '1.0' }),
-    });
-    if (!res.ok) throw new Error('Failed');
+    // The server records the CURRENT version — the client never says which one was accepted.
+    const res = await fetch('/.netlify/functions/accept-dpa', { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to record DPA acceptance. Please try again.');
+    }
     // Hide modal and re-trigger submission
     document.getElementById('modal-dpa-onboarding').classList.add('hidden');
     document.getElementById('modal-dpa-onboarding').classList.remove('flex');
     document.getElementById('setup-loading-view').classList.remove('hidden');
     document.getElementById('setup-initial-view').classList.add('hidden');
     if (typeof window.submitToBackend === 'function') window.submitToBackend();
-  } catch {
+  } catch (e) {
     btn.disabled = false;
     btn.textContent = 'Accept DPA & Activate Assistant';
-    window.showToast?.('Failed to record DPA acceptance. Please try again.', { icon: '⚠️' });
+    window.showToast?.(e.message || 'Failed to record DPA acceptance. Please try again.', { icon: '⚠️' });
   }
 }
 </script>

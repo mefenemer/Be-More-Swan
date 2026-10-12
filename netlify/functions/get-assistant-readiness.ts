@@ -15,7 +15,7 @@ import { resolveLiveSocialPlatforms } from '../../src/utils/live-social-connecti
 import { DEAD_CONNECTION_STATUSES } from '../../src/config/connection-status';
 import { checkProhibitedUsePatterns } from '../../src/utils/tos-gate';
 import { CURRENT_TOS_VERSION } from './accept-tos';
-import { CURRENT_DPA_VERSION } from './accept-dpa';
+import { dpaAcceptedVersionClause } from './accept-dpa';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 import { liveRoleLabel } from '../../src/utils/live-role-label';
@@ -161,7 +161,7 @@ export async function computeAssistantReadiness(db: Db, orgId: number, assistant
                 : Promise.resolve([] as { id: number }[]),
             db.select({ id: dpaAcceptances.id }).from(dpaAcceptances).where(and(
                 eq(dpaAcceptances.organisationId, orgId),
-                eq(dpaAcceptances.version, CURRENT_DPA_VERSION),
+                dpaAcceptedVersionClause(),
             )).limit(1),
         ]);
         const tosDone = tosRow.length > 0 || provisioned;

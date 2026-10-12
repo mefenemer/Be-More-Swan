@@ -17,7 +17,7 @@ import { createNotification } from '../../src/utils/notify';
 import { sendEmail, sendTemplatedEmail } from '../../src/utils/email';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { requireTosAcceptance, checkProhibitedUsePatterns } from '../../src/utils/tos-gate';
-import { CURRENT_DPA_VERSION } from './accept-dpa';
+import { dpaAcceptedVersionClause } from './accept-dpa';
 import { isEuCountry } from '../../src/config/compliance';
 import type { ProvisioningBlockReason } from '../../src/utils/assistant-lifecycle';
 import Stripe from 'stripe';
@@ -133,14 +133,14 @@ export default withLambda(async (event) => {
             }
         }
 
-        // US-GDPR-1.1.1: Block activation if organisation has not accepted the current DPA version
+        // US-GDPR-1.1.1: Block activation if organisation has not accepted the DPA (any version still in DPA_VERSIONS_STILL_VALID)
         if (preCheck?.organisationId) {
             const [dpa] = await db
                 .select({ id: dpaAcceptances.id })
                 .from(dpaAcceptances)
                 .where(and(
                     eq(dpaAcceptances.organisationId, preCheck.organisationId),
-                    eq(dpaAcceptances.version, CURRENT_DPA_VERSION),
+                    dpaAcceptedVersionClause(),
                 ))
                 .limit(1);
 

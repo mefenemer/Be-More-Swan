@@ -165,7 +165,7 @@
             instructions and for no other purpose. For your own account, login and billing data, and for running and
             securing the platform itself, we are a <strong>Data Controller</strong>. A Data Processing Agreement covering
             the processor role is presented to you in-product when you set up your organisation, and your acceptance is
-            recorded; you can re-read it any time from your account settings. If you need a countersigned copy for your
+            recorded; you can <a href="/dpa.html" class="underline hover:text-emerald-700">read it here</a> at any time. If you need a countersigned copy for your
             own records, use the <a href="#dpa-request" class="underline hover:text-emerald-700">request form below</a>.
             Our full <a href="/privacy.html" class="underline hover:text-emerald-700">Privacy Policy</a> is available at <a href="/privacy.html" class="underline hover:text-emerald-700">/privacy.html</a>.
             For erasure requests, please email <a href="mailto:hello@bemoreswan.com" class="underline hover:text-emerald-700">hello@bemoreswan.com</a>.
@@ -176,26 +176,27 @@
     <section class="mb-10">
         <h2 class="text-xl font-bold text-gray-900 mb-3">Data Residency</h2>
         <p class="text-gray-700 text-sm leading-relaxed">
-            Your primary workspace data is <strong>stored</strong> in the <strong>United Kingdom / European Economic Area</strong> — our
-            managed PostgreSQL database sits in an EU region, video rendering runs in AWS <code class="text-xs bg-gray-100 px-1 py-0.5 rounded">eu-west-2</code> (London),
-            and Netlify serves the application through UK/EU edge nodes. Uploaded and generated media is held in
+            Your primary workspace data is <strong>stored</strong> in the <strong>United Kingdom</strong> — our
+            managed PostgreSQL database and our serverless functions are in London (<code class="text-xs bg-gray-100 px-1 py-0.5 rounded">eu-west-2</code>), video rendering runs in AWS London,
+            and Netlify serves the pages themselves from its global edge network. Uploaded and generated media is held in
             Cloudflare R2 object storage, which is globally distributed rather than pinned to a single region.
             Being straight with you: some <strong>processing</strong> does happen in the United States, because the AI model
             providers, our payment processor and our transactional email provider are US-based. Every one of those transfers
-            runs under adequate safeguards as required by UK GDPR Article 46 — Standard Contractual Clauses, or the UK–US Data
-            Privacy Framework in Stripe's case — supported by a documented Transfer Impact Assessment and minimisation of the
+            runs under the safeguards UK GDPR Chapter V requires — the UK International Data Transfer Agreement or the UK
+            Addendum to the EU Standard Contractual Clauses, or the UK Extension to the Data Privacy Framework in Stripe's case — supported by a documented Transfer Impact Assessment and minimisation of the
             data sent to model APIs. The table below names each provider and where it sits.
         </p>
     </section>
 
-    <!-- Section: Sub-Processor List -->
-    <section class="mb-10">
+    <!-- Section: Sub-Processor List — THE list the DPA (get-dpa-content.ts clause 5) points at; keep
+         privacy.html's table identical. -->
+    <section class="mb-10" id="sub-processors">
         <h2 class="text-xl font-bold text-gray-900 mb-3">Sub-Processors</h2>
         <p class="text-gray-600 text-sm mb-4">
             Be More Swan uses the following third-party sub-processors to deliver its services. Each is assessed
-            for GDPR compliance before we adopt it, and we rely on the provider's data processing terms for every
+            for UK GDPR compliance before we adopt it, and we rely on the provider's data processing terms for every
             transfer of personal data. Where a row is marked "copy on request", email us and we will send the
-            current agreement. Several are used only if you choose to connect that service.
+            current agreement.
         </p>
         <div class="overflow-x-auto rounded-xl border border-gray-200">
             <table class="w-full text-sm text-left">
@@ -211,92 +212,80 @@
                     <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3 font-medium text-gray-800">Anthropic</td>
                         <td class="px-4 py-3 text-gray-600">AI language model inference — the primary model behind your assistants' drafting, chat and review</td>
-                        <td class="px-4 py-3 text-gray-600">USA (SCCs applied)</td>
+                        <td class="px-4 py-3 text-gray-600">US</td>
                         <td class="px-4 py-3"><a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">anthropic.com/legal/privacy</a></td>
                     </tr>
                     <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3 font-medium text-gray-800">OpenAI</td>
                         <td class="px-4 py-3 text-gray-600">Content moderation screening and product tour narration</td>
-                        <td class="px-4 py-3 text-gray-600">USA (SCCs applied)</td>
+                        <td class="px-4 py-3 text-gray-600">US</td>
                         <td class="px-4 py-3"><a href="https://openai.com/enterprise-privacy" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">openai.com/enterprise-privacy</a></td>
                     </tr>
                     <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3 font-medium text-gray-800">Voyage AI</td>
                         <td class="px-4 py-3 text-gray-600">Embedding of knowledge-base content so assistants can search it</td>
-                        <td class="px-4 py-3 text-gray-600">USA (SCCs applied)</td>
+                        <td class="px-4 py-3 text-gray-600">US</td>
                         <td class="px-4 py-3 text-gray-600">Copy on request</td>
                     </tr>
                     <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3 font-medium text-gray-800">fal.ai</td>
                         <td class="px-4 py-3 text-gray-600">AI image and video generation from your prompts</td>
-                        <td class="px-4 py-3 text-gray-600">USA (SCCs applied)</td>
+                        <td class="px-4 py-3 text-gray-600">US</td>
                         <td class="px-4 py-3 text-gray-600">Copy on request</td>
                     </tr>
                     <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3 font-medium text-gray-800">Stability AI</td>
                         <td class="px-4 py-3 text-gray-600">AI music generation from a text description of the track</td>
-                        <td class="px-4 py-3 text-gray-600">UK / USA (SCCs applied)</td>
+                        <td class="px-4 py-3 text-gray-600">UK / US</td>
                         <td class="px-4 py-3 text-gray-600">Copy on request</td>
-                    </tr>
-                    <tr class="hover:bg-gray-50">
-                        <td class="px-4 py-3 font-medium text-gray-800">Stripe</td>
-                        <td class="px-4 py-3 text-gray-600">Payment processing &amp; billing</td>
-                        <td class="px-4 py-3 text-gray-600">USA / UK (SCCs applied)</td>
-                        <td class="px-4 py-3"><a href="https://stripe.com/gb/privacy" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">stripe.com/gb/privacy</a></td>
-                    </tr>
-                    <tr class="hover:bg-gray-50">
-                        <td class="px-4 py-3 font-medium text-gray-800">Resend</td>
-                        <td class="px-4 py-3 text-gray-600">Transactional email delivery</td>
-                        <td class="px-4 py-3 text-gray-600">USA (SCCs applied)</td>
-                        <td class="px-4 py-3"><a href="https://resend.com/legal/privacy-policy" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">resend.com/legal/privacy-policy</a></td>
-                    </tr>
-                    <tr class="hover:bg-gray-50">
-                        <td class="px-4 py-3 font-medium text-gray-800">Netlify</td>
-                        <td class="px-4 py-3 text-gray-600">Hosting, serverless functions, CDN</td>
-                        <td class="px-4 py-3 text-gray-600">USA / EU edge nodes</td>
-                        <td class="px-4 py-3"><a href="https://www.netlify.com/gdpr-ccpa" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">netlify.com/gdpr-ccpa</a></td>
                     </tr>
                     <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3 font-medium text-gray-800">Neon</td>
                         <td class="px-4 py-3 text-gray-600">Managed PostgreSQL — where your workspace data is stored</td>
-                        <td class="px-4 py-3 text-gray-600">EU (eu-west) — no US transfer for stored data</td>
+                        <td class="px-4 py-3 text-gray-600">UK (London)</td>
                         <td class="px-4 py-3 text-gray-600">Copy on request</td>
                     </tr>
                     <tr class="hover:bg-gray-50">
-                        <td class="px-4 py-3 font-medium text-gray-800">Cloudflare</td>
-                        <td class="px-4 py-3 text-gray-600">R2 object storage — uploaded files and generated media</td>
-                        <td class="px-4 py-3 text-gray-600">Global distributed network</td>
+                        <td class="px-4 py-3 font-medium text-gray-800">Cloudflare R2</td>
+                        <td class="px-4 py-3 text-gray-600">Object storage — uploaded files and generated media</td>
+                        <td class="px-4 py-3 text-gray-600">Global (Cloudflare network)</td>
                         <td class="px-4 py-3"><a href="https://www.cloudflare.com/trust-hub/gdpr/" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">cloudflare.com/trust-hub/gdpr</a></td>
+                    </tr>
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 font-medium text-gray-800">Netlify</td>
+                        <td class="px-4 py-3 text-gray-600">Hosting, serverless functions, scheduled jobs and CDN</td>
+                        <td class="px-4 py-3 text-gray-600">UK (London) for functions; global edge network; US company</td>
+                        <td class="px-4 py-3"><a href="https://www.netlify.com/gdpr-ccpa" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">netlify.com/gdpr-ccpa</a></td>
                     </tr>
                     <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3 font-medium text-gray-800">Amazon Web Services</td>
                         <td class="px-4 py-3 text-gray-600">Lambda video rendering for post and Short overlays</td>
-                        <td class="px-4 py-3 text-gray-600">UK (eu-west-2, London)</td>
+                        <td class="px-4 py-3 text-gray-600">UK (London)</td>
                         <td class="px-4 py-3"><a href="https://aws.amazon.com/compliance/gdpr-center/" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">aws.amazon.com/compliance/gdpr-center</a></td>
                     </tr>
                     <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 font-medium text-gray-800">Stripe</td>
+                        <td class="px-4 py-3 text-gray-600">Payment processing &amp; billing</td>
+                        <td class="px-4 py-3 text-gray-600">UK / US</td>
+                        <td class="px-4 py-3"><a href="https://stripe.com/gb/privacy" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">stripe.com/gb/privacy</a></td>
+                    </tr>
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 font-medium text-gray-800">Resend</td>
+                        <td class="px-4 py-3 text-gray-600">Transactional and notification email delivery</td>
+                        <td class="px-4 py-3 text-gray-600">US</td>
+                        <td class="px-4 py-3"><a href="https://resend.com/legal/privacy-policy" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">resend.com/legal/privacy-policy</a></td>
+                    </tr>
+                    <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3 font-medium text-gray-800">Twilio SendGrid</td>
-                        <td class="px-4 py-3 text-gray-600">Inbound email parsing — turns mail sent to us into support and CRM records</td>
-                        <td class="px-4 py-3 text-gray-600">USA (SCCs applied)</td>
+                        <td class="px-4 py-3 text-gray-600">Inbound email parsing — turns replies sent to us into workspace, support and CRM records</td>
+                        <td class="px-4 py-3 text-gray-600">US</td>
                         <td class="px-4 py-3"><a href="https://www.twilio.com/en-us/legal/privacy" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">twilio.com/legal/privacy</a></td>
                     </tr>
                     <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3 font-medium text-gray-800">Serper</td>
-                        <td class="px-4 py-3 text-gray-600">Web search for outbound lead discovery</td>
-                        <td class="px-4 py-3 text-gray-600">USA (SCCs applied)</td>
+                        <td class="px-4 py-3 text-gray-600">Web search for the lead discovery runs you start</td>
+                        <td class="px-4 py-3 text-gray-600">US</td>
                         <td class="px-4 py-3 text-gray-600">Copy on request</td>
-                    </tr>
-                    <tr class="hover:bg-gray-50">
-                        <td class="px-4 py-3 font-medium text-gray-800">Google</td>
-                        <td class="px-4 py-3 text-gray-600">Only where you connect a Google account — Search Console metrics, Drive and calendar data, and sending from your own inbox</td>
-                        <td class="px-4 py-3 text-gray-600">USA / global (SCCs applied)</td>
-                        <td class="px-4 py-3"><a href="https://cloud.google.com/terms/data-processing-addendum" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">cloud.google.com/terms/dpa</a></td>
-                    </tr>
-                    <tr class="hover:bg-gray-50">
-                        <td class="px-4 py-3 font-medium text-gray-800">Canva</td>
-                        <td class="px-4 py-3 text-gray-600">Only where you connect Canva — importing your designs as post media</td>
-                        <td class="px-4 py-3 text-gray-600">Australia / global (SCCs applied)</td>
-                        <td class="px-4 py-3"><a href="https://www.canva.com/policies/privacy-policy/" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">canva.com/policies/privacy-policy</a></td>
                     </tr>
                     <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3 font-medium text-gray-800">Pexels</td>
@@ -307,6 +296,18 @@
                 </tbody>
             </table>
         </div>
+        <p class="text-gray-600 text-sm mt-4">
+            <strong>Changes to this list.</strong> We email workspace owners at least 14 days before adding or replacing
+            a sub-processor that handles your personal data, and you can object — see clause 5 of our
+            <a href="/dpa.html" class="text-emerald-600 underline hover:text-emerald-800">Data Processing Agreement</a>.
+            Last updated 12 October 2026.
+        </p>
+        <p class="text-gray-600 text-sm mt-3">
+            <strong>Platforms you connect are not on this list.</strong> When you connect an account — Google (Gmail,
+            Search Console, Drive, Calendar), Microsoft Outlook, Canva, your social media accounts, your blog or your CRM —
+            and tell an assistant to use it, we send data to that platform on your instructions. It acts under your own
+            agreement with it, not as our sub-processor.
+        </p>
     </section>
 
     <!-- Section: Encryption Standards -->
