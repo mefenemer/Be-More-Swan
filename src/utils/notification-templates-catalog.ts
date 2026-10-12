@@ -282,6 +282,8 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // Sent by milestone-progress.ts only for BETA roles (built, early access) — never a coming-soon
+        // teaser, which no task count unlocks (assistant-go-live.ts hireDecision).
         templateKey: 'milestone_unlock',
         name: 'Early access unlocked',
         category: 'Assistants',

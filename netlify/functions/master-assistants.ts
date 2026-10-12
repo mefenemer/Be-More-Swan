@@ -13,9 +13,10 @@
 
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
-import { eq, and, ilike, or, sql } from 'drizzle-orm';
+import { eq, and, count, ilike, or, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { masterAssistants, waitlist, organisations, userOrganisations, users } from '../../db/schema';
+import { masterAssistants, waitlist, organisations, userOrganisations, users, taskRuns } from '../../db/schema';
+import { hireDecision, statusOf } from '../../src/utils/assistant-go-live';
 import { hasPermission } from '../../src/utils/rbac';
 import { announceRoleLaunch } from '../../src/utils/role-launch-notify';
 import { createNotifications } from '../../src/utils/notify';
@@ -178,17 +179,26 @@ export default withLambda(async (event) => {
             filtered = filtered.filter(r => r.category === catParam);
         }
 
-        // AC3.1.2: pre-release ('beta' lifecycle) assistants are visible only to orgs that
-        // unlocked Beta access via the 50-hours milestone. Everything else is unchanged.
+        // AC3.1.2 + US-AUD-2.3.1: a beta role (built, early access) is visible to a workspace with
+        // Beta access (50 hours saved) or a user who has reached its task milestone — exactly who
+        // hire-assistant lets hire it (assistant-go-live.ts hireDecision). Coming-soon roles stay
+        // listed for everyone as teasers; nobody can hire them.
         let betaAccess = false;
-        if (callerId) {
-            const [orgRow] = await db.select({ beta: organisations.betaAccess })
-                .from(userOrganisations)
-                .leftJoin(organisations, eq(userOrganisations.organisationId, organisations.id))
-                .where(eq(userOrganisations.userId, callerId)).limit(1);
+        let completedTasks = 0;
+        if (callerId && filtered.some(r => statusOf(r) === 'beta')) {
+            const [[orgRow], [{ completedCount }]] = await Promise.all([
+                db.select({ beta: organisations.betaAccess })
+                    .from(userOrganisations)
+                    .leftJoin(organisations, eq(userOrganisations.organisationId, organisations.id))
+                    .where(eq(userOrganisations.userId, callerId)).limit(1),
+                db.select({ completedCount: count() }).from(taskRuns)
+                    .where(and(eq(taskRuns.userId, callerId), eq(taskRuns.status, 'completed'))),
+            ]);
             betaAccess = orgRow?.beta ?? false;
+            completedTasks = Number(completedCount) || 0;
         }
-        filtered = filtered.filter(r => r.lifecycleState !== 'beta' || betaAccess);
+        filtered = filtered.filter(r => statusOf(r) !== 'beta'
+            || (!!callerId && hireDecision({ status: 'beta', betaAccess, completedTasks, milestoneTasksRequired: r.milestoneTasksRequired }).ok));
 
         const assistants = filtered.map(r => ({
             id: r.id,
@@ -209,7 +219,9 @@ export default withLambda(async (event) => {
             integrations: r.integrations ?? [],
             worksWith: r.worksWith ?? [],
             video: r.video ?? null,
-            beta: r.lifecycleState === 'beta', // UI can badge these as Beta Program early access
+            // Early access: the catalogue pages render this as the unlocked, hireable card. statusOf, not the
+            // raw lifecycle column, so a coming-soon row can never be badged as hireable.
+            beta: statusOf(r) === 'beta',
             waitlistCount: countMap[r.id] || 0,
             onWaitlist: callerId ? userSet.has(r.id) : false,
         }));

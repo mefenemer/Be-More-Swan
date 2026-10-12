@@ -12,7 +12,9 @@
 // Gates (parity with the existing hire paths):
 //   • DPA accepted at current version (US-GDPR-1.1.1, same as onboarding.ts)
 //   • Plan assistant limit + referral bonus (mirrors check-capacity's live lifecycle count)
-//   • comingSoon roles only when the US-AUD-2.3.1 milestone is unlocked
+//   • Status (src/utils/assistant-go-live.ts hireDecision): coming-soon roles are NEVER hireable —
+//     they are teasers, mostly unbuilt. Beta roles need the org's Beta access or the user's
+//     US-AUD-2.3.1 task milestone. Live roles are open.
 //
 // If the org has already hired this role, responds 200 with the existing instance and
 // alreadyHired=true so the setup page can re-run configuration against it instead of
@@ -26,8 +28,10 @@ import {
     aiAssistants,
     dpaAcceptances,
     masterAssistants,
+    organisations,
     taskRuns,
 } from '../../db/schema';
+import { hireDecision, statusOf } from '../../src/utils/assistant-go-live';
 import { requireTenant } from '../../src/utils/tenant';
 import { createNotification } from '../../src/utils/notify';
 import { checkRateLimit } from '../../src/utils/rate-limit';
@@ -68,6 +72,7 @@ export default withLambda(async (event) => {
                 name: masterAssistants.name,
                 comingSoon: masterAssistants.comingSoon,
                 isActive: masterAssistants.isActive,
+                lifecycleState: masterAssistants.lifecycleState,
                 milestoneTasksRequired: masterAssistants.milestoneTasksRequired,
             })
             .from(masterAssistants)
@@ -75,16 +80,27 @@ export default withLambda(async (event) => {
             .limit(1);
         if (!master || !master.isActive) return json(404, { error: 'This role is not available in the catalogue.' });
 
-        // comingSoon roles are hireable only once the milestone unlock is earned
-        // (same rule milestone-progress.ts uses to show the "Hire Role" button).
-        if (master.comingSoon) {
-            const [{ completedCount }] = await db
-                .select({ completedCount: count() })
-                .from(taskRuns)
-                .where(and(eq(taskRuns.userId, userId), eq(taskRuns.status, 'completed')));
-            const required = master.milestoneTasksRequired ?? 25;
-            if ((Number(completedCount) || 0) < required) {
-                return json(403, { error: `${master.name} is coming soon — complete ${required} tasks to unlock early access.`, code: 'COMING_SOON' });
+        // Coming soon = not built: refused whatever the task count. Beta = built, early access: the
+        // org's Beta access or the user's task milestone opens it. Same rule master-assistants and
+        // milestone-progress use to show the "Hire" button (assistant-go-live.ts hireDecision).
+        const status = statusOf(master);
+        if (status === 'coming_soon') {
+            return json(403, { error: `${master.name} is coming soon and can't be hired yet — turn on "Notify me" and we'll tell you when it launches.`, code: 'COMING_SOON' });
+        }
+        if (status === 'beta') {
+            const [[org], [{ completedCount }]] = await Promise.all([
+                db.select({ betaAccess: organisations.betaAccess }).from(organisations).where(eq(organisations.id, orgId)).limit(1),
+                db.select({ completedCount: count() }).from(taskRuns)
+                    .where(and(eq(taskRuns.userId, userId), eq(taskRuns.status, 'completed'))),
+            ]);
+            const decision = hireDecision({
+                status,
+                betaAccess: org?.betaAccess ?? false,
+                completedTasks: Number(completedCount) || 0,
+                milestoneTasksRequired: master.milestoneTasksRequired,
+            });
+            if (!decision.ok) {
+                return json(403, { error: `${master.name} is in early access — complete ${decision.required} tasks to unlock it.`, code: decision.code });
             }
         }
 
