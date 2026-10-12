@@ -40,12 +40,39 @@
   <!-- Registers /sw.js and keeps this browser's push subscription in sync. Not deferred behind
        anything: it is self-contained and exposes window.SwanPush for the settings UI. -->
   <script src="/push-client.js" defer></script>
+<!-- Collapsed side menu: applied before first paint so a reload doesn't flash the wide menu.
+     The preference is per browser (localStorage), like a remembered tab. -->
+<script>try { if (localStorage.getItem('bms.sidebarCollapsed') === '1') document.documentElement.classList.add('sb-collapsed'); } catch (e) {}</script>
 <style>
+  /* Side menu width as ONE variable: the main column, the post editor page and the Blog Studio
+     page (src/components/blog-studio-modal.js) all sit beside it. Only on screen from md up —
+     on phones the menu is a drawer and is never collapsed. */
+  :root { --sidebar-w: 16rem; }
+  /* Display set here, not by md:inline-flex — the prebuilt style.css has no such utility. */
+  #sidebar-collapse-btn { display: none; }
+  @media (min-width: 768px) {
+    #sidebar-collapse-btn { display: inline-flex; }
+    html.sb-collapsed { --sidebar-w: 4.5rem; }
+    #sidebar-container { transition: transform .3s ease-in-out, width .2s ease-in-out; }
+    #workspace-main { margin-left: var(--sidebar-w); transition: margin-left .2s ease-in-out; }
+    html.sb-collapsed #sidebar-container { width: var(--sidebar-w); overflow-x: hidden; }
+    html.sb-collapsed #sidebar-container aside { padding-left: .75rem; padding-right: .75rem; }
+    html.sb-collapsed #sidebar-container aside a { position: relative; justify-content: center; gap: 0;
+      padding-left: 0; padding-right: 0; }
+    /* Labels stay in the accessibility tree (screen readers still get the name); visually gone. */
+    html.sb-collapsed #sidebar-container .nav-label { position: absolute; width: 1px; height: 1px;
+      overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    /* Count badges ride on the icon's corner instead of the end of the row. */
+    html.sb-collapsed #sidebar-container aside a > span[class*="rounded-full"] { position: absolute;
+      top: 2px; right: 2px; margin: 0; padding: 0 .3rem; font-size: 9px; line-height: 14px; }
+    html.sb-collapsed #sidebar-container .nav-lock-icon { position: absolute; top: 1px; right: 4px; margin: 0; }
+    html.sb-collapsed #sidebar-container .nav-lock-icon svg { width: .75rem; height: .75rem; }
+  }
   /* The post editor as a PAGE (see the note on #post-review-modal). 64px = the workspace header;
-     16rem = the sidebar, which is only on screen from md up. */
+     --sidebar-w = the side menu, which is only on screen from md up. */
   #post-review-modal.pr-page { top: 64px; left: 0; padding: 0; background: #f9fafb;
     backdrop-filter: none; -webkit-backdrop-filter: none; align-items: stretch; justify-content: stretch; }
-  @media (min-width: 768px) { #post-review-modal.pr-page { left: 16rem; } }
+  @media (min-width: 768px) { #post-review-modal.pr-page { left: var(--sidebar-w, 16rem); } }
   #post-review-modal.pr-page #post-review-panel { max-width: none !important; max-height: none !important;
     height: 100%; border-radius: 0; box-shadow: none; }
   /* More room as a page: the post card, its platform tabs and the timeline under it go up to 600px
@@ -2256,6 +2283,11 @@ window.showComplianceModals = function showComplianceModals(force) {
     <button id="mobile-menu-btn" class="md:hidden text-gray-500 hover:text-gray-900 focus:outline-none">
       <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
     </button>
+    <!-- Collapse the side menu to icons (md and up) — wired in the "Side menu collapse" script. -->
+    <button id="sidebar-collapse-btn" type="button" aria-controls="sidebar-container" aria-expanded="true" aria-label="Collapse menu" title="Collapse menu"
+      class="text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg p-1.5 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-400">
+      <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" stroke-width="2"/><path stroke-linecap="round" stroke-width="2" d="M9 4v16"/><path id="sidebar-collapse-chevron" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l-2 2 2 2"/></svg>
+    </button>
     <a href="#" class="flex items-center">
       <span class="font-extrabold text-xl sm:text-2xl text-emerald-700 tracking-tight">Be More Swan</span>
     </a>
@@ -2317,7 +2349,7 @@ window.showComplianceModals = function showComplianceModals(force) {
   <div id="sidebar-placeholder" class="h-full"></div>
 </div>
 
-<div class="md:ml-64 flex flex-col min-h-screen bg-gray-50">
+<div id="workspace-main" class="flex flex-col min-h-screen bg-gray-50">
   <div class="h-16 w-full shrink-0"></div>
 
   <!-- US-GAP-3.1.1 SC1/SC2: Payment Required full-page gate — shown when planStatus==='past_due' -->
@@ -2673,6 +2705,36 @@ function formatCurrency(amount, currency) {
 
     if(mobileOverlay) {
       mobileOverlay.addEventListener('click', closeMobileMenu);
+    }
+
+    // Side menu collapse (md and up): icons only, so the page gets the width. The class on <html>
+    // is set before first paint by the inline script in <head>; the CSS beside it does the layout.
+    // Collapsed links get a title tooltip from their (translated) label, since the text is hidden.
+    const sidebarCollapseBtn = document.getElementById('sidebar-collapse-btn');
+    function applySidebarCollapsed(collapsed) {
+      document.documentElement.classList.toggle('sb-collapsed', collapsed);
+      if (sidebarCollapseBtn) {
+        const label = collapsed ? 'Expand menu' : 'Collapse menu';
+        sidebarCollapseBtn.setAttribute('aria-expanded', String(!collapsed));
+        sidebarCollapseBtn.setAttribute('aria-label', label);
+        sidebarCollapseBtn.title = label;
+        const chevron = document.getElementById('sidebar-collapse-chevron');
+        if (chevron) chevron.setAttribute('d', collapsed ? 'M13 10l2 2-2 2' : 'M15 10l-2 2 2 2');
+      }
+      sidebarContainer.querySelectorAll('aside a').forEach((a) => {
+        const label = a.querySelector('.nav-label');
+        if (collapsed && label) a.title = label.textContent.trim(); else a.removeAttribute('title');
+      });
+    }
+    applySidebarCollapsed(document.documentElement.classList.contains('sb-collapsed'));
+    if (sidebarCollapseBtn) {
+      sidebarCollapseBtn.addEventListener('click', () => {
+        const collapsed = !document.documentElement.classList.contains('sb-collapsed');
+        applySidebarCollapsed(collapsed);
+        try { localStorage.setItem('bms.sidebarCollapsed', collapsed ? '1' : '0'); } catch (e) {}
+        // Pages that measure their width (charts, the post editor's canvas fit) re-measure on resize.
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 220);
+      });
     }
 
     // Consolidated path definitions mapping navigation links to standard modular components
