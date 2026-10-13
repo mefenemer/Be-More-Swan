@@ -234,3 +234,22 @@ export function voucherCallout(v: VoucherSummary | null): string {
       ${note ? `<div class="v-note">${esc(note)}</div>` : ''}
     </div>`;
 }
+
+/**
+ * The few words a billing email adds after the amount, so a discounted customer is told WHY it is
+ * that amount — and is told when the discount has run out, before they are charged the full price.
+ *   next    — the discount on the coming invoice (summariseDiscount of an invoice preview), or null
+ *   current — the discount on the subscription right now, or null
+ * Pure; returns '' when there is no discount either side.
+ */
+export function renewalDiscountNote(next: VoucherSummary | null, current: VoucherSummary | null): string {
+    const who = (v: VoucherSummary) => v.codes[0] ?? v.name ?? 'your';
+    if (next) {
+        const until = next.endsAt
+            ? `, until ${new Date(next.endsAt).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'Europe/London' })}`
+            : '';
+        return ` — that includes your ${who(next)} discount (${next.label}${until})`;
+    }
+    if (current) return ` — your ${who(current)} discount has ended, so this is the full price`;
+    return '';
+}

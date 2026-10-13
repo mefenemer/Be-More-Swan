@@ -13,6 +13,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
+import { resolveMonthlyPriceId } from '../../src/utils/stripe-price';
 
 const stripeSecret = process.env.STRIPE_SECRET_KEY!;
 
@@ -82,7 +83,12 @@ export default withLambda(async (event) => {
 
     const monthlyAmount = planPrice ? Number(planPrice.monthlyPriceMajorUnit) : Number(plan.monthlyPriceGbp);
     const priceCurrency = (planPrice ? currency : 'GBP').toLowerCase();
-    const stripePriceId = planPrice?.stripePriceId ?? null;
+    // A GBP monthly plan with no configured price uses the SAME reusable Stripe price checkout.html
+    // uses (found by lookup key, created once). It used to fall through to inline price_data below,
+    // which mints a brand-new one-off Stripe Price on every checkout — on prod that was every
+    // £29 and £349 purchase from the in-app plan picker (only £79 had a plan_prices row).
+    const stripePriceId = planPrice?.stripePriceId
+        ?? (billingCycle === 'monthly' && priceCurrency === 'gbp' ? await resolveMonthlyPriceId(stripe, plan) : null);
 
     // Build Stripe line item.
     // - Monthly: reuse a configured Stripe price if present, else a dynamic monthly price.
