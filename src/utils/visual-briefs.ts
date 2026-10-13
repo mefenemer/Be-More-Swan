@@ -22,6 +22,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { aiAssistants, campaigns, contentAssets, mediaGenerationJobs, organisations, scheduledPosts, visualBriefOptions, visualBriefs } from '../../db/schema';
 import type { getDb } from '../../db/client';
 import { gatewayGenerate } from '../lib/ai-gateway';
+import { logMediaCost } from './ai-usage';
 import {
     FalContentPolicyError, FalError, extractVideo, falConfigured, generateImages, result as falResult, status as falStatus,
     submitVideo, type AspectRatio,
@@ -495,7 +496,7 @@ async function aiOptions(db: Db, brief: BriefRow, ad: ArtDirection, userId: numb
     let images;
     try {
         images = falConfigured()
-            ? await generateImages({ prompt: ad.imagePrompt, aspectRatio, numImages: AI_OPTIONS })
+            ? await generateImages({ prompt: ad.imagePrompt, aspectRatio, numImages: AI_OPTIONS, usage: { workspaceId: brief.organisationId, userId, assistantId: brief.aiAssistantId } })
             : Array.from({ length: AI_OPTIONS }, (_, i) => ({ url: `https://picsum.photos/seed/brief-${brief.id}-${brief.rounds}-${i}/1024/1024`, width: 1024, height: 1024, contentType: 'image/jpeg' }));
     } catch (err) {
         const flagged = err instanceof FalContentPolicyError;
@@ -564,6 +565,7 @@ async function aiVideoOptions(db: Db, brief: BriefRow, ad: ArtDirection, userId:
                 await sleep(VIDEO_POLL_INTERVAL_MS);
             }
             const v = extractVideo(await falResult(sub.responseUrl));
+            logMediaCost(VIDEO_MODEL, { durationSeconds: 6 }, { workspaceId: brief.organisationId, userId, assistantId: brief.aiAssistantId, sessionId: 'fal-video' });
             url = v.url;
             contentType = v.contentType || contentType;
         }

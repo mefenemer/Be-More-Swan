@@ -14,6 +14,7 @@ import { getDb } from '../../db/client';
 import { contentAssets, mediaGenerationJobs } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { status as falStatus, result as falResult, extractVideo, falConfigured, FalContentPolicyError } from '../../src/lib/fal-gateway';
+import { logMediaCost } from '../../src/utils/ai-usage';
 import { settleHold } from '../../src/utils/ai-credits';
 import { persistRemoteMediaToR2, r2IsConfigured } from '../../src/lib/media-persist';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -70,6 +71,8 @@ export default withLambda(async (event: HandlerEvent) => {
             }
             const payload = await falResult(job.falResponseUrl);
             const video = extractVideo(payload);
+            // Charged by fal on a COMPLETED job, so recorded here rather than at submit.
+            logMediaCost(job.model, { durationSeconds: job.durationSeconds ?? 6 }, { workspaceId: orgId, userId: job.userId, assistantId: job.assistantId ?? null, sessionId: 'fal-video' });
             videoUrl = video.url;
             videoContentType = video.contentType;
         }

@@ -18,7 +18,7 @@ import assert from 'node:assert';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LIST_PRICE_PER_1K, costUsdFor } from '../src/utils/ai-usage';
+import { LIST_PRICE_PER_1K, MEDIA_LIST_PRICE_USD, costUsdFor, mediaCostUsd } from '../src/utils/ai-usage';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -109,6 +109,41 @@ check('the COGS margin query no longer interpolates an array into = ANY()', () =
     assert.ok(cogs.length > 0, 'cogs-dashboard handler not found');
     assert.ok(!/= ANY\(\$\{/.test(cogs.replace(/\/\/[^\n]*/g, '')), 'drizzle expands a JS array into a row constructor — 42809. Use inArray().');
     assert.ok(/planType === 'beta' \? 0/.test(cogs), 'a free beta workspace must not be credited with the top tier\'s price');
+});
+
+console.log('\nAI media — images, video and music cost something too');
+
+check('every default media model has a price', () => {
+    const defaults = [
+        ...read('src/lib/fal-gateway.ts').matchAll(/FAL_(?:IMAGE|VIDEO)_MODEL \?\? '([^']+)'/g),
+        ...read('src/lib/stability-audio.ts').matchAll(/STABILITY_AUDIO_MODEL \|\| '([^']+)'/g),
+    ].map((m) => m[1]);
+    assert.strictEqual(defaults.length, 3, `expected the image, video and music defaults, found ${defaults.join(', ')}`);
+    const unpriced = defaults.filter((m) => !MEDIA_LIST_PRICE_USD[m]);
+    assert.deepStrictEqual(unpriced, [], `add these to MEDIA_LIST_PRICE_USD or they record $0: ${unpriced.join(', ')}`);
+});
+
+check('media cost follows the published prices', () => {
+    // FLUX: $0.04/MP rounded UP per image — 1024×1024 is 1.05 MP, so 2 MP; 1280×720 is 0.92, so 1.
+    assert.strictEqual(mediaCostUsd('fal-ai/flux-pro/v1.1', { images: [{ width: 1024, height: 1024 }, { width: 1280, height: 720 }] }), '0.120000');
+    assert.strictEqual(mediaCostUsd('fal-ai/minimax/hailuo-2.3/standard/text-to-video', { durationSeconds: 6 }), '0.280000');
+    assert.strictEqual(mediaCostUsd('fal-ai/minimax/hailuo-2.3/standard/text-to-video', { durationSeconds: 10 }), '0.560000');
+    assert.strictEqual(mediaCostUsd('stable-audio-3', {}), '0.260000');
+    assert.strictEqual(mediaCostUsd('some-unknown-model', { durationSeconds: 6 }), '0');
+});
+
+check('every successful generation records its cost — once, where the provider charges', () => {
+    const fal = read('src/lib/fal-gateway.ts');
+    const gen = fal.slice(fal.indexOf('export async function generateImages('), fal.indexOf('export type VideoDurationSeconds'));
+    assert.ok(/logMediaCost\(IMAGE_MODEL, \{ images \}/.test(gen), 'generateImages no longer records image cost');
+    assert.ok(/logMediaCost\(job\.model, \{ durationSeconds/.test(read('netlify/functions/process-media-job-background.ts')), 'a completed video job records nothing');
+    assert.ok(/extractVideo\([\s\S]{0,120}\n\s*logMediaCost\(VIDEO_MODEL/.test(read('src/utils/visual-briefs.ts')), 'a brief video records nothing');
+    const music = read('netlify/functions/process-music-job-background.ts');
+    assert.ok(/success: true[\s\S]{0,300}logMediaCost\(job\.model/.test(music), 'a finished music track records nothing (and it must be after the SUCCESS settle)');
+    // Nothing reaches fal or Stability around these: a new direct caller would be unpriced.
+    const direct = sources.filter((f) => !['src/lib/fal-gateway.ts', 'src/lib/stability-audio.ts', 'src/utils/provider-balance.ts', 'netlify/functions/admin-system-status.ts'].includes(f)
+        && /queue\.fal\.run|fal\.run\/|api\.stability\.ai/.test(read(f)));
+    assert.deepStrictEqual(direct, [], `these call fal/Stability directly and record no cost:\n    ${direct.join('\n    ')}`);
 });
 
 console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`);

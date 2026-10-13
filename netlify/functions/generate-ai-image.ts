@@ -106,7 +106,7 @@ export default withLambda(async (event) => {
 
     try {
         const images = falConfigured()
-            ? await generateImages({ prompt, aspectRatio, numImages: 4 })
+            ? await generateImages({ prompt, aspectRatio, numImages: 4, usage: { workspaceId: orgId, userId } })
             : mockImages(aspectRatio);
 
         // Success → debit the held credit and record the completed job with its candidate URLs.

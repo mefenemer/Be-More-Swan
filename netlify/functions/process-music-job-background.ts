@@ -14,6 +14,7 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { contentAssets, mediaGenerationJobs, musicTracks } from '../../db/schema';
 import { settleHold } from '../../src/utils/ai-credits';
+import { logMediaCost } from '../../src/utils/ai-usage';
 import { persistBufferToR2, putR2Object, r2IsConfigured } from '../../src/lib/media-persist';
 import { fetchMusicResult, StabilityPolicyError, StabilityError } from '../../src/lib/stability-audio';
 import { trackName, communityTrackTitle, communityTrackTags, COMMUNITY_TERMS_URL } from '../../src/lib/music-prompt';
@@ -98,6 +99,8 @@ export default withLambda(async (event: HandlerEvent) => {
         }).returning({ id: contentAssets.id });
 
         await settleHold(db, { orgId, amount: cost, success: true, mediaType: 'audio', userId: ownerId, jobId: job.id });
+        // Stability charges a SUCCESSFUL generation only — which is exactly here.
+        logMediaCost(job.model, {}, { workspaceId: orgId, userId: ownerId, assistantId: job.assistantId ?? null, sessionId: 'stability-music' });
 
         // ── Shared with the community: into the library every workspace can browse ───────────────
         // After the customer has their track and has been charged the shared price, and isolated so a

@@ -20,8 +20,10 @@
 //   FAL_OUTPUT_FORMAT     — 'png' (default, lossless — best for crisp text overlays) or 'jpeg'
 
 const FAL_KEY     = process.env.FAL_KEY;
+import { logMediaCost } from '../utils/ai-usage';
+
 const IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
-const VIDEO_MODEL = process.env.FAL_VIDEO_MODEL ?? 'fal-ai/minimax/hailuo-2.3/standard/text-to-video';
+export const VIDEO_MODEL = process.env.FAL_VIDEO_MODEL ?? 'fal-ai/minimax/hailuo-2.3/standard/text-to-video';
 
 // FLUX 1.1 Pro safety_tolerance: 1 (strictest) … 6 (most permissive). We run our own prompt
 // moderation upstream, so the model-level gate is a backstop — keep Fal's default of 2.
@@ -198,6 +200,8 @@ export async function generateImages(opts: {
     aspectRatio: AspectRatio;
     numImages?: number;
     timeoutMs?: number;
+    /** Who this is for, so its cost lands on the right workspace in the COGS view. Recorded either way. */
+    usage?: { workspaceId?: number | null; userId?: number | null; assistantId?: number | null };
 }): Promise<GeneratedImage[]> {
     // FLUX 1.1 Pro auto-routes inference internally — we deliberately DON'T pass legacy SDXL
     // knobs (scheduler / num_inference_steps / guidance_scale); forcing them degrades the model's
@@ -215,6 +219,8 @@ export async function generateImages(opts: {
     const out = await runSync(IMAGE_MODEL, input, { timeoutMs: opts.timeoutMs ?? 22_000 });
     const images: any[] = out?.images ?? [];
     if (!images.length) throw new FalError('Fal returned no images.');
+    // Here, not in each caller: every image path (editor, briefs, autopilot) comes through this one.
+    logMediaCost(IMAGE_MODEL, { images }, { ...opts.usage, sessionId: 'fal-image' });
     return images.map(img => ({
         url: img.url,
         width: img.width ?? null,
