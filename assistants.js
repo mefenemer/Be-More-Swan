@@ -2148,6 +2148,16 @@ function _rqRecordActions(r, statusKey) {
     // A line above the buttons, for the cards where the state is the point and there is little left
     // to do — a lead whose email has gone out, or one waiting on an inbox connection.
     let note = '';
+    // ⚠️ A campaign decision is approved or rejected — both routed to campaigns.ts `decide` — and
+    // nothing else. "Approve & Schedule", "Schedule", "Send back" and "Restore" are all generic
+    // PATCHes of the MIRROR: the card would read approved while no order was ever placed.
+    // assistant-records.ts now refuses them too (409).
+    if (r.recordType === 'campaign_decision') {
+        return `<div class="flex flex-wrap items-center gap-2 mt-3">
+        ${statusKey === 'review' ? btn('Approve', 'approve', primary) + reject : ''}
+        <p class="rq-rec-err hidden w-full text-xs font-semibold text-red-600 mt-1"></p>
+    </div>`;
+    }
     if (statusKey === 'review') {
         buttons = isLead
             ? btn(leadApprove, 'approve', primary) + editDraft + selfSend + notesBtn + reject
@@ -2505,6 +2515,61 @@ function _rqLeadNotes(r) {
       </div>`;
 }
 
+/**
+ * What a campaign decision would actually do — the briefs themselves, not just their count.
+ *
+ * ⚠️ Before 2026-10-13 a Decisions card opened onto nothing but its buttons: the mirror's `data`
+ * carries `evidence` and `costOfInaction`, and this card read neither, so "Add 6 briefs to this
+ * campaign" was approved blind. The briefs live on campaign_decisions.proposed (not the mirror), so
+ * they come from campaigns.ts `list_decisions`, fetched with the column; settled decisions, which
+ * that action does not return, still show the evidence lines from the mirror.
+ */
+const _rqCampaignDecisions = new Map();
+const _RQ_BRIEF_LABELS = [
+    ['idea', 'Brief'], ['angle', 'Angle'], ['audience', 'Audience'], ['facts', 'Points to make'],
+    ['hypothesis', 'Testing'], ['angleA', 'Angle A'], ['angleB', 'Angle B'],
+    ['show', 'Picture shows'], ['headline', 'Words on it'], ['mustAvoid', 'Avoid'],
+    ['assignee', 'Who'], ['task', 'Task'], ['dueDate', 'Due'], ['name', 'Name'],
+];
+const _RQ_EMAIL_TRIGGER_LABELS = {
+    form: 'A follow-up for people who sign up through a form — saved switched off',
+    custom: 'Emails you send to a group yourself — saved as drafts',
+};
+
+function _rqDecisionDetail(r) {
+    if (r.recordType !== 'campaign_decision') return '';
+    const d = r.data || {};
+    const evidence = Array.isArray(d.evidence) ? d.evidence : [];
+    const decision = _rqCampaignDecisions.get(_rqDecisionId(r));
+    const orders = Array.isArray(decision?.proposed?.orders) ? decision.proposed.orders : [];
+    const line = (label, value) => `<p class="text-xs text-gray-700"><span class="font-semibold text-gray-900">${_rqEsc(label)}:</span> ${_rqEsc(value)}</p>`;
+
+    const items = evidence.map((e, i) => {
+        if (!e || typeof e !== 'object') return '';
+        const brief = (orders[i] && orders[i].brief) || {};
+        const fields = _RQ_BRIEF_LABELS
+            .filter(([k]) => typeof brief[k] === 'string' && brief[k].trim())
+            .map(([k, label]) => line(label, brief[k]));
+        if (_RQ_EMAIL_TRIGGER_LABELS[brief.emailTrigger]) fields.unshift(line('Kind', _RQ_EMAIL_TRIGGER_LABELS[brief.emailTrigger]));
+        const isOrder = i < orders.length || !!e.detail;
+        return `<li class="rounded-lg border border-gray-200 bg-white px-3 py-2">
+            <p class="text-sm font-bold text-gray-900">${isOrder ? `${i + 1}. ` : ''}${_rqEsc(e.value || '')}</p>
+            <p class="text-[11px] text-gray-500">${_rqEsc(e.label || '')}${e.detail ? ` · ${_rqEsc(e.detail)}` : ''}</p>
+            ${fields.length ? `<div class="mt-1.5 space-y-1">${fields.join('')}</div>` : ''}
+          </li>`;
+    }).join('');
+
+    const expires = d.expiresAt ? new Date(d.expiresAt) : null;
+    const days = expires && !isNaN(expires) ? Math.ceil((expires - Date.now()) / 86400000) : null;
+    return `<div class="mt-1 space-y-2">
+        ${d.campaign ? `<p class="text-xs text-gray-500"><span class="font-semibold text-gray-700">Campaign:</span> ${_rqEsc(d.campaign)}</p>` : ''}
+        ${items ? `<ol class="space-y-2">${items}</ol>` : ''}
+        ${Number(d.workItems) > 0 ? `<p class="text-xs text-gray-700"><span class="font-semibold text-gray-900">Uses:</span> ${Number(d.workItems)} of this campaign’s tasks</p>` : ''}
+        ${d.costOfInaction ? `<p class="text-xs text-gray-700"><span class="font-semibold text-gray-900">If you do nothing:</span> ${_rqEsc(d.costOfInaction)}</p>` : ''}
+        ${days !== null && days > 0 ? `<p class="text-[11px] text-gray-500">Expires in ${days} day${days === 1 ? '' : 's'}.</p>` : ''}
+      </div>`;
+}
+
 function _detailRqRecordCard(r, statusKey) {
     const found = _rqDraft(r);
     let snippet = _rqRecordSnippet(r);
@@ -2535,6 +2600,7 @@ function _detailRqRecordCard(r, statusKey) {
         ${_rqOutreachPreview(r, statusKey)}
         ${sync.pills}
         ${_rqLeadNotes(r)}
+        ${_rqDecisionDetail(r)}
         ${_rqRecordActions(r, statusKey)}
       </div>
     </div>`;
@@ -2606,6 +2672,19 @@ async function _detailRqRenderRecords(statusKey) {
         if (!res.ok) throw new Error();
         records = (await res.json()).records || [];
     } catch { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">Failed to load.</p>'; return; }
+
+    // The briefs behind each pending decision (see _rqDecisionDetail). Best effort: without them
+    // the card still shows its evidence lines, so a failure here must not fail the column.
+    if (recordType === 'campaign_decision') {
+        _rqCampaignDecisions.clear();
+        try {
+            const res = await fetch('/.netlify/functions/campaigns', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'list_decisions', assistantId: aid }),
+            });
+            if (res.ok) for (const dec of (await res.json()).decisions || []) _rqCampaignDecisions.set(Number(dec.id), dec);
+        } catch { /* evidence-only cards */ }
+    }
 
     // Keep the Review column badge + tab badge + Overview shortcut in sync.
     //

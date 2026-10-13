@@ -129,6 +129,9 @@ export default withLambda(async (event) => {
      * cannot file campaigns into its workspace.
      */
     async function requireOrchestrator(assistantId: number) {
+        // A missing or non-numeric id arrives as NaN, which Postgres refuses outright — an
+        // unhandled 502 carrying the raw query, instead of "not found".
+        if (!Number.isInteger(assistantId) || assistantId <= 0) return null;
         const [a] = await db.select({ id: aiAssistants.id })
             .from(aiAssistants)
             .where(and(
@@ -142,6 +145,7 @@ export default withLambda(async (event) => {
 
     /** IDOR guard for a campaign id supplied by the caller. */
     async function requireCampaign(campaignId: number) {
+        if (!Number.isInteger(campaignId) || campaignId <= 0) return null;
         const [c] = await db.select()
             .from(campaigns)
             .where(and(eq(campaigns.id, campaignId), eq(campaigns.organisationId, orgId)))
