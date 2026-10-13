@@ -499,7 +499,7 @@ window.showComplianceModals = function showComplianceModals(force) {
           <label class="block text-xs font-semibold text-gray-700">Post text</label>
           <button type="button" id="gpw-swan-btn" onclick="gpAskSwanImprove()" title="Ask your assistant to suggest improvements to this draft" class="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 hover:text-emerald-800 transition cursor-pointer">
             <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain">
-            <span>Ask Swan to improve</span>
+            <span id="gpw-swan-label">Ask your assistant to improve</span>
           </button>
         </div>
         <div class="relative">
@@ -658,14 +658,14 @@ window.showComplianceModals = function showComplianceModals(force) {
         </button>
         <button type="button" id="gp-ai-src-ai" onclick="gpAiGenerate()" class="btn-assistant px-2.5 py-1 text-xs font-semibold border rounded-lg transition cursor-pointer flex items-center gap-1">
           <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
-          <span id="gp-ai-gen-label">Generate with AI</span>
+          <span id="gp-ai-gen-label">Ask your assistant to generate</span>
         </button>
         <!-- Brand Designer (plan Phase 5): brief it for this post's picture. Hidden until a check finds a
              Brand Designer in the workspace (_gpDesignerCheck) — a button that can only fail is worse
              than none. `hidden` loses to `flex`, so the starting state is pinned inline too. -->
         <button type="button" id="gp-ai-src-designer" onclick="gpAiAskDesigner()" style="display:none" class="hidden btn-secondary px-2.5 py-1 text-xs font-semibold border rounded-lg transition cursor-pointer flex items-center gap-1">
           <span>✏️</span>
-          <span>Ask the Brand Designer</span>
+          <span id="gp-ai-designer-label">Ask your Brand Designer</span>
         </button>
         <!-- Text overlays moved to the "Text on image" inspector layer in the Review Queue (Phase 3);
              the old inline "Add text" button here is retired to keep a single entry point. -->
@@ -1009,7 +1009,7 @@ window.showComplianceModals = function showComplianceModals(force) {
            built rather than the order the work happens, and it put the targeting form in front of
            the post. It is gone. What is here now is the post itself, full width, and one rail of
            collapsed steps in the order you actually do them (see _RAIL). -->
-      <div class="flex flex-col lg:flex-row gap-4 items-start">
+      <div id="pce-stage-wrap" class="flex flex-col lg:flex-row gap-4 items-start">
 
         <!-- ── PARKING: blocks the rail borrows ──────────────────────────────────────────────
              NOT a pane. The three-pane layout that used to live here (left = post setup, right =
@@ -1098,7 +1098,7 @@ window.showComplianceModals = function showComplianceModals(force) {
              column and dragging in another — the two things you must compare were never side by
              side. Layers, their tracks and their start/end now sit directly under the media they
              belong to; the right pane keeps only what a layer LOOKS like. -->
-        <div class="flex-1 min-w-0 w-full">
+        <div id="pce-stage-main" class="flex-1 min-w-0 w-full">
           <!-- Platform tab bar: one tab per platform this post is going out on, shown only when it
                spans 2+ (moved here from the left pane — see the note there). Switching a tab
                previews and edits THAT platform's copy; the footer's Approve/Reject act on every
@@ -1348,7 +1348,7 @@ window.showComplianceModals = function showComplianceModals(force) {
                   title="Ask your assistant to write or improve this caption"
                   class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 transition cursor-pointer">
                   <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain">
-                  <span>Ask Swan</span>
+                  <span data-pce-assistant-ask>Ask your assistant</span>
                 </button>
               </div>
               <div class="relative">
@@ -6932,6 +6932,20 @@ const _PCE_CANVAS_MAX_VH = 0.52;
  */
 const _PCE_PAGE_MAX_VH = 0.74;
 const _PCE_PAGE_CARD_MAX_PX = 600;
+/**
+ * How tall the media may be on the PAGE: the room between the top of the media and the bottom of
+ * the scrolling area, so the whole picture is on screen without scrolling. Measured, not a fraction
+ * of the window: the header, alerts, platform tabs and the card's own name row above the media all
+ * vary, and a fixed 74% of the window ran a 9:16 reel off the bottom of a laptop screen.
+ */
+function _pcePageMediaCap(body, media) {
+    const fallback = Math.max(320, Math.round((window.innerHeight - 64) * _PCE_PAGE_MAX_VH));
+    const scroller = body.closest('.overflow-y-auto');
+    if (!scroller) return fallback;
+    const top = media.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    const room = scroller.clientHeight - top - 24;
+    return room > 0 ? Math.max(320, Math.min(room, fallback)) : fallback;
+}
 function _pceIsPageMode() { return !!document.getElementById('post-review-modal')?.classList.contains('pr-page'); }
 function _pceFitCanvasToView() {
     const body = document.getElementById('post-review-body');
@@ -6945,12 +6959,20 @@ function _pceFitCanvasToView() {
     if (!(natW > 0) || !(natH > 0)) return;
     const page = _pceIsPageMode();
     const cap = page
-        ? Math.max(320, Math.round((window.innerHeight - 64) * _PCE_PAGE_MAX_VH))
+        ? _pcePageMediaCap(body, media)
         : Math.max(240, Math.round(window.innerHeight * _PCE_CANVAS_MAX_VH));
     const widthForCap = Math.round(cap * (natW / natH));
     if (page) {
         // Never wider than a post plausibly is on a big screen, never taller than the space allows.
-        card.style.maxWidth = Math.min(widthForCap, _PCE_PAGE_CARD_MAX_PX) + 'px';
+        // 260px floor: below it the card's own name row truncates, and a short screen is better
+        // served by scrolling a little than by a post too small to judge.
+        const w = Math.max(260, Math.min(widthForCap, _PCE_PAGE_CARD_MAX_PX));
+        card.style.maxWidth = w + 'px';
+        // The platform tabs label THIS card, so they are its width — at 600px over a 330px reel they
+        // ran off both sides of the post they name.
+        const tabs = document.getElementById('post-review-tabs');
+        if (tabs) tabs.style.maxWidth = Math.max(w, 280) + 'px';
+        _pceApplyStageSplit();   // the grouped layout is sized off the card
         return;
     }
     // Only ever NARROWER than the card's own maximum — a landscape clip is already short enough,
@@ -16771,15 +16793,32 @@ function _pceApplyStageSplit() {
     const side = document.getElementById('pce-stage-side');
     if (!row || !media || !side) return;
     const split = _pceSplitOn && window.innerWidth >= _PCE_SPLIT_MIN_PX;
+    // ── As a PAGE, the steps, the picture and the timeline are ONE centred group ──────────────
+    // The page is as wide as the workspace (wider still with the side menu collapsed), and a 9:16
+    // video is only ~330px wide at the height there is. Letting the canvas column take every spare
+    // pixel left the picture marooned in the middle of an empty band with the timeline pinned to the
+    // far edge of the window — the two things you must compare, a screen-width apart. Shrink-wrapped
+    // and centred, they sit side by side whatever the width, and the spare room becomes even margins.
+    const group = split && _pceIsPageMode();
+    const wrap = document.getElementById('pce-stage-wrap');
+    const main = document.getElementById('pce-stage-main');
+    if (wrap) wrap.style.justifyContent = group ? 'center' : '';
+    if (main) { main.style.flex = group ? '0 1 auto' : ''; main.style.width = group ? 'auto' : ''; }
+    // Never narrower than the platform tabs need to sit on one line above the card.
+    const cardW = Math.max(280, parseInt(document.querySelector('#post-review-body [data-mockup-card]')?.style.maxWidth, 10) || 0);
     row.style.display = split ? 'flex' : 'block';
     row.style.alignItems = split ? 'flex-start' : '';
-    row.style.gap = split ? '16px' : '';
-    media.style.flex = split ? '1 1 0%' : '';
-    media.style.minWidth = split ? '0' : '';
-    // Wide enough for the clip list's own controls — a bar, two number boxes and the buttons — and
-    // no wider, because every pixel here comes off the picture.
-    side.style.flex = split ? '0 0 22rem' : '';
-    side.style.width = split ? '22rem' : '';
+    row.style.gap = split ? (group ? '24px' : '16px') : '';
+    // Grouped: exactly the card's width (it shrinks before it overflows). Otherwise: whatever is left.
+    media.style.flex = split ? (group && cardW ? `0 1 ${cardW}px` : '1 1 0%') : '';
+    media.style.width = group && cardW ? `${cardW}px` : '';
+    media.style.minWidth = split ? (group ? '200px' : '0') : '';
+    // Wide enough for the clip list's own controls — a bar, two number boxes and the buttons. As a
+    // page there is room to spare, so the timeline gets more of it: a longer trim bar is a finer one.
+    const sideW = group ? '28rem' : '22rem';
+    side.style.flex = split ? (group ? `0 1 ${sideW}` : `0 0 ${sideW}`) : '';
+    side.style.width = split ? sideW : '';
+    side.style.minWidth = group ? '20rem' : '';
     side.style.marginTop = split ? '0' : '';
     const strip = document.getElementById('pce-stage-strip');
     if (strip) {
@@ -16836,8 +16875,10 @@ function _pceApplyColumnFold() {
         const shut = offer && _pceColumnShut.side;
         strip.style.display = shut ? 'none' : '';
         if (offer) {
-            side.style.flex = shut ? '0 0 2rem' : '0 0 22rem';
-            side.style.width = shut ? '2rem' : '22rem';
+            const open = _pceIsPageMode() ? '28rem' : '22rem';
+            side.style.flex = shut ? '0 0 2rem' : (_pceIsPageMode() ? `0 1 ${open}` : `0 0 ${open}`);
+            side.style.width = shut ? '2rem' : open;
+            side.style.minWidth = shut ? '2rem' : (_pceIsPageMode() ? '20rem' : '');
         }
         const btn = bar.querySelector('[onclick*="_pceFoldColumn"]');
         if (btn) {
@@ -18730,6 +18771,7 @@ async function gpPopulateAssistants() {
             sel.appendChild(opt);
         });
         _gpCurrentAssistantId = Number(eligible[0].id);
+        _gpwSyncAssistantLabel();
         // Only surface the dropdown when there's a genuine choice to make.
         wrap.classList.toggle('hidden', eligible.length === 1);
     } catch {
@@ -18740,6 +18782,15 @@ async function gpPopulateAssistants() {
 function gpOnAssistantChange() {
     const sel = document.getElementById('gen-post-assistant');
     _gpCurrentAssistantId = sel?.value ? Number(sel.value) : null;
+    _gpwSyncAssistantLabel();
+}
+
+// "Ask Marvin to improve" — the assistant who will answer, by the name the user gave it.
+async function _gpwSyncAssistantLabel() {
+    const el = document.getElementById('gpw-swan-label');
+    if (!el) return;
+    const meta = _gpCurrentAssistantId ? await gpResolveAssistantMeta(_gpCurrentAssistantId) : null;
+    el.textContent = meta && meta.name && meta.name !== 'Your assistant' ? `Ask ${meta.name} to improve` : 'Ask your assistant to improve';
 }
 
 function gpUpdateConnectedPlatforms(connected) {
@@ -19841,6 +19892,7 @@ function gpAiMediaStatus(msg, type) {
 // One check per page load: is there a Brand Designer to ask? The answer only changes when someone
 // hires or archives one, and a stale "yes" fails with a plain message rather than silently.
 let _gpDesignerId = null;
+let _gpDesignerName = null;
 (async function _gpDesignerCheck() {
     try {
         const res = await fetch('/.netlify/functions/brand-briefs', {
@@ -19848,25 +19900,44 @@ let _gpDesignerId = null;
             body: JSON.stringify({ action: 'post_brief' }),
         });
         if (!res.ok) return;
-        _gpDesignerId = (await res.json()).designerId || null;
+        const d = await res.json();
+        _gpDesignerId = d.designerId || null;
+        _gpDesignerName = d.designerName || null;
         const btn = document.getElementById('gp-ai-src-designer');
         if (btn && _gpDesignerId) { btn.classList.remove('hidden'); btn.style.display = ''; }
+        _gpSyncAssistantLabels();
     } catch { /* no button — nothing else depends on it */ }
 })();
+
+/**
+ * Name the assistants on the media buttons — "Ask Marvin to generate", "Ask Iris" — instead of a
+ * generic "Generate with AI". The post's own assistant does the generating; the Brand Designer is a
+ * separate hire with its own name. Called whenever the media panel is (re)shown for a post.
+ */
+function _gpSyncAssistantLabels() {
+    const id = typeof _gpCurrentPostId !== 'undefined' && _gpCurrentPostId != null ? _gpCurrentPostId : _rqReviewPostId;
+    const post = id != null ? _rqPostCache[id] : null;
+    const name = (post && post.assistantName) || null;
+    const gen = document.getElementById('gp-ai-gen-label');
+    if (gen) gen.textContent = name ? `Ask ${name} to generate` : 'Ask your assistant to generate';
+    const des = document.getElementById('gp-ai-designer-label');
+    if (des) des.textContent = _gpDesignerName ? `Ask ${_gpDesignerName} (Brand Designer)` : 'Ask your Brand Designer';
+    document.querySelectorAll('[data-pce-assistant-ask]').forEach(el => { el.textContent = name ? `Ask ${name}` : 'Ask your assistant'; });
+}
 
 async function gpAiAskDesigner() {
     if (!_gpCurrentPostId) return;
     gpAiMediaBusy(true);
-    gpAiMediaStatus('Briefing your Brand Designer…');
+    gpAiMediaStatus(`Briefing ${_gpDesignerName || 'your Brand Designer'}…`);
     try {
         const res = await fetch('/.netlify/functions/brand-briefs', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
             body: JSON.stringify({ action: 'brief_for_post', postId: _gpCurrentPostId, context: _gpAiMediaPrompt || '', mediaType: _gpAiMediaType }),
         });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || 'Could not brief the Brand Designer.');
+        if (!res.ok) throw new Error(data.error || `Could not brief ${_gpDesignerName || 'the Brand Designer'}.`);
         // Says where the choice happens and what happens next — nothing lands here until they choose.
-        gpAiMediaStatus('Briefed. Choose a picture on your Brand Designer\'s Briefs tab — it comes onto this post if the post still has none.');
+        gpAiMediaStatus(`Briefed. Choose a picture on ${_gpDesignerName ? _gpDesignerName + '\u2019s' : 'your Brand Designer\u2019s'} Briefs tab — it comes onto this post if the post still has none.`);
     } catch (e) {
         gpAiMediaStatus(e.message, 'error');
     } finally {
@@ -19975,6 +20046,7 @@ function gpAiSetMediaType(type) {
     if (vidBtn) vidBtn.className = _gpAiMediaType === 'video' ? on : off;
     const findLabel = document.getElementById('gp-ai-find-label');
     if (findLabel) findLabel.textContent = _gpAiMediaType === 'video' ? 'Find a video' : 'Find a photo';
+    _gpSyncAssistantLabels();
     document.getElementById('gp-ai-own')?.classList.add('hidden');
     document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');

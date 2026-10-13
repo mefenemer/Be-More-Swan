@@ -238,7 +238,7 @@ check('dashboard: own tab, own KPIs, no social Review Queue or empty Data Hub', 
     assert.match(a, /toggle\('maintab-btn-review-queue', !cfg\.hideReviewQueue\)/);
     assert.match(a, /if \(source === 'brand'\) \{[\s\S]{0,80}_loadBrandMetrics\(assistantId\)/);
     assert.match(a, /if \(name === 'briefs'\) window\.AssistantBriefs\?\.activate\(\)/);
-    assert.match(a, /window\.AssistantBriefs\?\.init\(\{ assistantId: data\.id \}\)/);
+    assert.match(a, /window\.AssistantBriefs\?\.init\(\{ assistantId: data\.id, assistantName: data\.name \}\)/);
 });
 
 check('the tab exists in the markup and its script is loaded', () => {

@@ -394,7 +394,7 @@
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center">
         <p class="text-sm font-bold text-gray-700">No briefs yet</p>
-        <p class="text-xs text-gray-500 mt-2">Press "New brief", or tell your Brand Designer in chat what you need — "a square image for our spring offer, warm and bright". Either way, nothing is made until you press "Make options", and nothing is used until you approve it.</p>
+        <p class="text-xs text-gray-500 mt-2">Press "New brief", or tell ${esc(state.assistantName || 'your Brand Designer')} in chat what you need — "a square image for our spring offer, warm and bright". Either way, nothing is made until you press "Make options", and nothing is used until you approve it.</p>
       </div>`;
   }
 
@@ -658,8 +658,9 @@
   });
 
   window.AssistantBriefs = {
-    init({ assistantId }) {
+    init({ assistantId, assistantName }) {
       state.assistantId = assistantId;
+      state.assistantName = assistantName || null;
       state.rendered = false;
       state.form = null;
       state.rejecting = null;

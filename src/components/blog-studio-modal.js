@@ -168,7 +168,10 @@
     // The standalone blog-studio.html has no header or sidebar, so it keeps the pop-up look.
     + '#bms-blog-backdrop.bs-page{top:64px;left:0;background:#f9fafb;-webkit-backdrop-filter:none;backdrop-filter:none;}'
     + '@media (min-width:768px){#bms-blog-backdrop.bs-page{left:var(--sidebar-w,16rem);}}'
-    + '#bms-blog-backdrop.bs-page .bms-blog-panel{max-width:none;margin:0;border-radius:0;box-shadow:none;min-height:100%;}'
+    // Centred and capped: with the side menu collapsed the page is ~1800px wide, and a writing
+    // column that wide puts 25 words on a line and the assistant's buttons a screen away from the
+    // title they act on.
+    + '#bms-blog-backdrop.bs-page .bms-blog-panel{max-width:1360px;margin:0 auto;border-radius:0;box-shadow:none;min-height:100%;}'
     + '.bs-crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:14px;color:#6b7280;margin-bottom:6px;}'
     + '.bs-crumbs button{background:none;border:0;padding:0;font:inherit;font-weight:600;color:#6b7280;cursor:pointer;}'
     + '.bs-crumbs button:hover{color:#111827;text-decoration:underline;}'
@@ -225,7 +228,14 @@
     + '.bs-btn-ico{font-size:14px;line-height:1;}'
     + '.bs-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}'
     + '.bs-title-input{width:100%;font-size:26px;font-weight:700;border:0;outline:0;padding:8px 0;background:transparent;}'
-    + '.bs-editor{min-height:320px;border:1px solid #e5e7eb;border-radius:12px;padding:16px;background:#fff;}'
+    // The draft is the page: tall enough to write into, not a short box with a pink sliver in it.
+    + '.bs-editor{min-height:max(420px,calc(100vh - 330px));border:1px solid #e5e7eb;border-radius:12px;padding:16px 20px 24px;background:#fff;}'
+    // One bar above the draft: how long it is on the left, what the assistant can do on the right.
+    + '.bs-actionbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;}'
+    + '.bs-actionbar .bs-row{gap:6px;}'
+    + '.bs-btn-assist{background:#fff;color:#9d174d;border-color:#f9a8d4;}'
+    + '.bs-btn-assist:hover:not(:disabled){background:#fdf2f8;border-color:#ec4899;}'
+    + '.bs-btn-assist img{width:16px;height:16px;object-fit:contain;}'
     + '.bs-snippet{font-family:ui-monospace,monospace;font-size:12px;background:#111827;color:#e5e7eb;'
     + 'padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all;}'
     + '.bs-status{font-size:12px;color:#6b7280;}'
@@ -450,7 +460,7 @@
     + '        </div>'
     + '      </details>'
     // Scheduling mirrors the Create Post sheet: one guided question, not three loose button rows.
-    + '      <details class="bs-sec" data-bs-sec="publish" open>'
+    + '      <details class="bs-sec" data-bs-sec="publish">'
     + '<summary class="bs-sec-head"><span class="bs-sec-num">6</span><span class="bs-sec-titles"><span class="bs-sec-title">Approve &amp; publish</span><span class="bs-sec-sub">Schedule it, publish it now, or reject it</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
     + '        <div class="bs-sec-body">'
     + '        <p class="bs-ready-q">Your post is ready. How should it go out?</p>'
@@ -553,21 +563,26 @@
     + '      </details>'
     + '    </div>'
     + '    <div>'
-    + '      <div class="bs-row" style="justify-content:space-between;margin-bottom:4px;">'
+    + '      <div class="bs-actionbar">'
     + '        <span id="bs-readout" class="bs-chip">0 words · under a minute read</span>'
-    + '        <div class="bs-row" style="gap:12px;">'
+    + '        <div class="bs-row">'
     // "AI draft" and "Ask Swan to improve" named nobody. The work is done by the workspace's own
     // Blog Writer, who has a name the user chose — so the buttons say so. The <span>s carry
     // data-bs-assistant-label and are rewritten by applyAssistantNaming(); the wording here is the
     // fallback for the case where no assistant can be resolved at all.
-    + '          <button type="button" id="bs-ai-draft" class="bs-swan"'
+    + '          <button type="button" id="bs-ai-draft" class="bs-btn bs-btn-sm bs-btn-assist"'
     + '            title="Draft this post from a topic">'
     + '            <img src="/images/BeMoreSwan_SwanAI.png" alt="">'
     + '<span data-bs-assistant-label="draft">Ask your assistant to draft</span></button>'
-    + '          <button type="button" id="bs-swan-improve" class="bs-swan bs-hidden"'
+    + '          <button type="button" id="bs-swan-improve" class="bs-btn bs-btn-sm bs-btn-assist bs-hidden"'
     + '            title="Ask your assistant to suggest improvements to this draft">'
     + '            <img src="/images/BeMoreSwan_SwanAI.png" alt="">'
     + '<span data-bs-assistant-label="improve">Ask your assistant to improve</span></button>'
+    // "Generate A/B hooks" told the author nothing about what would happen, and the only trace the
+    // feature left was a toast reading "3 hook variants ready" — three of WHAT, ready for what.
+    // Up here with the other things the assistant does to the draft, not stranded under it.
+    + '          <button id="bs-generate-hooks" class="bs-btn bs-btn-ghost bs-btn-sm"'
+    + '            title="Write three alternative headlines and openings, then let your readers pick the winner">Test 3 headlines</button>'
     + '        </div>'
     + '      </div>'
     + '      <input id="bs-title" class="bs-title-input" placeholder="Post title">'
@@ -587,12 +602,6 @@
     + '        <div id="bs-ai-draft-status" class="bs-status" style="margin-top:6px;"></div>'
     + '      </div>'
     + '      <div id="bs-editor" class="bs-editor"></div>'
-    + '      <div class="bs-row" style="margin-top:16px;">'
-    // "Generate A/B hooks" told the author nothing about what would happen, and the only trace the
-    // feature left was a toast reading "3 hook variants ready" — three of WHAT, ready for what.
-    + '        <button id="bs-generate-hooks" class="bs-btn bs-btn-ghost"'
-    + '          title="Write three alternative headlines and openings, then let your readers pick the winner">Test 3 headlines</button>'
-    + '      </div>'
     // Every action's outcome is reported here ("Approved — scheduled for…", errors). It lives in the
     // right column, not in the Approve & publish section, so it stays visible when that section is
     // collapsed — a result nobody can see reads as a button that did nothing.
@@ -729,7 +738,8 @@
       blogPostId: postId,
       initialMarkdown: md,
       title: title,
-      placeholder: 'Write your post here… (Markdown supported — or ask your assistant to draft it)',
+      placeholder: 'Write your post here… (Markdown supported — or ask ' + (assistantName() || 'your assistant') + ' to draft it)',
+      assistantName: assistantName,
       onChange: function (nextMd) {
         // The editor autosaves this, so the card in the list behind the modal is now out of date.
         state.contentChanged = true;
@@ -821,7 +831,7 @@
     if (!topic) { setStatus('bs-ai-draft-status', 'Add a topic to draft from.'); return; }
 
     aiDraftBusy(true);
-    setStatus('bs-ai-draft-status', 'Asking your assistant…');
+    setStatus('bs-ai-draft-status', 'Asking ' + (assistantName() || 'your assistant') + '\u2026');
 
     api('generate-blog', { method: 'POST', body: JSON.stringify({
       blogPostId: state.postId,
@@ -960,7 +970,7 @@
       if (res.body.metaDescription && !el('bs-meta-desc').value.trim()) el('bs-meta-desc').value = res.body.metaDescription;
       refreshSeoCounts();
       syncSeoButton();
-      setStatus('bs-seo-status', 'SEO written by your assistant \u2014 edit it if you like.');
+      setStatus('bs-seo-status', 'SEO written by ' + (assistantName() || 'your assistant') + ' \u2014 edit it if you like.');
     }).catch(function () {
       setStatus('bs-seo-status', '');
     });
@@ -1895,7 +1905,7 @@
       if (!state.postId) return;
       var reason = el('bs-reject-reason').value.trim();
       if (!reason) {
-        setBanner('bs-action-status', 'Say what is wrong with this draft first \u2014 that is what your assistant learns from.', 'error');
+        setBanner('bs-action-status', 'Say what is wrong with this draft first \u2014 that is what ' + (assistantName() || 'your assistant') + ' learns from.', 'error');
         el('bs-reject-reason').focus();
         return;
       }
@@ -2413,6 +2423,15 @@
     backdrop.setAttribute('aria-modal', 'true');
     backdrop.innerHTML = MARKUP;
     document.body.appendChild(backdrop);
+
+    // One step open at a time, like the post editor's rail. Two open at once (media at the top,
+    // publishing at the bottom) pushed the pane past the screen and left the author scrolling a
+    // column of controls to find the one they were using. `toggle` does not bubble, so capture it.
+    backdrop.addEventListener('toggle', function (e) {
+      var d = e.target;
+      if (!d || !d.classList || !d.classList.contains('bs-sec') || !d.open) return;
+      backdrop.querySelectorAll('details.bs-sec[open]').forEach(function (o) { if (o !== d) o.open = false; });
+    }, true);
 
     wireEvents();
     state.injected = true;

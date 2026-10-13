@@ -123,7 +123,10 @@ check('5. SEO, "Where this post gets published" and "Approve & publish" are left
     assert.deepStrictEqual([...at].sort((a, b) => a - b), at, 'sections out of order');
     assert.ok(at[at.length - 1] < bs.indexOf('id="bs-editor"'), 'all eight must sit in the LEFT column, before the editor');
     for (let n = 1; n <= 8; n++) assert.ok(bs.includes(`<span class="bs-sec-num">${n}</span>`), `badge ${n} missing`);
-    assert.match(bs, /data-bs-sec="publish" open>/, 'the publishing controls start open');
+    // One section open at a time (2026-10-12): publishing used to start open as well as media, which
+    // left two expanded panels at either end of the rail. It is a step you reach, not a default.
+    assert.match(bs, /data-bs-sec="publish">/, 'the publishing controls start closed');
+    assert.ok(bs.includes("backdrop.addEventListener('toggle'"), 'sections must behave as an accordion');
 });
 
 check('5. each control moved with its section, and Generate SEO sits with the SEO fields', () => {

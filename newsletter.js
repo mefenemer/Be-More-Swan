@@ -118,6 +118,12 @@
       const make = ASSISTANT_LABELS[el.getAttribute('data-nl-assistant')];
       if (make) el.textContent = make(name);
     });
+    // The swan icons beside Subject / Preview line have no words, so their tooltip names the assistant.
+    const SUGGEST = { subject: 'a subject line', preheader: 'a preview line' };
+    document.querySelectorAll('[data-nl-suggest]').forEach((el) => {
+      const what = SUGGEST[el.getAttribute('data-nl-suggest')];
+      if (what) { el.title = `Ask ${name} to suggest ${what}`; el.setAttribute('aria-label', el.title); }
+    });
     renderCrumbs();
   }
 

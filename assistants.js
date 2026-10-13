@@ -5658,7 +5658,7 @@ function _applyDashboardRegistry(data) {
     toggle('maintab-btn-briefs', !!briefsTab);
     if (briefsTab) {
         setText('briefs-tab-label', briefsTab.label || 'Briefs');
-        window.AssistantBriefs?.init({ assistantId: data.id });
+        window.AssistantBriefs?.init({ assistantId: data.id, assistantName: data.name });
     }
 
     // Signal Inbox tab — lead roles only (signalInbox: lead_qualifier): everything that came IN
