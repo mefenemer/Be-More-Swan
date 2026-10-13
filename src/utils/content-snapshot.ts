@@ -145,9 +145,8 @@ export async function buildPostsSnapshot(db: Db, organisationId: number, aiAssis
 }
 
 // ── Blog Writer: the "Blogs" tab ─────────────────────────────────────────────────────────────────
-// Columns as _RQ_BLOG_STATUS reads them. The Blogs tab hides "Approved" and maps nothing to "Needs
-// attention", so an article that is approved-but-unbooked, paused or failed sits in NO column: it
-// gets its own section that says so, rather than sending the user to a column that will not show it.
+// Columns as _RQ_BLOG_STATUS reads them: failed, paused and approved-but-unbooked articles are in
+// "Needs attention" (they were in no column at all until 2026-10-13).
 
 const BLOG_WORDS: Record<string, string> = {
     draft: 'draft — waiting for your review',
@@ -176,7 +175,7 @@ export async function buildBlogSnapshot(db: Db, organisationId: number, aiAssist
             col(inArray(blogPosts.status, ['draft', 'pending_approval', 'in_review']), sql`${blogPosts.publishDate} ASC NULLS LAST`, 'In the "Review" column — drafts waiting for the user'),
             col(inArray(blogPosts.status, ['scheduled', 'publishing']), asc(blogPosts.publishDate), 'In the "Scheduled" column — booked to publish'),
             col(and(eq(blogPosts.status, 'published'), gte(blogPosts.publishedAt, since(RECENT_DAYS))), desc(blogPosts.publishedAt), `In the "Posted" column — published in the last ${RECENT_DAYS} days`),
-            col(inArray(blogPosts.status, ['approved', 'paused', 'failed']), desc(blogPosts.updatedAt), 'Stuck — not shown in any column of the Blogs tab (tell the user plainly what state each is in; they open it in Blog Studio to fix it)'),
+            col(inArray(blogPosts.status, ['failed', 'paused', 'approved']), desc(blogPosts.updatedAt), 'In the "Needs attention" column — failed to publish, paused, or approved but not booked; the user picks a new time there'),
         ]);
         return renderContentSnapshot({ noun: 'articles', tab: 'Blogs', sections, stateWords: BLOG_WORDS, timezone });
     } catch (err) {

@@ -293,4 +293,28 @@ check('disconnecting tells the truth about what it retracts', () => {
     assert.ok(/status: 'withdrawn'/.test(store), 'the copy describes a withdrawal the server no longer performs');
 });
 
+console.log('\n(5) Every status a blog post can hold is in a visible column\n');
+
+check('failed, paused and approved articles land in Needs attention, mid-publish in Scheduled', () => {
+    // 2026-10-13: publish-blog-posts sets 'failed' on a post that could not go live and 'publishing'
+    // while it is mid-publish; neither was mapped, and Approved is hidden for blogs — so a failed
+    // article vanished from the Blogs tab with nothing telling the author.
+    const map = js.slice(landmark(js, 'const _RQ_BLOG_STATUS = {'), landmark(js, 'function _rqBlogActions('));
+    const schema = read('../db/schema.ts');
+    const allowed = (schema.match(/blog_posts_status_check", sql`\$\{t\.status\} IN \(([^)]*)\)/) || [])[1];
+    assert.ok(allowed, 'blog_posts_status_check not found — update this test');
+    const statuses = allowed.split(',').map((x) => x.trim().replace(/'/g, ''));
+    for (const st of statuses) {
+        assert.ok(map.includes(`'${st}'`), `blog status '${st}' is in no column of the Blogs tab — it would be invisible`);
+    }
+    assert.ok(!/^\s*approved:/m.test(map), 'the Approved column is hidden for blogs; mapping to it hides the article');
+    assert.ok(/attention: \['failed', 'paused', 'approved'\]/.test(map), 'Needs attention lost a status');
+    assert.ok(/scheduled: \['scheduled', 'publishing'\]/.test(map), 'a post mid-publish dropped out of Scheduled');
+});
+
+check('a Needs-attention article can be put back in the queue', () => {
+    const actions = js.slice(landmark(js, 'function _rqBlogActions('), landmark(js, 'function _detailRqBlogCard('));
+    assert.ok(/statusKey === 'attention'[\s\S]{0,400}'showSchedule', 'Pick a new time'/.test(actions), 'no way to reschedule a failed article');
+});
+
 console.log(`\n${passed} checks passed\n`);
