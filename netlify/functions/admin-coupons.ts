@@ -9,6 +9,9 @@
 //   POST   { name, code, discountType, discountValue, duration, durationInMonths?, maxRedemptions?, redeemBy?, notes? }
 //   PATCH  { id, name?, notes?, isActive? }   — the only things Stripe lets change after creation
 //   DELETE ?id=                 → deactivates the code, deletes the coupon in Stripe, keeps our row
+//   GET    ?view=stripe         → what is REALLY in Stripe: every coupon + code, who is on a discount,
+//                                 and which codes this screen does not know about yet
+//   POST   { action: 'import' } → record those codes here (nothing is changed in Stripe)
 //
 // Cookie: aura_session; role must clear `manage_coupons` (billing_admin and above).
 //
@@ -24,7 +27,7 @@ import { getDb } from '../../db/client';
 import { billingCoupons, users } from '../../db/schema';
 import { requirePermission } from '../../src/utils/rbac';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
-import { validateCouponInput, stripeCouponParams, stripePromotionCodeParams, describeCoupon } from '../../src/utils/coupon-rules';
+import { validateCouponInput, stripeCouponParams, stripePromotionCodeParams, describeCoupon, planStripeImport, type StripeCouponLite, type StripePromoCodeLite } from '../../src/utils/coupon-rules';
 
 const jwtSecret = process.env.JWT_SECRET;
 const stripeKey = process.env.STRIPE_SECRET_KEY;
@@ -73,6 +76,67 @@ export default withLambda(async (event) => {
     const ua = event.headers['user-agent'] || undefined;
     const notDeleted = and(isNull(billingCoupons.deletedAt), eq(billingCoupons.livemode, livemode));
 
+    // ── What is really in Stripe ────────────────────────────────────────────────────────────
+    // Read server-side on purpose: the live key never leaves Netlify, and the admin sees the same
+    // account checkout uses.
+    async function readStripe() {
+        const s = stripe!;
+        const coupons: StripeCouponLite[] = [];
+        for await (const c of s.coupons.list({ limit: 100 })) {
+            coupons.push({
+                id: c.id, name: c.name ?? null, percent_off: c.percent_off ?? null, amount_off: c.amount_off ?? null,
+                currency: c.currency ?? null, duration: c.duration, duration_in_months: c.duration_in_months ?? null,
+                max_redemptions: c.max_redemptions ?? null, redeem_by: c.redeem_by ?? null, valid: c.valid, times_redeemed: c.times_redeemed,
+            });
+        }
+        const codes: StripePromoCodeLite[] = [];
+        for await (const p of s.promotionCodes.list({ limit: 100 })) {
+            const c = p.promotion?.coupon;
+            codes.push({
+                id: p.id, code: p.code, active: p.active, couponId: typeof c === 'string' ? c : c?.id ?? null,
+                max_redemptions: p.max_redemptions ?? null, expires_at: p.expires_at ?? null, created: p.created, times_redeemed: p.times_redeemed,
+            });
+        }
+        return { coupons, codes };
+    }
+
+    if (event.httpMethod === 'GET' && event.queryStringParameters?.view === 'stripe') {
+        try {
+            const { coupons, codes } = await readStripe();
+            // Who is on a discount right now — every subscription carrying one, any status.
+            const onDiscount: Array<Record<string, unknown>> = [];
+            for await (const sub of stripe.subscriptions.list({ status: 'all', limit: 100, expand: ['data.customer', 'data.discounts'] })) {
+                for (const d of sub.discounts || []) {
+                    if (typeof d === 'string') continue;
+                    const cust = sub.customer as Stripe.Customer | Stripe.DeletedCustomer | string;
+                    const coupon = d.source?.coupon;
+                    const couponId = typeof coupon === 'string' ? coupon : coupon?.id ?? null;
+                    const promoId = typeof d.promotion_code === 'string' ? d.promotion_code : d.promotion_code?.id ?? null;
+                    onDiscount.push({
+                        customer: typeof cust === 'string' ? cust : ('email' in cust && cust.email) ? cust.email : cust.id,
+                        subscriptionId: sub.id, status: sub.status,
+                        couponId, code: codes.find((p) => p.id === promoId)?.code ?? null,
+                        start: d.start ? new Date(d.start * 1000) : null, end: d.end ? new Date(d.end * 1000) : null,
+                    });
+                }
+            }
+            const known = await db.select({ id: billingCoupons.stripePromotionCodeId }).from(billingCoupons).where(eq(billingCoupons.livemode, livemode));
+            const plan = planStripeImport(coupons, codes, new Set(known.map((k) => k.id)));
+            return json(200, {
+                livemode,
+                coupons: coupons.map((c) => ({
+                    ...c, summary: describeCoupon({ percentOff: c.percent_off, amountOffPence: c.amount_off, duration: c.duration, durationInMonths: c.duration_in_months }),
+                    codes: codes.filter((p) => p.couponId === c.id).map((p) => ({ code: p.code, active: p.active, timesRedeemed: p.times_redeemed })),
+                })),
+                onDiscount,
+                toImport: plan.rows.map((r) => ({ code: r.code, name: r.name, isActive: r.isActive })),
+                noCode: plan.noCode.map((c) => ({ id: c.id, name: c.name })),
+            });
+        } catch (err) {
+            return json(502, { error: stripeMessage(err) });
+        }
+    }
+
     // ── List ────────────────────────────────────────────────────────────────────────────────
     if (event.httpMethod === 'GET') {
         const rows = await db.select().from(billingCoupons).where(notDeleted).orderBy(desc(billingCoupons.createdAt));
@@ -101,6 +165,35 @@ export default withLambda(async (event) => {
     let body: Record<string, unknown> = {};
     if (event.body) {
         try { body = JSON.parse(event.body); } catch { return json(400, { error: 'Invalid JSON.' }); }
+    }
+
+    // ── Import codes that exist in Stripe but not here (changes nothing in Stripe) ─────────────
+    if (event.httpMethod === 'POST' && body.action === 'import') {
+        let plan;
+        try {
+            const { coupons, codes } = await readStripe();
+            const known = await db.select({ id: billingCoupons.stripePromotionCodeId }).from(billingCoupons).where(eq(billingCoupons.livemode, livemode));
+            plan = planStripeImport(coupons, codes, new Set(known.map((k) => k.id)));
+        } catch (err) {
+            return json(502, { error: stripeMessage(err) });
+        }
+        const imported: string[] = [];
+        for (const r of plan.rows) {
+            // A deleted row may hold the same code; the unique index only covers live rows, and a
+            // code clash with a LIVE row means two Stripe codes share text — report, never overwrite.
+            const [clash] = await db.select({ id: billingCoupons.id }).from(billingCoupons)
+                .where(and(notDeleted, sql`upper(${billingCoupons.code}) = ${r.code}`)).limit(1);
+            if (clash) continue;
+            await db.insert(billingCoupons).values({ ...r, livemode, createdBy: null });
+            imported.push(r.code);
+        }
+        if (imported.length) {
+            await insertAdminAuditLog({
+                adminId, action: 'coupon_create', targetType: 'coupon',
+                newState: { importedFromStripe: imported, livemode }, ipAddress: ip, userAgent: ua,
+            });
+        }
+        return json(200, { imported, skipped: plan.rows.length - imported.length, noCode: plan.noCode.length });
     }
 
     // ── Create ──────────────────────────────────────────────────────────────────────────────

@@ -123,3 +123,53 @@ export function describeCoupon(c: { percentOff: number | string | null; amountOf
         : `for ${c.durationInMonths} month${c.durationInMonths === 1 ? '' : 's'}`;
     return `${off} ${how}`;
 }
+
+// ── Importing what already exists in Stripe ───────────────────────────────────────────────────────
+// Coupons made in the Stripe dashboard before this screen existed (or by hand since) are invisible
+// to it. These shapes are the minimum read from Stripe; the mapping is pure so it is tested.
+
+export interface StripeCouponLite {
+    id: string; name: string | null; percent_off: number | null; amount_off: number | null; currency: string | null;
+    duration: 'once' | 'repeating' | 'forever'; duration_in_months: number | null;
+    max_redemptions: number | null; redeem_by: number | null; valid: boolean; times_redeemed: number;
+}
+export interface StripePromoCodeLite {
+    id: string; code: string; active: boolean; couponId: string | null;
+    max_redemptions: number | null; expires_at: number | null; created: number; times_redeemed: number;
+}
+
+export interface ImportRow {
+    name: string; code: string; notes: string;
+    percentOff: string | null; amountOffPence: number | null; currency: string;
+    duration: 'once' | 'repeating' | 'forever'; durationInMonths: number | null;
+    maxRedemptions: number | null; redeemBy: Date | null;
+    stripeCouponId: string; stripePromotionCodeId: string; isActive: boolean; createdAt: Date;
+}
+
+/**
+ * One row per PROMOTION CODE the Coupons screen does not already hold (matched on the promotion
+ * code id, so a second import adds nothing). A coupon with no promotion code cannot be typed at
+ * checkout, so it is returned separately to be shown, not imported.
+ */
+export function planStripeImport(coupons: StripeCouponLite[], codes: StripePromoCodeLite[], knownPromotionCodeIds: Set<string>) {
+    const rows: ImportRow[] = [];
+    for (const p of codes) {
+        if (knownPromotionCodeIds.has(p.id)) continue;
+        const c = coupons.find((x) => x.id === p.couponId);
+        if (!c) continue;
+        rows.push({
+            name: (c.name || p.code).slice(0, 40), code: p.code.toUpperCase(),
+            notes: 'Imported from Stripe — made before or outside the Coupons screen.',
+            percentOff: c.percent_off != null ? String(c.percent_off) : null,
+            amountOffPence: c.percent_off == null ? c.amount_off : null,
+            currency: (c.currency || 'gbp').toLowerCase(),
+            duration: c.duration, durationInMonths: c.duration === 'repeating' ? c.duration_in_months : null,
+            maxRedemptions: p.max_redemptions ?? c.max_redemptions,
+            redeemBy: p.expires_at ? new Date(p.expires_at * 1000) : c.redeem_by ? new Date(c.redeem_by * 1000) : null,
+            stripeCouponId: c.id, stripePromotionCodeId: p.id,
+            isActive: p.active && c.valid, createdAt: new Date(p.created * 1000),
+        });
+    }
+    const noCode = coupons.filter((c) => !codes.some((p) => p.couponId === c.id));
+    return { rows, noCode };
+}

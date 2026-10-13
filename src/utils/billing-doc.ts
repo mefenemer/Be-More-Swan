@@ -45,8 +45,23 @@ export interface VoucherSummary {
     currency: string;
 }
 
+/**
+ * The coupon behind one Stripe Discount. ⚠️ In the API version this app pins (2026-05-27.dahlia)
+ * a Discount has NO `coupon` field — it is `source.coupon`, and only an OBJECT when the caller
+ * expanded `discounts.source.coupon`. Reading `d.coupon` alone found nothing, so every voucher line
+ * on our invoices, receipts and the billing page silently disappeared (fixed 2026-10-13). The old
+ * field is still accepted for any payload shaped by an older version.
+ */
+export function couponOf(d: any): any | null {
+    const c = d?.source?.coupon ?? d?.coupon;
+    return c && typeof c === 'object' ? c : null;
+}
+
+/** Every expand a discounts read needs, so the coupon arrives as an object. Prefix with `data.` for lists. */
+export const DISCOUNT_EXPANDS = ['discounts.promotion_code', 'discounts.source.coupon'];
+
 export function summariseDiscount(discounts: any[], grossMinor: number, currency: string): VoucherSummary | null {
-    const active = (discounts || []).filter(d => d && typeof d === 'object' && d.coupon);
+    const active = (discounts || []).filter(d => d && typeof d === 'object' && couponOf(d));
     if (!active.length || !(grossMinor > 0)) return null;
 
     let remaining = grossMinor;
@@ -56,7 +71,7 @@ export function summariseDiscount(discounts: any[], grossMinor: number, currency
     let durationInMonths: number | null = null;
 
     for (const d of active) {
-        const c = d.coupon;
+        const c = couponOf(d);
         if (c.percent_off) {
             remaining -= Math.round(remaining * (c.percent_off / 100));
             parts.push({ code: d.promotion_code?.code ?? null, name: c.name ?? null, label: `${c.percent_off}% off` });
@@ -98,7 +113,7 @@ export function summariseDiscount(discounts: any[], grossMinor: number, currency
 export async function resolveInvoiceVoucher(stripe: Stripe | null, stripeInvoiceId: string | null | undefined): Promise<VoucherSummary | null> {
     if (!stripe || !stripeInvoiceId) return null;
     try {
-        const inv = await stripe.invoices.retrieve(stripeInvoiceId, { expand: ['discounts.promotion_code'] }) as any;
+        const inv = await stripe.invoices.retrieve(stripeInvoiceId, { expand: DISCOUNT_EXPANDS }) as any;
         const grossMinor = typeof inv.subtotal === 'number' ? inv.subtotal : 0;
         return summariseDiscount(inv.discounts || [], grossMinor, inv.currency || 'gbp');
     } catch {

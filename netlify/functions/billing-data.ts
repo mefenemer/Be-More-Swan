@@ -136,7 +136,7 @@ export default withLambda(async (event) => {
                         // discounts.promotion_code resolves the promo id to the customer-facing
                         // voucher code ("LAUNCH50") — without it we'd only have `promo_…`.
                         // The Coupon itself is embedded in each Discount, so it needs no expand.
-                        expand: ['data.default_payment_method', 'data.discounts.promotion_code'],
+                        expand: ['data.default_payment_method', 'data.discounts.promotion_code', 'data.discounts.source.coupon'],
                     });
 
                     stripeSubscriptions = subs.data.map(sub => {
@@ -173,7 +173,7 @@ export default withLambda(async (event) => {
                     const invoices = await stripe.invoices.list({
                         customer: customer.id,
                         limit: 50,
-                        expand: ['data.discounts.promotion_code'],
+                        expand: ['data.discounts.promotion_code', 'data.discounts.source.coupon'],
                     });
                     invoices.data.forEach(inv => {
                         // Stripe SDK v22 / API 2026-05-27 removed `payment_intent` from the Invoice type;
