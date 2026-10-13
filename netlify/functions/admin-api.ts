@@ -23,6 +23,8 @@ import jwt from 'jsonwebtoken';
 import * as crypto from 'crypto';
 import { Resend } from 'resend';
 import { eq, ilike, desc, and, or, count, gte, lte, sql, inArray } from 'drizzle-orm';
+import Stripe from 'stripe';
+import { billedMonthlyBySubscription, type BilledMonthly } from '../../src/utils/billed-mrr';
 import { getDb, withUpdatedAt } from '../../db/client';
 import {
     users, userProfiles, plans, aiAssistants,
@@ -1154,21 +1156,37 @@ export default withLambda(async (event) => {
 
             // Attach active plan MRR for margin column, normalised to GBP
             const workspaceIds = topWorkspaces.map(w => w.workspaceId).filter(Boolean) as number[];
-            let planMrrMap: Record<number, { amount: number; currency: string }> = {};
+            let planMrrMap: Record<number, { amount: number; currency: string; source: 'stripe' | 'list' | 'beta'; discount: string | null }> = {};
             if (workspaceIds.length > 0) {
                 // inArray, not `= ANY(${workspaceIds})`: drizzle expands an interpolated array into a
                 // parameter LIST, which Postgres reads as a row constructor — 42809, and the whole
                 // dashboard 500s the moment any workspace has spend.
                 const planRows = await db
-                    .select({ orgId: plans.organisationId, monthlyPriceGbp: masterPlans.monthlyPriceGbp, planType: plans.planType })
+                    .select({ orgId: plans.organisationId, monthlyPriceGbp: masterPlans.monthlyPriceGbp, planType: plans.planType, stripeSubscriptionId: plans.stripeSubscriptionId })
                     .from(plans)
                     .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
                     .where(and(eq(plans.status, 'active'), inArray(plans.organisationId, workspaceIds)));
+                // What each subscription ACTUALLY bills, after discounts (src/utils/billed-mrr.ts). The
+                // list price is only the fallback: three prod workspaces on 100%-off comps showed
+                // £79–£349 of revenue and a 99% margin. Read from the account checkout uses.
+                let billed = new Map<string, BilledMonthly>();
+                const subIds = planRows.map(p => p.stripeSubscriptionId).filter((x): x is string => !!x);
+                if (subIds.length && process.env.STRIPE_SECRET_KEY) {
+                    try {
+                        billed = await billedMonthlyBySubscription(new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' }), subIds);
+                    } catch (err) {
+                        console.warn('[cogs-dashboard] Stripe read failed — margins use list prices', err);
+                    }
+                }
                 planRows.forEach(p => {
+                    if (!p.orgId) return;
                     // A beta plan copies the top tier's row, price included, but pays nothing — counting
                     // £349 of revenue against a free workspace would show a healthy margin that isn't.
-                    const amount = p.planType === 'beta' ? 0 : parseFloat(String(p.monthlyPriceGbp || '0'));
-                    if (p.orgId) planMrrMap[p.orgId] = { amount, currency: 'GBP' };
+                    if (p.planType === 'beta') { planMrrMap[p.orgId] = { amount: 0, currency: 'GBP', source: 'beta', discount: null }; return; }
+                    const b = p.stripeSubscriptionId ? billed.get(p.stripeSubscriptionId) : undefined;
+                    planMrrMap[p.orgId] = b
+                        ? { amount: b.monthlyGbp, currency: 'GBP', source: 'stripe', discount: b.discount }
+                        : { amount: parseFloat(String(p.monthlyPriceGbp || '0')), currency: 'GBP', source: 'list', discount: null };
                 });
             }
 
@@ -1183,7 +1201,7 @@ export default withLambda(async (event) => {
                 const marginPct = mrrUsd > 0 ? Math.round(((mrrUsd - costUsd) / mrrUsd) * 100) : null;
                 const highlight = mrrUsd > 0 && costUsd >= mrrUsd ? 'red'
                     : mrrUsd > 0 && costUsd >= mrrUsd * 0.8 ? 'amber' : null;
-                return { ...w, costUsd, mrrGbp, mrrRaw, planCurrency, marginPct, highlight };
+                return { ...w, costUsd, mrrGbp, mrrRaw, planCurrency, marginPct, highlight, mrrSource: plan?.source ?? null, mrrDiscount: plan?.discount ?? null };
             });
 
             // (3) Model distribution (all time, last 30 days)
