@@ -404,6 +404,7 @@
     if (document.getElementById(STYLE_ID)) return;
     const css = `
       .bmsme-root { position: relative; min-height: 120px; cursor: text; }
+      .bmsme-input::placeholder { color:#9ca3af; }
       /* Every block reserves a left gutter for its drag handle. Without the gutter the handle
          would either overlap the first word or hang outside the editor's padding box. */
       .bmsme-block { position: relative; padding: 2px 4px 2px 26px; border-radius: 4px; }
@@ -436,7 +437,7 @@
       .bmsme-block:hover .bmsme-remove, .bmsme-remove:focus { opacity:1; }
       .bmsme-remove:hover { color:#b91c1c; border-color:#fecaca; background:#fef2f2; }
       /* Click-to-edit: the block swaps its rendered HTML for a textarea over its raw Markdown. */
-      .bmsme-editing { background: rgba(236,72,153,.04); box-shadow: inset 0 0 0 1px #fbcfe8; }
+      .bmsme-editing { background: transparent; box-shadow: inset 2px 0 0 #f9a8d4; }
       .bmsme-input { display:block; width:100%; border:0; outline:0; padding:0; margin:0;
         font: inherit; color: inherit; background: transparent; resize: none; overflow: hidden;
         line-height: 1.6; }
@@ -497,18 +498,18 @@
       /* Formatting bar — light, in normal flow at the top of the draft, so it is visible before
          the author does anything. Deliberately NOT the dark floating pill: that one is the AI
          toolbar, and the two doing different jobs should not look like the same control. */
-      .bmsme-formatbar { display:flex; align-items:center; gap:4px; flex-wrap:wrap;
-        padding:6px; margin:0 0 10px; border:1px solid #e5e7eb; border-radius:10px;
-        background:#fff; }
+      .bmsme-formatbar { display:flex; align-items:center; gap:2px; flex-wrap:wrap;
+        padding:4px 6px; margin:0 0 14px; border:1px solid #e5e7eb; border-radius:10px;
+        background:#f9fafb; position:sticky; top:0; z-index:5; }
       .bmsme-fb-select { font:inherit; font-size:13px; padding:4px 6px; border:1px solid #d1d5db;
         border-radius:6px; background:#fff; color:#111827; cursor:pointer; }
-      .bmsme-fb-btn { font:inherit; font-size:13px; min-width:30px; padding:4px 8px; border:0;
+      .bmsme-fb-btn { font:inherit; font-size:13px; min-width:30px; height:28px; padding:0 8px; border:0;
         border-radius:6px; background:transparent; color:#374151; cursor:pointer; }
-      .bmsme-fb-btn:hover { background:#f3f4f6; }
+      .bmsme-fb-btn:hover { background:#fff; box-shadow:0 0 0 1px #e5e7eb; }
       .bmsme-fb-bold { font-weight:800; }
       .bmsme-fb-italic { font-style:italic; }
       .bmsme-fb-underline { text-decoration:underline; }
-      .bmsme-fb-highlight { background:#fef08a; }
+      .bmsme-fb-highlight { background:linear-gradient(transparent 55%, #fef08a 55%); }
       .bmsme-fb-code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
       .bmsme-fb-sep { width:1px; height:18px; background:#e5e7eb; margin:0 2px; }
       .bmsme-formatbar [disabled] { opacity:.4; cursor:not-allowed; }
@@ -988,6 +989,9 @@
       const ta = document.createElement('textarea');
       ta.className = 'bmsme-input';
       ta.value = b.raw;
+      // An empty draft opens straight into this box, so the prompt the rendered state shows has to
+      // be here too — otherwise the author lands in a blank pink sliver with nothing to say what it is.
+      if (!b.raw && blocks.length === 1) ta.placeholder = placeholder;
       ta.setAttribute('aria-label', 'Edit section');
       el.innerHTML = '';
       el.classList.add('bmsme-editing');
@@ -1147,7 +1151,9 @@
     function onAction(action, anchorBtn) {
       if (action === 'tone') return openToneMenu(anchorBtn);
       if (action === 'custom') {
-        const instruction = window.prompt('How should the AI rewrite the selection?');
+        // `assistantName` (string or getter) lets the host say who is rewriting — "How should Lyra…".
+        const who = (opts && (typeof opts.assistantName === 'function' ? opts.assistantName() : opts.assistantName)) || 'your assistant';
+        const instruction = window.prompt(`How should ${who} rewrite the selection?`);
         if (!instruction) return;
         return runRewrite('custom', { instruction });
       }

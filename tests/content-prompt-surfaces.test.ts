@@ -62,7 +62,7 @@ const ROLES = [
     },
     {
         role: 'blog_writer', helper: 'blogSurfaces', kind: 'blog', queue: 'Blogs',
-        columns: ['Review', 'Scheduled', 'Posted', 'Archived'],
+        columns: ['Review', 'Scheduled', 'Posted', 'Needs attention', 'Archived'],
         tabs: ['Calendar', 'Inspo', 'My Content', 'Goals', 'Activity'],
         profile: PROFILE('Brand Knowledge'),
     },

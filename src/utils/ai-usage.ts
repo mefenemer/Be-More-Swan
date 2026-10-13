@@ -53,6 +53,9 @@ export interface AiUsageParams {
     sessionId?: string | null;
     // US-GDPR-4.2.2: data categories present in the prompt. Defaults to ['general'].
     dataCategories?: DataCategory[];
+    /** A cost already worked out by the caller (media is priced per item, not per token). Skips
+     *  the token-rate lookup entirely. */
+    costUsdOverride?: string;
 }
 
 /**
@@ -65,7 +68,7 @@ export async function logAiUsage(params: AiUsageParams): Promise<void> {
         const db = getDb();
 
         // Look up per-token pricing for this model; the list price when there is no row.
-        const [pricing] = await db
+        const [pricing] = params.costUsdOverride != null ? [] : await db
             .select({
                 inputCostPer1kTokens:  aiModelPricing.inputCostPer1kTokens,
                 outputCostPer1kTokens: aiModelPricing.outputCostPer1kTokens,
@@ -77,7 +80,7 @@ export async function logAiUsage(params: AiUsageParams): Promise<void> {
         const rate = pricing
             ? { input: parseFloat(pricing.inputCostPer1kTokens), output: parseFloat(pricing.outputCostPer1kTokens) }
             : LIST_PRICE_PER_1K[params.model] ?? null;
-        const costUsd = costUsdFor(params.inputTokens, params.outputTokens, rate);
+        const costUsd = params.costUsdOverride ?? costUsdFor(params.inputTokens, params.outputTokens, rate);
 
         // A caller that knows only the assistant (the quality reviewer, for one) still belongs to a
         // workspace, and the COGS dashboard groups by workspace — an unattributed row is a cost
@@ -125,4 +128,52 @@ export function logMessageUsage(
         inputTokens: response.usage.input_tokens ?? 0,
         outputTokens: response.usage.output_tokens ?? 0,
     });
+}
+
+// ── AI media (fal images and video, Stability music) ──────────────────────────────────────────────
+// Priced per ITEM, not per token, so these rows carry 0 tokens and a cost worked out here. Written to
+// the same ai_usage_log so the COGS dashboard's per-workspace margin includes them — before
+// 2026-10-13 AI images, the likeliest second-biggest cost after drafting, were in no ledger at all.
+//
+// List prices as published on 2026-10-13 — check them against the provider's invoice and update:
+//   • fal FLUX 1.1 Pro: $0.04 per megapixel, ROUNDED UP per image (fal's own wording), so a
+//     1024×1024 image (1.05 MP) is billed as 2 MP. Rounded up here too: overstating a cost is the
+//     safe error in a margin view.
+//   • fal Hailuo 2.3 Standard text-to-video: $0.28 per 6 s, $0.56 per 10 s.
+//   • Stability Stable Audio 3.0: 26 credits per SUCCESSFUL track at $0.01 a credit.
+export const MEDIA_LIST_PRICE_USD: Record<string, { perMegapixel?: number; perDuration?: Record<number, number>; perItem?: number }> = {
+    'fal-ai/flux-pro/v1.1': { perMegapixel: 0.04 },
+    // Priced per clip LENGTH, not per second: 10 s is not 10/6 of 6 s.
+    'fal-ai/minimax/hailuo-2.3/standard/text-to-video': { perDuration: { 6: 0.28, 10: 0.56 } },
+    'stable-audio-3': { perItem: 0.26 },
+};
+
+/** Cost of one media generation in USD (6 dp). Pure. An unpriced model is '0'. */
+export function mediaCostUsd(model: string, opts: { images?: Array<{ width?: number | null; height?: number | null }>; durationSeconds?: number | null }): string {
+    const p = MEDIA_LIST_PRICE_USD[model];
+    if (!p) return '0';
+    let usd = 0;
+    if (p.perMegapixel != null) {
+        for (const img of opts.images ?? []) {
+            const mp = img.width && img.height ? Math.ceil((img.width * img.height) / 1_000_000) : 1;
+            usd += mp * p.perMegapixel;
+        }
+    }
+    if (p.perDuration) {
+        // An unlisted length is priced at the longest listed clip — overstating is the safe error.
+        const d = opts.durationSeconds ?? 0;
+        usd += p.perDuration[d] ?? Math.max(...Object.values(p.perDuration));
+    }
+    if (p.perItem != null) usd += p.perItem;
+    return usd.toFixed(6);
+}
+
+/** Record one SUCCESSFUL media generation. Fire-and-forget: never throws, never needs awaiting. */
+export function logMediaCost(
+    model: string,
+    opts: { images?: Array<{ width?: number | null; height?: number | null }>; durationSeconds?: number | null },
+    ctx: Omit<AiUsageParams, 'model' | 'inputTokens' | 'outputTokens' | 'costUsdOverride'> = {},
+): void {
+    if (!MEDIA_LIST_PRICE_USD[model]) console.warn(`[ai-usage] no media price for ${model} — logged at $0; add it to MEDIA_LIST_PRICE_USD`);
+    void logAiUsage({ ...ctx, model, inputTokens: 0, outputTokens: 0, costUsdOverride: mediaCostUsd(model, opts) });
 }

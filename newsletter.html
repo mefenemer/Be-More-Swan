@@ -10,21 +10,35 @@
   .nl-wand { height: 20px; width: auto; display: inline-block; }
   .nl-wand.is-casting { animation: nlWandCast 0.7s ease-in-out infinite; transform-origin: bottom center; }
   @keyframes nlWandCast { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-14deg); } }
+  /* Layout. Ids + plain CSS rather than arbitrary Tailwind classes, which the compiled style.css
+     may not carry (see tailwind-rebuild-drift).
+     - Wider than max-w-7xl: the editor is three panes (blocks bar, the email, the block inspector),
+       and at 80rem, after a one-third list column, the email itself was squeezed to ~480px.
+     - The list is a fixed 320px column, not a third of the page — it holds names and dates, and
+       every pixel it took beyond that came off the email.
+     - The header's actions stay on one row beside the title on a laptop and up, instead of
+       stranding "New email" on a second line under the others. */
+  #nl-page { max-width: 1600px; }
+  @media (min-width: 1024px) {
+    #nl-grid { grid-template-columns: 320px minmax(0, 1fr); }
+    #nl-head { flex-wrap: nowrap; }
+    #nl-head-actions { flex-wrap: nowrap; flex-shrink: 0; }
+  }
 </style>
-<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full pb-20">
+<div id="nl-page" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full pb-20">
 
   <!-- The way back. The Studio is a full view, not a modal like Blog Studio, so there is no ✕ to
        close — without this the only exit is the sidebar. Filled by renderCrumbs() in newsletter.js
        from where the user came in (window._previousView, recorded by the workspace router). -->
   <nav id="nl-crumbs" aria-label="Breadcrumb" class="flex flex-wrap items-center gap-1.5 text-sm text-gray-500 mb-4"></nav>
 
-  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+  <div id="nl-head" class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
     <div>
       <h1 class="text-3xl font-extrabold text-gray-900">Email Studio</h1>
       <p class="text-gray-500 mt-1">Draft an email or a whole email campaign, see exactly what lands in the inbox, then approve it for sending.</p>
     </div>
     <!-- Grouped so five buttons wrap as a row on narrower screens instead of squeezing each label onto three lines. -->
-    <div class="flex flex-wrap gap-2 justify-end">
+    <div id="nl-head-actions" class="flex flex-wrap gap-2 justify-end">
     <!-- Sign-up forms live on the Audience page (they feed every assistant that sends), but this is
          where an Email Marketing Assistant user goes looking for them. -->
     <button type="button" id="nl-forms"
@@ -32,8 +46,10 @@
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
       Sign-up forms
     </button>
+    <!-- Secondary: configuration, not the page's one primary action (that is "New email"). Two pink
+         buttons side by side read as two equally urgent things to do. -->
     <button type="button" id="nl-sending"
-      class="btn-primary flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-colors border cursor-pointer">
+      class="btn-secondary flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-colors border cursor-pointer">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
       Sending setup
     </button>
@@ -52,10 +68,10 @@
     </div>
   </div>
 
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+  <div id="nl-grid" class="grid grid-cols-1 gap-6">
 
     <!-- Issue list -->
-    <div class="lg:col-span-1">
+    <div class="min-w-0">
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
         <div class="px-4 py-3 border-b border-gray-100">
           <p class="text-sm font-bold text-gray-900">Emails</p>
@@ -78,7 +94,7 @@
     </div>
 
     <!-- Editor -->
-    <div class="lg:col-span-2">
+    <div class="min-w-0">
       <div id="nl-empty" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-10 text-center">
         <p class="text-sm font-bold text-gray-900">No email selected</p>
         <p class="text-sm text-gray-500 mt-1">Pick an email on the left, or start a new one.</p>

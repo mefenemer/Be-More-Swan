@@ -2784,6 +2784,31 @@ export const billingOverrides = pgTable("billing_overrides", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// ── Billing coupons — Admin → Revenue → Coupons, mirrored to Stripe ─────────────
+// See db/z-billing-coupons.sql. Discount and duration are immutable in Stripe, so they are written
+// once; name / notes / isActive are the editable fields. Deleted rows keep deletedAt, not removed.
+export const billingCoupons = pgTable("billing_coupons", {
+  id: serial().primaryKey(),
+  name: text("name").notNull(),
+  code: text("code").notNull(),
+  notes: text("notes"),
+  percentOff: decimal("percent_off", { precision: 5, scale: 2 }),
+  amountOffPence: integer("amount_off_pence"),
+  currency: text("currency").notNull().default("gbp"),
+  duration: text("duration").notNull(), // 'once' | 'repeating' | 'forever'
+  durationInMonths: integer("duration_in_months"),
+  maxRedemptions: integer("max_redemptions"),
+  redeemBy: timestamp("redeem_by"),
+  stripeCouponId: text("stripe_coupon_id").notNull(),
+  stripePromotionCodeId: text("stripe_promotion_code_id").notNull(),
+  livemode: boolean("livemode").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  deletedAt: timestamp("deleted_at"),
+});
+
 // ── Bias Audit — US-GOV-3.3.1 ────────────────────────────────────────────────
 // Quarterly prompt review records
 export const biasAuditReviews = pgTable("bias_audit_reviews", {

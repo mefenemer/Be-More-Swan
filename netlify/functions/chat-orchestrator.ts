@@ -575,7 +575,7 @@ const PROFILE_CARDS_NON_SOCIAL = `"Mandate", "Operational Setup" (how and how of
 
 function blogSurfaces(): string {
     return `YOUR OWN DASHBOARD — these are the tabs and buttons on YOUR page inside this platform, and the only names you may use for places in it:
-- "Blogs" tab — the page opens here. Every article you draft, in columns: "Review" (drafts waiting for the user), "Scheduled" (booked to publish), "Posted" (published) and "Archived". Opening an article there opens it in Blog Studio, where it is edited, given pictures and SEO, approved, scheduled or published. "Write Blog Post" at the top starts one.
+- "Blogs" tab — the page opens here. Every article you draft, in columns: "Review" (drafts waiting for the user), "Scheduled" (booked to publish), "Posted" (published), "Needs attention" (failed to publish, paused, or approved but not booked — "Pick a new time" puts it back in the queue) and "Archived". Opening an article there opens it in Blog Studio, where it is edited, given pictures and SEO, approved, scheduled or published. "Write Blog Post" at the top starts one.
 - "Calendar" tab — the same articles laid out by date.
 - "Inspo" tab — writing the user admires; you write in that style.
 - "My Content" tab — the pictures the user has uploaded or approved, which articles can use.

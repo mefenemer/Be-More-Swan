@@ -390,6 +390,9 @@
             <option value="tier_change">Tier Change</option>
             <option value="comp_credit">Comp Credit</option>
             <option value="refund_issued">Refund Issued</option>
+            <option value="coupon_create">Coupon Created</option>
+            <option value="coupon_update">Coupon Updated</option>
+            <option value="coupon_delete">Coupon Deleted</option>
             <option value="kill_switch_toggle">Kill Switch Toggle</option>
             <option value="feature_flag_toggle">Feature Flag Toggle</option>
             <option value="gdpr_erasure">GDPR Erasure</option>
@@ -996,6 +999,39 @@
             <span>Special category suspected: <strong id="cogs-special-count" class="text-gray-800">—</strong></span>
             <span>Total calls: <strong id="cogs-total-calls" class="text-gray-800">—</strong></span>
           </div>
+        </div>
+      </section>
+
+      <!-- ── Coupons — Admin → Revenue → Coupons (admin-coupons.ts) ───────────────────────
+           Every coupon here is a real Stripe coupon + promotion code; checkout validates codes
+           against Stripe (validate-promo.ts). The create/edit modal lives OUTSIDE this section —
+           a fixed modal inside .admin-view is trapped by its overflow container. -->
+      <section id="view-coupons" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-5">
+          <div>
+            <p class="text-sm text-gray-500">Discount codes customers enter at checkout. Each one is created in Stripe too — there is no need to open the Stripe dashboard.</p>
+            <p id="coupons-mode" class="text-xs font-bold mt-1"></p>
+          </div>
+          <button type="button" onclick="couponOpenCreate()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">New coupon</button>
+        </div>
+        <p id="coupons-stripe-error" class="hidden text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4"></p>
+        <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide">
+              <tr>
+                <th class="px-4 py-3 text-left">Code</th>
+                <th class="px-4 py-3 text-left">Name</th>
+                <th class="px-4 py-3 text-left">Discount</th>
+                <th class="px-4 py-3 text-right">Used</th>
+                <th class="px-4 py-3 text-left">Expires</th>
+                <th class="px-4 py-3 text-left">Status</th>
+                <th class="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="coupons-tbody">
+              <tr><td colspan="7" class="px-5 py-8 text-center text-gray-400">Loading…</td></tr>
+            </tbody>
+          </table>
         </div>
       </section>
 
@@ -2195,6 +2231,72 @@
 </div>
 
 <!-- AI Credits Modal — Epic 2 US4 -->
+<!-- Coupon create / edit — outside every .admin-view, see view-coupons. -->
+<div id="coupon-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative max-h-[90vh] overflow-y-auto">
+    <button type="button" onclick="couponCloseModal()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold" aria-label="Close">✕</button>
+    <h3 id="coupon-modal-title" class="text-base font-bold text-gray-900 mb-4">New coupon</h3>
+    <div class="space-y-3">
+      <div>
+        <label for="coupon-name" class="text-xs font-bold text-gray-500 uppercase">Name <span class="text-red-500">*</span></label>
+        <input id="coupon-name" maxlength="40" placeholder="Founding member" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+        <p class="text-[11px] text-gray-400 mt-1">Shown on the customer's invoice.</p>
+      </div>
+      <div class="coupon-create-only">
+        <label for="coupon-code" class="text-xs font-bold text-gray-500 uppercase">Code customers type <span class="text-red-500">*</span></label>
+        <input id="coupon-code" maxlength="30" placeholder="FOUNDER30" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono uppercase">
+      </div>
+      <div class="coupon-create-only grid grid-cols-2 gap-3">
+        <div>
+          <label for="coupon-type" class="text-xs font-bold text-gray-500 uppercase">Discount</label>
+          <select id="coupon-type" onchange="couponSyncForm()" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+            <option value="percent">% off</option>
+            <option value="amount">£ off</option>
+          </select>
+        </div>
+        <div>
+          <label for="coupon-value" class="text-xs font-bold text-gray-500 uppercase"><span id="coupon-value-label">Percent</span> <span class="text-red-500">*</span></label>
+          <input id="coupon-value" type="number" min="0" step="0.01" placeholder="30" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+      </div>
+      <div class="coupon-create-only grid grid-cols-2 gap-3">
+        <div>
+          <label for="coupon-duration" class="text-xs font-bold text-gray-500 uppercase">Lasts</label>
+          <select id="coupon-duration" onchange="couponSyncForm()" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+            <option value="repeating">A number of months</option>
+            <option value="once">First payment only</option>
+            <option value="forever">Forever</option>
+          </select>
+        </div>
+        <div id="coupon-months-wrap">
+          <label for="coupon-months" class="text-xs font-bold text-gray-500 uppercase">Months</label>
+          <input id="coupon-months" type="number" min="1" max="36" step="1" placeholder="12" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+      </div>
+      <div class="coupon-create-only grid grid-cols-2 gap-3">
+        <div>
+          <label for="coupon-max" class="text-xs font-bold text-gray-500 uppercase">Usage limit</label>
+          <input id="coupon-max" type="number" min="1" step="1" placeholder="No limit" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label for="coupon-expires" class="text-xs font-bold text-gray-500 uppercase">Expires</label>
+          <input id="coupon-expires" type="date" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+      </div>
+      <p class="coupon-edit-only hidden text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+        <span id="coupon-edit-summary" class="font-semibold"></span><br>
+        Stripe never lets a coupon's discount, length, limit or expiry change once it exists. To change those, create a new coupon and switch this one off.
+      </p>
+      <div>
+        <label for="coupon-notes" class="text-xs font-bold text-gray-500 uppercase">Notes (admins only)</label>
+        <textarea id="coupon-notes" rows="2" placeholder="What it's for, who it was given to…" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none"></textarea>
+      </div>
+      <div id="coupon-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
+      <button id="coupon-save" type="button" onclick="couponSave()" class="btn-primary w-full py-2.5 text-sm font-bold rounded-lg">Create coupon</button>
+    </div>
+  </div>
+</div>
+
 <div id="ai-credits-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative max-h-[85vh] overflow-y-auto">
     <button onclick="document.getElementById('ai-credits-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold">✕</button>
@@ -2688,6 +2790,7 @@ const ADMIN_CATS = {
     { view: 'dunning',        icon: '⏰', label: 'Dunning Queue',         perm: 'dunning_override' },
     { view: 'disputes',       icon: '⚠️', label: 'Disputes',              perm: 'view_reconciliation' },
     { view: 'cogs',           icon: '💰', label: 'COGS Dashboard',        perm: 'view_cogs' },
+    { view: 'coupons',        icon: '🏷️', label: 'Coupons',               perm: 'manage_coupons' },
   ]},
   assistants: { label: 'Assistants', children: [
     { view: 'catalog',              icon: '🤖', label: 'Assistants',          perm: 'assistant_catalog', group: 'Configuration' },
@@ -3044,6 +3147,7 @@ function adminNav(view) {
   if (view === 'audit-log')    loadAuditLog();
   if (view === 'security-abuse') loadSecurityAbuse();
   if (view === 'cogs')            loadCogsDashboard();
+  if (view === 'coupons')         loadCoupons();
   if (view === 'reconciliation')  loadReconciliation();
   if (view === 'dunning')         loadDunningQueue();
   if (view === 'disputes')        loadDisputes();
@@ -8616,6 +8720,146 @@ async function loadCogsDashboard() {
     document.getElementById('cogs-tbody').innerHTML =
       `<tr><td colspan="5" class="px-5 py-5 text-red-500 text-sm">${e.message}</td></tr>`;
   }
+}
+
+// ── Coupons (admin-coupons.ts) ───────────────────────────────────────────────
+const COUPONS_API = '/.netlify/functions/admin-coupons';
+const _coupons = { items: [], editing: null };
+const _cpEsc = (v) => escAdm(v == null ? '' : String(v));
+
+async function loadCoupons() {
+  const tbody = document.getElementById('coupons-tbody');
+  tbody.innerHTML = '<tr><td colspan="7" class="px-5 py-8 text-center text-gray-400 animate-pulse">Loading…</td></tr>';
+  try {
+    const d = await api(COUPONS_API);
+    _coupons.items = d.coupons || [];
+    const mode = document.getElementById('coupons-mode');
+    mode.textContent = d.livemode ? 'Live Stripe account — these codes take real money off.' : 'Stripe TEST account — codes here work only on this environment.';
+    mode.className = 'text-xs font-bold mt-1 ' + (d.livemode ? 'text-red-600' : 'text-gray-500');
+    const err = document.getElementById('coupons-stripe-error');
+    err.textContent = d.stripeError || '';
+    err.classList.toggle('hidden', !d.stripeError);
+    tbody.innerHTML = _coupons.items.map((c) => {
+      const status = !c.isActive ? '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-gray-100 text-gray-600">Off</span>'
+        : c.expired ? '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700">Expired</span>'
+        : '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">Active</span>';
+      const used = c.timesRedeemed == null ? '—' : `${c.timesRedeemed}${c.maxRedemptions ? ' / ' + c.maxRedemptions : ''}`;
+      const expires = c.redeemBy ? new Date(c.redeemBy).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Never';
+      return `<tr class="border-t border-gray-100">
+        <td class="px-4 py-3 font-mono font-bold text-gray-900">${_cpEsc(c.code)}</td>
+        <td class="px-4 py-3 text-gray-700">${_cpEsc(c.name)}${c.notes ? `<p class="text-[11px] text-gray-400 truncate max-w-[16rem]" title="${_cpEsc(c.notes)}">${_cpEsc(c.notes)}</p>` : ''}</td>
+        <td class="px-4 py-3 text-gray-700">${_cpEsc(c.summary)}</td>
+        <td class="px-4 py-3 text-right font-mono">${used}</td>
+        <td class="px-4 py-3 text-gray-600">${expires}</td>
+        <td class="px-4 py-3">${status}</td>
+        <td class="px-4 py-3 text-right whitespace-nowrap">
+          <button type="button" onclick="couponOpenEdit(${c.id})" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">Edit</button>
+          <button type="button" onclick="couponToggle(${c.id})" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">${c.isActive ? 'Switch off' : 'Switch on'}</button>
+          <button type="button" onclick="couponDelete(${c.id})" class="btn-destructive px-2.5 py-1 text-xs font-bold rounded-lg border">Delete</button>
+        </td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="7" class="px-5 py-8 text-center text-gray-400">No coupons yet.</td></tr>';
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="7" class="px-5 py-5 text-red-500 text-sm">${_cpEsc(e.message)}</td></tr>`;
+  }
+}
+
+function couponSyncForm() {
+  const type = document.getElementById('coupon-type').value;
+  document.getElementById('coupon-value-label').textContent = type === 'amount' ? 'Amount (£)' : 'Percent';
+  const repeating = document.getElementById('coupon-duration').value === 'repeating';
+  document.getElementById('coupon-months-wrap').style.visibility = repeating ? 'visible' : 'hidden';
+}
+
+function _couponShowModal(editing) {
+  _coupons.editing = editing;
+  document.querySelectorAll('#coupon-modal .coupon-create-only').forEach((el) => el.classList.toggle('hidden', !!editing));
+  document.querySelectorAll('#coupon-modal .coupon-edit-only').forEach((el) => el.classList.toggle('hidden', !editing));
+  document.getElementById('coupon-modal-title').textContent = editing ? `Edit ${editing.code}` : 'New coupon';
+  document.getElementById('coupon-save').textContent = editing ? 'Save changes' : 'Create coupon';
+  document.getElementById('coupon-error').classList.add('hidden');
+  document.getElementById('coupon-modal').classList.remove('hidden');
+}
+
+function couponOpenCreate() {
+  ['coupon-name', 'coupon-code', 'coupon-value', 'coupon-months', 'coupon-max', 'coupon-expires', 'coupon-notes']
+    .forEach((id) => { document.getElementById(id).value = ''; });
+  document.getElementById('coupon-type').value = 'percent';
+  document.getElementById('coupon-duration').value = 'repeating';
+  couponSyncForm();
+  _couponShowModal(null);
+}
+
+function couponOpenEdit(id) {
+  const c = _coupons.items.find((x) => x.id === id);
+  if (!c) return;
+  document.getElementById('coupon-name').value = c.name || '';
+  document.getElementById('coupon-notes').value = c.notes || '';
+  document.getElementById('coupon-edit-summary').textContent = `${c.code}: ${c.summary}`;
+  _couponShowModal(c);
+}
+
+function couponCloseModal() { document.getElementById('coupon-modal').classList.add('hidden'); }
+
+async function couponSave() {
+  const btn = document.getElementById('coupon-save');
+  const errEl = document.getElementById('coupon-error');
+  const val = (id) => document.getElementById(id).value.trim();
+  const editing = _coupons.editing;
+  const body = editing
+    ? { id: editing.id, name: val('coupon-name'), notes: val('coupon-notes') }
+    : {
+        name: val('coupon-name'), code: val('coupon-code'), notes: val('coupon-notes'),
+        discountType: val('coupon-type'), discountValue: val('coupon-value'),
+        duration: val('coupon-duration'), durationInMonths: val('coupon-months'),
+        maxRedemptions: val('coupon-max'),
+        // End of the chosen day, UK time, so "expires 31 Dec" still works on 31 Dec.
+        redeemBy: val('coupon-expires') ? `${val('coupon-expires')}T23:59:59` : null,
+      };
+  btn.disabled = true;
+  errEl.classList.add('hidden');
+  try {
+    await api(COUPONS_API, { method: editing ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    couponCloseModal();
+    window.showToast?.(editing ? 'Coupon updated.' : `Coupon ${body.code.toUpperCase()} created in Stripe.`);
+    loadCoupons();
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function couponToggle(id) {
+  const c = _coupons.items.find((x) => x.id === id);
+  if (!c) return;
+  if (c.isActive) {
+    const ok = await window.confirmModal(
+      `Switch off <strong>${_cpEsc(c.code)}</strong>? Nobody new can use it until you switch it back on. Customers already on the discount keep it.`,
+      { title: 'Switch off coupon', confirmLabel: 'Switch off' });
+    if (!ok) return;
+  }
+  try {
+    await api(COUPONS_API, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, isActive: !c.isActive }) });
+    window.showToast?.(c.isActive ? `${c.code} switched off.` : `${c.code} switched on.`);
+    loadCoupons();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+async function couponDelete(id) {
+  const c = _coupons.items.find((x) => x.id === id);
+  if (!c) return;
+  const ok = await window.confirmModal(
+    `Delete <strong>${_cpEsc(c.code)}</strong>? It is removed from Stripe and the code stops working for good. ` +
+    `Customers already on the discount keep it — that is Stripe's rule. The record stays in the audit log.`,
+    { title: 'Delete coupon', confirmLabel: 'Delete', confirmColor: '#dc2626' });
+  if (!ok) return;
+  try {
+    await api(`${COUPONS_API}?id=${id}`, { method: 'DELETE' });
+    window.showToast?.(`${c.code} deleted.`);
+    loadCoupons();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 // ── Analytics ─────────────────────────────────────────────────────────────────

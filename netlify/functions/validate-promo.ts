@@ -9,6 +9,9 @@ import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { eq } from 'drizzle-orm';
+import { getDb } from '../../db/client';
+import { masterPlans } from '../../db/schema';
 
 const jwtSecret    = process.env.JWT_SECRET!;
 const stripeSecret = process.env.STRIPE_SECRET_KEY!;
@@ -16,15 +19,10 @@ const stripeSecret = process.env.STRIPE_SECRET_KEY!;
 if (!stripeSecret) throw new Error('CRITICAL: STRIPE_SECRET_KEY is missing.');
 
 const stripe    = new Stripe(stripeSecret, { apiVersion: '2026-05-27.dahlia' });
-const isTestMode = stripeSecret.startsWith('sk_test_');
 
-// Monthly prices by tier, used only to preview a promo code's discount. The authoritative price
-// is master_plans.monthly_price_gbp (what create-subscription.ts actually charges) — these are a
-// hardcoded mirror, so they have to be updated by hand whenever a plan price changes in the Admin
-// Portal, or the discount shown at checkout is computed off the old price.
-const MONTHLY_PRICES_GBP: Record<string, number> = isTestMode
-    ? { buster: 79, saver: 29, employee: 349 }
-    : { buster: 79, saver: 29, employee: 349 };
+// The price the discount is previewed against is read from master_plans.monthly_price_gbp — the
+// same row create-subscription.ts charges from. It used to be a hardcoded copy here, which had to
+// be edited by hand on every price change or checkout previewed the discount off the old price.
 
 const ANNUAL_DISCOUNT = 0.80;
 
@@ -86,7 +84,10 @@ export default withLambda(async (event) => {
 
     // Calculate the discounted amount
     const tierKey   = (tier || 'saver').toLowerCase();
-    const baseGbp   = (MONTHLY_PRICES_GBP[tierKey] || 99);
+    const [plan]    = await getDb().select({ monthlyPriceGbp: masterPlans.monthlyPriceGbp })
+        .from(masterPlans).where(eq(masterPlans.tierKey, tierKey)).limit(1);
+    if (!plan) return { statusCode: 400, body: JSON.stringify({ valid: false, error: 'Unknown plan.' }) };
+    const baseGbp   = Number(plan.monthlyPriceGbp);
     const chargeGbp = billingCycle === 'annual'
         ? parseFloat((baseGbp * 12 * ANNUAL_DISCOUNT).toFixed(2))
         : baseGbp;

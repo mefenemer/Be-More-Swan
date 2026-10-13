@@ -3413,14 +3413,21 @@ window._detailRqRecordAct = async function (btn, action) {
 // state". There is: set-draft-horizon.ts sets status='archived' on every draft beyond the window
 // whenever a user SHRINKS their draft horizon, and blog-posts.ts's DELETE now archives too. Those
 // rows were in the database and listed by no tab in the product — invisible, not gone.
+//
+// ⚠️ Same failure, three more statuses (fixed 2026-10-13). publish-blog-posts.ts sets 'failed' when
+// a due article cannot be published, and 'publishing' while it is mid-publish; blog_posts also
+// allows 'paused' and 'approved'. None of them was in any list here, and the Approved column is
+// hidden for blogs — so an article that failed to go live vanished from the Blogs tab, with nothing
+// to tell the author. They now sit in Needs attention (with a way to reschedule them), and a post
+// caught mid-publish stays under Scheduled.
 const _RQ_BLOG_STATUS = {
     review: ['draft', 'pending_approval', 'in_review'],
-    approved: ['approved'],
-    scheduled: ['scheduled'],
+    scheduled: ['scheduled', 'publishing'],
     posted: ['published'],
     // 'rejected' too: reject-blog-post.ts sets it, and without it here a rejected draft would be in
     // the database and in no tab — the workspace Review page already lists it under Archive.
     archived: ['archived', 'rejected'],
+    attention: ['failed', 'paused', 'approved'],
 };
 
 function _rqBlogActions(p, statusKey) {
@@ -3439,7 +3446,13 @@ function _rqBlogActions(p, statusKey) {
         actions.push(btn('showSchedule', 'Schedule', secondary));
     } else if (statusKey === 'scheduled') {
         actions.push(btn('open', 'Open in Blog Studio', primary));
-        actions.push(btn('unschedule', 'Unschedule', secondary));
+        // Mid-publish: unscheduling now would race the publisher for the same row.
+        if (p.status !== 'publishing') actions.push(btn('unschedule', 'Unschedule', secondary));
+    } else if (statusKey === 'attention') {
+        // Failed to publish, paused, or approved but never booked. schedule-blog.ts accepts any
+        // non-published status, so picking a new time is the way back into the queue.
+        actions.push(btn('open', 'Open in Blog Studio', primary));
+        actions.push(btn('showSchedule', 'Pick a new time', secondary));
     } else if (statusKey === 'posted') {
         // Live on the site — it can be taken back off (native copy only; see unpublish-blog.ts).
         actions.push(btn('open', 'Open in Blog Studio', primary));
@@ -3465,9 +3478,17 @@ function _rqBlogActions(p, statusKey) {
     </div>`;
 }
 
+// What each Needs-attention status means, in the author's words.
+const _RQ_BLOG_ATTENTION_NOTE = {
+    failed: 'This article was due to publish and didn’t go live. Open it to check it, then pick a new time.',
+    paused: 'Publishing is paused for this article. Pick a new time to put it back in the queue.',
+    approved: 'Approved, but not booked to publish. Pick a time to schedule it.',
+};
+
 function _detailRqBlogCard(p, statusKey) {
+    const note = statusKey === 'attention' ? _RQ_BLOG_ATTENTION_NOTE[p.status] : null;
     const when = p.publishDate
-        ? `scheduled ${new Date(p.publishDate).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+        ? `${p.status === 'failed' ? 'was due' : 'scheduled'} ${new Date(p.publishDate).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
         : (p.updatedAt ? `updated ${new Date(p.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : '');
     return `<div class="py-4" data-rq-blog="${p.id}">
       <div class="min-w-0">
@@ -3476,6 +3497,7 @@ function _detailRqBlogCard(p, statusKey) {
           <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">${_rqEsc(p.status)}</span>
           ${when ? `<span class="text-[11px] font-semibold text-gray-400">${_rqEsc(when)}</span>` : ''}
         </div>
+        ${note ? `<p class="text-xs text-gray-600 mt-2">${_rqEsc(note)}</p>` : ''}
       </div>
       ${_rqBlogActions(p, statusKey)}
     </div>`;
@@ -3623,8 +3645,8 @@ function _detailRqPaintBlogCounts(all) {
     for (const key of Object.keys(_DETAIL_RQ_COLUMNS)) {
         const btn = document.querySelector(`.detail-rq-col[data-status="${key}"]`);
         if (!btn || btn.classList.contains('hidden')) continue;
-        // A column with no blog statuses ('attention' — a post has a publish attempt to fail, a blog
-        // post does not) counts zero, which clears any badge a previous role left behind.
+        // A column with no blog statuses (Approved — hidden for blogs) counts zero, which clears any
+        // badge a previous role left behind.
         const wanted = _RQ_BLOG_STATUS[key] || [];
         const n = wanted.length ? all.filter((p) => wanted.includes(p.status)).length : 0;
         _detailRqSetColumnBadge(key, n);
@@ -5658,7 +5680,7 @@ function _applyDashboardRegistry(data) {
     toggle('maintab-btn-briefs', !!briefsTab);
     if (briefsTab) {
         setText('briefs-tab-label', briefsTab.label || 'Briefs');
-        window.AssistantBriefs?.init({ assistantId: data.id });
+        window.AssistantBriefs?.init({ assistantId: data.id, assistantName: data.name });
     }
 
     // Signal Inbox tab — lead roles only (signalInbox: lead_qualifier): everything that came IN

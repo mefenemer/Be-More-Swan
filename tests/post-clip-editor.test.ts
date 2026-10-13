@@ -1601,7 +1601,7 @@ check('both columns have a handle, and it is the thing that stays', () => {
     assert.ok(fn.includes("steps.style.display = shut ? 'none' : ''"), 'the rail folds its handle away too');
     assert.ok(fn.includes("strip.style.display = shut ? 'none' : ''"), 'the side folds its handle away too');
     assert.ok(fn.includes("rail.style.width = shut ? '2rem' : ''"), 'a folded rail takes no less room');
-    assert.ok(fn.includes("side.style.width = shut ? '2rem' : '22rem'"), 'a folded side takes no less room');
+    assert.ok(fn.includes("side.style.width = shut ? '2rem' : open"), 'a folded side takes no less room');
     // The handle has to say which way it goes.
     assert.ok(fn.includes("btn.title = shut ? 'Show the setup steps'"), 'the rail handle does not change its label');
     assert.ok(fn.includes("btn.title = shut ? 'Show the timeline'"), 'the side handle does not change its label');

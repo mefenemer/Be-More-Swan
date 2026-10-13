@@ -252,14 +252,15 @@ export default withLambda(async (event) => {
     // button rather than one that can only fail.
     if (action === 'post_brief') {
         const postId = Number(body.postId);
-        const [designer] = await db.select({ id: aiAssistants.id }).from(aiAssistants)
+        // `designerName` lets the editor say "Ask Iris" — the user's own name for their designer.
+        const [designer] = await db.select({ id: aiAssistants.id, name: aiAssistants.name }).from(aiAssistants)
             .where(and(eq(aiAssistants.organisationId, orgId), sql`(${aiAssistants.configuration} ->> 'type') = ${BRAND_DESIGNER_ROLE_KEY}`)).limit(1);
-        if (!designer || !Number.isInteger(postId) || postId <= 0) return json(200, { designerId: designer?.id ?? null, brief: null });
+        if (!designer || !Number.isInteger(postId) || postId <= 0) return json(200, { designerId: designer?.id ?? null, designerName: designer?.name ?? null, brief: null });
         const [brief] = await db.select({ id: visualBriefs.id, status: visualBriefs.status, aiAssistantId: visualBriefs.aiAssistantId })
             .from(visualBriefs).where(and(
                 eq(visualBriefs.organisationId, orgId), eq(visualBriefs.scheduledPostId, postId), sql`${visualBriefs.status} <> 'cancelled'`,
             )).limit(1);
-        return json(200, { designerId: designer.id, brief: brief ?? null });
+        return json(200, { designerId: designer.id, designerName: designer.name, brief: brief ?? null });
     }
 
     if (action === 'brief_for_post') {

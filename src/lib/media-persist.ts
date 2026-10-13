@@ -151,7 +151,7 @@ export async function generateAndPersistImage(db: Db, params: {
         console.error('[media-persist] picture guidelines unreadable — prompt used as written:', err instanceof Error ? err.message : err);
     }
     const image = falConfigured()
-        ? (await generateImages({ prompt, aspectRatio: params.aspectRatio, numImages: 1 }))[0]
+        ? (await generateImages({ prompt, aspectRatio: params.aspectRatio, numImages: 1, usage: { workspaceId: params.orgId, userId: params.userId } }))[0]
         : { url: `https://picsum.photos/seed/aura-auto-${Date.now()}/1024/1024`, width: 1024, height: 1024, contentType: 'image/jpeg' };
 
     const mimeType = image.contentType || 'image/png';
