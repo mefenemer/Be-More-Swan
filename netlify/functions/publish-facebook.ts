@@ -16,6 +16,7 @@
 // with the self-test harness (social-publish-selftest.ts) so a green self-test proves this path.
 
 import { livePostUrl } from '../../src/utils/post-live-url';
+import { heldOrganisationIds, heldOrgsClause } from '../../src/utils/beta-ending';
 import { Handler } from '@netlify/functions';
 import { getDb } from '../../db/client';
 import { scheduledPosts, publishCronLog } from '../../db/schema';
@@ -65,6 +66,7 @@ export default withLambda(async () => {
            AND updated_at < now() - interval '${STALE_PUBLISHING_MINS} minutes'`
     );
 
+    const held = await heldOrganisationIds(db);
     const posts = await db.execute<PostRow>(
         `SELECT id, user_id, organisation_id, caption, hashtags, connection_id,
                 attempt_count, publish_date, content_asset_ids, assistant_id,
@@ -74,6 +76,8 @@ export default withLambda(async () => {
            AND platform = 'facebook'
            AND publish_date <= now()
            AND (retry_at IS NULL OR retry_at <= now())
+           -- End of beta: a workspace whose beta ended and has not subscribed is held (beta-ending.ts).
+           ${heldOrgsClause(held)}
            -- Video text-overlay render gate (Phase 4) — see publish-social-posts for the rationale.
            AND (render_status IS NULL OR render_status = 'done')
          ORDER BY publish_date

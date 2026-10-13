@@ -1,6 +1,7 @@
 import { Handler } from '@netlify/functions';
 import Stripe from 'stripe';
 import { eq, and, inArray, desc, isNull, sql } from 'drizzle-orm';
+import { retireBetaPlanBeforePaid, afterPaidPlanStarted } from '../../src/utils/beta-ending';
 import { getDb, withUpdatedAt } from '../../db/client';
 import { payments, plans, aiAssistants, onboardingDrafts, notifications, users, masterPlans, invoices, processedWebhookEvents, userReferrals, platformConfig, stripeDisputes, userOrganisations, userProfiles } from '../../db/schema';
 import { createNotification, createNotifications } from '../../src/utils/notify';
@@ -165,6 +166,8 @@ export default withLambda(async (event) => {
         // Create the active plan record — unique-constraint guard mirrors the payment_intent path
         let newPlan: typeof plans.$inferSelect;
         try {
+            // A beta tester's free plan is replaced, not collided with (beta-ending.ts).
+            if (orgIdInt) await retireBetaPlanBeforePaid(db, orgIdInt);
             const [inserted] = await db.insert(plans).values({
                 userId: userIdInt,
                 organisationId: orgIdInt,
@@ -176,6 +179,7 @@ export default withLambda(async (event) => {
                 stripeSubscriptionId,
             }).returning();
             newPlan = inserted;
+            if (orgIdInt) await afterPaidPlanStarted(db, orgIdInt);
         } catch (planErr: any) {
             if (planErr?.code === '23505' || planErr?.message?.includes('plans_one_active_per_org_unique')) {
                 // confirm-payment.ts won the race. Do not just walk away: fill in any reference it
@@ -353,6 +357,8 @@ export default withLambda(async (event) => {
         // an unhandled error; returning 200 tells Stripe not to retry the event.
         let newPlan: typeof plans.$inferSelect;
         try {
+            // A beta tester's free plan is replaced, not collided with (beta-ending.ts).
+            if (orgIdInt) await retireBetaPlanBeforePaid(db, orgIdInt);
             const [inserted] = await db.insert(plans).values({
                 userId: userIdInt,
                 organisationId: orgIdInt,
@@ -364,6 +370,7 @@ export default withLambda(async (event) => {
                 stripeSubscriptionId: createdStripeSubscriptionId,
             }).returning();
             newPlan = inserted;
+            if (orgIdInt) await afterPaidPlanStarted(db, orgIdInt);
         } catch (planErr: any) {
             if (planErr?.code === '23505' || planErr?.message?.includes('plans_one_active_per_org_unique')) {
                 // Same reasoning as the checkout.session.completed handler above: the row that won

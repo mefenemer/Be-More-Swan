@@ -7,7 +7,8 @@
 // No external APIs — publishing a blog is a local DB snapshot, so no per-platform retry/backoff.
 
 import { Handler } from '@netlify/functions';
-import { and, eq, lte, lt } from 'drizzle-orm';
+import { heldOrganisationIds } from '../../src/utils/beta-ending';
+import { and, eq, lte, lt, notInArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { blogPosts } from '../../db/schema';
 import { publishBlogPost } from '../../src/utils/blog-publish';
@@ -34,10 +35,15 @@ export default withLambda(async () => {
 
     // Find due posts. Each is then claimed with a status-guarded update so overlapping ticks
     // (or a manual publish landing at the same moment) can't double-publish.
+    // End of beta: a workspace whose beta ended and has not subscribed is held (beta-ending.ts).
+    const held = [...await heldOrganisationIds(db)];
     const due = await db
         .select({ id: blogPosts.id })
         .from(blogPosts)
-        .where(and(eq(blogPosts.status, 'scheduled'), lte(blogPosts.publishDate, now)))
+        .where(and(
+            eq(blogPosts.status, 'scheduled'), lte(blogPosts.publishDate, now),
+            ...(held.length ? [notInArray(blogPosts.organisationId, held)] : []),
+        ))
         .limit(BATCH);
 
     for (const { id } of due) {

@@ -106,6 +106,12 @@ export default withLambda(async (event) => {
     if (state === 'system_paused' && (a.provisioningStatus === 'paused_payment' || a.provisioningStatus === 'paused_limit')) {
         return json(409, { error: 'Resolve the billing issue on this workspace before starting this assistant.', code: 'SYSTEM_PAUSED_BILLING' });
     }
+    if (state === 'system_paused' && a.provisioningStatus === 'paused_beta_ended') {
+        return json(409, {
+            error: 'Your beta has ended, so this assistant is paused. Choose a plan and it starts again straight away — nothing has been deleted.',
+            code: 'SYSTEM_PAUSED_BETA_ENDED',
+        });
+    }
     // A quota pause is not user-fixable by kicking off either — every task would be refused by
     // atomicCapCheck anyway. It clears itself when the allowance resets (resume-quota-paused.ts),
     // so say so rather than letting the user start something that cannot run.

@@ -178,7 +178,7 @@ async function readPage(domain: string, path: string): Promise<{ url: string; ht
 export async function gatherLeadIntel(
     domain: string | null,
     companyName: string,
-    opts: { maxSearches?: number } = {},
+    opts: { maxSearches?: number; usage?: { workspaceId?: number | null; assistantId?: number | null; userId?: number | null } } = {},
 ): Promise<LeadIntel> {
     if (!ENABLED || !domain) return { ...EMPTY, gatheredAt: new Date().toISOString() };
 
@@ -200,7 +200,7 @@ export async function gatherLeadIntel(
                 ? `site:${domain} ${q.terms}`
                 : `"${companyName}" ${domain} ${q.terms}`;
             try {
-                const res = await search(query, { limit: 4, recency: q.recency });
+                const res = await search(query, { limit: 4, recency: q.recency, usage: opts.usage });
                 searchCallsMade++;
                 costGbp += res.costGbp;
                 for (const r of res.results) evidence.push(toEvidence(q.kind, r));

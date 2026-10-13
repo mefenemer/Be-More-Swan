@@ -17,6 +17,7 @@
 
 import * as cheerio from 'cheerio';
 import { safeFetchText, USER_AGENTS } from '../utils/safe-fetch';
+import { logServiceCost } from '../utils/ai-usage';
 
 const PROVIDER = (process.env.DISCOVERY_SEARCH_PROVIDER ?? 'serper').toLowerCase();
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
@@ -102,13 +103,18 @@ export function normaliseDomain(input: string | null | undefined): string | null
  */
 export async function search(
     query: string,
-    opts: { limit?: number; recency?: 'year' | 'month'; page?: number } = {},
+    opts: { limit?: number; recency?: 'year' | 'month'; page?: number; usage?: { workspaceId?: number | null; assistantId?: number | null; userId?: number | null } } = {},
 ): Promise<SearchResponse> {
     if (!isSearchConfigured()) throw new SearchNotConfiguredError();
     const limit = Math.max(1, Math.min(opts.limit ?? 10, MAX_RESULTS_PER_CALL));
     const page = Math.max(1, Math.floor(opts.page ?? 1));
 
-    if (PROVIDER === 'serper') return searchSerper(query, limit, opts.recency, page);
+    if (PROVIDER === 'serper') {
+        const res = await searchSerper(query, limit, opts.recency, page);
+        // One billed query per call (each page is its own query). Recorded only once it answered.
+        logServiceCost('serper-search', 1, { ...opts.usage, sessionId: 'serper' });
+        return res;
+    }
     throw new SearchNotConfiguredError(`Unknown DISCOVERY_SEARCH_PROVIDER "${PROVIDER}".`);
 }
 

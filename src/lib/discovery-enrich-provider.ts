@@ -49,6 +49,7 @@
 //   DISCOVERY_ENRICH_TIMEOUT_MS — per-lookup timeout (default 5000)
 
 import { roleOrPersonal, type EmailKind } from '../config/lead-email-kind';
+import { logServiceCost } from '../utils/ai-usage';
 
 const PROVIDER = (process.env.DISCOVERY_ENRICH_PROVIDER ?? 'none').toLowerCase();
 const HUNTER_API_KEY = process.env.HUNTER_API_KEY;
@@ -134,7 +135,7 @@ function confidenceOf(raw: unknown): number | null {
  * a silent zero hit rate reads identically to "these companies publish nothing", and the
  * console.warn below is the only thing that tells them apart.
  */
-async function lookupHunter(domain: string, timeoutMs: number): Promise<ProviderOutcome> {
+async function lookupHunter(domain: string, timeoutMs: number, usage?: { workspaceId?: number | null; assistantId?: number | null; userId?: number | null }): Promise<ProviderOutcome> {
     const url = `${HUNTER_ENDPOINT}?domain=${encodeURIComponent(domain)}&api_key=${encodeURIComponent(HUNTER_API_KEY as string)}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -157,6 +158,9 @@ async function lookupHunter(domain: string, timeoutMs: number): Promise<Provider
             console.warn(`[enrich-provider] hunter 200 but data.emails was not an array for ${domain} — response shape changed?`);
             return { status: 'error', reason: 'bad_body' };
         }
+        // Hunter bills one credit per email a domain search RETURNS (none when it finds nothing),
+        // whether or not we use them — so the units are the length of the list, not 1.
+        logServiceCost('hunter-domain-search', raw.length, { ...usage, sessionId: 'hunter' });
 
         const candidates = raw
             .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object')
@@ -196,7 +200,7 @@ async function lookupHunter(domain: string, timeoutMs: number): Promise<Provider
  */
 export async function lookupProviderContact(
     domain: string | null,
-    opts: { timeoutMs?: number } = {},
+    opts: { timeoutMs?: number; usage?: { workspaceId?: number | null; assistantId?: number | null; userId?: number | null } } = {},
 ): Promise<ProviderOutcome> {
     if (!isEnrichProviderConfigured()) return { status: 'error', reason: 'not_configured' };
     if (!domain) return { status: 'error', reason: 'no_domain' };
@@ -207,6 +211,6 @@ export async function lookupProviderContact(
     // Abandoning it is emphatically NOT a miss — we ran out of OUR time, not their addresses.
     const timeoutMs = Math.min(opts.timeoutMs ?? TIMEOUT_MS, TIMEOUT_MS);
     if (timeoutMs <= 0) return { status: 'error', reason: 'no_budget' };
-    if (PROVIDER === 'hunter') return lookupHunter(host, timeoutMs);
+    if (PROVIDER === 'hunter') return lookupHunter(host, timeoutMs, opts.usage);
     return { status: 'error', reason: 'not_configured' };
 }

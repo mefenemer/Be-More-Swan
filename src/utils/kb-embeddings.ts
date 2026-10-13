@@ -11,6 +11,8 @@
 // the HNSW index assumes cosine distance, so changing EMBEDDING_MODEL to one with a
 // different output size needs a migration and a re-embed of every article.
 
+import { logAiUsage } from './ai-usage';
+
 export const EMBEDDING_MODEL = 'voyage-3.5-lite';
 export const EMBEDDING_DIMENSIONS = 1024;
 
@@ -30,7 +32,12 @@ export function embeddingsConfigured(): boolean {
  * Returns null when no provider is configured (callers fall back to full-text
  * search); throws on provider errors so ingestion can mark the article 'failed'.
  */
-export async function embedTexts(texts: string[], inputType: 'document' | 'query'): Promise<number[][] | null> {
+export async function embedTexts(
+    texts: string[],
+    inputType: 'document' | 'query',
+    /** Who this is for, so the cost lands on the right workspace in the COGS view. Recorded either way. */
+    usage?: { workspaceId?: number | null; assistantId?: number | null; userId?: number | null },
+): Promise<number[][] | null> {
     const apiKey = process.env.VOYAGE_API_KEY;
     if (!apiKey) return null;
     if (texts.length === 0) return [];
@@ -45,7 +52,10 @@ export async function embedTexts(texts: string[], inputType: 'document' | 'query
         const detail = await res.text().catch(() => '');
         throw new Error(`Voyage embeddings request failed (${res.status}): ${detail.slice(0, 300)}`);
     }
-    const payload = await res.json() as { data?: { index: number; embedding: number[] }[] };
+    const payload = await res.json() as { data?: { index: number; embedding: number[] }[]; usage?: { total_tokens?: number } };
+    // Voyage reports the tokens it billed; priced via LIST_PRICE_PER_1K['voyage-3.5-lite'].
+    const billed = Number(payload.usage?.total_tokens) || 0;
+    if (billed > 0) void logAiUsage({ ...usage, model: EMBEDDING_MODEL, inputTokens: billed, outputTokens: 0, sessionId: `embed:${inputType}` });
     if (!Array.isArray(payload.data) || payload.data.length !== texts.length) {
         throw new Error('Voyage embeddings response shape unexpected.');
     }

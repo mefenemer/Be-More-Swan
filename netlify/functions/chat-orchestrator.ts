@@ -1040,7 +1040,7 @@ async function retrieveKnowledgeBase(
         let rows: { title: string; content: string }[] = [];
 
         // Semantic pass — embed the query and rank chunks by cosine distance.
-        const vectors = await embedTexts([q], 'query').catch((err) => {
+        const vectors = await embedTexts([q], 'query', { workspaceId: orgId, assistantId: aiAssistantId }).catch((err) => {
             console.error('[chat-orchestrator] KB query embedding failed:', err);
             return null;
         });

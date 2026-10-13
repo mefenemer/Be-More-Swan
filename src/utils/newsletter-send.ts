@@ -27,6 +27,7 @@ import {
     newsletterSendingDomains, newsletterSends, organisations,
 } from '../../db/schema';
 import { unopenedRecipientPage } from './newsletter-resend';
+import { heldOrganisationIds } from './beta-ending';
 import { MONTHLY_GAP_DAYS } from './audience-preferences';
 import { buildSegmentCondition, parseRules } from './audience-segment-rules';
 import { decideAndRelease, prepareAbSample } from './newsletter-ab';
@@ -531,10 +532,17 @@ export async function sendDueIssues(db: Db, opts: { baseUrl: string; now?: Date;
             lt(newsletterIssues.updatedAt, new Date(now.getTime() - STALE_CLAIM_MS)),
         ));
 
+    // End of beta: a SCHEDULED issue from a workspace whose beta ended (and has not subscribed) is
+    // held (beta-ending.ts). An issue already 'sending' is finished — stopping mid-send would leave
+    // half the list emailed.
+    const held = [...await heldOrganisationIds(db)];
+    const notHeld = held.length
+        ? sql` AND ${newsletterIssues.organisationId} <> ALL(ARRAY[${sql.join(held.map((h) => sql`${h}`), sql`, `)}]::int[])`
+        : sql``;
     const due = await db
         .select({ id: newsletterIssues.id, status: newsletterIssues.status })
         .from(newsletterIssues)
-        .where(sql`(${newsletterIssues.status} = 'scheduled' AND ${newsletterIssues.scheduledFor} <= ${nowIso})
+        .where(sql`(${newsletterIssues.status} = 'scheduled' AND ${newsletterIssues.scheduledFor} <= ${nowIso}${notHeld})
                    OR ${newsletterIssues.status} = 'sending'`)
         .orderBy(newsletterIssues.scheduledFor)
         .limit(opts.maxIssues ?? 5);

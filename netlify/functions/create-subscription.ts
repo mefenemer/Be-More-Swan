@@ -7,7 +7,9 @@ config({ path: path.resolve(process.cwd(), '.env') });
 import { Handler } from '@netlify/functions';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, ne } from 'drizzle-orm';
+import { BETA_PLAN_TYPE } from '../../src/utils/beta-testers';
+import { retireBetaPlanBeforePaid, afterPaidPlanStarted } from '../../src/utils/beta-ending';
 import { users, masterPlans, plans, payments } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { requireTenant } from '../../src/utils/tenant';
@@ -43,10 +45,11 @@ export default withLambda(async (event) => {
     // the webhook's plan insert would collide on plans_one_active_per_org_unique). Report
     // no-payment-due so the frontend routes the already-subscribed user to their dashboard,
     // matching the £0 already-provisioned response shape.
+    // A free BETA plan does not count: a beta tester taking a paid plan replaces it (beta-ending.ts).
     const [activePlan] = await db
       .select({ id: plans.id, planName: plans.planName })
       .from(plans)
-      .where(and(eq(plans.organisationId, orgId), eq(plans.status, 'active')))
+      .where(and(eq(plans.organisationId, orgId), eq(plans.status, 'active'), ne(plans.planType, BETA_PLAN_TYPE)))
       .limit(1);
     if (activePlan) {
       return {
@@ -231,7 +234,7 @@ export default withLambda(async (event) => {
       const [existingPlan] = await db
         .select({ id: plans.id })
         .from(plans)
-        .where(and(eq(plans.organisationId, orgId), eq(plans.status, 'active')))
+        .where(and(eq(plans.organisationId, orgId), eq(plans.status, 'active'), ne(plans.planType, BETA_PLAN_TYPE)))
         .limit(1);
 
       // Track whether THIS subscription became the org's active plan. A £0 subscription
@@ -242,6 +245,7 @@ export default withLambda(async (event) => {
 
       if (!existingPlan) {
         try {
+          await retireBetaPlanBeforePaid(db, orgId);
           const [newPlan] = await db.insert(plans).values({
             userId:               user.id,
             organisationId:       orgId,
@@ -265,6 +269,7 @@ export default withLambda(async (event) => {
             description:       `${masterPlan.name} — first payment (100% promo)`,
           });
 
+          await afterPaidPlanStarted(db, orgId);
           await createNotification(db, 'subscription_active_setup', { userId: user.id, isRead: false });
 
           await resolveActionNotifications(db, user.id, PAYMENT_RESTORED_TYPES);
