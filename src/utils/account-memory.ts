@@ -83,7 +83,9 @@ export async function writeMemories(db: Db, inputs: MemoryInput[]): Promise<Arra
     let vectors: number[][] | null = null;
     if (embeddingsConfigured()) {
         try {
-            vectors = await embedTexts(prepared.map((p) => p.content), 'document');
+            // One workspace per batch in practice; attributed only when that holds.
+            const orgs = new Set(prepared.map((p) => p.organisationId));
+            vectors = await embedTexts(prepared.map((p) => p.content), 'document', orgs.size === 1 ? { workspaceId: prepared[0].organisationId } : undefined);
         } catch (err) {
             // Store unembedded rather than losing the memory. Retrieval falls back to full-text
             // search, which is degraded but real — and a later backfill can fill the vector in.
@@ -166,7 +168,7 @@ export async function searchMemory(
         try {
             // inputType 'query' — asymmetric retrieval. Embedding a question the same way as a
             // document measurably degrades ranking on this model.
-            const out = await embedTexts([text], 'query');
+            const out = await embedTexts([text], 'query', { workspaceId: organisationId });
             queryVector = out?.[0] ?? null;
         } catch (err) {
             console.error('[account-memory] query embedding failed, falling back to full text', err);

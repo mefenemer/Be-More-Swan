@@ -523,7 +523,7 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
             if (!isSearchConfigured()) throw new SearchNotConfiguredError();
 
             const page = Math.max(1, plannedPage ?? 1);
-            const { results, costGbp: callCost } = await search(query, { limit: RESULTS_PER_QUERY, page });
+            const { results, costGbp: callCost } = await search(query, { limit: RESULTS_PER_QUERY, page, usage: { workspaceId: job.organisation_id, assistantId: campaign.aiAssistantId } });
             searchCallsMade += 1;
             costGbp += callCost;
             coverage.queriesRun += 1;
@@ -871,7 +871,7 @@ async function enrichBatch(db: Db, job: JobRow, guardrails: Guardrails, counters
         }
         const deadline = Date.now() + PAID_ENRICH_BUDGET_MS;
         await Promise.all(misses.slice(0, allowed).map(async (s) => {
-            const outcome = await lookupProviderContact(s.lead.domain, { timeoutMs: deadline - Date.now() });
+            const outcome = await lookupProviderContact(s.lead.domain, { timeoutMs: deadline - Date.now(), usage: { workspaceId: job.organisation_id } });
             // ⚠️ THE THREE OUTCOMES ARE NOT TWO. `error` means the provider never answered us —
             // out of credits, rate limited, timed out — so nothing was spent and nothing was
             // learned about this company. Charging it and stamping it as a purchase is precisely

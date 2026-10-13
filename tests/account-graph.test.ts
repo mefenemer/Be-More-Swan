@@ -288,7 +288,8 @@ check('memory writes are conflict-tolerant, so a replayed tick is a no-op', () =
 check('search embeds the query asymmetrically', () => {
     // Embedding a question as a document measurably degrades ranking on this model.
     const fn = memoryText.slice(landmark(memoryText, 'export async function searchMemory'));
-    assert.ok(fn.includes("embedTexts([text], 'query')"), "the query must be embedded with inputType 'query'");
+    // The third argument (cost attribution, 2026-10-13) is not part of the asymmetry being checked.
+    assert.ok(/embedTexts\(\[text\], 'query'[,)]/.test(fn), "the query must be embedded with inputType 'query'");
     const write = memoryText.slice(landmark(memoryText, 'export async function writeMemories'));
     assert.ok(write.includes("'document'"), 'stored rows must be embedded as documents');
 });

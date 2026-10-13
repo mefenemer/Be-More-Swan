@@ -18,7 +18,7 @@ import assert from 'node:assert';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LIST_PRICE_PER_1K, MEDIA_LIST_PRICE_USD, costUsdFor, mediaCostUsd } from '../src/utils/ai-usage';
+import { LIST_PRICE_PER_1K, MEDIA_LIST_PRICE_USD, SERVICE_UNIT_PRICE_USD, costUsdFor, mediaCostUsd, serviceUnitPriceUsd } from '../src/utils/ai-usage';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -144,6 +144,37 @@ check('every successful generation records its cost — once, where the provider
     const direct = sources.filter((f) => !['src/lib/fal-gateway.ts', 'src/lib/stability-audio.ts', 'src/utils/provider-balance.ts', 'netlify/functions/admin-system-status.ts'].includes(f)
         && /queue\.fal\.run|fal\.run\/|api\.stability\.ai/.test(read(f)));
     assert.deepStrictEqual(direct, [], `these call fal/Stability directly and record no cost:\n    ${direct.join('\n    ')}`);
+});
+
+console.log('\nSearch, contact lookups and embeddings');
+
+check('every Serper search, Hunter lookup and Voyage embedding records its cost', () => {
+    const search = read('src/lib/discovery-search.ts');
+    assert.ok(/searchSerper\([^)]*\);\s*\/\/[^\n]*\n\s*logServiceCost\('serper-search', 1/.test(search), 'a Serper search is not recorded');
+    const hunter = read('src/lib/discovery-enrich-provider.ts');
+    assert.ok(/logServiceCost\('hunter-domain-search', raw\.length/.test(hunter),
+        'Hunter bills a credit per email RETURNED — record raw.length, not 1');
+    const embed = read('src/utils/kb-embeddings.ts');
+    assert.ok(/payload\.usage\?\.total_tokens/.test(embed) && /logAiUsage\(\{ \.\.\.usage, model: EMBEDDING_MODEL/.test(embed), 'embedding tokens are not recorded');
+    assert.ok(LIST_PRICE_PER_1K['voyage-3.5-lite'], 'voyage-3.5-lite has no price');
+});
+
+check('callers that know the workspace pass it on', () => {
+    assert.ok(/search\(query, \{[^}]*usage: \{ workspaceId: job\.organisation_id/.test(read('netlify/functions/process-discovery-jobs.ts')));
+    assert.ok(/lookupProviderContact\(s\.lead\.domain, \{[^}]*usage: \{ workspaceId: job\.organisation_id/.test(read('netlify/functions/process-discovery-jobs.ts')));
+    for (const f of ['netlify/functions/kb-articles.ts', 'netlify/functions/inspo-items.ts', 'netlify/functions/process-inspo-background.ts', 'netlify/functions/chat-orchestrator.ts', 'src/utils/inspo-profile.ts']) {
+        assert.ok(/embedTexts\([^)]*\{ workspaceId:/.test(read(f)), `${f} embeds without saying whose workspace it is`);
+    }
+});
+
+check('service prices default to the published rate and can be overridden', () => {
+    assert.strictEqual(serviceUnitPriceUsd('serper-search'), Number(process.env.SERPER_COST_USD_PER_QUERY || SERVICE_UNIT_PRICE_USD['serper-search'].fallback));
+    const prev = process.env.HUNTER_COST_USD_PER_CREDIT;
+    process.env.HUNTER_COST_USD_PER_CREDIT = '0.0105';
+    assert.strictEqual(serviceUnitPriceUsd('hunter-domain-search'), 0.0105);
+    process.env.HUNTER_COST_USD_PER_CREDIT = 'nonsense';
+    assert.strictEqual(serviceUnitPriceUsd('hunter-domain-search'), SERVICE_UNIT_PRICE_USD['hunter-domain-search'].fallback);
+    if (prev === undefined) delete process.env.HUNTER_COST_USD_PER_CREDIT; else process.env.HUNTER_COST_USD_PER_CREDIT = prev;
 });
 
 console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`);

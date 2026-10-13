@@ -274,7 +274,7 @@ async function retrieveInspoChunks(
     );
     const cols = { title: inspoItems.title, userNote: inspoItems.userNote, content: inspoChunks.content };
 
-    const vectors = await embedTexts([q], 'query').catch((err) => {
+    const vectors = await embedTexts([q], 'query', { workspaceId: opts.organisationId, assistantId: opts.assistantId }).catch((err) => {
         console.error('[inspo-profile] query embedding failed:', err);
         return null;
     });

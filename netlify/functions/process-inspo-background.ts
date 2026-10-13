@@ -153,7 +153,7 @@ export default withLambda(async (event: HandlerEvent) => {
     let embeddingStatus = embeddingsConfigured() ? 'embedded' : 'keyword_only';
     if (chunks.length > 0 && embeddingsConfigured()) {
         try {
-            vectors = await embedTexts(chunks, 'document');
+            vectors = await embedTexts(chunks, 'document', { workspaceId: item.organisationId, assistantId: item.aiAssistantId });
         } catch (err) {
             console.error(`[process-inspo-background] embedding failed for item ${inspoItemId}:`, err);
             embeddingStatus = 'failed';

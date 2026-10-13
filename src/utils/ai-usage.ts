@@ -34,6 +34,9 @@ export const LIST_PRICE_PER_1K: Record<string, { input: number; output: number }
     'claude-sonnet-4-6':         { input: 0.003, output: 0.015 },
     'claude-haiku-4-5-20251001': { input: 0.001, output: 0.005 },
     'claude-haiku-4-5':          { input: 0.001, output: 0.005 },
+    // Voyage embeddings (src/utils/kb-embeddings.ts): $0.02 per million tokens, no free tier for
+    // this model (docs.voyageai.com/docs/pricing, 2026-10-13). Embeddings have no output tokens.
+    'voyage-3.5-lite':           { input: 0.00002, output: 0 },
 };
 
 /** Cost of one call in USD, as a 6-dp string. Pure — the rate lookup is the caller's. */
@@ -176,4 +179,38 @@ export function logMediaCost(
 ): void {
     if (!MEDIA_LIST_PRICE_USD[model]) console.warn(`[ai-usage] no media price for ${model} — logged at $0; add it to MEDIA_LIST_PRICE_USD`);
     void logAiUsage({ ...ctx, model, inputTokens: 0, outputTokens: 0, costUsdOverride: mediaCostUsd(model, opts) });
+}
+
+// ── Per-call services (search, contact lookups) ───────────────────────────────────────────────────
+// Neither is priced in tokens. Defaults are the providers' published prices on 2026-10-13 for the
+// smallest paid tier; set the env var to your actual rate once you buy a bigger pack.
+//   • Serper: $1.00 per 1,000 searches on the $50 pack (down to $0.30 on the largest).
+//   • Hunter: 1 credit per EMAIL FOUND by a domain search (none if nothing is found); Starter is
+//     €49 for 2,000 credits ≈ $0.0285 a credit. A domain search can return up to 10 emails, so
+//     one lookup can cost up to 10 credits — the units logged are the emails Hunter returned.
+export const SERVICE_UNIT_PRICE_USD: Record<string, { envVar: string; fallback: number; unit: string }> = {
+    'serper-search': { envVar: 'SERPER_COST_USD_PER_QUERY', fallback: 0.001, unit: 'search' },
+    'hunter-domain-search': { envVar: 'HUNTER_COST_USD_PER_CREDIT', fallback: 0.0285, unit: 'credit' },
+};
+
+export function serviceUnitPriceUsd(service: string): number {
+    const def = SERVICE_UNIT_PRICE_USD[service];
+    if (!def) return 0;
+    const raw = process.env[def.envVar];
+    const fromEnv = raw === undefined || raw === '' ? NaN : Number(raw);
+    return Number.isFinite(fromEnv) && fromEnv >= 0 ? fromEnv : def.fallback;
+}
+
+/**
+ * Record a per-call service charge (a Serper search, a Hunter lookup) in ai_usage_log, so the COGS
+ * view's per-workspace margin includes it. `units` is what the provider bills: searches for Serper,
+ * credits (emails returned) for Hunter. Zero units records nothing. Never throws.
+ */
+export function logServiceCost(
+    service: string,
+    units: number,
+    ctx: Omit<AiUsageParams, 'model' | 'inputTokens' | 'outputTokens' | 'costUsdOverride'> = {},
+): void {
+    if (!(units > 0)) return;
+    void logAiUsage({ ...ctx, model: service, inputTokens: 0, outputTokens: 0, costUsdOverride: (units * serviceUnitPriceUsd(service)).toFixed(6) });
 }

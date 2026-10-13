@@ -223,7 +223,7 @@ export async function enrichOneLead(
     let paidFailedReason: string | null = null;
     if (!found.contact && opts.allowPaid !== false && isEnrichProviderConfigured()) {
         try {
-            const outcome = await lookupProviderContact(opts.domain);
+            const outcome = await lookupProviderContact(opts.domain, { usage: { workspaceId: opts.ledger?.organisationId ?? null, assistantId: opts.ledger?.aiAssistantId ?? null } });
             if (outcome.status === 'error') {
                 // The provider never answered. This lead learned nothing, so it is not "attempted"
                 // — the user pressed a button and deserves to be able to press it again.
@@ -378,6 +378,7 @@ export async function deepEnrichLead(
 
     const intel = await gatherLeadIntel(opts.domain, rec.title || opts.domain, {
         maxSearches: opts.maxSearches ?? DEEP_SEARCHES_PER_LEAD,
+        usage: { workspaceId: rec.organisationId ?? null, assistantId: rec.aiAssistantId ?? null },
     });
 
     if (!hasIntelWorthScoring(intel)) {

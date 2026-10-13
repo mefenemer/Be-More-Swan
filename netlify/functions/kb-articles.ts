@@ -55,7 +55,7 @@ async function ingestArticle(
     let embeddingStatus = embeddingsConfigured() ? 'embedded' : 'keyword_only';
     if (chunks.length > 0 && embeddingsConfigured()) {
         try {
-            vectors = await embedTexts(chunks, 'document');
+            vectors = await embedTexts(chunks, 'document', { workspaceId: article.organisationId, assistantId: article.aiAssistantId, userId });
         } catch (err) {
             console.error(`[kb-articles] embedding failed for article ${article.id}:`, err);
             embeddingStatus = 'failed';

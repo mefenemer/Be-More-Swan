@@ -89,7 +89,7 @@ async function ingestItem(
     let embeddingStatus = embeddingsConfigured() ? 'embedded' : 'keyword_only';
     if (chunks.length > 0 && embeddingsConfigured()) {
         try {
-            vectors = await embedTexts(chunks, 'document');
+            vectors = await embedTexts(chunks, 'document', { workspaceId: item.organisationId, assistantId: item.aiAssistantId, userId });
         } catch (err) {
             console.error(`[inspo-items] embedding failed for item ${item.id}:`, err);
             embeddingStatus = 'failed';
