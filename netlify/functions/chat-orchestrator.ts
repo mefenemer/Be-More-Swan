@@ -50,6 +50,7 @@ import { buildCampaignsSnapshot } from '../../src/utils/campaign-plan';
 import { buildBriefsSnapshot } from '../../src/utils/visual-briefs';
 import { loadProductsBlock } from '../../src/utils/org-products';
 import { buildTeamActivityBlock } from '../../src/utils/team-activity';
+import { buildBlogSnapshot, buildEmailsSnapshot, buildPostsSnapshot } from '../../src/utils/content-snapshot';
 import { BRIEF_PURPOSES, BRIEF_ASPECT_RATIOS, REJECT_REASONS, SOURCE_SPECS } from '../../src/config/visual-brief-vocab';
 import { FUNNEL_STAGES, FUNNEL_STAGE_DESCRIPTIONS, stageOutcomes } from '../../src/config/campaign-vocab';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -146,6 +147,9 @@ interface RouteContext {
     /** This Brand Designer's briefs and the options awaiting a decision, by id — read per turn for
      *  routes with usesBriefsSnapshot. Without it "use the second one" has no option to point at. */
     briefsSnapshot?: string | null;
+    /** This assistant's own posts / articles / emails, column by column, read per turn — only
+     *  populated for routes with contentSnapshot. See src/utils/content-snapshot.ts. */
+    contentSnapshot?: string | null;
 }
 
 interface AssistantRoute {
@@ -169,6 +173,8 @@ interface AssistantRoute {
     usesCampaignSnapshot?: boolean;
     /** When true the handler reads this assistant's briefs for this turn (rc.briefsSnapshot). */
     usesBriefsSnapshot?: boolean;
+    /** Which of this assistant's own queues the handler reads for this turn (rc.contentSnapshot). */
+    contentSnapshot?: 'posts' | 'blog' | 'emails';
     /** Role-specific prompt body. buildSystemPrompt() appends the hardened
      *  <strict_configuration> block to this before every API call. */
     buildRolePrompt(rc: RouteContext): string;
@@ -533,6 +539,66 @@ function brandDesignerSurfaces(): string {
     return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform, never outside tools:
 - "Briefs" tab — the tab the user lands on. One card per brief: what it is for, a sentence on what it is waiting for, and its options as a grid. Each option has "Use this" (it goes into their library) and "Not this" (they pick a reason). Each brief has "Make options" / "Make more options" (the button shows what a round costs), "Edit brief" and "Cancel brief". "New brief" at the top writes one without chatting. Everything you can do here, the user can also do there by hand.
 - Their content library ("My Content") — where every approved picture goes, and where their other assistants pick pictures from for posts and articles.`;
+}
+
+// ── Social Media assistant: its own dashboard surfaces ────────────────────────
+// Same purpose as leadGeneratorSurfaces(). The social prompt used to say only "never describe
+// dashboard steps, tools, or sections to visit", so when a user asked where something WAS the model
+// had no names to give and made some up: it asked for "content brief information", then said the
+// app had no "content brief section" — the real one is Assistant Profile ▸ Creative Brief.
+// ⚠️ These labels are copied from assistant-detail.html and the social_media_manager entry in
+// src/components/assistant-dashboard-registry.js (reviewQueue label 'Posts', inspoTab, myContentTab).
+// Rename a tab there and this string must change with it; tests/content-prompt-surfaces.test.ts
+// checks each one against the page.
+function socialSurfaces(): string {
+    return `YOUR OWN DASHBOARD — these are the tabs and buttons on YOUR page inside this platform, and the only names you may use for places in it. They are not third-party tools:
+- "Posts" tab — the page opens here. Every post you draft, in columns: "Review" (waiting for the user to approve, edit or reject), "Scheduled" (approved and booked into a posting slot), "Posted" (already published), "Needs attention" (tried to publish and stopped) and "Archived" (rejected or cancelled). Opening a post there is where it is edited, approved or rejected. "Create a Post" at the top writes one without chatting.
+- "Calendar" tab — the same posts laid out by date.
+- "Inspo" tab — example posts the user admires; you write in their style.
+- "My Content" tab — the pictures and videos the user has uploaded or approved, which posts can use.
+- "Goals" tab — the targets this assistant is working towards and how it is doing.
+- "Activity" tab — a log of what this assistant has done.
+- "Assistant Profile" button (top of the page) — this assistant's settings, as cards: "Mandate", "Operational Setup" (how posts are triggered, where content comes from, and the posting schedule), "Creative Brief" (objective, audience, voice and content pillars), "Connections" (the social accounts it posts to — reconnect an account here), "Rules", "Brand Safety & Legal" and "Notifications".
+
+NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
+
+EXISTING POSTS — you can see your posts (below) but you cannot change them from this chat: you cannot approve, edit, reschedule, delete or publish a post that already exists. If asked to, say so, and tell them which column of the "Posts" tab it is in so they can open it there. You CAN write a new version as a fresh draft if they want one.`;
+}
+
+// ── Blog Writer and Email Marketing: their own dashboard surfaces ─────────────
+// Same purpose as socialSurfaces(), from the same sources: the blog_writer / newsletter_editor
+// entries in src/components/assistant-dashboard-registry.js (reviewQueue labels 'Blogs' / 'Emails',
+// emailCampaignsTab, inspoTab, myContentTab, hasCreativeBrief:false → the Profile card is retitled
+// "Brand Knowledge") and the column buttons in assistant-detail.html. Pinned by
+// tests/content-prompt-surfaces.test.ts.
+const PROFILE_CARDS_NON_SOCIAL = `"Mandate", "Operational Setup" (how and how often it drafts), "Brand Knowledge" (business information and brand context), "Connections", "Rules", "Brand Safety & Legal" and "Notifications"`;
+
+function blogSurfaces(): string {
+    return `YOUR OWN DASHBOARD — these are the tabs and buttons on YOUR page inside this platform, and the only names you may use for places in it:
+- "Blogs" tab — the page opens here. Every article you draft, in columns: "Review" (drafts waiting for the user), "Scheduled" (booked to publish), "Posted" (published) and "Archived". Opening an article there opens it in Blog Studio, where it is edited, given pictures and SEO, approved, scheduled or published. "Write Blog Post" at the top starts one.
+- "Calendar" tab — the same articles laid out by date.
+- "Inspo" tab — writing the user admires; you write in that style.
+- "My Content" tab — the pictures the user has uploaded or approved, which articles can use.
+- "Goals" tab and "Activity" tab — this assistant's targets, and a log of what it has done.
+- "Assistant Profile" button (top of the page) — this assistant's settings, as cards: ${PROFILE_CARDS_NON_SOCIAL}.
+
+NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above, or Blog Studio. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
+
+EXISTING ARTICLES — you can see your articles (below) but you cannot change them from this chat: you cannot approve, edit, reschedule, delete or publish one that already exists. If asked to, say so and tell them which column of the "Blogs" tab it is in. You CAN write a new version as a fresh draft if they want one.`;
+}
+
+function emailSurfaces(): string {
+    return `YOUR OWN DASHBOARD — these are the tabs and buttons on YOUR page inside this platform, and the only names you may use for places in it:
+- "Emails" tab — the page opens here. Every single email you draft, in columns: "Review" (drafts waiting for the user), "Approved" (approved, not yet sent or scheduled), "Scheduled" (booked to send), "Sent", "Needs attention" (failed to send) and "Archived". Opening one opens it in the Email Studio, where it is edited, given its recipients, previewed, approved, scheduled and sent. "Write Email" at the top starts one.
+- "Campaigns" tab — the automatic series of emails: the welcome sequence and any others.
+- "Calendar" tab — the same emails laid out by date.
+- "Goals" tab and "Activity" tab — this assistant's targets, and a log of what it has done.
+- "Assistant Profile" button (top of the page) — this assistant's settings, as cards: ${PROFILE_CARDS_NON_SOCIAL}.
+- Outside this page: the "Audience" page holds subscribers, segments and sign-up forms.
+
+NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above, or the Email Studio. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
+
+EXISTING EMAILS — you can see your single emails (below) but you cannot change them from this chat: you cannot approve, edit, reschedule, delete or send one that already exists. If asked to, say so and tell them which column of the "Emails" tab it is in. You CAN write a new version as a fresh draft if they want one.`;
 }
 
 // ── Internal Data Hub persistence (Golden Rule 2) ─────────────────────────────
@@ -1663,6 +1729,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
         // and everything the model just wrote is discarded in front of the user. Was 3072 for a
         // single issue. max_tokens is a ceiling, not a spend.
         maxTokens: 8192,
+        contentSnapshot: 'emails',
         // docs/newsletter-campaigns-system-prompt.md is the reasoning behind every paragraph here.
         // ⚠️ The "TRIGGERS THAT START BY THEMSELVES" line is held to AUTOMATIC_TRIGGERS (and so to
         // newsletter_sequences_trigger_check) by tests/newsletter-campaign-draft.test.ts. Widen the
@@ -1747,7 +1814,9 @@ You cannot SEND, approve, schedule or switch on anything yourself. If they are n
 ONE DRAFT OBJECT PER REPLY — one email, one email campaign or one sign-up form, never two.
 
 NEVER claim you have written something unless THIS reply carries the draft object. If it is null, nothing was written, and a reply saying otherwise leaves the user looking for something that does not exist.`,
-            `WHAT YOU CANNOT SEE — this conversation gives you no sight of their audience, segments, emails, welcome sequence or results: not how many subscribers they have, not what has been sent, opened or unsubscribed. If they ask, say plainly that you cannot see it from here and point them at the right place — subscribers and segments are on the Audience page; past emails, their results and the welcome sequence are in the Email Studio. Never guess at a number, and never describe a screen you have not been told about.`,
+            emailSurfaces(),
+            rc.contentSnapshot ?? 'YOUR EMAILS — your list of emails could not be read this turn. Do not guess at what is drafted, scheduled or sent: if the user asks about an existing email, say you cannot see it right now and point them to the "Emails" tab.',
+            `WHAT YOU CANNOT SEE — you can see your own single emails (above), but not their audience, segments, campaigns, welcome sequence or results: not how many subscribers they have, and not what was opened, clicked or unsubscribed. If they ask, say plainly that you cannot see it from here and point them at the right place — subscribers and segments are on the Audience page; results and the welcome sequence are in the Email Studio and the "Campaigns" tab. Never guess at a number.`,
             `WHAT NEVER GOES IN THE COPY — do not write an unsubscribe line, a footer, a postal address or any "you are receiving this because…" text; those are added automatically to every email. Do not invent statistics, customer numbers, testimonials, prices, discounts, deadlines or dates: if the brief does not give you a fact, write around it. Do not invent links: only use a URL they have given you. If an email needs one you do not have, leave its callToAction "url" null and tell them which link to add.`,
             `PERSONALISATION — you may use {{contact.first_name | "there"}} where a first name belongs, and always with a fallback like that, so a subscriber whose name they do not hold still reads a natural sentence. Do not invent other tags: the only ones that work are the contact's first name, last name, company and email, and the business's own name.`,
             // Before the JSON contract, deliberately — the block ends with exemplar copy, so it
@@ -1826,6 +1895,7 @@ A sign-up form:
         // STRUCTURED_REPLY_FALLBACK, and the post the model had just written is discarded in
         // front of the user. max_tokens is a ceiling, not a spend.
         maxTokens: 4096,
+        contentSnapshot: 'blog',
         buildRolePrompt: (rc) => [
             sharedContextBlock(rc),
             `You are this business's blog writer. When the user gives you a topic, an angle, a brief or a rough idea — or asks you to write about something you already have enough context for — write the ACTUAL finished article, ready to publish as-is: no outlines, no placeholders, no "[insert example here]".
@@ -1841,9 +1911,11 @@ Once saved, a draft appears in this assistant's "Blogs" tab and opens in Blog St
 
 ONE POST PER REPLY. The draft object holds exactly one article, so one reply can only ever offer one. If they ask for several, write the FIRST one properly and offer the next.
 
-WHAT YOU CANNOT SEE — this conversation gives you no sight of the posts this business already has: not their drafts, not what is scheduled, not what is published, and not how any of it is performing. If they ask about existing work, say plainly that you cannot see it from here (their drafts and scheduled posts are in the "Blogs" tab, and how published posts are doing is on this assistant's "Overview" tab) and offer to write something new. Never guess at what they have posted, invent a figure, or describe a screen you have not been told about.
+WHAT YOU CANNOT SEE — you can see your own articles (listed below), but not how any of them is performing. If they ask about performance, say plainly that you cannot see it from here (it is on this assistant's page) and offer to write something new. Never guess at a figure.
 
 NEVER claim you have written a post unless THIS reply carries the draft object. If it is null, nothing was written, and a reply saying otherwise leaves the user looking for something that does not exist.`,
+            blogSurfaces(),
+            rc.contentSnapshot ?? 'YOUR ARTICLES — your list of articles could not be read this turn. Do not guess at what is drafted, scheduled or published: if the user asks about an existing article, say you cannot see it right now and point them to the "Blogs" tab.',
             // Before the JSON contract, deliberately — the block ends with exemplar copy, so it
             // must not be the last thing shaping the reply's SHAPE. Same ordering as the social route.
             rc.inspoBlock ?? '',
@@ -1869,6 +1941,7 @@ NEVER claim you have written a post unless THIS reply carries the draft object. 
     social_media_manager: {
         model: DEFAULT_MODEL,
         usesInspo: true,
+        contentSnapshot: 'posts',
         // 1024 was not enough headroom for a finished caption plus hashtags plus the reply, and
         // the failure mode is the worst one available: the envelope truncates mid-string, the
         // JSON never parses, and parseStructuredReply degrades to STRUCTURED_REPLY_FALLBACK —
@@ -1899,7 +1972,7 @@ So when the user asks for wording for a colour block, a quote card, a text graph
                 sharedContextBlock(rc),
                 `You are this business's social media manager. When the user asks you to draft, write, or come up with a social media post — or gives you enough to write one (a topic, an announcement, a promotion, an update) — write the actual finished caption and hashtags, ready to post as-is: no placeholders, no brackets, no "[insert X here]".
 
-Every post you draft here is saved for real the moment you include the post draft below, with a suggested posting slot already picked from this business's posting schedule — this chat cannot publish or schedule it further than that. Because of this: NEVER tell the user to go set it up, schedule it, or add it to their Review Queue themselves, and never describe dashboard steps, tools, or sections to visit. Once you include the post draft, your reply should just briefly confirm you've drafted the post and suggested a schedule for it — a link to review and approve it is added automatically straight after your reply, so don't mention where that link is or how to find it.
+Every post you draft here is saved for real the moment you include the post draft below, with a suggested posting slot already picked from this business's posting schedule — this chat cannot publish or schedule it further than that. Because of this: when you draft a post, NEVER tell the user to go set it up, schedule it, or add it to their Review column themselves, and don't walk them through dashboard steps. Once you include the post draft, your reply should just briefly confirm you've drafted the post and suggested a schedule for it — a link to review and approve it is added automatically straight after your reply, so don't mention where that link is or how to find it.
 
 Only include the post draft once you have enough to write real, finished copy — a topic or brief is enough. Ask a short clarifying question (uiElement: null) only when you don't have a topic to write about yet.
 
@@ -1908,6 +1981,8 @@ ONE POST PER REPLY. The draft object below holds exactly one post, so one reply 
 NEVER say a post has been drafted, written, saved, scheduled or queued for review unless THIS reply includes the post draft object. If uiElement is null then nothing has been saved, and a reply claiming otherwise sends the user to an empty Review Queue. When you have nothing to include, say plainly what you need in order to write it.`,
                 platformLine,
                 mediaLine,
+                socialSurfaces(),
+                rc.contentSnapshot ?? 'YOUR POSTS — your list of posts could not be read this turn. Do not guess at what is drafted, scheduled or published: if the user asks about an existing post, say you cannot see it right now and point them to the "Posts" tab.',
                 // Before the JSON contract, deliberately. The block ends with up to four excerpts
                 // that are themselves finished social posts, so it is the last thing that should be
                 // allowed to suggest a reply SHAPE — the envelope instruction has to come after it.
@@ -2196,6 +2271,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         })
         : null;
 
+    // Per turn, like the leads snapshot: something approved on the Posts / Blogs / Emails tab a
+    // moment ago must already be in "Scheduled" when the user asks what is coming up. Never throws.
+    const snapshotTz = resolvePostingSchedule(
+        assistantRow.onboardingContext && typeof assistantRow.onboardingContext === 'object' && !Array.isArray(assistantRow.onboardingContext)
+            ? assistantRow.onboardingContext as Record<string, unknown> : null,
+    ).timezone;
+    const contentSnapshot = route.contentSnapshot === 'posts' ? await buildPostsSnapshot(db, orgId, session.aiAssistantId, snapshotTz)
+        : route.contentSnapshot === 'blog' ? await buildBlogSnapshot(db, orgId, session.aiAssistantId, snapshotTz)
+        : route.contentSnapshot === 'emails' ? await buildEmailsSnapshot(db, orgId, session.aiAssistantId, snapshotTz)
+        : null;
+
     const rolePrompt = route.buildRolePrompt({
         assistantName: assistantRow.name,
         jobRole: assistantRow.jobRole,
@@ -2208,6 +2294,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         leadsSnapshot,
         campaignsSnapshot,
         briefsSnapshot,
+        contentSnapshot,
     });
     // The user's rules (their Assistant Rules, learned directives and workspace-wide rules) for the
     // roles in RULE_READING_ROLES: the chat-only records roles, whose rules reached nothing before,

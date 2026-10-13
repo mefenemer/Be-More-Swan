@@ -10,6 +10,7 @@
 
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
+import { logMessageUsage } from '../../src/utils/ai-usage';
 import { eq, and, asc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, organisations, systemConnections, relationshipBuildingTasks } from '../../db/schema';
@@ -192,6 +193,7 @@ Rules:
                 model: MODEL, max_tokens: 700,
                 messages: [{ role: 'user', content: prompt }],
             });
+            logMessageUsage(response, MODEL, { workspaceId: organisationId, sessionId: 'relationship-checklist' });
             const raw = (response.content[0] as { text: string }).text.trim();
             const candidate = parseModelJsonArray<ChecklistItem>(raw);
             if (Array.isArray(candidate) && candidate.length) { parsed = candidate; break; }

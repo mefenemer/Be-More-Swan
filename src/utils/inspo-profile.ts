@@ -185,6 +185,7 @@ export async function compileStyleProfile(
     const res = await gatewayGenerate({
         system: COMPILER_SYSTEM,
         maxTokens: PROFILE_MAX_TOKENS,
+        usage: { workspaceId: opts.organisationId, assistantId: opts.assistantId },
         messages: [{
             role: 'user',
             // Structural boundary: the material is scraped pages and user text, so it must be

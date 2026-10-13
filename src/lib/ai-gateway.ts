@@ -41,10 +41,14 @@ export interface GatewayRequest {
      * Logging belongs HERE because this is the one place every model call passes through, and it is
      * the only place that knows which model actually answered after a failover.
      *
-     * ⚠️ OPT-IN, deliberately. About a dozen callers already log for themselves; making this
-     * unconditional would double-count every one of them. Passing `usage` is the signal that this
-     * caller does NOT log on its own. The end state is for those callers to move here and their own
-     * calls to go — until then, pass this only from a caller that has none.
+     * Every call is recorded, with or without this (2026-10-13). It used to be opt-in, on the
+     * belief that about a dozen gateway callers logged for themselves — none did: the callers that
+     * log their own usage all call the Anthropic SDK directly, never this module. Opt-in therefore
+     * meant fourteen gateway callers (goal AI, the strategy agent, translation, quality review,
+     * compliance checks…) cost $0 in ai_usage_log. Pass this to ATTRIBUTE the cost to a workspace
+     * and assistant; a call without it is still counted in the platform total.
+     *
+     * ⚠️ So a caller must never ALSO call logAiUsage for a gateway call — that double-counts.
      */
     usage?: {
         workspaceId?: number | null;
@@ -147,7 +151,7 @@ export async function gatewayGenerate(req: GatewayRequest): Promise<GatewayRespo
     }
 
     const text = response.content.find(b => b.type === 'text')?.text ?? '';
-    recordUsage(req, response, usedFallback ? FALLBACK_MODEL : PRIMARY_MODEL);
+    recordUsage(req, response.usage?.input_tokens ?? 0, response.usage?.output_tokens ?? 0, usedFallback ? FALLBACK_MODEL : PRIMARY_MODEL);
     return {
         text,
         stopReason: response.stop_reason ?? null,
@@ -171,19 +175,19 @@ export async function gatewayGenerate(req: GatewayRequest): Promise<GatewayRespo
  * exact hole this change exists to close. Still accurate after a failover, because the caller passes
  * the model it actually called.
  */
-function recordUsage(req: GatewayRequest, response: Anthropic.Message, modelKey: string): void {
-    if (!req.usage) return;
+function recordUsage(req: GatewayRequest, inputTokens: number, outputTokens: number, modelKey: string): void {
+    const u = req.usage ?? {};
     try {
         void logAiUsage({
-            workspaceId:  req.usage.workspaceId  ?? null,
-            userId:       req.usage.userId       ?? null,
-            assistantId:  req.usage.assistantId  ?? null,
+            workspaceId:  u.workspaceId  ?? null,
+            userId:       u.userId       ?? null,
+            assistantId:  u.assistantId  ?? null,
             model:        modelKey,
-            inputTokens:  response.usage?.input_tokens  ?? 0,
-            outputTokens: response.usage?.output_tokens ?? 0,
-            taskRunId:    req.usage.taskRunId    ?? null,
-            sessionId:    req.usage.sessionId    ?? null,
-            dataCategories: req.usage.dataCategories,
+            inputTokens,
+            outputTokens,
+            taskRunId:    u.taskRunId    ?? null,
+            sessionId:    u.sessionId    ?? null,
+            dataCategories: u.dataCategories,
         });
     } catch (err) {
         console.error('[ai-gateway] usage logging failed (the call itself succeeded)', err);
@@ -299,6 +303,10 @@ export async function gatewayGenerateGrounded(req: GatewayRequest): Promise<Grou
     }
 
     const allContent: Anthropic.ContentBlock[] = [...response.content];
+    // Every resume is billed as its own call, so the usage is the SUM — recording only the last
+    // response undercounted a search-heavy turn by up to three quarters.
+    let tokensIn = response.usage?.input_tokens ?? 0;
+    let tokensOut = response.usage?.output_tokens ?? 0;
     // Resume a paused turn rather than accepting a half-finished search. Bounded twice — by a fixed
     // iteration cap so a runaway loop cannot burn search quota on one click, and by the time budget
     // so a legitimate resume cannot push the request past its deadline.
@@ -310,19 +318,21 @@ export async function gatewayGenerateGrounded(req: GatewayRequest): Promise<Grou
         messages = [...messages, { role: 'assistant', content: response.content as any }];
         response = await run(model, messages);
         allContent.push(...response.content);
+        tokensIn += response.usage?.input_tokens ?? 0;
+        tokensOut += response.usage?.output_tokens ?? 0;
     }
 
     const { urls, searches } = collectSearchedUrls(allContent);
     const text = allContent.filter(b => b.type === 'text').map(b => (b as any).text).join('\n').trim();
 
-    recordUsage(req, response, model);
+    recordUsage(req, tokensIn, tokensOut, model);
     return {
         text,
         stopReason: response.stop_reason ?? null,
         model: response.model,
         usedFallback,
-        tokensInput:  response.usage?.input_tokens  ?? null,
-        tokensOutput: response.usage?.output_tokens ?? null,
+        tokensInput:  tokensIn,
+        tokensOutput: tokensOut,
         searchedUrls: urls,
         searchCount: searches,
     };

@@ -541,6 +541,7 @@ async function executeRun(result: StrategyAgentResult, startedAt: number): Promi
                 // response has to fit inside a JSON string. 700 truncated it mid-object, which
                 // fails `parseModelJson` and lands as an indistinguishable "skipped".
                 maxTokens: 2000,
+                usage: { workspaceId: c.organisationId, assistantId: c.aiAssistantId },
             });
             // A truncated response is unparseable JSON, so it would otherwise surface as a generic
             // skip. Name it: this is the one failure whose fix is a number in this file.
@@ -740,6 +741,7 @@ async function executeRun(result: StrategyAgentResult, startedAt: number): Promi
                         + (c.examples.length ? c.examples.map((e) => `- ${e}`).join('\n') : '- (names not recorded)'),
                 }],
                 maxTokens: 2000,
+                usage: { workspaceId: c.organisationId, assistantId: c.aiAssistantId },
             });
             if (stopReason === 'max_tokens') {
                 console.error('[strategy-agent] rejection response hit the token ceiling and cannot be parsed', {

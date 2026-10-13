@@ -25,6 +25,7 @@
 // omits the advisory. It must never block a plan the user could otherwise approve.
 
 import Anthropic from '@anthropic-ai/sdk';
+import { logMessageUsage } from '../utils/ai-usage';
 import { parseModelJson } from '../utils/model-json';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -69,6 +70,8 @@ export async function assessMarket(idea: string, icp?: Record<string, unknown> |
                     + (icp ? `\n\nIdeal customer profile:\n${JSON.stringify(icp).slice(0, 600)}` : ''),
             }],
         });
+        // No workspace in scope here: counted in the platform total, unattributed.
+        logMessageUsage(resp, MODEL, { sessionId: 'market-enumerability' });
         const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
         const parsed = parseModelJson<Record<string, unknown>>(raw);
         if (!parsed || typeof parsed.enumerable !== 'boolean') return null;

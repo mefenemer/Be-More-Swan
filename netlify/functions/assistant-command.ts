@@ -11,6 +11,7 @@
 
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
+import { logMessageUsage } from '../../src/utils/ai-usage';
 import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants } from '../../db/schema';
@@ -173,6 +174,7 @@ Rules:
             system,
             messages: [{ role: 'user', content: command }],
         });
+        logMessageUsage(response, MODEL, { workspaceId: orgId, userId, sessionId: 'assistant-command' });
 
         const raw = (response.content[0] as { text: string }).text.trim();
         // Shared extractor (src/utils/model-json.ts), not a local fence-strip: the private copies

@@ -6,6 +6,7 @@
 
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
+import { logMessageUsage } from '../../src/utils/ai-usage';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { systemConnections } from '../../db/schema';
@@ -332,6 +333,7 @@ export default withLambda(async (event) => {
                     content: `You are assembling a social media posting blueprint for an AI assistant. Based on the platform data below, write a concise JSON object with key "narrative" (a 2-3 sentence plain-English summary of what the assistant must know before posting: rate limits, best times, restrictions, and any current blockers). Return ONLY valid JSON.\n\nData:\n${JSON.stringify(constraintsInput, null, 2)}`,
                 }],
             });
+            logMessageUsage(llmRes, HAIKU, { workspaceId: organisationId, sessionId: 'social-preflight-audit' });
             const raw = (llmRes.content[0] as { text: string }).text.trim();
             const parsed = parseModelJson<{ narrative?: string }>(raw);
             if (parsed?.narrative) {

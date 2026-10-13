@@ -25,7 +25,8 @@ import { recordEvent } from './revenue-ledger';
 import { enrichLeadContact } from '../lib/discovery-enrich';
 import { isEnrichProviderConfigured, lookupProviderContact } from '../lib/discovery-enrich-provider';
 import { gatherLeadIntel, nameAppearsInSources, hasIntelWorthScoring, LEAD_INTEL_SEARCHES } from '../lib/lead-intel';
-import { rescoreWithIntel, normaliseLeadCard, type LeadScoringCard, type DecisionMaker, type InterpretedSignal } from '../lib/discovery-scoring';
+import { logAiUsage } from './ai-usage';
+import { rescoreWithIntel, normaliseLeadCard, SCORING_MODEL, type LeadScoringCard, type DecisionMaker, type InterpretedSignal } from '../lib/discovery-scoring';
 import type { SenderIdentity } from '../config/sender-identity';
 
 type Db = ReturnType<typeof getDb>;
@@ -362,7 +363,10 @@ export async function deepEnrichLead(
     // the Review Queue, the Edit form and the contact-enrichment pass, and re-scoring from a stale
     // copy would silently revert whichever of them committed most recently.
     const [rec] = await db
-        .select({ id: assistantRecords.id, title: assistantRecords.title, data: assistantRecords.data })
+        .select({
+            id: assistantRecords.id, title: assistantRecords.title, data: assistantRecords.data,
+            organisationId: assistantRecords.organisationId, aiAssistantId: assistantRecords.aiAssistantId,
+        })
         .from(assistantRecords)
         .where(eq(assistantRecords.id, opts.assistantRecordId))
         .limit(1);
@@ -396,6 +400,14 @@ export async function deepEnrichLead(
         peopleSources: intel.peopleSources,
         fingerprint: { platforms: intel.fingerprint.platforms, hasCareersPage: intel.fingerprint.hasCareersPage },
     }, opts.icp, opts.sender, { domain: opts.domain });
+    // rescoreWithIntel reports its tokens and logs nothing itself; nor did anything else.
+    if (rescored.inputTokens || rescored.outputTokens) {
+        void logAiUsage({
+            workspaceId: rec.organisationId ?? null, assistantId: rec.aiAssistantId ?? null,
+            model: SCORING_MODEL, inputTokens: rescored.inputTokens, outputTokens: rescored.outputTokens,
+            sessionId: 'lead-deep-enrichment', dataCategories: ['business_context'],
+        });
+    }
 
     // A failed or unusable re-score leaves the lead exactly as it was. Deliberately NOT a fallback
     // to some default: the existing score is a real judgement, and overwriting it with a guess

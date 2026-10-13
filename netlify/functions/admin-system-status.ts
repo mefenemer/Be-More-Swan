@@ -14,6 +14,7 @@ import { getDb } from '../../db/client';
 import { users } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { hasPermission } from '../../src/utils/rbac';
+import { FAL_BILLING_URL } from '../../src/utils/provider-balance';
 
 const jwtSecret = process.env.JWT_SECRET;
 const json = (statusCode: number, body: unknown) => ({
@@ -230,6 +231,15 @@ const SERVICES: ServiceDef[] = [
                 return (res.status === 401 || res.status === 403) ? 'error' : 'ok';
             } catch { return 'error'; }
         },
+    },
+    {
+        key: 'fal-billing', name: 'Fal.ai balance alerts', category: 'AI', tier: 'infra',
+        purpose: 'Admin key that lets check-provider-balances read the fal balance and warn BEFORE it runs out. Without it, the alert only fires after fal has locked the account and AI images are already failing.',
+        consoleUrl: 'https://fal.ai/dashboard/keys', envVars: ['FAL_ADMIN_KEY'],
+        // The same read-only billing call the balance check makes; an ordinary (non-admin) key answers 401/403.
+        check: async () => process.env.FAL_ADMIN_KEY
+            ? pingOk(FAL_BILLING_URL, { Authorization: `Key ${process.env.FAL_ADMIN_KEY}` })
+            : 'n/a',
     },
     {
         key: 'embeddings', name: 'Embeddings & moderation', category: 'AI', tier: 'core',

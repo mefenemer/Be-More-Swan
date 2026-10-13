@@ -23,6 +23,7 @@
 // expanded queries; that is string substitution, done here, where it is inspectable.
 
 import Anthropic from '@anthropic-ai/sdk';
+import { logMessageUsage } from '../utils/ai-usage';
 import { parseModelJson } from '../utils/model-json';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -123,6 +124,8 @@ export async function splitTerritories(idea: string, granularity: SplitGranulari
             system: systemPrompt(granularity),
             messages: [{ role: 'user', content: `Who they want to find:\n${text.slice(0, 1000)}` }],
         });
+        // No workspace in scope here: counted in the platform total, unattributed.
+        logMessageUsage(resp, MODEL, { sessionId: 'territory-split' });
         const parsed = parseModelJson<Record<string, unknown>>(
             resp.content[0]?.type === 'text' ? resp.content[0].text : '',
         );

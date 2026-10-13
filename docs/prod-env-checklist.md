@@ -55,6 +55,16 @@ then falls back to `DEPLOY_PRIME_URL`, which is correct per deploy) or set it to
 `CRON_TRIGGER_SECRET`, `WORKER_SECRET`, `NETLIFY_CRON_SECRET` — authenticate internal cron/worker
 endpoints so they can't be invoked publicly.
 
+`FAL_ADMIN_KEY` — a fal **admin** key (fal dashboard → Keys), used only to read the account balance.
+Without it `check-provider-balances` can't read fal's balance (an ordinary `FAL_KEY` answers 401/403),
+so it only alerts after fal has locked the account ("Exhausted balance") and AI images are already
+failing. With it you get a low-balance warning below $10. Shown on Admin → System status as
+"Fal.ai balance alerts".
+
+Not an env var, but do it alongside: turn on **auto-reload** in the Anthropic Console (Settings →
+Billing). Anthropic has no balance API, so the provider check only notices once the credit is gone
+and every AI draft is failing — the cause of the 2026-09-17 → 09-28 prod outage.
+
 ## 🔌 Connectors — optional; only needed for the integrations you offer at launch
 
 Each is a `<PREFIX>_CLIENT_ID` + `<PREFIX>_CLIENT_SECRET` pair. A missing pair only means that one

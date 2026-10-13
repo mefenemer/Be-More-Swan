@@ -95,6 +95,7 @@ export default withLambda(async () => {
                     + `If you choose posting_frequency, keep the cadence realistic — between "2 times a week" and "twice a day".`,
                 messages: [{ role: 'user', content: `Brief fields:\n${fieldList}` }],
                 maxTokens: 300,
+                usage: { workspaceId: a.organisationId, assistantId: a.id },
             });
             const parsed = parseModelJson<{ field?: string; value?: string }>(text);
             if (parsed) {
