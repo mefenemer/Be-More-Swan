@@ -13,6 +13,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
+import { annualAmountGbp, resolveAnnualPriceId, resolveMonthlyPriceId } from '../../src/utils/stripe-price';
 
 const stripeSecret = process.env.STRIPE_SECRET_KEY!;
 
@@ -53,7 +54,6 @@ export default withLambda(async (event) => {
 
     // Annual plans bill a single 12-month lump sum at a 20% discount; monthly bills each month.
     const billingCycle: 'monthly' | 'annual' = requestedCycle === 'annual' ? 'annual' : 'monthly';
-    const ANNUAL_DISCOUNT = 0.80;
 
     try {
     const currency = SUPPORTED_CURRENCIES.includes((requestedCurrency ?? '').toUpperCase())
@@ -82,17 +82,26 @@ export default withLambda(async (event) => {
 
     const monthlyAmount = planPrice ? Number(planPrice.monthlyPriceMajorUnit) : Number(plan.monthlyPriceGbp);
     const priceCurrency = (planPrice ? currency : 'GBP').toLowerCase();
-    const stripePriceId = planPrice?.stripePriceId ?? null;
+    // A GBP monthly plan with no configured price uses the SAME reusable Stripe price checkout.html
+    // uses (found by lookup key, created once). It used to fall through to inline price_data below,
+    // which mints a brand-new one-off Stripe Price on every checkout — on prod that was every
+    // £29 and £349 purchase from the in-app plan picker (only £79 had a plan_prices row).
+    const stripePriceId = planPrice?.stripePriceId
+        ?? (billingCycle === 'monthly' && priceCurrency === 'gbp' ? await resolveMonthlyPriceId(stripe, plan) : null);
 
     // Build Stripe line item.
     // - Monthly: reuse a configured Stripe price if present, else a dynamic monthly price.
     // - Annual: always dynamic (the configured Stripe price is a MONTHLY price), billed once a
     //   year as 12 × monthly × 0.8.
     let lineItem: Stripe.Checkout.SessionCreateParams.LineItem;
-    if (billingCycle === 'annual') {
-        // Match the advertised annual total (pricing.html): round the discounted monthly to a
-        // whole unit, then ×12 — e.g. £349 → round(279.2)=£279 → £3,348/yr.
-        const annualAmount = Math.round(monthlyAmount * ANNUAL_DISCOUNT) * 12;
+    // (A stored plan_prices.stripe_price_id is a MONTHLY price, so it never applies here.)
+    if (billingCycle === 'annual' && priceCurrency === 'gbp') {
+        // The SAME reusable yearly Price checkout.html uses, on the plan's own product. This used to
+        // be inline price_data, which minted a new product AND price on every annual checkout.
+        lineItem = { price: await resolveAnnualPriceId(stripe, plan), quantity: 1 };
+    } else if (billingCycle === 'annual') {
+        // Another currency: no reusable price exists, so price it inline at the advertised sum.
+        const annualAmount = annualAmountGbp(monthlyAmount);
         lineItem = {
             quantity: 1,
             price_data: {

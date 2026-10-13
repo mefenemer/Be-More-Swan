@@ -12,6 +12,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { masterPlans } from '../../db/schema';
+import { annualAmountGbp } from '../../src/utils/stripe-price';
 
 const jwtSecret    = process.env.JWT_SECRET!;
 const stripeSecret = process.env.STRIPE_SECRET_KEY!;
@@ -24,7 +25,6 @@ const stripe    = new Stripe(stripeSecret, { apiVersion: '2026-05-27.dahlia' });
 // same row create-subscription.ts charges from. It used to be a hardcoded copy here, which had to
 // be edited by hand on every price change or checkout previewed the discount off the old price.
 
-const ANNUAL_DISCOUNT = 0.80;
 
 function parseSession(event: any): number | null {
     const match = (event.headers.cookie || '').match(/aura_session=([^;]+)/);
@@ -89,7 +89,7 @@ export default withLambda(async (event) => {
     if (!plan) return { statusCode: 400, body: JSON.stringify({ valid: false, error: 'Unknown plan.' }) };
     const baseGbp   = Number(plan.monthlyPriceGbp);
     const chargeGbp = billingCycle === 'annual'
-        ? parseFloat((baseGbp * 12 * ANNUAL_DISCOUNT).toFixed(2))
+        ? annualAmountGbp(baseGbp)
         : baseGbp;
 
     let discountedAmountGbp: number;

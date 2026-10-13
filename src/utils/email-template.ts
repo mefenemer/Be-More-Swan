@@ -184,6 +184,8 @@ export const EMAIL_VARIABLES: EmailVariable[] = [
     { key: 'billing.amount', label: 'Amount', group: 'Billing', sample: '£49.00' },
     { key: 'billing.plan_name', label: 'Plan name', group: 'Billing', sample: 'Growth' },
     { key: 'billing.portal_url', label: 'Billing portal URL', group: 'Billing', sample: `${BASE_URL}/billing.html` },
+    // Empty unless a discount applies. Written to sit straight after the amount, so it starts with " — ".
+    { key: 'billing.discount_note', label: 'Discount note (after the amount)', group: 'Billing', sample: ' — that includes your FOUNDER30 discount (30% off, until July 2027)' },
     // Weekly digest figures (netlify/functions/weekly-digest.ts) — counted through roi-activity.ts.
     { key: 'digest.tasks_handled', label: 'Tasks handled (7 days)', group: 'Digest', sample: '42' },
     { key: 'digest.hours_saved', label: 'Hours saved (7 days)', group: 'Digest', sample: '6.5' },

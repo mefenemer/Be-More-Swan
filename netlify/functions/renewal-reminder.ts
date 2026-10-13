@@ -11,6 +11,7 @@ import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans, processedWebhookEvents } from '../../db/schema';
 import { sendTemplatedEmail } from '../../src/utils/email';
+import { DISCOUNT_EXPANDS, renewalDiscountNote, summariseDiscount } from '../../src/utils/billing-doc';
 import Stripe from 'stripe';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -38,6 +39,8 @@ async function runRenewalReminder() {
         const page = await stripe.subscriptions.list({
             status: 'active',
             limit: 100,
+            // The subscription's CURRENT discount, to tell a customer when it has run out.
+            expand: DISCOUNT_EXPANDS.map((e) => `data.${e}`),
             ...(startingAfter ? { starting_after: startingAfter } : {}),
         });
 
@@ -72,10 +75,23 @@ async function runRenewalReminder() {
                 day: 'numeric', month: 'long', year: 'numeric',
             });
             const item   = sub.items.data[0];
-            const amount = item?.price?.unit_amount
-                ? `£${(item.price.unit_amount / 100).toFixed(2)}`
-                : '';
             const interval = item?.price?.recurring?.interval === 'year' ? 'year' : 'month';
+            // ⚠️ What Stripe will ACTUALLY charge, from a preview of the next invoice. This used to be
+            // item.price.unit_amount — the list price — so a founding member on 30% off was told
+            // "renews for £29.00" and then charged £20.30: a wrong amount in the notice the
+            // DMCCA requires us to send. The list price stays only as a fallback if the preview fails.
+            let amountMinor: number | null = item?.price?.unit_amount ?? null;
+            let next = null as ReturnType<typeof summariseDiscount>;
+            try {
+                const preview = await stripe.invoices.createPreview({ subscription: sub.id, expand: DISCOUNT_EXPANDS }) as any;
+                amountMinor = typeof preview.amount_due === 'number' ? preview.amount_due : amountMinor;
+                next = summariseDiscount(preview.discounts || [], preview.subtotal ?? 0, preview.currency || 'gbp');
+            } catch (err) {
+                console.warn('[renewal-reminder] invoice preview failed — falling back to the list price:', (err as Error)?.message);
+            }
+            const current = summariseDiscount(((sub as any).discounts || []) as any[], item?.price?.unit_amount ?? 0, 'gbp');
+            const amount = amountMinor != null ? `£${(amountMinor / 100).toFixed(2)}` : '';
+            const discountNote = renewalDiscountNote(next, current);
 
             // US-COMMS-1: admin-editable template 'renewal_reminder'.
             void renewalDate;
@@ -86,6 +102,7 @@ async function runRenewalReminder() {
                     user: { first_name: user.firstName || '' },
                     billing: {
                         amount: amount ? `${amount}/${interval}` : '',
+                        discount_note: discountNote,
                         portal_url: `${BASE_URL}/user-settings.html`,
                     },
                 },

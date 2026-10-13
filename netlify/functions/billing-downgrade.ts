@@ -13,7 +13,7 @@ import { getDb } from '../../db/client';
 import { users, plans, masterPlans, aiAssistants, userOrganisations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
-import { resolveMonthlyPriceId } from '../../src/utils/stripe-price';
+import { resolvePriceIdForInterval } from '../../src/utils/stripe-price';
 import { sendPlanDowngradeAlert } from '../../src/utils/founder-alerts';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -205,12 +205,15 @@ export default withLambda(async (event) => {
     // a schedule keeps the subscription alive and renews it at the lower price for the next period,
     // so the customer is downgraded — not cancelled. The webhook (customer.subscription.updated)
     // finalises the DB switch when the new phase enters.
-    const targetPriceId = await resolveMonthlyPriceId(stripe, targetMp);
+    let targetPriceId = '';
 
     try {
         const sub = await stripe.subscriptions.retrieve(activePlan.stripeSubscriptionId, { expand: ['items'] });
         const currentItem = sub.items.data[0];
         if (!currentItem) throw new Error('No subscription item found');
+        // Same interval as now: an annual subscriber renews on the lower plan's ANNUAL price, not
+        // the monthly one it was always switched to before.
+        targetPriceId = await resolvePriceIdForInterval(stripe, targetMp, currentItem.price?.recurring?.interval === 'year' ? 'year' : 'month');
         const currentPeriodEndUnix = currentItem.current_period_end ?? 0;
 
         // A subscription owns at most one schedule; release any stale one (e.g. from a prior,

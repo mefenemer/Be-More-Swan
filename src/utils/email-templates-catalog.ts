@@ -232,7 +232,7 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
         category: 'Billing',
         subject: 'Reminder: Your Be More Swan subscription renews in 14 days',
         bodyHtml: greet +
-            p('Your {{billing.plan_name | "subscription"}} will renew in 14 days for <strong>{{billing.amount}}</strong>. No action is needed to continue.') +
+            p('Your {{billing.plan_name | "subscription"}} will renew in 14 days for <strong>{{billing.amount}}</strong>{{billing.discount_note}}. No action is needed to continue.') +
             p('You can review or change your plan any time in billing settings.') +
             button('Manage billing', 'billing.portal_url') + signoff,
     },

@@ -12,7 +12,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summariseDiscount, couponOf, DISCOUNT_EXPANDS } from '../src/utils/billing-doc';
+import { summariseDiscount, couponOf, DISCOUNT_EXPANDS, renewalDiscountNote } from '../src/utils/billing-doc';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -56,6 +56,36 @@ check('every Stripe read feeding a voucher line expands the coupon', () => {
 check('nothing reads the removed d.coupon field directly', () => {
     const doc = read('src/utils/billing-doc.ts').replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '');
     assert.ok(!/const c = d\.coupon;/.test(doc));
+});
+
+console.log('\nThe renewal reminder states the amount actually charged');
+
+check('the reminder previews the next invoice instead of quoting the list price', () => {
+    const rr = read('netlify/functions/renewal-reminder.ts');
+    assert.ok(/stripe\.invoices\.createPreview\(\{ subscription: sub\.id/.test(rr), 'no invoice preview — the amount would be the list price');
+    assert.ok(/preview\.amount_due/.test(rr));
+    assert.ok(/discount_note: discountNote/.test(rr));
+});
+
+check('the note names the discount, says when it ends, and warns when it has run out', () => {
+    const v = summariseDiscount([{ promotion_code: { code: 'FOUNDER30' }, source: { coupon: founder } }], 2900, 'gbp')!;
+    const ending = { ...v, endsAt: '2027-07-30T00:00:00.000Z' };
+    assert.strictEqual(renewalDiscountNote(ending, ending), ' — that includes your FOUNDER30 discount (30% off, until July 2027)');
+    assert.strictEqual(renewalDiscountNote(null, v), ' — your FOUNDER30 discount has ended, so this is the full price');
+    assert.strictEqual(renewalDiscountNote(null, null), '');
+});
+
+check('the default template puts the note straight after the amount', () => {
+    assert.ok(/\{\{billing\.amount\}\}<\/strong>\{\{billing\.discount_note\}\}/.test(read('src/utils/email-templates-catalog.ts')));
+    assert.ok(/key: 'billing\.discount_note'/.test(read('src/utils/email-template.ts')), 'the variable is not declared for the Comms editor');
+});
+
+console.log('\nThe in-app plan picker reuses one Stripe price per plan');
+
+check('a GBP monthly plan with no configured price reuses the lookup-key price checkout.html uses', () => {
+    const ci = read('netlify/functions/create-plan-checkout-intent.ts');
+    assert.ok(/planPrice\?\.stripePriceId\s*\?\? \(billingCycle === 'monthly' && priceCurrency === 'gbp' \? await resolveMonthlyPriceId\(stripe, plan\)/.test(ci),
+        'the plan picker would mint a one-off Stripe price on every checkout');
 });
 
 console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`);

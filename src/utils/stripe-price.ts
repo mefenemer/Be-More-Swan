@@ -52,3 +52,55 @@ export async function resolveMonthlyPriceId(stripe: Stripe, plan: PlanForPricing
     });
     return price.id;
 }
+
+// ── Annual ("Pay Annually", 20% off) ──────────────────────────────────────────────────────────────
+
+/** The annual discount: 20% off twelve monthly payments. */
+export const ANNUAL_DISCOUNT = 0.8;
+
+/**
+ * The yearly charge for a plan, in whole GBP — EXACTLY what pricing.html advertises
+ * (syncLivePricesGBP: round(monthly × 0.8) per month, × 12). It used to be computed three ways:
+ * checkout.html charged monthly × 12 × 0.8 unrounded (£278.40 for the £29 plan against an
+ * advertised £276), the promo preview did the same, and only the in-app plan picker matched the
+ * page. One function now, so the page, both checkouts and the preview cannot disagree.
+ */
+export function annualAmountGbp(monthlyGbp: number | string): number {
+    return Math.round(Number(monthlyGbp) * ANNUAL_DISCOUNT) * 12;
+}
+
+export function annualLookupKey(tierKey: string, unitAmountMinor: number): string {
+    return `${tierKey}_annual_gbp_${unitAmountMinor}`;
+}
+
+/**
+ * Find-or-create the stable yearly GBP Price for a plan, on the plan's OWN product — like the
+ * monthly one. Annual prices used to sit on a separate "<plan> (Annual)" product, so the nightly
+ * reconciliation (which identifies a subscription's plan by its product) could not place an annual
+ * subscriber, and the in-app picker minted a new product and price on every annual checkout.
+ */
+export async function resolveAnnualPriceId(stripe: Stripe, plan: PlanForPricing): Promise<string> {
+    const unitAmount = annualAmountGbp(plan.monthlyPriceGbp) * 100;
+    const lookupKey = annualLookupKey(plan.tierKey, unitAmount);
+
+    const existing = await stripe.prices.list({ lookup_keys: [lookupKey], active: true, limit: 1 });
+    if (existing.data.length > 0) return existing.data[0].id;
+
+    const productId = plan.stripeProductId
+        ?? (await stripe.products.create({ name: plan.name, metadata: { tierKey: plan.tierKey } })).id;
+
+    const price = await stripe.prices.create({
+        currency:            'gbp',
+        product:             productId,
+        unit_amount:         unitAmount,
+        recurring:           { interval: 'year' },
+        lookup_key:          lookupKey,
+        transfer_lookup_key: true,
+    });
+    return price.id;
+}
+
+/** The price for a plan on the given billing interval — the one call plan changes need. */
+export function resolvePriceIdForInterval(stripe: Stripe, plan: PlanForPricing, interval: 'month' | 'year'): Promise<string> {
+    return interval === 'year' ? resolveAnnualPriceId(stripe, plan) : resolveMonthlyPriceId(stripe, plan);
+}
