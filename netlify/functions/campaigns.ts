@@ -10,6 +10,7 @@
 //                                 fields include audience { persona, description, excludeDomains }
 //                                 and excludeExistingCustomers (§9.2), funnelStage (§9.6)
 //   POST { action: 'propose_plan', campaignId, orders[] }    → pending strategy decision (chat)
+//   POST { action: 'revise_plan', decisionId, orders[] }     → the user's edit of a waiting plan (supersedes it)
 //   POST { action: 'start',       campaignId }             → draft|paused → active
 //   POST { action: 'pause',       campaignId, reason }
 //   POST { action: 'stop_all',    assistantId }            → pause every live campaign
@@ -925,6 +926,49 @@ export default withLambda(async (event) => {
             .orderBy(desc(campaignOrders.createdAt))
             .limit(200);
         return json(200, { orders });
+    }
+
+    // ── revise_plan ───────────────────────────────────────────────────────────
+    // The user's edits to a plan that is still waiting: briefs reworded, quantities changed, items
+    // removed. Filed as a NEW pending decision that supersedes the old one (fileStrategyPlan's own
+    // rule), so it can never touch a placed order and never spends — approving is still separate.
+    if (action === 'revise_plan') {
+        const decisionId = Number(body.decisionId);
+        if (!Number.isInteger(decisionId) || decisionId <= 0) return json(400, { error: 'decisionId is required.' });
+        const [d] = await db.select({
+            id: campaignDecisions.id, campaignId: campaignDecisions.campaignId, kind: campaignDecisions.kind,
+            status: campaignDecisions.status, expiresAt: campaignDecisions.expiresAt,
+        })
+            .from(campaignDecisions)
+            .where(and(eq(campaignDecisions.id, decisionId), eq(campaignDecisions.organisationId, orgId)))
+            .limit(1);
+        if (!d || d.kind !== 'strategy') return json(404, { error: 'Plan not found.' });
+        // Approved, turned down, replaced by a chat plan or edited in another tab since this one was
+        // opened: saving would resurrect a plan the user has already moved past.
+        if (d.status !== 'pending' || (d.expiresAt && d.expiresAt.getTime() <= Date.now())) {
+            return json(409, { error: 'This plan has changed since you opened it — it was approved, turned down, replaced or has expired. Reload to see the current one.' });
+        }
+        const campaign = await requireCampaign(d.campaignId);
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+        if (!PLANNABLE_STATUSES.includes(campaign.status as never)) {
+            return json(400, { error: `This campaign is ${campaign.status}, so its plan cannot be changed.` });
+        }
+        const orders = normalisePlanOrders(body.orders);
+        if (!orders.length) return json(400, { error: 'A plan needs at least one piece of work. To drop the whole plan, use "Turn down".' });
+        const problem = planProblem(orders);
+        if (problem) return json(400, { error: problem });
+
+        const [budget] = await db.select({ maxWorkItems: campaignBudgets.maxWorkItems })
+            .from(campaignBudgets).where(eq(campaignBudgets.campaignId, campaign.id)).limit(1);
+        const verdict = fitsBudget(await campaignSpendTotals(db, campaign.id), budget?.maxWorkItems ?? 0, planWorkItems(orders));
+        if (!verdict.allowed) return json(400, { error: verdict.message });
+
+        const newId = await fileStrategyPlan(db, {
+            id: campaign.id, organisationId: orgId, aiAssistantId: campaign.aiAssistantId,
+            objective: campaign.objective, status: campaign.status,
+        }, orders, 'edited');
+        if (!newId) return json(500, { error: 'The plan could not be saved — please try again.' });
+        return json(200, { decisionId: newId, campaignId: campaign.id, workItems: planWorkItems(orders) });
     }
 
     // ── place_order ───────────────────────────────────────────────────────────

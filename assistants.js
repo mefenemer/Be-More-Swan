@@ -2536,7 +2536,7 @@ const _RQ_EMAIL_TRIGGER_LABELS = {
     custom: 'Emails you send to a group yourself — saved as drafts',
 };
 
-function _rqDecisionDetail(r) {
+function _rqDecisionDetail(r, statusKey) {
     if (r.recordType !== 'campaign_decision') return '';
     const d = r.data || {};
     const evidence = Array.isArray(d.evidence) ? d.evidence : [];
@@ -2567,8 +2567,19 @@ function _rqDecisionDetail(r) {
         ${Number(d.workItems) > 0 ? `<p class="text-xs text-gray-700"><span class="font-semibold text-gray-900">Uses:</span> ${Number(d.workItems)} of this campaign’s tasks</p>` : ''}
         ${d.costOfInaction ? `<p class="text-xs text-gray-700"><span class="font-semibold text-gray-900">If you do nothing:</span> ${_rqEsc(d.costOfInaction)}</p>` : ''}
         ${days !== null && days > 0 ? `<p class="text-[11px] text-gray-500">Expires in ${days} day${days === 1 ? '' : 's'}.</p>` : ''}
+        ${statusKey === 'review' && d.decisionKind === 'strategy' && window.AssistantCampaigns?.editPlan ? `<button type="button" onclick="_rqEditCampaignPlan(${Number(d.decisionId)})" class="btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer">Edit this plan</button>` : ''}
       </div>`;
 }
+
+/**
+ * A plan is edited where it is drawn in full, on the Campaigns tab (assistant-campaigns.js). Saving
+ * there replaces this decision with the edited one, so this card is gone when the user comes back.
+ */
+window._rqEditCampaignPlan = async function (decisionId) {
+    window._activateMainTab?.('campaigns');
+    const ok = await window.AssistantCampaigns.editPlan(decisionId);
+    if (!ok) window.showToast?.('That plan is no longer waiting — it was approved, turned down or replaced.', 'error');
+};
 
 function _detailRqRecordCard(r, statusKey) {
     const found = _rqDraft(r);
@@ -2600,7 +2611,7 @@ function _detailRqRecordCard(r, statusKey) {
         ${_rqOutreachPreview(r, statusKey)}
         ${sync.pills}
         ${_rqLeadNotes(r)}
-        ${_rqDecisionDetail(r)}
+        ${_rqDecisionDetail(r, statusKey)}
         ${_rqRecordActions(r, statusKey)}
       </div>
     </div>`;

@@ -79,6 +79,12 @@
     addWork: {},
     /** Decision id whose "Turn down" reason picker is open. */
     rejectingPlan: null,
+    /**
+     * The plan being edited: { decisionId, campaignId, gen, orders: [{ action, quantity, after, brief }] }.
+     * `gen` goes into every field's data-keep key and moves on each Remove — the items re-number,
+     * and a kept value restored by its old index would land in the wrong brief.
+     */
+    editingPlan: null,
     /** Per campaign: { open, picking, selected: Set } for the Pictures panel (§9.3). */
     pictures: {},
     /** Per campaign: { open, loading, data, error } for the Summary panel (§9.8). */
@@ -397,7 +403,143 @@
   // is the row the user is already looking at, and approving from it means the decision and the
   // campaign it starts are on one screen. Turning it down asks why — that reason is written into
   // the campaign's constraints and restated in the next proposal, the same as in Decisions.
+  // ── Editing a waiting plan ───────────────────────────────────────────────────
+  // A plan could only be approved whole or turned down whole; changing one word meant throwing it
+  // all away. Edits are saved with `revise_plan`, which files a NEW pending plan that replaces this
+  // one — nothing is placed and nothing is spent until the user approves, exactly as before.
+  //
+  // Field caps match campaign-plan.ts BRIEF_TEXT_FIELDS; the server clips to them regardless.
+  const PLAN_FIELD_LABELS = {
+    idea: ['Brief', 1000], angle: ['Angle', 300], audience: ['Audience', 300], facts: ['Points to make, links and facts', 2000],
+    hypothesis: ['What you are testing', 300], angleA: ['Angle A', 300], angleB: ['Angle B', 300],
+    show: ['What the picture shows', 1000], headline: ['Words on it', 120], mustAvoid: ['What it must avoid', 300],
+    assignee: ['Who', 80], task: ['What they are asked to do', 500], name: ['Name', 120],
+  };
+  // The fields each kind of work reads. Any OTHER labelled field already on the brief is shown too,
+  // so nothing the chat wrote is hidden from the person approving it.
+  const PLAN_EDIT_FIELDS = {
+    draft_social_posts: ['angle', 'audience', 'facts'],
+    draft_blog_pillar: ['idea', 'angle', 'audience'],
+    run_lead_search: ['idea'],
+    narrow_targeting: ['idea'],
+    adjust_messaging: ['angle'],
+    draft_email_campaign: ['idea', 'angle', 'audience', 'facts'],
+    request_human_task: ['assignee', 'task'],
+    ab_test_posts: ['hypothesis', 'angleA', 'angleB'],
+    commission_visuals: ['show', 'headline', 'mustAvoid'],
+  };
+  const EMAIL_TRIGGER_LABELS = {
+    form: 'People who sign up through a form (a follow-up)',
+    custom: 'A group I send them to myself',
+  };
+
+  function planFieldsFor(o) {
+    const own = PLAN_EDIT_FIELDS[o.action] || [];
+    const extra = Object.keys(PLAN_FIELD_LABELS).filter((k) => own.indexOf(k) === -1 && typeof o.brief[k] === 'string' && o.brief[k].trim());
+    return own.concat(extra);
+  }
+
+  function planTasks(orders) {
+    return orders.reduce((n, o) => {
+      const spec = actionSpec(o.action);
+      return n + (spec ? (spec.workItemsPerUnit || 0) * (spec.takesQuantity ? o.quantity : 1) : 0);
+    }, 0);
+  }
+
+  /** The brief, read-only, under each item of a waiting plan. */
+  function briefSummary(o) {
+    const b = o.brief || {};
+    const lines = planFieldsFor({ action: o.action, brief: b })
+      .filter((k) => typeof b[k] === 'string' && b[k].trim())
+      .map((k) => `<span class="block pl-3 text-gray-500 break-words"><span class="font-semibold text-gray-600">${esc(PLAN_FIELD_LABELS[k][0])}:</span> ${esc(b[k])}</span>`);
+    if (EMAIL_TRIGGER_LABELS[b.emailTrigger]) lines.unshift(`<span class="block pl-3 text-gray-500"><span class="font-semibold text-gray-600">Who gets them:</span> ${esc(EMAIL_TRIGGER_LABELS[b.emailTrigger])}</span>`);
+    return lines.join('');
+  }
+
+  /** Copy whatever is typed into the editor back onto state, before anything re-renders. */
+  function syncPlanEdit() {
+    const ed = state.editingPlan;
+    if (!ed) return;
+    document.querySelectorAll('[data-cmp-pe]').forEach((el) => {
+      const [i, field] = el.dataset.cmpPe.split('|');
+      const o = ed.orders[Number(i)];
+      if (!o) return;
+      const v = String(el.value || '').trim();
+      if (field === 'quantity') {
+        const spec = actionSpec(o.action);
+        o.quantity = Math.max(1, Math.min(spec ? spec.maxQuantity : 1, Math.floor(Number(v)) || 1));
+      } else if (field === 'after') {
+        o.after = Number(v) > 0 ? Number(v) : null;
+      } else if (v) {
+        o.brief[field] = v;
+      } else {
+        delete o.brief[field];
+      }
+    });
+  }
+
+  function planEditor(c, plan) {
+    const ed = state.editingPlan;
+    const id = esc(String(plan.decisionId));
+    const input = 'mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal';
+    const items = ed.orders.map((o, i) => {
+      const spec = actionSpec(o.action);
+      const key = (f) => `pe-${ed.gen}-${i}-${f}`;
+      const fields = planFieldsFor(o).map((f) => {
+        const [label, max] = PLAN_FIELD_LABELS[f];
+        const val = typeof o.brief[f] === 'string' ? o.brief[f] : '';
+        return `<label class="block text-xs font-bold text-gray-600">${esc(label)}
+            <textarea rows="${max > 300 ? 3 : 2}" maxlength="${max}" data-cmp-pe="${i}|${f}" data-keep="${key(f)}" class="${input}">${esc(val)}</textarea>
+          </label>`;
+      }).join('');
+      const earlier = ed.orders.slice(0, i);
+      return `
+        <li class="bg-white border border-gray-200 rounded-lg p-3 space-y-2" data-cmp-pe-item="${i}">
+          <div class="flex items-start justify-between gap-3">
+            <p class="text-sm font-bold text-gray-900">${i + 1}. ${esc(spec ? spec.label : o.action)}</p>
+            <button type="button" data-cmp-pe-remove="${i}" class="btn-destructive px-2.5 py-1 text-xs font-bold rounded-lg border transition shrink-0">Remove</button>
+          </div>
+          <div class="flex flex-wrap gap-3">
+            ${spec && spec.takesQuantity ? `
+              <label class="block text-xs font-bold text-gray-600">How many (up to ${esc(String(spec.maxQuantity))})
+                <input type="number" min="1" max="${esc(String(spec.maxQuantity))}" value="${esc(String(o.quantity))}" data-cmp-pe="${i}|quantity" data-keep="${key('quantity')}"
+                  class="mt-1 w-24 text-sm border border-gray-300 rounded-lg px-3 py-1.5 font-normal">
+              </label>` : ''}
+            ${earlier.length ? `
+              <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Waits for
+                <select data-cmp-pe="${i}|after" data-keep="${key('after')}" class="${input}">
+                  <option value="">Nothing — starts when you approve</option>
+                  ${earlier.map((x, j) => `<option value="${j + 1}" ${o.after === j + 1 ? 'selected' : ''}>Item ${j + 1}: ${esc((actionSpec(x.action) || {}).label || x.action)}</option>`).join('')}
+                </select>
+              </label>` : ''}
+            ${o.action === 'draft_email_campaign' ? `
+              <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Who gets them
+                <select data-cmp-pe="${i}|emailTrigger" data-keep="${key('emailTrigger')}" class="${input}">
+                  <option value="">Let the campaign's stage decide</option>
+                  ${Object.keys(EMAIL_TRIGGER_LABELS).map((t) => `<option value="${t}" ${o.brief.emailTrigger === t ? 'selected' : ''}>${esc(EMAIL_TRIGGER_LABELS[t])}</option>`).join('')}
+                </select>
+              </label>` : ''}
+          </div>
+          ${fields}
+        </li>`;
+    }).join('');
+    const total = planTasks(ed.orders);
+    return `
+      <div class="mt-4 bg-indigo-50/60 border border-indigo-200 rounded-xl p-4" data-cmp-plan-editor="${id}">
+        <p class="text-[11px] font-bold text-indigo-700 uppercase tracking-wide">Editing the plan</p>
+        <p class="text-xs text-gray-600 mt-1">Saving replaces the waiting plan with this one. Nothing is briefed until you approve it.</p>
+        <ol class="mt-3 space-y-3">${items}</ol>
+        <div class="mt-3 flex flex-wrap items-center gap-2">
+          <p class="text-xs text-gray-600 mr-auto" data-cmp-pe-total>Uses ${esc(String(total))} ${total === 1 ? 'task' : 'tasks'}.</p>
+          <button type="button" data-cmp-pe-save="${id}" data-cmp-plan-campaign="${esc(String(c.id))}"
+            class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save changes</button>
+          <button type="button" data-cmp-pe-cancel class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition">Cancel</button>
+        </div>
+      </div>`;
+  }
+
   function planBlock(c, plan) {
+    if (state.editingPlan && Number(state.editingPlan.decisionId) === Number(plan.decisionId)) return planEditor(c, plan);
     const id = esc(String(plan.decisionId));
     const rejecting = Number(state.rejectingPlan) === Number(plan.decisionId);
     const reasons = (C() && C().rejectReasons) || [];
@@ -408,7 +550,7 @@
           ${plan.orders.map((o) => `
             <li class="text-xs text-gray-700">• ${esc(o.label)}${o.quantity > 1 ? ` ×${esc(String(o.quantity))}` : ''} — ${esc(o.assignee || o.role)}
               <span class="text-gray-400">(${o.workItems ? `${esc(String(o.workItems))} ${o.workItems === 1 ? 'task' : 'tasks'}` : 'uses no tasks'}${o.after && plan.orders[o.after - 1] ? ` · waits until: ${esc(plan.orders[o.after - 1].label)}${plan.orders[o.after - 1].assignee ? ` (${esc(plan.orders[o.after - 1].assignee)})` : ''}` : ''})</span>
-              ${o.task ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.task)}</span>` : ''}</li>`).join('')}
+              ${o.brief ? briefSummary(o) : (o.task ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.task)}</span>` : '')}</li>`).join('')}
         </ul>
         <p class="text-xs text-gray-500 mt-2">
           Uses ${esc(String(plan.workItems))} tasks.
@@ -433,6 +575,10 @@
               data-cmp-plan-tasks="${esc(String(plan.workItems))}" data-cmp-plan-starts="${c.status === 'draft' ? '1' : ''}"
               class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
               ${c.status === 'draft' ? 'Approve plan &amp; start' : 'Approve plan'}
+            </button>
+            <button type="button" data-cmp-plan-edit="${id}" data-cmp-plan-campaign="${esc(String(c.id))}"
+              class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+              Edit plan
             </button>
             <button type="button" data-cmp-plan-reject-open="${id}"
               class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
@@ -2554,6 +2700,85 @@
     }
   });
 
+  // ── Plan editor ────────────────────────────────────────────────────────────
+  /** Open the editor on a waiting plan. False when no campaign on this tab has that plan waiting. */
+  function openPlanEditor(decisionId) {
+    const c = state.campaigns.find((x) => x.pendingPlan && Number(x.pendingPlan.decisionId) === Number(decisionId));
+    if (!c) return false;
+    state.rejectingPlan = null;
+    state.editingPlan = {
+      decisionId: Number(decisionId), campaignId: c.id, gen: 0,
+      // A deep copy: Cancel must leave the plan exactly as it was.
+      orders: c.pendingPlan.orders.map((o) => ({ action: o.action, quantity: o.quantity, after: o.after || null, brief: JSON.parse(JSON.stringify(o.brief || {})) })),
+    };
+    if (state.rendered) render();
+    document.querySelector(`[data-cmp-plan-editor="${Number(decisionId)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return true;
+  }
+
+  document.addEventListener('input', (e) => {
+    const el = e.target.closest && e.target.closest('[data-cmp-pe]');
+    if (!el || !state.editingPlan || !/\|quantity$/.test(el.dataset.cmpPe)) return;
+    syncPlanEdit();
+    const total = planTasks(state.editingPlan.orders);
+    const out = document.querySelector('[data-cmp-pe-total]');
+    if (out) out.textContent = `Uses ${total} ${total === 1 ? 'task' : 'tasks'}.`;
+  });
+
+  document.addEventListener('click', async (e) => {
+    const open = e.target.closest('[data-cmp-plan-edit]');
+    const remove = e.target.closest('[data-cmp-pe-remove]');
+    const cancel = e.target.closest('[data-cmp-pe-cancel]');
+    const save = e.target.closest('[data-cmp-pe-save]');
+    if (!open && !remove && !cancel && !save) return;
+
+    if (open) { openPlanEditor(Number(open.dataset.cmpPlanEdit)); return; }
+    const ed = state.editingPlan;
+    if (!ed) return;
+    if (cancel) { state.editingPlan = null; if (state.rendered) render(); return; }
+
+    if (remove) {
+      syncPlanEdit();
+      const i = Number(remove.dataset.cmpPeRemove);
+      if (ed.orders.length === 1) { say(ed.campaignId, 'A plan needs at least one piece of work. To drop the whole plan, use "Turn down".', 'error'); return; }
+      const n = i + 1;
+      const waiting = ed.orders.filter((o) => o.after === n).length;
+      if (waiting && !window.confirm(`${waiting} ${waiting === 1 ? 'item waits' : 'items wait'} for this one. Remove it anyway? ${waiting === 1 ? 'That item' : 'They'} will then start as soon as you approve.`)) return;
+      ed.orders.splice(i, 1);
+      // Re-number the waits: later items move up one, and anything that waited for the removed
+      // item now waits for nothing (the user has just said so).
+      for (const o of ed.orders) {
+        if (o.after === n) o.after = null;
+        else if (o.after > n) o.after -= 1;
+      }
+      ed.gen += 1;
+      if (state.rendered) render();
+      return;
+    }
+
+    if (save) {
+      if (state.busy) return;
+      syncPlanEdit();
+      state.busy = true;
+      save.disabled = true;
+      try {
+        const data = await post({ action: 'revise_plan', decisionId: ed.decisionId, orders: ed.orders });
+        state.editingPlan = null;
+        window.showToast?.(`Plan updated — ${data.workItems} ${data.workItems === 1 ? 'task' : 'tasks'}. Approve it when you are ready.`, 'success');
+      } catch (err) {
+        // A plan that moved on under us cannot be saved over; show the current one.
+        if (/changed since you opened it/.test(err.message || '')) state.editingPlan = null;
+        say(ed.campaignId, err.message || 'That did not work — please try again.', 'error');
+        save.disabled = false;
+        state.busy = false;
+        if (!state.editingPlan) await load();
+        return;
+      }
+      state.busy = false;
+      await load();
+    }
+  });
+
   // ── Writes made from outside this tab ──────────────────────────────────────
   /**
    * A campaign created from the chat window (CampaignStrategyProposalCard → chat-session.js) writes
@@ -2714,6 +2939,15 @@
       if (state.rendered) return;
       state.rendered = true;
       render();
+    },
+    /**
+     * Open the plan editor from elsewhere — the Decisions card's "Edit this plan". Reloads first so
+     * it edits the plan as it is NOW; false when that plan is no longer waiting.
+     */
+    async editPlan(decisionId) {
+      await load();
+      if (!state.rendered) { state.rendered = true; render(); }
+      return openPlanEditor(decisionId);
     },
   };
 })();

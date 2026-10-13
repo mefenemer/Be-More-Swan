@@ -43,7 +43,7 @@ console.log('campaign decision card');
 
 check('the card body renders the decision detail', () => {
     const card = body(client, 'function _detailRqRecordCard(');
-    assert.ok(card.includes('_rqDecisionDetail(r)'), 'card never calls _rqDecisionDetail');
+    assert.ok(card.includes('_rqDecisionDetail(r, statusKey)'), 'card never calls _rqDecisionDetail');
 });
 
 check('the detail shows evidence, the briefs, and what doing nothing means', () => {

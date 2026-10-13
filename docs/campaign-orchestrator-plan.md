@@ -2,8 +2,9 @@
 
 **roleKey:** `campaign_orchestrator` (snake_case, to be added verbatim to `db/seed-catalog.ts`)
 **Display name:** Campaign Orchestrator
-**Status:** Phase 1 + paid rails built (catalog name "Campaign Assistant"). ⚠️ A started campaign
-places no orders — see §9.1, which blocks everything in §9. Mockup: `docs/mockups/campaign-orchestrator-mockup.html`
+**Status:** Phase 1, paid rails (dark) and all of §9 built (catalog name "Campaign Assistant"). Paid ads
+wait on Meta verification, LinkedIn Standard Tier and a Google Ads developer token. A waiting plan can be
+edited before approval (`revise_plan`, 2026-10-13). Mockup: `docs/mockups/campaign-orchestrator-mockup.html`
 **Written:** 2026-08-06 · **§9 added:** 2026-10-08 (marketing review)
 
 ---
