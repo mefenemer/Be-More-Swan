@@ -14,7 +14,7 @@ import { users, masterPlans, plans, payments } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { requireTenant } from '../../src/utils/tenant';
 import { resolveActionNotifications, PAYMENT_RESTORED_TYPES } from '../../src/utils/notification-actions';
-import { resolveMonthlyPriceId } from '../../src/utils/stripe-price';
+import { ANNUAL_DISCOUNT, annualAmountGbp, resolveAnnualPriceId, resolveMonthlyPriceId } from '../../src/utils/stripe-price';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const connectionString = process.env.NETLIFY_DATABASE_URL;
@@ -65,8 +65,6 @@ export default withLambda(async (event) => {
 
     const billingCycle: 'monthly' | 'annual' = rawCycle === 'annual' ? 'annual' : 'monthly';
 
-    // Annual discount: 20% off (12 months × monthly price × 0.8)
-    const ANNUAL_DISCOUNT = 0.80;
 
     // 2. LOOK UP MASTER PLAN
     const tierKey = tier.toLowerCase();
@@ -77,9 +75,8 @@ export default withLambda(async (event) => {
 
     // Compute charge amount based on billing cycle
     const monthlyGbp    = Number(masterPlan.monthlyPriceGbp);
-    const baseChargeGbp = billingCycle === 'annual'
-        ? parseFloat((monthlyGbp * 12 * ANNUAL_DISCOUNT).toFixed(2))  // annual lump-sum
-        : monthlyGbp;                                                   // monthly
+    // Annual: exactly the yearly figure pricing.html advertises (stripe-price.ts annualAmountGbp).
+    const baseChargeGbp = billingCycle === 'annual' ? annualAmountGbp(monthlyGbp) : monthlyGbp;
 
     // SC3: Apply promotion code discount if provided (validated by validate-promo.ts)
     let chargeGbp        = baseChargeGbp;
@@ -168,24 +165,9 @@ export default withLambda(async (event) => {
     // Price, and a price change is picked up transparently: a new amount → new lookup_key → new Price.
     let stripePriceId: string;
     if (billingCycle === 'annual') {
-      // Annual plans bill a 12-month lump sum (already discounted in baseChargeGbp) once a year.
-      const annualUnitAmount = Math.round(baseChargeGbp * 100);
-      const annualLookupKey  = `${tierKey}_annual_gbp_${annualUnitAmount}`;
-      const existingAnnual   = await stripe.prices.list({ lookup_keys: [annualLookupKey], active: true, limit: 1 });
-      if (existingAnnual.data.length > 0) {
-        stripePriceId = existingAnnual.data[0].id;
-      } else {
-        const annualProduct = await stripe.products.create({ name: `${masterPlan.name} (Annual)` });
-        const annualPrice   = await stripe.prices.create({
-          currency:            'gbp',
-          product:             annualProduct.id,
-          unit_amount:         annualUnitAmount,
-          recurring:           { interval: 'year' },
-          lookup_key:          annualLookupKey,
-          transfer_lookup_key: true,
-        });
-        stripePriceId = annualPrice.id;
-      }
+      // Annual plans bill the yearly sum once a year, on the plan's OWN product (stripe-price.ts) so
+      // reconciliation can tell which plan an annual subscriber is on.
+      stripePriceId = await resolveAnnualPriceId(stripe, masterPlan);
     } else {
       // Monthly: resolve via the shared helper — derives the amount from master_plans and reuses a
       // stable Price by lookup_key (the single source shared with billing-upgrade).

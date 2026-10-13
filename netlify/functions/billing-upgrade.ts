@@ -15,7 +15,7 @@ import { createNotification } from '../../src/utils/notify';
 import { sendEmail } from '../../src/utils/email';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
 import { resolveActionNotifications, PLAN_UPGRADED_TYPES } from '../../src/utils/notification-actions';
-import { resolveMonthlyPriceId } from '../../src/utils/stripe-price';
+import { resolvePriceIdForInterval } from '../../src/utils/stripe-price';
 import { sendPlanUpgradeAlert } from '../../src/utils/founder-alerts';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -132,7 +132,12 @@ export default withLambda(async (event) => {
 
     // Resolve the target tier's monthly price from master_plans (single source — tracks the Plans
     // tab). Find-or-create is stable, so the preview and the execute path use the same Price.
-    const targetPriceId = await resolveMonthlyPriceId(stripe, targetMp);
+    // ⚠️ Resolved from the LIVE subscription's interval (below, after it is retrieved), not always
+    // monthly: an annual subscriber who upgraded used to be moved onto the monthly price — losing
+    // the 20% annual discount and their billing period without being told.
+    let targetPriceId = '';
+    const targetPriceFor = (s: Stripe.Subscription) =>
+        resolvePriceIdForInterval(stripe, targetMp, s.items.data[0]?.price?.recurring?.interval === 'year' ? 'year' : 'month');
 
     // ─────────────────────────────────────────────────────────────────────────
     // GET ?preview=1: SC2 — proration preview
@@ -166,6 +171,7 @@ export default withLambda(async (event) => {
             });
             const currentItemId = sub.items.data[0]?.id;
             if (!currentItemId) throw new Error('No subscription item found');
+            targetPriceId = await targetPriceFor(sub);
 
             // Preview the proration invoice
             const upcoming = await stripe.invoices.createPreview({
@@ -215,6 +221,7 @@ export default withLambda(async (event) => {
         const sub = await stripe.subscriptions.retrieve(currentPlan.stripeSubscriptionId, { expand: ['items'] });
         const currentItemId = sub.items.data[0]?.id;
         if (!currentItemId) throw new Error('No subscription item found');
+        targetPriceId = await targetPriceFor(sub);
 
         // SC3: upgrade with proration — expand latest_invoice so prorated amount and URL are available
         const updatedSub = await stripe.subscriptions.update(currentPlan.stripeSubscriptionId, {
