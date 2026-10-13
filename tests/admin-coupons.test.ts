@@ -10,7 +10,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validateCouponInput, stripeCouponParams, stripePromotionCodeParams, describeCoupon } from '../src/utils/coupon-rules';
+import { validateCouponInput, stripeCouponParams, stripePromotionCodeParams, describeCoupon, planStripeImport } from '../src/utils/coupon-rules';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -149,6 +149,40 @@ check('the migration matches the schema', () => {
     for (const col of ['stripe_coupon_id', 'stripe_promotion_code_id', 'livemode', 'deleted_at', 'duration_in_months', 'amount_off_pence', 'percent_off']) {
         assert.ok(sqlText.includes(col) && schema.includes(`"${col}"`), `${col} missing from the SQL or schema.ts`);
     }
+});
+
+console.log('\nImporting what already exists in Stripe');
+
+const sc = (over: Record<string, unknown> = {}) => ({ id: 'co_A', name: 'Launch', percent_off: 20, amount_off: null, currency: null, duration: 'once' as const, duration_in_months: null, max_redemptions: null, redeem_by: null, valid: true, times_redeemed: 3, ...over });
+const sp = (over: Record<string, unknown> = {}) => ({ id: 'promo_1', code: 'launch20', active: true, couponId: 'co_A', max_redemptions: null, expires_at: null, created: 1_790_000_000, times_redeemed: 3, ...over });
+
+check('one row per promotion code not already on the screen; a re-run imports nothing', () => {
+    const first = planStripeImport([sc()], [sp()], new Set());
+    assert.strictEqual(first.rows.length, 1);
+    assert.strictEqual(first.rows[0].code, 'LAUNCH20');
+    assert.strictEqual(first.rows[0].percentOff, '20');
+    assert.strictEqual(first.rows[0].stripePromotionCodeId, 'promo_1');
+    assert.strictEqual(planStripeImport([sc()], [sp()], new Set(['promo_1'])).rows.length, 0);
+});
+
+check('an inactive code or an invalid coupon imports as switched off, never as active', () => {
+    assert.strictEqual(planStripeImport([sc()], [sp({ active: false })], new Set()).rows[0].isActive, false);
+    assert.strictEqual(planStripeImport([sc({ valid: false })], [sp()], new Set()).rows[0].isActive, false);
+});
+
+check('a coupon with no promotion code is reported, not imported', () => {
+    const r = planStripeImport([sc(), sc({ id: 'co_B', name: 'Manual only' })], [sp()], new Set());
+    assert.strictEqual(r.rows.length, 1);
+    assert.deepStrictEqual(r.noCode.map((c) => c.id), ['co_B']);
+});
+
+check('the Stripe check and import run server-side, with the live key never leaving Netlify', () => {
+    const fn = read('netlify/functions/admin-coupons.ts');
+    assert.ok(/queryStringParameters\?\.view === 'stripe'/.test(fn));
+    assert.ok(/body\.action === 'import'/.test(fn));
+    const imp = fn.slice(fn.indexOf("body.action === 'import'"), fn.indexOf('// ── Create'));
+    assert.ok(!/stripe\.(coupons|promotionCodes)\.(create|update|del)/.test(imp), 'import must change nothing in Stripe');
+    assert.ok(/Check Stripe/.test(read('admin.html')) && /couponImportStripe/.test(read('admin.html')));
 });
 
 console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`);
