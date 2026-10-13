@@ -841,6 +841,11 @@ node_bundler = "esbuild"
 [functions.resume-quota-paused]
   schedule = "15 0 * * *"
 
+# End of beta: ends each beta on the date an admin set for it, only after the admin sent its notice.
+# 07:05 UTC, after midnight UK time in both BST and GMT. See netlify/functions/end-beta-sweep.ts.
+[functions.end-beta-sweep]
+  schedule = "5 7 * * *"
+
 # US4 of the paid-ads brief: the daily pass over LIVE PAID campaigns — pause fatigued or
 # over-priced ads, and stop any campaign we can no longer watch or control.
 #

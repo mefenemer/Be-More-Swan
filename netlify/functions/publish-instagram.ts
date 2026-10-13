@@ -4,6 +4,7 @@
 // rate-limit state table, permanent-error classification, push notifications, cron log.
 
 import { Handler } from '@netlify/functions';
+import { heldOrganisationIds, heldOrgsClause } from '../../src/utils/beta-ending';
 import { and, eq, lte, or, isNull, inArray, sql, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
@@ -211,6 +212,7 @@ export default withLambda(async () => {
     );
 
     // Claim due posts — SKIP LOCKED prevents concurrent tick double-processing
+    const held = await heldOrganisationIds(db);
     const posts = await db.execute<{
         id: number; user_id: number; organisation_id: number; caption: string | null;
         hashtags: string | null; platform_post_id: string | null; connection_id: number | null;
@@ -225,6 +227,8 @@ export default withLambda(async () => {
            AND platform = 'instagram'
            AND publish_date <= now()
            AND (retry_at IS NULL OR retry_at <= now())
+           -- End of beta: a workspace whose beta ended and has not subscribed is held (beta-ending.ts).
+           ${heldOrgsClause(held)}
            -- Video text-overlay render gate (Phase 4) — see publish-social-posts for the rationale.
            AND (render_status IS NULL OR render_status = 'done')
          ORDER BY publish_date

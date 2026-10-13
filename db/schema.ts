@@ -2809,6 +2809,25 @@ export const billingCoupons = pgTable("billing_coupons", {
   deletedAt: timestamp("deleted_at"),
 });
 
+// ── Beta endings — Admin → Customers → Beta testers ──────────────────────────────
+// See db/z-beta-endings.sql. One row per beta workspace; end date set per workspace; notices are
+// sent by an admin only; end-beta-sweep ends a workspace only after its notice was sent.
+export const betaEndings = pgTable("beta_endings", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().unique().references(() => organisations.id, { onDelete: "cascade" }),
+  endsOn: date("ends_on", { mode: "string" }).notNull(),
+  offeredTierKey: text("offered_tier_key"),
+  couponCode: text("coupon_code"),
+  noticeSentAt: timestamp("notice_sent_at"),
+  noticeSentBy: integer("notice_sent_by").references(() => users.id, { onDelete: "set null" }),
+  reminderSentAt: timestamp("reminder_sent_at"),
+  reminderSentBy: integer("reminder_sent_by").references(() => users.id, { onDelete: "set null" }),
+  endedAt: timestamp("ended_at"),
+  convertedAt: timestamp("converted_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // ── Bias Audit — US-GOV-3.3.1 ────────────────────────────────────────────────
 // Quarterly prompt review records
 export const biasAuditReviews = pgTable("bias_audit_reviews", {

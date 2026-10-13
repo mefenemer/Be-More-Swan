@@ -1002,6 +1002,34 @@
         </div>
       </section>
 
+      <!-- ── Beta testers — ending the beta, one workspace at a time (admin-beta.ts) ─────────────
+           Owner decisions 2026-10-13: end date per workspace; ONLY an admin sends the notice and the
+           reminder; end-beta-sweep ends a workspace on its date, and only if its notice was sent. -->
+      <section id="view-beta-testers" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div class="mb-5 space-y-1">
+          <p class="text-sm text-gray-500">Every workspace on the free beta plan. Set each one's end date and offer, preview the email, then send the notice. Nothing is sent automatically.</p>
+          <p class="text-xs text-gray-500">On the end date, a workspace that has not subscribed has its assistants paused and anything scheduled held. Nothing is deleted; subscribing switches everything back on. A workspace is only ever ended if its notice was sent.</p>
+        </div>
+        <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide">
+              <tr>
+                <th class="px-4 py-3 text-left">Workspace</th>
+                <th class="px-4 py-3 text-left">Used in beta</th>
+                <th class="px-4 py-3 text-left">Plan to offer</th>
+                <th class="px-4 py-3 text-left">Coupon</th>
+                <th class="px-4 py-3 text-left">Beta ends</th>
+                <th class="px-4 py-3 text-left">Status</th>
+                <th class="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="beta-tbody">
+              <tr><td colspan="7" class="px-5 py-8 text-center text-gray-400">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <!-- ── Coupons — Admin → Revenue → Coupons (admin-coupons.ts) ───────────────────────
            Every coupon here is a real Stripe coupon + promotion code; checkout validates codes
            against Stripe (validate-promo.ts). The create/edit modal lives OUTSIDE this section —
@@ -2236,6 +2264,18 @@
 </div>
 
 <!-- AI Credits Modal — Epic 2 US4 -->
+<!-- Beta email preview — outside every .admin-view. -->
+<div id="beta-preview-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full p-6 relative max-h-[92vh] overflow-y-auto">
+    <button type="button" onclick="document.getElementById('beta-preview-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold" aria-label="Close">✕</button>
+    <h3 class="text-base font-bold text-gray-900 mb-1">Email preview</h3>
+    <p id="beta-preview-meta" class="text-xs text-gray-500 mb-2"></p>
+    <p id="beta-preview-warning" class="hidden text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3"></p>
+    <iframe id="beta-preview-frame" title="Email preview" style="width:100%;height:560px;border:0;background:#fff;border-radius:8px;"></iframe>
+    <p class="text-[11px] text-gray-400 mt-2">The wording comes from the "Beta Ending" templates in Comms, where it can be edited.</p>
+  </div>
+</div>
+
 <!-- Coupon create / edit — outside every .admin-view, see view-coupons. -->
 <div id="coupon-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative max-h-[90vh] overflow-y-auto">
@@ -2786,6 +2826,7 @@ const ADMIN_CATS = {
     { view: 'users',          icon: '👥', label: 'All Users',        perm: 'view_users',      group: 'Accounts' },
     { view: 'workspaces',     icon: '🏢', label: 'Workspaces',       perm: 'view_workspaces', group: 'Accounts' },
     { view: 'contacts',       icon: '👤', label: 'Contacts',         perm: 'view_users',      group: 'Accounts' },
+    { view: 'beta-testers',   icon: '🧪', label: 'Beta testers',     perm: 'manage_beta',     group: 'Accounts' },
     { view: 'tickets',        icon: '🎫', label: 'Support Tickets',  perm: 'view_tickets',            group: 'Inbound' },
     { view: 'issue-reports',  icon: '🐞', label: 'Issue Reports',    perm: 'view_issue_reports',      group: 'Inbound' },
     { view: 'feature-roadmap',icon: '💡', label: 'Feature Requests', perm: 'manage_feature_requests', group: 'Inbound' },
@@ -3153,6 +3194,7 @@ function adminNav(view) {
   if (view === 'security-abuse') loadSecurityAbuse();
   if (view === 'cogs')            loadCogsDashboard();
   if (view === 'coupons')         loadCoupons();
+  if (view === 'beta-testers')    loadBetaTesters();
   if (view === 'reconciliation')  loadReconciliation();
   if (view === 'dunning')         loadDunningQueue();
   if (view === 'disputes')        loadDisputes();
@@ -8725,6 +8767,103 @@ async function loadCogsDashboard() {
     document.getElementById('cogs-tbody').innerHTML =
       `<tr><td colspan="5" class="px-5 py-5 text-red-500 text-sm">${e.message}</td></tr>`;
   }
+}
+
+// ── Beta testers (admin-beta.ts) ─────────────────────────────────────────────
+const BETA_API = '/.netlify/functions/admin-beta';
+const _beta = { rows: [], tiers: [], coupons: [] };
+
+async function loadBetaTesters() {
+  const tbody = document.getElementById('beta-tbody');
+  tbody.innerHTML = '<tr><td colspan="7" class="px-5 py-8 text-center text-gray-400 animate-pulse">Loading…</td></tr>';
+  try {
+    const d = await api(BETA_API);
+    Object.assign(_beta, { rows: d.workspaces || [], tiers: d.tiers || [], coupons: d.coupons || [] });
+    const esc = (v) => escAdm(v == null ? '' : String(v));
+    const day = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    const gbpFmt = (n) => '£' + Number(n).toFixed(2).replace(/\.00$/, '');
+    const tomorrow = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+    tbody.innerHTML = _beta.rows.map((w) => {
+      const e = w.ending || {};
+      const locked = !!e.endedAt;
+      const status = w.hasPaidPlan || e.convertedAt ? '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">Subscribed</span>'
+        : e.endedAt ? `<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-gray-200 text-gray-700">Ended ${day(e.endedAt)}</span>`
+        : e.reminderSentAt ? `<span class="text-xs text-gray-600">Reminder sent ${day(e.reminderSentAt)}</span>`
+        : e.noticeSentAt ? `<span class="text-xs text-gray-600">Notice sent ${day(e.noticeSentAt)}</span>`
+        : e.endsOn ? '<span class="text-xs font-semibold text-amber-700">Not told yet</span>'
+        : '<span class="text-xs text-gray-400">No end date</span>';
+      const tierOpts = _beta.tiers.map((t) => {
+        const tag = t.tierKey === w.suggestedTierKey ? ' (suggested)' : '';
+        const sel = (e.offeredTierKey || w.suggestedTierKey) === t.tierKey ? ' selected' : '';
+        return `<option value="${esc(t.tierKey)}"${sel}>${esc(t.name)} — ${gbpFmt(t.monthlyPriceGbp)}${tag}</option>`;
+      }).join('');
+      const couponOpts = ['<option value="">No coupon</option>'].concat(_beta.coupons.map((c) =>
+        `<option value="${esc(c.code)}"${(e.couponCode || '') === c.code ? ' selected' : ''}>${esc(c.code)} — ${esc(c.name)}</option>`)).join('');
+      const offer = w.offer ? `<p class="text-[11px] text-gray-500 mt-1">Email offers ${gbpFmt(w.offer.offerPriceGbp)}${w.offer.couponCode ? ` (was ${gbpFmt(w.offer.fullPriceGbp)})` : ''}${w.offer.fits ? '' : ' · uses more than the top plan allows'}</p>` : '';
+      const problem = w.offer?.couponProblem ? `<p class="text-[11px] font-semibold text-amber-700 mt-1">${esc(w.offer.couponProblem)}</p>` : '';
+      const sendBtn = !e.endsOn || locked || w.hasPaidPlan ? ''
+        : !e.noticeSentAt ? `<button type="button" onclick="betaSend(${w.organisationId}, 'notice')" class="btn-primary px-2.5 py-1 text-xs font-bold rounded-lg">Send notice</button>`
+        : `<button type="button" onclick="betaSend(${w.organisationId}, 'reminder')" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">Send reminder</button>`;
+      return `<tr class="border-t border-gray-100 align-top" data-beta-org="${w.organisationId}">
+        <td class="px-4 py-3"><p class="font-semibold text-gray-900">${esc(w.organisationName)}</p><p class="text-xs text-gray-500">${esc(w.ownerEmail || 'no owner email')}</p><p class="text-[11px] text-gray-400">On beta since ${day(w.betaSince)}</p></td>
+        <td class="px-4 py-3 text-xs text-gray-600">${w.usage.assistants} assistant${w.usage.assistants === 1 ? '' : 's'}<br>${w.usage.peakMonthlyTasks} tasks in their busiest month</td>
+        <td class="px-4 py-3"><select class="beta-tier border border-gray-200 rounded-lg px-2 py-1 text-xs" ${locked ? 'disabled' : ''}>${tierOpts}</select>${offer}${problem}</td>
+        <td class="px-4 py-3"><select class="beta-coupon border border-gray-200 rounded-lg px-2 py-1 text-xs" ${locked ? 'disabled' : ''}>${couponOpts}</select></td>
+        <td class="px-4 py-3"><input type="date" class="beta-ends border border-gray-200 rounded-lg px-2 py-1 text-xs" min="${tomorrow}" value="${esc(e.endsOn || '')}" ${locked ? 'disabled' : ''}></td>
+        <td class="px-4 py-3">${status}</td>
+        <td class="px-4 py-3 text-right whitespace-nowrap space-x-1">
+          ${locked ? '' : `<button type="button" onclick="betaSave(${w.organisationId})" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">Save</button>`}
+          ${e.endsOn && !locked ? `<button type="button" onclick="betaPreview(${w.organisationId})" class="btn-utility px-2.5 py-1 text-xs font-bold rounded-lg">Preview</button>` : ''}
+          ${sendBtn}
+        </td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="7" class="px-5 py-8 text-center text-gray-400">Nobody is on the beta plan.</td></tr>';
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" class="px-5 py-5 text-red-500 text-sm">${escAdm(err.message)}</td></tr>`;
+  }
+}
+
+async function betaSave(orgId) {
+  const row = document.querySelector(`[data-beta-org="${orgId}"]`);
+  const body = {
+    organisationId: orgId,
+    endsOn: row.querySelector('.beta-ends').value,
+    offeredTierKey: row.querySelector('.beta-tier').value,
+    couponCode: row.querySelector('.beta-coupon').value,
+  };
+  try {
+    await api(BETA_API, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    window.showToast?.('Saved.');
+    loadBetaTesters();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+async function betaPreview(orgId) {
+  try {
+    const d = await api(BETA_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ organisationId: orgId, action: 'preview' }) });
+    document.getElementById('beta-preview-meta').textContent = `To ${d.to || '(no owner email)'} · Subject: ${d.subject}`;
+    const warn = document.getElementById('beta-preview-warning');
+    warn.textContent = d.couponProblem || '';
+    warn.classList.toggle('hidden', !d.couponProblem);
+    document.getElementById('beta-preview-frame').srcdoc = d.html;
+    document.getElementById('beta-preview-modal').classList.remove('hidden');
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+async function betaSend(orgId, action) {
+  const w = _beta.rows.find((r) => r.organisationId === orgId);
+  if (!w) return;
+  const what = action === 'notice' ? 'the end-of-beta notice' : 'a reminder';
+  const ok = await window.confirmModal(
+    `Send ${what} to <strong>${escAdm(w.ownerEmail || '')}</strong> for <strong>${escAdm(w.organisationName)}</strong>?<br><br>` +
+    `Their beta ends on <strong>${escAdm(w.ending?.endsOn || '')}</strong>. Save any changes to the plan or coupon first — the email uses what is saved.`,
+    { title: action === 'notice' ? 'Send notice' : 'Send reminder', confirmLabel: 'Send email' });
+  if (!ok) return;
+  try {
+    const d = await api(BETA_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ organisationId: orgId, action }) });
+    window.showToast?.(d.couponProblem ? `Sent, without the coupon: ${d.couponProblem}` : 'Email sent.');
+    loadBetaTesters();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 // ── Coupons (admin-coupons.ts) ───────────────────────────────────────────────

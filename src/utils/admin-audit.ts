@@ -67,7 +67,11 @@ export type AdminAction =
     // Coupons (Admin → Revenue → Coupons): each one changes what customers pay, in Stripe.
     | 'coupon_create'
     | 'coupon_update'
-    | 'coupon_delete';
+    | 'coupon_delete'
+    // End of beta (Admin → Customers → Beta testers): emails customers and decides when they pause.
+    | 'beta_ending_update'
+    | 'beta_notice_sent'
+    | 'beta_reminder_sent';
 
 export interface AdminAuditParams {
     adminId: number;

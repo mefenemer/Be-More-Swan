@@ -10,6 +10,7 @@
 // publisher (publish-facebook.ts) sharing the same driver module.
 
 import { livePostUrl } from '../../src/utils/post-live-url';
+import { heldOrganisationIds, heldOrgsClause } from '../../src/utils/beta-ending';
 import { Handler } from '@netlify/functions';
 import { inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
@@ -100,6 +101,7 @@ export default withLambda(async () => {
            AND (retry_at IS NULL OR retry_at <= now())`
     );
 
+    const held = await heldOrganisationIds(db);
     const posts = await db.execute<PostRow>(
         `SELECT id, user_id, organisation_id, caption, hashtags, connection_id,
                 attempt_count, publish_date, platform, content_asset_ids, assistant_id,
@@ -109,6 +111,8 @@ export default withLambda(async () => {
            AND platform IN ('linkedin','x','threads','youtube')
            AND publish_date <= now()
            AND (retry_at IS NULL OR retry_at <= now())
+           -- End of beta: a workspace whose beta ended and has not subscribed is held (beta-ending.ts).
+           ${heldOrgsClause(held)}
            -- Video text-overlay render gate (Phase 4). NULL = nothing to render, 'done' = the
            -- overlaid clip is attached. 'pending'/'rendering' hold the post back so it can never
            -- publish without its text; 'failed' holds it back too, for the reviewer to resolve.

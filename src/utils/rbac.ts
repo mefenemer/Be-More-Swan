@@ -53,6 +53,7 @@ const PERMISSION_MIN_RANK: Record<string, number> = {
     sar_export:             2,  // GDPR SAR export
     manage_ai_credits:      2,  // grant / deduct AI generation credits (DB-only, no Stripe)
     manage_coupons:         2,  // create / edit / delete discount coupons (mirrored to Stripe)
+    manage_beta:            2,  // set beta end dates + offers, send the end-of-beta notice / reminder
     view_workspaces:        2,  // browse the workspace list + detail
 
     // ── platform_admin and above ──────────────────────────────────────

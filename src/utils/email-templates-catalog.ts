@@ -247,6 +247,48 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             button('View billing', 'billing.portal_url') + signoff,
     },
 
+    // ── End of beta (src/utils/beta-ending.ts; sent ONLY by an admin from Customers → Beta testers,
+    //    except beta_ended, sent by end-beta-sweep on the end date the admin set) ──────────────────
+    {
+        triggerKey: 'beta_ending_notice',
+        name: 'Beta Ending — Notice',
+        category: 'Billing',
+        transactional: true,
+        subject: 'Your Be More Swan beta ends on {{beta.ends_on}}',
+        preheader: 'Thank you for testing — here is how to keep going.',
+        bodyHtml: greet +
+            p('Thank you for being one of our beta testers. Your feedback has shaped what Be More Swan is today.') +
+            p('The beta for <strong>{{workspace.name | "your workspace"}}</strong> ends on <strong>{{beta.ends_on}}</strong>.') +
+            p('{{beta.offer_line}}') +
+            button('Keep my assistants running', 'link.action_url') +
+            p('If you don’t choose a plan by then, your assistants will pause and anything scheduled will be held. Nothing is deleted — your posts, content and settings stay exactly as they are, and you can pick up where you left off whenever you subscribe.') +
+            p('Questions? Just reply to this email.') + signoff,
+    },
+    {
+        triggerKey: 'beta_ending_reminder',
+        name: 'Beta Ending — Reminder',
+        category: 'Billing',
+        transactional: true,
+        subject: 'Reminder: your Be More Swan beta ends on {{beta.ends_on}}',
+        bodyHtml: greet +
+            p('A quick reminder that the beta for <strong>{{workspace.name | "your workspace"}}</strong> ends on <strong>{{beta.ends_on}}</strong>.') +
+            p('{{beta.offer_line}}') +
+            button('Keep my assistants running', 'link.action_url') +
+            p('After that date your assistants pause until you choose a plan. Nothing is deleted.') + signoff,
+    },
+    {
+        triggerKey: 'beta_ended',
+        name: 'Beta Ended',
+        category: 'Billing',
+        transactional: true,
+        subject: 'Your Be More Swan beta has ended — your work is safe',
+        bodyHtml: greet +
+            p('The beta for <strong>{{workspace.name | "your workspace"}}</strong> has now ended, so your assistants are paused and anything scheduled is on hold.') +
+            p('Nothing has been deleted. Choose a plan and they start again straight away — anything that fell due while they were paused comes back to you to review rather than going out late.') +
+            p('{{beta.offer_line}}') +
+            button('Choose a plan', 'link.action_url') + signoff,
+    },
+
     // ── Engagement & lifecycle ───────────────────────────────────────────────
     {
         triggerKey: 'win_back',
