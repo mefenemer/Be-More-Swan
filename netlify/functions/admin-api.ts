@@ -1156,13 +1156,19 @@ export default withLambda(async (event) => {
             const workspaceIds = topWorkspaces.map(w => w.workspaceId).filter(Boolean) as number[];
             let planMrrMap: Record<number, { amount: number; currency: string }> = {};
             if (workspaceIds.length > 0) {
+                // inArray, not `= ANY(${workspaceIds})`: drizzle expands an interpolated array into a
+                // parameter LIST, which Postgres reads as a row constructor — 42809, and the whole
+                // dashboard 500s the moment any workspace has spend.
                 const planRows = await db
-                    .select({ orgId: plans.organisationId, monthlyPriceGbp: masterPlans.monthlyPriceGbp })
+                    .select({ orgId: plans.organisationId, monthlyPriceGbp: masterPlans.monthlyPriceGbp, planType: plans.planType })
                     .from(plans)
                     .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
-                    .where(and(eq(plans.status, 'active'), sql`plans.organisation_id = ANY(${workspaceIds})`));
+                    .where(and(eq(plans.status, 'active'), inArray(plans.organisationId, workspaceIds)));
                 planRows.forEach(p => {
-                    if (p.orgId) planMrrMap[p.orgId] = { amount: parseFloat(String(p.monthlyPriceGbp || '0')), currency: 'GBP' };
+                    // A beta plan copies the top tier's row, price included, but pays nothing — counting
+                    // £349 of revenue against a free workspace would show a healthy margin that isn't.
+                    const amount = p.planType === 'beta' ? 0 : parseFloat(String(p.monthlyPriceGbp || '0'));
+                    if (p.orgId) planMrrMap[p.orgId] = { amount, currency: 'GBP' };
                 });
             }
 

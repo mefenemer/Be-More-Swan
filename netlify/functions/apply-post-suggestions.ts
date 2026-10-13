@@ -275,6 +275,7 @@ ${before}
             system: 'You are a careful copy editor. You apply the requested edits and nothing more. You never invent or alter factual claims.',
             messages: [{ role: 'user', content: prompt }],
             maxTokens: 900,
+            usage: { workspaceId: post.organisationId, userId, assistantId: post.assistantId },
         });
 
         const after = (gw.text || '').trim().replace(/^["']|["']$/g, '');

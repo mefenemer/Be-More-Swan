@@ -11,6 +11,7 @@
 
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
+import { logMessageUsage } from '../../src/utils/ai-usage';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, organisations } from '../../db/schema';
@@ -126,6 +127,7 @@ Rules:
                 max_tokens: 700,
                 messages: [{ role: 'user', content: prompt }],
             });
+            logMessageUsage(response, MODEL, { workspaceId: organisationId, assistantId: assistantId ?? null, sessionId: 'generate-profile-bio' });
             const raw = (response.content[0] as { text: string }).text.trim();
             const parsed = parseModelJson<BioDraft>(raw);
             if (parsed?.instagram && parsed?.facebook && parsed?.linkedin) {

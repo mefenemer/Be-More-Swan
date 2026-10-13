@@ -18,6 +18,7 @@
 
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
+import { logMessageUsage } from '../../src/utils/ai-usage';
 import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
@@ -98,6 +99,7 @@ Respond with ONLY valid JSON: { "directive": "the instruction" }`;
             system: systemPrompt,
             messages: [{ role: 'user', content: userMessage }],
         });
+        logMessageUsage(response, 'claude-haiku-4-5-20251001', { workspaceId: orgId, userId, assistantId: Number(assistantId) || null, sessionId: 'tune-assistant' });
         const rawText = response.content[0]?.type === 'text' ? response.content[0].text : '';
         const parsed = parseModelJson<{ directive?: string }>(rawText);
         if (parsed) directive = String(parsed.directive || '').trim();

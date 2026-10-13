@@ -5,6 +5,7 @@
 
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
+import { logMessageUsage } from '../../src/utils/ai-usage';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, systemConnections, organisations, userOrganisations } from '../../db/schema';
@@ -94,6 +95,7 @@ Rules:
                 max_tokens: 512,
                 messages: [{ role: 'user', content: prompt }],
             });
+            logMessageUsage(response, MODEL, { workspaceId: organisationId, assistantId: assistantId ?? null, sessionId: 'social-auto-responder' });
             const raw = (response.content[0] as { text: string }).text.trim();
             const parsed = parseModelJson<AutoResponderDraft>(raw);
             if (parsed?.messengerGreeting && parsed?.messengerAutoReply && parsed?.instagramDmAutoReply) {

@@ -352,6 +352,7 @@ Return ONLY valid JSON, no markdown, no explanation.`;
         system: 'You are a social media content quality reviewer. Always respond with valid JSON only.',
         messages: [{ role: 'user', content: prompt }],
         maxTokens: withSuggestions ? 600 : 400,
+        usage: { assistantId: post.assistantId },
     });
 
     // ⚠️ parseModelJson, not JSON.parse. Despite "no markdown", the reviewer wraps its JSON in a

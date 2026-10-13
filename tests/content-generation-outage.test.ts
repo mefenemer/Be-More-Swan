@@ -156,15 +156,17 @@ check('the gateway logs usage, because it is the one place every call passes thr
     assert.ok(gateway.includes('function recordUsage('), 'the gateway still meters nothing');
     assert.ok(gateway.includes('logAiUsage({'), 'no usage row is written');
     // Both entry points, or the grounded path is a hole in the same shape.
-    assert.strictEqual(gateway.split('recordUsage(req, response').length - 1, 2,
-        'only one of the two generate paths records usage');
+    // recordUsage takes token counts since 2026-10-13, so the grounded path can pass the SUM over
+    // its pause_turn resumes rather than the last response alone.
+    assert.ok(gateway.includes('recordUsage(req, response.usage?.input_tokens'), 'the plain generate path records no usage');
+    assert.ok(gateway.includes('recordUsage(req, tokensIn, tokensOut, model)'), 'the grounded path records no usage');
 });
 
 check('it records the model KEY WE INVOKED, not the dated id the API returns', () => {
     // The API resolves 'claude-sonnet-4-6' into a dated id, ai_model_pricing is keyed on the undated
     // constant, and every other caller logs its own MODEL constant — so recording response.model
     // would match no pricing row and write every drafting call in at $0.00. Which is the hole.
-    assert.ok(gateway.includes('recordUsage(req, response, usedFallback ? FALLBACK_MODEL : PRIMARY_MODEL)'),
+    assert.ok(gateway.includes('usedFallback ? FALLBACK_MODEL : PRIMARY_MODEL);'),
         'the plain path records a model key that will not price');
     assert.ok(gateway.includes('model:        modelKey,'), 'recordUsage ignores the key it was given');
     assert.ok(!/model:\s+response\.model,\n\s+inputTokens/.test(gateway),

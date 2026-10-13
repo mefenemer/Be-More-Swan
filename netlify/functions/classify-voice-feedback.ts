@@ -21,6 +21,7 @@
 
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
+import { logMessageUsage } from '../../src/utils/ai-usage';
 import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
@@ -110,6 +111,7 @@ Classify each piece of feedback.`;
             system: systemPrompt,
             messages: [{ role: 'user', content: userMessage }],
         });
+        logMessageUsage(response, 'claude-haiku-4-5-20251001', { workspaceId: orgId ?? null, userId, assistantId: Number(assistantId) || null, sessionId: 'classify-voice-feedback' });
 
         const rawText = response.content[0].type === 'text' ? response.content[0].text : '';
         const parsed = parseModelJson<{ items?: unknown }>(rawText);

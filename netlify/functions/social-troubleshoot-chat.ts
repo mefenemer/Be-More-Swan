@@ -5,6 +5,7 @@
 
 import { Handler, HandlerResponse } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
+import { logMessageUsage } from '../../src/utils/ai-usage';
 import jwt from 'jsonwebtoken';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -112,6 +113,7 @@ Do not mention check IDs. Do not use bullet points. Write naturally as if you're
             max_tokens: 200,
             messages: [{ role: 'user', content: prompt }],
         });
+        logMessageUsage(response, MODEL, { userId, sessionId: 'social-troubleshoot-chat' });
         const message = (response.content[0] as { text: string }).text.trim();
         return {
             statusCode: 200,
