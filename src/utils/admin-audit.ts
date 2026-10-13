@@ -63,7 +63,11 @@ export type AdminAction =
     // (and what the copy said at that moment) must be answerable afterwards.
     | 'product_update_edit'
     | 'product_update_approve'
-    | 'product_update_discard';
+    | 'product_update_discard'
+    // Coupons (Admin → Revenue → Coupons): each one changes what customers pay, in Stripe.
+    | 'coupon_create'
+    | 'coupon_update'
+    | 'coupon_delete';
 
 export interface AdminAuditParams {
     adminId: number;

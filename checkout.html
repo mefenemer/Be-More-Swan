@@ -559,6 +559,16 @@
         errorDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
     });
+
+    // ?promo=CODE pre-applies a code, so a link in an email (the end-of-beta founding offer) lands
+    // on checkout with the discount already shown. Same path as typing it — Stripe still decides
+    // whether it is valid, and an invalid one shows the usual message.
+    const linkedPromo = (params.get('promo') || '').trim();
+    if (linkedPromo) {
+      document.getElementById('promo-section')?.classList.remove('hidden');
+      const input = document.getElementById('promo-input');
+      if (input) { input.value = linkedPromo.toUpperCase(); await window._applyPromo(); }
+    }
   }
 
   document.addEventListener('DOMContentLoaded', initCheckout);
