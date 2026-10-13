@@ -108,7 +108,7 @@ check('the COGS margin query no longer interpolates an array into = ANY()', () =
     const cogs = api.slice(api.indexOf("resource === 'cogs-dashboard'"), api.indexOf("resource === 'cogs-workspace-detail'"));
     assert.ok(cogs.length > 0, 'cogs-dashboard handler not found');
     assert.ok(!/= ANY\(\$\{/.test(cogs.replace(/\/\/[^\n]*/g, '')), 'drizzle expands a JS array into a row constructor — 42809. Use inArray().');
-    assert.ok(/planType === 'beta' \? 0/.test(cogs), 'a free beta workspace must not be credited with the top tier\'s price');
+    assert.ok(/planType === 'beta'\) \{ planMrrMap\[p\.orgId\] = \{ amount: 0/.test(cogs), 'a free beta workspace must not be credited with the top tier\'s price');
 });
 
 console.log('\nAI media — images, video and music cost something too');

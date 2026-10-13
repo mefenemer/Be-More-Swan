@@ -24,7 +24,8 @@ import Stripe from 'stripe';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
-import { billingCoupons, users } from '../../db/schema';
+import { billingCoupons, masterPlans, users } from '../../db/schema';
+import { annualAmountGbp, annualLookupKey } from '../../src/utils/stripe-price';
 import { requirePermission } from '../../src/utils/rbac';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { validateCouponInput, stripeCouponParams, stripePromotionCodeParams, describeCoupon, planStripeImport, type StripeCouponLite, type StripePromoCodeLite } from '../../src/utils/coupon-rules';
@@ -105,7 +106,30 @@ export default withLambda(async (event) => {
             const { coupons, codes } = await readStripe();
             // Who is on a discount right now — every subscription carrying one, any status.
             const onDiscount: Array<Record<string, unknown>> = [];
+            // Annual subscribers, and whether each is on the CURRENT yearly price on its plan's own
+            // product (stripe-price.ts resolveAnnualPriceId). Older annual prices charged the unrounded
+            // sum (e.g. £278.40 against an advertised £276) on a separate "(Annual)" product that
+            // reconciliation cannot place — those stay as they are until moved.
+            const annual: Array<Record<string, unknown>> = [];
+            const planRows = await db.select({ tierKey: masterPlans.tierKey, name: masterPlans.name, monthlyPriceGbp: masterPlans.monthlyPriceGbp, stripeProductId: masterPlans.stripeProductId }).from(masterPlans);
             for await (const sub of stripe.subscriptions.list({ status: 'all', limit: 100, expand: ['data.customer', 'data.discounts'] })) {
+                const item = sub.items.data[0];
+                if (item?.price?.recurring?.interval === 'year' && ['active', 'trialing', 'past_due'].includes(sub.status)) {
+                    const productId = typeof item.price.product === 'string' ? item.price.product : item.price.product?.id ?? null;
+                    const plan = planRows.find((p) => p.stripeProductId && p.stripeProductId === productId)
+                        ?? planRows.find((p) => p.tierKey && item.price.lookup_key?.startsWith(`${p.tierKey}_annual_gbp_`));
+                    const expectedKey = plan?.tierKey ? annualLookupKey(plan.tierKey, annualAmountGbp(plan.monthlyPriceGbp) * 100) : null;
+                    const cust = sub.customer as Stripe.Customer | Stripe.DeletedCustomer | string;
+                    annual.push({
+                        customer: typeof cust === 'string' ? cust : ('email' in cust && cust.email) ? cust.email : cust.id,
+                        subscriptionId: sub.id, status: sub.status,
+                        plan: plan?.name ?? null,
+                        chargedGbp: (item.price.unit_amount ?? 0) / 100,
+                        advertisedGbp: plan ? annualAmountGbp(plan.monthlyPriceGbp) : null,
+                        onCurrentPrice: !!expectedKey && item.price.lookup_key === expectedKey && productId === plan?.stripeProductId,
+                        renews: item.current_period_end ? new Date(item.current_period_end * 1000) : null,
+                    });
+                }
                 for (const d of sub.discounts || []) {
                     if (typeof d === 'string') continue;
                     const cust = sub.customer as Stripe.Customer | Stripe.DeletedCustomer | string;
@@ -129,6 +153,7 @@ export default withLambda(async (event) => {
                     codes: codes.filter((p) => p.couponId === c.id).map((p) => ({ code: p.code, active: p.active, timesRedeemed: p.times_redeemed })),
                 })),
                 onDiscount,
+                annual,
                 toImport: plan.rows.map((r) => ({ code: r.code, name: r.name, isActive: r.isActive })),
                 noCode: plan.noCode.map((c) => ({ id: c.id, name: c.name })),
             });

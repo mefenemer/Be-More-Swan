@@ -931,7 +931,7 @@
 
       <!-- ── US-ADM-3.1.1: COGS Dashboard ─────────────────────────────── -->
       <section id="view-cogs" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
-        <p class="text-sm text-gray-500 mb-5">Platform AI cost of goods — real-time token spend vs plan MRR. Rows highlighted amber (>80% MRR) or red (cost ≥ MRR).</p>
+        <p class="text-sm text-gray-500 mb-5">Platform cost of goods — AI, media, search and enrichment spend against what each workspace actually pays after discounts. Rows highlighted amber (cost &gt; 80% of what they pay) or red (cost ≥ what they pay).</p>
 
         <!-- KPI strip -->
         <div id="cogs-kpi" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -956,7 +956,7 @@
               <tr>
                 <th class="px-4 py-3 text-left">Workspace</th>
                 <th class="px-4 py-3 text-right">Cost (USD, MTD)</th>
-                <th class="px-4 py-3 text-right">MRR (GBP)</th>
+                <th class="px-4 py-3 text-right" title="What the workspace actually pays per month, after discounts (annual ÷ 12)">Paid / month (GBP)</th>
                 <th class="px-4 py-3 text-right">Margin %</th>
                 <th class="px-4 py-3 text-left">Status</th>
               </tr>
@@ -8711,7 +8711,10 @@ async function loadCogsDashboard() {
       return `<tr class="border-t border-gray-50 ${rowCls}">
         <td class="px-4 py-3 text-sm font-medium text-gray-800">${w.orgName || ('ws #' + w.workspaceId) || '—'}</td>
         <td class="px-4 py-3 text-sm text-right font-mono">$${parseFloat(w.costUsd).toFixed(4)} USD</td>
-        <td class="px-4 py-3 text-sm text-right font-mono">£${parseFloat(w.mrrGbp).toFixed(2)} GBP${w.planCurrency && w.planCurrency !== 'GBP' ? ` <span class="text-gray-400 text-xs">(${w.planCurrency})</span>` : ''}</td>
+        <td class="px-4 py-3 text-sm text-right font-mono">£${parseFloat(w.mrrGbp).toFixed(2)} GBP${w.planCurrency && w.planCurrency !== 'GBP' ? ` <span class="text-gray-400 text-xs">(${w.planCurrency})</span>` : ''}${
+          w.mrrDiscount ? `<div class="text-[11px] font-sans text-gray-500">after ${escAdm(w.mrrDiscount)}</div>`
+          : w.mrrSource === 'list' ? '<div class="text-[11px] font-sans text-amber-600" title="Stripe could not be read for this workspace">list price</div>'
+          : w.mrrSource === 'beta' ? '<div class="text-[11px] font-sans text-gray-500">beta — free</div>' : ''}</td>
         <td class="px-4 py-3 text-sm text-right font-mono">${w.marginPct !== null ? w.marginPct + '%' : '—'}</td>
         <td class="px-4 py-3">${badge}</td>
       </tr>`;
@@ -8935,7 +8938,18 @@ async function couponCheckStripe() {
     const noCode = d.noCode.length
       ? `<p class="text-xs text-gray-500 mt-3">${d.noCode.length} coupon${d.noCode.length === 1 ? ' has' : 's have'} no promotion code (${d.noCode.map((c) => _cpEsc(c.name || c.id)).join(', ')}), so customers can't type it at checkout — it can only be applied to a subscription in Stripe directly. Not imported.</p>`
       : '';
+    const annualList = d.annual || [];
+    const annual = annualList.length
+      ? `<div class="overflow-x-auto"><table class="w-full text-sm"><thead class="text-xs font-bold text-gray-500 uppercase"><tr>
+          <th class="py-1 text-left">Customer</th><th class="py-1 text-left">Plan</th><th class="py-1 text-right">Pays / year</th><th class="py-1 text-right">Advertised</th><th class="py-1 text-left">Renews</th><th class="py-1 text-left">Price</th></tr></thead><tbody>
+          ${annualList.map((a) => `<tr class="border-t border-gray-100"><td class="py-2">${_cpEsc(a.customer)}</td><td class="py-2">${_cpEsc(a.plan || 'unknown plan')}</td>
+            <td class="py-2 text-right font-mono">£${Number(a.chargedGbp).toFixed(2)}</td><td class="py-2 text-right font-mono">${a.advertisedGbp != null ? '£' + Number(a.advertisedGbp).toFixed(2) : '—'}</td>
+            <td class="py-2 text-gray-500">${day(a.renews)}</td>
+            <td class="py-2">${a.onCurrentPrice ? '<span class="text-xs text-emerald-700 font-semibold">Current</span>' : '<span class="text-xs text-amber-700 font-semibold" title="An older annual price or product — reconciliation cannot place it, and it may differ from the advertised price">Old price</span>'}</td></tr>`).join('')}
+          </tbody></table></div>`
+      : '<p class="text-sm text-gray-500">Nobody is on an annual plan.</p>';
     panel.innerHTML = card(`Customers on a discount (${d.onDiscount.length})`, people)
+      + card(`Annual subscribers (${annualList.length})`, annual)
       + card(`Every coupon in Stripe (${d.coupons.length})`, all)
       + card('Bring Stripe codes onto this screen', importable + noCode);
   } catch (e) {
