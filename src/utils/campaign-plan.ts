@@ -235,7 +235,17 @@ export function planWorkItems(orders: PlanOrder[]): number {
  * The title says what approving DOES, because that is the question the card has to answer: on a
  * draft it starts the campaign, on a running one it only adds work.
  */
-export function buildStrategyProposal(orders: PlanOrder[], campaignStatus: string): ProposedDecision {
+/**
+ * Where a plan came from, for the decision's "Where this came from" line. A plan the user edited
+ * must not keep claiming it was agreed in chat — the card is a record of facts.
+ */
+export type PlanSource = 'chat' | 'edited';
+const PLAN_SOURCE_LABELS: Record<PlanSource, string> = {
+    chat: 'Agreed in conversation with your Campaign Assistant',
+    edited: 'Edited by you on the Campaigns tab',
+};
+
+export function buildStrategyProposal(orders: PlanOrder[], campaignStatus: string, source: PlanSource = 'chat'): ProposedDecision {
     const n = orders.length;
     const briefs = `${n} ${n === 1 ? 'brief' : 'briefs'}`;
     const isDraft = campaignStatus === 'draft';
@@ -255,7 +265,7 @@ export function buildStrategyProposal(orders: PlanOrder[], campaignStatus: strin
                     ].filter(Boolean).join(' · '),
                 };
             }),
-            { label: 'Where this came from', value: 'Agreed in conversation with your Campaign Assistant' },
+            { label: 'Where this came from', value: PLAN_SOURCE_LABELS[source] },
         ],
         costOfInaction: isDraft
             ? 'The campaign stays a draft: nothing is commissioned and no assistant is briefed.'
@@ -271,7 +281,7 @@ export function buildStrategyProposal(orders: PlanOrder[], campaignStatus: strin
  * race). Never places an order — see the file header.
  */
 export async function fileStrategyPlan(
-    db: Db, campaign: LiveCampaign & { status: string }, orders: PlanOrder[],
+    db: Db, campaign: LiveCampaign & { status: string }, orders: PlanOrder[], source: PlanSource = 'chat',
 ): Promise<number | null> {
     if (!orders.length) return null;
 
@@ -292,7 +302,7 @@ export async function fileStrategyPlan(
         await settleDecisionMirror(db, d.id, 'rejected');
     }
 
-    return persistProposal(db, campaign, buildStrategyProposal(orders, campaign.status));
+    return persistProposal(db, campaign, buildStrategyProposal(orders, campaign.status, source));
 }
 
 /**
@@ -306,6 +316,8 @@ export async function pendingPlanFor(db: Db, campaignId: number): Promise<{
         after: number | null;
         /** For a person's task: who, and what. Null for assistant work. */
         assignee: string | null; task: string | null;
+        /** The whole brief, so the plan can be read and edited before it is approved. */
+        brief: Record<string, unknown>;
     }>;
 } | null> {
     const [d] = await db
@@ -337,9 +349,27 @@ export async function pendingPlanFor(db: Db, campaignId: number): Promise<{
             after: o.after ?? null,
             assignee: typeof o.brief.assignee === 'string' ? o.brief.assignee : null,
             task: typeof o.brief.task === 'string' ? o.brief.task : null,
+            brief: o.brief,
         };
     });
     return { decisionId: d.id, workItems: Number(d.costWorkItems) || 0, expiresAt: d.expiresAt, orders };
+}
+
+/**
+ * The waiting plan, item by item, for the chat snapshot.
+ *
+ * ⚠️ The chat used to be told only "a plan of N briefs is waiting". Asked to change one item, it
+ * had to re-plan from memory — and since a new plan SUPERSEDES the waiting one, every item it
+ * forgot was silently dropped. It now sees each brief, so it can repeat the ones it keeps.
+ */
+function waitingPlanLines(orders: Array<{ action: string; quantity: number; after: number | null; brief: Record<string, unknown> }>): string {
+    const items = orders.map((o, i) => {
+        const brief = Object.entries(o.brief)
+            .filter(([, v]) => typeof v === 'string' || typeof v === 'number' || Array.isArray(v))
+            .map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(', ');
+        return `\n    ${i + 1}. action "${o.action}", quantity ${o.quantity}${o.after ? `, after ${o.after}` : ''}${brief ? ` — ${brief}` : ''}`;
+    }).join('');
+    return `, a plan of ${orders.length} briefs is WAITING for the user's approval:${items}`;
 }
 
 /**
@@ -501,7 +531,7 @@ export async function buildCampaignsSnapshot(
                 + await campaignPicturesLine(db, r.id)
                 + await openTasksLine(db, r.id)
                 + await testsLine(db, r.id, organisationId)
-                + `${plan ? `, a plan of ${plan.orders.length} briefs is waiting for the user's approval` : ''}`,
+                + (plan ? waitingPlanLines(plan.orders) : ''),
             );
         }
         return `YOUR CAMPAIGNS RIGHT NOW — read at the moment this message was sent. These are FACT: answer questions about the user's campaigns from here, never guess, and use these campaignId values (never invent one) when the user wants to change or add work to an existing campaign.

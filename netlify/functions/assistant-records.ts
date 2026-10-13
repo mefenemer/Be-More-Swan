@@ -69,7 +69,8 @@ const RECORD_TYPES = new Set(['lead', 'enrichment', 'meeting', 'invoice', 'ticke
  * would show a settled card while no assistant was ever briefed. Decisions are settled through
  * campaigns.ts `decide` (assistants.js routes them there).
  */
-const READ_RECORD_TYPES = new Set([...RECORD_TYPES, 'campaign_order', 'campaign_decision']);
+const MIRROR_RECORD_TYPES = new Set(['campaign_order', 'campaign_decision']);
+const READ_RECORD_TYPES = new Set([...RECORD_TYPES, ...MIRROR_RECORD_TYPES]);
 const SOURCES = new Set(['chat', 'csv_import', 'integration']);
 // Bulk-import ceiling per request — a CSV bigger than this should be split client-side.
 const MAX_BULK_RECORDS = 500;
@@ -799,6 +800,8 @@ export default withLambda(async (event) => {
                         .where(and(eq(assistantRecords.id, rid), eq(assistantRecords.organisationId, orgId)))
                         .limit(1);
                     if (!prev) { notFound++; continue; }
+                    // A campaign mirror is settled through campaigns.ts `decide`, never by flipping it here.
+                    if (MIRROR_RECORD_TYPES.has(prev.recordType)) { notFound++; continue; }
 
                     // Same guard as the single path: only a genuine transition writes a ledger row,
                     // so re-rejecting an already-decided lead cannot inflate the rejection count the
@@ -848,6 +851,17 @@ export default withLambda(async (event) => {
 
             const id = Number(body.id);
             if (!Number.isInteger(id)) return json(400, { error: 'id is required.' });
+
+            // ⚠️ Campaign mirrors are READ-only here (see READ_RECORD_TYPES). The Review Queue's old
+            // "Approve & Schedule" on a Decisions card PATCHed the mirror to 'scheduled' — a card
+            // reading as approved while campaigns.ts `decide` never ran and no order was placed.
+            const [mirrorCheck] = await db.select({ recordType: assistantRecords.recordType })
+                .from(assistantRecords)
+                .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
+                .limit(1);
+            if (mirrorCheck && MIRROR_RECORD_TYPES.has(mirrorCheck.recordType)) {
+                return json(409, { error: 'Campaign decisions and orders are settled on the Campaign Assistant, not edited here.' });
+            }
 
             const patch: Record<string, unknown> = { updatedAt: new Date() };
             if (body.title !== undefined) {
