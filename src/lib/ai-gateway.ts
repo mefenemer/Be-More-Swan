@@ -8,6 +8,7 @@
 //
 // Changing the target model requires only an env-var update; no business logic changes needed.
 
+import { sanitizeForModel } from '../utils/text-safe';
 import Anthropic from '@anthropic-ai/sdk';
 import { logAiUsage, type DataCategory } from '../utils/ai-usage';
 
@@ -128,8 +129,9 @@ async function callModel(model: string, req: GatewayRequest): Promise<Anthropic.
     return client.messages.create({
         model,
         max_tokens: req.maxTokens ?? 1024,
-        system: req.system,
-        messages: req.messages,
+        // Half-emoji in any part of the prompt make the whole request invalid JSON (text-safe.ts).
+        system: sanitizeForModel(req.system),
+        messages: sanitizeForModel(req.messages),
     });
 }
 
@@ -271,8 +273,8 @@ export async function gatewayGenerateGrounded(req: GatewayRequest): Promise<Grou
         return client.messages.create({
             model: m,
             max_tokens: req.maxTokens ?? 1024,
-            system: req.system,
-            messages,
+            system: sanitizeForModel(req.system),
+            messages: sanitizeForModel(messages),
             tools: [webSearchTool(m)],
         }, left === Infinity ? undefined : {
             timeout: Math.max(MIN_CALL_MS, left),

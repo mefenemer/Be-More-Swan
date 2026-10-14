@@ -13,6 +13,7 @@
 // payload; the client should show its own loading state between send and response.
 // Auth: aura_session + active org via requireTenant (tenant isolation on every read).
 
+import { sanitizeForModel } from '../../src/utils/text-safe';
 import { teamThreadPromptBlock } from '../../src/utils/team-messages';
 import { SPECIAL_CATEGORY_RULE } from '../../src/constants/special-category-rule';
 import { Handler } from '@netlify/functions';
@@ -2433,7 +2434,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             const shadowResponse = await anthropic.messages.create({
                 model: targetRoute.model,
                 max_tokens: targetRoute.maxTokens,
-                system: shadowSystem,
+                system: sanitizeForModel(shadowSystem),
                 messages: [{
                     role: 'user' as const,
                     content: `Background handoff (automated — the user approved this handoff; they are not addressing you directly). "${assistantRow.name}" needs your output to finish its own task. Work the payload below and respond in your usual format; keep the reply brief.\n\nHandoff payload:\n${handoff.payloadJson}`,
@@ -2478,8 +2479,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         const response = await anthropic.messages.create({
             model: route.model,
             max_tokens: route.maxTokens,
-            system,
-            messages: llmMessages,
+            // Half-emoji anywhere in the assembled prompt make the request invalid JSON (text-safe.ts).
+            system: sanitizeForModel(system),
+            messages: sanitizeForModel(llmMessages),
         });
 
         void logAiUsage({

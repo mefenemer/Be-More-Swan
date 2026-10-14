@@ -6,6 +6,7 @@
 // A reviewer does not care whether the near-identical post they are looking at was already
 // approved or is merely sitting two rows above in the queue; both read as the assistant repeating
 // itself. Rejected captions matter most of all: the user has explicitly said no to that angle.
+import { safeSlice } from './text-safe';
 
 /** One prior post, as the drafting query returns it. */
 export interface PriorPost {
@@ -27,7 +28,8 @@ export const VARIETY_VISUAL_LOOKBACK = 10;
 const HOOK_CHARS = 140;
 const VISUAL_CHARS = 120;
 
-const tidy = (s: string | null, max: number) => (s || '').replace(/\s+/g, ' ').trim().slice(0, max);
+// safeSlice: a caption opening with an emoji, cut mid-emoji, made every draft's request invalid (text-safe.ts).
+const tidy = (s: string | null, max: number) => safeSlice((s || '').replace(/\s+/g, ' ').trim(), max);
 
 /**
  * Build the "already drafted / recent visuals" prompt block from the assistant's prior posts.
@@ -171,7 +173,7 @@ export function findNearDuplicate(caption: string, priors: PriorPost[]): NearDup
 export function nearDuplicateRetryPrompt(dup: NearDuplicate): string {
     return 'That draft is too close to a post this assistant has already produced — the user would '
         + 'see the same idea twice in their review queue.\n\n'
-        + `THE EXISTING POST:\n"${dup.caption.replace(/\s+/g, ' ').trim().slice(0, 400)}"\n\n`
+        + `THE EXISTING POST:\n"${safeSlice(dup.caption.replace(/\s+/g, ' ').trim(), 400)}"\n\n`
         + 'Write a COMPLETELY different post instead: a different opening hook, a different core '
         + 'premise, and a different angle on the strategy above. Do not reword what you just wrote — '
         + 'the idea itself has to change. Return the same JSON shape as before.';
