@@ -4027,6 +4027,9 @@ export const campaigns = pgTable("campaigns", {
   parentCampaignId: integer("parent_campaign_id").references((): AnyPgColumn => campaigns.id, { onDelete: "set null" }),
   // Business-as-usual: no end date, ever (CHECK below). Drawn as a band on the year view.
   alwaysOn: boolean("always_on").notNull().default(false),
+  // What the usual Autopilot posting does while this campaign is live (db/z-team-feed.sql):
+  // { social, blog } each 'make_way' | 'pause' | 'normal'. Read only while live, so it restarts itself.
+  usualPosting: jsonb("usual_posting").$type<{ social?: string; blog?: string }>().notNull().default({ social: 'make_way', blog: 'make_way' }),
   // 'organic' | 'paid' | 'blended'. Phase 1 creates only 'organic'; the others are refused at the
   // HTTP boundary until the ad rails exist.
   mode: text().notNull().default("organic"),
@@ -5366,3 +5369,33 @@ export const orgProducts = pgTable("org_products", {
   check("org_products_kind_check", sql`${t.kind} IN ('product','service')`),
   check("org_products_status_check", sql`${t.status} IN ('active','archived')`),
 ]);
+
+// ── The Team feed (db/z-team-feed.sql) ───────────────────────────────────────────────────────────
+// Assistants and the person tell each other things and ask questions. Assistant messages are
+// generated from real state changes (src/utils/team-messages.ts is the ONLY writer); a person's
+// message is theirs, word for word.
+export const teamMessages = pgTable("team_messages", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").references(() => campaigns.id, { onDelete: "cascade" }),
+  campaignOrderId: integer("campaign_order_id").references(() => campaignOrders.id, { onDelete: "set null" }),
+  fromAssistantId: integer("from_assistant_id").references(() => aiAssistants.id, { onDelete: "cascade" }),
+  fromUserId: integer("from_user_id").references(() => users.id, { onDelete: "set null" }),
+  toAssistantId: integer("to_assistant_id").references(() => aiAssistants.id, { onDelete: "cascade" }),
+  toUser: boolean("to_user").notNull().default(false),
+  kind: text().notNull(),
+  body: text().notNull(),
+  link: jsonb(),
+  question: jsonb(),
+  answer: text(),
+  answeredAt: timestamp("answered_at"),
+  answeredBy: integer("answered_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const teamReads = pgTable("team_reads", {
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  lastReadId: integer("last_read_id").notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [primaryKey({ columns: [t.organisationId, t.userId] })]);

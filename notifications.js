@@ -52,7 +52,7 @@ window.updateNotificationBadge = async function() {
             const badge = document.getElementById('sidebar-nav-badge');
             // Badge reflects open ACTION items + unread UPDATES. Falls back to the older
             // actionCount / unreadCount fields if the server hasn't been updated yet.
-            const count = (typeof data.badgeCount === 'number') ? data.badgeCount
+            let count = (typeof data.badgeCount === 'number') ? data.badgeCount
                 : (typeof data.actionCount === 'number') ? data.actionCount
                 : (data.unreadCount || 0);
 
@@ -64,6 +64,25 @@ window.updateNotificationBadge = async function() {
                 else inboxNavBadge.classList.add('hidden');
             };
             setInboxNavBadge(count);
+
+            // The Team feed's unread messages: on its own side-menu item, and ADDED to the bell, so
+            // there is one place to look (owner, 2026-10-14). The Inbox item stays notifications-only.
+            // A failed read is no Team count, never a failed badge.
+            let teamUnread = 0;
+            try {
+                const t = await fetch('/.netlify/functions/team', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+                    body: JSON.stringify({ action: 'unread' }),
+                });
+                if (t.ok) teamUnread = Number((await t.json()).unread) || 0;
+            } catch (_) { /* no Team count this round */ }
+            window._teamUnread = teamUnread;
+            const teamNavBadge = document.getElementById('nav-team-badge');
+            if (teamNavBadge) {
+                teamNavBadge.textContent = teamUnread > 99 ? '99+' : String(teamUnread);
+                teamNavBadge.classList.toggle('hidden', teamUnread === 0);
+            }
+            count += teamUnread;
 
             // First refresh after login: run the one-time inbox-focus count-up, then adopt
             // the count as the baseline so the normal rise-ding doesn't also fire for it.
@@ -537,6 +556,15 @@ window.NotifKit = (function () {
 })();
 
 window.initNotifications = async function() {
+    // Work conversations live in Team, not here — but the bell counts both, so say where the rest are.
+    const teamBanner = document.getElementById('notif-team-banner');
+    if (teamBanner) {
+        const n = Number(window._teamUnread) || 0;
+        teamBanner.classList.toggle('hidden', n === 0);
+        teamBanner.style.display = n === 0 ? 'none' : '';
+        const label = document.getElementById('notif-team-banner-count');
+        if (label) label.textContent = `${n} unread ${n === 1 ? 'message' : 'messages'} from your assistants in Team.`;
+    }
     const listEl = document.getElementById('notif-list');
     const loadingEl = document.getElementById('notif-loading');
     const emptyStateEl = document.getElementById('notif-empty-state');

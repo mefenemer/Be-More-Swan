@@ -57,6 +57,7 @@ import { recordCampaignSpend } from './campaign-ledger';
 import { mirrorOrder } from './campaign-mirror';
 import { issueHumanTask, issueOrder, recompileCampaignTargets } from './campaign-orders';
 import { triggerBlogDrain, triggerContentDrain } from './trigger-drain';
+import { noteOrderSettled } from './team-messages';
 import { ORDER_ACTION_SPECS, type CampaignOrderAction } from '../config/campaign-vocab';
 
 type Db = ReturnType<typeof getDb>;
@@ -444,6 +445,20 @@ async function settleOrder(
         }
     } catch (err) {
         console.error('[campaign-reconciler] mirror failed', { orderId: order.id, err });
+    }
+
+    // The Team feed: the colleague says how it went — once per outcome (team-messages.ts dedupes).
+    // A picture brief part-way through ("3 of 10 chosen") is NOT ready; its own messages cover it.
+    // A rejected order says nothing: the person turned it down, they do not need telling.
+    const teamKind = verdict.kind === 'delivered' ? 'done'
+        : verdict.kind === 'failed' ? 'cancelled'
+        : verdict.kind === 'in_review' && order.action !== 'commission_visuals' ? 'ready' : null;
+    if (teamKind) {
+        const [t] = await db.select({ target: campaignOrders.targetAssistantId }).from(campaignOrders).where(eq(campaignOrders.id, order.id)).limit(1);
+        await noteOrderSettled(db, {
+            organisationId: order.organisationId, campaignId: order.campaignId, orderId: order.id, action: order.action,
+            targetAssistantId: t?.target ?? null, kind: teamKind, summary: verdict.summary,
+        });
     }
 
     if (verdict.kind === 'in_review') result.toReview++;

@@ -36,6 +36,7 @@ import { triggerBriefRound } from './trigger-brief-round';
 import { visualBriefs } from '../../db/schema';
 import { randomUUID } from 'crypto';
 import { resolveConnectedDraftPlatforms } from './auto-publish-runtime';
+import { noteOrderIssued, noteOrderPlaced, noteOrderSettled } from './team-messages';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
@@ -146,6 +147,22 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
     }).returning({ id: campaignOrders.id });
 
     if (!order) return { orderId: null, status: 'failed', workItems, message: 'Could not record the order.' };
+
+    // The Team feed: the Campaign Assistant briefs its colleague — and, when the work waits on
+    // earlier work, the colleague says so and offers to start now (team-messages.ts).
+    let waitingFor: { position: number | null; action: string } | null = null;
+    if (blocked) {
+        const [pre] = await db.select({
+            action: campaignOrders.action,
+            position: sql<number>`(SELECT count(*)::int FROM campaign_orders x WHERE x.campaign_id = ${campaignId} AND x.id <= ${campaignOrders.id})`,
+        }).from(campaignOrders).where(eq(campaignOrders.id, input.blockedOnOrderId!)).limit(1);
+        waitingFor = pre ? { position: Number(pre.position) || null, action: pre.action } : { position: null, action: '' };
+    }
+    await noteOrderPlaced(db, {
+        organisationId, campaignId, orderId: order.id, action, brief: brief as Record<string, unknown>,
+        orchestratorAssistantId: input.orchestratorAssistantId, targetAssistantId: target.id,
+        objective: input.campaignObjective, waitingFor,
+    });
 
     // A blocked order is real and costed, but nothing runs until its predecessor delivers. The
     // spend is recorded when it is actually issued, not now — otherwise cancelling the chain would
@@ -292,6 +309,10 @@ export async function issueOrder(db: Db, orderId: number, ctx: IssueContext): Pr
             status: 'cancelled', targetRoleLabel: ORDER_ACTION_SPECS[ctx.action].roleKey,
             workItems: 0, resultSummary: outcome.message,
         });
+        await noteOrderSettled(db, {
+            organisationId: ctx.organisationId, campaignId: ctx.campaignId, orderId, action: ctx.action,
+            targetAssistantId: ctx.targetAssistantId, kind: 'cancelled', summary: outcome.message ?? 'it could not be started',
+        });
         return { orderId, status: 'failed', workItems: ctx.workItems, message: outcome.message };
     }
 
@@ -325,6 +346,13 @@ export async function issueOrder(db: Db, orderId: number, ctx: IssueContext): Pr
         workItems: ctx.workItems, resultSummary: outcome.summary ?? null,
     });
 
+    // The Team feed: the colleague says it has the work, in words true of THIS moment.
+    await noteOrderIssued(db, {
+        organisationId: ctx.organisationId, campaignId: ctx.campaignId, orderId, action: ctx.action, brief: ctx.brief,
+        orchestratorAssistantId: ctx.orchestratorAssistantId, targetAssistantId: ctx.targetAssistantId,
+        objective: ctx.campaignObjective, summary: outcome.summary ?? null,
+    });
+
     return { orderId, status: 'issued', workItems: ctx.workItems };
 }
 
@@ -347,7 +375,7 @@ async function campaignPostPlatforms(db: Db, ctx: IssueContext): Promise<{ platf
 }
 
 /** Recompile one assistant so its blueprint reflects the campaigns it serves. Never throws. */
-async function recompileAssistantForCampaign(assistantId: number, reason: string): Promise<void> {
+export async function recompileAssistantForCampaign(assistantId: number, reason: string): Promise<void> {
     try {
         await assembleBlueprint(assistantId, 'campaign-orchestrator', reason);
     } catch (err) {

@@ -40,7 +40,7 @@ export async function fillBlogHorizons(now: Date = new Date()) {
         ));
 
     let jobsEnqueued = 0;
-    const skipped: Record<string, number> = { on_demand: 0, fully_covered: 0 };
+    const skipped: Record<string, number> = { on_demand: 0, fully_covered: 0, campaign_paused: 0, campaign_articles_first: 0 };
 
     // Out of tasks this month → enqueue nothing (same reasoning as draft-horizon-fill.ts).
     const hasCapacity = capacityMemo(db);

@@ -87,6 +87,8 @@
     editingPlan: null,
     /** Per campaign: { open, picking, selected: Set } for the Pictures panel (§9.3). */
     pictures: {},
+    /** Campaign ids whose Team conversation is open (team-feed.js). */
+    teamOpen: new Set(),
     /** Per campaign: { open, loading, data, error } for the Summary panel (§9.8). */
     summaries: {},
     /** Jira/Asana options for "File in…" (§9.5): null until first needed. */
@@ -391,6 +393,7 @@
             ${progressBar(c)}
             ${umbrellaHtml(c)}
             ${audienceHtml(c)}
+            ${usualPostingLine(c)}
           </div>
           <span class="flex items-center gap-1 shrink-0">
             ${c.alwaysOn ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border bg-gray-50 text-gray-600 border-gray-200" data-explain="campaign-always-on">Always on</span>' : ''}
@@ -429,8 +432,13 @@
         ${testsBlock(c)}
         ${canAddWork ? addWorkPanel(c) : ''}
         <p class="hidden mt-2 text-xs font-semibold text-gray-600" data-cmp-status="${esc(String(c.id))}"></p>
+        ${state.teamOpen.has(Number(c.id)) ? `<div class="mt-3 border border-gray-200 rounded-xl p-3" data-cmp-team-host="${esc(String(c.id))}"></div>` : ''}
 
         <div class="flex flex-wrap items-center gap-3 mt-3">
+          <button type="button" data-cmp-toggle-team="${esc(String(c.id))}"
+            class="text-xs font-bold text-gray-500 hover:text-gray-700 underline transition">
+            ${state.teamOpen.has(Number(c.id)) ? 'Hide conversation' : 'Conversation'}
+          </button>
           <button type="button" data-cmp-toggle-summary="${esc(String(c.id))}"
             class="text-xs font-bold text-gray-500 hover:text-gray-700 underline transition">
             ${state.summaries[c.id] && state.summaries[c.id].open ? 'Hide summary' : 'Summary'}
@@ -1327,6 +1335,7 @@
         </div>
         <p class="text-xs text-gray-500">The task budget is the most of your monthly allowance this campaign may commission. At the cap it stops — it never bills you extra.</p>
         ${umbrellaFields(c)}
+        ${usualPostingFields(c)}
         <label class="block text-xs font-bold text-gray-600"><span data-explain="campaign-tone">Tone for this campaign (optional)</span>
           <input type="text" maxlength="300" data-cmpf="tone" data-keep="f-tone" value="${esc((c && c.tone) || '')}"
             placeholder="e.g. warm and celebratory, no discount language — always within your brand voice"
@@ -1360,6 +1369,37 @@
         </div>
         <p class="hidden text-xs font-semibold" data-cmpf-status></p>
       </div>`;
+  }
+
+  // What usual Autopilot posting does while this campaign runs (campaign-usual-posting.ts). Make way
+  // is the default; the card states the choice, and usual posting restarts by itself afterwards.
+  const USUAL_CHOICES = {
+    social: [['make_way', 'Make way — no usual posts on days the campaign posts'], ['pause', 'Pause — no usual posts until it ends'], ['normal', 'Carry on as normal']],
+    blog: [['make_way', 'Make way — no usual articles while the campaign’s are written'], ['pause', 'Pause — no usual articles until it ends'], ['normal', 'Carry on as normal']],
+  };
+  const USUAL_SHORT = { make_way: 'make way', pause: 'paused', normal: 'carry on' };
+
+  function usualPostingFields(c) {
+    const u = (c && c.usualPosting) || {};
+    const pick = (kind, label) => `
+      <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[14rem]">${label}
+        <select data-cmpf="usual-${kind}" data-keep="f-usual-${kind}" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+          ${USUAL_CHOICES[kind].map(([v, l]) => `<option value="${v}" ${(u[kind] || 'make_way') === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+        </select>
+      </label>`;
+    return `
+      <div>
+        <p class="text-xs font-bold text-gray-600" data-explain="campaign-usual-posting">While this runs, your usual Autopilot posts…</p>
+        <div class="flex flex-wrap gap-3 mt-1">${pick('social', 'Social posts')}${pick('blog', 'Articles')}</div>
+        <p class="text-[11px] text-gray-500 mt-1">They start again by themselves when the campaign ends, is paused or is stopped.</p>
+      </div>`;
+  }
+
+  function usualPostingLine(c) {
+    if (!c.usualPosting || c.status === 'finished' || c.status === 'archived') return '';
+    const u = c.usualPosting;
+    const live = c.status === 'active' || c.status === 'throttled';
+    return `<p class="text-xs text-gray-500 mt-0.5">Your usual posts${live ? '' : ' (once it starts)'}: social — ${esc(USUAL_SHORT[u.social] || 'make way')} · articles — ${esc(USUAL_SHORT[u.blog] || 'make way')}</p>`;
   }
 
   // Umbrella picker + always-on (§9.4). Offers only campaigns that can legally be an umbrella —
@@ -1942,6 +1982,12 @@
         <div class="space-y-4">${nestedRows()}</div>
         ${lessonsHtml()}`;
     }
+
+    // A campaign's own conversation (team-feed.js), where it is open. The feed binds its handlers
+    // once on document; mounting only draws into the host and reads the messages.
+    host.querySelectorAll('[data-cmp-team-host]').forEach((el) => {
+      window.TeamFeed?.mount(el, { mode: 'campaign', campaignId: Number(el.dataset.cmpTeamHost) });
+    });
 
     host.querySelectorAll('[data-keep]').forEach((el) => {
       if (!Object.prototype.hasOwnProperty.call(kept, el.dataset.keep)) return;
@@ -2617,6 +2663,7 @@
         // '' = no umbrella (the server reads blank as "none"); absent when the field is not shown.
         ...(host?.querySelector('[data-cmpf="parentCampaignId"]') ? { parentCampaignId: val('parentCampaignId') || null } : {}),
         alwaysOn: !!host?.querySelector('[data-cmpf="alwaysOn"]')?.checked,
+        usualPosting: { social: val('usual-social') || 'make_way', blog: val('usual-blog') || 'make_way' },
         outcomeMetric: val('outcomeMetric'),
         // Blank means "no target" / "no end date" — sent as null, never as 0.
         targetValue: val('targetValue') ? Number(val('targetValue')) : null,
@@ -2797,6 +2844,14 @@
       window.showToast?.(`${spec.label} — briefed. It is listed in Orders.`, 'success');
       await load();
     }
+  });
+
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-cmp-toggle-team]');
+    if (!t) return;
+    const id = Number(t.dataset.cmpToggleTeam);
+    if (state.teamOpen.has(id)) state.teamOpen.delete(id); else state.teamOpen.add(id);
+    if (state.rendered) render();
   });
 
   // ── Plan editor ────────────────────────────────────────────────────────────

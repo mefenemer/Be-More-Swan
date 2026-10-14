@@ -48,6 +48,7 @@
 // 4. EVERY PAUSE HAS A REASON AND A RESUME. `pause` requires a reason; `start` is the documented
 //    way back and works from 'paused' as well as 'draft'.
 
+import { normaliseUsualPosting } from '../../src/utils/campaign-usual-posting';
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
     adVariants, aiAssistants, auditLogs, campaignAssets, campaignLearnings, campaignAttributions, campaignBudgets, contentAssets,
@@ -263,6 +264,7 @@ export default withLambda(async (event) => {
                 tone: campaigns.tone,
                 parentCampaignId: campaigns.parentCampaignId,
                 alwaysOn: campaigns.alwaysOn,
+                usualPosting: campaigns.usualPosting,
                 createdAt: campaigns.createdAt,
                 maxWorkItems: campaignBudgets.maxWorkItems,
                 maxSpendGbp: campaignBudgets.maxSpendGbp,
@@ -505,6 +507,8 @@ export default withLambda(async (event) => {
             endsAt: alwaysOn ? null : (endsAt && !Number.isNaN(endsAt.getTime()) ? endsAt : null),
             parentCampaignId: parent.id ?? null,
             alwaysOn,
+            // What usual Autopilot posting does while this runs — make way by default (campaign-usual-posting.ts).
+            usualPosting: normaliseUsualPosting(body.usualPosting),
             audience: normaliseAudience(body.audience),
             funnelStage,
             tone: normaliseTone(body.tone),
@@ -577,6 +581,10 @@ export default withLambda(async (event) => {
         if (!parent.ok) return json(400, { error: parent.error });
         if (parent.id !== undefined) patch.parentCampaignId = parent.id;
         if (typeof body.alwaysOn === 'boolean') patch.alwaysOn = body.alwaysOn;
+        // Partial edits merge over what is stored: changing the social choice leaves articles alone.
+        if (body.usualPosting && typeof body.usualPosting === 'object') {
+            patch.usualPosting = normaliseUsualPosting({ ...normaliseUsualPosting(campaign.usualPosting), ...(body.usualPosting as Record<string, unknown>) });
+        }
         const objective = str(body.objective, 500);
         if (objective) patch.objective = objective;
         // Stage and outcome move together: the outcome must be one the (new) stage may be measured

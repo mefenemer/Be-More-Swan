@@ -14,6 +14,7 @@
 // the author clicks "New post"). A generation failure therefore leaves an empty-bodied draft; it
 // is deleted on the final attempt so a failed slot doesn't litter the user's Blogs tab.
 
+import { noteJobRowFinished } from '../../src/utils/team-messages';
 import { Handler } from '@netlify/functions';
 import { and, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
@@ -371,6 +372,8 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
             .where(eq(contentGenerationJobs.id, job.id));
         // The body is written and the job is settled. Nothing below may re-queue it.
         jobCompleted = true;
+        // The Team feed: when this was the last article of a campaign order, its assistant says so.
+        await noteJobRowFinished(db, job.id);
         // One task per article, charged only now it exists (never throws).
         if (job.trigger_type !== 'admin_test') await recordCompletedWork(db, job.organisation_id, 'blog_article', 1, job.job_id);
 

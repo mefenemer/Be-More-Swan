@@ -128,7 +128,8 @@ check('the drafting worker uses the job\'s own section 13, built by the shared b
     const inject = jobs.indexOf("['13-campaign'] = { status: 'complete', content: { ...jobCampaign.directive } }");
     const render = jobs.indexOf('renderBlueprintPrompt(sections)');
     assert.ok(inject !== -1 && render !== -1 && inject < render, 'The override must land BEFORE the prompt is rendered.');
-    assert.match(jobDirective, /buildCampaignDirective\(directiveInputFrom\(row, brief, angle\)\)/);
+    // The person's Team notes ride along as a fourth argument (team-messages.ts, 2026-10-14).
+    assert.match(jobDirective, /buildCampaignDirective\(directiveInputFrom\(row, brief, angle,/);
     assert.match(code(read('src/utils/blueprint.ts')), /directiveInputFrom\(liveCampaign,/,
         'One builder for both — the assistant-wide section and a job\'s own can never disagree.');
 });

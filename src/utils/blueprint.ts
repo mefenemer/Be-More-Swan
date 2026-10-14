@@ -42,6 +42,7 @@ import { OPERATIONAL_TRIGGERS, OPERATIONAL_SOURCES } from './operational-setup';
 import { BUDGET_CONFIG_KEY, resolveBudget } from '../config/execution-budgets';
 import { buildGoalDirective, renderGoalDirective } from './goal-directive';
 import { buildCampaignDirective, directiveInputFrom } from './campaign-directive';
+import { ownerNotesFor } from './team-messages';
 import type { GoalStatus } from '../config/goal-metrics';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -632,7 +633,8 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
     // Built by the shared directiveInputFrom (campaign-directive.ts), the same function the per-job
     // rebuild uses — so the assistant-wide section and a job's own section can never disagree.
     const campaignDirective = buildCampaignDirective(liveCampaign
-        ? directiveInputFrom(liveCampaign, (liveCampaign.brief ?? {}) as Record<string, unknown>)
+        ? directiveInputFrom(liveCampaign, (liveCampaign.brief ?? {}) as Record<string, unknown>, undefined,
+            await ownerNotesFor(db, liveCampaign.id, assistantId))
         : null);
 
     // No live campaign ⇒ empty content, so the section serialises to nothing at all rather than an

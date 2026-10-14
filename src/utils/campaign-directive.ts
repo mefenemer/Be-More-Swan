@@ -46,6 +46,8 @@ export interface DirectiveCampaign {
     /** Days left, bucketed to a week so a daily tick cannot churn the blueprint. */
     weeksRemaining?: number | null;
     constraints?: CampaignConstraints | null;
+    /** What the person told THIS assistant about this campaign in Team (team-messages.ts), newest first. */
+    ownerNotes?: string[] | null;
 }
 
 export interface CampaignDirective {
@@ -81,7 +83,7 @@ export interface DirectiveCampaignRow {
  * `angleOverride` beats the brief's angle: an A/B test job carries ITS variant's angle.
  */
 export function directiveInputFrom(
-    c: DirectiveCampaignRow, brief: Record<string, unknown>, angleOverride?: string | null,
+    c: DirectiveCampaignRow, brief: Record<string, unknown>, angleOverride?: string | null, ownerNotes?: string[] | null,
 ): DirectiveCampaign {
     const weeksRemaining = c.endsAt
         ? Math.max(0, Math.round((c.endsAt.getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000)))
@@ -99,6 +101,7 @@ export function directiveInputFrom(
         pace: 'unknown',
         weeksRemaining,
         constraints: c.constraints as CampaignConstraints | null,
+        ownerNotes: ownerNotes ?? null,
     };
 }
 
@@ -180,6 +183,13 @@ function renderCampaignDirective(c: DirectiveCampaign, objective: string, outcom
 
     if (typeof c.weeksRemaining === 'number' && c.weeksRemaining > 0 && c.weeksRemaining <= 2) {
         lines.push('The campaign ends soon. Prefer content that stands on its own immediately over anything that needs a series to make sense.');
+    }
+
+    // What the person told this assistant in Team (owner, 2026-10-14). Their words, quoted; they
+    // outrank the angle and tone above, but never the content rules — a note is not a licence.
+    const notes = (c.ownerNotes ?? []).map((n) => n.trim()).filter(Boolean);
+    if (notes.length) {
+        lines.push(`What the person you work for has told you about this campaign's work (follow it; where it conflicts with your content rules, the rules win):\n${notes.map((n) => `- "${n.replace(/\s+/g, ' ')}"`).join('\n')}`);
     }
 
     // What the human has already refused. This is what makes the Reject button a feedback loop.

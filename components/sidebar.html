@@ -39,6 +39,14 @@
         <span class="nav-label">Audience</span>
       </a>
 
+      <!-- The Team feed: assistants say what they are doing and ask questions; the person writes back.
+           Its own badge counts unread messages, and the bell adds them in (notifications.js). -->
+      <a href="#" id="nav-team" class="flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-colors text-gray-600 hover:bg-gray-100 hover:text-gray-900">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"/></svg>
+        <span class="nav-label">Team</span>
+        <span id="nav-team-badge" class="ml-auto bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full hidden"></span>
+      </a>
+
       <a href="#" id="nav-calendar" class="flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-colors text-gray-600 hover:bg-gray-100 hover:text-gray-900">
         <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
         <span class="nav-label" data-i18n="workspace.nav.calendar">Calendar</span>
