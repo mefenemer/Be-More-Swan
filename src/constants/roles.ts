@@ -37,6 +37,9 @@ export const BRAND_DESIGNER_ROLE_KEY = 'brand_designer';
 /** The Mystery Shopper — reads the business's website as a buyer would, scores it, re-checks weekly. */
 export const MYSTERY_SHOPPER_ROLE_KEY = 'mystery_shopper';
 
+/** The Website Assistant — builds, previews and (step 3) publishes the business's website. */
+export const WEBSITE_ASSISTANT_ROLE_KEY = 'website_assistant';
+
 /**
  * The roles the Campaign Assistant is allowed to issue orders to, and nothing else.
  *

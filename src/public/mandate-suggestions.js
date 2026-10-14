@@ -66,6 +66,14 @@
       { title: 'The Blank Prompt', text: 'AI image tools want a perfect prompt, and I just know what the picture is for, not how to describe it to a machine.' },
     ],
 
+    // About the pain of HAVING a website — not of what is on it, which the Mystery Shopper judges.
+    website_assistant: [
+      { title: 'The Drag-and-Drop Weekend', text: 'Every change to our website means a weekend wrestling a page builder, so the site never gets updated.' },
+      { title: 'The Out-of-Date Site', text: 'Our website still describes what we did two years ago, and everyone knows it.' },
+      { title: 'The Freelancer Queue', text: 'Small changes wait weeks for whoever built the site, and every one costs money.' },
+      { title: 'The Invisible Site', text: 'Our site has no proper titles or descriptions, so search engines and AI assistants can\'t tell what we do.' },
+    ],
+
     // About not knowing why visitors leave — not about writing or posting, which belong to the
     // other assistants.
     mystery_shopper: [

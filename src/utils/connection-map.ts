@@ -61,6 +61,9 @@ export const ROLE_CONNECTIONS: Record<string, string[]> = {
     // The Mystery Shopper reads PUBLIC web pages through safe-fetch (src/utils/site-audit.ts) and
     // connects to nothing. Empty, NOT omitted — an omitted role fails OPEN (see campaign_orchestrator).
     mystery_shopper:           [],
+    // The Website Assistant connects to nothing yet; step 3 adds Stripe Connect (payments) for
+    // checkout. Empty, NOT omitted — an omitted role fails OPEN.
+    website_assistant:         [],
     social_media_manager:      ['social', 'design'],
     review_reputation_manager: ['reviews', 'social'],
     inbox_manager:             ['email'],

@@ -21,6 +21,7 @@
     campaign_orchestrator: 'Campaign Assistant',
     brand_designer: 'Brand Designer',
     mystery_shopper: 'Mystery Shopper',
+    website_assistant: 'Website Assistant',
     lead_qualifier: 'Lead Generation Assistant',
     crm_enricher: 'CRM Data Assistant',
     tier1_support_agent: 'First-Line Support Assistant',

@@ -50,6 +50,9 @@ export const RULE_READING_ROLES: ReadonlySet<string> = new Set([
     // Mystery Shopper: its chat, and the rewrites every check suggests (site-audit.ts executeAuditRun
     // → AuditBrief.rulesBlock). Registry rulesScope 'audit' says so on the Rules tab.
     'mystery_shopper',
+    // Website Assistant: its chat, and every AI draft of the site (site-store.ts runSiteDraft →
+    // buildDraftPrompt). Registry rulesScope 'site' says so on the Rules tab.
+    'website_assistant',
 ]);
 
 /** Record types those roles produce. Rejecting one of these may carry a free-text `feedback`. */

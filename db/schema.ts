@@ -5486,3 +5486,26 @@ export const siteAuditFixes = pgTable("site_audit_fixes", {
   check("site_audit_fixes_impact_check", sql`${t.impact} IN ('high','medium','low')`),
   check("site_audit_fixes_status_check", sql`${t.status} IN ('open','accepted','done','dismissed')`),
 ]);
+
+// ── Website Assistant — one site per hired assistant (docs/website-assistant-plan.md §6) ─────────
+// `draft` has always passed normaliseSiteDefinition (src/utils/site-definition.ts). Publishing and
+// versions arrive in step 3. Requires db/z-website-assistant.sql.
+export const sites = pgTable("sites", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  status: text().notNull().default("draft"),
+  draft: jsonb().notNull(),
+  slug: text(),
+  credit: boolean().notNull().default(true),
+  draftingAt: timestamp("drafting_at"),
+  draftNote: text("draft_note"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("sites_assistant_uq").on(t.aiAssistantId),
+  uniqueIndex("sites_slug_uq").on(t.slug).where(sql`slug IS NOT NULL`),
+  index("sites_org_idx").on(t.organisationId),
+  check("sites_status_check", sql`${t.status} IN ('draft','published','suspended')`),
+]);

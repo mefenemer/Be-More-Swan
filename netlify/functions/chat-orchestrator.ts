@@ -51,6 +51,8 @@ import { RULE_READING_ROLES, loadAssistantRulesBlock } from '../../src/utils/ass
 import { buildCampaignsSnapshot } from '../../src/utils/campaign-plan';
 import { buildBriefsSnapshot } from '../../src/utils/visual-briefs';
 import { buildSiteAuditSnapshot } from '../../src/utils/site-audit-snapshot';
+import { buildSiteSnapshot } from '../../src/utils/site-store';
+import { LIMITS as SITE_LIMITS, SECTION_TYPES } from '../../src/utils/site-definition';
 import { CONVERSION_GOALS, WEEKDAYS } from '../../src/utils/site-audit-setup';
 import { HANDOFF_TARGETS } from '../../src/utils/site-audit-prompts';
 
@@ -157,6 +159,8 @@ interface RouteContext {
     /** This Mystery Shopper's site, scores and suggested fixes by id — read per turn for routes with
      *  usesSiteAuditSnapshot (src/utils/site-audit-snapshot.ts). */
     siteAuditSnapshot?: string | null;
+    /** This Website Assistant's site — pages and sections by id — read per turn (usesSiteSnapshot). */
+    siteSnapshot?: string | null;
     /** This assistant's own posts / articles / emails, column by column, read per turn — only
      *  populated for routes with contentSnapshot. See src/utils/content-snapshot.ts. */
     contentSnapshot?: string | null;
@@ -185,6 +189,8 @@ interface AssistantRoute {
     usesBriefsSnapshot?: boolean;
     /** When true the handler reads this assistant's website checks for this turn (rc.siteAuditSnapshot). */
     usesSiteAuditSnapshot?: boolean;
+    /** When true the handler reads this assistant's site for this turn (rc.siteSnapshot). */
+    usesSiteSnapshot?: boolean;
     /** Which of this assistant's own queues the handler reads for this turn (rc.contentSnapshot). */
     contentSnapshot?: 'posts' | 'blog' | 'emails';
     /** Role-specific prompt body. buildSystemPrompt() appends the hardened
@@ -556,6 +562,16 @@ function brandDesignerSurfaces(): string {
 // ⚠️ The tab and button names below are copied from assistant-dashboard-registry.js (siteAuditTab
 // label 'Website') and src/components/assistant-site-audit.js. Rename one there and change it here —
 // tests/mystery-shopper-wiring.test.ts checks each name against those files.
+// ⚠️ The tab and button names below are copied from assistant-dashboard-registry.js (siteEditorTab
+// label 'Website') and src/components/assistant-site-editor.js. tests/website-assistant-wiring.test.ts
+// checks each name against those files.
+function websiteAssistantSurfaces(): string {
+    return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform:
+- "Website" tab — the tab the user lands on. On the left: "Pages" (each page's title, address, search title and description, and its sections, each with "Edit", "↑", "↓" and "Remove", plus "Add a section" and "+ Page"), "Design" (colours, lettering, corners, logo) and "Details" (business details and footer). On the right: the live "Preview", with "Desktop" and "Phone". "Draft my whole site" writes every page again.
+- Nothing is live yet: the site is a private draft. Publishing it is coming soon, and will always be a click the user makes on the Website tab — never something you do.
+Everything you can change here, the user can also change there by hand.`;
+}
+
 function mysteryShopperSurfaces(): string {
     return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform, never outside tools:
 - "Website" tab — the tab the user lands on. Their score out of 100 and the three parts of it, what the last check said, the suggested fixes (each with "I'll make this change", "Copy" and "Not for us"), what competitors changed, past checks, and "Check my site now". "Settings" on the same tab changes the website, who it is for, what visitors should do, the competitors and the weekly check day.
@@ -1382,6 +1398,55 @@ or, to decide on options:
 }`,
             ].filter(Boolean).join('\n\n');
         },
+        parseResponse: parseStructuredReply,
+    },
+
+    // Website Assistant (docs/website-assistant-plan.md §5.5). Its site is a definition edited through
+    // typed operations (src/utils/site-definition.ts) — the chat proposes them as a card and the user's
+    // click applies them through the same API as the Website tab (sites.ts). It never writes HTML and
+    // never publishes.
+    website_assistant: {
+        model: DEFAULT_MODEL,
+        maxTokens: 2500,
+        usesSiteSnapshot: true,
+        buildRolePrompt: (rc) => [
+            sharedContextBlock(rc),
+            `You are this business's Website Assistant: you build and keep up to date their website. You change it by proposing changes the user approves; you never write HTML, CSS or code.
+
+${websiteAssistantSurfaces()}
+
+${rc.siteSnapshot ?? 'Their site could not be read this turn. Do not guess what is on it: say you cannot see it right now and point the user at the "Website" tab. Do not emit a site_changes card.'}
+
+FACTS. Never put a fact on their site that is not in their business details, their products or this conversation: no invented testimonials, customer names, reviews, prices, numbers, years, awards or guarantees. Where a page needs one, write a placeholder in square brackets ("[number] customers since [year]") for them to fill in. Plain British English, no jargon.
+
+CHANGING THE SITE. When they ask for a change, emit a site_changes card: a short "summary" of what changes, and "ops" — the changes, in order, using ONLY pageIds and sectionIds listed above. They land together or not at all. The operations:
+- {"op":"add_page","title":"...","slug":"..."}   (their plan's page limit is shown above)
+- {"op":"update_page","pageId":"...","title":"...","slug":"...","seo":{"title":"...","description":"..."}}   (any subset)
+- {"op":"remove_page","pageId":"..."}   (never the home page)
+- {"op":"add_section","pageId":"...","index":<position, optional>,"section":{"type":"<one of ${SECTION_TYPES.join(', ')}>","props":{...}}}
+- {"op":"update_section","pageId":"...","sectionId":"...","props":{ only the props that change }}
+- {"op":"remove_section","pageId":"...","sectionId":"..."}
+- {"op":"move_section","pageId":"...","sectionId":"...","toIndex":<number>}
+- {"op":"set_theme","theme":{"primaryColor":"#rrggbb","textColor":"#rrggbb","backgroundColor":"#rrggbb","font":"sans|serif|rounded|system","radius":"none|small|medium|large"}}   (any subset)
+- {"op":"set_settings","settings":{"siteName","description","businessType":"Organization|LocalBusiness|ProfessionalService|Store","locality","email","phone"}}   (any subset)
+- {"op":"set_footer","text":"..."}
+Section props: hero {layout:"centered|split|banner", eyebrow, headline (max ${SITE_LIMITS.headline} chars), subheadline, primaryCta:{label,href}, secondaryCta:{label,href}}; features and steps {heading, intro, items:[{title, body}]}; text {heading, body}; faq {heading, items:[{q, a}]}; testimonials {heading, items:[{quote, name, detail}]}; cta {heading, body, button:{label, href}}. Links: "/" or "/<page address>", "#<sectionId>", mailto:, tel:, or https only.
+
+DRAFTING THE WHOLE SITE. When they want the whole site written (or rewritten), emit a site_draft_request card with their wishes in "request". It replaces the current draft and uses 1 task from their monthly allowance — say so.
+
+PUBLISHING. You cannot publish. If asked, say publishing is coming soon and will be a button on the Website tab.
+
+Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of the shapes below, or null:
+{
+  "reply": "your conversational message to the user",
+  "uiElement": { "type": "site_changes", "summary": "<what changes, one sentence>", "ops": [ { "op": "update_section", "pageId": "...", "sectionId": "...", "props": { "headline": "..." } } ] }
+}
+or
+{
+  "reply": "your conversational message to the user",
+  "uiElement": { "type": "site_draft_request", "request": "<what the site should cover, in their words>" }
+}`,
+        ].filter(Boolean).join('\n\n'),
         parseResponse: parseStructuredReply,
     },
 
@@ -2359,6 +2424,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         })
         : null;
 
+    // Per turn: an edit made on the Website tab a moment ago must be visible to the next message.
+    const siteSnapshot = route.usesSiteSnapshot
+        ? await buildSiteSnapshot(db, orgId, session.aiAssistantId).catch((err) => {
+            console.error('[chat-orchestrator] site snapshot failed:', err);
+            return null;
+        })
+        : null;
+
     // Per turn: a check that finished a moment ago, or a fix accepted on the Website tab, must be
     // visible to the next message. Never throws.
     const siteAuditSnapshot = route.usesSiteAuditSnapshot
@@ -2392,6 +2465,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         campaignsSnapshot,
         briefsSnapshot,
         siteAuditSnapshot,
+        siteSnapshot,
         contentSnapshot,
     });
     // The user's rules (their Assistant Rules, learned directives and workspace-wide rules) for the

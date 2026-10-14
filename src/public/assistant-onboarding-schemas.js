@@ -259,6 +259,56 @@
     // on Business Information ▸ Brand Assets or from this assistant's chat) are what every AI image
     // reads. These two answers only fill a guideline the workspace has left EMPTY
     // (visual-briefs.ts withSetupFallback) — the help text below must keep saying exactly that.
+    // Website Assistant (docs/website-assistant-plan.md). All three answers are read by every AI draft
+    // of the site (src/utils/site-store.ts runSiteDraft, SITE_SETUP_KEYS) — the keys must match there.
+    // Business name, description and audience come from Business Information, not from here.
+    website_assistant: [
+      {
+        title: 'Your website',
+        description: 'Your Website Assistant writes your pages from your business details and products. Tell it anything else it should know — you can change all of it later.',
+        fields: [
+          {
+            key: 'pagesWanted',
+            label: 'Which pages do you want?',
+            type: 'textarea',
+            required: false,
+            placeholder: 'e.g. Home, a page for each service, About us, Contact',
+            helpText: 'Optional. It suggests pages if you leave this blank. Your plan sets how many pages you can have.',
+          },
+          {
+            key: 'siteStyle',
+            label: 'How should it sound and feel?',
+            type: 'textarea',
+            required: false,
+            placeholder: 'e.g. Friendly and plain-spoken, like talking to a neighbour. No jargon.',
+            helpText: 'Optional. Colours, font and logo come from your brand kit.',
+          },
+        ],
+      },
+      {
+        title: 'Operational set-up',
+        description: 'The one thing every page should lead a visitor towards.',
+        operational: true,
+        fields: [
+          {
+            key: 'siteGoal',
+            label: 'What should a visitor do?',
+            type: 'dropdown',
+            required: true,
+            placeholder: 'Choose one…',
+            options: [
+              { value: 'Book a call or consultation', label: 'Book a call or consultation' },
+              { value: 'Buy online', label: 'Buy online' },
+              { value: 'Ask for a quote', label: 'Ask for a quote' },
+              { value: 'Phone us', label: 'Phone us' },
+              { value: 'Visit us in person', label: 'Visit us in person' },
+              { value: 'Join the mailing list', label: 'Join the mailing list' },
+            ],
+          },
+        ],
+      },
+    ],
+
     // Mystery Shopper (docs/mystery-shopper-plan.md §4.2). Saving these copies them into its audit
     // (src/utils/site-audit-setup.ts syncSiteAuditFromSetup, from update-assistant-context.ts) and,
     // the first time, starts the first check. The keys must match SETUP_KEYS there exactly.

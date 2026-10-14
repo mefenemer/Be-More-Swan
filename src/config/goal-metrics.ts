@@ -526,6 +526,22 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         realism: { maxDailyDelta: 50 },
     },
     {
+        // Website Assistant (docs/website-assistant-plan.md). Pages that are READY: they have content
+        // and nothing left in [square brackets] for the owner to fill in. Counted from the site draft by
+        // poll-goal-telemetry.ts. Until publishing exists (step 3) this is the honest measure of
+        // progress — a page full of placeholders is not a finished page, however many sections it has.
+        key: 'site_pages_ready',
+        label: 'Website Pages Ready',
+        unit: 'pages',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'outcome',
+        roles: ['website_assistant'],
+        description: 'Pages of your website with content on them and nothing left in [square brackets] to fill in.',
+        available: true,
+        realism: { maxDailyDelta: 50 },
+    },
+    {
         // Mystery Shopper (docs/mystery-shopper-plan.md §4.5). The website's latest overall score,
         // read from site_audits.current_score by poll-goal-telemetry.ts. A LEVEL, not a count: it can
         // fall as well as rise (a competitor's change moves the comparison). Null until a check has

@@ -1747,6 +1747,105 @@
   }
   register('site_audit_handoff', renderSiteAuditHandoffCard);
 
+  // ── Built-ins: Website Assistant cards (docs/website-assistant-plan.md §5.5) ───────────────────
+  // The chat twins of the Website tab — same server action (sites.ts `apply` / `draft`), handled in
+  // chat-session.js. The user's click applies; the server's gate (site-definition.ts) re-checks every
+  // change and refuses the whole batch if any one would break a rule.
+
+  // Plain words for each change — never the internal page or section ids the operations carry.
+  const SITE_SECTION_WORDS = { hero: 'top (hero)', features: 'features', steps: 'steps', text: 'text', faq: 'questions', testimonials: 'testimonials', cta: 'call-to-action' };
+  const SITE_PROP_WORDS = { headline: 'headline', subheadline: 'line under the headline', eyebrow: 'small label', primaryCta: 'main button', secondaryCta: 'second button',
+    image: 'picture', heading: 'heading', intro: 'introduction', items: 'items', body: 'text', button: 'button', layout: 'layout' };
+  const SITE_OP_WORDS = {
+    add_page: (o) => `Add a page: “${o.title || ''}”`,
+    update_page: (o) => (o.title ? `Rename a page to “${o.title}”` : o.seo ? 'Update a page\'s search title and description' : 'Update a page'),
+    remove_page: () => 'Remove a page',
+    add_section: (o) => `Add a ${SITE_SECTION_WORDS[(o.section || {}).type] || 'new'} section`,
+    update_section: (o) => `Change the ${Object.keys(o.props || {}).map((k) => SITE_PROP_WORDS[k] || k).join(', ') || 'section'}`,
+    remove_section: () => 'Remove a section',
+    move_section: () => 'Move a section',
+    set_theme: () => 'Change the design (colours, lettering or corners)',
+    set_settings: () => 'Update the business details',
+    set_footer: () => 'Change the footer text',
+    set_nav: () => 'Change the menu',
+  };
+
+  // { type: 'site_changes', summary, ops: SiteOperation[] }
+  function renderSiteChangesCard(ui, esc) {
+    const ops = (Array.isArray(ui.ops) ? ui.ops : []).filter((o) => o && typeof o === 'object' && SITE_OP_WORDS[o.op]).slice(0, 25);
+    const summary = typeof ui.summary === 'string' ? ui.summary.slice(0, 300) : '';
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Changes to your website · Approval needed</p>
+      ${summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(summary)}</p>` : ''}
+      ${ops.length ? `<ul class="mt-2 space-y-1 list-disc pl-5">${ops.map((o) => `<li class="text-xs text-gray-700">${esc(SITE_OP_WORDS[o.op](o))}</li>`).join('')}</ul>` : '<p class="text-xs text-amber-700 mt-2">No changes were given.</p>'}
+      <p class="text-xs text-gray-600 mt-2">Changes your draft only — nothing is live. The preview on the Website tab updates straight away.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-sc-apply ${ops.length ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Apply changes</button>
+        <button type="button" data-sc-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sc-status></p>`;
+    const status = el.querySelector('[data-sc-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-sc-cancel]')) { setBusy(true); say('Not applied.'); return; }
+      if (!e.target.closest('[data-sc-apply]')) return;
+      setBusy(true);
+      say('Applying…');
+      el.dispatchEvent(new CustomEvent('site:apply', {
+        bubbles: true,
+        detail: {
+          ops,
+          respond({ ok, error, warnings }) {
+            if (!ok) { setBusy(false); say(error || 'Could not apply that — nothing was changed.', 'error'); return; }
+            say(warnings && warnings.length ? `Applied. ${warnings.join(' ')}` : 'Applied — see the preview on the Website tab.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('site_changes', renderSiteChangesCard);
+
+  // { type: 'site_draft_request', request }
+  function renderSiteDraftRequestCard(ui, esc) {
+    const request = typeof ui.request === 'string' ? ui.request.replace(/\s+/g, ' ').trim().slice(0, 2000) : '';
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Draft your whole site</p>
+      ${request ? `<p class="text-xs text-gray-700 mt-2"><span class="font-bold">Your wishes:</span> ${esc(request)}</p>` : ''}
+      <p class="text-xs text-gray-600 mt-2">Writes every page again, replacing your current draft. Nothing is live. Uses 1 task from your monthly allowance.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-sd-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Draft my whole site</button>
+        <button type="button" data-sd-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sd-status></p>`;
+    const status = el.querySelector('[data-sd-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-sd-cancel]')) { setBusy(true); say('Not started.'); return; }
+      if (!e.target.closest('[data-sd-go]')) return;
+      setBusy(true);
+      say('Starting…');
+      el.dispatchEvent(new CustomEvent('site:draft', {
+        bubbles: true,
+        detail: {
+          request,
+          respond({ ok, error }) {
+            if (!ok) { setBusy(false); say(error || 'Could not start the draft.', 'error'); return; }
+            say('Drafting your site — it appears on the Website tab in a minute or two, and you\'ll be notified.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('site_draft_request', renderSiteDraftRequestCard);
+
   // ── Built-in: Visual Option Review Card (Brand Designer) ───────────────────
   // { type: 'visual_option_review', briefId, decisions: [{ optionId, decision, reason?, note? }], remake? }
   //
