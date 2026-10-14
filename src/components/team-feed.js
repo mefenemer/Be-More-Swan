@@ -29,6 +29,7 @@
   const ROLE_LABELS = {
     social_media_manager: 'Social Media', blog_writer: 'Blog Writing', lead_qualifier: 'Lead Generation',
     newsletter_editor: 'Email Marketing', brand_designer: 'Brand Designer', campaign_orchestrator: 'Campaign',
+    mystery_shopper: 'Mystery Shopper',
   };
   const KIND_CHIPS = {
     brief: ['Brief', 'bg-gray-50 text-gray-600 border-gray-200'],

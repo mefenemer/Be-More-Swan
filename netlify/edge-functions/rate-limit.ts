@@ -7,6 +7,7 @@
 //   /.netlify/functions/login           → 5 req / 60s  per IP
 //   /.netlify/functions/onboarding      → 3 req / 60s  per userId (from JWT cookie)
 //   /.netlify/functions/support-tickets → 10 req / 24h per userId (from JWT cookie)
+//   /.netlify/functions/site-audit-public → 40 req / 60s per IP (coarse; real limits in the function)
 
 import { Context } from "@netlify/edge-functions";
 
@@ -28,6 +29,10 @@ const RULES: Record<string, RuleConfig> = {
     '/.netlify/functions/login':           { maxAttempts: 5,  windowMs: 60_000,       keyType: 'ip' },
     '/.netlify/functions/onboarding':      { maxAttempts: 3,  windowMs: 60_000,       keyType: 'userId' },
     '/.netlify/functions/support-tickets': { maxAttempts: 10, windowMs: 86_400_000,   keyType: 'userId' },
+    // The Mystery Shopper's public taster. A COARSE shield only: it counts the result polls too
+    // (one every few seconds while a check runs), so it is set well above that. The real limits —
+    // 5 checks/hour per IP, 3/day per email, a daily cap — are enforced in site-audit-public.ts.
+    '/.netlify/functions/site-audit-public': { maxAttempts: 40, windowMs: 60_000,      keyType: 'ip' },
 };
 
 function getUserIdFromCookie(cookieHeader: string | null): string | null {

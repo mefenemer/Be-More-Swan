@@ -33,6 +33,13 @@
       'Make a branded card that says "Booking now open for summer".',
       'Which of the options on my latest brief would you pick, and why?',
     ],
+    // About the site and its score — none asks it to run a check without the user's click (the card
+    // it proposes is the click).
+    mystery_shopper: [
+      'What is the one change to my homepage that would matter most?',
+      'Why did my website get that score?',
+      'I’ve updated my headline — can you check my site again?',
+    ],
     lead_qualifier: [
       'Score these leads for me — I’ll paste in a list of company URLs.',
       'What information do you need from me to qualify a new lead?',

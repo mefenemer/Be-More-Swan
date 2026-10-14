@@ -632,6 +632,73 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // Mystery Shopper cards → site-audits.ts, the same actions as the Website tab's buttons. Each
+    // dispatches `siteaudit:changed` so the tab behind the chat reloads.
+    function siteAuditPost(payload) {
+      return fetch('/.netlify/functions/site-audits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(payload),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+        return data;
+      });
+    }
+    const siteAuditChanged = () => document.dispatchEvent(new CustomEvent('siteaudit:changed', { detail: { assistantId } }));
+
+    function onSiteAuditCheck(e) {
+      const respond = typeof (e.detail || {}).respond === 'function' ? e.detail.respond : () => {};
+      siteAuditPost({ action: 'run', assistantId })
+        .then((data) => { respond({ ok: true, alreadyRunning: data.alreadyRunning === true }); siteAuditChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
+    function onSiteAuditSave(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      siteAuditPost({ action: 'save', assistantId, ...(d.change || {}) })
+        .then((data) => { respond({ ok: true, started: data.started === true }); siteAuditChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
+    async function onSiteAuditFix(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const results = [];
+      for (const x of Array.isArray(d.decisions) ? d.decisions : []) {
+        try {
+          await siteAuditPost({ action: 'fix', fixId: x.fixId, status: x.status });
+          results.push({ fixId: x.fixId, ok: true });
+        } catch (err) {
+          results.push({ fixId: x.fixId, ok: false, error: err.message });
+        }
+      }
+      respond({ results });
+      siteAuditChanged();
+    }
+
+    // "Open their chat" on a site_audit_handoff card: find this workspace's assistant in that role
+    // (site-audits.ts `get` lists them), and open its chat with the brief typed in — never sent.
+    function onSiteAuditHandoff(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      siteAuditPost({ action: 'get', assistantId })
+        .then(async (data) => {
+          const who = (data.team || []).find((a) => a.roleKey === d.target);
+          if (!who) throw new Error('You don\'t have that assistant yet.');
+          const draft = `From my Mystery Shopper's website check: ${d.brief}`;
+          if (typeof window.openAssistantChat === 'function') window.openAssistantChat({ assistantId: who.id, draft });
+          else {
+            try { await navigator.clipboard.writeText(draft); } catch { /* best effort */ }
+            window.location.href = `assistant-chat.html?assistantId=${encodeURIComponent(who.id)}`;
+          }
+          respond({ ok: true });
+        })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     // "Save guidelines" on a brand_guideline_proposal card — brand-kit.ts `save_guidelines`, the same
     // save as Business Information ▸ Brand Assets ▸ Picture guidelines.
     function onBrandSaveGuidelines(e) {
@@ -916,6 +983,10 @@
     container.addEventListener('brief:create', onBriefCreate);
     container.addEventListener('brief:review', onBriefReview);
     container.addEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
+    container.addEventListener('siteaudit:check', onSiteAuditCheck);
+    container.addEventListener('siteaudit:save', onSiteAuditSave);
+    container.addEventListener('siteaudit:fix', onSiteAuditFix);
+    container.addEventListener('siteaudit:handoff', onSiteAuditHandoff);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
     container.addEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
@@ -954,6 +1025,10 @@
         container.removeEventListener('brief:create', onBriefCreate);
         container.removeEventListener('brief:review', onBriefReview);
         container.removeEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
+        container.removeEventListener('siteaudit:check', onSiteAuditCheck);
+        container.removeEventListener('siteaudit:save', onSiteAuditSave);
+        container.removeEventListener('siteaudit:fix', onSiteAuditFix);
+        container.removeEventListener('siteaudit:handoff', onSiteAuditHandoff);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
         container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);

@@ -569,6 +569,57 @@
       defaultMainTab: 'briefs',
     },
 
+    // Mystery Shopper (docs/mystery-shopper-plan.md §4). Its work is CHECKS of the business's website
+    // and the fixes they suggest; it publishes nothing, files no records and has no post queue, so
+    // every social module is off and the Review Queue / Data Hub are hidden — its review surface is
+    // the fix list on the Website tab, and its history is the checks listed there.
+    mystery_shopper: {
+      // Fed by site-audits.ts `performance` (routed by metricsSource in assistants.js).
+      metricsSource: 'site_audit',
+      kpis: [
+        {
+          label: 'Website Score',
+          title: 'Out of 100',
+          desc: 'Your site\'s latest score, worked out from fixed checks — the same page always gets the same score.',
+        },
+        {
+          label: 'Needs You',
+          title: 'Fixes to Decide',
+          desc: 'Suggested changes you have not yet said you\'ll make or turned down.',
+        },
+        {
+          label: 'Proven',
+          title: 'Fixes Live',
+          desc: 'Fixes a later check confirmed are on your site — the old wording has gone.',
+        },
+        {
+          label: 'Competitor Radar',
+          title: 'Changes Spotted',
+          desc: 'Changes to your competitors\' headlines, prices, proof and offers noticed in the last 30 days.',
+        },
+      ],
+      hideReviewQueue: true,
+      hideDataHub: true,
+      modules: {
+        hasPostingSchedule: false, hasSocialStrategy: false,
+        hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
+        hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+        hasContentPublishing: false,
+      },
+      // No primaryAction: "Check my site now" lives on the Website tab beside the score it changes,
+      // and the header's Chat button covers talking to it. Omitting the key hides the button.
+      // ⚠️ If you rename this tab, change mysteryShopperSurfaces() in chat-orchestrator.ts too —
+      // tests/mystery-shopper-wiring.test.ts fails until both agree.
+      siteAuditTab: {
+        label: 'Website',
+      },
+      // Calendar tab: past checks on the day they ran (calendar.js _datedItems).
+      calendarItems: 'checks',
+      // Rules tab: read by its chat AND by the rewrites every check suggests (site-audit.ts).
+      rulesScope: 'audit',
+      defaultMainTab: 'website',
+    },
+
     lead_qualifier: {
       // Rules tab: read by its outreach drafting (discovery scoring) and its chat — never its scores.
       rulesScope: 'outreach',

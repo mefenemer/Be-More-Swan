@@ -361,6 +361,24 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             p('We’re writing to inform you of a security matter that may affect your account. Please review the details and follow any recommended steps.') + signoff,
     },
     {
+        // The Mystery Shopper's free public taster (src/utils/site-audit.ts sendTasterEmail). Sent ONCE,
+        // to the address the visitor typed, because they asked for this check — so it is transactional
+        // and carries no marketing. Being added to any mailing list is a separate, optional form on the
+        // page. The link opens the result (token-protected, site-taster.ts).
+        triggerKey: 'site_taster_result',
+        name: 'Website First-Impression Result',
+        category: 'Engagement',
+        transactional: true,
+        subject: 'Your website scored {{site.score}} on first impression',
+        preheader: 'The result of the check you asked for on {{site.host}}.',
+        bodyHtml: p('Hi there,') +
+            p('You asked Be More Swan’s Mystery Shopper to look at <strong>{{site.host}}</strong> the way a first-time visitor would. It scored <strong>{{site.score}}</strong> on first impression.') +
+            p('Your result — what is costing you visitors, and the one change to make first — is waiting here:') +
+            button('See your result', 'link.action_url') +
+            p('<span style="color:#6b7280;font-size:14px;">You are getting this one email because this address was entered on bemoreswan.com to request the check. We have not added you to any mailing list. If it wasn’t you, you can ignore it.</span>') +
+            signoff,
+    },
+    {
         triggerKey: 'data_export_ready',
         name: 'Data Export Ready',
         category: 'Compliance',

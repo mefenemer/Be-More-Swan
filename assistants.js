@@ -452,6 +452,7 @@ window.generateAssistantCardHTML = function(assistant) {
     const quickActions = dReg ? [
         ...(dReg.hideDataHub ? [] : [['🗂️', dReg.hubTab?.label || 'Data Hub', 'datahub']]),
         ...(dReg.briefsTab ? [['🎨', dReg.briefsTab.label || 'Briefs', 'briefs']] : []),
+        ...(dReg.siteAuditTab ? [['🔍', dReg.siteAuditTab.label || 'Website', 'website']] : []),
         ...(dReg.hideReviewQueue ? [] : [['✅', dReg.reviewQueue?.label || 'Review', 'review-queue']]),
         ['📅', 'Calendar', 'calendar'],
     ] : [];
@@ -954,6 +955,8 @@ window._activateMainTab = function(name) {
     if (name === 'email-campaigns') window.AssistantEmailCampaigns?.activate();
     // Briefs (Brand Designer) renders lazily too — init() already fetched for the badge.
     if (name === 'briefs') window.AssistantBriefs?.activate();
+    // Website (Mystery Shopper) likewise — init() already fetched for the badge.
+    if (name === 'website') window.AssistantSiteAudit?.activate();
     // Conversations already fetched at init() — its thread total feeds the tab's own count, so it
     // cannot wait for the tab to be opened. activate() repaints from that result rather than
     // refetching. (This comment used to say the opposite and was stale: the prefetch landed when
@@ -4619,6 +4622,13 @@ function _applyAssistantRulesScope() {
         if (subtitle) subtitle.textContent = 'Custom rules for this assistant. It follows them in every reply and proposal it makes.';
         return;
     }
+    if (window._detailRulesScope === 'audit') {
+        note.classList.remove(...AMBER);
+        note.classList.add(...EMERALD);
+        text.textContent = 'Your Mystery Shopper follows these rules in the replacement wording it suggests on every check, and whenever you ask it for something in chat. Changes apply from the next check.';
+        if (subtitle) subtitle.textContent = 'Custom rules for this assistant — for example a claim your site must never make, or words you never use.';
+        return;
+    }
     if (window._detailRulesScope === 'designer') {
         note.classList.remove(...AMBER);
         note.classList.add(...EMERALD);
@@ -5783,6 +5793,15 @@ function _applyDashboardRegistry(data) {
     if (briefsTab) {
         setText('briefs-tab-label', briefsTab.label || 'Briefs');
         window.AssistantBriefs?.init({ assistantId: data.id, assistantName: data.name });
+    }
+
+    // Website tab — Mystery Shopper only (siteAuditTab: mystery_shopper). init() loads eagerly: the
+    // count of fixes waiting for a decision is the tab badge, visible from every tab.
+    const siteAuditTab = cfg.siteAuditTab;
+    toggle('maintab-btn-website', !!siteAuditTab);
+    if (siteAuditTab) {
+        setText('website-tab-label', siteAuditTab.label || 'Website');
+        window.AssistantSiteAudit?.init({ assistantId: data.id, assistantName: data.name });
     }
 
     // Signal Inbox tab — lead roles only (signalInbox: lead_qualifier): everything that came IN
@@ -9039,6 +9058,11 @@ function _setMetricsEmptyState(mode) {
         if (title) title.textContent = 'No briefs yet';
         if (body)  body.textContent  = 'These fill in as you brief pictures and choose between the options. Press "New brief" on the Briefs tab, or describe what you need in chat.';
         if (note) note.textContent = '';
+    } else if (mode === 'site-no-data') {
+        // This assistant publishes nothing; what is missing is the first check of the site.
+        if (title) title.textContent = 'No website check yet';
+        if (body)  body.textContent  = 'These fill in after the first check of your website. Add your website on the Website tab, or tell your assistant in chat.';
+        if (note) note.textContent = '';
     } else if (mode === 'campaign-no-data') {
         // Distinct from 'no-data' on purpose. This assistant publishes nothing itself, so "nothing
         // has been published" would be both confusing and permanently true; what is actually
@@ -9407,6 +9431,58 @@ async function _loadBrandMetrics(assistantId) {
     }
 }
 
+// ── Mystery Shopper KPI cards ────────────────────────────────────────────────
+// Routed here by `metricsSource: 'site_audit'`. Same markup as every role; the figures come from
+// site-audits.ts `performance` — this assistant publishes nothing, so the shared endpoint
+// (post_insights) would report "nothing published" for ever.
+async function _loadSiteAuditMetrics(assistantId) {
+    const valEl   = (k) => document.getElementById(`metric-${k}-value`);
+    const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
+    const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
+    document.getElementById('metric-value-wins')?.classList.add('hidden');
+    try {
+        const res = await fetch('/.netlify/functions/site-audits', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({ action: 'performance', assistantId }),
+        });
+        if (!res.ok) { _setMetricsEmptyState('error'); return; }
+        const data = await res.json();
+        if (!data.hasData) { _setMetricsEmptyState('site-no-data'); return; }
+        _setMetricsEmptyState('cards');
+        const note = document.getElementById('metrics-status-note');
+        if (note) note.textContent = 'Latest check';
+        const m = data.metrics || {};
+
+        // Score: null when the page could not be read — "—", never 0.
+        const hasScore = m.score !== null && m.score !== undefined;
+        valEl('engagement').textContent = hasScore ? `${m.score}/100` : '—';
+        _setKpiCard('engagement', { empty: !hasScore });
+        if (trendEl('engagement')) {
+            trendEl('engagement').textContent = hasScore && m.baseline !== null && m.baseline !== undefined && m.baseline !== m.score
+                ? `${m.score > m.baseline ? '+' : ''}${m.score - m.baseline} since first check` : '—';
+        }
+
+        // Amber, like the Brand Designer's "Needs You": a number the user is meant to bring down.
+        valEl('reach').textContent = String(m.fixesWaiting ?? 0);
+        _setKpiCard('reach', { empty: !m.fixesWaiting });
+        if (trendEl('reach')) trendEl('reach').textContent = '—';
+        if (dotEl('reach')) dotEl('reach').className = 'w-2 h-2 rounded-full ' + (m.fixesWaiting ? 'bg-amber-400' : 'bg-gray-200');
+
+        valEl('ctr').textContent = String(m.fixesDone ?? 0);
+        _setKpiCard('ctr', { empty: !m.fixesDone });
+        if (trendEl('ctr')) trendEl('ctr').textContent = '—';
+
+        if (valEl('value')) {
+            // No competitors saved → "—" and say why, rather than a 0 that reads as "they did nothing".
+            valEl('value').textContent = m.competitorCount ? String(m.competitorChanges ?? 0) : '—';
+            _setKpiCard('value', { empty: !m.competitorChanges });
+            if (trendEl('value')) trendEl('value').textContent = m.competitorCount ? '—' : 'Add competitors on the Website tab';
+        }
+    } catch {
+        _setMetricsEmptyState('error');
+    }
+}
+
 // ── Lead Generation Assistant KPI cards ──────────────────────────────────────
 // Same markup as every other role, different data source: get-lead-performance reads the revenue
 // ledger, because this assistant owns no posts and the shared endpoint (post_insights) reported
@@ -9535,6 +9611,10 @@ async function _loadAssistantMetrics(assistantId, roleKey) {
     if (source === 'brand') {
         _setMetricsEmptyState('pending');
         return _loadBrandMetrics(assistantId);
+    }
+    if (source === 'site_audit') {
+        _setMetricsEmptyState('pending');
+        return _loadSiteAuditMetrics(assistantId);
     }
     if (source === 'blog') {
         _setMetricsEmptyState('pending');

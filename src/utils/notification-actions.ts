@@ -168,6 +168,9 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     // assistant_ready, assistant_kickoff_complete) are all state_change too; see
     // src/utils/notification-prefs.ts, where this type was mapped on the same day.
     search_signals_published: 'state_change',
+    // A Mystery Shopper check finished (site-audit.ts). A report — nothing is blocked on it.
+    site_audit_ready: 'state_change',
+    site_audit_competitor_change: 'state_change', site_audit_goal_met: 'state_change',
     // Issue #191 follow-up — confirms a reinstate actually took effect.
     assistant_reinstated: 'state_change',
     goal_autonomous_adjustment: 'state_change', // SMART Goals AC3.3.3 — autonomous brief change FYI

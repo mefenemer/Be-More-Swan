@@ -66,6 +66,15 @@
       { title: 'The Blank Prompt', text: 'AI image tools want a perfect prompt, and I just know what the picture is for, not how to describe it to a machine.' },
     ],
 
+    // About not knowing why visitors leave — not about writing or posting, which belong to the
+    // other assistants.
+    mystery_shopper: [
+      { title: 'The Silent Bounce', text: 'People visit our website and leave without getting in touch, and nobody ever tells us why.' },
+      { title: 'The Homepage Blind Spot', text: 'I have looked at our homepage so often I can no longer see it the way a stranger does.' },
+      { title: 'The Competitor Surprise', text: 'Competitors change their prices and offers and I only find out when a customer mentions it.' },
+      { title: 'The AI Search Worry', text: 'More buyers ask AI assistants who to hire, and I have no idea whether our site gives them anything to recommend us on.' },
+    ],
+
     lead_qualifier: [
       { title: 'The Cold-Lead Time Sink', text: 'I spend hours every week researching inbound leads and manually deciding which ones are actually worth my sales team’s time.' },
       { title: 'The Inconsistent Scoring Problem', text: 'Every lead gets qualified differently depending on who picks it up, so good prospects slip through and weak ones eat up our calendar.' },

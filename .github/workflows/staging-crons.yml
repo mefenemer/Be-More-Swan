@@ -114,6 +114,9 @@ jobs:
           # 6h rather than daily: all three are no-ops when nothing is due, and a shorter interval
           # means a change gets tested the same working day. 300s of curl budget because the
           # enrichment sweep does real per-lead work when it is switched on.
+          # `run-site-audit-dispatch` (6h) queues the Mystery Shopper's weekly checks. It is idempotent
+          # within a UK day (an audit already checked today is skipped), so the 6h interval only means a
+          # check day is caught early in the day rather than waiting for a once-daily tick to land.
           # `run-paid-optimiser` (12h) is the paid-campaign sweep: fatigue pauses, the control
           # check, and the staleness watchdog.
           #
@@ -134,6 +137,7 @@ jobs:
           run-follower-counts       14400   120
           run-insights-ingest       21600   120
           run-lead-sweeps           21600   300
+          run-site-audit-dispatch   21600   120
           run-paid-optimiser        43200   300
           run-campaign-agent        86400   300
           run-strategy-agent        604800  300

@@ -216,7 +216,7 @@ let _leadOutreach = false;
 // Read-only chips: the date belongs to the record, so moving it here would be editing a fact.
 // Shape: { key, kind, title, at: Date, derived, tab }.
 let _datedItems = [];
-let _datedSource = null;   // 'records' | 'briefs' | null
+let _datedSource = null;   // 'records' | 'briefs' | 'checks' | null
 // The locked assistant's roleKey (opts.roleKey) — only for wording the legend and the empty month.
 let _roleKey = null;
 const DATED_KIND_META = {
@@ -224,6 +224,7 @@ const DATED_KIND_META = {
     meeting:     { icon: '🗓', label: 'Meeting' },
     notes_taken: { icon: '📝', label: 'Notes taken' },
     brief_due:   { icon: '🎨', label: 'Brief due' },
+    site_check:  { icon: '🔍', label: 'Website check' },
 };
 
 // An assistant's identity colour — the user's own choice where they've made one, otherwise the
@@ -268,7 +269,7 @@ window.initCalendar = async function (opts = {}) {
         _lockedAssistant = true;
         _publishesContent = opts.publishesContent !== false;
         _leadOutreach = opts.leadOutreach === true;
-        _datedSource = opts.datedItems === 'records' || opts.datedItems === 'briefs' ? opts.datedItems : null;
+        _datedSource = ['records', 'briefs', 'checks'].includes(opts.datedItems) ? opts.datedItems : null;
         _roleKey = typeof opts.roleKey === 'string' ? opts.roleKey : null;
     } else {
         _datedSource = null;
@@ -441,6 +442,14 @@ async function _loadAndRender() {
                     const dr = await fetch(`/.netlify/functions/assistant-records?dated=1&assistantId=${_assistantFilter}&from=${from.toISOString()}&to=${to.toISOString()}`);
                     const items = dr.ok ? ((await dr.json()).items || []) : [];
                     dated = items.map((i) => ({ key: `r${i.id}`, kind: i.kind, title: i.title, at: new Date(i.at), derived: !!i.derived, tab: 'datahub' }));
+                } else if (_datedSource === 'checks') {
+                    // Mystery Shopper: the checks it ran, on the day they ran (site-audits.ts `calendar`).
+                    const cr = await fetch('/.netlify/functions/site-audits', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+                        body: JSON.stringify({ action: 'calendar', assistantId: Number(_assistantFilter), from: from.toISOString(), to: to.toISOString() }),
+                    });
+                    const items = cr.ok ? ((await cr.json()).items || []) : [];
+                    dated = items.map((i) => ({ key: `c${i.id}`, kind: 'site_check', title: i.title, at: new Date(i.at), derived: false, tab: 'website', done: i.done }));
                 } else {
                     const br = await fetch('/.netlify/functions/brand-briefs', {
                         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',

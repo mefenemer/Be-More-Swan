@@ -47,6 +47,9 @@ export const RULE_READING_ROLES: ReadonlySet<string> = new Set([
     // Lead Generator: its chat scoring, and (separately, process-discovery-jobs → scoreCandidates)
     // the outreach emails discovery drafts. Registry rulesScope 'outreach' says so on the Rules tab.
     'lead_qualifier',
+    // Mystery Shopper: its chat, and the rewrites every check suggests (site-audit.ts executeAuditRun
+    // → AuditBrief.rulesBlock). Registry rulesScope 'audit' says so on the Rules tab.
+    'mystery_shopper',
 ]);
 
 /** Record types those roles produce. Rejecting one of these may carry a free-text `feedback`. */

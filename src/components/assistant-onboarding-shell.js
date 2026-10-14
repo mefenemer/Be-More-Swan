@@ -424,7 +424,7 @@
     // save instead of leaving the first drafts to the next cron tick. Say the number: "everything it
     // needs to get to work" is a promise with no evidence, and the user's next screen is an empty
     // queue that looks identical whether the assistant started or silently didn't.
-    function renderSuccess(draftsQueued) {
+    function renderSuccess(draftsQueued, siteCheck) {
       progressEl.style.width = '100%';
 
       // Preferred: an in-character welcome from the assistant itself — says hi, introduces its
@@ -439,6 +439,8 @@
           roleLabel,
           assistantName,
           draftsQueued,
+          // Mystery Shopper: whether its first check started (update-assistant-context.ts siteCheck).
+          siteCheck: siteCheck || null,
         })}</div>`;
         return;
       }
@@ -488,7 +490,7 @@
         if (!res.ok || !data.success) throw new Error(data.error || `Save failed (${res.status})`);
 
         if (newName) assistantName = newName;
-        renderSuccess(data.draftsQueued);
+        renderSuccess(data.draftsQueued, data.siteCheck);
         if (typeof onComplete === 'function') onComplete({ ...contextAnswers, assistantName, draftsQueued: data.draftsQueued || 0 });
       } catch (err) {
         console.error('[AssistantOnboardingShell] save failed:', err);

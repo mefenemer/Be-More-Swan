@@ -721,6 +721,14 @@
         <!-- `hidden` loses to `inline-flex` (equal specificity, later in style.css): pinned inline too. -->
         <span id="briefs-review-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
+      <!-- Website — Mystery Shopper only (siteAuditTab: mystery_shopper). The site's score, the
+           suggested fixes, competitor changes and past checks. Sits first: it is what the role is for.
+           assistant-site-audit.js → site-audits.ts. Design: docs/mystery-shopper-plan.md §4 -->
+      <button type="button" id="maintab-btn-website" data-maintab="website" class="main-tab-btn hidden">
+        <span id="website-tab-label">Website</span>
+        <!-- `hidden` loses to `inline-flex` (equal specificity, later in style.css): pinned inline too. -->
+        <span id="site-audit-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
+      </button>
       <button type="button" id="maintab-btn-signals" data-maintab="signals" class="main-tab-btn hidden">
         <span id="signals-tab-label">Searches</span>
         <!-- `hidden` loses to `inline-flex` (equal specificity, emitted later in style.css), so the
@@ -1016,6 +1024,12 @@
   <div id="maintab-briefs" class="main-tab-content hidden">
     <div id="briefs-host"></div>
   </div><!-- /maintab-briefs -->
+
+  <!-- Website — Mystery Shopper only. Rendered lazily by assistant-site-audit.js on first activation;
+       init() fetches eagerly because the count of undecided fixes drives the tab badge. -->
+  <div id="maintab-website" class="main-tab-content hidden">
+    <div id="site-audit-host"></div>
+  </div><!-- /maintab-website -->
 
   <div id="maintab-email-campaigns" class="main-tab-content hidden">
     <div id="email-campaigns-host"></div>

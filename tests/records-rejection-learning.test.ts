@@ -52,7 +52,7 @@ console.log('scope');
 check('the chat-reading roles, and not Email Marketing (its rules reach it through blueprint §4)', () => {
     assert.deepEqual([...RULE_READING_ROLES].sort(),
         ['accounts_receivable_clerk', 'blog_writer', 'brand_designer', 'campaign_orchestrator', 'crm_enricher',
-            'lead_qualifier', 'meeting_note_taker', 'social_media_manager', 'tier1_support_agent']);
+            'lead_qualifier', 'meeting_note_taker', 'mystery_shopper', 'social_media_manager', 'tier1_support_agent']);
 });
 check('a platform-only rule is labelled, a global one is not', () => {
     const b = formatRulesBlock([

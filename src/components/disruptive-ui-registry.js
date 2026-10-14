@@ -1565,6 +1565,188 @@
 
   register('visual_brief_proposal', renderVisualBriefProposalCard);
 
+  // ── Built-ins: Mystery Shopper cards (docs/mystery-shopper-plan.md §4.6) ──────────────────────
+  // The chat twins of the Website tab's buttons — same server actions (site-audits.ts), handled in
+  // chat-session.js. Each writes only on the user's click; a check that re-scores spends a task and
+  // the card says so before it is pressed.
+
+  // { type: 'site_audit_check' }
+  function renderSiteAuditCheckCard(ui, esc) {
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Website check</p>
+      <p class="text-sm text-gray-800 mt-2">Read your website again now and re-score it.</p>
+      <p class="text-xs text-gray-600 mt-2">If nothing on your site or your competitors' sites has changed, the last score stands and nothing is used. A check that re-scores uses 1 task from your monthly allowance.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-sac-run class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Check my site now</button>
+        <button type="button" data-sac-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sac-status></p>`;
+    const status = el.querySelector('[data-sac-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-sac-cancel]')) { setBusy(true); say('Not checked.'); return; }
+      if (!e.target.closest('[data-sac-run]')) return;
+      setBusy(true);
+      say('Starting…');
+      el.dispatchEvent(new CustomEvent('siteaudit:check', {
+        bubbles: true,
+        detail: {
+          respond({ ok, error, alreadyRunning }) {
+            if (!ok) { setBusy(false); say(error || 'Could not start the check — please try again.', 'error'); return; }
+            say(alreadyRunning ? 'A check is already running — the result appears on the Website tab.' : 'Checking your site — the result appears on the Website tab in a minute or two.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('site_audit_check', renderSiteAuditCheckCard);
+
+  // { type: 'site_audit_settings', url?, icp?, conversionGoal?, competitorUrls?, checkWeekday? }
+  // Only the fields present are sent, so a card that changes the competitors cannot blank the rest.
+  function renderSiteAuditSettingsCard(ui, esc) {
+    const clean = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+    const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const change = {};
+    if (clean(ui.url, 500)) change.url = clean(ui.url, 500);
+    if (clean(ui.icp, 400)) change.icp = clean(ui.icp, 400);
+    if (clean(ui.conversionGoal, 200)) change.conversionGoal = clean(ui.conversionGoal, 200);
+    if (Array.isArray(ui.competitorUrls)) change.competitorUrls = ui.competitorUrls.map((x) => clean(x, 500)).filter(Boolean).slice(0, 3);
+    const wd = Number(ui.checkWeekday);
+    if (ui.checkWeekday !== undefined && ui.checkWeekday !== null && Number.isInteger(wd) && wd >= 0 && wd <= 6) change.checkWeekday = wd;
+    const row = (label, v) => `<p class="text-xs text-gray-700 mt-1"><span class="font-bold">${label}:</span> ${v}</p>`;
+    const rows = [
+      change.url !== undefined ? row('Website', esc(change.url)) : '',
+      change.icp !== undefined ? row('Who it is for', esc(change.icp)) : '',
+      change.conversionGoal !== undefined ? row('Visitors should', esc(change.conversionGoal)) : '',
+      change.competitorUrls !== undefined ? row('Competitors', change.competitorUrls.length ? change.competitorUrls.map(esc).join(', ') : 'none') : '',
+      change.checkWeekday !== undefined ? row('Weekly check', esc(DAYS[change.checkWeekday])) : '',
+    ].join('');
+    const any = Object.keys(change).length > 0;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Website check settings · Approval needed</p>
+      ${any ? rows : '<p class="text-xs text-amber-700 mt-2">Nothing to change was given.</p>'}
+      <p class="text-xs text-gray-600 mt-2">Saved to the Website tab. If this is the first time your website is saved, its first check starts straight away (1 task).</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-sas-save ${any ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save</button>
+        <button type="button" data-sas-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sas-status></p>`;
+    const status = el.querySelector('[data-sas-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-sas-cancel]')) { setBusy(true); say('Not saved.'); return; }
+      if (!e.target.closest('[data-sas-save]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('siteaudit:save', {
+        bubbles: true,
+        detail: {
+          change,
+          respond({ ok, error, started }) {
+            if (!ok) { setBusy(false); say(error || 'Could not save that — please try again.', 'error'); return; }
+            say(started ? 'Saved. Your first check has started — the result appears on the Website tab.' : 'Saved.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('site_audit_settings', renderSiteAuditSettingsCard);
+
+  // { type: 'site_audit_fix_update', decisions: [{ fixId, status: 'accepted'|'dismissed'|'open' }] }
+  // There is no "done": a later check marks a fix done when the old text has left the page.
+  function renderSiteAuditFixUpdateCard(ui, esc) {
+    const WORDS = { accepted: "I'll make this change", dismissed: 'Not for us', open: 'Undecided again' };
+    const decisions = (Array.isArray(ui.decisions) ? ui.decisions : [])
+      .map((d) => ({ fixId: Number(d && d.fixId), status: d && d.status }))
+      .filter((d) => Number.isInteger(d.fixId) && d.fixId > 0 && Object.prototype.hasOwnProperty.call(WORDS, d.status))
+      .slice(0, 10);
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Suggested fixes · Approval needed</p>
+      ${decisions.length
+        ? `<ul class="mt-2 space-y-1">${decisions.map((d) => `<li class="text-xs text-gray-800">Fix ${esc(d.fixId)}: <span class="font-bold">${esc(WORDS[d.status])}</span></li>`).join('')}</ul>`
+        : '<p class="text-xs text-amber-700 mt-2">No fixes were named.</p>'}
+      <p class="text-xs text-gray-600 mt-2">The next check confirms each change once the old wording has gone from your site.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-safu-confirm ${decisions.length ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Confirm</button>
+        <button type="button" data-safu-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-safu-status></p>`;
+    const status = el.querySelector('[data-safu-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-safu-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-safu-confirm]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('siteaudit:fix', {
+        bubbles: true,
+        detail: {
+          decisions,
+          respond({ results }) {
+            const failed = (results || []).filter((r) => !r.ok);
+            if (!failed.length) { say('Done — the Website tab is up to date.'); return; }
+            say(`${(results || []).length - failed.length} saved; ${failed.map((f) => `fix ${f.fixId}: ${f.error}`).join('; ')}`, 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('site_audit_fix_update', renderSiteAuditFixUpdateCard);
+
+  // { type: 'site_audit_handoff', target: 'social_media_manager'|'blog_writer'|'campaign_orchestrator', title?, brief }
+  // Opens the target assistant's chat with the brief TYPED IN — the user reads it and sends it. The
+  // same as "Brief <name>" under "Ideas for your other assistants" on the Website tab.
+  function renderSiteAuditHandoffCard(ui, esc) {
+    const TARGETS = { social_media_manager: 'Social Media Assistant', blog_writer: 'Blog Writing Assistant', campaign_orchestrator: 'Campaign Assistant' };
+    const target = Object.prototype.hasOwnProperty.call(TARGETS, ui.target) ? ui.target : null;
+    const clean = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+    const brief = clean(ui.brief, 800);
+    const title = clean(ui.title, 80);
+    const label = target ? ((window.RoleLabels && window.RoleLabels.get && window.RoleLabels.get(target)) || TARGETS[target]) : '';
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Brief for your ${esc(label || 'other assistant')}</p>
+      ${title ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(title)}</p>` : ''}
+      <p class="text-xs text-gray-700 mt-1">${brief ? esc(brief) : '<span class="text-amber-700">No brief was given.</span>'}</p>
+      <p class="text-xs text-gray-600 mt-2">Opens their chat with this typed in. Nothing is sent until you send it.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-sah-open ${target && brief ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Open their chat</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sah-status></p>`;
+    const status = el.querySelector('[data-sah-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    el.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-sah-open]');
+      if (!btn) return;
+      btn.disabled = true;
+      el.dispatchEvent(new CustomEvent('siteaudit:handoff', {
+        bubbles: true,
+        detail: {
+          target, brief,
+          respond({ ok, error }) {
+            btn.disabled = false;
+            if (!ok) say(error || 'Could not open their chat.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('site_audit_handoff', renderSiteAuditHandoffCard);
+
   // ── Built-in: Visual Option Review Card (Brand Designer) ───────────────────
   // { type: 'visual_option_review', briefId, decisions: [{ optionId, decision, reason?, note? }], remake? }
   //

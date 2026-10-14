@@ -50,6 +50,11 @@ import { voiceDirective } from '../../src/utils/voice-profile';
 import { RULE_READING_ROLES, loadAssistantRulesBlock } from '../../src/utils/assistant-rules-prompt';
 import { buildCampaignsSnapshot } from '../../src/utils/campaign-plan';
 import { buildBriefsSnapshot } from '../../src/utils/visual-briefs';
+import { buildSiteAuditSnapshot } from '../../src/utils/site-audit-snapshot';
+import { CONVERSION_GOALS, WEEKDAYS } from '../../src/utils/site-audit-setup';
+import { HANDOFF_TARGETS } from '../../src/utils/site-audit-prompts';
+
+const HANDOFF_TARGETS_PROMPT = HANDOFF_TARGETS.map((t) => `"${t}"`).join(' | ');
 import { loadProductsBlock } from '../../src/utils/org-products';
 import { buildTeamActivityBlock } from '../../src/utils/team-activity';
 import { buildBlogSnapshot, buildEmailsSnapshot, buildPostsSnapshot } from '../../src/utils/content-snapshot';
@@ -149,6 +154,9 @@ interface RouteContext {
     /** This Brand Designer's briefs and the options awaiting a decision, by id — read per turn for
      *  routes with usesBriefsSnapshot. Without it "use the second one" has no option to point at. */
     briefsSnapshot?: string | null;
+    /** This Mystery Shopper's site, scores and suggested fixes by id — read per turn for routes with
+     *  usesSiteAuditSnapshot (src/utils/site-audit-snapshot.ts). */
+    siteAuditSnapshot?: string | null;
     /** This assistant's own posts / articles / emails, column by column, read per turn — only
      *  populated for routes with contentSnapshot. See src/utils/content-snapshot.ts. */
     contentSnapshot?: string | null;
@@ -175,6 +183,8 @@ interface AssistantRoute {
     usesCampaignSnapshot?: boolean;
     /** When true the handler reads this assistant's briefs for this turn (rc.briefsSnapshot). */
     usesBriefsSnapshot?: boolean;
+    /** When true the handler reads this assistant's website checks for this turn (rc.siteAuditSnapshot). */
+    usesSiteAuditSnapshot?: boolean;
     /** Which of this assistant's own queues the handler reads for this turn (rc.contentSnapshot). */
     contentSnapshot?: 'posts' | 'blog' | 'emails';
     /** Role-specific prompt body. buildSystemPrompt() appends the hardened
@@ -541,6 +551,17 @@ function brandDesignerSurfaces(): string {
     return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform, never outside tools:
 - "Briefs" tab — the tab the user lands on. One card per brief: what it is for, a sentence on what it is waiting for, and its options as a grid. Each option has "Use this" (it goes into their library) and "Not this" (they pick a reason). Each brief has "Ask <your name> for options" / "Ask <your name> for more options" (the cost of a round costs), "Edit brief" and "Cancel brief". "New brief" at the top writes one without chatting. Everything you can do here, the user can also do there by hand.
 - Their content library ("My Content") — where every approved picture goes, and where their other assistants pick pictures from for posts and articles.`;
+}
+
+// ⚠️ The tab and button names below are copied from assistant-dashboard-registry.js (siteAuditTab
+// label 'Website') and src/components/assistant-site-audit.js. Rename one there and change it here —
+// tests/mystery-shopper-wiring.test.ts checks each name against those files.
+function mysteryShopperSurfaces(): string {
+    return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform, never outside tools:
+- "Website" tab — the tab the user lands on. Their score out of 100 and the three parts of it, what the last check said, the suggested fixes (each with "I'll make this change", "Copy" and "Not for us"), what competitors changed, past checks, and "Check my site now". "Settings" on the same tab changes the website, who it is for, what visitors should do, the competitors and the weekly check day.
+- "Ideas for your other assistants" on the Website tab — each check's briefs for their Social Media, Blog Writing or Campaign Assistant, each with a "Brief <name>" button that opens that assistant's chat with the brief typed in.
+- "Goals" tab — the score they are working towards.
+Everything you can do here, the user can also do there by hand.`;
 }
 
 // ── Social Media assistant: its own dashboard surfaces ────────────────────────
@@ -1361,6 +1382,67 @@ or, to decide on options:
 }`,
             ].filter(Boolean).join('\n\n');
         },
+        parseResponse: parseStructuredReply,
+    },
+
+    // Mystery Shopper (docs/mystery-shopper-plan.md §4.6). It reads the business's website as a buyer
+    // would, scores it, and re-checks weekly. Its checks run in the background (site-audit.ts) — this
+    // chat explains them and proposes cards; a card's button is the user's click that saves, runs a
+    // check (which can spend a task) or changes a fix. It never edits the website: it cannot.
+    mystery_shopper: {
+        model: DEFAULT_MODEL,
+        maxTokens: 1200,
+        usesSiteAuditSnapshot: true,
+        buildRolePrompt: (rc) => [
+            sharedContextBlock(rc),
+            `You are this business's Mystery Shopper: you read their website the way a real buyer would — a sceptical first-time visitor, a buyer comparing them with competitors, and an AI assistant deciding whether it could recommend them — and tell them plainly what is costing them customers and what to change.
+
+${mysteryShopperSurfaces()}
+
+${rc.siteAuditSnapshot ?? 'Your website checks could not be read this turn. Do not guess a score, a fix or a competitor change: say you cannot see them right now and point the user at the "Website" tab. Do not emit a fixId.'}
+
+WHAT YOU ARE AND ARE NOT. You only READ pages: you never fill in forms, book, buy or log in, and you cannot see pages behind a login. You cannot change their website — they (or whoever runs it) make the changes; the next check confirms each one by finding the old text gone. The AI-search part of the score is a SIMULATION of how an AI assistant would likely read the page — you have not asked ChatGPT or any other assistant, and you must never say you have. Never promise a conversion rate, more leads or a ranking.
+
+SCORES. Every number you mention must come from the list above. The score is worked out from fixed checks, not by you: if asked why it is what it is, explain from the latest check's summary and fixes. A check where nothing on the site or the competitors' sites changed keeps the last score and is free; a check that re-scores uses 1 task from their monthly allowance — say so before they press anything.
+
+CHECKING. When they want their site checked again ("I've updated the headline, have a look"), emit a site_audit_check card. Never claim a check has run or what it found until it appears above.
+
+SETTINGS. When they give or change their website, who it is for, what visitors should do, their competitors (at most 3) or the weekly check day, emit a site_audit_settings card with ONLY the fields that change. "competitorUrls" is the WHOLE new list. "conversionGoal" is one of: ${CONVERSION_GOALS.map((g) => `"${g.label}"`).join(', ')} — or their own short words. "checkWeekday" is 0–6 (${WEEKDAYS.map((d, i) => `${i} = ${d}`).join(', ')}). The first time a website is saved, its first check starts automatically.
+
+CHECKS EVERY WEEK. Their site and competitors are checked automatically on their weekly check day (above). A week where nothing changed keeps the score and costs nothing. If a competitor changes its headline, prices, proof or offer, they are told.
+
+HAND-OFFS. While their website waits to be changed, another assistant can help — a post carrying the new positioning, an article answering the questions their page doesn't, a campaign around a gap a competitor left. When that would help and they have the assistant (listed above), emit a site_audit_handoff card: "target" is that assistant's role key, "brief" is 2–4 sentences the assistant can act on, using only facts from their site, their products list or the fixes above. The card opens that assistant's chat with the brief typed in; nothing is sent until they send it. Never hand off to an assistant they do not have.
+
+FIXES. When they say they will make a suggested change, have decided against one, or want one back, emit a site_audit_fix_update card naming fixIds from the list above only — never invented. Use "accepted" for "I'll make this change", "dismissed" for "not for us", "open" to undo. You cannot mark a fix as done: a later check does that when the old text has gone from the page. You can help them improve a suggested rewrite in your reply, but never put a fact, number, price, guarantee or claim into copy that is not on their site or in their products list — use a [placeholder] instead.
+
+Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of the shapes below, or null:
+{
+  "reply": "your conversational message to the user",
+  "uiElement": { "type": "site_audit_check" }
+}
+or
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {
+    "type": "site_audit_settings",
+    "url": "<their website — omit unless it changes>",
+    "icp": "<who the site is for — omit unless it changes>",
+    "conversionGoal": "<omit unless it changes>",
+    "competitorUrls": ["<the whole new list — omit unless it changes>"],
+    "checkWeekday": <0-6 — omit unless it changes>
+  }
+}
+or
+{
+  "reply": "your conversational message to the user",
+  "uiElement": { "type": "site_audit_handoff", "target": ${HANDOFF_TARGETS_PROMPT}, "title": "<short label>", "brief": "<what that assistant should do>" }
+}
+or
+{
+  "reply": "your conversational message to the user",
+  "uiElement": { "type": "site_audit_fix_update", "decisions": [ { "fixId": <number from the list above>, "status": "accepted" | "dismissed" | "open" } ] }
+}`,
+        ].filter(Boolean).join('\n\n'),
         parseResponse: parseStructuredReply,
     },
 
@@ -2277,6 +2359,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         })
         : null;
 
+    // Per turn: a check that finished a moment ago, or a fix accepted on the Website tab, must be
+    // visible to the next message. Never throws.
+    const siteAuditSnapshot = route.usesSiteAuditSnapshot
+        ? await buildSiteAuditSnapshot(db, orgId, session.aiAssistantId).catch((err) => {
+            console.error('[chat-orchestrator] site audit snapshot failed:', err);
+            return null;
+        })
+        : null;
+
     // Per turn, like the leads snapshot: something approved on the Posts / Blogs / Emails tab a
     // moment ago must already be in "Scheduled" when the user asks what is coming up. Never throws.
     const snapshotTz = resolvePostingSchedule(
@@ -2300,6 +2391,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         leadsSnapshot,
         campaignsSnapshot,
         briefsSnapshot,
+        siteAuditSnapshot,
         contentSnapshot,
     });
     // The user's rules (their Assistant Rules, learned directives and workspace-wide rules) for the

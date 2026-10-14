@@ -135,6 +135,9 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'assistant_kickoff_complete' THEN 'state_change'  -- Issue #115 — Kick Off Meeting confirmed
     WHEN 'feature_status_change' THEN 'state_change'  -- Feature Requests US06 — a backed request moved status
     WHEN 'search_signals_published' THEN 'state_change'  -- a saved search finished with companies to review
+    WHEN 'site_audit_ready' THEN 'state_change'          -- a Mystery Shopper check finished (call site also passes category)
+    WHEN 'site_audit_competitor_change' THEN 'state_change'  -- a competitor changed its page (call site passes category)
+    WHEN 'site_audit_goal_met' THEN 'state_change'       -- the website reached its target score (call site passes category)
     -- celebratory
     WHEN 'setup_complete' THEN 'celebratory'
     WHEN 'milestone_unlock' THEN 'celebratory'

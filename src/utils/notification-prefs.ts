@@ -236,6 +236,13 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             // override reads. Without it the row falls back to the workspace-wide value, which has
             // no UI at all, and the alert becomes permanently ON. Same trap as the three above.
             'lead_company_blocked',
+            // The Mystery Shopper finished a check of the business's website (src/utils/site-audit.ts).
+            // A report, not a request — nothing waits on the user — so it sits with the other
+            // summaries. ⚠️ scope:'assistant': the call site passes metadata.assistantId, same as above.
+            'site_audit_ready',
+            // Its other two reports: a competitor changed its headline/prices/proof/offer, and the
+            // site reached its target score. Both summaries — nothing waits on the user.
+            'site_audit_competitor_change', 'site_audit_goal_met',
         ],
     },
     {
