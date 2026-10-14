@@ -26,6 +26,7 @@ const META = {
     campaign_orchestrator: { name: 'Marketing Campaign Orchestrator', accent: '#ea580c' },
     brand_designer:        { name: 'Brand Designer',                 accent: '#db2777' },
     mystery_shopper:       { name: 'Mystery Shopper',                accent: '#db2777' },
+    website_assistant:     { name: 'Website Assistant',              accent: '#7c3aed' },
 };
 
 const only = process.argv.slice(2);

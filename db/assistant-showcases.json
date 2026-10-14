@@ -454,5 +454,82 @@
         "a": "Yes. The free website check on this page gives you a first-impression score and the one change to make first, in about 30 seconds."
       }
     ]
+  },
+  "website_assistant": {
+    "headline": "Describe your website. Approve it. Done.",
+    "overview": [
+      "The Website Assistant writes your website from what it already knows about your business: your profile, your products, your brand kit and the answers you give when you set it up. Ask for a whole site and it drafts every page; ask in chat for a change and it shows you exactly what it will do before anything is saved.",
+      "It never makes things up. Where a page needs a fact only you know, such as a price, a customer quote or how long you have been trading, it leaves a clear [placeholder] for you to fill in. You see every page in a live preview, on a desktop or a phone, as you work."
+    ],
+    "highlights": [
+      "Built from a conversation",
+      "Live preview, desktop and phone",
+      "Your brand colours and logo",
+      "No invented facts, ever"
+    ],
+    "steps": [
+      {
+        "title": "Tell it about your site",
+        "body": "What visitors should do, the pages you want, and how it should feel."
+      },
+      {
+        "title": "Get a first draft",
+        "body": "Every page written from your business details, products and brand kit."
+      },
+      {
+        "title": "Fill in the gaps",
+        "body": "Replace each [placeholder] with a fact only you know, and edit anything you like."
+      },
+      {
+        "title": "Ask for changes",
+        "body": "Tell it in chat what to change; it shows you the change before you approve it."
+      }
+    ],
+    "features": [
+      {
+        "title": "Your whole site, drafted",
+        "body": "Pages, headings, wording, questions buyers ask and a clear next step on every page, written in plain British English.",
+        "image": "/images/assistants/website_assistant/editor.jpg",
+        "alt": "The website editor listing its pages, beside a live preview of the home page"
+      },
+      {
+        "title": "Edit anything, see it straight away",
+        "body": "Change a heading, a button or a whole section and the preview shows it the moment you save. Links to your own pages are checked against the pages you have, so none lead nowhere.",
+        "image": "/images/assistants/website_assistant/edit.jpg",
+        "alt": "Editing the opening section of a home page, with the preview beside it"
+      },
+      {
+        "title": "On brand, and readable",
+        "body": "It starts from your brand kit, and it refuses colour choices that would make the text hard to read. Check every page on a phone before anyone else sees it.",
+        "image": "/images/assistants/website_assistant/design.jpg",
+        "alt": "The design settings beside a phone-sized preview of the site"
+      },
+      {
+        "title": "Ready for search",
+        "body": "Every page gets its own search title and description, one main heading, a sitemap and the details search engines use to understand your business."
+      }
+    ],
+    "faqs": [
+      {
+        "q": "Can I put my site live yet?",
+        "a": "Not yet. Today you build and preview your site; it stays a private draft that search engines are told to ignore. Putting it live on its own web address is coming next."
+      },
+      {
+        "q": "Does it use tasks?",
+        "a": "Drafting your whole site uses 1 task from your monthly allowance. Editing pages yourself, and approving changes it suggests in chat, costs nothing."
+      },
+      {
+        "q": "How many pages can I have?",
+        "a": "Up to 5 pages on the £29 plan, and more on the higher plans."
+      },
+      {
+        "q": "Will it make up reviews or prices?",
+        "a": "No. It only states what is in your business details and products. Anything else, such as a customer quote or a number, is left as a [placeholder] for you to fill in."
+      },
+      {
+        "q": "Do I need to know how to build a website?",
+        "a": "No. There is no code and no drag-and-drop. You describe what you want, or edit the words directly, and the layout is handled for you."
+      }
+    ]
   }
 }
