@@ -160,6 +160,9 @@ async function pickCampaignAsset(
             // Not yet on any post. A cross-post's sibling platforms share the one asset, which is
             // fine: that is the same post, cloned per platform after this pick.
             sql`NOT EXISTS (SELECT 1 FROM scheduled_post_assets spa WHERE spa.content_asset_id = ${contentAssets.id})`,
+            // Pictures briefed for ARTICLES or emails (a separate campaign brief) are not social posts'.
+            sql`NOT EXISTS (SELECT 1 FROM visual_brief_options o JOIN visual_briefs b ON b.id = o.brief_id
+                             WHERE o.content_asset_id = ${contentAssets.id} AND b.purpose IN ('blog_header', 'email_header'))`,
         ))
         .orderBy(asc(contentAssets.createdAt))
         .limit(1);

@@ -1082,6 +1082,10 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 });
                 if (resolved.ok) {
                     await attachAssetToPost(db, post.id, resolved.assetId);
+                    // Record the drafter's OWN pick. A campaign picture may later replace it while the
+                    // post still carries exactly this one (brief-post-media.ts placeOnCampaignPost);
+                    // anything the user does to the media moves the post off it.
+                    await db.update(scheduledPosts).set({ autoMediaAssetId: resolved.assetId }).where(eq(scheduledPosts.id, post.id));
                     attachedMediaSource = resolved.source;
                     // US3 AC3.3: credit line only for stock (Pexels) media, and only when the org opts in.
                     // Rebuild through captionFor so the credit rides after the footer on the correct
@@ -1228,6 +1232,10 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                         }).returning({ id: scheduledPosts.id });
 
                         for (const aid of sharedAssetIds) await attachAssetToPost(db, sibling.id, aid);
+                        // The sibling carries the same drafter's pick, so the same marker.
+                        if (attachedMediaSource && sharedAssetIds.length === 1) {
+                            await db.update(scheduledPosts).set({ autoMediaAssetId: sharedAssetIds[0] }).where(eq(scheduledPosts.id, sibling.id));
+                        }
 
                         if (attachedMediaSource) {
                             await runAutoPublishGate(db, {

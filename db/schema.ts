@@ -1901,6 +1901,9 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   // re-edit composites onto the original, not an already-flattened one.
   imageOverlays: jsonb("image_overlays"),
   overlayBaseAssetId: integer("overlay_base_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
+  // The picture the drafter attached (db/z-campaign-picture-counts.sql). A campaign picture may replace the
+  // post's media only while it still carries exactly this asset — a picture the user chose is never replaced.
+  autoMediaAssetId: integer("auto_media_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
   // Timed audio on the post — voice notes and sound, modelled exactly like imageOverlays above:
   // [{ id, assetId, startS?, endS?, volume, fadeInS, fadeOutS }], absent bounds meaning the whole
   // post. Any audio at all forces a server-side render (a still with sound is not a post any
@@ -5285,6 +5288,8 @@ export const visualBriefs = pgTable("visual_briefs", {
   artDirection: jsonb("art_direction"),
   // Credits held by the round in flight; settled and zeroed in ONE update, so only once.
   creditHold: integer("credit_hold").notNull().default(0),
+  // How many pictures this brief is for (db/z-campaign-picture-counts.sql). A campaign brief for 10 posts asks for 10.
+  picturesNeeded: integer("pictures_needed").notNull().default(1),
   // The AI-VIDEO part of creditHold (db/z-brand-designer-sources.sql): images and a video succeed
   // or fail separately, so each part is charged or refunded on its own.
   creditHoldVideo: integer("credit_hold_video").notNull().default(0),

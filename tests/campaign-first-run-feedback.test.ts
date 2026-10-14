@@ -41,9 +41,10 @@ check('1. a round in flight holds the house spinner, once, and gives it back', (
 });
 
 check('2. choosing a picture says the brief is finished, and that extras are optional', () => {
-    assert.ok(briefs.includes('that is all this brief needs'), 'the approved line does not say it is finished');
+    // Superseded by picture counts (2026-10-14): "N of M chosen", then "no more needed".
+    assert.ok(briefs.includes('no more pictures are needed for ${forWhat(b)}'), 'the done line does not say no more are needed');
+    assert.ok(briefs.includes('`${p.chosen} of ${p.needed} chosen for ${forWhat(b)} — ${p.left} more needed. `'), 'no running tally');
     assert.ok(briefs.includes('That is all this brief needed, so you are done here.'), 'the approve note does not say so');
-    assert.ok(/Choose ONE you like/.test(briefs), 'the waiting line does not say one is enough');
 });
 
 check('3. a pictures-only brief offers video, and the chat asks', () => {

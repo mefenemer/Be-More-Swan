@@ -38,7 +38,10 @@ import { loadAssistantRulesBlock } from './assistant-rules-prompt';
 import { PexelsRateLimitError, searchUniqueImages, searchUniqueVideos } from './pexels';
 import { BRAND_CARD_PROVIDER } from './brand-card-lifecycle';
 import { resolveAssetDisplayUrl } from './social-publish';
-import { POST_ATTACH_NOTES, attachApprovedToPost } from './brief-post-media';
+import { POST_ATTACH_NOTES, attachApprovedToPost, placeOnCampaignPost } from './brief-post-media';
+
+/** Brief purposes whose pictures belong on social posts (blog and email headers have their own briefs). */
+const SOCIAL_PURPOSES = new Set(['social_post', 'story', 'ad', 'other']);
 import { triggerBriefRound } from './trigger-brief-round';
 import {
     GENERATION_TIMEOUT_MS, MAX_ROUNDS, OWN_SOURCE, OWN_SOURCE_LABEL, PURPOSE_SPECS, REJECT_REASON_LABELS, SOURCE_SPECS,
@@ -263,8 +266,12 @@ export async function startRound(db: Db, args: { orgId: number; brief: BriefRow 
     const { orgId, brief } = args;
     if (brief.status === 'generating') return { ok: false, status: 409, error: 'Options are already being made for this brief.' };
     if (brief.status === 'cancelled') return { ok: false, status: 409, error: 'This brief was cancelled.' };
-    if (brief.rounds >= MAX_ROUNDS) {
-        return { ok: false, status: 409, error: `This brief has had ${MAX_ROUNDS} rounds. If none of them fit, the brief probably needs changing — start a new one.` };
+    const roundCap = maxRoundsFor(brief);
+    if (brief.rounds >= roundCap) {
+        return { ok: false, status: 409, error: `This brief has had ${roundCap} rounds. If none of them fit, the brief probably needs changing — start a new one.` };
+    }
+    if (await picturesStillNeeded(db, brief) === 0) {
+        return { ok: false, status: 409, error: 'This brief already has every picture it needs — no more options are required.' };
     }
 
     const sources = Array.isArray(brief.sources) ? (brief.sources as string[]) : [];
@@ -305,7 +312,7 @@ export async function startRound(db: Db, args: { orgId: number; brief: BriefRow 
         eq(visualBriefs.id, brief.id),
         eq(visualBriefs.organisationId, orgId),
         sql`${visualBriefs.status} NOT IN ('generating', 'cancelled')`,
-        sql`${visualBriefs.rounds} < ${MAX_ROUNDS}`,
+        sql`${visualBriefs.rounds} < ${roundCap}`,
     )).returning({ rounds: visualBriefs.rounds });
 
     if (!rows.length) {
@@ -609,24 +616,64 @@ async function cardOptions(brief: BriefRow, ad: ArtDirection, ctx: BriefContext)
 
 // ── Deciding ────────────────────────────────────────────────────────────────────────────────────
 
-/** Recompute a brief's status from its options. Leaves a generating or cancelled brief alone. */
+/**
+ * A brief for N pictures (a campaign's 10 posts) may need more rounds than one picture does: never
+ * fewer than MAX_ROUNDS, and at least one round per picture it is for.
+ */
+export function maxRoundsFor(brief: { picturesNeeded?: number | null }): number {
+    return Math.max(MAX_ROUNDS, Number(brief.picturesNeeded) || 1);
+}
+
+/** How many more pictures this brief is for — 0 once enough are chosen. */
+async function picturesStillNeeded(db: Db, brief: { id: number; picturesNeeded?: number | null }): Promise<number> {
+    const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(visualBriefOptions)
+        .where(and(eq(visualBriefOptions.briefId, brief.id), eq(visualBriefOptions.status, 'approved')));
+    return Math.max(0, (Number(brief.picturesNeeded) || 1) - Number(n));
+}
+
+/**
+ * Recompute a brief's status from its options. Leaves a generating or cancelled brief alone.
+ * 'approved' (done) only once as many pictures are chosen as the brief is for — a brief for ten
+ * posts with three chosen is still waiting on the user.
+ */
 async function settleBriefStatus(db: Db, briefId: number): Promise<void> {
     await db.execute(sql`
         UPDATE visual_briefs b
            SET status = CASE
-                   WHEN EXISTS (SELECT 1 FROM visual_brief_options o WHERE o.brief_id = b.id AND o.status = 'approved') THEN 'approved'
+                   WHEN (SELECT count(*) FROM visual_brief_options o WHERE o.brief_id = b.id AND o.status = 'approved') >= b.pictures_needed THEN 'approved'
                    WHEN EXISTS (SELECT 1 FROM visual_brief_options o WHERE o.brief_id = b.id AND o.status = 'proposed') THEN 'in_review'
                    ELSE 'open' END,
                updated_at = now()
          WHERE b.id = ${briefId} AND b.status NOT IN ('generating', 'cancelled')`);
 }
 
-export type DecideResult = { ok: true; contentAssetId?: number; postNote?: string } | { ok: false; status: number; error: string };
+export type DecideResult =
+    | { ok: true; contentAssetId?: number; postNote?: string; chosen?: number; needed?: number }
+    | { ok: false; status: number; error: string };
 
-/** After an approval: a brief raised for a post (Phase 5) puts the picture on that post if it still needs one. */
+/** How many of the brief's pictures are chosen now, for the "3 of 10" the tab and chat say back. */
+async function progressOf(db: Db, brief: BriefRow): Promise<{ chosen: number; needed: number }> {
+    const needed = Number(brief.picturesNeeded) || 1;
+    return { chosen: needed - await picturesStillNeeded(db, brief), needed };
+}
+
+/**
+ * After an approval, put the picture where it was for:
+ *   - a brief raised for ONE post (Phase 5) → that post, if it still has no picture;
+ *   - a campaign brief for social pictures → one of the campaign's posts still awaiting review,
+ *     replacing the picture the drafter found itself (owner, 2026-10-14: "swap onto waiting posts").
+ *     A picture the user chose is never replaced; with no such post the picture waits in the
+ *     campaign's pictures for the next post drafted.
+ */
 async function placeOnPost(db: Db, brief: BriefRow, orgId: number, assetId: number): Promise<string | undefined> {
-    if (!brief.scheduledPostId) return undefined;
-    return POST_ATTACH_NOTES[await attachApprovedToPost(db, { orgId, postId: brief.scheduledPostId, assetId })];
+    if (brief.scheduledPostId) return POST_ATTACH_NOTES[await attachApprovedToPost(db, { orgId, postId: brief.scheduledPostId, assetId })];
+    if (brief.campaignId && SOCIAL_PURPOSES.has(brief.purpose)) {
+        const placed = await placeOnCampaignPost(db, { orgId, campaignId: brief.campaignId, assetId });
+        return placed
+            ? 'It is now on one of the campaign\'s posts waiting for your review, in place of the picture the Social Media Assistant found.'
+            : 'It will go on the campaign\'s next post — none of the posts drafted so far can take it.';
+    }
+    return undefined;
 }
 
 /**
@@ -661,6 +708,12 @@ export async function decideOption(db: Db, args: {
         return { ok: true };
     }
 
+    // A campaign brief is for a set number of pictures. Once they are chosen, "no more required"
+    // means exactly that — an extra would have no post to go on.
+    if (brief.campaignId && await picturesStillNeeded(db, brief) === 0) {
+        return { ok: false, status: 409, error: `All ${brief.picturesNeeded} pictures this brief is for are chosen — no more are needed.` };
+    }
+
     const claimed = await db.update(visualBriefOptions)
         .set({ status: 'approved', decidedAt: new Date() })
         .where(and(eq(visualBriefOptions.id, optionId), eq(visualBriefOptions.status, 'proposed')))
@@ -672,7 +725,7 @@ export async function decideOption(db: Db, args: {
     if (opt.source === OWN_SOURCE && opt.contentAssetId) {
         await settleBriefStatus(db, brief.id);
         if (brief.campaignOrderId) await settleCampaignOrder(db, brief.id);
-        return { ok: true, contentAssetId: opt.contentAssetId, postNote: await placeOnPost(db, brief, orgId, opt.contentAssetId) };
+        return { ok: true, contentAssetId: opt.contentAssetId, postNote: await placeOnPost(db, brief, orgId, opt.contentAssetId), ...await progressOf(db, brief) };
     }
 
     try {
@@ -693,7 +746,7 @@ export async function decideOption(db: Db, args: {
         await db.update(visualBriefOptions).set({ contentAssetId: asset.id }).where(eq(visualBriefOptions.id, optionId));
         await settleBriefStatus(db, brief.id);
         if (brief.campaignOrderId) await settleCampaignOrder(db, brief.id);
-        return { ok: true, contentAssetId: asset.id, postNote: await placeOnPost(db, brief, orgId, asset.id) };
+        return { ok: true, contentAssetId: asset.id, postNote: await placeOnPost(db, brief, orgId, asset.id), ...await progressOf(db, brief) };
     } catch (err) {
         // Give the option back rather than leave it "approved" with nothing in the library.
         await db.update(visualBriefOptions).set({ status: 'proposed', decidedAt: null }).where(eq(visualBriefOptions.id, optionId));
@@ -870,6 +923,8 @@ export interface BriefView {
     mood: string | null; mustInclude: string | null; mustAvoid: string | null; sources: string[]; status: string;
     origin: string; dueDate: string | null; rounds: number; artDirection: unknown; generationNote: string | null;
     createdAt: string; roundCredits: number; waitingOn: string | null;
+    /** How many pictures the brief is for (a campaign's 10 posts → 10), and its round ceiling. */
+    picturesNeeded: number; maxRounds: number;
     /** The social draft this brief is finding a picture for (Phase 5), or null. */
     scheduledPostId: number | null;
     /** The campaign that commissioned this brief (Phase 3), or null. Its picture joins that campaign. */
@@ -927,6 +982,8 @@ export async function listBriefs(db: Db, orgId: number, assistantId: number, lim
             mood: b.mood, mustInclude: b.mustInclude, mustAvoid: b.mustAvoid, sources, status: b.status, origin: b.origin,
             dueDate: b.dueDate ? String(b.dueDate) : null, rounds: b.rounds, artDirection: b.artDirection, generationNote: b.generationNote,
             createdAt: new Date(b.createdAt).toISOString(),
+            picturesNeeded: Number(b.picturesNeeded) || 1,
+            maxRounds: maxRoundsFor(b),
             roundCredits: (sources.includes('ai_image') ? IMAGE_CREDIT_COST : 0) + (sources.includes('ai_video') ? VIDEO_CREDIT_COST : 0),
             waitingOn: b.waitingOn,
             scheduledPostId: b.scheduledPostId,

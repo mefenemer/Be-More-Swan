@@ -81,8 +81,9 @@ check('both approval paths place it through the one attach function, and report 
     const decide = span(engine, 'export async function decideOption', '\n}\n', 'decideOption');
     assert.ok((decide.match(/postNote: await placeOnPost\(db, brief, orgId,/g) || []).length === 2, 'generated AND "your own" options both go onto the post');
     const place = span(engine, 'async function placeOnPost', '\n}\n', 'placeOnPost');
-    assert.match(place, /if \(!brief\.scheduledPostId\) return undefined;/);
-    assert.match(place, /attachApprovedToPost\(db, \{ orgId, postId: brief\.scheduledPostId, assetId \}\)/);
+    // A brief for ONE post attaches to it; a campaign brief (2026-10-14) places on a campaign post.
+    assert.match(place, /if \(brief\.scheduledPostId\) return POST_ATTACH_NOTES\[await attachApprovedToPost\(db, \{ orgId, postId: brief\.scheduledPostId, assetId \}\)\];/);
+    assert.match(place, /placeOnCampaignPost\(db, \{ orgId, campaignId: brief\.campaignId, assetId \}\)/);
     for (const k of ['attached', 'post_has_media', 'not_editable', 'post_gone'] as const) assert.ok(POST_ATTACH_NOTES[k].length > 20, `no sentence for ${k}`);
     assert.match(read('src/components/assistant-briefs.js'), /res\.postNote \? ` \$\{res\.postNote\}` : ''/);
     assert.match(read('src/components/disruptive-ui-registry.js'), /const notes = \(results \|\| \[\]\)\.map\(\(r\) => r\.postNote\)/);

@@ -129,7 +129,8 @@
   function updateBadge() {
     const el = document.getElementById('briefs-review-badge');
     if (!el) return;
-    const n = state.briefs.filter((b) => b.options.some((o) => o.status === 'proposed') && b.status !== 'cancelled').length;
+    // A brief with every picture it needs chosen is finished — leftover options do not ask for anything.
+    const n = state.briefs.filter((b) => b.options.some((o) => o.status === 'proposed') && b.status !== 'cancelled' && !progress(b).done).length;
     el.textContent = n > 99 ? '99+' : String(n);
     el.classList.toggle('hidden', n === 0);
     // `hidden` loses to inline-flex (equal specificity, later in style.css) — pin it inline too.
@@ -147,24 +148,44 @@
     return `<span class="${base} bg-gray-50 text-gray-600 border-gray-200">Not started</span>`;
   }
 
+  /** How many pictures this brief is for, and how many are chosen. */
+  function progress(b) {
+    const needed = Math.max(1, Number(b.picturesNeeded) || 1);
+    const chosen = b.options.filter((o) => o.status === 'approved').length;
+    return { needed, chosen, left: Math.max(0, needed - chosen), done: chosen >= needed };
+  }
+
+  /** What the pictures are for, in the campaign's words: its social posts, its articles, its emails. */
+  function forWhat(b) {
+    const noun = b.purpose === 'blog_header' ? 'articles' : b.purpose === 'email_header' ? 'emails' : 'social posts';
+    return b.campaign ? `the campaign's ${noun}` : noun;
+  }
+
+  // ⚠️ Every line says how many are chosen OF how many, and says plainly when no more are needed.
+  // "Use this" used to leave the user wondering how many more they had to pick (2026-10-14); a
+  // campaign brief for 10 posts now offers options until 10 are chosen, then stops.
   function activityLine(b) {
     const waiting = b.options.filter((o) => o.status === 'proposed').length;
-    const approved = b.options.filter((o) => o.status === 'approved').length;
+    const p = progress(b);
     if (b.status === 'generating') return `${name()} is making options now — usually under a minute. This page updates by itself.`;
-    if (b.status === 'cancelled') return 'Cancelled. Anything you approved is still in your library.';
-    if (b.status === 'approved') {
-      // ⚠️ Say it is FINISHED. "Use this" used to leave the user wondering how many more they had
-      // to pick (2026-10-14). One is all a brief needs; the rest are optional extras.
-      const extra = b.campaign
-        ? 'each extra one goes on one more of the campaign\'s posts'
-        : 'each extra one goes into your library';
-      return `Done — you have chosen ${approved}, and that is all this brief needs. Nothing else to do here.${waiting ? ` The other ${waiting} ${waiting === 1 ? 'option is' : 'options are'} optional: ${extra}.` : ''}`;
+    if (b.status === 'cancelled') return 'Cancelled. Anything you chose is still in your library.';
+    if (p.done) {
+      return p.needed > 1 || b.campaign
+        ? `All ${p.needed} chosen — no more pictures are needed for ${forWhat(b)}.`
+        : 'Done — you have chosen the picture this brief needs. Nothing else to do here.';
     }
-    if (waiting) return `Choose ONE you like with "Use this" — that is all this brief needs. Nothing is used anywhere until you do. ${waiting} ${waiting === 1 ? 'option' : 'options'} to choose from.`;
-    if (b.waitingOn) return `Waiting on ${b.waitingOn} to add their own — they use "Add your own" on this brief. Nothing is sent to them; tell them yourself.`;
-    if (b.rounds > 0) return 'Every option so far was turned down. Make another round — it reads why you turned them down.';
-    return 'Not started. Press "Make options" when the brief says what you want.';
+    const tally = p.needed > 1 ? `${p.chosen} of ${p.needed} chosen for ${forWhat(b)} — ${p.left} more needed. ` : '';
+    if (waiting) {
+      // Fewer options here than pictures still needed: say where the rest come from.
+      return waiting >= p.left
+        ? `${tally}Choose ${p.left === 1 ? 'the one you like' : `${p.left} you like`} with "Use this".`
+        : `${tally}Choose the ones you like with "Use this", then ask ${name()} for more options for the rest.`;
+    }
+    if (b.waitingOn) return `${tally}Waiting on ${b.waitingOn} to add their own — they use "Add your own" on this brief. Nothing is sent to them; tell them yourself.`;
+    if (b.rounds > 0) return `${tally}Ask ${name()} for more options — the next round reads why you turned any down.`;
+    return `${tally}Not started. Ask ${name()} for options when the brief says what you want.`;
   }
+
 
   /** The label on the round button states its cost before the click. */
   /** Why a paid source cannot run here, or null. The round skips it, so the label must not charge for it. */
@@ -218,7 +239,7 @@
             class="w-full mt-1 px-2 py-1 border border-gray-200 rounded-lg text-xs">
           <button type="button" data-brief-reject-cancel class="text-[11px] text-gray-500 underline">Keep it</button>
         </div>`;
-    } else if (o.status === 'proposed' && b.status !== 'cancelled') {
+    } else if (o.status === 'proposed' && b.status !== 'cancelled' && !progress(b).done) {
       actions = `
         <div class="flex gap-1 mt-2">
           <button type="button" data-brief-approve="${o.id}" class="btn-primary flex-1 px-2 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">Use this</button>
@@ -314,7 +335,7 @@
     const visible = b.options.filter((o) => o.status !== 'rejected');
     const rejected = b.options.length - visible.length;
     const note = state.notes[b.id];
-    const meta = [purposeLabel(b.purpose), b.aspectRatio, b.sources.map(sourceLabel).join(', '), b.dueDate ? `due ${b.dueDate}` : '', b.origin === 'chat' ? 'from chat' : '', b.origin === 'campaign' ? 'from a campaign' : '', b.origin === 'assistant' ? 'raised by your Social Media Assistant' : '']
+    const meta = [purposeLabel(b.purpose), (Number(b.picturesNeeded) || 1) > 1 ? `${b.picturesNeeded} pictures` : '', b.aspectRatio, b.sources.map(sourceLabel).join(', '), b.dueDate ? `due ${b.dueDate}` : '', b.origin === 'chat' ? 'from chat' : '', b.origin === 'campaign' ? 'from a campaign' : '', b.origin === 'assistant' ? 'raised by your Social Media Assistant' : '']
       .filter(Boolean).map(esc).join(' · ');
     const live = b.status !== 'cancelled';
     return `
@@ -339,8 +360,8 @@
         ${live ? ownPanelHtml(b) : ''}
         ${live ? `
           <div class="flex flex-wrap items-center gap-2 mt-4">
-            <button type="button" data-brief-generate="${b.id}" ${b.status === 'generating' || b.rounds >= V().maxRounds ? 'disabled' : ''}
-              class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(roundButtonLabel(b))}</button>
+            ${progress(b).done ? '' : `<button type="button" data-brief-generate="${b.id}" ${b.status === 'generating' || b.rounds >= (b.maxRounds || V().maxRounds) ? 'disabled' : ''}
+              class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(roundButtonLabel(b))}</button>`}
             <button type="button" data-brief-own-open="${b.id}"
               class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Add your own</button>
             <button type="button" data-brief-edit="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
@@ -350,8 +371,8 @@
             <button type="button" data-brief-cancel="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
               class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">Cancel brief</button>
           </div>
-          <p class="text-[11px] text-gray-500 mt-1">${esc(roundCostLine(b))}</p>
-          ${videoOfferHtml(b)}` : ''}
+          ${progress(b).done ? '' : `<p class="text-[11px] text-gray-500 mt-1">${esc(roundCostLine(b))}</p>
+          ${videoOfferHtml(b)}`}` : ''}
       </div>`;
   }
 
@@ -604,16 +625,18 @@
       approve.disabled = true;
       const optionId = Number(approve.dataset.briefApprove);
       const brief = state.briefs.find((b) => b.options.some((o) => o.id === optionId));
-      const firstPick = brief && !brief.options.some((o) => o.status === 'approved');
       try {
         const res = await post({ action: 'decide', optionId, decision: 'approve' });
-        // Say whether that FINISHED the brief — one pick is all a brief needs, and "how many more do
-        // I have to choose?" was the question this left unanswered (2026-10-14).
+        // Say how many are chosen OF how many, and plainly when no more are needed (2026-10-14).
+        const needed = Number(res.needed) || 1;
+        const chosen = Number(res.chosen) || 1;
+        const tally = chosen >= needed
+          ? (needed > 1 ? `All ${needed} chosen — no more are needed.` : 'That is all this brief needed, so you are done here.')
+          : `${chosen} of ${needed} chosen — ${needed - chosen} more needed.`;
         const where = brief && brief.campaign ? 'Added to the campaign and your library.' : 'Added to your library — every assistant can use it now.';
-        const done = firstPick ? ' That is all this brief needed, so you are done here.' : ' An extra pick — optional, and nothing else is needed.';
-        // A brief raised for a post (Phase 5) also says what happened to that post.
-        if (brief) say(brief.id, `${where}${done}${res.postNote ? ` ${res.postNote}` : ''}`);
-        window.showToast?.(firstPick ? 'Done — that is all this brief needed.' : 'Added.', 'success');
+        // Where it went (a post it was for, or one of the campaign's posts) is the server's sentence.
+        if (brief) say(brief.id, `${where} ${tally}${res.postNote ? ` ${res.postNote}` : ''}`);
+        window.showToast?.(chosen >= needed ? 'Done — no more pictures needed for this brief.' : `${chosen} of ${needed} chosen.`, 'success');
       } catch (err) {
         if (brief) say(brief.id, err.message, 'error');
       }
