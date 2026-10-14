@@ -211,6 +211,20 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // The Website Assistant finished an AI draft of the whole site (site-store.ts runSiteDraft).
+        // Nothing is live: a draft is only ever published by the owner's click (step 3).
+        templateKey: 'site_draft_ready',
+        name: 'Website draft ready',
+        category: 'Assistants',
+        type: 'site_draft_ready',
+        title: 'Your website draft is ready to look at',
+        message: '{{assistant.name}} has drafted {{site.pages}}. Open the preview to read it, change anything, and fill in the parts in [square brackets]. Nothing is live yet.',
+        variables: [
+            ASSISTANT_NAME,
+            v('site.pages', 'Pages drafted (noun phrase)', '4 pages'),
+        ],
+    },
+    {
         // A competitor the Mystery Shopper watches changed its page (site-audit.ts executeAuditRun).
         // Names the first change; `competitor.more` is a full sentence or empty, so the merge never
         // has to pluralise.

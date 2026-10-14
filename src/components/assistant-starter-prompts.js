@@ -35,6 +35,12 @@
     ],
     // About the site and its score — none asks it to run a check without the user's click (the card
     // it proposes is the click).
+    // Each one is a change it proposes as a card — nothing is applied, drafted or spent without a click.
+    website_assistant: [
+      'Draft my website — a page for each of my services, and a contact page.',
+      'Make the home page headline say exactly who we help.',
+      'Add a questions section to the home page answering what customers ask most.',
+    ],
     mystery_shopper: [
       'What is the one change to my homepage that would matter most?',
       'Why did my website get that score?',

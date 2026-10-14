@@ -453,6 +453,7 @@ window.generateAssistantCardHTML = function(assistant) {
         ...(dReg.hideDataHub ? [] : [['🗂️', dReg.hubTab?.label || 'Data Hub', 'datahub']]),
         ...(dReg.briefsTab ? [['🎨', dReg.briefsTab.label || 'Briefs', 'briefs']] : []),
         ...(dReg.siteAuditTab ? [['🔍', dReg.siteAuditTab.label || 'Website', 'website']] : []),
+        ...(dReg.siteEditorTab ? [['🌐', dReg.siteEditorTab.label || 'Website', 'sitebuilder']] : []),
         ...(dReg.hideReviewQueue ? [] : [['✅', dReg.reviewQueue?.label || 'Review', 'review-queue']]),
         ['📅', 'Calendar', 'calendar'],
     ] : [];
@@ -957,6 +958,8 @@ window._activateMainTab = function(name) {
     if (name === 'briefs') window.AssistantBriefs?.activate();
     // Website (Mystery Shopper) likewise — init() already fetched for the badge.
     if (name === 'website') window.AssistantSiteAudit?.activate();
+    // Website (Website Assistant) — the editor and preview; init() already fetched the site.
+    if (name === 'sitebuilder') window.AssistantSiteEditor?.activate();
     // Conversations already fetched at init() — its thread total feeds the tab's own count, so it
     // cannot wait for the tab to be opened. activate() repaints from that result rather than
     // refetching. (This comment used to say the opposite and was stale: the prefetch landed when
@@ -4622,6 +4625,13 @@ function _applyAssistantRulesScope() {
         if (subtitle) subtitle.textContent = 'Custom rules for this assistant. It follows them in every reply and proposal it makes.';
         return;
     }
+    if (window._detailRulesScope === 'site') {
+        note.classList.remove(...AMBER);
+        note.classList.add(...EMERALD);
+        text.textContent = 'Your Website Assistant follows these rules in every draft of your site it writes, and whenever you ask it for something in chat. Changes apply from the next draft.';
+        if (subtitle) subtitle.textContent = 'Custom rules for this assistant — for example a claim your site must never make, or words you never use.';
+        return;
+    }
     if (window._detailRulesScope === 'audit') {
         note.classList.remove(...AMBER);
         note.classList.add(...EMERALD);
@@ -5797,6 +5807,14 @@ function _applyDashboardRegistry(data) {
 
     // Website tab — Mystery Shopper only (siteAuditTab: mystery_shopper). init() loads eagerly: the
     // count of fixes waiting for a decision is the tab badge, visible from every tab.
+    // Website tab — Website Assistant only (siteEditorTab: website_assistant).
+    const siteEditorTab = cfg.siteEditorTab;
+    toggle('maintab-btn-sitebuilder', !!siteEditorTab);
+    if (siteEditorTab) {
+        setText('sitebuilder-tab-label', siteEditorTab.label || 'Website');
+        window.AssistantSiteEditor?.init({ assistantId: data.id, assistantName: data.name });
+    }
+
     const siteAuditTab = cfg.siteAuditTab;
     toggle('maintab-btn-website', !!siteAuditTab);
     if (siteAuditTab) {
@@ -9431,6 +9449,52 @@ async function _loadBrandMetrics(assistantId) {
     }
 }
 
+// ── Website Assistant KPI cards ──────────────────────────────────────────────
+// Routed here by `metricsSource: 'site'`. From sites.ts `get`: pages built against the plan's cap,
+// the [placeholders] still to fill, sections, and whether the site is live (publishing is step 3).
+async function _loadSiteMetrics(assistantId) {
+    const valEl   = (k) => document.getElementById(`metric-${k}-value`);
+    const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
+    const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
+    document.getElementById('metric-value-wins')?.classList.add('hidden');
+    try {
+        const res = await fetch('/.netlify/functions/sites', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({ action: 'get', assistantId }),
+        });
+        if (!res.ok) { _setMetricsEmptyState('error'); return; }
+        const data = await res.json();
+        _setMetricsEmptyState('cards');
+        const note = document.getElementById('metrics-status-note');
+        if (note) note.textContent = 'Your draft';
+        const pages = (data.definition?.pages || []);
+        const sections = pages.reduce((n, p) => n + (p.sections || []).length, 0);
+        const holes = (data.placeholders || []).length;
+
+        valEl('engagement').textContent = `${pages.length}/${data.maxPages}`;
+        _setKpiCard('engagement', { empty: !pages.length });
+        if (trendEl('engagement')) trendEl('engagement').textContent = '—';
+
+        // Amber: the number the owner brings down before publishing.
+        valEl('reach').textContent = String(holes);
+        _setKpiCard('reach', { empty: !holes });
+        if (trendEl('reach')) trendEl('reach').textContent = '—';
+        if (dotEl('reach')) dotEl('reach').className = 'w-2 h-2 rounded-full ' + (holes ? 'bg-amber-400' : 'bg-gray-200');
+
+        valEl('ctr').textContent = String(sections);
+        _setKpiCard('ctr', { empty: !sections });
+        if (trendEl('ctr')) trendEl('ctr').textContent = '—';
+
+        if (valEl('value')) {
+            valEl('value').textContent = data.site?.status === 'published' ? 'Live' : 'Draft';
+            _setKpiCard('value', { empty: data.site?.status !== 'published' });
+            if (trendEl('value')) trendEl('value').textContent = '—';
+        }
+    } catch {
+        _setMetricsEmptyState('error');
+    }
+}
+
 // ── Mystery Shopper KPI cards ────────────────────────────────────────────────
 // Routed here by `metricsSource: 'site_audit'`. Same markup as every role; the figures come from
 // site-audits.ts `performance` — this assistant publishes nothing, so the shared endpoint
@@ -9611,6 +9675,10 @@ async function _loadAssistantMetrics(assistantId, roleKey) {
     if (source === 'brand') {
         _setMetricsEmptyState('pending');
         return _loadBrandMetrics(assistantId);
+    }
+    if (source === 'site') {
+        _setMetricsEmptyState('pending');
+        return _loadSiteMetrics(assistantId);
     }
     if (source === 'site_audit') {
         _setMetricsEmptyState('pending');

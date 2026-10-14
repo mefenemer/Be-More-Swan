@@ -483,6 +483,7 @@
       if (reg && reg.hideReviewQueue && reg.briefsTab) return { tab: 'briefs', label: reg.briefsTab.label || 'Briefs' };
       // The Mystery Shopper's waiting work is its undecided fixes, on the Website tab.
       if (reg && reg.hideReviewQueue && reg.siteAuditTab) return { tab: 'website', label: reg.siteAuditTab.label || 'Website' };
+      if (reg && reg.hideReviewQueue && reg.siteEditorTab) return { tab: 'sitebuilder', label: reg.siteEditorTab.label || 'Website' };
       return { tab: 'review-queue', label: (reg && reg.reviewQueue && reg.reviewQueue.label) || 'Review' };
     };
     async function render() {

@@ -569,6 +569,37 @@
       defaultMainTab: 'briefs',
     },
 
+    // Website Assistant (docs/website-assistant-plan.md). Its work is ONE site — a draft edited on the
+    // Website tab (and in chat), published in step 3. No posts, records or review queue: the preview
+    // IS its review surface. Goals hidden until publishing gives it something measurable to track.
+    website_assistant: {
+      // Fed by sites.ts `get` (routed by metricsSource in assistants.js).
+      metricsSource: 'site',
+      kpis: [
+        { label: 'Pages', title: 'Built of Your Plan', desc: 'Pages in your site, out of the number your plan includes.' },
+        { label: 'Needs You', title: 'Details to Fill In', desc: 'Parts in [square brackets] — facts only you know — to fill in before you publish.' },
+        { label: 'Sections', title: 'On Your Pages', desc: 'Sections across every page of your site.' },
+        { label: 'Status', title: 'Draft or Live', desc: 'Your site stays a private draft until you publish it.' },
+      ],
+      hideReviewQueue: true,
+      hideDataHub: true,
+      hideGoals: true,
+      modules: {
+        hasPostingSchedule: false, hasSocialStrategy: false,
+        hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
+        hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+        hasContentPublishing: false,
+      },
+      // ⚠️ If you rename this tab, change websiteAssistantSurfaces() in chat-orchestrator.ts too —
+      // tests/website-assistant-wiring.test.ts fails until both agree.
+      siteEditorTab: {
+        label: 'Website',
+      },
+      // Rules tab: read by every AI draft of the site and by its chat (site-store.ts, RULE_READING_ROLES).
+      rulesScope: 'site',
+      defaultMainTab: 'sitebuilder',
+    },
+
     // Mystery Shopper (docs/mystery-shopper-plan.md §4). Its work is CHECKS of the business's website
     // and the fixes they suggest; it publishes nothing, files no records and has no post queue, so
     // every social module is off and the Review Queue / Data Hub are hidden — its review surface is

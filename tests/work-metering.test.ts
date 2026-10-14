@@ -30,6 +30,8 @@ const WORKERS: Array<[string, string, string]> = [
     ['src/utils/campaign-email-order.ts', 'email_campaign', 'const customKeys = await loadCustomFieldKeys'],
     // The Mystery Shopper: only a run that re-scored is charged, after the done+charged latch.
     ['src/utils/site-audit.ts', 'site_audit', 'if (!latched) return;'],
+    // The Website Assistant's whole-site draft: charged after the draft is saved under its claim.
+    ['src/utils/site-store.ts', 'site_draft', 'if (!saved) return;'],
 ];
 
 for (const [file, kind, marker] of WORKERS) {

@@ -21,7 +21,9 @@ import { getDb } from '../../db/client';
 import {
     goals, goalTelemetry, aiAssistants, systemConnections,
     scheduledPosts, plans, masterPlans, assistantRecords, blogPosts,
-    audienceContacts, newsletterIssues, siteAudits, visualBriefOptions, visualBriefs } from '../../db/schema';
+    audienceContacts, newsletterIssues, siteAudits, sites, visualBriefOptions, visualBriefs } from '../../db/schema';
+import { normaliseSiteDefinition } from '../../src/utils/site-definition';
+import { placeholdersIn } from '../../src/utils/site-draft';
 import { createNotification } from '../../src/utils/notify';
 import { getSecret } from '../../src/utils/vault';
 import {
@@ -549,6 +551,19 @@ async function fetchMetric(
                         eq(visualBriefOptions.status, 'approved'),
                     ));
                 return Number(row?.v ?? 0);
+            });
+        }
+
+        // Website Assistant — pages with content and no [placeholder] left. No site yet = no figure.
+        case 'site_pages_ready': {
+            return countOrUnmeasured(async () => {
+                const [row] = await db.select({ draft: sites.draft }).from(sites).where(and(
+                    eq(sites.aiAssistantId, goal.assistantId), eq(sites.organisationId, goal.organisationId),
+                )).limit(1);
+                if (!row) return 0;
+                const def = normaliseSiteDefinition(row.draft, { maxPages: 1000 }).definition;
+                const holes = new Set(placeholdersIn(def).map((p) => p.pageId));
+                return def.pages.filter((p) => p.sections.length > 0 && !holes.has(p.id)).length;
             });
         }
 

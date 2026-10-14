@@ -1,0 +1,533 @@
+// src/utils/site-definition.ts — what a Website Assistant site IS. docs/website-assistant-plan.md §4.2, §5.1.
+//
+// A site is a JSON definition — theme, navigation, pages, sections, footer, business details — that
+// our own renderer (site-render.ts) turns into HTML. The model NEVER writes HTML: it proposes typed
+// operations (add a section, change a headline, reorder, set the theme), and every one of them, and
+// every save from the editor, passes through ONE gate: `normaliseSiteDefinition`. That is the Form
+// Builder pattern (memory: form-builder-definition), and it is what makes these promises hold:
+//   · every page renders, on every screen size, because only known sections with known props exist;
+//   · nothing a user or a model types can become markup, script or a dangerous link — text is text,
+//     links are https / mailto / tel / one of the site's own pages, images are https with alt text;
+//   · the plan's page cap, one home page, unique page addresses and readable colours always hold.
+//
+// PURE: no database, no network. tests/site-definition.test.ts.
+
+import { contrastRatio, normalizeHex, readableInkOn } from './brand-kit';
+
+// ── Shapes ──────────────────────────────────────────────────────────────────────────────────
+
+export type FontKey = 'sans' | 'serif' | 'rounded' | 'system';
+export type RadiusKey = 'none' | 'small' | 'medium' | 'large';
+export type BusinessType = 'Organization' | 'LocalBusiness' | 'ProfessionalService' | 'Store';
+
+export interface SiteTheme {
+    primaryColor: string;
+    textColor: string;
+    backgroundColor: string;
+    font: FontKey;
+    radius: RadiusKey;
+    /** https URL of the logo; null = the site name in text. */
+    logoUrl: string | null;
+}
+
+export interface SiteSettings {
+    siteName: string;
+    /** The search description of the home page when it has none of its own. */
+    description: string | null;
+    businessType: BusinessType;
+    /** Town or city — what a buyer (or an AI assistant) needs to know where you work. */
+    locality: string | null;
+    email: string | null;
+    phone: string | null;
+}
+
+export interface Link { label: string; href: string; }
+export interface Image { url: string; alt: string; }
+
+export interface HeroProps {
+    layout: 'centered' | 'split' | 'banner';
+    eyebrow: string | null;
+    headline: string;
+    subheadline: string | null;
+    primaryCta: Link | null;
+    secondaryCta: Link | null;
+    image: Image | null;
+}
+export interface ItemsProps { heading: string | null; intro: string | null; items: Array<{ title: string; body: string }>; }
+export interface TextProps { heading: string | null; body: string; }
+export interface FaqProps { heading: string | null; items: Array<{ q: string; a: string }>; }
+export interface CtaProps { heading: string; body: string | null; button: Link; }
+/** What customers say — the proof a buyer looks for (and the Mystery Shopper checks for). */
+export interface TestimonialsProps { heading: string | null; items: Array<{ quote: string; name: string; detail: string | null }>; }
+
+export type Section =
+    | { id: string; type: 'hero'; props: HeroProps }
+    | { id: string; type: 'features'; props: ItemsProps }
+    | { id: string; type: 'steps'; props: ItemsProps }
+    | { id: string; type: 'text'; props: TextProps }
+    | { id: string; type: 'faq'; props: FaqProps }
+    | { id: string; type: 'cta'; props: CtaProps }
+    | { id: string; type: 'testimonials'; props: TestimonialsProps };
+export type SectionType = Section['type'];
+export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta'];
+
+export interface SitePageDef {
+    id: string;
+    /** '' is the home page; otherwise the page's address, e.g. 'services'. */
+    slug: string;
+    title: string;
+    seo: { title: string | null; description: string | null };
+    sections: Section[];
+}
+
+export interface SiteDefinition {
+    version: 1;
+    theme: SiteTheme;
+    settings: SiteSettings;
+    /** Page ids, in menu order. Empty = every page, in page order. */
+    nav: Array<{ label: string; pageId: string }>;
+    pages: SitePageDef[];
+    footer: { text: string | null };
+}
+
+// ── Limits ──────────────────────────────────────────────────────────────────────────────────
+
+export const LIMITS = {
+    siteName: 80, description: 170, locality: 80, email: 254, phone: 30,
+    pageTitle: 80, seoTitle: 65, seoDescription: 170, slug: 40,
+    sectionsPerPage: 20, navItems: 7, navLabel: 30, footer: 300,
+    headline: 120, subheadline: 300, eyebrow: 40, ctaLabel: 40, href: 500, alt: 150,
+    itemTitle: 80, itemBody: 400, intro: 300, textBody: 3000, faqItems: 15, q: 200, a: 1000,
+    features: 9, stepsMin: 2, steps: 6, testimonials: 9, quote: 500, personName: 80, personDetail: 80,
+} as const;
+
+/** Pages a site may have when the plan sets no number (decision D1: 5 on £29). */
+export const DEFAULT_MAX_PAGES = 5;
+/** Below this, body text on the background is hard to read (WCAG AA for body text). */
+export const MIN_TEXT_CONTRAST = 4.5;
+/** Page addresses we serve ourselves, which a page may never take. */
+export const RESERVED_SLUGS = new Set(['sitemap.xml', 'robots.txt', 'api', 'preview', 'assets', 'favicon.ico', '_bms', 'report']);
+
+export const DEFAULT_THEME: SiteTheme = {
+    primaryColor: '#1f2937', textColor: '#1f2937', backgroundColor: '#ffffff', font: 'sans', radius: 'medium', logoUrl: null,
+};
+
+// ── Text and link cleaning ──────────────────────────────────────────────────────────────────
+
+/** Plain text: control characters out, whitespace collapsed (newlines kept where `multiline`), clamped. */
+export function cleanText(v: unknown, max: number, multiline = false): string {
+    if (typeof v !== 'string') return '';
+    let s = v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
+    s = multiline
+        ? s.replace(/\r\n?/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').split('\n').map((l) => l.trim()).join('\n').trim()
+        : s.replace(/\s+/g, ' ').trim();
+    return s.length > max ? s.slice(0, max).trimEnd() : s;
+}
+const textOrNull = (v: unknown, max: number, multiline = false) => cleanText(v, max, multiline) || null;
+
+export const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const ID_RE = /^[a-z0-9_-]{1,24}$/;
+
+/** A page address from anything a person or model typed: 'Our Services!' → 'our-services'. */
+export function slugify(v: unknown): string {
+    return cleanText(v, 200).toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '')
+        .replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, LIMITS.slug).replace(/-+$/, '');
+}
+
+/**
+ * A link a visitor can safely follow: https, mailto, tel, an in-page anchor, or one of this site's
+ * own pages ('/' or '/<slug>' — checked against the real pages in a second pass). Everything else —
+ * javascript:, data:, plain http, protocol-relative — is refused (null).
+ */
+export function cleanHref(v: unknown): string | null {
+    const s = cleanText(v, LIMITS.href);
+    if (!s) return null;
+    if (s === '/' || /^\/[a-z0-9]+(?:-[a-z0-9]+)*$/.test(s)) return s;
+    if (/^#[a-z0-9_-]{1,40}$/i.test(s)) return s;
+    if (/^mailto:[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/i.test(s)) return s;
+    if (/^tel:\+?[0-9 ()-]{5,20}$/i.test(s)) return s.replace(/\s+/g, '');
+    try {
+        const u = new URL(s);
+        if (u.protocol !== 'https:' || u.username || u.password) return null;
+        return u.toString();
+    } catch { return null; }
+}
+
+function cleanLink(v: unknown): Link | null {
+    if (!v || typeof v !== 'object') return null;
+    const o = v as Record<string, unknown>;
+    const label = cleanText(o.label, LIMITS.ctaLabel);
+    const href = cleanHref(o.href);
+    return label && href ? { label, href } : null;
+}
+
+/** An image must be https AND described — an image without alt text is dropped, not shipped. */
+function cleanImage(v: unknown, warn: (m: string) => void): Image | null {
+    if (!v || typeof v !== 'object') return null;
+    const o = v as Record<string, unknown>;
+    const url = cleanHref(o.url);
+    const alt = cleanText(o.alt, LIMITS.alt);
+    if (!url || !url.startsWith('https://')) { if (o.url) warn('An image was left out: it needs an https address.'); return null; }
+    if (!alt) { warn('An image was left out: every image needs a short description (alt text).'); return null; }
+    return { url, alt };
+}
+
+// ── Sections ────────────────────────────────────────────────────────────────────────────────
+
+function items(v: unknown, max: number, warn: (m: string) => void): Array<{ title: string; body: string }> {
+    const list = Array.isArray(v) ? v : [];
+    const out = list.map((x) => {
+        const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
+        return { title: cleanText(o.title, LIMITS.itemTitle), body: cleanText(o.body, LIMITS.itemBody, true) };
+    }).filter((x) => x.title);
+    if (out.length > max) warn(`Only the first ${max} items were kept.`);
+    return out.slice(0, max);
+}
+
+/** One section's props, cleaned. Null = not a usable section (dropped, with a warning). */
+export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string) => void): Omit<Section, 'id'> | null {
+    const p = (rawProps && typeof rawProps === 'object' ? rawProps : {}) as Record<string, unknown>;
+    switch (type) {
+        case 'hero': {
+            const headline = cleanText(p.headline, LIMITS.headline);
+            if (!headline) { warn('A hero section was left out: it needs a headline.'); return null; }
+            const layout = p.layout === 'split' || p.layout === 'banner' ? p.layout : 'centered';
+            return { type: 'hero', props: {
+                layout, headline,
+                eyebrow: textOrNull(p.eyebrow, LIMITS.eyebrow),
+                subheadline: textOrNull(p.subheadline, LIMITS.subheadline),
+                primaryCta: cleanLink(p.primaryCta), secondaryCta: cleanLink(p.secondaryCta),
+                image: cleanImage(p.image, warn),
+            } };
+        }
+        case 'features':
+        case 'steps': {
+            const max = type === 'features' ? LIMITS.features : LIMITS.steps;
+            const list = items(p.items, max, warn);
+            if (!list.length) { warn(`A ${type} section was left out: it has no items.`); return null; }
+            if (type === 'steps' && list.length < LIMITS.stepsMin) { warn('A steps section was left out: it needs at least two steps.'); return null; }
+            return { type, props: { heading: textOrNull(p.heading, LIMITS.headline), intro: textOrNull(p.intro, LIMITS.intro, true), items: list } };
+        }
+        case 'text': {
+            const body = cleanText(p.body, LIMITS.textBody, true);
+            if (!body) { warn('A text section was left out: it is empty.'); return null; }
+            return { type: 'text', props: { heading: textOrNull(p.heading, LIMITS.headline), body } };
+        }
+        case 'faq': {
+            const list = (Array.isArray(p.items) ? p.items : []).map((x) => {
+                const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
+                return { q: cleanText(o.q, LIMITS.q), a: cleanText(o.a, LIMITS.a, true) };
+            }).filter((x) => x.q && x.a);
+            if (!list.length) { warn('A questions section was left out: it has no questions with answers.'); return null; }
+            if (list.length > LIMITS.faqItems) warn(`Only the first ${LIMITS.faqItems} questions were kept.`);
+            return { type: 'faq', props: { heading: textOrNull(p.heading, LIMITS.headline), items: list.slice(0, LIMITS.faqItems) } };
+        }
+        case 'testimonials': {
+            const list = (Array.isArray(p.items) ? p.items : []).map((x) => {
+                const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
+                return { quote: cleanText(o.quote, LIMITS.quote, true), name: cleanText(o.name, LIMITS.personName), detail: textOrNull(o.detail, LIMITS.personDetail) };
+            }).filter((x) => x.quote && x.name);
+            // A quote with nobody's name on it is the kind of proof buyers distrust — it needs one.
+            if (!list.length) { warn('A testimonials section was left out: each quote needs the customer\'s name.'); return null; }
+            if (list.length > LIMITS.testimonials) warn(`Only the first ${LIMITS.testimonials} testimonials were kept.`);
+            return { type: 'testimonials', props: { heading: textOrNull(p.heading, LIMITS.headline), items: list.slice(0, LIMITS.testimonials) } };
+        }
+        case 'cta': {
+            const heading = cleanText(p.heading, LIMITS.headline);
+            const button = cleanLink(p.button);
+            if (!heading || !button) { warn('A call-to-action section was left out: it needs a heading and a button.'); return null; }
+            return { type: 'cta', props: { heading, body: textOrNull(p.body, LIMITS.subheadline, true), button } };
+        }
+        default:
+            warn(`A section of an unknown kind was left out.`);
+            return null;
+    }
+}
+
+// ── Theme and settings ──────────────────────────────────────────────────────────────────────
+
+const FONTS: readonly FontKey[] = ['sans', 'serif', 'rounded', 'system'];
+const RADII: readonly RadiusKey[] = ['none', 'small', 'medium', 'large'];
+const BUSINESS_TYPES: readonly BusinessType[] = ['Organization', 'LocalBusiness', 'ProfessionalService', 'Store'];
+
+export function cleanTheme(raw: unknown, warn: (m: string) => void, base: SiteTheme = DEFAULT_THEME): SiteTheme {
+    const t = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const colour = (v: unknown, fallback: string) => normalizeHex(typeof v === 'string' ? v : '') ?? fallback;
+    let textColor = colour(t.textColor, base.textColor);
+    let backgroundColor = colour(t.backgroundColor, base.backgroundColor);
+    // Readable or nothing: an unreadable pair falls back to the defaults rather than shipping.
+    if (contrastRatio(textColor, backgroundColor) < MIN_TEXT_CONTRAST) {
+        warn('Those text and background colours are too hard to read together, so the defaults were kept.');
+        textColor = DEFAULT_THEME.textColor;
+        backgroundColor = DEFAULT_THEME.backgroundColor;
+    }
+    const logo = cleanHref(t.logoUrl);
+    return {
+        primaryColor: colour(t.primaryColor, base.primaryColor),
+        textColor, backgroundColor,
+        font: FONTS.includes(t.font as FontKey) ? (t.font as FontKey) : base.font,
+        radius: RADII.includes(t.radius as RadiusKey) ? (t.radius as RadiusKey) : base.radius,
+        logoUrl: logo && logo.startsWith('https://') ? logo : (t.logoUrl === null ? null : base.logoUrl),
+    };
+}
+
+/** The colour a button's label must be on the primary colour — dark or light, whichever reads. */
+export function buttonInk(theme: SiteTheme): string {
+    return readableInkOn(theme.primaryColor);
+}
+
+function cleanSettings(raw: unknown, base?: SiteSettings): SiteSettings {
+    const s = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const has = (k: string) => Object.prototype.hasOwnProperty.call(s, k);
+    const email = cleanText(s.email, LIMITS.email);
+    const phone = cleanText(s.phone, LIMITS.phone);
+    return {
+        siteName: cleanText(s.siteName, LIMITS.siteName) || base?.siteName || 'My business',
+        description: has('description') ? textOrNull(s.description, LIMITS.description) : base?.description ?? null,
+        businessType: BUSINESS_TYPES.includes(s.businessType as BusinessType) ? (s.businessType as BusinessType) : base?.businessType ?? 'Organization',
+        locality: has('locality') ? textOrNull(s.locality, LIMITS.locality) : base?.locality ?? null,
+        email: has('email') ? (/^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(email) ? email : null) : base?.email ?? null,
+        phone: has('phone') ? (/^\+?[0-9 ()-]{5,30}$/.test(phone) ? phone : null) : base?.phone ?? null,
+    };
+}
+
+// ── The gate ────────────────────────────────────────────────────────────────────────────────
+
+export interface NormaliseOptions { maxPages?: number; }
+export interface NormaliseResult { definition: SiteDefinition; warnings: string[]; }
+
+/**
+ * The ONE way a definition becomes trusted. Never throws, and always returns a site that renders:
+ * an empty or broken input becomes a one-page starter. What it dropped or changed is in `warnings`,
+ * in words a business owner can read.
+ */
+export function normaliseSiteDefinition(raw: unknown, opts: NormaliseOptions = {}): NormaliseResult {
+    const warnings: string[] = [];
+    const warn = (m: string) => { if (!warnings.includes(m)) warnings.push(m); };
+    const maxPages = Math.max(1, opts.maxPages ?? DEFAULT_MAX_PAGES);
+    const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+
+    const settings = cleanSettings(r.settings);
+    const theme = cleanTheme(r.theme, warn);
+
+    // Pages: ids unique and well-formed, slugs unique and not reserved, exactly one home.
+    const usedPageIds = new Set<string>();
+    const usedSlugs = new Set<string>();
+    const pages: SitePageDef[] = [];
+    let sectionCounter = 0;
+    const usedSectionIds = new Set<string>();
+    const nextSectionId = (want: unknown) => {
+        if (typeof want === 'string' && ID_RE.test(want) && !usedSectionIds.has(want)) { usedSectionIds.add(want); return want; }
+        let id: string;
+        do { id = `s${++sectionCounter}`; } while (usedSectionIds.has(id));
+        usedSectionIds.add(id);
+        return id;
+    };
+
+    const rawPages = Array.isArray(r.pages) ? r.pages : [];
+    for (const rp of rawPages) {
+        const p = (rp && typeof rp === 'object' ? rp : {}) as Record<string, unknown>;
+        const title = cleanText(p.title, LIMITS.pageTitle);
+        if (!title) { warn('A page without a title was left out.'); continue; }
+        let slug = p.slug === '' || p.slug === '/' ? '' : slugify(p.slug ?? title);
+        if (slug && RESERVED_SLUGS.has(slug)) slug = `${slug}-page`;
+        if (slug === '' && usedSlugs.has('')) slug = slugify(title) || 'page';   // a second "home" becomes a normal page
+        let unique = slug; let n = 2;
+        while (usedSlugs.has(unique)) unique = `${slug}-${n++}`;
+        if (pages.length >= maxPages) { warn(`Your plan includes ${maxPages} page${maxPages === 1 ? '' : 's'}, so "${title}" was left out.`); continue; }
+        let id = typeof p.id === 'string' && ID_RE.test(p.id) && !usedPageIds.has(p.id) ? p.id : '';
+        if (!id) { let k = pages.length + 1; do { id = `p${k++}`; } while (usedPageIds.has(id)); }
+        usedPageIds.add(id); usedSlugs.add(unique);
+
+        const rawSections = Array.isArray(p.sections) ? p.sections : [];
+        if (rawSections.length > LIMITS.sectionsPerPage) warn(`A page can have up to ${LIMITS.sectionsPerPage} sections; the rest were left out.`);
+        const sections: Section[] = [];
+        for (const rs of rawSections.slice(0, LIMITS.sectionsPerPage)) {
+            const s = (rs && typeof rs === 'object' ? rs : {}) as Record<string, unknown>;
+            const cleaned = cleanSection(s.type, s.props, warn);
+            if (cleaned) sections.push({ id: nextSectionId(s.id), ...cleaned } as Section);
+        }
+        const seo = (p.seo && typeof p.seo === 'object' ? p.seo : {}) as Record<string, unknown>;
+        pages.push({
+            id, slug: unique, title,
+            seo: { title: textOrNull(seo.title, LIMITS.seoTitle), description: textOrNull(seo.description, LIMITS.seoDescription) },
+            sections,
+        });
+    }
+
+    // Exactly one home page: the first page becomes home when none is.
+    if (!pages.length) {
+        pages.push({ id: 'p1', slug: '', title: 'Home', seo: { title: null, description: null }, sections: [
+            { id: nextSectionId(null), type: 'hero', props: { layout: 'centered', eyebrow: null, headline: settings.siteName, subheadline: null, primaryCta: null, secondaryCta: null, image: null } },
+        ] });
+    } else if (!pages.some((p) => p.slug === '')) {
+        usedSlugs.delete(pages[0].slug);
+        pages[0].slug = '';
+    }
+    // Home first, so the menu and the sitemap start where a visitor does.
+    pages.sort((a, b) => (a.slug === '' ? -1 : b.slug === '' ? 1 : 0));
+
+    // Internal links must point at a page that exists.
+    const pagePaths = new Set(pages.map((p) => (p.slug ? `/${p.slug}` : '/')));
+    const checkLink = (l: Link | null): Link | null => {
+        if (!l || !l.href.startsWith('/')) return l;
+        if (pagePaths.has(l.href)) return l;
+        warn(`A button pointed at a page that doesn't exist (${l.href}), so it was removed.`);
+        return null;
+    };
+    for (const page of pages) {
+        page.sections = page.sections.flatMap((s): Section[] => {
+            if (s.type === 'hero') return [{ ...s, props: { ...s.props, primaryCta: checkLink(s.props.primaryCta), secondaryCta: checkLink(s.props.secondaryCta) } }];
+            if (s.type === 'cta') {
+                const button = checkLink(s.props.button);
+                if (!button) { warn('A call-to-action section was left out: its button pointed nowhere.'); return []; }
+                return [{ ...s, props: { ...s.props, button } }];
+            }
+            return [s];
+        });
+    }
+
+    // Navigation: only pages that exist, each once, at most LIMITS.navItems.
+    const navSeen = new Set<string>();
+    const nav = (Array.isArray(r.nav) ? r.nav : []).flatMap((x) => {
+        const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
+        const pageId = typeof o.pageId === 'string' ? o.pageId : '';
+        const page = pages.find((p) => p.id === pageId);
+        if (!page || navSeen.has(pageId)) return [];
+        navSeen.add(pageId);
+        return [{ label: cleanText(o.label, LIMITS.navLabel) || page.title.slice(0, LIMITS.navLabel), pageId }];
+    }).slice(0, LIMITS.navItems);
+
+    const footer = { text: textOrNull((r.footer as Record<string, unknown> | undefined)?.text, LIMITS.footer, true) };
+
+    return { definition: { version: 1, theme, settings, nav, pages, footer }, warnings };
+}
+
+/** The menu a visitor sees: the nav as set, or every page in order when it is empty. */
+export function menuOf(def: SiteDefinition): Array<{ label: string; path: string; pageId: string }> {
+    const entries = def.nav.length ? def.nav : def.pages.slice(0, LIMITS.navItems).map((p) => ({ label: p.title.slice(0, LIMITS.navLabel), pageId: p.id }));
+    return entries.flatMap((n) => {
+        const page = def.pages.find((p) => p.id === n.pageId);
+        return page ? [{ label: n.label, path: page.slug ? `/${page.slug}` : '/', pageId: page.id }] : [];
+    });
+}
+
+// ── Operations (what the editor and the chat cards both send) ──────────────────────────────
+
+export type SiteOperation =
+    | { op: 'add_page'; title: string; slug?: string }
+    | { op: 'update_page'; pageId: string; title?: string; slug?: string; seo?: { title?: string | null; description?: string | null } }
+    | { op: 'remove_page'; pageId: string }
+    | { op: 'add_section'; pageId: string; section: { type: SectionType; props: unknown }; index?: number }
+    | { op: 'update_section'; pageId: string; sectionId: string; props: Record<string, unknown> }
+    | { op: 'remove_section'; pageId: string; sectionId: string }
+    | { op: 'move_section'; pageId: string; sectionId: string; toIndex: number }
+    | { op: 'set_nav'; items: Array<{ label?: string; pageId: string }> }
+    | { op: 'set_theme'; theme: Partial<Record<keyof SiteTheme, unknown>> }
+    | { op: 'set_settings'; settings: Partial<Record<keyof SiteSettings, unknown>> }
+    | { op: 'set_footer'; text: string | null };
+
+export type OperationResult = { ok: true; definition: SiteDefinition; warnings: string[] } | { ok: false; error: string };
+
+/**
+ * The gate's notes are written for a draft it tidied ("…was left out", "…the defaults were kept").
+ * When the user's OWN change is refused, nothing changed — so say that instead.
+ */
+export function refusalFrom(note: string | undefined, fallback: string): string {
+    if (!note) return fallback;
+    if (/too hard to read/.test(note)) return 'Those text and background colours are too hard to read together, so nothing was changed. Try a darker text colour or a lighter background.';
+    const m = /^An? [^:]*? was left out: (.*)$/.exec(note);
+    return m ? `Not saved — ${m[1]}` : note;
+}
+
+/**
+ * Apply one change, then re-run the gate. Refuses (with a sentence a person can act on) anything
+ * that would silently do nothing or break a rule: removing the home page, a page over the plan's
+ * cap, an id that doesn't exist, a section that would be dropped as invalid.
+ */
+export function applySiteOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseOptions = {}): OperationResult {
+    const maxPages = Math.max(1, opts.maxPages ?? DEFAULT_MAX_PAGES);
+    const next: SiteDefinition = JSON.parse(JSON.stringify(def));
+    const page = 'pageId' in op ? next.pages.find((p) => p.id === op.pageId) : undefined;
+    if ('pageId' in op && !page) return { ok: false, error: 'That page no longer exists.' };
+    const sectionIndex = page && 'sectionId' in op ? page.sections.findIndex((s) => s.id === op.sectionId) : -1;
+    if ('sectionId' in op && sectionIndex < 0) return { ok: false, error: 'That section no longer exists.' };
+
+    switch (op.op) {
+        case 'add_page': {
+            if (next.pages.length >= maxPages) return { ok: false, error: `Your plan includes ${maxPages} page${maxPages === 1 ? '' : 's'}, and this site has them all. Remove one, or move to a plan with more.` };
+            const title = cleanText(op.title, LIMITS.pageTitle);
+            if (!title) return { ok: false, error: 'A new page needs a title.' };
+            next.pages.push({ id: '', slug: slugify(op.slug || title) || 'page', title, seo: { title: null, description: null }, sections: [] });
+            break;
+        }
+        case 'update_page': {
+            if (op.title !== undefined) { const t = cleanText(op.title, LIMITS.pageTitle); if (!t) return { ok: false, error: 'A page needs a title.' }; page!.title = t; }
+            if (op.slug !== undefined && page!.slug !== '') {
+                const s = slugify(op.slug);
+                if (!s) return { ok: false, error: 'That page address has no letters or numbers in it.' };
+                if (next.pages.some((p) => p !== page && p.slug === s)) return { ok: false, error: `Another page already uses /${s}.` };
+                page!.slug = s;
+            }
+            if (op.seo) page!.seo = { ...page!.seo, ...op.seo } as SitePageDef['seo'];
+            break;
+        }
+        case 'remove_page': {
+            if (page!.slug === '') return { ok: false, error: 'The home page can\'t be removed — every site needs one.' };
+            next.pages = next.pages.filter((p) => p !== page);
+            next.nav = next.nav.filter((n) => n.pageId !== op.pageId);
+            break;
+        }
+        case 'add_section': {
+            if (page!.sections.length >= LIMITS.sectionsPerPage) return { ok: false, error: `A page can have up to ${LIMITS.sectionsPerPage} sections.` };
+            const why: string[] = [];
+            const cleaned = cleanSection(op.section?.type, op.section?.props, (m) => why.push(m));
+            if (!cleaned) return { ok: false, error: refusalFrom(why[0], 'That section isn\'t complete yet.') };
+            const at = Number.isInteger(op.index) ? Math.max(0, Math.min(op.index!, page!.sections.length)) : page!.sections.length;
+            page!.sections.splice(at, 0, { id: '', ...cleaned } as Section);
+            break;
+        }
+        case 'update_section': {
+            const current = page!.sections[sectionIndex];
+            const why: string[] = [];
+            const cleaned = cleanSection(current.type, { ...current.props, ...op.props }, (m) => why.push(m));
+            if (!cleaned) return { ok: false, error: refusalFrom(why[0], 'That change would leave the section incomplete.') };
+            page!.sections[sectionIndex] = { id: current.id, ...cleaned } as Section;
+            break;
+        }
+        case 'remove_section': {
+            page!.sections.splice(sectionIndex, 1);
+            break;
+        }
+        case 'move_section': {
+            const [s] = page!.sections.splice(sectionIndex, 1);
+            const to = Math.max(0, Math.min(Number.isInteger(op.toIndex) ? op.toIndex : 0, page!.sections.length));
+            page!.sections.splice(to, 0, s);
+            break;
+        }
+        case 'set_nav': {
+            next.nav = (Array.isArray(op.items) ? op.items : []).map((i) => ({ label: cleanText(i.label, LIMITS.navLabel), pageId: i.pageId }));
+            break;
+        }
+        case 'set_theme': {
+            const why: string[] = [];
+            next.theme = cleanTheme({ ...next.theme, ...op.theme }, (m) => why.push(m), next.theme);
+            if (why.length) return { ok: false, error: refusalFrom(why[0], 'That design change was not saved.') };
+            break;
+        }
+        case 'set_settings': {
+            next.settings = cleanSettings({ ...next.settings, ...op.settings }, next.settings);
+            break;
+        }
+        case 'set_footer': {
+            next.footer = { text: op.text };
+            break;
+        }
+        default:
+            return { ok: false, error: 'Unknown change.' };
+    }
+    // New pages and sections get their ids from the gate; everything else is re-checked there.
+    for (const p of next.pages) for (const s of p.sections) if (!s.id) (s as { id: unknown }).id = undefined;
+    const { definition, warnings } = normaliseSiteDefinition(next, opts);
+    return { ok: true, definition, warnings };
+}

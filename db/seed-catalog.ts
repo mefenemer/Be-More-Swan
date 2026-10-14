@@ -120,6 +120,19 @@ const CATALOG = [
         isActive: true,
     },
     {
+        // docs/website-assistant-plan.md. Builds and keeps up to date the business's website from a
+        // conversation. ⚠️ db/z-website-assistant.sql inserts this row on existing databases, HIDDEN —
+        // this entry is for a FRESH database. Go-live is the admin status change, never an edit here.
+        roleKey: 'website_assistant',
+        name: 'Website Assistant',
+        description: 'Builds your website from a conversation — pages, wording, pictures and layout — shows you a live preview, and makes the changes you ask for. No drag-and-drop, no templates to wrestle with: you describe it, approve it, and it keeps it up to date.',
+        category: 'Marketing & Sales',
+        iconKey: 'globe',
+        iconColor: 'purple',
+        comingSoon: false,
+        isActive: false,
+    },
+    {
         // docs/mystery-shopper-plan.md. Reads the business's website as a buyer would, scores it in
         // code, suggests rewrites and re-checks weekly. ⚠️ db/z-mystery-shopper-role.sql inserts this
         // row on existing databases, HIDDEN — this entry is for a FRESH database. Go-live is the admin

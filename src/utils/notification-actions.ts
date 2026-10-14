@@ -171,6 +171,8 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     // A Mystery Shopper check finished (site-audit.ts). A report — nothing is blocked on it.
     site_audit_ready: 'state_change',
     site_audit_competitor_change: 'state_change', site_audit_goal_met: 'state_change',
+    // A Website Assistant draft is ready to look at. Nothing is published by it.
+    site_draft_ready: 'state_change',
     // Issue #191 follow-up — confirms a reinstate actually took effect.
     assistant_reinstated: 'state_change',
     goal_autonomous_adjustment: 'state_change', // SMART Goals AC3.3.3 — autonomous brief change FYI

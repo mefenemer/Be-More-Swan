@@ -243,6 +243,8 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             // Its other two reports: a competitor changed its headline/prices/proof/offer, and the
             // site reached its target score. Both summaries — nothing waits on the user.
             'site_audit_competitor_change', 'site_audit_goal_met',
+            // The Website Assistant finished an AI draft of the site (site-store.ts runSiteDraft).
+            'site_draft_ready',
         ],
     },
     {

@@ -699,6 +699,35 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // Website Assistant cards → sites.ts, the same actions as the Website tab. Each dispatches
+    // `site:changed` so the editor behind the chat reloads.
+    function sitePost(payload) {
+      return fetch('/.netlify/functions/sites', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(payload),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+        return data;
+      });
+    }
+    const siteChanged = () => document.dispatchEvent(new CustomEvent('site:changed', { detail: { assistantId } }));
+
+    function onSiteApply(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      sitePost({ action: 'apply', assistantId, ops: Array.isArray(d.ops) ? d.ops : [] })
+        .then((data) => { respond({ ok: true, warnings: data.warnings || [] }); siteChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
+    function onSiteDraft(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      sitePost({ action: 'draft', assistantId, request: d.request || '' })
+        .then(() => { respond({ ok: true }); siteChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     // "Save guidelines" on a brand_guideline_proposal card — brand-kit.ts `save_guidelines`, the same
     // save as Business Information ▸ Brand Assets ▸ Picture guidelines.
     function onBrandSaveGuidelines(e) {
@@ -987,6 +1016,8 @@
     container.addEventListener('siteaudit:save', onSiteAuditSave);
     container.addEventListener('siteaudit:fix', onSiteAuditFix);
     container.addEventListener('siteaudit:handoff', onSiteAuditHandoff);
+    container.addEventListener('site:apply', onSiteApply);
+    container.addEventListener('site:draft', onSiteDraft);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
     container.addEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
@@ -1029,6 +1060,8 @@
         container.removeEventListener('siteaudit:save', onSiteAuditSave);
         container.removeEventListener('siteaudit:fix', onSiteAuditFix);
         container.removeEventListener('siteaudit:handoff', onSiteAuditHandoff);
+        container.removeEventListener('site:apply', onSiteApply);
+        container.removeEventListener('site:draft', onSiteDraft);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
         container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);

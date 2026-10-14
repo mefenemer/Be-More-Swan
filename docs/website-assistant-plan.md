@@ -1,7 +1,19 @@
 # Website Assistant — Plan
 
 Added 2026-10-14, from an external proposal ("Website Design Assistant") reviewed against the code
-as built. Status: **proposed, not started.** Builds after
+as built. Status: **step 1 built 2026-10-14** — `src/utils/site-definition.ts` (definition, the one
+`normaliseSiteDefinition` gate, typed operations), `src/utils/site-render.ts` (HTML pages, sitemap,
+robots, JSON-LD; no JavaScript in the output), `tests/site-builder.test.ts`. Sections so far: hero,
+features, steps, text, FAQ, testimonials, call to action. **Step 2 (without hosting) built
+2026-10-14**: role `website_assistant` (inserted Hidden by `db/z-website-assistant.sql`, which also
+adds `sites` and the `website_pages` plan feature: 5 / 15 / 50, off the pricing table until go-live),
+API `sites.ts` (get / apply / draft), AI whole-site draft (`site-draft.ts`, `site-store.ts`,
+`draft-site-background.ts`; 1 task; never invents facts — `[placeholders]` instead), signed-in preview
+`site-preview.ts` (CSP forbids scripts), the Website tab editor (`assistant-site-editor.js`), chat
+route + `site_changes` / `site_draft_request` cards, goal metric `site_pages_ready`, notification
+`site_draft_ready`. Credit link ON by default (owner, 2026-10-14). Not yet: hosting/publish (needs
+the free-subdomain domain), forms, commerce — step 3. Step 3's publish must refuse pages with
+`[placeholders]` (`placeholdersIn`). Builds after
 [mystery-shopper-plan.md](./mystery-shopper-plan.md).
 
 ---

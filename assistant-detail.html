@@ -729,6 +729,12 @@
         <!-- `hidden` loses to `inline-flex` (equal specificity, later in style.css): pinned inline too. -->
         <span id="site-audit-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
+      <!-- Website — Website Assistant only (siteEditorTab: website_assistant). The site's pages and
+           sections, design and details, and the live preview. assistant-site-editor.js → sites.ts.
+           Ids say "sitebuilder" because "website" is the Mystery Shopper's tab. -->
+      <button type="button" id="maintab-btn-sitebuilder" data-maintab="sitebuilder" class="main-tab-btn hidden">
+        <span id="sitebuilder-tab-label">Website</span>
+      </button>
       <button type="button" id="maintab-btn-signals" data-maintab="signals" class="main-tab-btn hidden">
         <span id="signals-tab-label">Searches</span>
         <!-- `hidden` loses to `inline-flex` (equal specificity, emitted later in style.css), so the
@@ -1030,6 +1036,11 @@
   <div id="maintab-website" class="main-tab-content hidden">
     <div id="site-audit-host"></div>
   </div><!-- /maintab-website -->
+
+  <!-- Website — Website Assistant only. Rendered lazily by assistant-site-editor.js on first activation. -->
+  <div id="maintab-sitebuilder" class="main-tab-content hidden">
+    <div id="site-editor-host"></div>
+  </div><!-- /maintab-sitebuilder -->
 
   <div id="maintab-email-campaigns" class="main-tab-content hidden">
     <div id="email-campaigns-host"></div>
