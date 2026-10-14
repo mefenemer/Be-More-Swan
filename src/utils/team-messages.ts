@@ -158,8 +158,16 @@ export async function noteOrderIssued(db: Db, o: OrderCtx & { summary?: string |
                 link: { assistantId: o.targetAssistantId, tab: 'signals', label: 'Open the search' } });
         case 'commission_visuals': {
             const many = n > 1 ? ` — ${n} pictures, one for each post` : '';
+            // A brief with only free sources starts its first round at once (campaign-orders.ts), so
+            // say what is ACTUALLY happening: "ask me for options" while they were already being made
+            // sent the person to press a button that was greyed out (found on prod, 2026-10-14).
+            const [b] = await db.select({ status: visualBriefs.status }).from(visualBriefs)
+                .where(and(eq(visualBriefs.campaignOrderId, o.orderId), eq(visualBriefs.organisationId, o.organisationId))).limit(1);
+            const making = b?.status === 'generating';
             await postOncePerOrder(db, o.orderId, { ...base, toUser: true, kind: 'started',
-                body: `Your brief is ready${many}. Ask me for options on my Briefs tab and choose the ones you like.`,
+                body: making
+                    ? `Your brief is ready${many}. I am making the first options now — free stock photos and branded cards — and they will be on my Briefs tab in about a minute. Choose the ones you like.`
+                    : `Your brief is ready${many}. Ask me for options on my Briefs tab and choose the ones you like.`,
                 link: { assistantId: o.targetAssistantId, tab: 'briefs', label: 'Open the brief' } });
             await askAboutVideo(db, { ...o, targetAssistantId: o.targetAssistantId });
             return;

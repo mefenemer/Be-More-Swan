@@ -15,6 +15,7 @@
 // ⚠️ Never throws. A source that fails drops that assistant's lines (or the whole block), and the
 // conversation carries on exactly as it did before this existed.
 
+import { safeSlice } from './text-safe';
 import { and, asc, desc, eq, gte, inArray, isNotNull, lte, ne, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords, blogPosts, newsletterIssues, revenueEvents, scheduledPosts } from '../../db/schema';
@@ -55,7 +56,7 @@ export async function recentWorkFor(db: Db, orgId: number, a: Pick<TeamMember, '
         for (const p of posts) {
             // The opening words say what the post was ABOUT — "published a post" alone tells a
             // teammate nothing it can build on or avoid repeating.
-            const gist = String(p.caption ?? '').replace(/\s+/g, ' ').trim().slice(0, 90);
+            const gist = safeSlice(String(p.caption ?? '').replace(/\s+/g, ' ').trim(), 90);
             items.push({
                 id: `post-${p.id}`, type: 'post_published', icon: 'rocket',
                 description: `Published a post to ${platformName(p.platform)}${gist ? `: “${gist}${String(p.caption ?? '').length > 90 ? '…' : ''}”` : ''}.`,
@@ -145,7 +146,7 @@ const fmtWhen = (d: Date, tz?: string | null) => {
     const opts: Intl.DateTimeFormatOptions = { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', ...(tz ? { timeZone: tz } : {}) };
     try { return d.toLocaleString('en-GB', opts); } catch { return d.toISOString().slice(0, 16).replace('T', ' '); }
 };
-const clean = (s: string, max: number) => s.replace(/\s+/g, ' ').trim().slice(0, max);
+const clean = (s: string, max: number) => safeSlice(s.replace(/\s+/g, ' ').trim(), max);
 
 /**
  * Render the block. Pure — tested without a database. Returns null when there is no team beyond
