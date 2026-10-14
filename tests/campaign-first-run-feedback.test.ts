@@ -63,6 +63,8 @@ check('5. campaign posts fan out to every platform the assistant drafts for', ()
     assert.ok(orders.includes('async function campaignPostPlatforms('), 'no platform resolution');
     assert.ok(orders.includes('resolveConnectedDraftPlatforms(db, ctx.organisationId, a)'), 'not scoped to the assistant');
     assert.strictEqual((orders.match(/\.\.\.fan,/g) || []).length, 2, 'both post executors must carry the platforms');
+    // ...and one cross-post group per job, or the platforms are four unrelated posts (prod, 2026-10-14).
+    assert.strictEqual((orders.match(/crosspostGroupId: crossPostGroup\(fan\),/g) || []).length, 2, 'per-platform posts are not grouped');
 });
 
 check('5 & 9. a campaign picture goes on ONE post, then the usual sources take over', () => {
