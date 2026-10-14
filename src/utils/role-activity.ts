@@ -16,7 +16,7 @@ import { and, desc, eq, gte, isNotNull } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
     assistantRecords, blogPosts, campaignDecisions, campaignOrders, campaigns, newsletterIssues, newsletterSequences,
-    taskRuns, visualBriefOptions, visualBriefs,
+    siteAuditFixes, siteAuditRuns, siteAudits, taskRuns, visualBriefOptions, visualBriefs,
 } from '../../db/schema';
 
 type Db = ReturnType<typeof getDb>;
@@ -32,7 +32,7 @@ const RECORD_NOUNS: Record<string, { type: string; made: string; noun: string }>
 };
 
 /** The roles this module adds rows for. Anything else gets the shared feed unchanged. */
-export const ROLE_ACTIVITY_ROLES = new Set([...Object.keys(RECORD_NOUNS), 'newsletter_editor', 'blog_writer', 'campaign_orchestrator', 'brand_designer']);
+export const ROLE_ACTIVITY_ROLES = new Set([...Object.keys(RECORD_NOUNS), 'newsletter_editor', 'blog_writer', 'campaign_orchestrator', 'brand_designer', 'mystery_shopper']);
 
 const clip = (s: string | null | undefined, n = 70) => {
     const t = (s ?? '').replace(/\s+/g, ' ').trim();
@@ -155,6 +155,26 @@ export async function roleActivityItems(db: Db, args: {
                 eq(visualBriefOptions.status, 'approved'), isNotNull(visualBriefOptions.decidedAt), ...since(visualBriefOptions.decidedAt),
             )).orderBy(desc(visualBriefOptions.decidedAt)).limit(limit);
         for (const a of approved) items.push({ id: `opt-ok-${a.id}`, type: 'visual_option_approved', icon: 'check-circle', description: `You approved a picture for "${clip(a.title, 50)}" — it's in your library.`, createdAt: a.decidedAt!, status: 'success' });
+    }
+
+    if (roleKey === 'mystery_shopper') {
+        // Every check that ended — including "nothing had changed", which is the proof it looked.
+        const runs = await db.select({ id: siteAuditRuns.id, status: siteAuditRuns.status, score: siteAuditRuns.overallScore, error: siteAuditRuns.error, at: siteAuditRuns.createdAt })
+            .from(siteAuditRuns).innerJoin(siteAudits, eq(siteAudits.id, siteAuditRuns.auditId)).where(and(
+                eq(siteAuditRuns.organisationId, orgId), eq(siteAudits.aiAssistantId, assistantId), ...since(siteAuditRuns.createdAt),
+            )).orderBy(desc(siteAuditRuns.createdAt)).limit(limit);
+        for (const r of runs) {
+            if (r.status === 'done') items.push({ id: `check-${r.id}`, type: 'site_check', icon: 'search', description: `Checked your website: it scored ${r.score ?? '—'}/100.`, createdAt: r.at, status: 'success' });
+            else if (r.status === 'unchanged') items.push({ id: `check-${r.id}`, type: 'site_check', icon: 'search', description: 'Checked your website and your competitors\' — nothing had changed, so the score stands.', createdAt: r.at, status: 'info' });
+            else if (r.status === 'unreadable') items.push({ id: `check-${r.id}`, type: 'site_check', icon: 'alert', description: 'Tried to check your website, but the page shows almost no text without JavaScript.', createdAt: r.at, status: 'needs_input' });
+            else if (r.status === 'failed') items.push({ id: `check-${r.id}`, type: 'site_check', icon: 'alert', description: `A website check did not complete: ${clip(r.error, 90)}`, createdAt: r.at, status: 'failed' });
+            else items.push({ id: `check-${r.id}`, type: 'site_check', icon: 'search', description: 'Checking your website now.', createdAt: r.at, status: 'in_progress' });
+        }
+        const live = await db.select({ id: siteAuditFixes.id, location: siteAuditFixes.location, at: siteAuditFixes.updatedAt })
+            .from(siteAuditFixes).innerJoin(siteAudits, eq(siteAudits.id, siteAuditFixes.auditId)).where(and(
+                eq(siteAuditFixes.organisationId, orgId), eq(siteAudits.aiAssistantId, assistantId), eq(siteAuditFixes.status, 'done'), ...since(siteAuditFixes.updatedAt),
+            )).orderBy(desc(siteAuditFixes.updatedAt)).limit(limit);
+        for (const f of live) items.push({ id: `fix-live-${f.id}`, type: 'site_fix_live', icon: 'check-circle', description: `Confirmed your change is live: ${clip(f.location || 'a page change', 60)}.`, createdAt: f.at, status: 'success' });
     }
 
     return items;

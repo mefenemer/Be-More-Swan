@@ -32,4 +32,5 @@ export const ASSISTANT_BUILD: Readonly<Record<string, RoleBuild>> = {
     tier1_support_agent:       { setup: 'schema', chat: true, dashboard: true },
     crm_enricher:              { setup: 'schema', chat: true, dashboard: true },
     meeting_note_taker:        { setup: 'schema', chat: true, dashboard: true },
+    mystery_shopper:           { setup: 'schema', chat: true, dashboard: true },
 };

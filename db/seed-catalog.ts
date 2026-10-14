@@ -120,6 +120,20 @@ const CATALOG = [
         isActive: true,
     },
     {
+        // docs/mystery-shopper-plan.md. Reads the business's website as a buyer would, scores it in
+        // code, suggests rewrites and re-checks weekly. ⚠️ db/z-mystery-shopper-role.sql inserts this
+        // row on existing databases, HIDDEN — this entry is for a FRESH database. Go-live is the admin
+        // status change on Admin ▸ Configuration ▸ Assistants, never an edit here.
+        roleKey: 'mystery_shopper',
+        name: 'Mystery Shopper',
+        description: 'Reads your website the way a real buyer would — a sceptical first-time visitor, a buyer comparing you with your competitors, and an AI assistant deciding whether it could recommend you — then scores it, writes the replacement wording, and checks again every week to prove each fix landed.',
+        category: 'Marketing & Sales',
+        iconKey: 'globe',
+        iconColor: 'pink',
+        comingSoon: false,
+        isActive: false,
+    },
+    {
         roleKey: 'social_media_manager',
         name: 'Social Media Assistant',
         description: 'Plans, writes, and schedules branded content across all your social channels — consistent pipeline generation without the daily grind.',

@@ -195,6 +195,55 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // The Mystery Shopper finished a check (src/utils/site-audit.ts executeAuditRun). Only sent
+        // for a check that re-scored — an unchanged week is not news. The score is passed as a
+        // string ('—' when the page couldn't be scored) so the merge never prints "null".
+        templateKey: 'site_audit_ready',
+        name: 'Website check ready',
+        category: 'Assistants',
+        type: 'site_audit_ready',
+        title: 'Your website scored {{audit.score}}/100',
+        message: '{{assistant.name}} has read {{audit.site}} the way a buyer would and lined up the changes that matter most.',
+        variables: [
+            ASSISTANT_NAME,
+            v('audit.score', 'Overall score', '64'),
+            v('audit.site', 'Website', 'yourbusiness.co.uk'),
+        ],
+    },
+    {
+        // A competitor the Mystery Shopper watches changed its page (site-audit.ts executeAuditRun).
+        // Names the first change; `competitor.more` is a full sentence or empty, so the merge never
+        // has to pluralise.
+        templateKey: 'site_audit_competitor_change',
+        name: 'Competitor changed their website',
+        category: 'Assistants',
+        type: 'site_audit_competitor_change',
+        title: '{{competitor.site}} changed their website',
+        message: '{{assistant.name}} spotted it on this week\'s check: {{competitor.change}}. {{competitor.more}}',
+        variables: [
+            ASSISTANT_NAME,
+            v('competitor.site', 'Competitor website', 'rival-agency.co.uk'),
+            v('competitor.change', 'The first change, in words', 'Headline changed from "Bookkeeping for agencies" to "Agency bookkeeping — or your first month free"'),
+            v('competitor.more', 'Sentence when there is more, or empty', 'More changes are listed on the Website tab.'),
+        ],
+    },
+    {
+        // The website reached its target score (site-audit.ts). Sent once — the audit moves to
+        // 'goal_met' and keeps being checked weekly.
+        templateKey: 'site_audit_goal_met',
+        name: 'Website reached its target score',
+        category: 'Assistants',
+        type: 'site_audit_goal_met',
+        title: '{{audit.site}} reached {{audit.score}}/100',
+        message: 'That hits your target of {{audit.target}}. {{assistant.name}} will keep checking it every week — and on the Website tab you can move on to your next most important page.',
+        variables: [
+            ASSISTANT_NAME,
+            v('audit.site', 'Website', 'yourbusiness.co.uk'),
+            v('audit.score', 'Score', '87'),
+            v('audit.target', 'Target', '85'),
+        ],
+    },
+    {
         // A PROSPECT wrote back (Phase 2a reply ingest, netlify/functions/inbound-email.ts).
         //
         // ⚠️ This is the one notification in the lead pipeline that is genuinely time-critical, and

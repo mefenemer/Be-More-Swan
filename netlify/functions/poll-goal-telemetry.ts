@@ -21,7 +21,7 @@ import { getDb } from '../../db/client';
 import {
     goals, goalTelemetry, aiAssistants, systemConnections,
     scheduledPosts, plans, masterPlans, assistantRecords, blogPosts,
-    audienceContacts, newsletterIssues, visualBriefOptions, visualBriefs } from '../../db/schema';
+    audienceContacts, newsletterIssues, siteAudits, visualBriefOptions, visualBriefs } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { getSecret } from '../../src/utils/vault';
 import {
@@ -550,6 +550,23 @@ async function fetchMetric(
                     ));
                 return Number(row?.v ?? 0);
             });
+        }
+
+        // Mystery Shopper — the latest score, not a count. A null score (never scored, or the page
+        // could not be read) is "no figure yet", never 0.
+        case 'site_health_score': {
+            try {
+                const [row] = await db.select({ v: siteAudits.currentScore }).from(siteAudits).where(and(
+                    eq(siteAudits.aiAssistantId, goal.assistantId),
+                    eq(siteAudits.organisationId, goal.organisationId),
+                )).limit(1);
+                return { value: row?.v ?? null, disconnected: false };
+            } catch (err) {
+                const code = (err as { code?: string; cause?: { code?: string } })?.code
+                    ?? (err as { cause?: { code?: string } })?.cause?.code;
+                if (code !== '42P01' && code !== '42703') throw err;
+                return { value: null, disconnected: false };
+            }
         }
 
         case 'cash_recovered': {

@@ -141,7 +141,7 @@ check('the handler builds each snapshot scoped to this org and assistant and pas
     for (const fn of ['buildPostsSnapshot', 'buildBlogSnapshot', 'buildEmailsSnapshot']) {
         assert.ok(new RegExp(`${fn}\\(db, orgId, session\\.aiAssistantId`).test(orchestrator), `${fn} must be called with this org and assistant`);
     }
-    assert.ok(/briefsSnapshot,\s*contentSnapshot,/.test(orchestrator), 'the handler must pass contentSnapshot into buildRolePrompt');
+    assert.ok(/briefsSnapshot,\s*(?:siteAuditSnapshot,\s*)?contentSnapshot,/.test(orchestrator), 'the handler must pass contentSnapshot into buildRolePrompt');
 });
 
 console.log('\nThe snapshot text');

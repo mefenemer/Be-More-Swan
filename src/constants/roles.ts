@@ -34,6 +34,9 @@ export const NEWSLETTER_ROLE_KEY = 'newsletter_editor';
 /** The Brand Designer — briefs, a review grid of options, approved pictures into the library. */
 export const BRAND_DESIGNER_ROLE_KEY = 'brand_designer';
 
+/** The Mystery Shopper — reads the business's website as a buyer would, scores it, re-checks weekly. */
+export const MYSTERY_SHOPPER_ROLE_KEY = 'mystery_shopper';
+
 /**
  * The roles the Campaign Assistant is allowed to issue orders to, and nothing else.
  *

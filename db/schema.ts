@@ -4,6 +4,7 @@ import {
   text,
   timestamp,
   integer,
+  smallint,
   bigint,
   boolean,
   // `real`, not `numeric`: numeric comes back from postgres-js as a STRING, and every reader of a
@@ -5399,3 +5400,89 @@ export const teamReads = pgTable("team_reads", {
   lastReadId: integer("last_read_id").notNull().default(0),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [primaryKey({ columns: [t.organisationId, t.userId] })]);
+
+// ── Mystery Shopper — audits, runs and fixes (docs/mystery-shopper-plan.md §5) ─────────────────
+// One audit per hired Mystery Shopper; one run per check (an 'unchanged' run is still a row — the
+// proof it looked); fixes verified by a later run that no longer finds the old text. Pipeline in
+// src/utils/site-audit.ts. Requires db/z-mystery-shopper.sql.
+export const siteAudits = pgTable("site_audits", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  url: text().notNull(),
+  icp: text(),
+  conversionGoal: text("conversion_goal"),
+  competitorUrls: jsonb("competitor_urls").notNull().default([]),
+  checkWeekday: smallint("check_weekday").notNull().default(1),
+  baselineScore: integer("baseline_score"),
+  currentScore: integer("current_score"),
+  targetScore: integer("target_score").notNull().default(85),
+  status: text().notNull().default("active"),
+  lastHashes: jsonb("last_hashes").notNull().default({}),
+  lastRunId: integer("last_run_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("site_audits_assistant_uq").on(t.aiAssistantId),
+  index("site_audits_org_idx").on(t.organisationId),
+  index("site_audits_dispatch_idx").on(t.status, t.checkWeekday),
+  check("site_audits_check_weekday_check", sql`${t.checkWeekday} BETWEEN 0 AND 6`),
+  check("site_audits_target_score_check", sql`${t.targetScore} BETWEEN 1 AND 100`),
+  check("site_audits_status_check", sql`${t.status} IN ('active','paused','goal_met')`),
+]);
+
+export const siteAuditRuns = pgTable("site_audit_runs", {
+  id: serial().primaryKey(),
+  auditId: integer("audit_id").references(() => siteAudits.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").references(() => organisations.id, { onDelete: "cascade" }),
+  requestedBy: integer("requested_by").references(() => users.id, { onDelete: "set null" }),
+  kind: text().notNull(),
+  status: text().notNull().default("queued"),
+  overallScore: integer("overall_score"),
+  scores: jsonb(),
+  pages: jsonb(),
+  changes: jsonb(),
+  report: jsonb(),
+  groundingDropped: integer("grounding_dropped").notNull().default(0),
+  error: text(),
+  charged: boolean().notNull().default(false),
+  emailHash: text("email_hash"),
+  urlHash: text("url_hash"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  startedAt: timestamp("started_at"),
+  finishedAt: timestamp("finished_at"),
+}, (t) => [
+  index("site_audit_runs_audit_idx").on(t.auditId, t.createdAt.desc()),
+  index("site_audit_runs_taster_url_idx").on(t.urlHash, t.createdAt.desc()).where(sql`kind = 'public_taster'`),
+  uniqueIndex("site_audit_runs_one_in_flight_uq").on(t.auditId).where(sql`status IN ('queued', 'running') AND audit_id IS NOT NULL`),
+  check("site_audit_runs_kind_check", sql`${t.kind} IN ('baseline','weekly','manual','public_taster')`),
+  check("site_audit_runs_status_check", sql`${t.status} IN ('queued','running','done','unchanged','unreadable','failed')`),
+  check("site_audit_runs_owner_check", sql`${t.kind} = 'public_taster' OR (${t.auditId} IS NOT NULL AND ${t.organisationId} IS NOT NULL)`),
+]);
+
+export const siteAuditFixes = pgTable("site_audit_fixes", {
+  id: serial().primaryKey(),
+  auditId: integer("audit_id").notNull().references(() => siteAudits.id, { onDelete: "cascade" }),
+  runId: integer("run_id").notNull().references(() => siteAuditRuns.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  lens: text().notNull(),
+  location: text(),
+  problem: text().notNull(),
+  beforeText: text("before_text").notNull(),
+  afterText: text("after_text").notNull(),
+  whyItMatters: text("why_it_matters"),
+  impact: text().notNull().default("medium"),
+  status: text().notNull().default("open"),
+  verifiedRunId: integer("verified_run_id").references(() => siteAuditRuns.id, { onDelete: "set null" }),
+  // Which page the fix was suggested for — verification only compares a fix with ITS page
+  // (db/z-mystery-shopper-weekly.sql).
+  pageUrl: text("page_url"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("site_audit_fixes_audit_status_idx").on(t.auditId, t.status),
+  check("site_audit_fixes_lens_check", sql`${t.lens} IN ('clarity','compete','ai')`),
+  check("site_audit_fixes_impact_check", sql`${t.impact} IN ('high','medium','low')`),
+  check("site_audit_fixes_status_check", sql`${t.status} IN ('open','accepted','done','dismissed')`),
+]);

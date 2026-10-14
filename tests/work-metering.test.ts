@@ -28,6 +28,8 @@ const WORKERS: Array<[string, string, string]> = [
     ['netlify/functions/process-discovery-jobs.ts', 'lead_search', 'if (claimed.length === 0) return; // already published by an earlier tick'],
     ['netlify/functions/draft-newsletter-issues.ts', 'email_issue', ".set({ status: 'pending_approval', updatedAt: new Date() })"],
     ['src/utils/campaign-email-order.ts', 'email_campaign', 'const customKeys = await loadCustomFieldKeys'],
+    // The Mystery Shopper: only a run that re-scored is charged, after the done+charged latch.
+    ['src/utils/site-audit.ts', 'site_audit', 'if (!latched) return;'],
 ];
 
 for (const [file, kind, marker] of WORKERS) {

@@ -1,5 +1,8 @@
 // src/lib/robots.ts
-// A robots.txt courtesy check for the lead crawler.
+// A robots.txt courtesy check for our crawlers: the lead crawler, and the Mystery Shopper reading a
+// customer's own site and the competitors they named (docs/mystery-shopper-plan.md §3.6). One parser
+// for both, so a fix to the rules lands for every bot at once. Each bot passes its own CRAWLERS entry
+// — a site owner who blocks one of them by name has not blocked the other.
 //
 // ── Why this exists ──────────────────────────────────────────────────────────
 // Contact enrichment reads strangers' websites — up to four pages per prospect, on our schedule,
@@ -41,6 +44,14 @@ const TIMEOUT_MS = 3000;
  */
 const OUR_TOKEN = 'bemoreswan-leaddiscovery';
 
+/** A crawler's identity: the robots.txt token (lowercase, no version) and the User-Agent it sends. */
+export interface Crawler { token: string; userAgent: string }
+
+export const CRAWLERS = {
+    leadDiscovery: { token: OUR_TOKEN, userAgent: USER_AGENTS.leadDiscovery },
+    mysteryShopper: { token: 'bemoreswan-mysteryshopper', userAgent: USER_AGENTS.mysteryShopper },
+} as const satisfies Record<string, Crawler>;
+
 interface Rule { path: string; allow: boolean }
 
 /**
@@ -64,10 +75,13 @@ const cache = new Map<string, Rule[] | null>();
  * rules for us has taken the trouble to be specific, and folding the generic rules back in would
  * override what they actually said.
  */
-export function parseRobots(text: string): Rule[] {
+export function parseRobots(text: string, ourToken: string = OUR_TOKEN): Rule[] {
     const specific: Rule[] = [];
     const wildcard: Rule[] = [];
     let matched: 'none' | 'specific' | 'wildcard' = 'none';
+    // Was the previous directive a User-agent line? A User-agent line that follows a rule starts a
+    // NEW group, so whatever matched before stops applying.
+    let inAgentRun = false;
 
     for (const rawLine of text.split(/\r?\n/)) {
         // Comments run to end of line, and a directive is `field: value`.
@@ -82,13 +96,19 @@ export function parseRobots(text: string): Rule[] {
             const token = value.toLowerCase();
             // ⚠️ Consecutive User-agent lines form ONE group ("User-agent: a" / "User-agent: b" /
             // "Disallow: /x" applies to both), which is why this sets the target rather than
-            // resetting it — and why a specific match is sticky for the group that follows.
-            if (token === OUR_TOKEN) matched = 'specific';
+            // resetting it — and why a specific match is sticky WITHIN that run of lines.
+            // ⚠️ But only within it. Until 2026-10-14 nothing ever reset `matched`, so once our group
+            // had matched, every later group's rules — Googlebot's "Disallow: /", or a `*` group
+            // written after ours — were applied to us as well.
+            if (!inAgentRun) matched = 'none';
+            inAgentRun = true;
+            if (token === ourToken) matched = 'specific';
             else if (token === '*' && matched !== 'specific') matched = 'wildcard';
             else if (matched !== 'specific') matched = 'none';
             continue;
         }
 
+        inAgentRun = false;
         if (field !== 'disallow' && field !== 'allow') continue;
         if (matched === 'none') continue;
 
@@ -140,17 +160,19 @@ export function robotsAllowsPath(rules: Rule[] | null, path: string): boolean {
  *
  * Never throws: every failure resolves to null, which robotsAllowsPath reads as "no rules".
  */
-async function rulesFor(host: string): Promise<Rule[] | null> {
-    if (cache.has(host)) return cache.get(host) ?? null;
+async function rulesFor(host: string, crawler: Crawler): Promise<Rule[] | null> {
+    // Keyed per crawler too: the same site can allow one of our bots and refuse the other.
+    const key = `${crawler.token}|${host}`;
+    if (cache.has(key)) return cache.get(key) ?? null;
 
     let rules: Rule[] | null = null;
     try {
         const { body } = await safeFetchText(`https://${host}/robots.txt`, {
             timeoutMs: TIMEOUT_MS,
             maxBytes: MAX_BYTES,
-            userAgent: USER_AGENTS.leadDiscovery,
+            userAgent: crawler.userAgent,
         });
-        const parsed = parseRobots(body);
+        const parsed = parseRobots(body, crawler.token);
         rules = parsed.length ? parsed : null;
     } catch {
         // No robots.txt, a redirect loop, a timeout, an HTML 404 page — all mean the same thing to
@@ -158,20 +180,20 @@ async function rulesFor(host: string): Promise<Rule[] | null> {
         // is the common case and would drown the discovery logs.
         rules = null;
     }
-    cache.set(host, rules);
+    cache.set(key, rules);
     return rules;
 }
 
 /**
- * May the lead crawler fetch this path on this host?
+ * May this crawler (the lead crawler unless told otherwise) fetch this path on this host?
  *
  * Fails open, including on our own bugs — an exception here must never stop enrichment, which is a
  * paid feature doing legitimate work. The check is a courtesy we owe the site owner, not a gate on
  * our own correctness.
  */
-export async function robotsAllows(host: string, path: string): Promise<boolean> {
+export async function robotsAllows(host: string, path: string, crawler: Crawler = CRAWLERS.leadDiscovery): Promise<boolean> {
     try {
-        return robotsAllowsPath(await rulesFor(host), path || '/');
+        return robotsAllowsPath(await rulesFor(host, crawler), path || '/');
     } catch {
         return true;
     }

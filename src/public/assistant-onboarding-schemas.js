@@ -259,6 +259,77 @@
     // on Business Information ▸ Brand Assets or from this assistant's chat) are what every AI image
     // reads. These two answers only fill a guideline the workspace has left EMPTY
     // (visual-briefs.ts withSetupFallback) — the help text below must keep saying exactly that.
+    // Mystery Shopper (docs/mystery-shopper-plan.md §4.2). Saving these copies them into its audit
+    // (src/utils/site-audit-setup.ts syncSiteAuditFromSetup, from update-assistant-context.ts) and,
+    // the first time, starts the first check. The keys must match SETUP_KEYS there exactly.
+    mystery_shopper: [
+      {
+        title: 'Your website',
+        description: 'Your Mystery Shopper reads your site the way a buyer would and tells you what is costing you customers. It only reads public pages — it never fills in forms or buys anything.',
+        fields: [
+          {
+            key: 'siteUrl',
+            label: 'Which website should it check?',
+            type: 'text',
+            required: true,
+            placeholder: 'yourbusiness.co.uk',
+            helpText: 'Your homepage, or the page most visitors land on.',
+          },
+          {
+            key: 'idealCustomer',
+            label: 'Who is your website for?',
+            type: 'textarea',
+            required: false,
+            placeholder: 'e.g. Owners of 10–50 person service firms who are drowning in admin',
+            helpText: 'One or two sentences. It reads your site as this person would.',
+          },
+          {
+            key: 'conversionGoal',
+            label: 'What should a visitor do?',
+            type: 'dropdown',
+            required: false,
+            placeholder: 'Choose one…',
+            options: [
+              { value: 'book_call', label: 'Book a call or consultation' },
+              { value: 'buy', label: 'Buy online' },
+              { value: 'start_trial', label: 'Start a free trial or sign up' },
+              { value: 'get_quote', label: 'Ask for a quote' },
+              { value: 'phone', label: 'Phone us' },
+              { value: 'visit', label: 'Visit us in person' },
+              { value: 'subscribe', label: 'Join the mailing list' },
+            ],
+          },
+          {
+            key: 'competitorUrls',
+            label: 'Competitors to compare you with (up to 3)',
+            type: 'textarea',
+            required: false,
+            placeholder: 'competitor-one.co.uk\ncompetitor-two.com',
+            helpText: 'Optional. One per line. It reads their homepage and up to two more pages, and tells you when they change their headline, prices or offer.',
+          },
+        ],
+      },
+      {
+        title: 'Operational set-up',
+        description: 'When it checks your site again. A check where nothing has changed is free; one that re-scores uses 1 task.',
+        operational: true,
+        fields: [
+          {
+            key: 'checkWeekday',
+            label: 'Which day should it check every week?',
+            type: 'dropdown',
+            required: true,
+            defaultValue: '1',
+            options: [
+              { value: '1', label: 'Monday' }, { value: '2', label: 'Tuesday' }, { value: '3', label: 'Wednesday' },
+              { value: '4', label: 'Thursday' }, { value: '5', label: 'Friday' }, { value: '6', label: 'Saturday' },
+              { value: '0', label: 'Sunday' },
+            ],
+          },
+        ],
+      },
+    ],
+
     brand_designer: [
       {
         title: 'Your look',

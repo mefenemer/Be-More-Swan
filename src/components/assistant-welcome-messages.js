@@ -69,6 +69,12 @@
     brand_designer: {
       working: 'Tell me what a picture is for and I’ll put options in front of you to choose from',
     },
+    mystery_shopper: {
+      working: 'I’m reading your website the way a buyer would — your first score and what to fix will be on the Website tab shortly',
+      // When set-up saved but the first check could not start (an address it could not read, say).
+      // Chosen by buildWorkingLine from the save response's siteCheck — never claim work that isn't happening.
+      notStarted: 'I couldn’t start your first website check yet — open the Website tab to check the address and press “Check my site now”',
+    },
     default: {
       role: 'your new assistant',
       working: 'I’m already getting to work',
@@ -96,8 +102,9 @@
    * over the generic promise — an empty queue looks identical whether the assistant started
    * or silently didn't, so saying the number is what makes the welcome trustworthy.
    */
-  function buildWorkingLine(roleKey, draftsQueued) {
+  function buildWorkingLine(roleKey, draftsQueued, siteCheck) {
     const copy = get(roleKey);
+    if (siteCheck && siteCheck.started === false && copy.notStarted) return copy.notStarted;
     const n = Number(draftsQueued) || 0;
     if (copy.produces && n > 0) {
       const noun = n === 1 ? copy.produces.replace(/s$/, '') : copy.produces;
@@ -123,7 +130,7 @@
     const o = opts || {};
     const name = escapeHtml(o.assistantName || 'your assistant');
     const copy = get(o.roleKey);
-    const working = escapeHtml(buildWorkingLine(o.roleKey, o.draftsQueued));
+    const working = escapeHtml(buildWorkingLine(o.roleKey, o.draftsQueued, o.siteCheck));
     const chat = o.assistantId != null ? chatHref(o.assistantId) : null;
     const workspace = o.assistantId != null ? workspaceHref(o.assistantId) : 'workspace.html';
 

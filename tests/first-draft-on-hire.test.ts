@@ -60,10 +60,11 @@ check('a fill failure never fails the save', () => {
 });
 
 check('the enqueued count is returned, so the UI can prove the assistant started', () => {
-    assert.ok(/JSON\.stringify\(\{ success: true, draftsQueued \}\)/.test(saveFn),
+    // The Mystery Shopper adds `siteCheck` alongside it (whether its first check started).
+    assert.ok(/JSON\.stringify\(\{ success: true, draftsQueued[,\s}]/.test(saveFn),
         'draftsQueued is not in the response body');
     const shell = read('../src/components/assistant-onboarding-shell.js');
-    assert.ok(shell.includes('renderSuccess(data.draftsQueued)'),
+    assert.ok(shell.includes('renderSuccess(data.draftsQueued'),
         'the success screen ignores the count and keeps promising work it cannot evidence');
 });
 

@@ -50,6 +50,7 @@ const FOOTER_PAGES = [
     'index.html',
     'about.html',
     'blog.html',
+    'mystery-shopper.html',
     'pricing.html',
     'assistants.html',
     'faq.html',

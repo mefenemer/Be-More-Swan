@@ -8,6 +8,8 @@ import { retryBlockedAssistants } from '../../src/utils/retry-provisioning';
 import { assembleBlueprint } from '../../src/utils/blueprint';
 import { enqueueScheduleGapFill } from '../../src/utils/schedule-gap-fill';
 import { enqueueBlogGapFill } from '../../src/utils/blog-gap-fill';
+import { syncSiteAuditFromSetup } from '../../src/utils/site-audit-setup';
+import { MYSTERY_SHOPPER_ROLE_KEY } from '../../src/constants/roles';
 import { BLOG_WRITER_ROLE_KEYS, SMM_ROLE_KEYS } from '../../src/constants/roles';
 import { MIN_HORIZON_DAYS, MAX_HORIZON_DAYS } from '../../src/config/posting-cadence';
 import { normaliseAssistantColor } from '../../src/config/assistant-colors';
@@ -297,9 +299,20 @@ export default withLambda(async (event) => {
             }
         }
 
+        // The Mystery Shopper keeps its settings in site_audits (the pipeline's copy); saving set-up
+        // copies the answers across and, the first time, starts the first check of the site. Never
+        // throws: the answers are saved, and the Website tab can finish anything that failed here.
+        let siteCheck: { started: boolean; error?: string } | null = null;
+        if (target && target.isActive && target.roleKey === MYSTERY_SHOPPER_ROLE_KEY) {
+            const r = await syncSiteAuditFromSetup(db, {
+                assistantId: target.id, orgId: target.organisationId, userId: currentUserId, onboardingContext: target.onboardingContext,
+            });
+            siteCheck = { started: r.started, ...(r.error ? { error: r.error } : {}) };
+        }
+
         // draftsQueued lets the caller tell the user their assistant has already started, instead of
         // ending onboarding on a screen that promises work with no evidence any was scheduled.
-        return { statusCode: 200, body: JSON.stringify({ success: true, draftsQueued }) };
+        return { statusCode: 200, body: JSON.stringify({ success: true, draftsQueued, ...(siteCheck ? { siteCheck } : {}) }) };
     } catch (error: any) {
         if (error?.message?.startsWith('DISCLOSURE_REQUIRED')) {
             return { statusCode: 422, body: JSON.stringify({ error: 'AI disclosure text is required before this assistant can be activated (EU AI Act Art. 52).', code: 'DISCLOSURE_MISSING' }) };

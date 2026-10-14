@@ -526,6 +526,22 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         realism: { maxDailyDelta: 50 },
     },
     {
+        // Mystery Shopper (docs/mystery-shopper-plan.md §4.5). The website's latest overall score,
+        // read from site_audits.current_score by poll-goal-telemetry.ts. A LEVEL, not a count: it can
+        // fall as well as rise (a competitor's change moves the comparison). Null until a check has
+        // scored the page — the goal stays unmeasured rather than reading 0.
+        key: 'site_health_score',
+        label: 'Website Score',
+        unit: 'points',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'outcome',
+        roles: ['mystery_shopper'],
+        description: 'Your website\'s score out of 100 at the latest check — clarity, standing against competitors and AI-search readiness.',
+        available: true,
+        realism: { maxDailyDelta: 100 },
+    },
+    {
         // Blog Writer's content lives in blog_posts (NOT assistant_records), so this is counted
         // from published blog_posts by poll-goal-telemetry.ts, mirroring 'content_published' for social.
         key: 'posts_published',

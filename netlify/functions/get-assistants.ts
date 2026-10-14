@@ -2,7 +2,7 @@ import { Handler } from '@netlify/functions';
 import { and, eq, gte, sql, count, inArray } from 'drizzle-orm';
 import { notStillGenerating } from '../../src/utils/blog-still-generating';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, assistantRecords, blogPosts, campaignDecisions, campaignOrders, campaigns, contentGenerationJobs, goals, masterAssistants, newsletterIssues, scheduledPosts, userProfiles, visualBriefOptions, visualBriefs } from '../../db/schema';
+import { aiAssistants, assistantRecords, blogPosts, campaignDecisions, campaignOrders, campaigns, contentGenerationJobs, goals, masterAssistants, newsletterIssues, scheduledPosts, siteAuditFixes, siteAuditRuns, siteAudits, userProfiles, visualBriefOptions, visualBriefs } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { RETENTION_DELETED_SQL_PATH } from '../../src/config/lead-retention';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
@@ -406,7 +406,7 @@ export default withLambda(async (event) => {
         // its own three counts. Best-effort: a failure leaves the card exactly as it was before.
         // Decisions waiting are NOT added to pendingReview — their mirrors (pending_approval) were
         // already counted by the records loop above. Briefs waiting ARE added: nothing counted them.
-        type SummaryMetrics = { kind: 'campaign' | 'brand'; items: { n: number; label: string; attention?: boolean; title: string }[] };
+        type SummaryMetrics = { kind: 'campaign' | 'brand' | 'site'; items: { n: number; label: string; attention?: boolean; title: string }[] };
         const summaryMetrics = new Map<number, SummaryMetrics>();
         // Only when someone HAS one of these roles: the pool is one connection, so every query here
         // runs in series ahead of the dashboard's cards — five round trips for a team with neither
@@ -464,6 +464,32 @@ export default withLambda(async (event) => {
                 }
             } catch (err) {
                 console.error('[get-assistants] summary strips failed — cards keep their previous strips:', err);
+            }
+        }
+
+        // The Mystery Shopper: its score, the fixes waiting for a decision (added to pendingReview —
+        // they are what "Needs you" should send the user to), and the fixes a later check confirmed.
+        // Same best-effort rule as above; only queried when someone has the role.
+        const shopperIds = assistants.filter((a) => roleOf(a) === 'mystery_shopper').map((a) => a.id);
+        if (shopperIds.length) {
+            try {
+                const rows = await db.select({
+                    assistantId: siteAudits.aiAssistantId,
+                    score: siteAudits.currentScore,
+                    waiting: sql<number>`(SELECT count(*) FROM ${siteAuditFixes} f JOIN ${siteAuditRuns} r ON r.id = f.run_id WHERE f.audit_id = ${siteAudits.id} AND f.status = 'open' AND r.status = 'done')::int`,
+                    live: sql<number>`(SELECT count(*) FROM ${siteAuditFixes} f WHERE f.audit_id = ${siteAudits.id} AND f.status = 'done')::int`,
+                }).from(siteAudits).where(and(eq(siteAudits.organisationId, orgId), inArray(siteAudits.aiAssistantId, shopperIds)));
+                for (const r of rows) {
+                    const waiting = Number(r.waiting) || 0;
+                    summaryMetrics.set(r.assistantId, { kind: 'site', items: [
+                        { n: r.score ?? 0, label: r.score === null ? 'not scored yet' : '/100 website score', title: 'Your website\'s latest score' },
+                        { n: waiting, label: waiting === 1 ? 'fix to decide' : 'fixes to decide', attention: waiting > 0, title: 'Suggested fixes you have not decided on' },
+                        { n: Number(r.live) || 0, label: 'fixes live', title: 'Fixes a later check confirmed are on your site' },
+                    ] });
+                    if (waiting) pendingReviewCount.set(r.assistantId, (pendingReviewCount.get(r.assistantId) || 0) + waiting);
+                }
+            } catch (err) {
+                console.error('[get-assistants] Mystery Shopper strip failed — card keeps its previous strip:', err);
             }
         }
 

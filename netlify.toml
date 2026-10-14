@@ -830,6 +830,10 @@ node_bundler = "esbuild"
   function = "rate-limit"
   path = "/.netlify/functions/support-tickets"
 
+[[edge_functions]]
+  function = "rate-limit"
+  path = "/.netlify/functions/site-audit-public"
+
 # SC3: Daily task-volume threshold check — 08:00 UTC every day
 [functions.task-volume-check]
   schedule = "0 8 * * *"
@@ -862,6 +866,14 @@ node_bundler = "esbuild"
 # .github/workflows/staging-campaign-cron.yml uses) before this can be exercised there.
 [functions.optimise-paid-campaigns]
   schedule = "40 6 * * *"
+
+# The Mystery Shopper's weekly check (docs/mystery-shopper-plan.md §4.5): queues each audit whose
+# check day is today in UK time, plus any that has gone a week without one (src/utils/site-audit-schedule.ts).
+# 06:30 UTC — before the UK working day in both GMT and BST, so Monday's check is waiting at 9am, and
+# off the :00/:15/:20/:40 batch. Daily, not weekly: the check DAY is per audit. Staging is poked via
+# run-site-audit-dispatch (staging-crons.yml).
+[functions.dispatch-site-audits]
+  schedule = "30 6 * * *"
 
 # Is the paid sweep above still running? 09:20 UTC — a DIFFERENT schedule entry from
 # optimise-paid-campaigns on purpose, so one broken entry cannot silently take both.
@@ -1284,6 +1296,12 @@ node_bundler = "esbuild"
 # the other side of the Atlantic (functions-region-vs-db-region), which the 10 s default does not
 # always cover. The round itself runs in generate-brief-options-background, not here.
 [functions.brand-briefs]
+  timeout = 26
+
+# The Mystery Shopper's API (docs/mystery-shopper-plan.md). `get` sweeps stuck runs and reads the
+# audit, recent runs and open fixes — several round trips to a database across the Atlantic, which
+# the 10 s default does not always cover. The check itself runs in run-site-audit-background.
+[functions.site-audits]
   timeout = 26
 
 # The dashboard's "Recent work" widget reads a few rows per assistant across several tables. The
