@@ -58,6 +58,21 @@
   status = 404
   force = true
 
+# The Mystery Shopper's free website check moved from its own page onto the assistant's page
+# (2026-10-14; src/public/site-taster.js). Both spellings of the old URL, permanently. The page was
+# live only for hours before the move, so no emailed result link points at it.
+[[redirects]]
+  from = "/mystery-shopper"
+  to = "/assistant.html?role=mystery_shopper"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/mystery-shopper.html"
+  to = "/assistant.html?role=mystery_shopper"
+  status = 301
+  force = true
+
 [[redirects]]
   from = "/docs/*"
   to = "/404.html"

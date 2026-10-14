@@ -11,7 +11,7 @@
 // workspace or adds anyone to a mailing list.
 
 import assert from 'node:assert';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { extractSitePage } from '../src/utils/site-extract';
 import { rubricFor } from '../src/utils/site-score';
@@ -161,40 +161,53 @@ check('one transactional email, saying why it came and that nobody was added to 
     assert.match(m.body, /have not added you to any mailing list/);
 });
 
-console.log('\nThe page');
+console.log('\nThe page (assistant.html?role=mystery_shopper + src/public/site-taster.js)');
 
-const page = read('mystery-shopper.html');
+const taster = read('src/public/site-taster.js');
+const assistantPage = read('assistant.html');
 
-check('registered in all five places a marketing page needs', () => {
-    assert.match(read('scripts/build-seo-html.mjs'), /'mystery-shopper\.html',/);
-    assert.match(read('sitemap.xml'), /<loc>https:\/\/bemoreswan\.com\/mystery-shopper<\/loc>/);
-    assert.match(read('components/footer.html'), /href="mystery-shopper\.html"[^>]*data-i18n="footer\.free_website_check"/);
-    for (const l of ['en', 'de', 'es', 'fr', 'pt']) {
-        assert.ok(JSON.parse(read(`locales/${l}.json`)).footer.free_website_check, l);
+check('the check lives on the assistant\'s own page, and the old standalone page is gone', () => {
+    assert.match(assistantPage, /<script src="\/src\/public\/site-taster\.js" defer><\/script>/);
+    assert.match(assistantPage, /const TASTER_ROLE = 'mystery_shopper';/);
+    assert.match(assistantPage, /roleKey === TASTER_ROLE \? '<div id="site-taster-host"><\/div>' : ''/);
+    assert.ok(!existsSync(join(root, 'mystery-shopper.html')));
+    assert.ok(!read('scripts/build-seo-html.mjs').includes('mystery-shopper.html'));
+    assert.ok(!read('sitemap.xml').includes('/mystery-shopper<'));
+});
+
+check('both old URLs redirect permanently to the new page', () => {
+    const toml = read('netlify.toml');
+    for (const from of ['/mystery-shopper', '/mystery-shopper.html']) {
+        assert.ok(new RegExp(`from = "${from.replace('.', '\\.')}"\\s*\\n\\s*to = "/assistant\\.html\\?role=mystery_shopper"\\s*\\n\\s*status = 301`).test(toml), from);
     }
-    assert.match(page, /<div id="footer-placeholder"><\/div>/);
-    assert.match(page, /^\s*loadComponent\('footer-placeholder', '\.\/components\/footer\.html'\);$/m);
-    assert.match(page, /<link rel="canonical" href="https:\/\/bemoreswan\.com\/mystery-shopper">/);
 });
 
-check('the page is unbuilt — no baked footer committed by a local build', () => {
-    assert.ok(!page.includes('BUILD:FOOTER'));
+check('the footer link and the result email point at the new page', () => {
+    assert.match(read('components/footer.html'), /href="assistant\.html\?role=mystery_shopper#free-website-check"[^>]*data-i18n="footer\.free_website_check"/);
+    for (const l of ['en', 'de', 'es', 'fr', 'pt']) assert.ok(JSON.parse(read(`locales/${l}.json`)).footer.free_website_check, l);
+    assert.match(read('src/utils/site-audit.ts'), /\/assistant\.html\?role=mystery_shopper&r=\$\{runId\}&t=\$\{token\}/);
 });
 
-check('the hire button becomes the waitlist (with this role) while sign-ups are locked', () => {
-    assert.match(page, /data-waitlist-href="\/waitlist\.html\?role=mystery_shopper"/);
-    assert.match(page, /<script src="\/waitlist-mode\.js" defer><\/script>/);
+check('while the role is not public, the check still shows (an emailed result must never land on "not found")', () => {
+    assert.match(assistantPage, /if \(!c && roleKey === TASTER_ROLE\) \{[\s\S]{0,400}mountTaster\(root, roleKey, \{ name: 'Mystery Shopper', comingSoon: false \}, 'h1'\);/);
+});
+
+check('the result\'s button is the page\'s own button (hire / waitlist / get started)', () => {
+    assert.match(assistantPage, /window\.BmsSiteTaster\.mount\(host, \{ ctaHtml: cta\(roleKey, c, true\), headingTag \}\)/);
 });
 
 check('the copy makes no claim the taster does not do', () => {
-    const visible = page.replace(/<!--[\s\S]*?-->/g, '');
-    assert.ok(!/\d+\s?%/.test(visible.replace(/width:\d+%|\d+%\)/g, '')), 'no percentages');
-    assert.ok(!/ChatGPT|Perplexity|guarantee/i.test(visible));
+    const visible = taster.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    assert.ok(!/\d+\s?%/.test(visible.replace(/width:\d+%/g, '')), 'no percentages');
+    assert.ok(!/ChatGPT|Perplexity|guarantee|the moment/i.test(visible));
     assert.match(visible, /We email you your result, once\. We don't add you to a mailing list or keep your address\./);
+    assert.match(visible, /alerts you when a rival changes/);
+    assert.match(visible, /AI assistants are likely to read your site/);
+    assert.match(visible, /an unchanged page keeps exactly the same grade/);
 });
 
-check('everything the page renders from the server is escaped', () => {
-    const render = page.slice(page.indexOf('function renderResult'), page.indexOf('function rewriteCta'));
+check('everything rendered from the server is escaped', () => {
+    const render = taster.slice(taster.indexOf('function renderResult'), taster.indexOf('async function poll'));
     for (const field of ['r.summary', 'fix.problem', 'fix.currentText', 'fix.suggestedText', 'fix.location']) {
         assert.ok(render.includes(`esc(${field}`), field);
     }

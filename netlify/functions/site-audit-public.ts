@@ -1,6 +1,6 @@
 // netlify/functions/site-audit-public.ts
 // The Mystery Shopper's free public taster — the ONE unauthenticated way into the pipeline
-// (docs/mystery-shopper-plan.md §4.7, page: mystery-shopper.html). Anyone can make us fetch a page
+// (docs/mystery-shopper-plan.md §4.7, mounted on assistant.html?role=mystery_shopper by src/public/site-taster.js). Anyone can make us fetch a page
 // and call a model from here, so every request passes, in order:
 //
 //   1. the AI kill switch (platform config global_ai_disabled) — off means off, here too;
