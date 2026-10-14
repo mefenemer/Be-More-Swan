@@ -80,14 +80,16 @@ check('a failing campaign lookup falls through instead of costing the post its p
     assert.match(fn, /catch \(err\)/);
 });
 
-check('the campaign picker is org-scoped twice, skips dead assets, and rotates least-used first', () => {
+check('the campaign picker is org-scoped twice, skips dead assets, and uses each picture once', () => {
     const fn = span(resolver, 'async function pickCampaignAsset', '\n}\n', 'pickCampaignAsset');
     assert.match(fn, /eq\(campaignAssets\.organisationId, orgId\)/);
     assert.match(fn, /eq\(contentAssets\.organisationId, orgId\)/);
     assert.match(fn, /isNull\(contentAssets\.purgedAt\)/);
     assert.match(fn, /ne\(contentAssets\.status, 'rejected'\)/);
-    assert.match(fn, /SELECT count\(\*\) FROM scheduled_post_assets/,
-        'Least-used first: a campaign picture may be reused (one look across the flight) but must rotate.');
+    // Changed 2026-10-14: reuse put ONE image on every post of prod campaign 1. A campaign picture
+    // now goes on one post; the rest use the assistant's usual sources.
+    assert.match(fn, /NOT EXISTS \(SELECT 1 FROM scheduled_post_assets/,
+        'A campaign picture must be used once, not repeated across every post.');
 });
 
 check('the content job passes its campaign, and never for a Short', () => {

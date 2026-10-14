@@ -193,10 +193,9 @@
         // cannot leave one lead counted as both won and lost — confirming is a deliberate act.
         if (res.status === 409 && data.needsConfirmation) {
           const RCl = RC.outcomeLabel(data.currentOutcome);
-          const ok = window.confirm(
-            `This lead is already marked ${RCl}.\n\n`
-            + `Recording "${RC.outcomeLabel(chosen)}" instead keeps both in the history — the most recent one is what counts.\n\n`
-            + 'Change it?'
+          const ok = await window.confirmModal(
+            `Recording "${window.escapeHtml(RC.outcomeLabel(chosen))}" instead keeps both in the history — the most recent one is what counts.`,
+            { title: `This lead is already marked ${window.escapeHtml(RCl)}. Change it?`, confirmLabel: 'Change it', tone: 'primary' },
           );
           if (!ok) { close(); return; }
           res = await post(true);

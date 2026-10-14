@@ -854,7 +854,7 @@ function _mailboxCard(m) {
 }
 
 window._intDisconnectMailbox = async function (provider, label) {
-    if (!window.confirm(`Disconnect ${label}? Approved leads will stop being emailed automatically until you reconnect.`)) return;
+    if (!(await window.confirmModal('Approved leads will stop being emailed automatically until you reconnect.', { title: `Disconnect ${_esc(label)}?`, confirmLabel: 'Disconnect' }))) return;
     try {
         const res = await fetch(`/api/oauth/${encodeURIComponent(provider)}/disconnect`, { method: 'POST' });
         if (!res.ok) {

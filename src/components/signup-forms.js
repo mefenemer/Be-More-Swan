@@ -122,7 +122,7 @@
 
   async function copy(text, what) {
     try { await navigator.clipboard.writeText(text); window.showToast?.(`${what} copied.`); }
-    catch { window.prompt(`Copy the ${what.toLowerCase()}:`, text); }
+    catch { window.promptModal(`Copy the ${what.toLowerCase()}:`, { title: 'Copy', value: text, confirmLabel: 'Done' }); }
   }
 
   function openBuilder(form) {

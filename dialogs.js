@@ -48,6 +48,13 @@ window.showToast = function (message, opts = {}) {
 
 // ── US3: destructive confirm modal + draft cancellation ──────────────
 // Generic confirm modal (inline styles — arbitrary Tailwind classes aren't in the prebuilt CSS).
+/** The confirm button's colours by intent — the same values as .btn-golive / -primary / -destructive. */
+var DIALOG_TONES = {
+  golive: { bg: '#00e55c', ink: '#1f1e1b' },
+  primary: { bg: '#d6006b', ink: '#fff' },
+  destructive: { bg: '#dc2626', ink: '#fff' },
+};
+
 window.showConfirmModal = function(message, onConfirm, opts = {}) {
   document.getElementById('aura-confirm-modal')?.remove();
   const overlay = document.createElement('div');
@@ -59,14 +66,20 @@ window.showConfirmModal = function(message, onConfirm, opts = {}) {
   const title   = opts.title   || 'Are you sure?';
   const confirm = opts.confirmLabel || 'Confirm';
   const cancel  = opts.cancelLabel  || 'Cancel';
-  const confirmBg = opts.confirmColor || '#dc2626';
+  // `tone` names the button's INTENT, matching the app's .btn-* palette (input.css): approving or
+  // paying is golive, an ordinary next step is primary, anything that removes or stops is
+  // destructive — still the default, because most confirms in the app ask about exactly that.
+  // `confirmColor` is the older escape hatch and still wins when given.
+  const tone = DIALOG_TONES[opts.tone] || DIALOG_TONES.destructive;
+  const confirmBg = opts.confirmColor || tone.bg;
+  const confirmInk = opts.confirmColor ? '#fff' : tone.ink;
   overlay.innerHTML = `
     <div style="background:#fff;border-radius:1rem;max-width:24rem;width:100%;padding:1.5rem;box-shadow:0 20px 50px rgba(0,0,0,.25);">
       <h3 style="font-size:1.05rem;font-weight:700;color:#111827;margin:0 0 ${message ? '.5rem' : '1.25rem'};">${title}</h3>
       ${message ? `<p style="font-size:.875rem;color:#4b5563;margin:0 0 1.25rem;line-height:1.5;">${message}</p>` : ''}
       <div style="display:flex;gap:.5rem;justify-content:flex-end;">
-        ${opts.hideCancel ? '' : `<button id="acm-cancel" style="cursor:pointer;font-size:.875rem;font-weight:600;color:#374151;background:#fff;border:1px solid #d1d5db;padding:.5rem .9rem;border-radius:.6rem;">${cancel}</button>`}
-        <button id="acm-confirm" style="cursor:pointer;font-size:.875rem;font-weight:600;color:#fff;background:${confirmBg};border:none;padding:.5rem .9rem;border-radius:.6rem;">${confirm}</button>
+        ${opts.hideCancel ? '' : `<button id="acm-cancel" style="cursor:pointer;font-size:.875rem;font-weight:600;color:#1f1e1b;background:#f6f3eb;border:1px solid #eae4d7;padding:.5rem .9rem;border-radius:.6rem;">${cancel}</button>`}
+        <button id="acm-confirm" style="cursor:pointer;font-size:.875rem;font-weight:600;color:${confirmInk};background:${confirmBg};border:none;padding:.5rem .9rem;border-radius:.6rem;">${confirm}</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -107,7 +120,7 @@ window.alertModal = function(message, opts = {}) {
   return new Promise((resolve) => {
     window.showConfirmModal(message, () => resolve(), {
       confirmLabel: 'OK',
-      confirmColor: '#059669',
+      tone: 'primary',
       ...opts,
       hideCancel: true,
       onCancel: () => resolve(),
@@ -148,7 +161,7 @@ window.choiceModal = function(message, options, opts = {}) {
           </button>`).join('')}
       </div>
       <div style="display:flex;justify-content:flex-end;margin-top:.75rem;">
-        <button id="achm-cancel" style="cursor:pointer;font-size:.875rem;font-weight:600;color:#374151;background:#fff;border:1px solid #d1d5db;padding:.5rem .9rem;border-radius:.6rem;">${cancel}</button>
+        <button id="achm-cancel" style="cursor:pointer;font-size:.875rem;font-weight:600;color:#1f1e1b;background:#f6f3eb;border:1px solid #eae4d7;padding:.5rem .9rem;border-radius:.6rem;">${cancel}</button>
       </div>
     </div>`;
     document.body.appendChild(overlay);
@@ -199,8 +212,8 @@ window.promptModal = function(message, opts = {}) {
       <p style="font-size:.875rem;color:#4b5563;margin:0 0 .85rem;line-height:1.5;">${message}</p>
       ${field}
       <div style="display:flex;gap:.5rem;justify-content:flex-end;">
-        <button id="apm-cancel" style="cursor:pointer;font-size:.875rem;font-weight:600;color:#374151;background:#fff;border:1px solid #d1d5db;padding:.5rem .9rem;border-radius:.6rem;">${cancel}</button>
-        <button id="apm-confirm" style="cursor:pointer;font-size:.875rem;font-weight:600;color:#fff;background:#059669;border:none;padding:.5rem .9rem;border-radius:.6rem;">${confirm}</button>
+        <button id="apm-cancel" style="cursor:pointer;font-size:.875rem;font-weight:600;color:#1f1e1b;background:#f6f3eb;border:1px solid #eae4d7;padding:.5rem .9rem;border-radius:.6rem;">${cancel}</button>
+        <button id="apm-confirm" style="cursor:pointer;font-size:.875rem;font-weight:600;color:#fff;background:#d6006b;border:none;padding:.5rem .9rem;border-radius:.6rem;">${confirm}</button>
       </div>
     </div>`;
     document.body.appendChild(overlay);

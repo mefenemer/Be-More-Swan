@@ -35,6 +35,7 @@ import { endRound, startRound } from './visual-briefs';
 import { triggerBriefRound } from './trigger-brief-round';
 import { visualBriefs } from '../../db/schema';
 import { randomUUID } from 'crypto';
+import { resolveConnectedDraftPlatforms } from './auto-publish-runtime';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
@@ -327,6 +328,24 @@ export async function issueOrder(db: Db, orderId: number, ctx: IssueContext): Pr
     return { orderId, status: 'issued', workItems: ctx.workItems };
 }
 
+/**
+ * Which platforms a campaign's posts go to: every platform the Social Media Assistant drafts for —
+ * connected AND switched on for it — exactly as Autopilot fans out (schedule-gap-fill.ts). One idea,
+ * one post per platform, grouped as a cross-post in the review queue.
+ *
+ * ⚠️ Before 2026-10-14 the job carried no platform, so the worker fell back to the FIRST connected
+ * platform. Prod campaign 1 (LinkedIn, X, Facebook and Instagram all connected) drafted every
+ * post for Instagram alone.
+ */
+async function campaignPostPlatforms(db: Db, ctx: IssueContext): Promise<{ platform: string | null; platforms: string[] | null }> {
+    const [a] = await db.select({ onboardingContext: aiAssistants.onboardingContext, configuration: aiAssistants.configuration })
+        .from(aiAssistants).where(eq(aiAssistants.id, ctx.targetAssistantId)).limit(1);
+    const targets = a ? await resolveConnectedDraftPlatforms(db, ctx.organisationId, a) : [];
+    // None live: leave both empty and the worker resolves its fallback, as before.
+    if (!targets.length) return { platform: null, platforms: null };
+    return { platform: targets[0], platforms: targets.length > 1 ? targets : null };
+}
+
 /** Recompile one assistant so its blueprint reflects the campaigns it serves. Never throws. */
 async function recompileAssistantForCampaign(assistantId: number, reason: string): Promise<void> {
     try {
@@ -411,6 +430,7 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
         if (!blueprintId) return { ok: false, message: 'The Social Media Assistant has no usable setup yet, so nothing could be queued.' };
 
         const count = Math.max(1, Math.min(20, Math.floor(Number(ctx.brief.quantity) || 1)));
+        const fan = await campaignPostPlatforms(db, ctx);
         // Spread the drafts across the days ahead rather than stacking them on one date: a
         // campaign that dumps six posts on the same slot produces six near-identical drafts,
         // because the variety block only compares against what is already scheduled.
@@ -427,6 +447,7 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
                 maxAttempts: 3,
                 triggerType: 'on_demand',
                 targetPublishDate: new Date(now + (i + 1) * 24 * 60 * 60 * 1000),
+                ...fan,
                 // The trace back to this order. Without it the reconciler cannot tell whether the
                 // order produced anything, and it sits at 'issued' for ever.
                 campaignOrderId: orderId,
@@ -543,6 +564,7 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
             postsPerVariant: perVariant,
         }).returning({ id: campaignExperiments.id });
 
+        const fan = await campaignPostPlatforms(db, ctx);
         const now = Date.now();
         for (let i = 0; i < perVariant * 2; i++) {
             const variant = i % 2 === 0 ? 'A' : 'B';
@@ -557,6 +579,7 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
                 maxAttempts: 3,
                 triggerType: 'on_demand',
                 targetPublishDate: new Date(now + (i + 1) * 24 * 60 * 60 * 1000),
+                ...fan,
                 campaignOrderId: orderId,
             }).returning({ id: contentGenerationJobs.id });
             await db.insert(campaignExperimentJobs).values({ jobId: job.id, experimentId: exp.id, variant });
@@ -588,15 +611,15 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
     commission_visuals: async (db, ctx, orderId) => {
         const made = await createBriefForOrder(db, ctx, orderId);
         if (!made.ok) return { ok: false, message: made.message };
-        let summary = 'Brief with the Brand Designer — press "Make options" on its Briefs tab (AI images use AI credits)';
+        let summary = 'Brief with the Brand Designer — ask for options on its Briefs tab (AI images use AI credits)';
         if (made.allFree) {
             const [brief] = await db.select().from(visualBriefs).where(eq(visualBriefs.id, made.briefId)).limit(1);
             const started = brief ? await startRound(db, { orgId: ctx.organisationId, brief }) : null;
             if (started && started.ok && await triggerBriefRound(made.briefId, null)) {
                 summary = 'The Brand Designer is making options — choose one on its Briefs tab';
             } else if (started && started.ok) {
-                await endRound(db, made.briefId, { chargeAi: false, note: 'Could not start making options — press "Make options" to try again.' });
-                summary = 'Brief with the Brand Designer — options could not start; press "Make options" on its Briefs tab';
+                await endRound(db, made.briefId, { chargeAi: false, note: 'Could not start making options — ask for options again to retry.' });
+                summary = 'Brief with the Brand Designer — options could not start; ask for options again on its Briefs tab';
             }
         }
         return { ok: true, artefactKind: 'visual_brief', artefactId: made.briefId, summary };

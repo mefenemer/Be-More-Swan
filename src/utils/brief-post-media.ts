@@ -11,10 +11,10 @@
 //
 // ⚠️ Imports nothing from visual-briefs.ts, which imports THIS module.
 
-import { and, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { scheduledPostAssets, scheduledPosts } from '../../db/schema';
-import { isMediaEditable } from '../config/post-status';
+import { MEDIA_EDITABLE_STATUSES, isMediaEditable } from '../config/post-status';
 import { mediaTargetPostIds } from './crosspost-media';
 
 type Db = ReturnType<typeof getDb>;
@@ -65,4 +65,66 @@ export async function attachApprovedToPost(db: Db, args: { orgId: number; postId
         console.error('[brief-post-media] attach failed — the picture stays in the library:', args, err instanceof Error ? err.message : err);
         return 'post_has_media';
     }
+}
+
+/**
+ * A campaign's chosen picture → one of the campaign's posts still awaiting review (owner,
+ * 2026-10-14: a brief for 10 posts gives 10 pictures, and each goes on one of the posts).
+ *
+ * Only a post that still carries EXACTLY the picture its drafter found (auto_media_asset_id) is
+ * eligible, so a picture the user chose — or changed, or added beside it — is never replaced; and
+ * only one that has no campaign picture yet, so two chosen pictures never land on the same post.
+ * Oldest publish date first. The whole cross-post group takes it, sibling by sibling, under the
+ * same rule. Returns whether a post took it; never throws (the approval is already saved, and an
+ * unplaced picture still waits in the campaign's pictures for the next post drafted).
+ */
+export async function placeOnCampaignPost(db: Db, args: { orgId: number; campaignId: number; assetId: number }): Promise<boolean> {
+    try {
+        const candidates = await db.select({ id: scheduledPosts.id, status: scheduledPosts.status, auto: scheduledPosts.autoMediaAssetId })
+            .from(scheduledPosts)
+            .where(and(
+                eq(scheduledPosts.organisationId, args.orgId),
+                inArray(scheduledPosts.status, [...MEDIA_EDITABLE_STATUSES]),
+                isNotNull(scheduledPosts.autoMediaAssetId),
+                sql`EXISTS (SELECT 1 FROM content_generation_jobs j JOIN campaign_orders o ON o.id = j.campaign_order_id
+                             WHERE j.job_id = ${scheduledPosts.jobId} AND o.campaign_id = ${args.campaignId}
+                               AND o.action IN ('draft_social_posts', 'ab_test_posts'))`,
+                sql`NOT EXISTS (SELECT 1 FROM scheduled_post_assets spa JOIN campaign_assets ca ON ca.content_asset_id = spa.content_asset_id
+                                 WHERE spa.scheduled_post_id = ${scheduledPosts.id} AND ca.campaign_id = ${args.campaignId}
+                                   AND spa.content_asset_id <> ${args.assetId})`,
+            ))
+            .orderBy(asc(scheduledPosts.publishDate), asc(scheduledPosts.id))
+            .limit(50);
+        for (const c of candidates) {
+            if (!(await carriesOnlyItsOwnPick(db, c.id, c.auto))) continue;
+            const targets = await mediaTargetPostIds(db, { postId: c.id, orgId: args.orgId });
+            let placed = 0;
+            for (const id of targets) {
+                const [t] = await db.select({ status: scheduledPosts.status, auto: scheduledPosts.autoMediaAssetId })
+                    .from(scheduledPosts).where(and(eq(scheduledPosts.id, id), eq(scheduledPosts.organisationId, args.orgId))).limit(1);
+                if (!t || !isMediaEditable(t.status) || !(await carriesOnlyItsOwnPick(db, id, t.auto))) continue;
+                await db.delete(scheduledPostAssets).where(eq(scheduledPostAssets.scheduledPostId, id));
+                await db.insert(scheduledPostAssets).values({ scheduledPostId: id, contentAssetId: args.assetId, position: 0 }).onConflictDoNothing();
+                // The deprecated array is still read (resolvePostImage) — kept in step. The marker moves
+                // with the picture: it is still not one the USER chose, and a later campaign pick must
+                // not land here again (the campaign-picture check above keeps it out).
+                await db.update(scheduledPosts).set({ contentAssetIds: [args.assetId], autoMediaAssetId: args.assetId, updatedAt: new Date() })
+                    .where(and(eq(scheduledPosts.id, id), eq(scheduledPosts.organisationId, args.orgId)));
+                placed++;
+            }
+            if (placed) return true;
+        }
+        return false;
+    } catch (err) {
+        console.error('[brief-post-media] campaign placement failed — the picture stays with the campaign:', args, err instanceof Error ? err.message : err);
+        return false;
+    }
+}
+
+/** True when the post's media is exactly the one picture its drafter attached — nothing the user did. */
+async function carriesOnlyItsOwnPick(db: Db, postId: number, auto: number | null): Promise<boolean> {
+    if (!auto) return false;
+    const rows = await db.select({ id: scheduledPostAssets.contentAssetId }).from(scheduledPostAssets)
+        .where(eq(scheduledPostAssets.scheduledPostId, postId));
+    return rows.length === 1 && rows[0].id === auto;
 }

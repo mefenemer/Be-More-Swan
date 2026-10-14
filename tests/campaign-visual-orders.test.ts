@@ -58,10 +58,13 @@ check('one brief per order, priced in tasks, artefact = the brief, to the Brand 
     const spec = ORDER_ACTION_SPECS.commission_visuals;
     assert.strictEqual(spec.roleKey, BRAND_DESIGNER_ROLE_KEY);
     assert.strictEqual(spec.artefactKind, 'visual_brief');
-    assert.strictEqual(spec.takesQuantity, false);
-    assert.strictEqual(orderWorkItems('commission_visuals', 9), 1, 'a quantity cannot multiply the price of one brief');
+    // Quantity = pictures needed, one task each (owner, 2026-10-14: 10 posts → 10 pictures).
+    assert.strictEqual(spec.takesQuantity, true);
+    assert.strictEqual(spec.maxQuantity, 20, 'must match visual_briefs.pictures_needed CHECK and MAX_PICTURES_NEEDED');
+    assert.strictEqual(orderWorkItems('commission_visuals', 10), 10);
     assert.ok(ORCHESTRATABLE_ROLE_KEYS.includes(BRAND_DESIGNER_ROLE_KEY));
     assert.match(spec.description, /AI images wait for you/, 'the user must know approving the plan does not spend AI credits');
+    assert.match(spec.description, /Pictures for articles are a separate brief/);
 });
 
 check('a plan keeps the picture fields, drops junk, and refuses a picture with nothing to show', () => {
@@ -163,7 +166,7 @@ check('the chat is told which orders can run here, and how to write a picture or
 check('the plan card and Add work both say AI images wait for a click', () => {
     const reg = read('src/components/disruptive-ui-registry.js');
     assert.match(reg, /const pictureNote = o\.action === 'commission_visuals'/);
-    assert.match(reg, /AI images and video only when you press "Make options" on its Briefs tab/);
+    assert.match(reg, /AI images and video only when you ask for options on its Briefs tab/);
     assert.match(reg, /sources && !sources\.some\(\(x\) => x === 'ai_image' \|\| x === 'ai_video'\)/, 'a plan with AI video is not "made straight away"');
     const tab = read('src/components/assistant-campaigns.js');
     assert.match(tab, /commission_visuals: \{ field: 'show'/);

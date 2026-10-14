@@ -151,7 +151,8 @@ check('uploads go through My Content\'s own upload and safety check', () => {
 
 check('the tab never charges for a source the round will skip, and plays videos', () => {
     const tab = read('src/components/assistant-briefs.js');
-    const label = span(tab, 'function roundButtonLabel', '\n  }\n', 'roundButtonLabel');
+    // The cost moved off the button onto its own line (roundCostLine, 2026-10-14) — the rule holds there.
+    const label = span(tab, 'function roundCostLine', '\n  }\n', 'roundCostLine');
     assert.match(label, /\.filter\(\(k\) => !sourceBlocked\(k\)\)/);
     assert.match(tab, /<video src="\$\{esc\(o\.url\)\}" controls muted playsinline/);
 });

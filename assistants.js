@@ -185,6 +185,9 @@ function _goalNextStep(h, latest, target, goalsTab) {
 }
 
 window._buildAssistantCardGoals = function (assistant) {
+    // No goals for a role that hides them (its campaigns carry the targets) — the prompt to add one
+    // would deep-link to a tab that is not there.
+    if (window.AssistantDashboardRegistry?.get(assistant.roleKey)?.hideGoals) return '';
     const gs = assistant.goalSummary || {};
     const total = gs.total || 0;
     const goalsTab = `event.stopPropagation(); window._assistantDetailInitialTab='goals'; window.routeToAssistantDetail('${assistant.id}')`;
@@ -958,6 +961,8 @@ window._activateMainTab = function(name) {
     if (name === 'conversations') window.AssistantLeadThreads?.activate();
     // Strategy resolved its gate (and loaded) on init — activation only paints.
     if (name === 'strategy') window.AssistantStrategy?.activate();
+    // A hub whose rows change in the background (the Campaign Assistant's Orders) re-reads on open.
+    if (name === 'datahub') window.AssistantDataHub?.activate?.();
     // Load the assistant-scoped review queue when the tab is first opened. detailRqOpenStatus
     // branches on window._detailReviewQueue.kind (posts vs records) internally.
     if (name === 'review-queue') {
@@ -1880,11 +1885,11 @@ async function _rqApproveCampaignDecision(card, record) {
         window.showToast?.('This card has lost its link to the decision — refresh and try again.', 'error');
         return;
     }
-    const ok = window.confirm(
-        'Approve this decision?\n\n'
-        + 'Your other assistants will be briefed straight away and this campaign\'s task budget is '
+    const ok = await window.confirmModal(
+        'Your other assistants will be briefed straight away and this campaign\'s task budget is '
         + 'committed to the work. Everything they produce still comes back to you for approval '
         + 'before anything is published or sent.',
+        { title: 'Approve this decision?', confirmLabel: 'Approve', tone: 'golive' },
     );
     if (!ok) return;
 
@@ -5486,6 +5491,10 @@ function _applyDashboardRegistry(data) {
     // approval gate is the option grid on its Briefs tab, and the default here would be an empty
     // SOCIAL post queue for an assistant that makes no posts.
     toggle('maintab-btn-review-queue', !cfg.hideReviewQueue);
+    // A role whose campaigns carry their own targets (the Campaign Assistant) has no separate goals:
+    // two places to set "what success is" was the confusion. The Goal Progress card goes with it.
+    toggle('maintab-btn-goals', !cfg.hideGoals);
+    toggle('goal-progress-panel', !cfg.hideGoals);
     // Social/blog retire the Data Hub tab (cfg.hideDataHub) — and the action bar with the primary
     // action ("Create a Post") lives INSIDE that tab's panel. Hiding the tab button alone left the
     // panel itself visible whenever _activateMainTab hadn't run yet, so it leaked in under the tab
@@ -11338,7 +11347,7 @@ window._suggestGoalRationale = async function (btn) {
     if (!box || !_goalsAssistantId) return;
 
     // Never silently paste over something the user wrote. Their own words are the better brief.
-    if (box.value.trim() && !window.confirm('Replace what you have written here with a fresh suggestion?')) return;
+    if (box.value.trim() && !(await window.confirmModal('', { title: 'Replace what you have written here with a fresh suggestion?', confirmLabel: 'Replace it', cancelLabel: 'Keep mine', tone: 'primary' }))) return;
 
     const label = btn ? btn.innerHTML : null;
     if (btn) { btn.disabled = true; btn.textContent = 'Thinking…'; }

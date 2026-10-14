@@ -1148,13 +1148,19 @@
       toolbar.style.left = Math.max(0, rect.left - rootRect.left) + 'px';
     }
 
-    function onAction(action, anchorBtn) {
+    async function onAction(action, anchorBtn) {
       if (action === 'tone') return openToneMenu(anchorBtn);
       if (action === 'custom') {
         // `assistantName` (string or getter) lets the host say who is rewriting — "How should Lyra…".
         const who = (opts && (typeof opts.assistantName === 'function' ? opts.assistantName() : opts.assistantName)) || 'your assistant';
-        const instruction = window.prompt(`How should ${who} rewrite the selection?`);
+        // /dialogs.js when the host has it (the same rule as the remove confirm above). The dialog
+        // takes focus, which can clear the editor's selection — hold it across the question.
+        const keepSel = currentSel;
+        const instruction = typeof window.promptModal === 'function'
+          ? await window.promptModal(`How should ${who} rewrite the selection?`, { title: 'Rewrite', confirmLabel: 'Rewrite', multiline: true, required: true })
+          : window.prompt(`How should ${who} rewrite the selection?`);
         if (!instruction) return;
+        currentSel = keepSel;
         return runRewrite('custom', { instruction });
       }
       return runRewrite(action, {});
@@ -1197,7 +1203,7 @@
         // column still rewrites normally: it matches verbatim, so it never reaches this branch.
         if (isColumnsBlock(block.raw)) {
           hideChrome();
-          window.alert('Select the words inside a column to rewrite them — a whole column layout can’t be rewritten at once.');
+          (window.alertModal || window.alert)('Select the words inside a column to rewrite them — a whole column layout can’t be rewritten at once.');
           return;
         }
         rawStart = 0; rawEnd = block.raw.length; rawSelected = block.raw;
@@ -1223,7 +1229,7 @@
         rewrittenText = (await res.json()).rewrittenText;
       } catch (_) {
         if (blockEl) { blockEl.classList.remove('bmsme-busy'); blockEl.innerHTML = prevHtml; }
-        window.alert('The rewrite could not be completed. Please try again.');
+        (window.alertModal || window.alert)('The rewrite could not be completed. Please try again.');
         return;
       }
 

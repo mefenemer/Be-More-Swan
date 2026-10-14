@@ -259,7 +259,7 @@
 
       const rm = e.target.closest('[data-remove]');
       if (rm) {
-        if (!window.confirm('Remove this recipe? It will stop firing for this assistant.')) return;
+        if (!(await window.confirmModal('It will stop firing for this assistant.', { title: 'Remove this recipe?', confirmLabel: 'Remove' }))) return;
         try {
           const res = await fetch(API + '/deactivate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ activeScenarioId: Number(rm.getAttribute('data-remove')) }) });
           if (res.ok) load();

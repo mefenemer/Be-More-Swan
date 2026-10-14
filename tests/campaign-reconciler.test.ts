@@ -187,7 +187,9 @@ check('a chain does not resume behind a campaign that stopped', () => {
         landmark(reconcilerSrc, 'async function settleOrder'),
     );
     assert.ok(
-        unblock.includes("campaign.status !== 'active'") && unblock.includes("campaign.status !== 'throttled'"),
+        // The release itself lives in releaseBlockedOrder (shared with "Start now"), inside this slice.
+        unblock.includes('releaseBlockedOrder(db, next)')
+            && unblock.includes("c.status !== 'active'") && unblock.includes("c.status !== 'throttled'"),
         'a blocked order could be issued into a paused or finished campaign',
     );
 });

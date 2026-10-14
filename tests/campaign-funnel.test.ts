@@ -322,7 +322,7 @@ check('archiving states the consequence and that the history is kept', () => {
     // A tracked link may already be printed in an advert. "It stops working" is the fact the user
     // needs before they act, and "the clicks are kept" stops archive reading as a way to erase
     // results.
-    const c = ui.slice(landmark(ui, "const ok = window.confirm(\n        'Archive this link?"), landmark(ui, 'archBtn.disabled = true;'));
+    const c = ui.slice(landmark(ui, "const ok = await window.confirmModal(\n        'It will stop working immediately"), landmark(ui, 'archBtn.disabled = true;'));
     assert.match(c, /stop working immediately/);
     assert.match(c, /already recorded are kept/);
 });

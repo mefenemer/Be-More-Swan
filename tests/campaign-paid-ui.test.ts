@@ -102,7 +102,7 @@ check('the confirm dialog states the amount and that charging starts', () => {
     // ⚠️ The end landmark is searched FROM the start index. Without that, `if (!ok) return;`
     // matches the stop_all handler earlier in the file, start > end, and slice() returns an EMPTY
     // STRING — so every assertion below would fail against perfectly correct code.
-    const confirmAt = landmark(ui, 'const ok = window.confirm(\n      `Start spending');
+    const confirmAt = landmark(ui, "const ok = await window.confirmModal(\n      'Your ads go live immediately");
     const confirm = ui.slice(confirmAt, landmark(ui, 'if (!ok) return;', confirmAt));
     assert.match(confirm, /£\$\{budget\.toFixed\(2\)\} a day/);
     assert.match(confirm, /LinkedIn begins charging/);

@@ -167,6 +167,97 @@
     return 'Running, but nothing is commissioned yet. Use "Add work", or ask your Campaign Assistant for a plan.';
   }
 
+  // ── Next step + the work, item by item ───────────────────────────────────────
+  // docs/campaign-orchestrator-flow.md §2. Approving campaign 1 sent six briefs and the row then
+  // said only "6 briefs are with your other assistants" — while two waited on the user and three
+  // waited on one of those. The server now states each item's live state and the ONE next step
+  // (campaign-work-state.ts); this draws them, and never invents either.
+  const WORK_CHIPS = {
+    done: ['Done', 'bg-gray-50 text-gray-600 border-gray-200'],
+    waiting_you: ['Needs you', 'bg-amber-50 text-amber-800 border-amber-200'],
+    waiting_item: ['Waiting', 'bg-gray-50 text-gray-600 border-gray-200'],
+    queued: ['Queued', 'bg-sky-50 text-sky-700 border-sky-200'],
+    working: ['Working', 'bg-emerald-50 text-emerald-700 border-emerald-200'],
+    cancelled: ['Cancelled', 'bg-gray-50 text-gray-400 border-gray-200'],
+  };
+
+  function workLinkBtn(link, cls) {
+    if (!link) return '';
+    return `<button type="button" data-cmp-open-assistant="${esc(String(link.assistantId))}" data-cmp-open-tab="${esc(link.tab)}"
+      class="${cls} px-3 py-1.5 text-xs font-bold rounded-lg transition">${esc(link.label)}</button>`;
+  }
+
+  function nextStepHtml(c) {
+    const n = c.nextStep;
+    const needsYou = n.kind === 'act' || n.kind === 'plan';
+    return `
+      <div class="rounded-xl border ${needsYou ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-gray-50'} px-3 py-2 mt-1">
+        <p class="text-[11px] font-bold uppercase tracking-wide ${needsYou ? 'text-amber-800' : 'text-gray-500'}">${needsYou ? 'Your next step' : 'Next step'}</p>
+        <p class="text-xs text-gray-800 leading-relaxed mt-0.5">${esc(n.text)}</p>
+        ${n.link ? `<div class="mt-2">${workLinkBtn(n.link, 'btn-primary')}</div>` : ''}
+      </div>`;
+  }
+
+  function workBlock(c) {
+    const work = Array.isArray(c.work) ? c.work : [];
+    if (!work.length) return '';
+    const live = work.filter((w) => w.state !== 'done' && w.state !== 'cancelled').length;
+    return `
+      <div class="mt-4">
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">The work${live ? ` · ${esc(String(live))} not finished` : ''}</p>
+        <ol class="mt-2 space-y-2">
+          ${work.map((w) => {
+            const [chip, cls] = WORK_CHIPS[w.state] || [w.state, 'bg-gray-50 text-gray-600 border-gray-200'];
+            return `
+            <li class="flex flex-wrap items-start gap-2 text-xs" data-cmp-work="${esc(String(w.orderId))}">
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border ${cls} shrink-0">${esc(chip)}</span>
+              <span class="min-w-0 flex-1">
+                <span class="font-bold text-gray-900">${esc(String(w.position))}. ${esc(w.label)}</span>
+                <span class="block text-gray-600 break-words">${esc(String(w.text).replace(/[.\s]*$/, '.'))}${w.holding ? ` ${esc(String(w.holding))} ${w.holding === 1 ? 'item waits' : 'items wait'} on this.` : ''}</span>
+              </span>
+              <span class="flex items-center gap-2 shrink-0">
+                ${w.state === 'waiting_you' || w.state === 'done' ? workLinkBtn(w.link, 'btn-secondary border') : ''}
+                ${w.canStartNow && c.status !== 'paused' ? `<button type="button" data-cmp-start-now="${esc(String(w.orderId))}" data-cmp-campaign="${esc(String(c.id))}"
+                  class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Start now</button>` : ''}
+              </span>
+            </li>`;
+          }).join('')}
+        </ol>
+      </div>`;
+  }
+
+  document.addEventListener('click', async (e) => {
+    const open = e.target.closest('[data-cmp-open-assistant]');
+    if (open) {
+      // In-app, like the dashboard's quick actions: land on the receiving assistant's own tab.
+      window._assistantDetailInitialTab = open.dataset.cmpOpenTab;
+      window.routeToAssistantDetail?.(open.dataset.cmpOpenAssistant);
+      return;
+    }
+    const btn = e.target.closest('[data-cmp-start-now]');
+    if (!btn || state.busy) return;
+    const orderId = Number(btn.dataset.cmpStartNow);
+    const campaignId = Number(btn.dataset.cmpCampaign);
+    const ok = await window.confirmModal(
+      'It was approved with the plan, so this uses no extra tasks — it just stops waiting for the earlier item.',
+      { title: 'Start this now, without waiting?', confirmLabel: 'Start now', tone: 'primary' },
+    );
+    if (!ok) return;
+    state.busy = true;
+    btn.disabled = true;
+    try {
+      await post({ action: 'start_now', orderId });
+      window.showToast?.('Started. Drafting begins straight away.', 'success');
+    } catch (err) {
+      say(campaignId, err.message || 'That did not work — please try again.', 'error');
+      btn.disabled = false;
+      state.busy = false;
+      return;
+    }
+    state.busy = false;
+    await load();
+  });
+
   // ── Burn bar ───────────────────────────────────────────────────────────────
   // Tasks only. There is no money bar and there must not be one: Phase 1 campaigns are organic, a
   // "£0 / £0" bar states a budget that does not exist, and a pound sign on this screen reads as a
@@ -307,7 +398,7 @@
           </span>
         </div>
 
-        <p class="text-xs text-gray-600 leading-relaxed">${esc(activityLine(c))}</p>
+        ${c.nextStep ? nextStepHtml(c) : `<p class="text-xs text-gray-600 leading-relaxed">${esc(activityLine(c))}</p>`}
         ${burnBar(c)}
 
         <div class="flex items-center gap-2 mt-4">
@@ -333,6 +424,7 @@
             </button>` : ''}
         </div>
         ${plan ? planBlock(c, plan) : ''}
+        ${workBlock(c)}
         ${humanTasksBlock(c)}
         ${testsBlock(c)}
         ${canAddWork ? addWorkPanel(c) : ''}
@@ -1141,7 +1233,7 @@
           </label>
           <label class="flex items-start gap-2 text-xs text-gray-700">
             <input type="checkbox" data-cmp-aw-ai="${id}" data-keep="aw-ai-${id}" checked class="mt-0.5">
-            <span>Include AI images — made only when you press "Make options" on the Brand Designer's Briefs tab, where the AI credit is shown. Stock photos and branded cards are made straight away, free.</span>
+            <span>Include AI images — made only when you ask the Brand Designer for options on its Briefs tab, where the AI credit is shown. Stock photos and branded cards are made straight away, free.</span>
           </label>` : ''}
         ${spec.key === 'ab_test_posts' ? `
           <div class="flex flex-wrap gap-3">
@@ -1968,10 +2060,10 @@
       // does NOT unmake delivered work, and saying so here is what makes the confirmation
       // answerable rather than frightening.
       const live = state.campaigns.filter((c) => c.status === 'active' || c.status === 'throttled').length;
-      const ok = window.confirm(
-        `Stop ${live} running ${live === 1 ? 'campaign' : 'campaigns'}?\n\n`
-        + 'Queued work is cancelled and no new briefs go out. Anything already drafted or published '
+      const ok = await window.confirmModal(
+        'Queued work is cancelled and no new briefs go out. Anything already drafted or published '
         + 'stays exactly as it is, and you can resume each campaign afterwards.',
+        { title: `Stop ${live} running ${live === 1 ? 'campaign' : 'campaigns'}?`, confirmLabel: 'Stop everything' },
       );
       if (!ok) return;
       state.busy = true;
@@ -2029,7 +2121,7 @@
         // Clipboard access is refused outside a secure context and in some embedded browsers.
         // Showing the URL is a worse experience than copying it, and a far better one than a
         // button that appears to do nothing.
-        window.prompt('Copy this link:', url);
+        window.promptModal('Copy this link:', { title: 'Your tracked link', value: url, confirmLabel: 'Done' });
       }
       return;
     }
@@ -2052,11 +2144,11 @@
       // Confirmed, and the wording is the point: a tracked link may already be printed in an
       // advert, so "it stops working" is the consequence the user needs stated before they act.
       // It is also honest that the history survives — archiving is not a way to erase results.
-      const ok = window.confirm(
-        'Archive this link?\n\n'
-        + 'It will stop working immediately, so anyone clicking it from an advert or a post already '
+      const ok = await window.confirmModal(
+        'It will stop working immediately, so anyone clicking it from an advert or a post already '
         + 'published will be sent to your homepage instead. The clicks and conversions it has '
         + 'already recorded are kept, and stay in your funnel.',
+        { title: 'Archive this link?', confirmLabel: 'Archive link' },
       );
       if (!ok) return;
       archBtn.disabled = true;
@@ -2254,10 +2346,10 @@
     // ⚠️ The figure is in the confirm text AND echoed to the server, which refuses a mismatch.
     // That pair is what makes "a human, with the number in front of them" true rather than a claim:
     // the number the user agreed to is the number the server checks.
-    const ok = window.confirm(
-      `Start spending £${budget.toFixed(2)} a day on LinkedIn?\n\n`
-      + 'Your ads go live immediately and LinkedIn begins charging your ad account. '
+    const ok = await window.confirmModal(
+      'Your ads go live immediately and LinkedIn begins charging your ad account. '
       + 'You can pause them from this page at any time, and we check on them daily.',
+      { title: `Start spending £${budget.toFixed(2)} a day on LinkedIn?`, confirmLabel: 'Start spending', tone: 'golive' },
     );
     if (!ok) return;
 
@@ -2489,8 +2581,9 @@
       if (taskWont) {
         // The consequence is the point of the confirm: whatever was held behind this is cancelled.
         const waiting = Number(taskWont.dataset.cmpTaskWaiting) || 0;
-        const ok = window.confirm(
-          `Mark this task as not happening?${waiting ? `\n\nThe ${waiting} ${waiting === 1 ? 'piece' : 'pieces'} of work waiting on it will be cancelled.` : ''}`,
+        const ok = await window.confirmModal(
+          waiting ? `The ${waiting} ${waiting === 1 ? 'piece' : 'pieces'} of work waiting on it will be cancelled.` : '',
+          { title: 'Mark this task as not happening?', confirmLabel: 'It won’t happen' },
         );
         if (!ok) return;
       }
@@ -2569,10 +2662,13 @@
       const campaignId = Number(approve.dataset.cmpPlanCampaign);
       const tasks = approve.dataset.cmpPlanTasks;
       const starts = approve.dataset.cmpPlanStarts === '1';
-      const ok = window.confirm(
-        `${starts ? 'Start this campaign and brief' : 'Brief'} your assistants with this plan?\n\n`
-        + `It uses ${tasks} tasks from your monthly allowance. Everything they draft still comes back `
+      const ok = await window.confirmModal(
+        `It uses ${esc(tasks)} tasks from your monthly allowance. Everything they draft still comes back `
         + 'to you for approval, and you can pause the campaign at any time.',
+        {
+          title: `${starts ? 'Start this campaign and brief' : 'Brief'} your assistants with this plan?`,
+          confirmLabel: starts ? 'Approve and start' : 'Approve plan', tone: 'golive',
+        },
       );
       if (!ok) return;
       state.busy = true;
@@ -2681,7 +2777,10 @@
         ? Math.max(1, Math.min(spec.maxQuantity, Number(document.querySelector(`[data-cmp-aw-qty="${id}"]`)?.value) || 1))
         : 1;
       const tasks = (spec.workItemsPerUnit || 0) * quantity;
-      if (tasks && !window.confirm(`${spec.label}${quantity > 1 ? ` ×${quantity}` : ''}?\n\nThis uses ${tasks} tasks from this campaign's budget. The work comes back to you for approval.`)) return;
+      if (tasks && !(await window.confirmModal(
+        `This uses ${tasks} tasks from this campaign's budget. The work comes back to you for approval.`,
+        { title: `${esc(spec.label)}${quantity > 1 ? ` ×${quantity}` : ''}?`, confirmLabel: 'Brief the assistant', tone: 'primary' },
+      ))) return;
       state.busy = true;
       awSubmit.disabled = true;
       say(id, 'Briefing…');
@@ -2743,7 +2842,10 @@
       if (ed.orders.length === 1) { say(ed.campaignId, 'A plan needs at least one piece of work. To drop the whole plan, use "Turn down".', 'error'); return; }
       const n = i + 1;
       const waiting = ed.orders.filter((o) => o.after === n).length;
-      if (waiting && !window.confirm(`${waiting} ${waiting === 1 ? 'item waits' : 'items wait'} for this one. Remove it anyway? ${waiting === 1 ? 'That item' : 'They'} will then start as soon as you approve.`)) return;
+      if (waiting && !(await window.confirmModal(
+        `${waiting} ${waiting === 1 ? 'item waits' : 'items wait'} for this one. ${waiting === 1 ? 'That item' : 'They'} will then start as soon as you approve.`,
+        { title: 'Remove this item?', confirmLabel: 'Remove' },
+      ))) return;
       ed.orders.splice(i, 1);
       // Re-number the waits: later items move up one, and anything that waited for the removed
       // item now waits for nothing (the user has just said so).
@@ -2936,7 +3038,9 @@
     renderTimeline,
     /** Called on first activation of the tab. Cheap if init() already loaded. */
     activate() {
-      if (state.rendered) return;
+      // Coming BACK to the tab re-reads it: its work is moved on by other assistants while the page
+      // sits open, and a stale "waiting for the picture" after the picture was chosen reads as broken.
+      if (state.rendered) { load(); return; }
       state.rendered = true;
       render();
     },

@@ -27,6 +27,9 @@ import { BRIEF_ASPECT_RATIOS, BRIEF_PURPOSES, normaliseBrief, sourcesAreFree } f
 
 type Db = ReturnType<typeof getDb>;
 
+/** visual_briefs.pictures_needed's CHECK, and commission_visuals' maxQuantity. */
+export const MAX_PICTURES_NEEDED = 20;
+
 export type VisualVerdict =
     | { kind: 'pending' }
     | { kind: 'in_review' | 'delivered' | 'rejected' | 'failed'; summary: string };
@@ -68,9 +71,11 @@ export async function createBriefForOrder(db: Db, ctx: {
     });
     if (!n.ok) return { ok: false, message: `The Brand Designer could not be briefed: ${n.error}` };
 
+    // As many pictures as the posts they are for (the order's quantity; 1 for an older plan).
+    const picturesNeeded = Math.max(1, Math.min(MAX_PICTURES_NEEDED, Math.floor(Number(b.quantity)) || 1));
     const [row] = await db.insert(visualBriefs).values({
         organisationId: ctx.organisationId, aiAssistantId: ctx.targetAssistantId, createdBy: null,
-        ...n.brief, origin: 'campaign', campaignId: ctx.campaignId, campaignOrderId: orderId,
+        ...n.brief, picturesNeeded, origin: 'campaign', campaignId: ctx.campaignId, campaignOrderId: orderId,
     }).returning({ id: visualBriefs.id });
     return { ok: true, briefId: row.id, allFree: sourcesAreFree(n.brief.sources) };
 }
@@ -113,16 +118,27 @@ export async function attachApprovedToCampaign(db: Db, args: { organisationId: n
  */
 export async function judgeVisualOrder(db: Db, order: { id: number; organisationId: number; campaignId: number; artefactId: number | null }): Promise<VisualVerdict> {
     if (!order.artefactId) return { kind: 'pending' };
-    const [brief] = await db.select({ id: visualBriefs.id, status: visualBriefs.status, rounds: visualBriefs.rounds })
+    const [brief] = await db.select({ id: visualBriefs.id, status: visualBriefs.status, rounds: visualBriefs.rounds, needed: visualBriefs.picturesNeeded })
         .from(visualBriefs).where(and(eq(visualBriefs.id, order.artefactId), eq(visualBriefs.organisationId, order.organisationId))).limit(1);
     if (!brief) return { kind: 'rejected', summary: 'The brief no longer exists' };
     const counts = await db.select({ status: visualBriefOptions.status, n: sql<number>`count(*)::int` })
         .from(visualBriefOptions).where(eq(visualBriefOptions.briefId, brief.id)).groupBy(visualBriefOptions.status);
     const count = (s: string) => Number(counts.find((c) => c.status === s)?.n ?? 0);
 
-    if (count('approved') > 0) {
-        const n = await attachApprovedToCampaign(db, { organisationId: order.organisationId, campaignId: order.campaignId, briefId: brief.id });
-        return { kind: 'delivered', summary: `${n} picture${n === 1 ? '' : 's'} approved — added to this campaign's pictures` };
+    // Delivered only once as many pictures are chosen as the brief is for. Each one joins the
+    // campaign as it is chosen, so posts can use them before the last is picked.
+    const needed = Math.max(1, Number(brief.needed) || 1);
+    const chosen = count('approved');
+    if (chosen > 0) await attachApprovedToCampaign(db, { organisationId: order.organisationId, campaignId: order.campaignId, briefId: brief.id });
+    if (chosen >= needed) {
+        return { kind: 'delivered', summary: `${chosen} picture${chosen === 1 ? '' : 's'} chosen — all this brief needed, added to this campaign` };
+    }
+    // Closed early: what was chosen is real and stays with the campaign, so the order is done.
+    if (chosen > 0 && brief.status === 'cancelled') {
+        return { kind: 'delivered', summary: `${chosen} of ${needed} pictures chosen before the brief was closed — added to this campaign` };
+    }
+    if (chosen > 0) {
+        return { kind: 'in_review', summary: `${chosen} of ${needed} pictures chosen — ${needed - chosen} more needed on the Brand Designer's Briefs tab` };
     }
     if (brief.status === 'cancelled') {
         // Nothing was ever made: the commission produced nothing, so it is refunded. Otherwise the
@@ -133,7 +149,7 @@ export async function judgeVisualOrder(db: Db, order: { id: number; organisation
     }
     const waiting = count('proposed');
     if (waiting > 0) return { kind: 'in_review', summary: `${waiting} option${waiting === 1 ? '' : 's'} waiting on the Brand Designer's Briefs tab` };
-    if (brief.status === 'open' && brief.rounds === 0) return { kind: 'in_review', summary: 'Waiting for you to press "Make options" on the Brand Designer\'s Briefs tab' };
+    if (brief.status === 'open' && brief.rounds === 0) return { kind: 'in_review', summary: 'Waiting for you to ask the Brand Designer for options on its Briefs tab' };
     return { kind: 'pending' };
 }
 

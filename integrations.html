@@ -7,6 +7,7 @@
   <title>Integrations | Be More Swan</title>
   <link href="./style.css" rel="stylesheet">
   <script src="/site-theme.js"></script>
+  <script src="/dialogs.js"></script>
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
   <link rel="manifest" href="/favicon/manifest.json">
@@ -73,7 +74,7 @@
       window.runSelfTest = async function (confirmTestPost) {
         const platform = document.getElementById('selftest-platform')?.value || 'facebook';
         if (confirmTestPost) {
-          const typed = window.prompt('This publishes a real (clearly-marked) test post to your connected account. Type CONFIRM to proceed.');
+          const typed = await window.promptModal('This publishes a real (clearly-marked) test post to your connected account. Type CONFIRM to proceed.', { title: 'Send a real test post?', confirmLabel: 'Send test post', required: true });
           if ((typed || '').trim().toUpperCase() !== 'CONFIRM') { showResult('warn', 'Test post cancelled.'); return; }
         }
         const btns = ['selftest-preflight-btn', 'selftest-post-btn'].map(id => document.getElementById(id));
@@ -470,7 +471,7 @@
       // say so, or "Disconnect" reads like it will delete the user's library.
       ? '? Designs you have already added to your Content Library will stay there.'
       : '? Assistants will no longer be able to sync actions to it.';
-    if (!window.confirm('Disconnect ' + providerName(id) + warning)) return;
+    if (!(await window.confirmModal(escapeHtml(warning.replace(/^\?\s*/, '')), { title: 'Disconnect ' + escapeHtml(providerName(id)) + '?', confirmLabel: 'Disconnect' }))) return;
     btn.disabled = true;
     btn.textContent = 'Disconnecting…';
     try {
@@ -689,7 +690,7 @@
 
     const rm = e.target.closest('[data-remove]');
     if (rm) {
-      if (!window.confirm('Remove this scenario? It will stop firing for this assistant.')) return;
+      if (!(await window.confirmModal('It will stop firing for this assistant.', { title: 'Remove this scenario?', confirmLabel: 'Remove' }))) return;
       try {
         const res = await fetch(API + '/deactivate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ activeScenarioId: Number(rm.getAttribute('data-remove')) }) });
         if (res.ok) loadScenarios();

@@ -315,13 +315,15 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
     commission_visuals: {
         roleKey: BRAND_DESIGNER_ROLE_KEY,
         label: 'Commission pictures',
-        description: 'Briefs the Brand Designer for this campaign\u2019s pictures. Stock photos and branded cards are made straight away; AI images wait for you to press \u201cMake options\u201d on its Briefs tab, where the AI credit is shown. The picture you approve joins this campaign\u2019s pictures.',
-        // The brief and the round are the Brand Designer's work. AI images are charged in AI
-        // CREDITS, separately and only on the user's click — never in campaign tasks, which would
-        // charge the same picture twice.
+        description: 'Briefs the Brand Designer for as many pictures as the posts they are for — 10 posts, 10 pictures. It offers options until you have chosen that many, then says no more are needed. Each picture you choose goes on one of the campaign\u2019s posts. Pictures for articles are a separate brief. Stock photos and branded cards are made straight away; AI images wait for you to ask for options on its Briefs tab, where the AI credit is shown.',
+        // One task per picture: choosing ten is ten pieces of the designer's work. AI images are
+        // charged in AI CREDITS, separately and only on the user's click — never in campaign tasks,
+        // which would charge the same picture twice.
         workItemsPerUnit: 1,
-        takesQuantity: false,
-        maxQuantity: 1,
+        // Quantity = pictures needed (owner, 2026-10-14). Must match the clamp in
+        // campaign-visual-order.ts createBriefForOrder and visual_briefs.pictures_needed's CHECK.
+        takesQuantity: true,
+        maxQuantity: 20,
         artefactKind: 'visual_brief',
     },
 };
