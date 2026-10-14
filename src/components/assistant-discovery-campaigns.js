@@ -833,7 +833,7 @@
 
   async function archiveCampaign(btn) {
     const id = Number(btn.getAttribute('data-dc-archive'));
-    if (!window.confirm('Archive this campaign? It stops running and leaves this list. Leads already found stay in your Leads tab.')) return;
+    if (!(await window.confirmModal('It stops running and leaves this list. Leads already found stay in your Leads tab.', { title: 'Archive this campaign?', confirmLabel: 'Archive' }))) return;
     btn.disabled = true;
     try {
       await call('archive', { campaignId: id });

@@ -98,7 +98,7 @@ check('removing an item re-numbers the waits, and asks first when something wait
     const start = tab.indexOf('if (remove) {');
     const b = tab.slice(start, tab.indexOf('if (save) {', start));
     assert.ok(/o\.after === n\) o\.after = null/.test(b) && /o\.after > n\) o\.after -= 1/.test(b), 'waits not re-numbered');
-    assert.ok(b.includes('window.confirm('), 'removes a prerequisite silently');
+    assert.ok(b.includes('await window.confirmModal('), 'removes a prerequisite silently');
     assert.ok(b.includes('ed.gen += 1'), 'kept field values could land on the wrong item after a removal');
 });
 

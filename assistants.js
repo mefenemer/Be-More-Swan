@@ -1880,11 +1880,11 @@ async function _rqApproveCampaignDecision(card, record) {
         window.showToast?.('This card has lost its link to the decision — refresh and try again.', 'error');
         return;
     }
-    const ok = window.confirm(
-        'Approve this decision?\n\n'
-        + 'Your other assistants will be briefed straight away and this campaign\'s task budget is '
+    const ok = await window.confirmModal(
+        'Your other assistants will be briefed straight away and this campaign\'s task budget is '
         + 'committed to the work. Everything they produce still comes back to you for approval '
         + 'before anything is published or sent.',
+        { title: 'Approve this decision?', confirmLabel: 'Approve', tone: 'golive' },
     );
     if (!ok) return;
 
@@ -11338,7 +11338,7 @@ window._suggestGoalRationale = async function (btn) {
     if (!box || !_goalsAssistantId) return;
 
     // Never silently paste over something the user wrote. Their own words are the better brief.
-    if (box.value.trim() && !window.confirm('Replace what you have written here with a fresh suggestion?')) return;
+    if (box.value.trim() && !(await window.confirmModal('', { title: 'Replace what you have written here with a fresh suggestion?', confirmLabel: 'Replace it', cancelLabel: 'Keep mine', tone: 'primary' }))) return;
 
     const label = btn ? btn.innerHTML : null;
     if (btn) { btn.disabled = true; btn.textContent = 'Thinking…'; }

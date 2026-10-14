@@ -1811,7 +1811,7 @@
       const was = btn.textContent;
       btn.textContent = 'Copied ✓';
       setTimeout(() => { btn.textContent = was; }, 1500);
-    } catch { window.prompt('Copy this:', text); }
+    } catch { window.promptModal('Copy this:', { title: 'Copy', value: text, confirmLabel: 'Done' }); }
   });
 
   function renderSending(domains) {

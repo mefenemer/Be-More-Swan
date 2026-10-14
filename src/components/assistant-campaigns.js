@@ -1968,10 +1968,10 @@
       // does NOT unmake delivered work, and saying so here is what makes the confirmation
       // answerable rather than frightening.
       const live = state.campaigns.filter((c) => c.status === 'active' || c.status === 'throttled').length;
-      const ok = window.confirm(
-        `Stop ${live} running ${live === 1 ? 'campaign' : 'campaigns'}?\n\n`
-        + 'Queued work is cancelled and no new briefs go out. Anything already drafted or published '
+      const ok = await window.confirmModal(
+        'Queued work is cancelled and no new briefs go out. Anything already drafted or published '
         + 'stays exactly as it is, and you can resume each campaign afterwards.',
+        { title: `Stop ${live} running ${live === 1 ? 'campaign' : 'campaigns'}?`, confirmLabel: 'Stop everything' },
       );
       if (!ok) return;
       state.busy = true;
@@ -2029,7 +2029,7 @@
         // Clipboard access is refused outside a secure context and in some embedded browsers.
         // Showing the URL is a worse experience than copying it, and a far better one than a
         // button that appears to do nothing.
-        window.prompt('Copy this link:', url);
+        window.promptModal('Copy this link:', { title: 'Your tracked link', value: url, confirmLabel: 'Done' });
       }
       return;
     }
@@ -2052,11 +2052,11 @@
       // Confirmed, and the wording is the point: a tracked link may already be printed in an
       // advert, so "it stops working" is the consequence the user needs stated before they act.
       // It is also honest that the history survives — archiving is not a way to erase results.
-      const ok = window.confirm(
-        'Archive this link?\n\n'
-        + 'It will stop working immediately, so anyone clicking it from an advert or a post already '
+      const ok = await window.confirmModal(
+        'It will stop working immediately, so anyone clicking it from an advert or a post already '
         + 'published will be sent to your homepage instead. The clicks and conversions it has '
         + 'already recorded are kept, and stay in your funnel.',
+        { title: 'Archive this link?', confirmLabel: 'Archive link' },
       );
       if (!ok) return;
       archBtn.disabled = true;
@@ -2254,10 +2254,10 @@
     // ⚠️ The figure is in the confirm text AND echoed to the server, which refuses a mismatch.
     // That pair is what makes "a human, with the number in front of them" true rather than a claim:
     // the number the user agreed to is the number the server checks.
-    const ok = window.confirm(
-      `Start spending £${budget.toFixed(2)} a day on LinkedIn?\n\n`
-      + 'Your ads go live immediately and LinkedIn begins charging your ad account. '
+    const ok = await window.confirmModal(
+      'Your ads go live immediately and LinkedIn begins charging your ad account. '
       + 'You can pause them from this page at any time, and we check on them daily.',
+      { title: `Start spending £${budget.toFixed(2)} a day on LinkedIn?`, confirmLabel: 'Start spending', tone: 'golive' },
     );
     if (!ok) return;
 
@@ -2489,8 +2489,9 @@
       if (taskWont) {
         // The consequence is the point of the confirm: whatever was held behind this is cancelled.
         const waiting = Number(taskWont.dataset.cmpTaskWaiting) || 0;
-        const ok = window.confirm(
-          `Mark this task as not happening?${waiting ? `\n\nThe ${waiting} ${waiting === 1 ? 'piece' : 'pieces'} of work waiting on it will be cancelled.` : ''}`,
+        const ok = await window.confirmModal(
+          waiting ? `The ${waiting} ${waiting === 1 ? 'piece' : 'pieces'} of work waiting on it will be cancelled.` : '',
+          { title: 'Mark this task as not happening?', confirmLabel: 'It won’t happen' },
         );
         if (!ok) return;
       }
@@ -2569,10 +2570,13 @@
       const campaignId = Number(approve.dataset.cmpPlanCampaign);
       const tasks = approve.dataset.cmpPlanTasks;
       const starts = approve.dataset.cmpPlanStarts === '1';
-      const ok = window.confirm(
-        `${starts ? 'Start this campaign and brief' : 'Brief'} your assistants with this plan?\n\n`
-        + `It uses ${tasks} tasks from your monthly allowance. Everything they draft still comes back `
+      const ok = await window.confirmModal(
+        `It uses ${esc(tasks)} tasks from your monthly allowance. Everything they draft still comes back `
         + 'to you for approval, and you can pause the campaign at any time.',
+        {
+          title: `${starts ? 'Start this campaign and brief' : 'Brief'} your assistants with this plan?`,
+          confirmLabel: starts ? 'Approve and start' : 'Approve plan', tone: 'golive',
+        },
       );
       if (!ok) return;
       state.busy = true;
@@ -2681,7 +2685,10 @@
         ? Math.max(1, Math.min(spec.maxQuantity, Number(document.querySelector(`[data-cmp-aw-qty="${id}"]`)?.value) || 1))
         : 1;
       const tasks = (spec.workItemsPerUnit || 0) * quantity;
-      if (tasks && !window.confirm(`${spec.label}${quantity > 1 ? ` ×${quantity}` : ''}?\n\nThis uses ${tasks} tasks from this campaign's budget. The work comes back to you for approval.`)) return;
+      if (tasks && !(await window.confirmModal(
+        `This uses ${tasks} tasks from this campaign's budget. The work comes back to you for approval.`,
+        { title: `${esc(spec.label)}${quantity > 1 ? ` ×${quantity}` : ''}?`, confirmLabel: 'Brief the assistant', tone: 'primary' },
+      ))) return;
       state.busy = true;
       awSubmit.disabled = true;
       say(id, 'Briefing…');
@@ -2743,7 +2750,10 @@
       if (ed.orders.length === 1) { say(ed.campaignId, 'A plan needs at least one piece of work. To drop the whole plan, use "Turn down".', 'error'); return; }
       const n = i + 1;
       const waiting = ed.orders.filter((o) => o.after === n).length;
-      if (waiting && !window.confirm(`${waiting} ${waiting === 1 ? 'item waits' : 'items wait'} for this one. Remove it anyway? ${waiting === 1 ? 'That item' : 'They'} will then start as soon as you approve.`)) return;
+      if (waiting && !(await window.confirmModal(
+        `${waiting} ${waiting === 1 ? 'item waits' : 'items wait'} for this one. ${waiting === 1 ? 'That item' : 'They'} will then start as soon as you approve.`,
+        { title: 'Remove this item?', confirmLabel: 'Remove' },
+      ))) return;
       ed.orders.splice(i, 1);
       // Re-number the waits: later items move up one, and anything that waited for the removed
       // item now waits for nothing (the user has just said so).

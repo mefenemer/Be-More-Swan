@@ -82,10 +82,19 @@
       if (btn.dataset.confidenceHooked) return;
       btn.dataset.confidenceHooked = '1';
       btn.addEventListener('click', function (e) {
-        const confirmed = window.confirm(
-          'This output has low AI confidence.\n\nI understand this output may be inaccurate — proceed anyway?'
-        );
-        if (!confirmed) e.stopImmediatePropagation();
+        // A styled dialog cannot answer synchronously, so the original click is held and, on a
+        // yes, replayed with a one-shot pass so this capture listener lets it through.
+        if (btn.dataset.confidencePass === '1') { delete btn.dataset.confidencePass; return; }
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        window.confirmModal(
+          'I understand this output may be inaccurate — proceed anyway?',
+          { title: 'This output has low AI confidence', confirmLabel: 'Proceed anyway', tone: 'primary' },
+        ).then((ok) => {
+          if (!ok) return;
+          btn.dataset.confidencePass = '1';
+          btn.click();
+        });
       }, true);
     });
   }

@@ -112,8 +112,8 @@
     renderPreview();
   }
 
-  function close(force) {
-    if (!force && S && S.dirty && !window.confirm('Close without saving your changes?')) return;
+  async function close(force) {
+    if (!force && S && S.dirty && !(await window.confirmModal('', { title: 'Close without saving your changes?', confirmLabel: 'Close without saving', cancelLabel: 'Keep editing' }))) return;
     hide($('fb-modal'));
     S = null;
   }
@@ -449,7 +449,7 @@
       const isLink = cp.getAttribute('data-fb-copy') === 'link';
       const text = isLink ? cp.getAttribute('data-link') : ($('fb-panel').querySelector('textarea[readonly]') || {}).value;
       if (text) navigator.clipboard?.writeText(text).then(() => window.showToast?.(isLink ? 'Link copied.' : 'Website code copied.'))
-        .catch(() => window.prompt('Copy this:', text));
+        .catch(() => window.promptModal('Copy this:', { title: 'Copy', value: text, confirmLabel: 'Done' }));
       return;
     }
     if (t.closest('#fb-save')) save();
