@@ -366,12 +366,20 @@ export async function issueOrder(db: Db, orderId: number, ctx: IssueContext): Pr
  * post for Instagram alone.
  */
 async function campaignPostPlatforms(db: Db, ctx: IssueContext): Promise<{ platform: string | null; platforms: string[] | null }> {
+    // ⚠️ The caller must ALSO give each job its own crosspostGroupId when platforms has 2+ entries
+    // (see crossPostGroup below) — without it the per-platform posts are four strangers: four cards
+    // in review, and a chosen campaign picture replaced on one of them only (found on prod, 2026-10-14).
     const [a] = await db.select({ onboardingContext: aiAssistants.onboardingContext, configuration: aiAssistants.configuration })
         .from(aiAssistants).where(eq(aiAssistants.id, ctx.targetAssistantId)).limit(1);
     const targets = a ? await resolveConnectedDraftPlatforms(db, ctx.organisationId, a) : [];
     // None live: leave both empty and the worker resolves its fallback, as before.
     if (!targets.length) return { platform: null, platforms: null };
     return { platform: targets[0], platforms: targets.length > 1 ? targets : null };
+}
+
+/** One idea on 2+ platforms is ONE cross-post: the shared id schedule-gap-fill.ts gives Autopilot's. */
+function crossPostGroup(fan: { platforms: string[] | null }): string | null {
+    return fan.platforms && fan.platforms.length > 1 ? randomUUID() : null;
 }
 
 /** Recompile one assistant so its blueprint reflects the campaigns it serves. Never throws. */
@@ -476,6 +484,7 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
                 triggerType: 'on_demand',
                 targetPublishDate: new Date(now + (i + 1) * 24 * 60 * 60 * 1000),
                 ...fan,
+                crosspostGroupId: crossPostGroup(fan),
                 // The trace back to this order. Without it the reconciler cannot tell whether the
                 // order produced anything, and it sits at 'issued' for ever.
                 campaignOrderId: orderId,
@@ -608,6 +617,7 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
                 triggerType: 'on_demand',
                 targetPublishDate: new Date(now + (i + 1) * 24 * 60 * 60 * 1000),
                 ...fan,
+                crosspostGroupId: crossPostGroup(fan),
                 campaignOrderId: orderId,
             }).returning({ id: contentGenerationJobs.id });
             await db.insert(campaignExperimentJobs).values({ jobId: job.id, experimentId: exp.id, variant });

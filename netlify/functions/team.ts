@@ -1,7 +1,7 @@
 // netlify/functions/team.ts
 // The Team feed — docs/campaign-orchestrator-flow.md §4. One endpoint, tenant-scoped.
 //
-//   POST { action: 'list', campaignId?, assistantId?, beforeId? } → messages (newest first), assistants, campaigns
+//   POST { action: 'list', campaignId?, assistantId?, mine?, beforeId? } → messages (newest first), assistants, campaigns
 //   POST { action: 'unread' }                                     → { unread } — the side menu and bell badge
 //   POST { action: 'mark_read', upToId }                          → the person has seen up to here
 //   POST { action: 'send', assistantId, campaignId?, body }       → a note to an assistant (moderated)
@@ -45,7 +45,7 @@ export default withLambda(async (event) => {
 
     if (action === 'list') {
         const messages = await listTeamMessages(db, orgId, {
-            campaignId: posInt(body.campaignId), assistantId: posInt(body.assistantId), beforeId: posInt(body.beforeId),
+            campaignId: posInt(body.campaignId), assistantId: posInt(body.assistantId), mine: body.mine === true, beforeId: posInt(body.beforeId),
         });
         // Everyone who can be written to, and every campaign a thread can be about — so the page can
         // show an assistant with no messages yet, and name a campaign thread by its objective.
