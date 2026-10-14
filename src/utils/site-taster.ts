@@ -1,6 +1,6 @@
 // src/utils/site-taster.ts — the Mystery Shopper's free public taster (docs/mystery-shopper-plan.md §4.7).
 //
-// Anyone on bemoreswan.com/mystery-shopper enters a website and an email; we read that one page, ask
+// Anyone on the Mystery Shopper's public page (assistant.html?role=mystery_shopper) enters a website and an email; we read that one page, ask
 // the first-impression questions only, and show a score out of 100 plus the single worst problem
 // with a rewrite. Same machinery as a hired check (site-extract, site-score, the clarity lens prompt),
 // so a taster score and a hired score for the same page agree on that lens.

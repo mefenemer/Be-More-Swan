@@ -568,7 +568,7 @@ export async function sendTasterEmail(runId: number, result: TasterResult, to: s
             to,
             vars: {
                 site: { host: new URL(result.url).hostname.replace(/^www\./, ''), score: result.score === null ? 'no score' : `${result.score}/100` },
-                link: { action_url: `${base}/mystery-shopper?r=${runId}&t=${token}` },
+                link: { action_url: `${base}/assistant.html?role=mystery_shopper&r=${runId}&t=${token}` },
             },
         });
     } catch (err) {

@@ -49,6 +49,8 @@
     .sc-lightbox.is-open { display: flex; }
   </style>
   <script src="/waitlist-mode.js" defer></script>
+  <!-- The Mystery Shopper's free website check, mounted after the hero for that role only. -->
+  <script src="/src/public/site-taster.js" defer></script>
 </head>
 <body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen overflow-x-hidden">
 
@@ -98,6 +100,20 @@
 
   let isLoggedIn = false;
   let waitlistOn = false;
+
+  // The Mystery Shopper's page carries its free website check (src/public/site-taster.js). That check
+  // is public whatever the role's catalogue status: while the role is Beta or Hidden an anonymous
+  // visitor cannot see its details, so the page shows the check on its own instead of "not found" —
+  // otherwise the emailed result link (…&r=&t=) would land on an error for everyone outside the beta.
+  const TASTER_ROLE = 'mystery_shopper';
+  function mountTaster(root, roleKey, c, headingTag) {
+    const host = root.querySelector('#site-taster-host');
+    if (host && window.BmsSiteTaster) {
+      // cta() already returns the waitlist button while sign-ups are locked, so the result's button
+      // always matches the page's own.
+      window.BmsSiteTaster.mount(host, { ctaHtml: cta(roleKey, c, true), headingTag });
+    }
+  }
 
   // Same CTA rules as the library cards (assistants.html): customers hire from the workspace,
   // visitors pick a plan first (or join the waitlist while registration is locked), and a role
@@ -163,6 +179,8 @@
         </div>
       </div>
     </section>
+
+    ${roleKey === TASTER_ROLE ? '<div id="site-taster-host"></div>' : ''}
 
     ${overview.length ? `
     <!-- Overview -->
@@ -279,6 +297,15 @@
     ]);
     const c = roleKey ? AssistantContent.get(roleKey) : null;
     document.getElementById('sc-loading').classList.add('hidden');
+    if (!c && roleKey === TASTER_ROLE) {
+      // Not public yet (Beta/Hidden for this visitor): the free check alone, as the page.
+      document.title = 'Free Website Check | Be More Swan';
+      const root = document.getElementById('sc-root');
+      root.innerHTML = '<div id="site-taster-host"></div>';
+      root.classList.remove('hidden');
+      mountTaster(root, roleKey, { name: 'Mystery Shopper', comingSoon: false }, 'h1');
+      return;
+    }
     if (!c) { document.getElementById('sc-error').classList.remove('hidden'); return; }
 
     document.title = `${c.name} | Be More Swan`;
@@ -287,6 +314,11 @@
     const root = document.getElementById('sc-root');
     root.innerHTML = render(roleKey, c, sc);
     root.classList.remove('hidden');
+    mountTaster(root, roleKey, c, 'h2');
+    // A result link from the email scrolls past the hero to the check.
+    if (roleKey === TASTER_ROLE && new URLSearchParams(location.search).get('r')) {
+      document.getElementById('free-website-check')?.scrollIntoView({ block: 'start' });
+    }
 
     // A video file that isn't there yet (not rendered/deployed) must not leave a black box.
     root.querySelector('#sc-video video source')?.addEventListener('error', () => {

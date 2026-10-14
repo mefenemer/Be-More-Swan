@@ -25,6 +25,7 @@ const META = {
     lead_qualifier:        { name: 'Lead Generation Assistant',      accent: '#2563eb' },
     campaign_orchestrator: { name: 'Marketing Campaign Orchestrator', accent: '#ea580c' },
     brand_designer:        { name: 'Brand Designer',                 accent: '#db2777' },
+    mystery_shopper:       { name: 'Mystery Shopper',                accent: '#db2777' },
 };
 
 const only = process.argv.slice(2);

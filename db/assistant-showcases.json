@@ -377,5 +377,82 @@
         "a": "Yes — upload them, or import designs from Canva, and they appear as options alongside the rest."
       }
     ]
+  },
+  "mystery_shopper": {
+    "headline": "See your website through a stranger's eyes, and fix what's costing you sales.",
+    "overview": [
+      "The Mystery Shopper reads your homepage the way real buyers do: a sceptical first-time visitor, a buyer comparing you with up to three competitors, and an AI assistant deciding whether it could recommend you. It scores your page out of 100 and tells you the changes that matter most.",
+      "Every suggested rewrite quotes your page word for word. It checks your site again every week, confirms each change went live, and tells you when a competitor changes their headline, prices or offer."
+    ],
+    "highlights": [
+      "Reads your site like a buyer",
+      "Side by side with your competitors",
+      "Replacement wording, ready to use",
+      "Every fix checked on the live page"
+    ],
+    "steps": [
+      {
+        "title": "Give it your website",
+        "body": "Your homepage, who it's for, what visitors should do, and up to three competitors."
+      },
+      {
+        "title": "Get your score",
+        "body": "A score out of 100 across first impression, competitors and AI search readiness."
+      },
+      {
+        "title": "Make the top changes",
+        "body": "The highest-impact fixes, each with what your page says now and what to say instead."
+      },
+      {
+        "title": "It checks every week",
+        "body": "The next check confirms each change is live and spots what your competitors changed."
+      }
+    ],
+    "features": [
+      {
+        "title": "A score you can trust",
+        "body": "Strict, repeatable checks: an unchanged page keeps exactly the same score, and you can see every check your page is missing.",
+        "image": "/images/assistants/mystery_shopper/website.jpg",
+        "alt": "A website scored 71 out of 100 across first impression, competitors and AI search readiness"
+      },
+      {
+        "title": "The wording, already written",
+        "body": "Each fix shows what your page says now and what to try instead, with [placeholders] wherever it needs a fact only you know.",
+        "image": "/images/assistants/mystery_shopper/fixes.jpg",
+        "alt": "Suggested fixes, each with the current wording and a suggested replacement"
+      },
+      {
+        "title": "Your eyes on the market",
+        "body": "Every week it compares you with up to three competitors, tells you when one changes their headline, prices or offer, and lines up briefs for your other assistants.",
+        "image": "/images/assistants/mystery_shopper/competitors.jpg",
+        "alt": "A competitor's new headline and prices, with briefs ready for the Social Media and Blog Writing Assistants"
+      },
+      {
+        "title": "Ready for AI search",
+        "body": "It checks how an AI assistant is likely to read your page — whether it can tell what you do, who you serve and what to quote — so you are easier to recommend."
+      }
+    ],
+    "faqs": [
+      {
+        "q": "Does it change my website?",
+        "a": "No. It reads your site and writes the changes; you, or whoever runs your site, make them. The next check confirms each one is live."
+      },
+      {
+        "q": "Does it use tasks?",
+        "a": "A check that re-scores your site uses 1 task from your monthly allowance. A week where nothing on your site or your competitors' sites changed costs nothing."
+      },
+      {
+        "q": "Does it ask ChatGPT about my business?",
+        "a": "No. The AI search part of the score simulates how an AI assistant is likely to read your page. It does not query ChatGPT or any other assistant."
+      },
+      {
+        "q": "What can't it see?",
+        "a": "Only public pages are read. It never logs in, fills in forms or buys anything, and it respects sites that ask crawlers to stay out. If your homepage shows text only after JavaScript runs, it tells you — that is often what AI crawlers see too."
+      },
+      {
+        "q": "Can I try it first?",
+        "a": "Yes. The free website check on this page gives you a first-impression score and the one change to make first, in about 30 seconds."
+      }
+    ]
   }
 }
