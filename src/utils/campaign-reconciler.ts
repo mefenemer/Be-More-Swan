@@ -56,6 +56,7 @@ import { isScheduleActive } from '../config/post-status';
 import { recordCampaignSpend } from './campaign-ledger';
 import { mirrorOrder } from './campaign-mirror';
 import { issueHumanTask, issueOrder, recompileCampaignTargets } from './campaign-orders';
+import { triggerBlogDrain, triggerContentDrain } from './trigger-drain';
 import { ORDER_ACTION_SPECS, type CampaignOrderAction } from '../config/campaign-vocab';
 
 type Db = ReturnType<typeof getDb>;
@@ -253,15 +254,7 @@ async function judgeLeadSearchOrder(db: Db, order: { artefactId: number | null }
  */
 async function unblockChain(db: Db, deliveredOrderId: number): Promise<number> {
     const waiting = await db
-        .select({
-            id: campaignOrders.id,
-            organisationId: campaignOrders.organisationId,
-            campaignId: campaignOrders.campaignId,
-            action: campaignOrders.action,
-            brief: campaignOrders.brief,
-            costWorkItems: campaignOrders.costWorkItems,
-            targetAssistantId: campaignOrders.targetAssistantId,
-        })
+        .select(BLOCKED_ORDER_FIELDS)
         .from(campaignOrders)
         .where(and(
             eq(campaignOrders.blockedOnOrderId, deliveredOrderId),
@@ -271,86 +264,119 @@ async function unblockChain(db: Db, deliveredOrderId: number): Promise<number> {
     let released = 0;
     for (const next of waiting) {
         try {
-            // A PERSON's task (§9.5) has no assistant to issue to — checked first, or the "assistant
-            // no longer in the workspace" branch below would cancel every task a human was asked
-            // to do after earlier work. It is released into "waiting on <name>", nothing more.
-            if (next.action === 'request_human_task') {
-                const [c] = await db
-                    .select({ objective: campaigns.objective, orchestratorId: campaigns.aiAssistantId, status: campaigns.status })
-                    .from(campaigns).where(eq(campaigns.id, next.campaignId)).limit(1);
-                if (!c) continue;
-                if (c.status !== 'active' && c.status !== 'throttled') {
-                    await db.update(campaignOrders)
-                        .set({ status: 'cancelled', resultSummary: 'The campaign was no longer running when this became due', updatedAt: new Date() })
-                        .where(eq(campaignOrders.id, next.id));
-                    continue;
-                }
-                await issueHumanTask(db, next.id, {
-                    organisationId: next.organisationId, orchestratorAssistantId: c.orchestratorId,
-                    campaignObjective: c.objective, brief: (next.brief ?? {}) as Record<string, unknown>,
-                });
-                released++;
-                continue;
-            }
-
-            if (!next.targetAssistantId) {
-                await db.update(campaignOrders)
-                    .set({
-                        status: 'cancelled',
-                        resultSummary: 'The assistant this was waiting for is no longer in the workspace',
-                        updatedAt: new Date(),
-                    })
-                    .where(eq(campaignOrders.id, next.id));
-                continue;
-            }
-
-            // The campaign carries both the objective quoted into the mirror and the orchestrator's
-            // own assistant id (campaigns.ai_assistant_id) — the Data Hub row belongs to the
-            // orchestrator's workspace, not the workspace of whoever receives the order.
-            const [campaign] = await db
-                .select({ objective: campaigns.objective, orchestratorId: campaigns.aiAssistantId, status: campaigns.status })
-                .from(campaigns)
-                .where(eq(campaigns.id, next.campaignId))
-                .limit(1);
-            if (!campaign) continue;
-
-            // A campaign that stopped while its chain waited must not have the chain resume behind
-            // it. Only a live campaign releases work.
-            if (campaign.status !== 'active' && campaign.status !== 'throttled') {
-                await db.update(campaignOrders)
-                    .set({
-                        status: 'cancelled',
-                        resultSummary: 'The campaign was no longer running when this became due',
-                        updatedAt: new Date(),
-                    })
-                    .where(eq(campaignOrders.id, next.id));
-                continue;
-            }
-
-            const [target] = await db
-                .select({ userId: aiAssistants.userId })
-                .from(aiAssistants)
-                .where(eq(aiAssistants.id, next.targetAssistantId))
-                .limit(1);
-            if (!target) continue;
-
-            await issueOrder(db, next.id, {
-                organisationId: next.organisationId,
-                campaignId: next.campaignId,
-                orchestratorAssistantId: campaign.orchestratorId,
-                campaignObjective: campaign.objective,
-                action: next.action as CampaignOrderAction,
-                brief: (next.brief ?? {}) as Record<string, unknown>,
-                workItems: next.costWorkItems,
-                targetAssistantId: next.targetAssistantId,
-                targetUserId: target.userId,
-            });
-            released++;
+            if (await releaseBlockedOrder(db, next)) released++;
         } catch (err) {
             console.error('[campaign-reconciler] could not release blocked order', { orderId: next.id, err });
         }
     }
+    if (released) await pokeDrainsFor(waiting.map((w) => w.action), undefined, 'campaign-reconciler');
     return released;
+}
+
+/** What releasing a waiting order needs to know about it. */
+export const BLOCKED_ORDER_FIELDS = {
+    id: campaignOrders.id,
+    organisationId: campaignOrders.organisationId,
+    campaignId: campaignOrders.campaignId,
+    action: campaignOrders.action,
+    brief: campaignOrders.brief,
+    costWorkItems: campaignOrders.costWorkItems,
+    targetAssistantId: campaignOrders.targetAssistantId,
+};
+export type BlockedOrder = {
+    id: number; organisationId: number; campaignId: number; action: string; brief: unknown;
+    costWorkItems: number; targetAssistantId: number | null;
+};
+
+/**
+ * Release ONE waiting order: issue it now. Shared by the reconciler (its predecessor delivered) and
+ * by "Start now without waiting" on the Campaigns tab (the user chose not to wait) — one path, so a
+ * released order is issued, charged and mirrored the same way whoever released it.
+ *
+ * Returns true when the order was issued (or, for a person's task, put in front of them).
+ *
+ * ⚠️ The status-guarded CLAIM comes first. The hourly reconciler and a user's click can reach the
+ * same order together; without the guard both would issue it, and the work would be drafted and
+ * charged twice. Whoever flips 'blocked' first owns it.
+ */
+export async function releaseBlockedOrder(db: Db, next: BlockedOrder): Promise<boolean> {
+    const [claimed] = await db.update(campaignOrders)
+        .set({ status: 'queued', updatedAt: new Date() })
+        .where(and(eq(campaignOrders.id, next.id), eq(campaignOrders.status, 'blocked')))
+        .returning({ id: campaignOrders.id });
+    if (!claimed) return false;
+
+    const [c] = await db
+        .select({ objective: campaigns.objective, orchestratorId: campaigns.aiAssistantId, status: campaigns.status })
+        .from(campaigns).where(eq(campaigns.id, next.campaignId)).limit(1);
+    if (!c) return false;
+
+    // A campaign that stopped while its chain waited must not have the chain resume behind it.
+    // Only a live campaign releases work.
+    if (c.status !== 'active' && c.status !== 'throttled') {
+        await db.update(campaignOrders)
+            .set({ status: 'cancelled', resultSummary: 'The campaign was no longer running when this became due', updatedAt: new Date() })
+            .where(eq(campaignOrders.id, next.id));
+        return false;
+    }
+
+    // A PERSON's task (§9.5) has no assistant to issue to — checked first, or the "assistant no
+    // longer in the workspace" branch below would cancel every task a human was asked to do after
+    // earlier work. It is released into "waiting on <name>", nothing more.
+    if (next.action === 'request_human_task') {
+        await issueHumanTask(db, next.id, {
+            organisationId: next.organisationId, orchestratorAssistantId: c.orchestratorId,
+            campaignObjective: c.objective, brief: (next.brief ?? {}) as Record<string, unknown>,
+        });
+        return true;
+    }
+
+    if (!next.targetAssistantId) {
+        await db.update(campaignOrders)
+            .set({ status: 'cancelled', resultSummary: 'The assistant this was waiting for is no longer in the workspace', updatedAt: new Date() })
+            .where(eq(campaignOrders.id, next.id));
+        return false;
+    }
+
+    const [target] = await db
+        .select({ userId: aiAssistants.userId })
+        .from(aiAssistants)
+        .where(eq(aiAssistants.id, next.targetAssistantId))
+        .limit(1);
+    if (!target) {
+        // Put it back: claimed but not issuable this run, and 'queued' is not a state the
+        // reconciler releases from. Waiting is the honest place for it.
+        await db.update(campaignOrders).set({ status: 'blocked', updatedAt: new Date() }).where(eq(campaignOrders.id, next.id));
+        return false;
+    }
+
+    // The campaign carries both the objective quoted into the mirror and the orchestrator's own
+    // assistant id — the Data Hub row belongs to the orchestrator's workspace, not the receiver's.
+    const r = await issueOrder(db, next.id, {
+        organisationId: next.organisationId,
+        campaignId: next.campaignId,
+        orchestratorAssistantId: c.orchestratorId,
+        campaignObjective: c.objective,
+        action: next.action as CampaignOrderAction,
+        brief: (next.brief ?? {}) as Record<string, unknown>,
+        workItems: next.costWorkItems,
+        targetAssistantId: next.targetAssistantId,
+        targetUserId: target.userId,
+    });
+    return r.status !== 'failed';
+}
+
+/**
+ * Start the drafting queues for work that has just been issued, rather than leaving it for the
+ * next ten-minute cron tick. Best effort: a failed poke leaves the jobs for the cron, which is the
+ * old behaviour. `headers` resolves the host to poke; a scheduled caller passes none.
+ */
+export async function pokeDrainsFor(
+    actions: string[], headers: Record<string, string | undefined> | undefined, caller: string,
+): Promise<void> {
+    const set = new Set(actions);
+    if (set.has('draft_social_posts') || set.has('ab_test_posts')) await triggerContentDrain(headers, 'campaign', caller);
+    if (set.has('draft_blog_pillar')) await triggerBlogDrain(headers, 'campaign', caller);
 }
 
 /**

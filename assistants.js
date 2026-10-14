@@ -185,6 +185,9 @@ function _goalNextStep(h, latest, target, goalsTab) {
 }
 
 window._buildAssistantCardGoals = function (assistant) {
+    // No goals for a role that hides them (its campaigns carry the targets) — the prompt to add one
+    // would deep-link to a tab that is not there.
+    if (window.AssistantDashboardRegistry?.get(assistant.roleKey)?.hideGoals) return '';
     const gs = assistant.goalSummary || {};
     const total = gs.total || 0;
     const goalsTab = `event.stopPropagation(); window._assistantDetailInitialTab='goals'; window.routeToAssistantDetail('${assistant.id}')`;
@@ -5486,6 +5489,10 @@ function _applyDashboardRegistry(data) {
     // approval gate is the option grid on its Briefs tab, and the default here would be an empty
     // SOCIAL post queue for an assistant that makes no posts.
     toggle('maintab-btn-review-queue', !cfg.hideReviewQueue);
+    // A role whose campaigns carry their own targets (the Campaign Assistant) has no separate goals:
+    // two places to set "what success is" was the confusion. The Goal Progress card goes with it.
+    toggle('maintab-btn-goals', !cfg.hideGoals);
+    toggle('goal-progress-panel', !cfg.hideGoals);
     // Social/blog retire the Data Hub tab (cfg.hideDataHub) — and the action bar with the primary
     // action ("Create a Post") lives INSIDE that tab's panel. Hiding the tab button alone left the
     // panel itself visible whenever _activateMainTab hadn't run yet, so it leaked in under the tab

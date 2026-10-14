@@ -11,6 +11,7 @@
 //                                 and excludeExistingCustomers (§9.2), funnelStage (§9.6)
 //   POST { action: 'propose_plan', campaignId, orders[] }    → pending strategy decision (chat)
 //   POST { action: 'revise_plan', decisionId, orders[] }     → the user's edit of a waiting plan (supersedes it)
+//   POST { action: 'start_now', orderId }                    → release an item waiting on earlier work
 //   POST { action: 'start',       campaignId }             → draft|paused → active
 //   POST { action: 'pause',       campaignId, reason }
 //   POST { action: 'stop_all',    assistantId }            → pause every live campaign
@@ -57,7 +58,8 @@ import { requireTenant } from '../../src/utils/tenant';
 import { campaignSpendTotals, fitsBudget, readPlanTaskGate } from '../../src/utils/campaign-ledger';
 import { placeOrder, recompileCampaignTargets } from '../../src/utils/campaign-orders';
 import { settleDecisionMirror } from '../../src/utils/campaign-mirror';
-import { settleOrderNow } from '../../src/utils/campaign-reconciler';
+import { BLOCKED_ORDER_FIELDS, pokeDrainsFor, releaseBlockedOrder, settleOrderNow } from '../../src/utils/campaign-reconciler';
+import { describeWork, nextStep } from '../../src/utils/campaign-work-state';
 import { hiredRoleKeys } from '../../src/utils/campaign-proposer';
 import { normaliseAudience, type CampaignAudience } from '../../src/config/campaign-audience';
 import { countCampaignOutcome } from '../../src/utils/campaign-outcomes';
@@ -329,7 +331,29 @@ export default withLambda(async (event) => {
                 id: t.id, hypothesis: t.hypothesis, angleA: t.angleA, angleB: t.angleB,
                 a: t.a, b: t.b, verdict: t.verdict.verdict, sentence: t.sentence,
             }));
-            items.push({ ...r, ...totals, orders: live ?? { open: 0, inReview: 0, delivered: 0 }, pendingPlan, progress, humanTasks, assets, tests });
+            // Every piece of work with its live state, and the ONE next step (campaign-work-state.ts).
+            // Drafting progress is read from the jobs each order enqueued, so "Drafting: 3 of 10
+            // done" is live rather than waiting for the hourly reconciler to notice.
+            const orderRows = await db.select({
+                id: campaignOrders.id, action: campaignOrders.action, status: campaignOrders.status,
+                blockedOnOrderId: campaignOrders.blockedOnOrderId, resultSummary: campaignOrders.resultSummary,
+                artefactKind: campaignOrders.artefactKind, targetAssistantId: campaignOrders.targetAssistantId,
+                brief: campaignOrders.brief,
+                jq: sql<number>`(SELECT count(*)::int FROM content_generation_jobs j WHERE j.campaign_order_id = ${campaignOrders.id} AND j.status = 'queued')`,
+                jp: sql<number>`(SELECT count(*)::int FROM content_generation_jobs j WHERE j.campaign_order_id = ${campaignOrders.id} AND j.status = 'processing')`,
+                jc: sql<number>`(SELECT count(*)::int FROM content_generation_jobs j WHERE j.campaign_order_id = ${campaignOrders.id} AND j.status = 'completed')`,
+                jf: sql<number>`(SELECT count(*)::int FROM content_generation_jobs j WHERE j.campaign_order_id = ${campaignOrders.id} AND j.status NOT IN ('queued','processing','completed'))`,
+            }).from(campaignOrders)
+                .where(eq(campaignOrders.campaignId, r.id))
+                .orderBy(campaignOrders.id);
+            const work = describeWork(orderRows.map((o) => ({
+                id: o.id, action: o.action, status: o.status, blockedOnOrderId: o.blockedOnOrderId,
+                resultSummary: o.resultSummary, artefactKind: o.artefactKind, targetAssistantId: o.targetAssistantId,
+                brief: (o.brief ?? {}) as Record<string, unknown>,
+                jobs: { queued: Number(o.jq) || 0, processing: Number(o.jp) || 0, completed: Number(o.jc) || 0, failed: Number(o.jf) || 0 },
+            })));
+            const step = nextStep({ status: r.status }, !!pendingPlan, work);
+            items.push({ ...r, ...totals, orders: live ?? { open: 0, inReview: 0, delivered: 0 }, pendingPlan, progress, humanTasks, assets, tests, work, nextStep: step });
         }
 
         // The plan gate travels with the list so the Budget & Control strip can render in one
@@ -971,6 +995,41 @@ export default withLambda(async (event) => {
         return json(200, { decisionId: newId, campaignId: campaign.id, workItems: planWorkItems(orders) });
     }
 
+    // ── start_now ─────────────────────────────────────────────────────────────
+    // "Start now without waiting": the user releases an item that was waiting on earlier work.
+    // It was costed and approved with the plan, so this commissions nothing new — it only drops
+    // the wait. Same release path as the reconciler (releaseBlockedOrder), whose status-guarded
+    // claim stops the two from issuing it twice.
+    if (action === 'start_now') {
+        const orderId = Number(body.orderId);
+        if (!Number.isInteger(orderId) || orderId <= 0) return json(400, { error: 'orderId is required.' });
+        const [o] = await db.select({ ...BLOCKED_ORDER_FIELDS, status: campaignOrders.status })
+            .from(campaignOrders)
+            .where(and(eq(campaignOrders.id, orderId), eq(campaignOrders.organisationId, orgId)))
+            .limit(1);
+        if (!o) return json(404, { error: 'That piece of work was not found.' });
+        if (o.status !== 'blocked') return json(409, { error: 'This item is no longer waiting — reload to see where it is.' });
+        const campaign = await requireCampaign(o.campaignId);
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+        if (!LIVE_CAMPAIGN_STATUSES.includes(campaign.status as never)) {
+            return json(400, { error: 'This campaign is not running. Resume it first, then start this item.' });
+        }
+        const gate = await readPlanTaskGate(db, orgId);
+        if (gate.atCap) {
+            return json(429, { error: 'This workspace has used its monthly task allowance, so this cannot start until it resets. Nothing has been charged.' });
+        }
+        let started = false;
+        try {
+            started = await releaseBlockedOrder(db, o);
+        } catch (err) {
+            console.error('[campaigns] start_now failed', { orderId, err });
+            return json(500, { error: 'It could not be started — please try again.' });
+        }
+        if (!started) return json(409, { error: 'It could not be started. Reload to see what happened to it.' });
+        await pokeDrainsFor([o.action], event.headers as Record<string, string | undefined>, 'campaigns-start-now');
+        return json(200, { orderId, started: true });
+    }
+
     // ── place_order ───────────────────────────────────────────────────────────
     if (action === 'place_order') {
         const campaign = await requireCampaign(Number(body.campaignId));
@@ -1032,6 +1091,7 @@ export default withLambda(async (event) => {
             blockedOnOrderId,
         });
         if (result.status === 'failed') return json(400, { error: result.message ?? 'The order could not be placed.' });
+        if (result.status === 'issued') await pokeDrainsFor([order.action], event.headers as Record<string, string | undefined>, 'campaigns-place-order');
         return json(200, { orderId: result.orderId, status: result.status, workItems: result.workItems });
     }
 
@@ -1756,6 +1816,10 @@ export default withLambda(async (event) => {
 
         // A strategy decision is the campaign's own go-ahead: it was started above, before its
         // orders were placed. Every other kind acts on a campaign that is already running.
+
+        // Start drafting now rather than at the next ten-minute tick: someone just pressed Approve
+        // and is watching. Best effort — a failed poke leaves the jobs for the cron.
+        await pokeDrainsFor((proposed.orders ?? []).map((o) => String(o.action)), event.headers as Record<string, string | undefined>, 'campaigns-decide');
 
         // Report what actually happened per order rather than a blanket success. Some orders fail
         // for legitimate reasons (the workspace has not hired that assistant), and the user needs

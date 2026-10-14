@@ -506,6 +506,9 @@
       // rather than relying on _activateDefaultMainTab's "first visible tab" fallback, which gives
       // the right answer only by accident of tab order.
       defaultMainTab: 'campaigns',
+      // A campaign's target IS its goal. A Goals tab beside it was a second place to say what
+      // success is, and the owner found it confusing (docs/campaign-orchestrator-flow.md §3).
+      hideGoals: true,
     },
 
     // Brand Designer (docs/brand-designer-plan.md §4). Its work is BRIEFS and the options they
