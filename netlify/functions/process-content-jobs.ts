@@ -7,6 +7,7 @@
 // released at autocommit before any work starts. Never remove the WHERE clause on the strength of
 // SKIP LOCKED being present.
 
+import { noteJobRowFinished } from '../../src/utils/team-messages';
 import { SPECIAL_CATEGORY_RULE } from '../../src/constants/special-category-rule';
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
@@ -1295,6 +1296,8 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             `UPDATE content_generation_jobs SET status = 'completed', result_post_id = ${post.id}${tokenCols}, updated_at = now() WHERE id = ${job.id}`
         );
         jobCompleted = true;
+        // The Team feed: when this was the last job of a campaign order, its assistant says the work is ready.
+        await noteJobRowFinished(db, job.id);
         // One task per job, however many platforms it fanned out to: a cross-post is one piece of
         // work adapted per platform. Charged only now the post exists (never throws).
         if (!isAdminTest) await recordCompletedWork(db, job.organisation_id, 'social_post', 1, job.job_id);

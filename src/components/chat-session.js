@@ -517,6 +517,8 @@
           attachAssetIds: Array.isArray(d.attachAssetIds) ? d.attachAssetIds : [],
           parentCampaignId: d.parentCampaignId || undefined,
           alwaysOn: d.alwaysOn === true,
+          // Absent = the server's default (make way). Validated server-side.
+          usualPosting: d.usualPosting && typeof d.usualPosting === 'object' ? d.usualPosting : undefined,
           excludeExistingCustomers: d.excludeExistingCustomers !== false,
           // The plan's briefs. The server files them as a PENDING plan on the draft — it places
           // nothing. Dropping them here is what left prod's first campaign briefing nobody.
@@ -695,6 +697,7 @@
         detachAssetIds: c.detachAssetIds,
         parentCampaignId: c.parentCampaignId,
         alwaysOn: c.alwaysOn,
+        usualPosting: c.usualPosting,
         // Only ever true from the chat; the server refuses false on this path anyway.
         excludeExistingCustomers: c.excludeExistingCustomers === true ? true : undefined,
       }, respond, d.campaignId);

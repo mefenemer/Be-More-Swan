@@ -22,6 +22,18 @@
 (function () {
   'use strict';
 
+  // What a campaign does to usual Autopilot posting (campaign-usual-posting.ts). Only the two known
+  // kinds and three known values are passed on; anything else is dropped and the server's default stands.
+  const USUAL_POSTING_WORDS = { make_way: 'make way for the campaign', pause: 'paused until it ends', normal: 'carry on as normal' };
+  function usualPostingOf(ui) {
+    const u = ui && ui.usualPosting;
+    if (!u || typeof u !== 'object') return undefined;
+    const out = {};
+    if (USUAL_POSTING_WORDS[u.social]) out.social = u.social;
+    if (USUAL_POSTING_WORDS[u.blog]) out.blog = u.blog;
+    return Object.keys(out).length ? out : undefined;
+  }
+
   const renderers = new Map();
 
   function escapeHtml(value) {
@@ -1076,6 +1088,7 @@
           ${persona || audDesc ? `${esc(persona)}${persona && audDesc ? ' — ' : ''}${esc(audDesc)}` : '<span class="text-amber-700">no audience given yet</span>'}</p>
         ${tone ? `<p class="text-sm text-gray-700 mb-1 break-words"><span class="font-bold text-indigo-900">Tone:</span> ${esc(tone)}</p>` : ''}
         ${alwaysOn ? '<p class="text-sm text-gray-700 mb-1"><span class="font-bold text-indigo-900">Always on</span> — business as usual, no end date</p>' : ''}
+        <p class="text-sm text-gray-700 mb-1"><span class="font-bold text-indigo-900">Your usual posts</span> — social: ${escapeHtml(USUAL_POSTING_WORDS[(usualPostingOf(ui) || {}).social || 'make_way'])}; articles: ${escapeHtml(USUAL_POSTING_WORDS[(usualPostingOf(ui) || {}).blog || 'make_way'])}</p>
         ${parentId ? `<p class="text-sm text-gray-700 mb-1"><span class="font-bold text-indigo-900">Inside umbrella:</span> campaign #${esc(String(parentId))}</p>` : ''}
         ${attach.length ? `<p class="text-sm text-gray-700 mb-1 break-words"><span class="font-bold text-indigo-900">Pictures:</span> ${esc(attach.map((a) => a.name || `#${a.id}`).join(', '))}</p>` : ''}
         <p class="text-xs mb-3 ${excludeCustomers ? 'text-gray-600' : 'text-amber-700 font-bold'}">
@@ -1180,6 +1193,7 @@
           attachAssetIds: attach.map((a) => a.id),
           parentCampaignId: parentId,
           alwaysOn,
+          usualPosting: usualPostingOf(ui),
           // Always-on campaigns have no end date — never send one alongside.
           ...(alwaysOn ? { endsAt: null } : {}),
           excludeExistingCustomers: excludeCustomers,
@@ -1278,6 +1292,12 @@
     if (typeof ui.alwaysOn === 'boolean') {
       changes.alwaysOn = ui.alwaysOn;
       rows.push(['Always on', ui.alwaysOn ? 'yes — no end date' : 'no']);
+    }
+    const usual = usualPostingOf(ui);
+    if (usual) {
+      changes.usualPosting = usual;
+      if (usual.social) rows.push(['Usual social posts', USUAL_POSTING_WORDS[usual.social]]);
+      if (usual.blog) rows.push(['Usual articles', USUAL_POSTING_WORDS[usual.blog]]);
     }
     // Only ever ON from a card (§9.0). A card carrying false shows nothing and sends nothing.
     if (ui.excludeExistingCustomers === true) {

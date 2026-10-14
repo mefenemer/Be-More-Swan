@@ -5494,7 +5494,7 @@ function _applyDashboardRegistry(data) {
     // A role whose campaigns carry their own targets (the Campaign Assistant) has no separate goals:
     // two places to set "what success is" was the confusion. The Goal Progress card goes with it.
     toggle('maintab-btn-goals', !cfg.hideGoals);
-    toggle('goal-progress-panel', !cfg.hideGoals);
+    toggle('goal-progress-card', !cfg.hideGoals);
     // Social/blog retire the Data Hub tab (cfg.hideDataHub) — and the action bar with the primary
     // action ("Create a Post") lives INSIDE that tab's panel. Hiding the tab button alone left the
     // panel itself visible whenever _activateMainTab hadn't run yet, so it leaked in under the tab
@@ -5776,6 +5776,9 @@ function _applyDashboardRegistry(data) {
     // Briefs tab — Brand Designer only (briefsTab: brand_designer). init() loads eagerly: the count
     // of briefs waiting for a decision is the tab badge, visible from every tab.
     const briefsTab = cfg.briefsTab;
+    // "From your team" — briefs this assistant received, what it said, and its questions to you.
+    // Every role: any assistant can be briefed by a campaign or written to on the Team page.
+    window.TeamFeed?.mount(document.getElementById('team-panel-host'), { mode: 'assistant', assistantId: data.id });
     toggle('maintab-btn-briefs', !!briefsTab);
     if (briefsTab) {
         setText('briefs-tab-label', briefsTab.label || 'Briefs');

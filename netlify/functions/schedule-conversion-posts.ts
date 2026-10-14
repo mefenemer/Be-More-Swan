@@ -11,6 +11,7 @@
 //
 // Schedule: "0 7 * * *" (07:00 UTC daily — just after draft-horizon-fill at 06:00).
 
+import { usualPostingFor } from '../../src/utils/campaign-usual-posting';
 import { Handler } from '@netlify/functions';
 import { and, eq, desc, sql, inArray } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
@@ -52,7 +53,7 @@ export default withLambda(async (event) => {
         ));
 
     let enqueued = 0;
-    const skipped: Record<string, number> = { no_offerings: 0, on_demand: 0, recent_conversion: 0, no_blueprint: 0, blocking_gaps: 0 };
+    const skipped: Record<string, number> = { no_offerings: 0, on_demand: 0, recent_conversion: 0, no_blueprint: 0, blocking_gaps: 0, campaign_running: 0 };
 
     for (const assistant of smmAssistants) {
         const ctx = (assistant.onboardingContext as Record<string, unknown>) ?? {};
@@ -63,6 +64,11 @@ export default withLambda(async (event) => {
 
         // Respect cadence — don't schedule for on-demand assistants.
         if (postsPerWeekFor(ctx.posting_frequency) <= 0) { skipped.on_demand++; continue; }
+
+        // A live campaign that asks usual posting to make way or pause also holds the standing sales
+        // post — a "buy now" in the middle of someone else's message is exactly the dilution the
+        // setting exists to stop (campaign-usual-posting.ts). Resumes when the campaign ends.
+        if ((await usualPostingFor(db, assistant.organisationId, 'social')).mode !== 'normal') { skipped.campaign_running++; continue; }
 
         // Cadence guard: skip if a conversion job was created within the interval, or one is still
         // queued/processing (avoid piling up if a worker is backed up).

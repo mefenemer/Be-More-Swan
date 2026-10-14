@@ -8,6 +8,7 @@
 //   • draft-horizon-fill.ts        (hourly cron — keeps every active SMM assistant's queue topped up)
 //   • set-draft-horizon.ts         (horizon expanded — fill the newly-opened window immediately)
 
+import { campaignPostDays, usualPostingFor } from './campaign-usual-posting';
 import { and, eq, gte, lte, desc, sql, inArray, isNull, ne } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import type { getDb } from '../../db/client';
@@ -52,7 +53,9 @@ export interface GapFillResult {
      *                         horizon and a weekday that isn't in it). Benign; resolves itself.
      */
     reason?: 'on_demand' | 'unrecognised_cadence' | 'no_slot_in_horizon' | 'no_blueprint'
-        | 'blocking_gaps' | 'fully_covered' | 'empty_library_skipped' | 'ok';
+        | 'blocking_gaps' | 'fully_covered' | 'empty_library_skipped' | 'ok'
+        /** A live campaign asked usual posting to pause (campaign-usual-posting.ts). Healthy; ends with the campaign. */
+        | 'campaign_paused';
 }
 
 /**
@@ -97,6 +100,13 @@ export async function enqueueScheduleGapFill(
         }
         return { enqueued: 0, reason: kind === 'on_demand' ? 'on_demand' : 'no_slot_in_horizon' };
     }
+
+    // A live campaign may ask usual posting to give way (campaign-usual-posting.ts). Pause: nothing
+    // at all. Make way: no usual post on a day the campaign has one. Read only while the campaign is
+    // live, so usual posting resumes by itself when it ends — nothing to switch back on.
+    const usual = await usualPostingFor(db, assistant.organisationId, 'social');
+    if (usual.mode === 'pause') return { enqueued: 0, reason: 'campaign_paused' };
+    const campaignDays = usual.mode === 'make_way' ? await campaignPostDays(db, assistant.id, usual.campaignIds) : new Set<string>();
 
     // Resolve the latest blueprint; skip if it has blocking gaps (mirror generate-post).
     let [bp] = await db
@@ -206,6 +216,7 @@ export async function enqueueScheduleGapFill(
     const uncovered: Date[] = [];
     for (const slot of slots) {
         const key = UTC_DAY(slot);
+        if (campaignDays.has(key)) continue;   // the campaign has this day
         const remaining = coverage.get(key) ?? 0;
         if (remaining > 0) { coverage.set(key, remaining - 1); continue; } // already covered
         uncovered.push(slot);

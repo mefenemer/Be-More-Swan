@@ -11,6 +11,12 @@
         </button>
     </div>
 
+    <!-- Team messages are counted on the bell too; they are read in Team, so say so here. -->
+    <div id="notif-team-banner" class="hidden mb-4 flex flex-wrap items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3" style="display:none">
+        <p id="notif-team-banner-count" class="text-sm text-gray-800 flex-1"></p>
+        <button type="button" onclick="window.loadView && window.loadView('team')" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg">Open Team</button>
+    </div>
+
     <!-- Action required vs Updates: actions are cleared by doing, updates by reading. -->
     <div class="flex gap-2 mb-4">
         <button type="button" id="tab-action" class="btn-secondary flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg border">

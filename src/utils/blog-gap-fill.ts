@@ -16,6 +16,7 @@
 //   · No empty-library media check. That guard exists because a social post without an image is a
 //     weak post; long-form stands on its text, and the hero graphic is optional.
 
+import { campaignArticlesInFlight, usualPostingFor } from './campaign-usual-posting';
 import { and, eq, gte, lte, sql, inArray } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import type { getDb } from '../../db/client';
@@ -36,7 +37,9 @@ export interface BlogGapFillAssistant {
 export interface BlogGapFillResult {
     enqueued: number;
     /** Why nothing (or fewer) jobs were enqueued — useful for cron telemetry. */
-    reason?: 'on_demand' | 'fully_covered' | 'ok';
+    reason?: 'on_demand' | 'fully_covered' | 'ok'
+        /** A live campaign asked usual articles to pause, or to wait while its own are written. Ends with the campaign. */
+        | 'campaign_paused' | 'campaign_articles_first';
 }
 
 const UTC_DAY = (d: Date) => d.toISOString().slice(0, 10);
@@ -57,6 +60,15 @@ export async function enqueueBlogGapFill(
 
     const slots = computeScheduleSlots({ schedule, horizonDays, now });
     if (!slots.length) return { enqueued: 0, reason: 'on_demand' };
+
+    // A live campaign may ask usual articles to give way (campaign-usual-posting.ts). Pause: none at
+    // all. Make way: none while the campaign's own articles are still being written or reviewed.
+    // Read only while the campaign is live, so usual articles resume by themselves when it ends.
+    const usual = await usualPostingFor(db, assistant.organisationId, 'blog');
+    if (usual.mode === 'pause') return { enqueued: 0, reason: 'campaign_paused' };
+    if (usual.mode === 'make_way' && await campaignArticlesInFlight(db, usual.campaignIds)) {
+        return { enqueued: 0, reason: 'campaign_articles_first' };
+    }
 
     const windowEnd = slots[slots.length - 1];
 

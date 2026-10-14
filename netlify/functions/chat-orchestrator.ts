@@ -13,6 +13,7 @@
 // payload; the client should show its own loading state between send and response.
 // Auth: aura_session + active org via requireTenant (tenant isolation on every read).
 
+import { teamThreadPromptBlock } from '../../src/utils/team-messages';
 import { SPECIAL_CATEGORY_RULE } from '../../src/constants/special-category-rule';
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
@@ -1160,6 +1161,8 @@ WHO IT IS FOR. Every campaign needs an audience before you propose it: a short p
 
 THE YEAR — UMBRELLAS AND ALWAYS-ON. Campaigns can sit inside ONE umbrella campaign ("Summer Rebrand" over a webinar, a social burst and a blog series) — one level only: an umbrella cannot itself be inside another, and a campaign that is an umbrella cannot be put inside one. Each campaign keeps its OWN task budget; an umbrella shows its campaigns' totals but never takes from them, so work on one cannot eat into another. "Always on" campaigns are business-as-usual work with no end date. When the user asks what is running this year, or what is planned, answer from the campaign list above — its dates, umbrellas and always-on campaigns — and point them at the year view at the top of the "Calendar" tab, which draws all of it.
 
+YOUR USUAL POSTS. While a campaign runs, the business's usual Autopilot posts can dilute it. Each campaign says what they do, separately for social posts and articles: "make_way" (the default — no usual social post on a day the campaign posts, and no usual article while the campaign's own articles are being written or reviewed), "pause" (none at all until the campaign ends) or "normal". Usual posting restarts by itself when the campaign finishes, is paused or is stopped — say so if they ask. Recommend make_way unless the user wants otherwise; change it on an existing campaign with a campaign_edit_proposal.
+
 TONE AND PICTURES. A campaign can carry its own tone ("warm, no discount language") which every colleague writes in, inside the brand voice — it narrows the voice, it never replaces it. It can also have its own pictures from their library: posts the campaign commissions use those first, so a six-week flight looks like one campaign. Only attach assetId values from the library list above, and name them exactly as listed; never invent one. If they want pictures that are not in the library yet, commission them from the Brand Designer with "commission_visuals" if it is hired (the list of assistants you can brief says so), say they can upload their own to the content library, or brief a person (a designer) with "request_human_task". Change tone or pictures on an existing campaign with a campaign_edit_proposal.
 
 EXISTING CUSTOMERS. By default a campaign's lead searches leave out companies the user has marked as won in "Conversations", plus any company domains listed in "excludeDomains". For a campaign aimed at winning NEW business keep it that way, and if the user names customers who are not in the platform, add their domains (e.g. "acme.co.uk") to "excludeDomains". A retention or upsell campaign is aimed AT customers: say so, and tell the user to switch "Leave out existing customers" off with "Edit" on the "Campaigns" tab — you can never switch it off yourself, only on.
@@ -1192,6 +1195,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EITHER
     "attachAssets": [ { "id": <assetId from the library list above>, "name": "<its name as listed>" } ],   // omit if none
     "parentCampaignId": <number>,     // the umbrella this campaign sits inside — an existing campaignId above; omit if none
     "alwaysOn": true | false,         // true for business-as-usual work with no end date; then omit endsAt
+    "usualPosting": { "social": "make_way" | "pause" | "normal", "blog": "make_way" | "pause" | "normal" },   // see YOUR USUAL POSTS; omit for the default (make way)
     "campaignId": <number>,           // ONLY when adding work to an existing campaign listed above; omit for a new campaign
     "orders": [                       // the assistants you would brief, and with what
       {
@@ -1259,7 +1263,8 @@ or, to change an existing campaign's details:
     "attachAssets": [ { "id": <assetId>, "name": "..." } ],   // pictures to add to this campaign
     "detachAssets": [ { "id": <assetId>, "name": "..." } ],   // pictures to remove from it
     "parentCampaignId": <number> | 0, // move it inside this umbrella, or 0 to take it out of one
-    "alwaysOn": true | false
+    "alwaysOn": true | false,
+    "usualPosting": { "social": "make_way" | "pause" | "normal", "blog": "make_way" | "pause" | "normal" }   // only the kinds the user wants to change
   }
 }`,
             ].filter(Boolean).join('\n\n');
@@ -2318,7 +2323,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 ? assistantRow.onboardingContext as Record<string, unknown> : null,
         ).timezone,
     });
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, teamBlock].filter(Boolean).join('\n\n');
+    // Its Team thread (team-messages.ts): what the user told it there, and what it said. Without it
+    // a note sent on the Team page was invisible to the very assistant it was addressed to.
+    const teamThreadBlock = await teamThreadPromptBlock(db, orgId, session.aiAssistantId);
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, teamBlock, teamThreadBlock].filter(Boolean).join('\n\n');
 
     const system = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,

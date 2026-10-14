@@ -2769,6 +2769,8 @@ function formatCurrency(amount, currency) {
       // Org-wide, deliberately NOT inside an assistant: the audience outlives any one hire
       // and is read by every assistant that can send (docs/newsletter-assistant-plan.md).
       'audience': { file: 'audience.html', title: '| Audience' },
+      // The Team feed: what assistants tell the person and each other (docs/campaign-orchestrator-flow.md §4).
+      'team': { file: 'team.html', title: '| Team' },
       // Email Studio. No sidebar link yet — it gets its entry point from the Newsletter
       // Assistant's detail page when that role goes live (Phase 5). Reachable at ?view=newsletter.
       'newsletter': { file: 'newsletter.html', title: '| Email Studio' },
@@ -2789,6 +2791,7 @@ function formatCurrency(amount, currency) {
       'help': document.getElementById('nav-help'),
       'my-content': document.getElementById('nav-my-content'),
       'audience': document.getElementById('nav-audience'),
+      'team': document.getElementById('nav-team'),
       'calendar': document.getElementById('nav-calendar'),
       'referral': document.getElementById('nav-referral'),
       'review-queue': document.getElementById('nav-review-queue')
@@ -3050,6 +3053,10 @@ function formatCurrency(amount, currency) {
 
         if (routeKey === 'audience' && typeof window.initAudience === 'function') {
           await window.initAudience();
+        }
+
+        if (routeKey === 'team' && typeof window.initTeam === 'function') {
+          await window.initTeam();
         }
 
         if (routeKey === 'newsletter' && typeof window.initNewsletter === 'function') {
@@ -5723,6 +5730,7 @@ function formatCurrency(amount, currency) {
 <!-- Shared Audience view (audience.html). Org-scoped; reads no assistant context. -->
 <script src="/src/components/xlsx-writer.js"></script>
 <script src="/audience.js"></script>
+<script src="/src/components/team-feed.js"></script>
 <!-- The sign-up form renderer (library mode — no data-bms-form, so it only defines window.BmsForm)
      and the visual form builder that previews with it. The SAME subscribe.js customers paste on
      their websites: the preview cannot disagree with the real form. docs/form-builder-plan.md. -->

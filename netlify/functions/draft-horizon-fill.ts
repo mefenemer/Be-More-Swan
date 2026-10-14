@@ -66,6 +66,8 @@ export default withLambda(async (event) => {
     const skipped: Record<string, number> = {
         on_demand: 0, unrecognised_cadence: 0, no_slot_in_horizon: 0,
         no_blueprint: 0, blocking_gaps: 0, fully_covered: 0, empty_library_skipped: 0,
+        // A live campaign asked usual posting to pause (campaign-usual-posting.ts) — healthy, ends with it.
+        campaign_paused: 0,
     };
     // Assistants that will never draft again until a human changes something. The user gets an
     // in-app notification (see notifyUnreadableCadence); this is the operator's copy — a run that

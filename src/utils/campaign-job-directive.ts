@@ -26,6 +26,7 @@ import {
     campaignExperimentJobs, campaignExperiments, campaignOrders, campaigns, contentGenerationJobs,
 } from '../../db/schema';
 import { buildCampaignDirective, directiveInputFrom, type CampaignDirective } from './campaign-directive';
+import { ownerNotesFor } from './team-messages';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -38,7 +39,7 @@ export interface JobDirective {
 export async function campaignDirectiveForJob(db: Db, jobId: number): Promise<JobDirective | null> {
     try {
         const [row] = await db.select({
-            orderId: campaignOrders.id, brief: campaignOrders.brief,
+            orderId: campaignOrders.id, brief: campaignOrders.brief, targetAssistantId: campaignOrders.targetAssistantId,
             id: campaigns.id, objective: campaigns.objective, outcomeMetric: campaigns.outcomeMetric,
             endsAt: campaigns.endsAt, constraints: campaigns.constraints, audience: campaigns.audience,
             funnelStage: campaigns.funnelStage, tone: campaigns.tone, status: campaigns.status,
@@ -85,7 +86,8 @@ export async function campaignDirectiveForJob(db: Db, jobId: number): Promise<Jo
             angle = typeof a === 'string' ? a : null;
         }
 
-        const directive = buildCampaignDirective(directiveInputFrom(row, brief, angle));
+        const directive = buildCampaignDirective(directiveInputFrom(row, brief, angle,
+            row.targetAssistantId ? await ownerNotesFor(db, row.id, row.targetAssistantId) : null));
         return directive ? { directive, variant } : null;
     } catch (err) {
         console.error('[campaign-job-directive] lookup failed — the blueprint section stands', { jobId, err });
