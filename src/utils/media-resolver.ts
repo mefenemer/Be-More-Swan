@@ -134,10 +134,14 @@ async function pickManualAsset(db: Db, orgId: number, mediaType: 'image' | 'vide
     return row?.id ?? null;
 }
 
-// Campaign source (§9.3): a picture the user attached to this campaign. Unlike the manual library,
-// a campaign picture MAY be reused — a consistent look across the flight is the point — so the
-// least-used one is chosen (fewest posts already carrying it, then oldest), which rotates through
-// the set rather than repeating the first. Purged, rejected and storage-less assets never qualify.
+// Campaign source (§9.3): a picture the user attached to this campaign, used ONCE — on the first
+// post that wants a picture — and then the post falls through to the assistant's usual sources.
+//
+// ⚠️ It used to be "least-used first", reuse allowed, on the theory that a flight should look
+// consistent. In practice a campaign with one approved picture put that SAME image on every post
+// (prod campaign 1, 2026-10-14: six posts, one image; then three more, one brand card). Nobody's
+// feed looks like that. A campaign's pictures now lead, and variety follows.
+// Purged, rejected and storage-less assets never qualify.
 async function pickCampaignAsset(
     db: Db, orgId: number, campaignId: number, mediaType: 'image' | 'video',
 ): Promise<{ id: number; provider: string | null } | null> {
@@ -153,11 +157,11 @@ async function pickCampaignAsset(
             ne(contentAssets.status, 'rejected'),
             isNull(contentAssets.purgedAt),
             sql`(${contentAssets.storageKey} IS NOT NULL OR ${contentAssets.storageUrl} IS NOT NULL OR ${contentAssets.externalUrl} IS NOT NULL)`,
+            // Not yet on any post. A cross-post's sibling platforms share the one asset, which is
+            // fine: that is the same post, cloned per platform after this pick.
+            sql`NOT EXISTS (SELECT 1 FROM scheduled_post_assets spa WHERE spa.content_asset_id = ${contentAssets.id})`,
         ))
-        .orderBy(
-            sql`(SELECT count(*) FROM scheduled_post_assets spa WHERE spa.content_asset_id = ${contentAssets.id})`,
-            asc(contentAssets.createdAt),
-        )
+        .orderBy(asc(contentAssets.createdAt))
         .limit(1);
     return row ?? null;
 }

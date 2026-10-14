@@ -3615,5 +3615,15 @@
     }
   }
 
-  window.AssistantDataHub = { init, refresh, focusRecord, openRecordModal };
+  /**
+   * Opening the tab re-reads it when its rows change in the background. The Campaign Assistant's
+   * Orders are moved on by other assistants and the hourly reconciler while the page sits open, so
+   * a table read at page load showed a picture order as unfinished long after it was delivered
+   * (2026-10-14). Other hubs change only through this tab, so they keep their one load.
+   */
+  function activate() {
+    if (state.hub && state.hub.recordType === 'campaign_order') refresh();
+  }
+
+  window.AssistantDataHub = { init, refresh, activate, focusRecord, openRecordModal };
 })();

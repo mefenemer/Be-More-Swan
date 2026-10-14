@@ -783,7 +783,7 @@ export async function raiseBriefForPost(db: Db, args: {
         if (sourcesAreFree(n.brief.sources)) {
             const started = await startRound(db, { orgId: args.orgId, brief: row });
             if (started.ok && !(await triggerBriefRound(row.id, null))) {
-                await endRound(db, row.id, { chargeAi: false, note: 'Could not start making options — press "Make options" to try again.' });
+                await endRound(db, row.id, { chargeAi: false, note: 'Could not start making options — ask for options again to retry.' });
             }
         }
         return row.id;

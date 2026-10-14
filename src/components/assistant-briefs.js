@@ -108,7 +108,20 @@
   /** Poll only while a round is in flight. The server ends a stuck one, so this always stops. */
   function schedulePoll() {
     clearTimeout(state.pollTimer);
-    if (state.briefs.some((b) => b.status === 'generating')) state.pollTimer = setTimeout(load, POLL_MS);
+    const making = state.briefs.some((b) => b.status === 'generating');
+    syncBusy(making);
+    if (making) state.pollTimer = setTimeout(load, POLL_MS);
+  }
+
+  /**
+   * The house "working" spinner (dialogs.js bmsBusy) for as long as a round is being made — it is
+   * refcounted, so this holds exactly ONE count and gives it back when the round ends, rather than
+   * adding one per poll. Pressing "Make options" showed nothing at all before (2026-10-14).
+   */
+  function syncBusy(on) {
+    if (on === !!state.busyHeld || typeof window.bmsBusy !== 'function') return;
+    state.busyHeld = on;
+    window.bmsBusy(on);
   }
 
   // ── Tab badge ──────────────────────────────────────────────────────────────
@@ -137,12 +150,17 @@
   function activityLine(b) {
     const waiting = b.options.filter((o) => o.status === 'proposed').length;
     const approved = b.options.filter((o) => o.status === 'approved').length;
-    if (b.status === 'generating') return 'Making options now — usually under a minute. This page updates by itself.';
+    if (b.status === 'generating') return `${name()} is making options now — usually under a minute. This page updates by itself.`;
     if (b.status === 'cancelled') return 'Cancelled. Anything you approved is still in your library.';
     if (b.status === 'approved') {
-      return `Done — ${approved} in your library${waiting ? `, and ${waiting} more ${waiting === 1 ? 'option is' : 'options are'} still here if you want ${waiting === 1 ? 'it' : 'them'}` : ''}.`;
+      // ⚠️ Say it is FINISHED. "Use this" used to leave the user wondering how many more they had
+      // to pick (2026-10-14). One is all a brief needs; the rest are optional extras.
+      const extra = b.campaign
+        ? 'each extra one goes on one more of the campaign\'s posts'
+        : 'each extra one goes into your library';
+      return `Done — you have chosen ${approved}, and that is all this brief needs. Nothing else to do here.${waiting ? ` The other ${waiting} ${waiting === 1 ? 'option is' : 'options are'} optional: ${extra}.` : ''}`;
     }
-    if (waiting) return `${waiting} ${waiting === 1 ? 'option is' : 'options are'} waiting for you. Nothing is used anywhere until you approve it.`;
+    if (waiting) return `Choose ONE you like with "Use this" — that is all this brief needs. Nothing is used anywhere until you do. ${waiting} ${waiting === 1 ? 'option' : 'options'} to choose from.`;
     if (b.waitingOn) return `Waiting on ${b.waitingOn} to add their own — they use "Add your own" on this brief. Nothing is sent to them; tell them yourself.`;
     if (b.rounds > 0) return 'Every option so far was turned down. Make another round — it reads why you turned them down.';
     return 'Not started. Press "Make options" when the brief says what you want.';
@@ -156,12 +174,22 @@
     return null;
   }
 
+  /** The assistant's own name — the button asks THEM, not a machine. */
+  function name() { return state.assistantName || 'Your Brand Designer'; }
+
+  // The button names who does the work; the cost sits on its own line under the buttons (owner,
+  // 2026-10-14: "1 AI Credit" on the button itself read as part of the action's name).
   function roundButtonLabel(b) {
-    const verb = b.rounds > 0 ? 'Make more options' : 'Make options';
-    const credits = b.sources
-      .filter((k) => !sourceBlocked(k))
-      .reduce((n, k) => n + ((V().sources.find((s) => s.key === k) || {}).credits || 0), 0);
-    return credits ? `${verb} (${credits} AI credit${credits === 1 ? '' : 's'})` : `${verb} (free)`;
+    return b.rounds > 0 ? `Ask ${name()} for more options` : `Ask ${name()} for options`;
+  }
+
+  /** What one round costs, stated before the click. */
+  function roundCostLine(b) {
+    const paid = b.sources.filter((k) => !sourceBlocked(k))
+      .map((k) => V().sources.find((s) => s.key === k)).filter((s) => s && s.credits);
+    const credits = paid.reduce((n, s) => n + s.credits, 0);
+    if (!credits) return 'Each round is free — stock and branded options only.';
+    return `Each round uses ${credits} AI credit${credits === 1 ? '' : 's'}, for the ${paid.map((s) => s.label).join(' and ')}. Stock photos and branded cards are free.`;
   }
 
   function optionTile(b, o) {
@@ -262,6 +290,26 @@
       </div>`;
   }
 
+  /**
+   * Pictures-only briefs ASK about video rather than assume (owner, 2026-10-14: "it did not ask me
+   * if I wanted any videos"). A campaign brief is created with picture sources, so this is where
+   * the question gets asked. Adding a source is an ordinary brief edit; nothing is made until the
+   * next round is asked for.
+   */
+  function videoOfferHtml(b) {
+    if (b.status === 'generating' || (b.sources || []).some((k) => k === 'stock_video' || k === 'ai_video')) return '';
+    const ai = V().sources.find((s) => s.key === 'ai_video');
+    const aiOk = ai && !sourceBlocked('ai_video');
+    return `
+      <div class="mt-3 flex flex-wrap items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2">
+        <p class="text-xs text-gray-700 mr-auto">This brief makes pictures only. Would you like video options too?</p>
+        <button type="button" data-brief-add-video="${b.id}" data-kind="stock_video"
+          class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Add stock video (free)</button>
+        ${aiOk ? `<button type="button" data-brief-add-video="${b.id}" data-kind="ai_video"
+          class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Add AI video (${esc(String(ai.credits))} credits a round)</button>` : ''}
+      </div>`;
+  }
+
   function briefCard(b) {
     const visible = b.options.filter((o) => o.status !== 'rejected');
     const rejected = b.options.length - visible.length;
@@ -282,7 +330,7 @@
         ${b.campaign ? `<p class="text-xs text-indigo-700 mt-1 break-words">For the campaign “${esc(b.campaign.objective)}” — the picture you approve joins that campaign's pictures.</p>` : ''}
         ${b.message ? `<p class="text-sm text-gray-700 mt-2 break-words">${esc(b.message)}</p>` : ''}
         ${b.headline ? `<p class="text-xs text-gray-600 mt-1">Words on the card: <span class="font-bold">${esc(b.headline)}</span></p>` : ''}
-        <p class="text-xs text-gray-600 mt-2">${esc(activityLine(b))}</p>
+        <p class="text-xs text-gray-600 mt-2 flex items-center gap-2">${b.status === 'generating' && window.bmsSpinnerHtml ? window.bmsSpinnerHtml(14) : ''}<span>${esc(activityLine(b))}</span></p>
         ${b.generationNote ? `<p class="text-xs text-amber-700 mt-1">${esc(b.generationNote)}</p>` : ''}
         ${note ? `<p class="text-xs mt-1 ${note.tone === 'error' ? 'text-red-600' : 'text-indigo-700'} font-semibold">${esc(note.text)}</p>` : ''}
         ${visible.length ? `<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">${visible.map((o) => optionTile(b, o)).join('')}</div>` : ''}
@@ -297,9 +345,13 @@
               class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Add your own</button>
             <button type="button" data-brief-edit="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
               class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">Edit brief</button>
+            <button type="button" data-brief-chat="${b.id}"
+              class="btn-assistant px-3 py-1.5 text-xs font-bold rounded-lg transition">Talk it through with ${esc(name())}</button>
             <button type="button" data-brief-cancel="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
               class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">Cancel brief</button>
-          </div>` : ''}
+          </div>
+          <p class="text-[11px] text-gray-500 mt-1">${esc(roundCostLine(b))}</p>
+          ${videoOfferHtml(b)}` : ''}
       </div>`;
   }
 
@@ -455,12 +507,16 @@
   // ── Actions (bound once, to document) ──────────────────────────────────────
   async function generateRound(briefId) {
     say(briefId, 'Starting…');
+    window.bmsBusy?.(true);
     try {
       await post({ action: 'generate', briefId });
       say(briefId, null);
     } catch (err) {
       say(briefId, err.message, 'error');
+    } finally {
+      window.bmsBusy?.(false);
     }
+    // load() takes over the spinner (syncBusy) for as long as the round is in flight.
     await load();
   }
 
@@ -522,15 +578,42 @@
       return;
     }
 
+    const chat = t('[data-brief-chat]');
+    if (chat) {
+      const b = state.briefs.find((x) => x.id === Number(chat.dataset.briefChat));
+      window.openAssistantChat?.({ assistantId: state.assistantId, draft: b ? `About the brief "${b.title}": ` : '' });
+      return;
+    }
+
+    const addVideo = t('[data-brief-add-video]');
+    if (addVideo) {
+      const id = Number(addVideo.dataset.briefAddVideo);
+      const b = state.briefs.find((x) => x.id === id);
+      if (!b) return;
+      addVideo.disabled = true;
+      try {
+        await post({ action: 'edit', briefId: id, sources: [...new Set([...(b.sources || []), addVideo.dataset.kind])] });
+        say(id, `Added. Press "${roundButtonLabel(b)}" and the next round includes video.`);
+      } catch (err) { say(id, err.message, 'error'); }
+      await load();
+      return;
+    }
+
     const approve = t('[data-brief-approve]');
     if (approve) {
       approve.disabled = true;
       const optionId = Number(approve.dataset.briefApprove);
       const brief = state.briefs.find((b) => b.options.some((o) => o.id === optionId));
+      const firstPick = brief && !brief.options.some((o) => o.status === 'approved');
       try {
         const res = await post({ action: 'decide', optionId, decision: 'approve' });
+        // Say whether that FINISHED the brief — one pick is all a brief needs, and "how many more do
+        // I have to choose?" was the question this left unanswered (2026-10-14).
+        const where = brief && brief.campaign ? 'Added to the campaign and your library.' : 'Added to your library — every assistant can use it now.';
+        const done = firstPick ? ' That is all this brief needed, so you are done here.' : ' An extra pick — optional, and nothing else is needed.';
         // A brief raised for a post (Phase 5) also says what happened to that post.
-        if (brief) say(brief.id, `Added to your library — every assistant can use it now.${res.postNote ? ` ${res.postNote}` : ''}`);
+        if (brief) say(brief.id, `${where}${done}${res.postNote ? ` ${res.postNote}` : ''}`);
+        window.showToast?.(firstPick ? 'Done — that is all this brief needed.' : 'Added.', 'success');
       } catch (err) {
         if (brief) say(brief.id, err.message, 'error');
       }

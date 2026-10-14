@@ -1233,7 +1233,7 @@
           </label>
           <label class="flex items-start gap-2 text-xs text-gray-700">
             <input type="checkbox" data-cmp-aw-ai="${id}" data-keep="aw-ai-${id}" checked class="mt-0.5">
-            <span>Include AI images — made only when you press "Make options" on the Brand Designer's Briefs tab, where the AI credit is shown. Stock photos and branded cards are made straight away, free.</span>
+            <span>Include AI images — made only when you ask the Brand Designer for options on its Briefs tab, where the AI credit is shown. Stock photos and branded cards are made straight away, free.</span>
           </label>` : ''}
         ${spec.key === 'ab_test_posts' ? `
           <div class="flex flex-wrap gap-3">
@@ -3038,7 +3038,9 @@
     renderTimeline,
     /** Called on first activation of the tab. Cheap if init() already loaded. */
     activate() {
-      if (state.rendered) return;
+      // Coming BACK to the tab re-reads it: its work is moved on by other assistants while the page
+      // sits open, and a stale "waiting for the picture" after the picture was chosen reads as broken.
+      if (state.rendered) { load(); return; }
       state.rendered = true;
       render();
     },

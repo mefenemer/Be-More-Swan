@@ -1004,7 +1004,7 @@
         // click — approving this plan must not read as approving an AI-credit spend.
         const sources = Array.isArray(o.sources) ? o.sources : null;
         const pictureNote = o.action === 'commission_visuals'
-          ? `${sources && !sources.some((x) => x === 'ai_image' || x === 'ai_video') ? 'Stock and branded cards, made straight away' : 'Stock and branded cards straight away; AI images and video only when you press "Make options" on its Briefs tab'} — you choose; the picture joins this campaign`
+          ? `${sources && !sources.some((x) => x === 'ai_image' || x === 'ai_video') ? 'Stock and branded cards, made straight away' : 'Stock and branded cards straight away; AI images and video only when you ask for options on its Briefs tab'} — you choose; the picture joins this campaign`
           : '';
         // A person's task (§9.5) names who, says nothing is sent to them, and shows what waits.
         const humanNote = o.action === 'request_human_task'
@@ -1510,7 +1510,7 @@
       <p class="text-xs text-gray-700 mt-1"><span class="font-bold">Options from:</span> ${brief.sources.map((x) => esc(SOURCE[x])).join(', ')}</p>
       <p class="text-xs text-gray-600 mt-2">${free
         ? 'Stock and branded cards are free. Nothing is used anywhere until you approve it.'
-        : 'Saved to your Briefs tab. Press "Make options" there — that button shows what the AI images or video cost before anything is spent.'}</p>
+        : 'Saved to your Briefs tab. Ask for options there — the cost of any AI images or video is shown before anything is spent.'}</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         ${free ? `<button type="button" data-vbp-save="generate" ${runnable ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save and make options</button>` : ''}
         <button type="button" data-vbp-save="save" ${runnable ? '' : 'disabled'} class="${free ? 'btn-secondary border' : 'btn-primary'} px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save brief</button>
@@ -1569,7 +1569,7 @@
       ${decisions.length ? `<ul class="mt-2 space-y-1">${decisions.map((d) => `
         <li class="text-sm text-gray-900">${d.decision === 'approve' ? '✓ Use' : '✗ Turn down'} option ${esc(d.optionId)}${d.decision === 'reject' ? ` <span class="text-xs text-gray-600">— ${esc(label(d.reason))}${d.note ? `: ${esc(d.note)}` : ''}</span>` : ''}</li>`).join('')}</ul>`
         : '<p class="text-sm text-amber-700 mt-2">No options were named.</p>'}
-      <p class="text-xs text-gray-600 mt-2">Approved pictures go into your library for every assistant to use. Turned-down ones are deleted, and the next round reads why.${ui.remake === true ? ' For a new round, press "Make more options" on the brief in your Briefs tab.' : ''}</p>
+      <p class="text-xs text-gray-600 mt-2">Approved pictures go into your library for every assistant to use. Turned-down ones are deleted, and the next round reads why.${ui.remake === true ? ' For a new round, ask for more options on the brief in your Briefs tab.' : ''}</p>
       <div class="flex items-center gap-2 mt-3">
         <button type="button" data-vor-confirm ${decisions.length ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Confirm</button>
         <button type="button" data-vor-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>

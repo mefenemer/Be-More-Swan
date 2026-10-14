@@ -87,6 +87,12 @@
   #post-review-modal.pr-page [data-mockup-card],
   #post-review-modal.pr-page #post-review-tabs,
   #post-review-modal.pr-page #pce-stage-strip { max-width: 600px; }
+  /* The editor and Blog Studio PAGES sit below the header but above it in z-order (90 / 85 against
+     the header's 50), so every header dropdown — the assistant switcher, notifications, the profile
+     menu — opened UNDERNEATH the page and could not be clicked (2026-10-14). While a page is open the
+     header is lifted above it. Only then: pop-ups (z 70-90) must still cover the header otherwise. */
+  body:has(#post-review-modal.pr-page:not(.hidden)) #app-header,
+  body:has(#bms-blog-backdrop.bs-page.bs-open) #app-header { z-index: 92; }
 </style>
 </head>
 <body class="bg-gray-50 text-gray-900 font-sans antialiased min-h-screen overflow-x-hidden">
@@ -2284,7 +2290,7 @@ window.showComplianceModals = function showComplianceModals(force) {
   </div>
 </div>
 
-<nav class="fixed top-0 left-0 right-0 z-50 h-16 w-full bg-white border-b border-gray-200 shadow-sm flex items-center justify-between px-4 sm:px-6 lg:px-8">
+<nav id="app-header" class="fixed top-0 left-0 right-0 z-50 h-16 w-full bg-white border-b border-gray-200 shadow-sm flex items-center justify-between px-4 sm:px-6 lg:px-8">
 
   <div class="flex items-center gap-3 sm:gap-4">
     <button id="mobile-menu-btn" class="md:hidden text-gray-500 hover:text-gray-900 focus:outline-none">

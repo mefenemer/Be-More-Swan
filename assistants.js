@@ -961,6 +961,8 @@ window._activateMainTab = function(name) {
     if (name === 'conversations') window.AssistantLeadThreads?.activate();
     // Strategy resolved its gate (and loaded) on init — activation only paints.
     if (name === 'strategy') window.AssistantStrategy?.activate();
+    // A hub whose rows change in the background (the Campaign Assistant's Orders) re-reads on open.
+    if (name === 'datahub') window.AssistantDataHub?.activate?.();
     // Load the assistant-scoped review queue when the tab is first opened. detailRqOpenStatus
     // branches on window._detailReviewQueue.kind (posts vs records) internally.
     if (name === 'review-queue') {

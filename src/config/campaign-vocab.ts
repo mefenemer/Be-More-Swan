@@ -315,7 +315,7 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
     commission_visuals: {
         roleKey: BRAND_DESIGNER_ROLE_KEY,
         label: 'Commission pictures',
-        description: 'Briefs the Brand Designer for this campaign\u2019s pictures. Stock photos and branded cards are made straight away; AI images wait for you to press \u201cMake options\u201d on its Briefs tab, where the AI credit is shown. The picture you approve joins this campaign\u2019s pictures.',
+        description: 'Briefs the Brand Designer for this campaign\u2019s pictures. Stock photos and branded cards are made straight away; AI images wait for you to ask for options on its Briefs tab, where the AI credit is shown. The picture you approve joins this campaign\u2019s pictures.',
         // The brief and the round are the Brand Designer's work. AI images are charged in AI
         // CREDITS, separately and only on the user's click — never in campaign tasks, which would
         // charge the same picture twice.

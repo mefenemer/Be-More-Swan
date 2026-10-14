@@ -163,7 +163,7 @@ check('the chat is told which orders can run here, and how to write a picture or
 check('the plan card and Add work both say AI images wait for a click', () => {
     const reg = read('src/components/disruptive-ui-registry.js');
     assert.match(reg, /const pictureNote = o\.action === 'commission_visuals'/);
-    assert.match(reg, /AI images and video only when you press "Make options" on its Briefs tab/);
+    assert.match(reg, /AI images and video only when you ask for options on its Briefs tab/);
     assert.match(reg, /sources && !sources\.some\(\(x\) => x === 'ai_image' \|\| x === 'ai_video'\)/, 'a plan with AI video is not "made straight away"');
     const tab = read('src/components/assistant-campaigns.js');
     assert.match(tab, /commission_visuals: \{ field: 'show'/);

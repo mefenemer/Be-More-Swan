@@ -133,7 +133,7 @@ export async function judgeVisualOrder(db: Db, order: { id: number; organisation
     }
     const waiting = count('proposed');
     if (waiting > 0) return { kind: 'in_review', summary: `${waiting} option${waiting === 1 ? '' : 's'} waiting on the Brand Designer's Briefs tab` };
-    if (brief.status === 'open' && brief.rounds === 0) return { kind: 'in_review', summary: 'Waiting for you to press "Make options" on the Brand Designer\'s Briefs tab' };
+    if (brief.status === 'open' && brief.rounds === 0) return { kind: 'in_review', summary: 'Waiting for you to ask the Brand Designer for options on its Briefs tab' };
     return { kind: 'pending' };
 }
 

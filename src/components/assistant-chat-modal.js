@@ -299,10 +299,21 @@
     loadConversation({
       assistantId: assistantId,
       sessionId: sessionId,
-      forceNew: opts.forceNew,
+      // A conversation opened ABOUT something (a brief, from the Brand Designer's Briefs tab) starts
+      // fresh, so the question is not buried under an unrelated thread.
+      forceNew: opts.forceNew || !!opts.draft,
     }).then(function (info) {
       // The drawer needs the resolved assistant id — a caller may have passed only a sessionId.
       if (info) mountHistory(info.assistantId);
+      // `draft` is typed into the composer, never sent: the user reads it, edits it, sends it.
+      if (opts.draft) {
+        var input = el('bms-chat-mount') && el('bms-chat-mount').querySelector('[data-chat-input]');
+        if (input) {
+          input.value = String(opts.draft);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.focus();
+        }
+      }
     });
   }
 
