@@ -563,7 +563,7 @@ window.initNotifications = async function() {
         teamBanner.classList.toggle('hidden', n === 0);
         teamBanner.style.display = n === 0 ? 'none' : '';
         const label = document.getElementById('notif-team-banner-count');
-        if (label) label.textContent = `${n} unread ${n === 1 ? 'message' : 'messages'} from your assistants in Team.`;
+        if (label) label.textContent = `${n} unread ${n === 1 ? 'message' : 'messages'} from your assistants in Team Chat.`;
     }
     const listEl = document.getElementById('notif-list');
     const loadingEl = document.getElementById('notif-loading');

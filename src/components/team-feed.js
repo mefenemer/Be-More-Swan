@@ -18,6 +18,11 @@
 (function () {
   const API = '/.netlify/functions/team';
   const POLL_MS = 30000;
+  /** The chosen order, remembered in this browser only — newest first unless they changed it. */
+  const SORT_KEY = 'bms.teamChat.sort';
+  function readSort() {
+    try { return localStorage.getItem(SORT_KEY) !== 'oldest'; } catch (_) { return true; }
+  }
   const instances = new Map();
   let nextId = 1;
 
@@ -62,10 +67,12 @@
     const filter = inst.mode === 'campaign' ? { campaignId: inst.campaignId }
       : inst.mode === 'assistant' ? { assistantId: inst.assistantId }
       : inst.thread.type === 'campaign' ? { campaignId: inst.thread.id }
-      : inst.thread.type === 'assistant' ? { assistantId: inst.thread.id } : {};
+      : inst.thread.type === 'assistant' ? { assistantId: inst.thread.id }
+      : inst.thread.type === 'me' ? { mine: true } : {};
     try {
       const data = await post({ action: 'list', ...filter });
-      inst.messages = (data.messages || []).slice().reverse();   // oldest first, like any chat
+      // The server answers newest first; the order shown is the person's choice (sortNewest).
+      inst.messages = (data.messages || []).slice().reverse();
       inst.assistants = data.assistants || [];
       inst.campaigns = data.campaigns || [];
       inst.error = null;
@@ -92,6 +99,7 @@
 
   function threadTitle(inst) {
     if (inst.mode !== 'page' || inst.thread.type === 'all') return inst.mode === 'page' ? 'Everything' : '';
+    if (inst.thread.type === 'me') return 'Me';
     if (inst.thread.type === 'campaign') {
       const c = inst.campaigns.find((x) => Number(x.id) === Number(inst.thread.id));
       return c ? `Campaign: ${c.objective}` : 'Campaign';
@@ -165,7 +173,8 @@
     const live = inst.campaigns.filter((c) => c.status === 'active' || c.status === 'throttled' || c.status === 'draft' || c.status === 'paused');
     return `
       <div class="space-y-1">
-        ${item('all', null, 'Everything', 'Every message, newest at the bottom')}
+        ${item('all', null, 'Everything', 'Every message')}
+        ${item('me', null, 'Me', 'To you, and what you have sent')}
         ${live.length ? `<p class="px-3 pt-3 text-[11px] font-bold text-gray-500 uppercase tracking-wide">Campaigns</p>${live.map((c) => item('campaign', c.id, c.objective, c.status)).join('')}` : ''}
         ${inst.assistants.length ? `<p class="px-3 pt-3 text-[11px] font-bold text-gray-500 uppercase tracking-wide">Assistants</p>${inst.assistants.map((a) => item('assistant', a.id, a.name, ROLE_LABELS[a.roleKey] || '')).join('')}` : ''}
       </div>`;
@@ -174,6 +183,7 @@
   function emptyText(inst) {
     if (inst.mode === 'assistant') return 'Nothing from the team yet. When a campaign briefs this assistant, or it has a question for you, it appears here.';
     if (inst.mode === 'campaign') return 'No messages on this campaign yet. When it briefs your assistants, they say so here.';
+    if (inst.thread.type === 'me') return 'Nothing for you yet. Questions your assistants ask you, work ready for you, and anything you send appear here.';
     return 'No messages yet. When your assistants are briefed, start work, finish it or have a question, they say so here.';
   }
 
@@ -185,14 +195,25 @@
     const toSel = inst.host.querySelector(`[data-team-to="${inst.id}"]`);
     if (toSel) inst.to = toSel.value;
 
+    // Newest first by default (owner, 2026-10-14) — the latest news is what you open it for. Oldest
+    // first reads like a conversation. The composer sits at the end you read from, so a reply is
+    // written next to the message it answers.
+    const ordered = inst.sortNewest ? inst.messages.slice().reverse() : inst.messages;
     const list = !inst.loaded ? '<p class="text-sm text-gray-400 py-6 text-center">Loading…</p>'
       : inst.error ? `<p class="text-sm text-red-600 py-6 text-center">${esc(inst.error)}</p>`
       : !inst.messages.length ? `<p class="text-sm text-gray-500 py-6 text-center">${esc(emptyText(inst))}</p>`
-      : inst.messages.map((m) => messageHtml(inst, m)).join('');
+      : ordered.map((m) => messageHtml(inst, m)).join('');
+    const composer = inst.loaded && !inst.error ? composerHtml(inst) : '';
+    const sortBtn = inst.messages.length > 1 ? `<button type="button" data-team-sort="${inst.id}"
+        class="btn-utility px-2 py-1 text-xs font-bold rounded-lg shrink-0">${inst.sortNewest ? 'Newest first ↓' : 'Oldest first ↑'}</button>` : '';
     const body = `
-      ${inst.mode === 'page' ? `<p class="text-sm font-bold text-gray-900 mb-3 truncate">${esc(threadTitle(inst))}</p>` : ''}
+      <div class="flex items-center justify-between gap-3 mb-3">
+        ${inst.mode === 'page' ? `<p class="text-sm font-bold text-gray-900 truncate">${esc(threadTitle(inst))}</p>` : '<span></span>'}
+        ${sortBtn}
+      </div>
+      ${inst.sortNewest ? composer.replace('border-t border-gray-100 pt-3 mt-3', 'border-b border-gray-100 pb-3 mb-3') : ''}
       <div data-team-scroll="${inst.id}" class="space-y-3 overflow-y-auto" style="max-height:${inst.mode === 'page' ? '60vh' : '24rem'}">${list}</div>
-      ${inst.loaded && !inst.error ? composerHtml(inst) : ''}`;
+      ${inst.sortNewest ? '' : composer}`;
 
     inst.host.innerHTML = inst.mode === 'page'
       ? `<div class="team-grid" style="display:grid;gap:1rem">
@@ -200,8 +221,9 @@
            <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 min-w-0">${body}</div>
          </div>`
       : `<div class="min-w-0">${body}</div>`;
+    // Start at the newest message, wherever the order puts it.
     const scroll = inst.host.querySelector(`[data-team-scroll="${inst.id}"]`);
-    if (scroll) scroll.scrollTop = scroll.scrollHeight;
+    if (scroll) scroll.scrollTop = inst.sortNewest ? 0 : scroll.scrollHeight;
   }
 
   // ── Handlers (once, on document) ──────────────────────────────────────────
@@ -210,6 +232,15 @@
   }
 
   document.addEventListener('click', async (e) => {
+    const sort = e.target.closest('[data-team-sort]');
+    if (sort) {
+      const inst = instFor(sort, 'data-team-sort');
+      if (!inst) return;
+      inst.sortNewest = !inst.sortNewest;
+      try { localStorage.setItem(SORT_KEY, inst.sortNewest ? 'newest' : 'oldest'); } catch (_) { /* per-viewer nicety only */ }
+      render(inst);
+      return;
+    }
     const thread = e.target.closest('[data-team-thread]');
     if (thread) {
       const inst = instFor(thread, 'data-team-thread');
@@ -291,6 +322,7 @@
       campaignId: opts.campaignId ? Number(opts.campaignId) : null,
       thread: { type: 'all', id: null }, messages: [], assistants: [], campaigns: [],
       loaded: false, error: null, draft: '', to: opts.assistantId || null, sending: false, sendError: null,
+      sortNewest: readSort(),
     };
     host.setAttribute('data-team-host', String(inst.id));
     instances.set(inst.id, inst);

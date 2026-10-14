@@ -280,7 +280,7 @@ export async function teamThreadPromptBlock(db: Db, organisationId: number, assi
             .orderBy(desc(teamMessages.id)).limit(12);
         if (!rows.length) return '';
         const lines = rows.reverse().map((r) => `- ${r.createdAt.toISOString().slice(0, 16).replace('T', ' ')} ${r.fromUserId ? 'The user' : r.fromAssistantId === assistantId ? 'You' : 'A colleague'}: ${r.body}`);
-        return `YOUR TEAM THREAD (the "Team" page — messages between you, your colleagues and the user; most recent last). The user's messages here are instructions to you; follow them. Do not repeat these back unless asked.\n${lines.join('\n')}`;
+        return `YOUR TEAM THREAD (the "Team Chat" page — messages between you, your colleagues and the user; most recent last). The user's messages here are instructions to you; follow them. Do not repeat these back unless asked.\n${lines.join('\n')}`;
     } catch {
         return '';
     }
@@ -297,8 +297,10 @@ export interface TeamMessageView {
     question: (TeamQuestion & { answered: boolean; answer: string | null }) | null;
 }
 
-export async function listTeamMessages(db: Db, orgId: number, filter: { campaignId?: number; assistantId?: number; beforeId?: number; limit?: number }): Promise<TeamMessageView[]> {
+export async function listTeamMessages(db: Db, orgId: number, filter: { campaignId?: number; assistantId?: number; mine?: boolean; beforeId?: number; limit?: number }): Promise<TeamMessageView[]> {
     const conds = [eq(teamMessages.organisationId, orgId)];
+    // "Me": everything addressed to the person or written by them — their own inbox and outbox.
+    if (filter.mine) conds.push(or(eq(teamMessages.toUser, true), sql`${teamMessages.fromUserId} IS NOT NULL`)!);
     if (filter.campaignId) conds.push(eq(teamMessages.campaignId, filter.campaignId));
     if (filter.assistantId) conds.push(or(eq(teamMessages.fromAssistantId, filter.assistantId), eq(teamMessages.toAssistantId, filter.assistantId))!);
     if (filter.beforeId) conds.push(lt(teamMessages.id, filter.beforeId));

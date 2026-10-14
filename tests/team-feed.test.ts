@@ -141,4 +141,26 @@ check('set from the form, the chat and stated on the card', () => {
     assert.ok(read('src/components/chat-session.js').includes('usualPosting: c.usualPosting,'), 'chat edits drop it');
 });
 
-console.log(`\n${passed} passed`);
+
+
+// ── Owner's changes, 2026-10-14 ──────────────────────────────────────────────
+check('it is called Team Chat everywhere the person reads it', () => {
+    assert.ok(read('components/sidebar.html').includes('<span class="nav-label">Team Chat</span>'));
+    assert.ok(read('team.html').includes('>Team Chat</span></h1>'));
+    assert.ok(read('notifications.html').includes('Open Team Chat'));
+});
+
+check('newest first by default, either order on request, remembered per browser', () => {
+    const f = read('src/components/team-feed.js');
+    assert.ok(f.includes("return localStorage.getItem(SORT_KEY) !== 'oldest';") && f.includes('catch (_) { return true; }'), 'default is not newest first');
+    assert.ok(f.includes('data-team-sort=') && f.includes('inst.sortNewest = !inst.sortNewest;'));
+    assert.ok(f.includes('scroll.scrollTop = inst.sortNewest ? 0 : scroll.scrollHeight;'), 'opens away from the newest message');
+});
+
+check('"Me" is the person\'s own thread: to them, or sent by them', () => {
+    assert.ok(read('src/components/team-feed.js').includes("${item('me', null, 'Me',"));
+    assert.ok(team.includes('if (filter.mine) conds.push(or(eq(teamMessages.toUser, true), sql`${teamMessages.fromUserId} IS NOT NULL`)!);'));
+    assert.ok(read('netlify/functions/team.ts').includes('mine: body.mine === true'));
+});
+console.log(`
+${passed} passed`);
