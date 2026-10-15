@@ -211,7 +211,7 @@ export function describeBooking(b: BookingRow, tz: string): { when: string; what
     const end = utcToZoned(new Date(b.endsAt), tz);
     const what = b.kind === 'table'
         ? `Table for ${b.partySize}${b.resourceName ? ` (${b.resourceName})` : ''}`
-        : `${b.serviceName ?? 'Appointment'}${b.resourceName ? ` with ${b.resourceName}` : ''}`;
+        : `${b.serviceName ?? 'Appointment'}${b.resourceName ? ` with ${b.resourceName}` : ''}${b.kind === 'class' && b.partySize > 1 ? ` (${b.partySize} places)` : ''}`;
     return { when: `${formatDate(z.date)}, ${formatTime(z.time)}–${formatTime(end.time)}`, what };
 }
 

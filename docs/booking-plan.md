@@ -43,13 +43,17 @@ restaurants, hairdressers, consultants and more, configured through the website 
    sending. SQL: `db/z-bookings-changes.sql`.
 3. Two-way Google / Outlook calendar sync (busy times block slots; bookings appear in the diary).
 4. Optional deposits through Stripe Connect (the shop's connected account, no platform fee).
-5. Classes / events (sessions with fixed times and a capacity). Today a class can only be
-   approximated: a resource with a capacity (e.g. Studio, 12), linked to one service, whose own hours
-   are exactly one class long — so only that start time is offered and 12 people can take it. That
-   cannot express one-off dates, offers extra start times when the hours are longer than the class,
-   and shows "choose a time" rather than a timetable with spaces left. The real kind: dated sessions
-   (optionally repeating weekly) with a class, teacher and capacity; a timetable on the site with
-   spaces left; reusing the manage links and reminders.
+5. ✅ (built 2026-10-15) Classes and events. A booking section of kind `class` shows dated SESSIONS
+   (`class_sessions`: a Business Information product = the class, a date and time in the business's
+   timezone, an optional teacher / room, a number of places; a weekly class = sessions sharing a
+   `series_key`). A place is an ordinary booking (kind `class`, `session_id`, party_size = places),
+   re-counted under the same per-workspace lock, so emails, the cancel link, reminders and review
+   requests all work unchanged; a class place is not "moved" — they cancel and book another date.
+   Full → `class_waitlist`; when places free up (customer cancel, owner decline / cancel), the earliest
+   people whose places fit are emailed a link to book (first come, first served — nothing held).
+   The owner adds and cancels dates on the Website tab ▸ Bookings ▸ Timetable (cancelling emails
+   everyone booked), or the chat proposes them with a `class_sessions` card. Opening hours don't limit
+   classes; notice and "how far ahead" do. SQL: `db/z-classes.sql`. Deposits (phase 4) still open.
 
 ## Opening hours & contact section (built 2026-10-15)
 

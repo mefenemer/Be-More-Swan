@@ -17,6 +17,7 @@
 import { directionsUrl, openingHoursSpecification, openStatus, upcomingClosures, weekRows, whatsappUrl } from './business-hours';
 import { formatDate } from './booking-time';
 import type { SiteRenderReview, SiteRenderReviews } from './reviews';
+import type { SessionView } from './class-sessions';
 import type { WeeklyHours } from './booking-availability';
 import { buttonInk, menuOf, type Link, type Section, type SiteDefinition, type SitePageDef, type SiteTheme } from './site-definition';
 
@@ -43,13 +44,37 @@ export function formatDuration(minutes: number): string {
 /** Business Information's hours and location, as the site needs them (bookings.ts businessSummary). */
 export interface SiteRenderBusiness { timezone: string; weeklyHours: WeeklyHours; closures: Array<{ date: string; note?: string | null }>; visitAddress: string | null; whatsapp: string | null; }
 
-export interface SiteRenderBooking { ready: boolean; services: Array<{ id: number; name: string; price: string | null; durationMinutes: number }>; maxPartySize: number; }
+export interface SiteRenderBooking { ready: boolean; services: Array<{ id: number; name: string; price: string | null; durationMinutes: number }>; maxPartySize: number;
+    /** Upcoming bookable class sessions (class-sessions.ts), for a 'class' booking section; absent = none loaded. */
+    sessions?: SessionView[]; }
 
 /** Where every booking step lives (booking-render.ts, served by site-serve.ts). */
 export const BOOK_PATH = '/_book';
 
 /** A customer's review page (site-review.ts): the link in a review request email. Its form posts to FORM_ACTION. */
 export const REVIEW_PATH = '/_review';
+
+// ── Classes and events (site-classes.ts) — drawn here so the page section and /_book share it. ──
+/** /_book link to one session of this section (also used in the waitlist email). */
+export const sessionLink = (sectionId: string, sessionId: number) => `${BOOK_PATH}?s=${encodeURIComponent(sectionId)}&sess=${sessionId}`;
+
+/** "4 places left", "1 place left", "Full". */
+export const placesText = (left: number) => (left <= 0 ? 'Full' : `${left} place${left === 1 ? '' : 's'} left`);
+
+/** The timetable, grouped by day — what the page section and the /_book page both draw. */
+export function timetableHtml(sessions: SessionView[], sectionId: string, opts: { preview?: boolean } = {}): string {
+    const byDay = new Map<string, SessionView[]>();
+    for (const s of sessions) byDay.set(s.dateText, [...(byDay.get(s.dateText) ?? []), s]);
+    return [...byDay].map(([day, list]) => `<h3>${esc(day)}</h3><ul class="menu tt">${list.map((s) => {
+        const action = opts.preview
+            ? `<span class="fine">${esc(placesText(s.left))}</span>`
+            : s.left > 0
+                ? `<a class="btn s" href="${esc(sessionLink(sectionId, s.id))}">Book</a>`
+                : `<a href="${esc(sessionLink(sectionId, s.id))}">Join the waitlist</a>`;
+        return `<li><div class="mi"><span class="mn">${esc(s.timeText)} · ${esc(s.title)}${s.resourceName ? ` <span class="mt">with ${esc(s.resourceName)}</span>` : ''}</span><span class="ml" aria-hidden="true"></span>${s.price ? `<span class="mp">${esc(s.price)}</span>` : ''}</div>
+<p class="md">${opts.preview ? '' : `${esc(placesText(s.left))} · `}${action}</p></li>`;
+    }).join('')}</ul>`).join('');
+}
 
 /** Where a Buy button posts (step 3c) — site-serve.ts starts a Stripe Checkout and redirects. */
 export const BUY_ACTION = '/_buy';
@@ -146,7 +171,7 @@ section{padding:64px 0}.alt{background:rgba(0,0,0,.035)}
 .pv{background:#111;color:#fff;text-align:center;font-size:.85rem;padding:8px}
 .stars{color:#f59e0b;letter-spacing:1px}.stars .off{color:rgba(0,0,0,.15)}.rv{margin:0}.rv blockquote{margin:8px 0}.rv figcaption{font-size:.95rem}.rsum{margin:8px 0 0}
 .gal{gap:12px}@media(max-width:699px){.gal{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(min-width:700px){.gal{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}}.gi{margin:0}.gi a{display:block}.gi img{display:block;width:100%;border-radius:var(--r)}.gal.sq img{aspect-ratio:1/1;object-fit:cover}.gal.nat{align-items:start}.gi figcaption{font-size:.85rem;margin-top:6px;opacity:.8}
-.menu{list-style:none;padding:0;margin:8px 0 0}.menu li{padding:10px 0;border-bottom:1px solid rgba(0,0,0,.08)}.mi{display:flex;align-items:baseline;gap:8px}.mn{font-weight:600}.mt{font-weight:400;font-size:.85rem;opacity:.7;white-space:nowrap}.ml{flex:1;min-width:16px;border-bottom:1px dotted currentColor;opacity:.35}.mp{font-weight:700;white-space:nowrap}.md{margin:4px 0 0;font-size:.92rem;opacity:.8}.mnote{margin-top:20px}
+.menu{list-style:none;padding:0;margin:8px 0 0}.menu li{padding:10px 0;border-bottom:1px solid rgba(0,0,0,.08)}.mi{display:flex;align-items:baseline;gap:8px}.mn{font-weight:600}.mt{font-weight:400;font-size:.85rem;opacity:.7;white-space:nowrap}.ml{flex:1;min-width:16px;border-bottom:1px dotted currentColor;opacity:.35}.mp{font-weight:700;white-space:nowrap}.md{margin:4px 0 0;font-size:.92rem;opacity:.8}.mnote{margin-top:20px}.tt+h3{margin-top:24px}
 .badge{display:inline-block;padding:6px 12px;border-radius:999px;font-size:.9rem}.badge.on{background:#dcfce7;color:#14532d}.badge.off{background:#f3f4f6;color:#1f2937}
 .hrs{border-collapse:collapse;margin:8px 0 12px;min-width:min(100%,360px)}.hrs th{text-align:left;font-weight:600;padding:6px 24px 6px 0}.hrs td{padding:6px 0}.hrs tr.today{font-weight:800}.hrs tr+tr{border-top:1px solid rgba(0,0,0,.08)}
 address{font-style:normal;margin:0 0 12px}
@@ -361,6 +386,18 @@ ${closed.length ? `<p class="fine">${closed.map((c) => `Closed ${esc(formatDate(
             // flow works with no script. A GET form: choosing a time changes nothing until the last step.
             const p = s.props;
             const b = formState.booking;
+            if (p.kind === 'class') {
+                // Classes and events: the next few sessions, with places left; the full timetable is /_book.
+                const sessions = (b?.sessions ?? []).filter((x) => !p.serviceIds.length || (x.serviceId !== null && p.serviceIds.includes(x.serviceId)));
+                const shown = sessions.slice(0, 6);
+                const all = `<p><a class="btn${shown.length ? ' s' : ''}" href="${esc(`${BOOK_PATH}?s=${encodeURIComponent(s.id)}`)}">${esc(p.buttonLabel)}</a></p>`;
+                const body = shown.length
+                    ? `${timetableHtml(shown, s.id, { preview: formState.preview })}${formState.preview ? '<p class="fine">Booking works on your live site, not in this preview.</p>' : all}`
+                    : formState.preview
+                        ? '<p class="fine">Classes &amp; events section: add dates on the Website tab, under Bookings ▸ Timetable. Until then it says there\'s nothing to book yet.</p>'
+                        : '<p>There\'s nothing to book just now — new dates are added regularly.</p>';
+                return `<section${cls} id="${esc(s.id)}"><div class="w n">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? paragraphs(p.intro) : ''}${body}</div></section>`;
+            }
             const services = b ? b.services.filter((x) => !p.serviceIds.length || p.serviceIds.includes(x.id)) : [];
             const ready = !!b && b.ready && (p.kind === 'table' || services.length > 0);
             if (!ready) {

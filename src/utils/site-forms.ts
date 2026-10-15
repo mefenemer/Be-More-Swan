@@ -218,6 +218,7 @@ export async function sentMessage(db: Db, site: SiteRow, def: SiteDefinition, q:
     const back = safeBackPath(def, q.get('b'));
     if (q.get('k') === 'booking') {
         if (q.get('st') === 'cancelled') return { title: 'Your booking is cancelled', message: 'We\'ve emailed you to confirm. Thanks for letting us know.', back };
+        if (q.get('st') === 'waitlist') return { title: 'You\'re on the waitlist', message: 'If a place opens up, we\'ll email you a link to book it. It isn\'t held for you, so book quickly when you hear from us.', back };
         if (q.get('st') === 'moved') return { title: 'Your booking has moved', message: 'Your new time is confirmed — we\'ve emailed you the details, with an invite for your calendar.', back };
         return q.get('st') === 'confirmed'
             ? { title: 'You\'re booked in', message: 'Your booking is confirmed. We\'ve emailed you the details, with an invite for your calendar.', back }

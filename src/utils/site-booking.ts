@@ -13,7 +13,7 @@
 
 import type { getDb } from '../../db/client';
 import type { BookingProps, Section, SiteDefinition } from './site-definition';
-import { BOOK_PATH, esc, FORM_SENT_PATH, renderSiteShell, type RenderContext } from './site-render';
+import { BOOK_PATH, esc, FORM_SENT_PATH, renderSiteShell, sessionLink, type RenderContext } from './site-render';
 import { bookableDates } from './booking-availability';
 import { formatDate, formatTime, DATE_RE, TIME_RE } from './booking-time';
 import {
@@ -21,6 +21,8 @@ import {
     loadBooking, loadBookingSetup, resourcesForKind, slotsForDay, type BookingRow, type BookingSetup,
 } from './bookings';
 import { verifyBookingToken } from './booking-links';
+import { classStep, classSubmit } from './site-classes';
+import { offerFreedPlaces } from './class-sessions';
 import { checkRateLimit } from './rate-limit';
 import { looksLikeEmail, normaliseEmail } from './audience-contacts';
 import { cleanText } from './site-definition';
@@ -78,6 +80,7 @@ const page = (b: BookCtx, title: string, inner: string, status = 200): BookPage 
 const NOTES_LABEL: Record<BookingProps['kind'], string> = {
     table: 'Anything we should know? (allergies, a special occasion)',
     appointment: 'Anything to tell us? (optional)',
+    class: 'Anything we should know? (optional)',
     consultation: 'What would you like to talk about?',
 };
 
@@ -126,7 +129,8 @@ async function managePage(b: BookCtx, q: URLSearchParams): Promise<BookPage> {
 <form class="fm" method="post" action="${BOOK_PATH}"><input type="hidden" name="_action" value="cancel"><input type="hidden" name="manage" value="${row.id}"><input type="hidden" name="t" value="${esc(token)}">
 <button class="btn" type="submit">Yes, cancel it</button></form><p><a href="${esc(`${BOOK_PATH}?manage=${row.id}&t=${token}`)}">No, keep it</a></p>`);
     }
-    const s = sectionForKind(b.def, row.kind);
+    // A class place isn't moved to "a new time": they cancel and book another date from the timetable.
+    const s = row.kind === 'class' ? null : sectionForKind(b.def, row.kind);
     const move = s ? `<a class="btn" href="${esc(bookLink({ s, svc: row.serviceId, party: row.kind === 'table' ? row.partySize : 0, res: row.resourceId ?? 'any', date: null, time: null, mv: row.id, mt: token }))}">Choose a new time</a> ` : '';
     const policy = setup.settings.cancellationPolicy ? `<p class="fine"><strong>Cancellation:</strong> ${esc(setup.settings.cancellationPolicy)}</p>` : '';
     return page(b, 'Your booking', `${head}<p>${move}<a class="btn s" href="${esc(`${BOOK_PATH}?manage=${row.id}&t=${token}&do=cancel`)}">Cancel it</a></p>${policy}`);
@@ -139,6 +143,8 @@ export async function bookStep(b: BookCtx, q: URLSearchParams, message: string |
     const found = findBookingSection(b.def, c.s);
     if (!found) return page(b, 'Booking isn\'t available', '<h1>Booking isn\'t available</h1><p>This page has changed since you opened it.</p><p><a class="btn" href="/">Go to the home page</a></p>', 404);
     const props = found.section.props;
+    // Classes and events: a timetable of dated sessions, not times computed from opening hours.
+    if (props.kind === 'class') return classStep(b, found, q, message);
     const setup = await loadBookingSetup(b.db, b.site.organisationId);
     const services = setup.services.filter((x) => !props.serviceIds.length || props.serviceIds.includes(x.id));
     const back = `<p><a href="${esc(found.pagePath)}">← Back to the website</a></p>`;
@@ -215,10 +221,16 @@ ${['s', 'svc', 'party', 'res', 'date', 'time'].map((k) => { const v = (c as unkn
 export async function bookSubmit(b: BookCtx, body: URLSearchParams, ip: string): Promise<BookPage> {
     if (body.get('_action') === 'cancel') return cancelSubmit(b, body);
     if (body.get('mv')) return moveSubmit(b, body);
+    if (body.get('_action') === 'class_book' || body.get('_action') === 'class_wait') {
+        const f = findBookingSection(b.def, String(body.get('s') || '').slice(0, 24));
+        if (!f || f.section.props.kind !== 'class') return page(b, 'Booking isn\'t available', '<h1>Booking isn\'t available</h1><p>This page has changed since you opened it.</p><p><a class="btn" href="/">Go to the home page</a></p>', 404);
+        return classSubmit(b, f, body, ip);
+    }
     const c = readChoice(body);
     const found = findBookingSection(b.def, c.s);
     if (!found || !c.date || !c.time) return bookStep(b, body, 'Something was missing — please choose again.');
     const props = found.section.props;
+    if (props.kind === 'class') return bookStep(b, body, 'Please choose a date.');
     // A bot: the hidden field, or faster than a person could fill the form in. Same "thank you", nothing held.
     const started = Number(body.get('_t'));
     if (String(body.get('website') || '').trim() || !Number.isFinite(started) || b.now.getTime() - started < BOOK_MIN_FILL_MS) {
@@ -275,6 +287,9 @@ async function cancelSubmit(b: BookCtx, body: URLSearchParams): Promise<BookPage
         const ctx = noticeCtx(b, setup);
         await emailCustomer(done, 'cancelled_by_you', ctx, null);
         await announceCustomerChange(b.db, 'cancelled', done, ctx).catch((err) => console.error('[site-booking] cancel notice failed', err));
+        // A class place freed up: offer it to the waitlist.
+        const cls = sectionForKind(b.def, 'class');
+        if (done.sessionId && cls) await offerFreedPlaces(b.db, b.site.organisationId, done.sessionId, { business: b.def.settings.siteName, siteOrigin: b.ctx.origin, bookPath: (id) => sessionLink(cls, id) });
     }
     return { status: 303, location: `${FORM_SENT_PATH}?k=booking&st=cancelled&b=%2F` };
 }
@@ -288,6 +303,7 @@ async function moveSubmit(b: BookCtx, body: URLSearchParams): Promise<BookPage> 
     const setup = await loadBookingSetup(b.db, b.site.organisationId);
     if (!customerCanChange(old, setup.settings.minNoticeMinutes, b.now)) return managePage(b, new URLSearchParams({ manage: String(old.id), t: String(c.mt) }));
     const props = found.section.props;
+    if (props.kind === 'class') return managePage(b, new URLSearchParams({ manage: String(old.id), t: String(c.mt) }));
     const made = await createBooking(b.db, b.site.organisationId, {
         siteId: b.site.id, kind: props.kind, date: c.date, time: c.time,
         serviceId: props.kind === 'table' ? null : c.svc, resourceId: typeof c.res === 'number' ? c.res : null,

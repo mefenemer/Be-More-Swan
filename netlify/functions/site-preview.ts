@@ -18,6 +18,7 @@ import { definitionOf, maxPagesFor } from '../../src/utils/site-store';
 import { loadSiteForms } from '../../src/utils/site-forms';
 import { loadSiteProducts } from '../../src/utils/site-shop';
 import { loadSiteReviews } from '../../src/utils/reviews';
+import { bookableSessions } from '../../src/utils/class-sessions';
 import { bookingSummary, businessSummary } from '../../src/utils/bookings';
 import { siteAssetUrl } from '../../src/utils/site-hosting';
 import { resolveBaseUrl } from '../../src/utils/base-url';
@@ -62,7 +63,7 @@ export default withLambda(async (event) => {
         // Sign-up sections draw their form (switched off — the preview's CSP forbids posting anyway).
         forms: await loadSiteForms(db, ctx.organisationId, definition),
         products: await loadSiteProducts(db, ctx.organisationId, definition),
-        booking: await bookingSummary(db, ctx.organisationId),
+        booking: { ...await bookingSummary(db, ctx.organisationId), sessions: await bookableSessions(db, ctx.organisationId, new Date(), [], 60) },
         business: await businessSummary(db, ctx.organisationId),
         reviews: await loadSiteReviews(db, ctx.organisationId, definition),
     });

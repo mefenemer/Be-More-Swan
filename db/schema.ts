@@ -5696,11 +5696,45 @@ export const bookings = pgTable("bookings", {
   cancelledBy: text("cancelled_by"),
   movedFromId: integer("moved_from_id"),
   reminderSentAt: timestamp("reminder_sent_at"),
+  // Phase 5 (db/z-classes.sql): the class session a 'class' booking is for; party_size = places.
+  sessionId: integer("session_id").references((): any => classSessions.id, { onDelete: "set null" }),
 }, (t) => [
   index("bookings_org_time_idx").on(t.organisationId, t.startsAt),
-  check("bookings_kind_check", sql`${t.kind} IN ('appointment','consultation','table')`),
+  check("bookings_kind_check", sql`${t.kind} IN ('appointment','consultation','table','class')`),
   check("bookings_status_check", sql`${t.status} IN ('pending','confirmed','declined','cancelled')`),
 ]);
+
+// Classes and events (db/z-classes.sql): dated sessions with places, and their waitlist.
+export const classSessions = pgTable("class_sessions", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  serviceId: integer("service_id").references(() => orgProducts.id, { onDelete: "set null" }),
+  title: text().notNull(),
+  resourceId: integer("resource_id").references(() => bookableResources.id, { onDelete: "set null" }),
+  resourceName: text("resource_name"),
+  startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+  endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+  capacity: integer().notNull(),
+  status: text().notNull().default("scheduled"),
+  seriesKey: text("series_key"),
+  notes: text(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("class_sessions_org_time_idx").on(t.organisationId, t.startsAt),
+  check("class_sessions_status_check", sql`${t.status} IN ('scheduled','cancelled')`),
+]);
+
+export const classWaitlist = pgTable("class_waitlist", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  sessionId: integer("session_id").notNull().references(() => classSessions.id, { onDelete: "cascade" }),
+  name: text().notNull(),
+  email: text().notNull(),
+  places: integer().notNull().default(1),
+  offeredAt: timestamp("offered_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
 
 // A workspace's Stripe STANDARD account for selling on its site (db/z-website-shop.sql). We take no
 // fee (decision D5); the business is the merchant of record.

@@ -127,7 +127,8 @@ export interface GalleryProps { heading: string | null; intro: string | null; la
  */
 export interface ReviewsProps { heading: string | null; intro: string | null; reviewIds: number[]; limit: number; showSummary: boolean; }
 export interface HoursProps { heading: string | null; intro: string | null; showHours: boolean; showContact: boolean; showAddress: boolean; }
-export type BookingSectionKind = 'appointment' | 'consultation' | 'table';
+/** 'class': classes and events — dated sessions with places (class-sessions.ts), not times from opening hours. */
+export type BookingSectionKind = 'appointment' | 'consultation' | 'table' | 'class';
 export interface BookingProps { heading: string | null; intro: string | null; kind: BookingSectionKind; serviceIds: number[]; askStaff: boolean; buttonLabel: string; }
 export interface ProductItem { name: string; description: string | null; price: number | null; image: Image | null; }
 export interface ProductsProps { heading: string | null; intro: string | null; productIds: number[]; items: ProductItem[]; collectAddress: boolean; buyLabel: string; }
@@ -432,12 +433,12 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
             } };
         }
         case 'booking': {
-            const kind = p.kind === 'table' || p.kind === 'consultation' ? p.kind : 'appointment';
+            const kind = p.kind === 'table' || p.kind === 'consultation' || p.kind === 'class' ? p.kind : 'appointment';
             return { type: 'booking', props: {
                 heading: textOrNull(p.heading, LIMITS.headline), intro: textOrNull(p.intro, LIMITS.intro, true), kind,
                 serviceIds: [...new Set((Array.isArray(p.serviceIds) ? p.serviceIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 50),
-                askStaff: kind !== 'table' && p.askStaff === true,
-                buttonLabel: cleanText(p.buttonLabel, LIMITS.buttonLabel) || (kind === 'table' ? 'Find a table' : 'Choose a time'),
+                askStaff: kind !== 'table' && kind !== 'class' && p.askStaff === true,
+                buttonLabel: cleanText(p.buttonLabel, LIMITS.buttonLabel) || (kind === 'table' ? 'Find a table' : kind === 'class' ? 'See all dates' : 'Choose a time'),
             } };
         }
         case 'signup': {

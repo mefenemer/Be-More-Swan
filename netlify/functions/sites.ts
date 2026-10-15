@@ -52,9 +52,12 @@ import { readWordsFile } from '../../src/utils/site-words';
 import { attachmentText, quoteFromChat } from '../../src/utils/chat-attachments';
 import { connectAccountFor, connectOnboardingLink, markOrderDone, refreshConnectAccount } from '../../src/utils/site-shop';
 import { bookings, bookingSettings, orgProducts, orgReviews, siteEnquiries, siteOrders, users } from '../../db/schema';
-import { decideBooking, describeBooking, listBookings, loadBookingSetup } from '../../src/utils/bookings';
+import { decideBooking, describeBooking, emailCustomer, listBookings, loadBookingSetup } from '../../src/utils/bookings';
 import { cleanBookingSettings, describeHours } from '../../src/utils/booking-settings';
 import { reviewSummary } from '../../src/utils/reviews';
+import { addSessions, cancelSessions, cleanNewSessions, offerFreedPlaces, ownerTimetable } from '../../src/utils/class-sessions';
+import { utcToZoned } from '../../src/utils/booking-time';
+import { sessionLink } from '../../src/utils/site-render';
 import { buyablePence, priceDisplay } from '../../src/utils/product-price';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import {
@@ -295,6 +298,30 @@ export default withLambda(async (event) => {
             cancelledBy: b.cancelledBy, moved: b.movedFromId !== null, reminded: b.reminderSentAt !== null })) });
     }
 
+    // ── Classes and events (class-sessions.ts): the timetable ──
+    if (action === 'timetable') {
+        return json(200, { sessions: await ownerTimetable(db, orgId, new Date()) });
+    }
+    if (action === 'session_add') {
+        const setup = await loadBookingSetup(db, orgId);
+        const today = utcToZoned(new Date(), setup.settings.timezone).date;
+        const cleaned = cleanNewSessions((body.session && typeof body.session === 'object' ? body.session : {}) as Record<string, unknown>, today);
+        if (!cleaned.ok) return json(400, { error: cleaned.error });
+        const r = await addSessions(db, orgId, cleaned.value);
+        if (!r.ok) return json(400, { error: r.error });
+        return json(200, { added: r.value.length, sessions: await ownerTimetable(db, orgId, new Date()) });
+    }
+    if (action === 'session_cancel') {
+        const setup = await loadBookingSetup(db, orgId);
+        const { definition } = definitionOf(site, maxPages);
+        const r = await cancelSessions(db, orgId, Number(body.id), body.wholeSeries === true, new Date());
+        if (!r.sessions.length) return json(409, { error: 'That session has already been cancelled.' });
+        const [owner] = await db.select({ email: users.email }).from(aiAssistants).leftJoin(users, eq(users.id, aiAssistants.userId)).where(eq(aiAssistants.id, assistant.id)).limit(1);
+        const ctx = { business: definition.settings.siteName, timezone: setup.settings.timezone, assistantId: assistant.id, cancellationPolicy: setup.settings.cancellationPolicy, siteOrigin: site.slug ? siteOrigin(site.slug) : null };
+        for (const b of r.bookings) await emailCustomer(b, 'cancelled', ctx, owner?.email ?? null);
+        return json(200, { cancelled: r.sessions.length, told: r.bookings.length, sessions: await ownerTimetable(db, orgId, new Date()) });
+    }
+
     if (action === 'booking_decide') {
         const decision = body.decision === 'confirm' || body.decision === 'decline' || body.decision === 'cancel' ? body.decision : null;
         if (!decision) return json(400, { error: 'Confirm, decline or cancel?' });
@@ -305,6 +332,11 @@ export default withLambda(async (event) => {
             siteOrigin: site.slug ? siteOrigin(site.slug) : null,
         });
         if (!r.ok) return json(409, { error: r.error });
+        // A class place given back (declined or cancelled): offer it to the waitlist.
+        if (r.booking.sessionId && r.booking.status !== 'confirmed' && site.slug) {
+            const cls = definition.pages.flatMap((pg) => pg.sections).find((x) => x.type === 'booking' && x.props.kind === 'class');
+            if (cls) await offerFreedPlaces(db, orgId, r.booking.sessionId, { business: definition.settings.siteName, siteOrigin: siteOrigin(site.slug), bookPath: (sid) => sessionLink(cls.id, sid) });
+        }
         return json(200, { ok: true, status: r.booking.status });
     }
 
