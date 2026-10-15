@@ -5,6 +5,8 @@
 // in normaliseSiteDefinition — there is no other writer. The editor (assistant-site-editor.js) and
 // the chat cards call the same API actions (netlify/functions/sites.ts), so they cannot disagree.
 
+import { depositLabel } from './product-price';
+import { bookableSessions } from './class-sessions';
 import { reviewsForPrompt } from './reviews';
 import { and, desc, eq, inArray, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
@@ -404,10 +406,14 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
     const bk = await loadBookingSetup(db, orgId).catch(() => null);
     if (bk) {
         lines.push(Object.keys(bk.settings.weeklyHours).length
-            ? `Bookings: opening hours ${describeHours(bk.settings.weeklyHours)} (${bk.settings.timezone}); ${bk.settings.mode === 'instant' ? 'confirmed straight away' : 'they confirm each booking'}; bookable services (with a length): ${bk.services.length ? bk.services.map((x) => `${x.name} (serviceId ${x.id}, ${x.durationMinutes} min)`).join(', ') : 'none yet'}; who/what can be booked: ${bk.resources.length ? bk.resources.map((r) => `${r.name} (${r.kind})`).join(', ') : 'just them'}.`
+            ? `Bookings: opening hours ${describeHours(bk.settings.weeklyHours)} (${bk.settings.timezone}); ${bk.settings.mode === 'instant' ? 'confirmed straight away' : 'they confirm each booking'}; bookable services (with a length): ${bk.services.length ? bk.services.map((x) => `${x.name} (serviceId ${x.id}, ${x.durationMinutes} min${depositLabel(x) ? `, ${depositLabel(x)}` : ''})`).join(', ') : 'none yet'}; who/what can be booked: ${bk.resources.length ? bk.resources.map((r) => `${r.name} (${r.kind})`).join(', ') : 'just them'}.`
             : 'Bookings: not set up (no opening hours yet).');
         lines.push(`Where to find them (Business Information, for an hours section): ${bk.settings.visitAddress ? `visit address "${bk.settings.visitAddress.split('\n').join(', ')}"` : 'no visit address'}; ${bk.settings.whatsapp ? `WhatsApp ${bk.settings.whatsapp}` : 'no WhatsApp number'}.`);
     }
+    const tt = await bookableSessions(db, orgId, new Date(), [], 20).catch(() => null);
+    if (tt) lines.push(tt.length
+        ? `Their class / event timetable (next ${tt.length} bookable dates): ${tt.map((x) => `${x.title}, ${x.dateText} ${x.timeText}${x.resourceName ? ` with ${x.resourceName}` : ''} — ${x.left} of ${x.capacity} places left`).join('; ')}.`
+        : 'Their class / event timetable is empty (no bookable dates).');
     lines.push(await reviewsForPrompt(db, orgId).catch(() => 'Their reviews could not be read this turn.'));
     const forms = await listSignupForms(db, orgId).catch(() => []);
     lines.push(forms.length

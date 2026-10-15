@@ -5,9 +5,12 @@
 //
 // Set up in the Stripe dashboard → Developers → Webhooks → Add endpoint →
 // "Events on Connected accounts", URL https://bemoreswan.com/.netlify/functions/stripe-connect-webhook,
-// events: checkout.session.completed, checkout.session.async_payment_succeeded, account.updated.
+// events: checkout.session.completed, checkout.session.async_payment_succeeded, account.updated
+// (and, optionally, checkout.session.expired — unpaid deposit holds also lapse on their own).
 //
-//   checkout.session.completed / async_payment_succeeded → record the order (site-shop.ts), if paid
+//   checkout.session.completed / async_payment_succeeded → a booking deposit (booking-deposits.ts),
+//                                                           else record the order (site-shop.ts), if paid
+//   checkout.session.expired                              → let an unpaid deposit hold go now
 //   account.updated                                       → keep charges_enabled & co. in step
 //
 // Fails closed without the secret. Repeat deliveries are harmless: orders are unique per session.
@@ -17,6 +20,41 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { STRIPE_API_VERSION } from '../../src/utils/stripe';
 import { recordPaidCheckout, syncConnectAccount } from '../../src/utils/site-shop';
+import { depositPaid, releaseHold } from '../../src/utils/booking-deposits';
+import { announceNewBooking, describeBooking, fromLine, loadBookingSetup } from '../../src/utils/bookings';
+import { organisations, sites } from '../../db/schema';
+import { siteOrigin } from '../../src/utils/site-hosting';
+import { sendEmail } from '../../src/utils/email';
+import { esc } from '../../src/utils/site-render';
+import { eq } from 'drizzle-orm';
+
+/**
+ * A deposit was paid: the held booking becomes a real one and everyone is told now (bookings.ts).
+ * If the hold had already gone, the payment was refunded (booking-deposits.ts) and they're told so.
+ */
+async function depositSettled(db: ReturnType<typeof getDb>, accountId: string, session: Stripe.Checkout.Session): Promise<void> {
+    const orgId = Number(session.metadata?.bms_org);
+    if (!Number.isInteger(orgId)) return;
+    const setup = await loadBookingSetup(db, orgId);
+    const r = await depositPaid(db, accountId, session, setup.settings.mode);
+    if (!r) return;
+    const b = r.booking;
+    const [site] = b.siteId ? await db.select({ slug: sites.slug, aiAssistantId: sites.aiAssistantId }).from(sites).where(eq(sites.id, b.siteId)).limit(1) : [];
+    const [org] = await db.select({ name: organisations.name }).from(organisations).where(eq(organisations.id, b.organisationId)).limit(1);
+    const business = org?.name || 'Your booking';
+    if (r.lateRefund) {
+        const { when, what } = describeBooking(b, setup.settings.timezone);
+        await sendEmail({
+            to: b.customerEmail, from: fromLine(business), subject: `Your deposit has been refunded — ${business}`,
+            html: `<p>Sorry, ${esc(b.customerName)} — your payment for <strong>${esc(what)}</strong> on <strong>${esc(when)}</strong> arrived after the time was released, so nothing was booked. Your deposit has been refunded in full; it usually reaches your card within 5–10 days.</p><p>Please book again on our website.</p>`,
+        }).catch((err: unknown) => console.error('[stripe-connect-webhook] late-refund email failed', err instanceof Error ? err.message : err));
+        return;
+    }
+    await announceNewBooking(db, b, {
+        business, timezone: setup.settings.timezone, assistantId: site?.aiAssistantId ?? null,
+        cancellationPolicy: setup.settings.cancellationPolicy, siteOrigin: site?.slug ? siteOrigin(site.slug) : null,
+    });
+}
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -40,7 +78,13 @@ export default withLambda(async (event) => {
     const db = getDb();
     try {
         if (evt.type === 'checkout.session.completed' || evt.type === 'checkout.session.async_payment_succeeded') {
-            await recordPaidCheckout(db, evt.account, evt.data.object as Stripe.Checkout.Session);
+            const session = evt.data.object as Stripe.Checkout.Session;
+            if (session.metadata?.bms_kind === 'booking_deposit') await depositSettled(db, evt.account, session);
+            else await recordPaidCheckout(db, evt.account, session);
+        } else if (evt.type === 'checkout.session.expired') {
+            const session = evt.data.object as Stripe.Checkout.Session;
+            const id = Number(session.metadata?.bms_booking);
+            if (session.metadata?.bms_kind === 'booking_deposit' && Number.isInteger(id)) await releaseHold(db, id);
         } else if (evt.type === 'account.updated') {
             await syncConnectAccount(db, evt.data.object as Stripe.Account);
         }

@@ -66,7 +66,7 @@
       { k: 'buyLabel', kind: 'text', label: 'Buy button text' }],
     // Bookings (docs/booking-plan.md): the services are Products & Services with a length; hours and
     // rules are Business Information ▸ Opening hours & bookings. This section only chooses what to offer.
-    booking: [{ k: 'kind', kind: 'select', label: 'What people book', options: [['appointment', 'Appointments (a service with you or your team)'], ['consultation', 'Consultations or calls'], ['table', 'Tables (restaurants, cafés, bars)']] },
+    booking: [{ k: 'kind', kind: 'select', label: 'What people book', options: [['appointment', 'Appointments (a service with you or your team)'], ['consultation', 'Consultations or calls'], ['table', 'Tables (restaurants, cafés, bars)'], ['class', 'Classes and events (dates you set, with places)']] },
       { k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
       { k: 'serviceIds', kind: 'servicePick', label: 'Which services can be booked' },
       { k: 'askStaff', kind: 'checkbox', label: 'Let people choose who they book with (or "anyone available")' },
@@ -131,7 +131,7 @@
     panel: 'pages', pageId: null, editing: null, device: 'desktop', previewPath: '/', note: null, pollTimer: null, version: 0,
     editingAddress: false, slugTyped: null, versions: null, publishNote: null,
     enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false,
-    thumbs: {}, bookings: null,
+    thumbs: {}, bookings: null, timetable: null,
     words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
   };
 
@@ -255,6 +255,16 @@
         ${line(!!b.visitAddress, b.visitAddress ? `Address: ${esc(b.visitAddress.split('\n').join(', '))}` : 'No address yet (no directions button)')}
         ${line(!!(st.phone || st.email || b.whatsapp), [st.phone && `Phone ${esc(st.phone)}`, b.whatsapp && `WhatsApp ${esc(b.whatsapp)}`, st.email && `Email ${esc(st.email)}`].filter(Boolean).join(' · ') || 'No phone, WhatsApp or email yet')}</ul>
         <p class="text-xs text-gray-500 mt-1">Change them once and every page updates. ${btn('data-site-open-hours', 'Hours, location & bookings')}</p>`;
+    }
+    if (f.kind === 'servicePick' && state.editing && state.editing.props.kind === 'class') {
+      // Classes and events: any Business Information product can be a class; dates are on the timetable.
+      const chosen = new Set((Array.isArray(value) ? value : []).map(Number));
+      const list = state.data.catalogue || [];
+      return `<p class="text-xs font-bold text-gray-700 mt-3">Which classes or events to show</p>
+        ${list.length ? `<div class="space-y-1 mt-1">${list.map((x) => `<label class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 text-xs cursor-pointer">
+          <input type="checkbox" data-service-pick value="${esc(x.id)}" ${chosen.has(x.id) ? 'checked' : ''}> <span class="font-bold text-gray-900">${esc(x.name)}</span>${x.price ? `<span class="text-gray-500">${esc(x.price)}</span>` : ''}</label>`).join('')}</div>
+          <p class="text-xs text-gray-500 mt-1">Tick none to show them all.</p>` : ''}
+        <p class="text-xs text-gray-500 mt-2">Add the dates and places on the Website tab, under Bookings ▸ Timetable. ${btn('data-site-panel="bookings"', 'Open the timetable')}</p>`;
     }
     if (f.kind === 'servicePick') {
       const b = state.data.booking || {};
@@ -663,19 +673,20 @@
   }
 
   // ── Bookings (bookings.ts) ─────────────────────────────────────────────────
-  const BOOKING_TONE = { pending: ['Waiting for you', 'text-indigo-700'], confirmed: ['Confirmed', 'text-green-700'], declined: ['Declined', 'text-gray-500'], cancelled: ['Cancelled', 'text-gray-500'] };
+  const BOOKING_TONE = { awaiting_payment: ['Paying the deposit…', 'text-gray-500'], pending: ['Waiting for you', 'text-indigo-700'], confirmed: ['Confirmed', 'text-green-700'], declined: ['Declined', 'text-gray-500'], cancelled: ['Cancelled', 'text-gray-500'] };
   function bookingsPanel() {
     const b = state.data.booking || {};
     const head = card(`<p class="text-sm font-black text-gray-900">Bookings</p>
       <p class="text-xs text-gray-500 mt-1">${b.ready ? `Opening hours: ${esc(b.hours)}. ${b.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}` : 'Set your opening hours to take bookings on your site.'} ${btn('data-site-open-hours', 'Hours, location & bookings')}</p>
       <p class="text-xs text-gray-500 mt-1">Add a "Bookings" section to a page to show it on your website.</p>`);
     const list = state.bookings;
-    if (!list) return head + card('<p class="text-sm text-gray-400 text-center">Loading bookings…</p>');
-    if (!list.length) return head + card('<p class="text-xs text-gray-500">No bookings yet. They appear here, and in your email, as they come in.</p>');
+    const tt = timetableCard();
+    if (!list) return head + tt + card('<p class="text-sm text-gray-400 text-center">Loading bookings…</p>');
+    if (!list.length) return head + tt + card('<p class="text-xs text-gray-500">No bookings yet. They appear here, and in your email, as they come in.</p>');
     const now = Date.now();
     const order = (x) => (x.status === 'pending' ? 0 : 1);
     const sorted = list.slice().sort((a, c) => order(a) - order(c) || new Date(a.startsAt) - new Date(c.startsAt));
-    return head + card(`<ul class="space-y-2">${sorted.map((x) => {
+    return head + tt + card(`<ul class="space-y-2">${sorted.map((x) => {
       let [label, tone] = BOOKING_TONE[x.status] || [x.status, 'text-gray-500'];
       if (x.status === 'cancelled') label = x.cancelledBy === 'customer' ? 'Cancelled by them' : 'Cancelled by you';
       if (x.moved && x.status !== 'cancelled') label += ' · moved by them';
@@ -685,6 +696,7 @@
         <p class="text-xs text-gray-800 mt-1">${esc(x.what)} · ${esc(x.customerName)}${x.reminded ? ' <span class="text-gray-500">· reminder sent</span>' : ''}</p>
         <p class="text-xs text-gray-600 mt-1"><a class="underline" href="mailto:${esc(x.customerEmail)}">${esc(x.customerEmail)}</a>${x.customerPhone ? ` · <a class="underline" href="tel:${esc(x.customerPhone)}">${esc(x.customerPhone)}</a>` : ''}</p>
         ${x.notes ? `<p class="text-xs text-gray-700 mt-1" style="white-space:pre-wrap">${esc(x.notes)}</p>` : ''}
+        ${x.deposit ? `<p class="text-xs font-semibold ${/failed/.test(x.deposit) ? 'text-red-600' : 'text-gray-700'} mt-1">${esc(x.deposit)}</p>` : ''}
         ${!past && (x.status === 'pending' || x.status === 'confirmed') ? `<div class="flex flex-wrap gap-2 mt-2">
           ${x.status === 'pending' ? btn(`data-site-booking="${esc(x.id)}" data-decision="confirm"`, 'Confirm', true) + btn(`data-site-booking="${esc(x.id)}" data-decision="decline"`, 'Decline') : ''}
           ${x.status === 'confirmed' ? btn(`data-site-booking="${esc(x.id)}" data-decision="cancel"`, 'Cancel booking') : ''}</div>` : ''}
@@ -692,9 +704,54 @@
     }).join('')}</ul>`);
   }
   async function loadBookings() {
-    try { state.bookings = (await post({ action: 'bookings', assistantId: state.assistantId })).bookings || []; }
-    catch (err) { state.bookings = []; state.note = { text: err.message, tone: 'error' }; }
+    try {
+      const [bk, tt] = await Promise.all([post({ action: 'bookings', assistantId: state.assistantId }), post({ action: 'timetable', assistantId: state.assistantId })]);
+      state.bookings = bk.bookings || [];
+      state.timetable = tt.sessions || [];
+    } catch (err) { state.bookings = state.bookings || []; state.timetable = state.timetable || []; state.note = { text: err.message, tone: 'error' }; }
     rerender();
+  }
+
+  // ── Classes and events (class-sessions.ts): dated sessions with places ──────────────────────
+  // The class itself is a Business Information product (its name, price, description); a session is
+  // when and how many. Shown on the site by a Bookings section set to "Classes and events".
+  function timetableCard() {
+    const tt = state.timetable;
+    const classes = (state.data.catalogue || []);
+    const people = ((state.data.booking || {}).resources || []).filter((r) => r.kind !== 'table');
+    const f = state.sessionDraft || {};
+    const opt = (v, l, cur) => `<option value="${esc(v)}" ${String(v) === String(cur ?? '') ? 'selected' : ''}>${esc(l)}</option>`;
+    const form = classes.length ? `<div class="grid gap-2 md:grid-cols-2 mt-3" data-session-form>
+        <label class="text-xs font-bold text-gray-700">Class or event<select data-sf="serviceId" class="${inputCls} mt-1">${classes.map((c) => opt(c.id, `${c.name}${c.price ? ` · ${c.price}` : ''}`, f.serviceId)).join('')}</select></label>
+        <label class="text-xs font-bold text-gray-700">Teacher or room <span class="font-normal text-gray-500">(optional)</span><select data-sf="resourceId" class="${inputCls} mt-1">${opt('', 'None', f.resourceId)}${people.map((r) => opt(r.id, r.name, f.resourceId)).join('')}</select></label>
+        <label class="text-xs font-bold text-gray-700">Date<input type="date" data-sf="date" class="${inputCls} mt-1" value="${esc(f.date || '')}"></label>
+        <div class="grid grid-cols-2 gap-2"><label class="text-xs font-bold text-gray-700">Starts<input type="time" data-sf="start" class="${inputCls} mt-1" value="${esc(f.start || '18:00')}"></label>
+          <label class="text-xs font-bold text-gray-700">Ends<input type="time" data-sf="end" class="${inputCls} mt-1" value="${esc(f.end || '19:00')}"></label></div>
+        <label class="text-xs font-bold text-gray-700">Places<input type="number" min="1" max="500" data-sf="capacity" class="${inputCls} mt-1" value="${esc(f.capacity || 12)}"></label>
+        <label class="text-xs font-bold text-gray-700">Repeat<select data-sf="repeatWeeks" class="${inputCls} mt-1">${[[0, 'Just this date (an event)'], [3, 'Weekly for 4 weeks'], [7, 'Weekly for 8 weeks'], [11, 'Weekly for 12 weeks'], [25, 'Weekly for 26 weeks']].map(([v, l]) => opt(v, l, f.repeatWeeks ?? 0)).join('')}</select></label>
+        <label class="text-xs font-bold text-gray-700 md:col-span-2">Note for customers <span class="font-normal text-gray-500">(optional — e.g. bring a mat)</span><input data-sf="notes" maxlength="300" class="${inputCls} mt-1" value="${esc(f.notes || '')}"></label>
+        <div class="md:col-span-2">${btn('data-session-add', 'Add to the timetable', true)}</div></div>`
+      : `<p class="text-xs text-gray-500 mt-2">First add your classes or events (with their prices) in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')}.</p>`;
+    const now = Date.now();
+    const rows = !tt ? '<p class="text-xs text-gray-400 mt-3">Loading…</p>'
+      : !tt.length ? '<p class="text-xs text-gray-500 mt-3">Nothing on the timetable yet.</p>'
+        : `<ul class="space-y-2 mt-3">${tt.map((x) => {
+          const past = new Date(x.endsAt).getTime() < now;
+          const off = x.status === 'cancelled';
+          return `<li class="border border-gray-200 rounded-lg p-3 ${past || off ? 'opacity-60' : ''}">
+            <div class="flex flex-wrap items-center justify-between gap-2"><p class="text-xs font-bold text-gray-900">${esc(x.dateText)}, ${esc(x.timeText)} · ${esc(x.title)}${x.resourceName ? ` with ${esc(x.resourceName)}` : ''}</p>
+              <span class="text-xs font-bold ${off ? 'text-gray-500' : x.left === 0 ? 'text-amber-700' : 'text-green-700'}">${off ? 'Cancelled' : `${esc(x.taken)} of ${esc(x.capacity)} booked${x.waiting ? ` · ${esc(x.waiting)} waiting` : ''}`}</span></div>
+            ${x.people.length ? `<p class="text-xs text-gray-600 mt-1">${x.people.map((p) => `${esc(p.name)}${p.places > 1 ? ` ×${esc(p.places)}` : ''}${p.status === 'pending' ? ' (to confirm)' : ''}`).join(', ')}</p>` : ''}
+            ${!past && !off ? `<div class="flex flex-wrap gap-2 mt-2">${btn(`data-session-cancel="${esc(x.id)}"`, 'Cancel this date')}${x.seriesKey ? btn(`data-session-cancel="${esc(x.id)}" data-series="1"`, 'Cancel this and later dates') : ''}</div>` : ''}
+          </li>`;
+        }).join('')}</ul>`;
+    return card(`<p class="text-sm font-black text-gray-900">Timetable — classes &amp; events</p>
+      <p class="text-xs text-gray-500 mt-1">Dated sessions with a number of places. Show them on your site with a Bookings section set to "Classes and events"; people book places, and join a waitlist when it's full.</p>${form}${rows}`);
+  }
+  function readSessionForm(scope) {
+    const o = {};
+    scope.querySelectorAll('[data-sf]').forEach((el) => { o[el.dataset.sf] = el.value; });
+    return o;
   }
 
   async function loadEnquiries() {
@@ -922,6 +979,34 @@
     if (t('[data-site-open-products]')) { window._bizinfoInitialTab = 'products'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
     if (t('[data-site-open-reviews]')) { window._bizinfoInitialTab = 'reviews'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
     if (t('[data-site-open-hours]')) { window._bizinfoInitialTab = 'hours'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
+    const sAdd = t('[data-session-add]');
+    if (sAdd) {
+      const draft = readSessionForm(sAdd.closest('[data-session-form]'));
+      state.sessionDraft = draft;
+      try {
+        const r = await post({ action: 'session_add', assistantId: state.assistantId, session: { ...draft, serviceId: Number(draft.serviceId), capacity: Number(draft.capacity), repeatWeeks: Number(draft.repeatWeeks), resourceId: draft.resourceId ? Number(draft.resourceId) : null } });
+        state.timetable = r.sessions || state.timetable;
+        state.sessionDraft = { ...draft, date: '' };
+        state.note = { text: r.added === 1 ? 'Added to the timetable.' : `${r.added} dates added to the timetable.`, tone: 'ok' };
+      } catch (err) { state.note = { text: err.message, tone: 'error' }; }
+      rerender();
+      return;
+    }
+    const sCancel = t('[data-session-cancel]');
+    if (sCancel) {
+      const series = sCancel.dataset.series === '1';
+      const x = (state.timetable || []).find((s) => s.id === Number(sCancel.dataset.sessionCancel));
+      const booked = x ? x.taken : 0;
+      const ok = await window.confirmModal(`${series ? 'This date and every later one in the series are' : 'This date is'} cancelled.${booked ? ` Everyone booked is emailed to say so.` : ''}`, { title: series ? 'Cancel this and later dates?' : 'Cancel this date?', confirmLabel: 'Cancel it', cancelLabel: 'Keep it' });
+      if (!ok) return;
+      try {
+        const r = await post({ action: 'session_cancel', assistantId: state.assistantId, id: Number(sCancel.dataset.sessionCancel), wholeSeries: series });
+        state.timetable = r.sessions || state.timetable;
+        state.note = { text: `${r.cancelled === 1 ? 'Cancelled' : `${r.cancelled} dates cancelled`}${r.told ? ` — ${r.told} booking${r.told === 1 ? '' : 's'} cancelled and emailed` : ''}.`, tone: 'ok' };
+      } catch (err) { state.note = { text: err.message, tone: 'error' }; }
+      await loadBookings();
+      return;
+    }
     const dec = t('[data-site-booking]');
     if (dec) {
       const decision = dec.dataset.decision;
@@ -1126,6 +1211,9 @@
   });
   // A product ticked in one menu group is greyed out in the others: redraw the form on each tick.
   document.addEventListener('change', (e) => {
+    // A booking section switching to or from "Classes and events" offers a different service list.
+    const kindSel = e.target.closest && e.target.closest('select[name="f-kind"]');
+    if (kindSel && state.editing && state.editing.type === 'booking') { syncEditing(kindSel.closest('form')); render(); return; }
     const pick = e.target.closest && e.target.closest('[data-menu-pick]');
     if (!pick || !state.editing) return;
     syncEditing(pick.closest('form'));

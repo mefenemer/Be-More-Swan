@@ -104,8 +104,8 @@ check('a PATCH touches only what was sent; status and order are validated', () =
 });
 check('every statement in the endpoint is scoped to the caller\'s organisation', () => {
     const src = code('netlify/functions/org-products.ts');
-    // GET, the POST count, PATCH and DELETE filter on it; the INSERT writes it.
-    assert.strictEqual((src.match(/eq\(orgProducts\.organisationId, orgId\)/g) || []).length, 4, 'an unscoped read or write');
+    // GET, the POST count, PATCH (and its read of the stored price for a deposit) and DELETE filter on it; the INSERT writes it.
+    assert.strictEqual((src.match(/eq\(orgProducts\.organisationId, orgId\)/g) || []).length, 5, 'an unscoped read or write');
     assert.ok(/insert\(orgProducts\)[\s\S]{0,200}organisationId: orgId/.test(src), 'a product inserted without its org');
 });
 check('the migration exists, is idempotent, and the Drizzle mirror matches', () => {

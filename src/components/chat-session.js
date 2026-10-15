@@ -827,6 +827,15 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // "Add" on a class_sessions card — sites.ts `session_add`, the same checks as the Website tab's Timetable.
+    function onClassSessions(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      sitePost({ action: 'session_add', assistantId, session: d.session || {} })
+        .then((r) => { respond({ ok: true, added: (r && r.added) || 1 }); siteChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     // "Add N reviews" on a reviews_add card — org-reviews.ts, the same checks as Business Information ▸ Reviews.
     function onReviewsAdd(e) {
       const d = e.detail || {};
@@ -1148,6 +1157,7 @@
     container.addEventListener('site:words', onSiteWords);
     container.addEventListener('site:bookingSetup', onBookingSetup);
     container.addEventListener('site:reviewsAdd', onReviewsAdd);
+    container.addEventListener('site:classSessions', onClassSessions);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
     container.addEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
@@ -1202,6 +1212,7 @@
         container.removeEventListener('site:words', onSiteWords);
         container.removeEventListener('site:bookingSetup', onBookingSetup);
         container.removeEventListener('site:reviewsAdd', onReviewsAdd);
+        container.removeEventListener('site:classSessions', onClassSessions);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
         container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);

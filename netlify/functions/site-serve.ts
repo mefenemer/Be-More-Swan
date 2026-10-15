@@ -25,6 +25,7 @@ import { renderRobots, renderSitemap, renderSiteNotice, renderSitePage, esc, BOO
 import { reviewPage, reviewSubmit } from '../../src/utils/site-review';
 import { bookStep, bookSubmit } from '../../src/utils/site-booking';
 import { loadSiteReviews } from '../../src/utils/reviews';
+import { bookableSessions } from '../../src/utils/class-sessions';
 import { bookingSummary, businessSummary } from '../../src/utils/bookings';
 import { canSell, loadSiteProducts, startCheckout } from '../../src/utils/site-shop';
 import { safeBackPath } from '../../src/utils/site-forms';
@@ -176,11 +177,12 @@ export default withLambda(async (event) => {
 
     const hasShop = definition.pages.some((p) => p.sections.some((s) => s.type === 'products'));
     const hasBooking = definition.pages.some((p) => p.sections.some((s) => s.type === 'booking'));
+    const hasClasses = definition.pages.some((p) => p.sections.some((s) => s.type === 'booking' && s.props.kind === 'class'));
     const page = renderSitePage(definition, path, {
         ...ctx, forms: await loadSiteForms(db, site.organisationId, definition), renderedAt: Date.now(),
         canSell: hasShop ? await canSell(db, site.organisationId) : false,
         products: hasShop || definition.pages.some((p) => p.sections.some((s) => s.type === 'menu')) ? await loadSiteProducts(db, site.organisationId, definition) : {},
-        booking: hasBooking ? await bookingSummary(db, site.organisationId) : null,
+        booking: hasBooking ? { ...await bookingSummary(db, site.organisationId), ...(hasClasses ? { sessions: await bookableSessions(db, site.organisationId, new Date(), [], 60) } : {}) } : null,
         business: await businessSummary(db, site.organisationId),
         reviews: await loadSiteReviews(db, site.organisationId, definition),
     });

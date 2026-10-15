@@ -2018,6 +2018,52 @@
   }
   register('reviews_add', renderReviewsAddCard);
 
+  // { type: 'class_sessions', summary, session: { serviceId, date, start, end, capacity, resourceId, repeatWeeks, notes } }
+  // Dates for a class or event on the timetable (sites.ts `session_add`, the same checks as the
+  // Website tab's Timetable), after the owner's click.
+  function renderClassSessionsCard(ui, esc) {
+    const s = ui.session && typeof ui.session === 'object' ? ui.session : {};
+    const weeks = Number.isInteger(s.repeatWeeks) ? s.repeatWeeks : 0;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Add to your timetable · Approval needed</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <ul class="text-xs text-gray-700 mt-2 space-y-0.5">
+        <li><strong>${esc(String(s.date || ''))}</strong>, ${esc(String(s.start || ''))}–${esc(String(s.end || ''))}</li>
+        <li>${esc(String(s.capacity || ''))} places</li>
+        <li>${weeks ? `Then weekly for ${weeks} more week${weeks === 1 ? '' : 's'} (${weeks + 1} dates)` : 'Just this date'}</li>
+        ${s.notes ? `<li>${esc(String(s.notes).slice(0, 300))}</li>` : ''}
+      </ul>
+      <p class="text-xs text-gray-600 mt-2">You can see and cancel dates on the Website tab, under Bookings ▸ Timetable. Uses no tasks.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-cs-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Add ${weeks ? `${weeks + 1} dates` : 'it'}</button>
+        <button type="button" data-cs-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-cs-status></p>`;
+    const status = el.querySelector('[data-cs-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-cs-cancel]')) { setBusy(true); say('Not added.'); return; }
+      if (!e.target.closest('[data-cs-go]')) return;
+      setBusy(true);
+      say('Adding…');
+      el.dispatchEvent(new CustomEvent('site:classSessions', {
+        bubbles: true,
+        detail: {
+          session: s,
+          respond({ ok, error, added }) {
+            if (!ok) { setBusy(false); say(error || 'That couldn\'t be added — nothing was changed.', 'error'); return; }
+            say(added === 1 ? 'Added to your timetable.' : `${added} dates added to your timetable.`);
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('class_sessions', renderClassSessionsCard);
+
   // ── Built-in: Visual Option Review Card (Brand Designer) ───────────────────
   // { type: 'visual_option_review', briefId, decisions: [{ optionId, decision, reason?, note? }], remake? }
   //
