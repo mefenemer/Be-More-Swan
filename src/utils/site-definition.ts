@@ -111,6 +111,14 @@ export interface SignupProps { heading: string | null; intro: string | null; for
  */
 export interface MenuGroup { title: string | null; productIds: number[]; }
 export interface MenuProps { heading: string | null; intro: string | null; groups: MenuGroup[]; showDescriptions: boolean; showDurations: boolean; note: string | null; }
+/**
+ * A gallery: the owner's own pictures (library assets, or an https address) — each with a description
+ * of what it shows (alt, required) and an optional caption. `layout` square = an even grid of cropped
+ * tiles; natural = each picture at its own shape. Every picture links to itself at full size (no
+ * script on customer sites, so no lightbox).
+ */
+export interface GalleryImage extends Image { caption: string | null; }
+export interface GalleryProps { heading: string | null; intro: string | null; layout: 'square' | 'natural'; images: GalleryImage[]; }
 export interface HoursProps { heading: string | null; intro: string | null; showHours: boolean; showContact: boolean; showAddress: boolean; }
 export type BookingSectionKind = 'appointment' | 'consultation' | 'table';
 export interface BookingProps { heading: string | null; intro: string | null; kind: BookingSectionKind; serviceIds: number[]; askStaff: boolean; buttonLabel: string; }
@@ -140,9 +148,10 @@ export type SectionBody =
     | { id: string; type: 'products'; props: ProductsProps }
     | { id: string; type: 'booking'; props: BookingProps }
     | { id: string; type: 'hours'; props: HoursProps }
-    | { id: string; type: 'menu'; props: MenuProps };
+    | { id: string; type: 'menu'; props: MenuProps }
+    | { id: string; type: 'gallery'; props: GalleryProps };
 export type SectionType = SectionBody['type'];
-export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking', 'hours', 'menu'];
+export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking', 'hours', 'menu', 'gallery'];
 
 export interface SitePageDef {
     id: string;
@@ -181,7 +190,7 @@ export const LIMITS = {
     itemTitle: 80, itemBody: 400, intro: 300, textBody: 3000, faqItems: 15, q: 200, a: 1000,
     features: 9, stepsMin: 2, steps: 6, testimonials: 9, quote: 500, personName: 80, personDetail: 80,
     buttonLabel: 40, products: 12, productName: 80, productDescription: 400,
-    menuGroups: 12, menuItems: 100, menuNote: 300,
+    menuGroups: 12, menuItems: 100, menuNote: 300, galleryImages: 24, caption: 150,
     /** Pence. Stripe's GBP minimum is 30p; the ceiling is a sanity bound for a small-business shop. */
     minPrice: 30, maxPrice: 1_000_000,
 } as const;
@@ -359,6 +368,21 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
                 buyLabel: cleanText(p.buyLabel, LIMITS.buttonLabel) || 'Buy now',
             } };
         }
+        case 'gallery': {
+            const raw = Array.isArray(p.images) ? p.images : [];
+            const images = raw.map((x) => {
+                const img = cleanImage(x, warn);
+                if (!img) return null;
+                const o = x as Record<string, unknown>;
+                return { ...img, caption: textOrNull(o.caption, LIMITS.caption) };
+            }).filter((x): x is GalleryImage => !!x);
+            if (!images.length) { warn('A gallery was left out: add at least one picture, each with a short description of what it shows.'); return null; }
+            if (images.length > LIMITS.galleryImages) warn(`A gallery shows up to ${LIMITS.galleryImages} pictures; the rest were left out.`);
+            return { type: 'gallery', props: {
+                heading: textOrNull(p.heading, LIMITS.headline), intro: textOrNull(p.intro, LIMITS.intro, true),
+                layout: p.layout === 'natural' ? 'natural' : 'square', images: images.slice(0, LIMITS.galleryImages),
+            } };
+        }
         case 'menu': {
             // Each product once across the whole menu; empty groups dropped; the item cap counts all groups.
             const seen = new Set<number>();
@@ -412,7 +436,7 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
 }
 
 /** A section's look: a closed set of choices, so nothing here can become CSS. */
-export const GRID_TYPES: readonly SectionType[] = ['features', 'steps', 'testimonials', 'products', 'menu'];
+export const GRID_TYPES: readonly SectionType[] = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery'];
 export function cleanLook(raw: unknown, type: SectionType): SectionLook {
     const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
     const background = o.background === 'plain' || o.background === 'soft' || o.background === 'brand' ? o.background : 'auto';
@@ -462,6 +486,7 @@ export function assetIdsIn(def: SiteDefinition): number[] {
         for (const s of p.sections) {
             if ((s.type === 'hero' || s.type === 'text') && s.props.image?.assetId) ids.add(s.props.image.assetId);
             if (s.type === 'products') for (const it of s.props.items) if (it.image?.assetId) ids.add(it.image.assetId);
+            if (s.type === 'gallery') for (const im of s.props.images) if (im.assetId) ids.add(im.assetId);
         }
     }
     return [...ids];
@@ -478,8 +503,11 @@ export function withoutAssets(def: SiteDefinition, drop: Set<number>): SiteDefin
             if (s.type === 'hero') return { ...s, props: { ...s.props, image: keep(s.props.image) } };
             if (s.type === 'text') return { ...s, props: { ...s.props, image: keep(s.props.image) } };
             if (s.type === 'products') return { ...s, props: { ...s.props, items: s.props.items.map((it) => ({ ...it, image: keep(it.image) })) } };
+            if (s.type === 'gallery') return { ...s, props: { ...s.props, images: s.props.images.filter((im) => keep(im)) } };
             return s;
-        }) })),
+        }) }))
+            // A gallery left with no pictures is no gallery.
+            .map((p) => ({ ...p, sections: p.sections.filter((s) => s.type !== 'gallery' || s.props.images.length) })),
     };
 }
 
