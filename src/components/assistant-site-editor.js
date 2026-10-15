@@ -26,7 +26,7 @@
   const API = '/.netlify/functions/sites';
   const POLL_MS = 5000;
 
-  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form' };
+  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale' };
   /** The edit form for each section type — the props the gate accepts (site-definition.ts cleanSection). */
   const FORMS = {
     hero: [
@@ -54,18 +54,34 @@
     // One of the workspace's Form Builder forms; its questions, consent and double opt-in come from it.
     signup: [{ k: 'formId', kind: 'formpick', label: 'Sign-up form', required: true }, { k: 'heading', kind: 'text', label: 'Heading (leave empty to use the form\'s own)' },
       { k: 'intro', kind: 'textarea', label: 'Introduction (leave empty to use the form\'s own)' }],
+    // Things for sale (step 3c). Prices are typed here in pounds and stored in pence; checkout reads
+    // them from the PUBLISHED site. Buy buttons appear once Stripe is connected on the Orders tab.
+    products: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
+      { k: 'items', kind: 'productItems', label: 'Items' },
+      { k: 'collectAddress', kind: 'checkbox', label: 'Ask buyers for a UK delivery address' },
+      { k: 'buyLabel', kind: 'text', label: 'Buy button text' }],
   };
   const BLANK = {
     hero: { layout: 'centered', headline: '' }, features: { items: [{ title: '', body: '' }] }, steps: { items: [{ title: '', body: '' }, { title: '', body: '' }] },
     text: { body: '' }, faq: { items: [{ q: '', a: '' }] }, testimonials: { items: [{ quote: '', name: '', detail: '' }] }, cta: { heading: '', button: { label: '', href: '/' } },
     contact: { heading: 'Get in touch', intro: '', askPhone: false, buttonLabel: 'Send message' }, signup: { formId: null },
+    products: { heading: 'Shop', items: [{ name: '', description: '', price: null, image: null }], collectAddress: false, buyLabel: 'Buy now' },
+  };
+  /** Pence → "12.50" for the price box; "" when there is no price. */
+  const poundsText = (pence) => (Number.isFinite(pence) && pence !== null ? (pence / 100).toFixed(2).replace(/\.00$/, '') : '');
+  /** What was typed ("£12.50", "12", "1,200") → pence, or null when empty or not a number. */
+  const toPence = (txt) => {
+    const t = String(txt || '').replace(/[£,\s]/g, '');
+    if (!t) return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? Math.round(n * 100) : null;
   };
 
   const state = {
     assistantId: null, assistantName: null, data: null, loaded: false, loadError: null, rendered: false,
     panel: 'pages', pageId: null, editing: null, device: 'desktop', previewPath: '/', note: null, pollTimer: null, version: 0,
     editingAddress: false, slugTyped: null, versions: null, publishNote: null,
-    enquiries: null, enquiryShown: 20,
+    enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false,
   };
 
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -87,6 +103,11 @@
     try {
       state.data = await post({ action: 'get', assistantId: state.assistantId });
       state.loadError = null;
+      // Back from Stripe's onboarding (or part-way through it): ask Stripe once for the latest.
+      if (state.data.payments && state.data.payments.connected && !state.data.payments.chargesEnabled && !state.refreshedPayments) {
+        state.refreshedPayments = true;
+        try { state.data = await post({ action: 'payments_refresh', assistantId: state.assistantId }); } catch { /* shown as not finished */ }
+      }
       if (!state.pageId || !def().pages.some((p) => p.id === state.pageId)) state.pageId = def().pages[0].id;
     } catch (err) {
       state.loadError = err.message;
@@ -170,6 +191,23 @@
         <div class="grid gap-2 md:grid-cols-2"><input name="${name}-url" class="${inputCls}" placeholder="https://… picture address" value="${esc(v.url || '')}">
         <input name="${name}-alt" class="${inputCls}" placeholder="What the picture shows (required)" value="${esc(v.alt || '')}"></div>`;
     }
+    if (f.kind === 'productItems') {
+      const list = Array.isArray(value) && value.length ? value : [{}];
+      return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
+        <div data-items="${esc(f.k)}" class="space-y-2">${list.map((it, i) => `
+          <div class="border border-gray-200 rounded-lg p-3" data-item>
+            <input data-item-field="name" class="${inputCls} mt-1" placeholder="Name (required)" value="${esc(it.name || '')}">
+            <textarea data-item-field="description" rows="2" class="${inputCls} mt-1" placeholder="Description">${esc(it.description || '')}</textarea>
+            <div class="grid gap-2 md:grid-cols-3 mt-1">
+              <input data-item-field="price" class="${inputCls}" inputmode="decimal" placeholder="Price in £, e.g. 12.50" value="${esc(it.price !== undefined ? poundsText(it.price) : (it.priceText || ''))}">
+              <input data-item-field="imageUrl" class="${inputCls}" placeholder="Picture (https address)" value="${esc((it.image && it.image.url) || it.imageUrl || '')}">
+              <input data-item-field="imageAlt" class="${inputCls}" placeholder="What the picture shows" value="${esc((it.image && it.image.alt) || it.imageAlt || '')}">
+            </div>
+            <button type="button" data-item-remove="${i}" class="text-xs text-gray-500 underline mt-1">Remove</button>
+          </div>`).join('')}</div>
+        <button type="button" data-item-add="${esc(f.k)}" class="text-xs text-gray-600 underline mt-2">+ Add another</button>
+        <p class="text-xs text-gray-500 mt-1">Leave the price empty to show an item without a Buy button. Prices are in pounds; buyers pay you directly through Stripe.</p>`;
+    }
     if (f.kind === 'items') {
       const list = Array.isArray(value) && value.length ? value : [{}];
       return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
@@ -200,6 +238,12 @@
         const url = form.querySelector(`[name="${n}-url"]`).value.trim();
         const alt = form.querySelector(`[name="${n}-alt"]`).value.trim();
         props[f.k] = url ? { url, alt } : null;
+      } else if (f.kind === 'productItems') {
+        props[f.k] = [...form.querySelectorAll(`[data-items="${f.k}"] [data-item]`)].map((row) => {
+          const g = (k) => row.querySelector(`[data-item-field="${k}"]`).value.trim();
+          const url = g('imageUrl');
+          return { name: g('name'), description: g('description'), price: toPence(g('price')), image: url ? { url, alt: g('imageAlt') } : null };
+        });
       } else if (f.kind === 'items') {
         props[f.k] = [...form.querySelectorAll(`[data-items="${f.k}"] [data-item]`)].map((row) => {
           const o = {};
@@ -303,6 +347,55 @@
       ${list.length > shown.length ? `<div class="mt-3">${btn('data-site-enquiries-more', `Show more (${list.length - shown.length})`)}</div>` : ''}`);
   }
 
+  // ── Orders (step 3c) ───────────────────────────────────────────────────────
+  const money = (pence, cur) => (String(cur || 'gbp').toLowerCase() === 'gbp' ? `£${(pence / 100).toFixed(2).replace(/\.00$/, '')}` : `${(pence / 100).toFixed(2)} ${String(cur).toUpperCase()}`);
+
+  function paymentsCard() {
+    const p = state.data.payments || {};
+    if (p.chargesEnabled) {
+      return card(`<p class="text-sm font-black text-gray-900">Payments: connected</p>
+        <p class="text-xs text-gray-500 mt-1">Your Stripe account is connected, so Buy buttons on your products show on your live site. Buyers pay you directly — Be More Swan takes no fee. Refunds, payouts and receipts are in your <a class="underline" href="https://dashboard.stripe.com" target="_blank" rel="noopener">Stripe dashboard</a>.</p>`, 'border-green-200');
+    }
+    const action = p.canConnect
+      ? btn('data-site-connect', p.connected ? 'Finish setting up Stripe' : 'Connect Stripe', true)
+      : '<p class="text-xs font-semibold text-gray-700 mt-2">Ask your workspace owner or an admin to connect Stripe.</p>';
+    return card(`<p class="text-sm font-black text-gray-900">Take payments on your site</p>
+      <p class="text-xs text-gray-500 mt-1">${p.connected
+        ? 'Stripe still needs a few details before you can take payments. Pick up where you left off — it takes a few minutes.'
+        : 'Connect a Stripe account to show Buy buttons on the products on your site. You are the seller: the money goes straight to your Stripe account, and Be More Swan takes no fee. Stripe charges its usual card fees. Prices are in pounds.'}</p>
+      <div class="mt-3">${action}</div>`);
+  }
+
+  function ordersPanel() {
+    const list = state.orders;
+    const top = paymentsCard();
+    if (!list) return top + card('<p class="text-sm text-gray-400 text-center">Loading orders…</p>');
+    if (!list.length) return top + card('<p class="text-sm font-black text-gray-900">Orders</p><p class="text-xs text-gray-500 mt-1">When someone buys from your site, the order appears here and in your email.</p>');
+    const shown = list.slice(0, state.orderShown);
+    return top + card(`
+      <p class="text-sm font-black text-gray-900">Orders</p>
+      <ul class="space-y-2 mt-3">${shown.map((o) => {
+        const a = o.shippingAddress && o.shippingAddress.address;
+        const addr = a ? [o.shippingAddress.name, a.line1, a.line2, a.city, a.postal_code].filter(Boolean).join(', ') : '';
+        return `<li class="border ${o.status === 'paid' ? 'border-indigo-200' : 'border-gray-200'} rounded-lg p-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <p class="text-xs font-bold text-gray-900">${esc(o.quantity)} × ${esc(o.itemName)} · ${esc(money(o.amountTotal, o.currency))} ${o.status === 'paid' ? '<span class="text-xs font-bold text-indigo-700">· New</span>' : ''}</p>
+            <p class="text-xs text-gray-500">${esc(new Date(o.createdAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }))}</p>
+          </div>
+          <p class="text-xs text-gray-600 mt-1">${esc(o.customerName || '')}${o.customerEmail ? ` · <a class="underline" href="mailto:${esc(o.customerEmail)}">${esc(o.customerEmail)}</a>` : ''}</p>
+          ${addr ? `<p class="text-xs text-gray-600 mt-1">Deliver to: ${esc(addr)}</p>` : ''}
+          <div class="mt-2">${btn(`data-site-order="${esc(o.id)}" data-done="${o.status === 'paid' ? '1' : '0'}"`, o.status === 'paid' ? 'Mark as dealt with' : 'Mark as new')}</div>
+        </li>`;
+      }).join('')}</ul>
+      ${list.length > shown.length ? `<div class="mt-3">${btn('data-site-orders-more', `Show more (${list.length - shown.length})`)}</div>` : ''}`);
+  }
+
+  async function loadOrders() {
+    try { state.orders = (await post({ action: 'orders', assistantId: state.assistantId })).orders || []; }
+    catch (err) { state.orders = []; state.note = { text: err.message, tone: 'error' }; }
+    rerender();
+  }
+
   async function loadEnquiries() {
     try { state.enquiries = (await post({ action: 'enquiries', assistantId: state.assistantId })).enquiries || []; }
     catch (err) { state.enquiries = []; state.note = { text: err.message, tone: 'error' }; }
@@ -385,7 +478,8 @@
     if (!state.loaded) { host.innerHTML = card('<p class="text-sm text-gray-400 text-center">Loading your website…</p>'); return; }
     if (state.loadError && !state.data) { host.innerHTML = card(`<p class="text-sm font-bold text-gray-700 text-center">Could not load your website</p><p class="text-xs text-gray-500 mt-2 text-center">${esc(state.loadError)}</p>`); return; }
     const newCount = state.data.newEnquiries || 0;
-    const tabs = [['pages', 'Pages'], ['design', 'Design'], ['details', 'Details'], ['enquiries', newCount ? `Enquiries (${newCount} new)` : 'Enquiries']].map(([k, l]) => btn(`data-site-panel="${k}"`, esc(l), state.panel === k)).join(' ');
+    const newOrders = state.data.newOrders || 0;
+    const tabs = [['pages', 'Pages'], ['design', 'Design'], ['details', 'Details'], ['enquiries', newCount ? `Enquiries (${newCount} new)` : 'Enquiries'], ['orders', newOrders ? `Orders (${newOrders} new)` : 'Orders']].map(([k, l]) => btn(`data-site-panel="${k}"`, esc(l), state.panel === k)).join(' ');
     host.innerHTML = `
       <div class="grid gap-4 lg:grid-cols-2">
         <div class="space-y-4 min-w-0">
@@ -393,7 +487,7 @@
           ${placeholdersCard()}
           <div class="flex flex-wrap gap-2">${tabs}</div>
           ${noteHtml()}
-          ${state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : state.panel === 'enquiries' ? enquiriesPanel() : detailsPanel()}
+          ${state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : state.panel === 'enquiries' ? enquiriesPanel() : state.panel === 'orders' ? ordersPanel() : detailsPanel()}
           ${draftCard()}
         </div>
         <div class="min-w-0">${previewHtml()}</div>
@@ -426,6 +520,7 @@
     if (panel) {
       state.panel = panel.dataset.sitePanel; state.editing = null;
       if (state.panel === 'enquiries') { state.enquiries = null; state.enquiryShown = 20; loadEnquiries(); }
+      if (state.panel === 'orders') { state.orders = null; state.orderShown = 20; loadOrders(); }
       render();
       return;
     }
@@ -439,6 +534,22 @@
       return;
     }
     if (t('[data-site-enquiries-more]')) { state.enquiryShown += 20; render(); return; }
+    const ord = t('[data-site-order]');
+    if (ord) {
+      try {
+        await post({ action: 'order_done', assistantId: state.assistantId, id: Number(ord.dataset.siteOrder), done: ord.dataset.done === '1' });
+        state.data = await post({ action: 'get', assistantId: state.assistantId });
+      } catch (err) { state.note = { text: err.message, tone: 'error' }; }
+      await loadOrders();
+      return;
+    }
+    if (t('[data-site-orders-more]')) { state.orderShown += 20; render(); return; }
+    if (t('[data-site-connect]')) {
+      // Stripe's own onboarding, in this tab; Stripe sends them back to this Website tab.
+      try { window.location.href = (await post({ action: 'payments_connect', assistantId: state.assistantId })).url; }
+      catch (err) { state.note = { text: err.message, tone: 'error' }; render(); }
+      return;
+    }
     const pg = t('[data-site-page]');
     if (pg) { state.pageId = pg.dataset.sitePage; state.editing = null; state.previewPath = pathOf(page()); render(); return; }
     const dev = t('[data-site-device]');
@@ -577,7 +688,7 @@
   window.AssistantSiteEditor = {
     init({ assistantId, assistantName }) {
       clearTimeout(state.pollTimer);
-      Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20 });
+      Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false });
       load();
     },
     activate() {

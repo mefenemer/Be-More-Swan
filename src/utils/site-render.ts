@@ -25,6 +25,15 @@ export interface SiteSignupForm {
 
 /** Where forms post, on the site's own origin (sites-host forwards it to site-serve.ts). */
 export const FORM_ACTION = '/_form';
+/** Where a Buy button posts (step 3c) — site-serve.ts starts a Stripe Checkout and redirects. */
+export const BUY_ACTION = '/_buy';
+
+/** Pence → "£12.50" ("£12" when whole). Sites sell in pounds sterling. */
+export function formatPrice(pence: number): string {
+    const pounds = pence / 100;
+    return `£${Number.isInteger(pounds) ? pounds.toLocaleString('en-GB') : pounds.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 /** The page a form lands on afterwards — drawn by site-serve.ts in the site's own look. */
 export const FORM_SENT_PATH = '/_sent';
 
@@ -49,6 +58,8 @@ export interface RenderContext {
     forms?: Record<number, SiteSignupForm>;
     /** When this page was drawn (ms) — a form posted back faster than a person could is a bot. */
     renderedAt?: number;
+    /** The workspace's Stripe account can take payments — Buy buttons are drawn (live site only). */
+    canSell?: boolean;
 }
 
 export interface RenderedPage { status: 200 | 404; html: string; }
@@ -103,7 +114,7 @@ const paragraphs = (text: string) => text.split(/\n{2,}/).map((p) => `<p>${esc(p
 /** Set per render call (renderSitePage) — internal links go through the context's pagePath. */
 let mapPath: (path: string) => string = (p) => p;
 /** Set per render call — forms are drawn live, or switched off in the preview. */
-let formState: { preview: boolean; forms: Record<number, SiteSignupForm>; renderedAt: number; path: string } = { preview: true, forms: {}, renderedAt: 0, path: '/' };
+let formState: { preview: boolean; forms: Record<number, SiteSignupForm>; renderedAt: number; path: string; canSell: boolean } = { preview: true, forms: {}, renderedAt: 0, path: '/', canSell: false };
 
 function formOpen(sectionId: string, kind: 'contact' | 'signup'): string {
     return `<form class="fm" method="post" action="${FORM_ACTION}">
@@ -187,6 +198,22 @@ ${formButton(p.buttonLabel)}
 <p class="fine">Your details are used only to reply to you.</p>
 </form></div></section>`;
         }
+        case 'products': {
+            const p = s.props;
+            const cards = p.items.map((it, i) => {
+                let buy = '';
+                if (it.price !== null) {
+                    if (formState.preview) buy = `<p><button class="btn" type="button" disabled>${esc(p.buyLabel)}</button></p>`;
+                    else if (formState.canSell) {
+                        buy = `<form method="post" action="${BUY_ACTION}"><input type="hidden" name="_s" value="${esc(s.id)}"><input type="hidden" name="_i" value="${i}"><input type="hidden" name="_n" value="${esc(it.name)}"><input type="hidden" name="_p" value="${esc(formState.path)}"><button class="btn" type="submit">${esc(p.buyLabel)}</button></form>`;
+                    }
+                }
+                return `<div class="card">${it.image ? `<img src="${esc(it.image.url)}" alt="${esc(it.image.alt)}" loading="lazy" style="border-radius:var(--r);margin-bottom:12px">` : ''}<h3>${esc(it.name)}</h3>${it.price !== null ? `<p class="price"><strong>${formatPrice(it.price)}</strong></p>` : ''}${it.description ? paragraphs(it.description) : ''}${buy}</div>`;
+            }).join('');
+            const note = formState.preview && p.items.some((it) => it.price !== null)
+                ? '<p class="fine">Buy buttons work on your live site once your Stripe account is connected (Orders tab).</p>' : '';
+            return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${note}<div class="grid">${cards}</div></div></section>`;
+        }
         case 'signup': {
             const p = s.props;
             const form = p.formId ? formState.forms[p.formId] : undefined;
@@ -233,6 +260,16 @@ function structuredData(def: SiteDefinition, page: SitePageDef, origin: string):
             ...(s.email ? { email: s.email } : {}),
             ...(s.phone ? { telephone: s.phone } : {}),
             ...(s.locality ? { address: { '@type': 'PostalAddress', addressLocality: s.locality } } : {}),
+        });
+    }
+    // Things for sale, as Product + Offer — so search engines and AI assistants can quote the price.
+    for (const it of page.sections.flatMap((x) => (x.type === 'products' ? x.props.items : []))) {
+        if (it.price === null) continue;
+        out.push({
+            '@context': 'https://schema.org', '@type': 'Product', name: it.name,
+            ...(it.description ? { description: it.description } : {}),
+            ...(it.image ? { image: it.image.url } : {}),
+            offers: { '@type': 'Offer', price: (it.price / 100).toFixed(2), priceCurrency: 'GBP', seller: { '@type': 'Organization', name: s.siteName } },
         });
     }
     const faqs = page.sections.flatMap((x) => (x.type === 'faq' ? x.props.items : []));
@@ -290,7 +327,7 @@ ${body}
 export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderContext): RenderedPage {
     mapPath = ctx.pagePath ?? ((p) => p);
     const page = findPage(def, path);
-    formState = { preview: ctx.preview, forms: ctx.forms ?? {}, renderedAt: ctx.renderedAt ?? Date.now(), path: page ? (page.slug ? `/${page.slug}` : '/') : '/' };
+    formState = { preview: ctx.preview, forms: ctx.forms ?? {}, renderedAt: ctx.renderedAt ?? Date.now(), path: page ? (page.slug ? `/${page.slug}` : '/') : '/', canSell: ctx.canSell === true };
     if (!page) {
         return { status: 404, html: documentHtml(def, null, ctx, `<section><div class="w n"><h1>Page not found</h1><p>That page isn't here. <a href="${esc(href('/'))}">Go to the home page</a>.</p></div></section>`) };
     }

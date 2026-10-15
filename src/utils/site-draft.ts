@@ -159,7 +159,13 @@ export function siteFromDraftReply(raw: unknown, current: SiteDefinition, maxPag
     // The email and phone are facts the model must not change; they come from the current site.
     settings.email = current.settings.email;
     settings.phone = current.settings.phone;
-    const result = normaliseSiteDefinition({ theme: current.theme, settings, nav: [], pages: r.pages, footer: current.footer }, { maxPages });
+    // Prices are the owner's alone: a draft never puts things up for sale (step 3c).
+    const pages = (r.pages as unknown[]).map((pg) => {
+        if (!pg || typeof pg !== 'object') return pg;
+        const o = pg as { sections?: unknown };
+        return Array.isArray(o.sections) ? { ...o, sections: o.sections.filter((x) => !(x && typeof x === 'object' && (x as { type?: unknown }).type === 'products')) } : pg;
+    });
+    const result = normaliseSiteDefinition({ theme: current.theme, settings, nav: [], pages, footer: current.footer }, { maxPages });
     if (!result.definition.pages.some((p) => p.sections.length)) return null;
     return result;
 }

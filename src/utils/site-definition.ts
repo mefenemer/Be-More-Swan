@@ -70,6 +70,14 @@ export interface ContactProps { heading: string | null; intro: string | null; as
  * drawn and again when someone signs up — a form that is not usable draws nothing on the live site.
  */
 export interface SignupProps { heading: string | null; intro: string | null; formId: number | null; }
+/**
+ * Things the business sells (step 3c). `price` is in PENCE (GBP) and only ever typed by the owner —
+ * the AI draft never produces this section (site-draft.ts drops it) and the chat only proposes it.
+ * An item with no price is shown without a Buy button. Checkout reads the price from the PUBLISHED
+ * site, never from the visitor's browser (site-shop.ts).
+ */
+export interface ProductItem { name: string; description: string | null; price: number | null; image: Image | null; }
+export interface ProductsProps { heading: string | null; intro: string | null; items: ProductItem[]; collectAddress: boolean; buyLabel: string; }
 
 export type Section =
     | { id: string; type: 'hero'; props: HeroProps }
@@ -80,9 +88,10 @@ export type Section =
     | { id: string; type: 'cta'; props: CtaProps }
     | { id: string; type: 'testimonials'; props: TestimonialsProps }
     | { id: string; type: 'contact'; props: ContactProps }
-    | { id: string; type: 'signup'; props: SignupProps };
+    | { id: string; type: 'signup'; props: SignupProps }
+    | { id: string; type: 'products'; props: ProductsProps };
 export type SectionType = Section['type'];
-export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup'];
+export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products'];
 
 export interface SitePageDef {
     id: string;
@@ -112,7 +121,9 @@ export const LIMITS = {
     headline: 120, subheadline: 300, eyebrow: 40, ctaLabel: 40, href: 500, alt: 150,
     itemTitle: 80, itemBody: 400, intro: 300, textBody: 3000, faqItems: 15, q: 200, a: 1000,
     features: 9, stepsMin: 2, steps: 6, testimonials: 9, quote: 500, personName: 80, personDetail: 80,
-    buttonLabel: 40,
+    buttonLabel: 40, products: 12, productName: 80, productDescription: 400,
+    /** Pence. Stripe's GBP minimum is 30p; the ceiling is a sanity bound for a small-business shop. */
+    minPrice: 30, maxPrice: 1_000_000,
 } as const;
 
 /** Pages a site may have when the plan sets no number (decision D1: 5 on £29). */
@@ -258,6 +269,26 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
                 intro: textOrNull(p.intro, LIMITS.intro, true),
                 askPhone: p.askPhone === true,
                 buttonLabel: cleanText(p.buttonLabel, LIMITS.buttonLabel) || 'Send message',
+            } };
+        }
+        case 'products': {
+            const list = (Array.isArray(p.items) ? p.items : []).map((x) => {
+                const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
+                const raw = o.price;
+                const pence = raw === null || raw === undefined || raw === '' ? null : Math.round(Number(raw));
+                let price: number | null = null;
+                if (pence !== null) {
+                    if (Number.isFinite(pence) && pence >= LIMITS.minPrice && pence <= LIMITS.maxPrice) price = pence;
+                    else warn(`A price was left out: it must be between £${(LIMITS.minPrice / 100).toFixed(2)} and £${(LIMITS.maxPrice / 100).toLocaleString('en-GB')}.`);
+                }
+                return { name: cleanText(o.name, LIMITS.productName), description: textOrNull(o.description, LIMITS.productDescription, true), price, image: cleanImage(o.image, warn) };
+            }).filter((x) => x.name);
+            if (!list.length) { warn('A products section was left out: it has no items with a name.'); return null; }
+            if (list.length > LIMITS.products) warn(`Only the first ${LIMITS.products} items were kept.`);
+            return { type: 'products', props: {
+                heading: textOrNull(p.heading, LIMITS.headline), intro: textOrNull(p.intro, LIMITS.intro, true),
+                items: list.slice(0, LIMITS.products), collectAddress: p.collectAddress === true,
+                buyLabel: cleanText(p.buyLabel, LIMITS.buttonLabel) || 'Buy now',
             } };
         }
         case 'signup': {

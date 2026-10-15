@@ -176,6 +176,9 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     site_audit_competitor_change: 'state_change', site_audit_goal_met: 'state_change',
     // A Website Assistant draft is ready to look at. Nothing is published by it.
     site_draft_ready: 'state_change',
+    // Someone paid for something on the website (site-shop.ts, from the Connect webhook). The money
+    // is already in their Stripe account; the card is the news, not a task.
+    site_order_received: 'state_change',
     // Issue #191 follow-up — confirms a reinstate actually took effect.
     assistant_reinstated: 'state_change',
     goal_autonomous_adjustment: 'state_change', // SMART Goals AC3.3.3 — autonomous brief change FYI

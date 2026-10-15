@@ -5546,6 +5546,49 @@ export const siteEnquiries = pgTable("site_enquiries", {
   check("site_enquiries_status_check", sql`${t.status} IN ('new','done')`),
 ]);
 
+// A workspace's Stripe STANDARD account for selling on its site (db/z-website-shop.sql). We take no
+// fee (decision D5); the business is the merchant of record.
+export const stripeConnectAccounts = pgTable("stripe_connect_accounts", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  stripeAccountId: text("stripe_account_id").notNull(),
+  livemode: boolean().notNull().default(true),
+  chargesEnabled: boolean("charges_enabled").notNull().default(false),
+  detailsSubmitted: boolean("details_submitted").notNull().default(false),
+  payoutsEnabled: boolean("payouts_enabled").notNull().default(false),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("stripe_connect_accounts_org_uq").on(t.organisationId),
+  uniqueIndex("stripe_connect_accounts_acct_uq").on(t.stripeAccountId),
+]);
+
+// A paid Checkout Session from a site's products section (db/z-website-shop.sql), recorded by the
+// Connect webhook. checkout_session_id is unique so a webhook retry records nothing twice.
+export const siteOrders = pgTable("site_orders", {
+  id: serial().primaryKey(),
+  siteId: integer("site_id").notNull().references(() => sites.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  stripeAccountId: text("stripe_account_id").notNull(),
+  checkoutSessionId: text("checkout_session_id").notNull(),
+  itemName: text("item_name").notNull(),
+  quantity: integer().notNull().default(1),
+  amountTotal: integer("amount_total").notNull(),
+  currency: text().notNull(),
+  customerName: text("customer_name"),
+  customerEmail: text("customer_email"),
+  shippingAddress: jsonb("shipping_address"),
+  pagePath: text("page_path"),
+  status: text().notNull().default("paid"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("site_orders_session_uq").on(t.checkoutSessionId),
+  index("site_orders_site_idx").on(t.siteId, t.createdAt),
+  index("site_orders_org_idx").on(t.organisationId),
+  check("site_orders_status_check", sql`${t.status} IN ('paid','done')`),
+]);
+
 // "Report this site" — public, from every hosted site's footer (db/z-website-hosting.sql).
 export const siteReports = pgTable("site_reports", {
   id: serial().primaryKey(),

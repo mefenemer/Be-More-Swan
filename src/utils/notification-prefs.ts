@@ -248,6 +248,8 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             'site_audit_competitor_change', 'site_audit_goal_met',
             // The Website Assistant finished an AI draft of the site (site-store.ts runSiteDraft).
             'site_draft_ready',
+            // Someone paid on the website (site-shop.ts). metadata.assistantId is passed.
+            'site_order_received',
         ],
     },
     {

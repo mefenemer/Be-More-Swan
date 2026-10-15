@@ -9,6 +9,7 @@ import { and, desc, eq, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, organisations, siteEnquiries, sites, siteVersions, users } from '../../db/schema';
 import { listSignupForms } from './site-forms';
+import { connectAccountFor } from './site-shop';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { loadAssistantRulesBlock } from './assistant-rules-prompt';
 import { normalizeBrandKit } from './brand-kit';
@@ -328,6 +329,11 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
             lines.push(`    · ${s.type} (sectionId ${s.id})${main ? `: "${clip(main, 90)}"` : ''}${items}${typeof pr.body === 'string' ? ` · "${clip(pr.body, 80)}"` : ''}`);
         }
     }
+    const acct = await connectAccountFor(db, orgId).catch(() => null);
+    lines.push(acct?.chargesEnabled
+        ? 'Payments: their Stripe account is connected — Buy buttons on a products section work on the live site.'
+        : acct ? 'Payments: they started connecting Stripe but it is not finished — Buy buttons do not show yet. Point them to the Orders tab.'
+            : 'Payments: not connected. Buy buttons on a products section only appear once they connect Stripe on the Orders tab (owner or admin).');
     const forms = await listSignupForms(db, orgId).catch(() => []);
     lines.push(forms.length
         ? `Their sign-up forms (for a signup section's formId): ${forms.map((f) => `${f.name} (formId ${f.id}${f.active ? '' : ', switched off'})`).join('; ')}.`

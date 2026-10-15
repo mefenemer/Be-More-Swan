@@ -5,16 +5,17 @@
 // Every request — any host, any path — is forwarded to the app's site-serve function with the host
 // the visitor asked for and SITE_SERVE_SECRET. Nothing about a site lives here: no database, no
 // pages, no secrets beyond the shared key. GET and HEAD are passed on for every path; POST only for
-// /_form (the site's contact and sign-up forms, step 3b), with the visitor's IP for rate limits.
+// /_form (contact and sign-up forms, step 3b) and /_buy (Buy buttons, step 3c), with the visitor's
+// IP for rate limits.
 
 declare const Netlify: { env: { get(name: string): string | undefined } };
 
-const FORM_PATH = '/_form';
+const FORM_PATHS = new Set(['/_form', '/_buy']);
 const MAX_FORM_BYTES = 20_000;
 
 export default async (request: Request, context?: { ip?: string }): Promise<Response> => {
     const url = new URL(request.url);
-    const isForm = request.method === 'POST' && url.pathname === FORM_PATH;
+    const isForm = request.method === 'POST' && FORM_PATHS.has(url.pathname);
     if (!isForm && request.method !== 'GET' && request.method !== 'HEAD') {
         return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'GET, HEAD' } });
     }
