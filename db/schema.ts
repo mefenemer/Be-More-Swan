@@ -3175,6 +3175,24 @@ export const chatMessages = pgTable("chat_messages", {
   check("chat_messages_role_check", sql`${t.role} IN ('user', 'assistant', 'system')`),
 ]);
 
+// Files attached to a chat turn (db/z-chat-attachments.sql). A picture is uploaded into the media
+// library first (assetId); a document keeps only its words (text). Scoped by organisation.
+export const chatAttachments = pgTable("chat_attachments", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  chatSessionId: integer("chat_session_id").notNull().references(() => chatSessions.id, { onDelete: "cascade" }),
+  chatMessageId: integer("chat_message_id").references(() => chatMessages.id, { onDelete: "set null" }),
+  kind: text().notNull(),
+  assetId: integer("asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
+  name: text().notNull(),
+  text: text(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("chat_attachments_session_idx").on(t.chatSessionId, t.createdAt),
+  index("chat_attachments_org_idx").on(t.organisationId),
+  check("chat_attachments_kind_check", sql`${t.kind} IN ('image','document')`),
+]);
+
 // ── Internal Data Hub (Golden Rule 2) ─────────────────────────────────────────
 // Tenant work products produced by the Tier 1 assistants — processed leads,
 // enrichment diffs, meeting notes, ledger invoices, triaged tickets. One table for

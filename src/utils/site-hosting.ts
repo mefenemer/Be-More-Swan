@@ -12,6 +12,7 @@
 // bemoreswan.com itself.
 
 import type { SiteDefinition } from './site-definition';
+import { newsletterMediaUrl } from './newsletter-media-url';
 
 export const DEFAULT_SITES_DOMAIN = 'bemoreswan.site';
 
@@ -124,6 +125,15 @@ export function siteVisibleText(def: SiteDefinition): string {
     };
     walk({ settings: def.settings, footer: def.footer, pages: def.pages });
     return out.filter((s) => s.trim()).join('\n');
+}
+
+/**
+ * The public link for a library picture on a site: the same signed, permanent link sent emails use
+ * (newsletter-media-url.ts) — it redirects to a fresh copy each time, so it never expires. Null when
+ * links cannot be signed here (no JWT_SECRET), in which case the picture is simply not drawn.
+ */
+export function siteAssetUrl(appOrigin: string, assetId: number): string | null {
+    try { return newsletterMediaUrl(appOrigin, assetId); } catch { return null; }
 }
 
 export const REPORT_REASONS = {

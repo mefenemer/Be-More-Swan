@@ -5,9 +5,9 @@
 // in normaliseSiteDefinition — there is no other writer. The editor (assistant-site-editor.js) and
 // the chat cards call the same API actions (netlify/functions/sites.ts), so they cannot disagree.
 
-import { and, desc, eq, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, organisations, siteEnquiries, sites, siteVersions, users } from '../../db/schema';
+import { aiAssistants, contentAssets, organisations, siteEnquiries, sites, siteVersions, users } from '../../db/schema';
 import { listSignupForms } from './site-forms';
 import { connectAccountFor } from './site-shop';
 import { gatewayGenerate } from '../lib/ai-gateway';
@@ -18,10 +18,11 @@ import { createNotification } from './notify';
 import { loadProductsBlock } from './org-products';
 import { getActiveFeaturesByOrg } from './plan-features';
 import {
-    applySiteOperation, DEFAULT_MAX_PAGES, normaliseSiteDefinition, type SiteDefinition, type SiteOperation,
+    applySiteOperation, assetIdsIn, DEFAULT_MAX_PAGES, normaliseSiteDefinition, withoutAssets, type SiteDefinition, type SiteOperation,
 } from './site-definition';
 import { buildDraftPrompt, placeholdersIn, siteFromDraftReply, starterSite, themeFromBrandKit, type BusinessFacts } from './site-draft';
 import { KEEP_VERSIONS, sameDefinition, siteOrigin, siteSlugProblem, slugFromHost } from './site-hosting';
+import { assemblePlacement, buildPlacementPrompt, MAX_WORDS_CHARS, readPlan, tidyWords, wordsToBlocks, type WordsPlan, type WordsProposal } from './site-words';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
 
 type Db = ReturnType<typeof getDb>;
@@ -97,8 +98,28 @@ export async function applySiteOperations(
         def = r.definition;
         for (const w of r.warnings) if (!warnings.includes(w)) warnings.push(w);
     }
-    const [saved] = await db.update(sites).set({ draft: def, updatedAt: new Date() }).where(eq(sites.id, site.id)).returning();
+    const checked = await verifySiteAssets(db, site.organisationId, def);
+    for (const w of checked.warnings) if (!warnings.includes(w)) warnings.push(w);
+    const [saved] = await db.update(sites).set({ draft: checked.definition, updatedAt: new Date() }).where(eq(sites.id, site.id)).returning();
     return { ok: true, site: saved, warnings };
+}
+
+/**
+ * Library pictures may be used only by the workspace that owns them, only if they are pictures, and
+ * never one moderation refused. Anything else is taken out, with a warning. Called on every save —
+ * the editor's picker, chat attachments and a chat card all arrive here.
+ */
+export async function verifySiteAssets(db: Db, orgId: number, def: SiteDefinition): Promise<{ definition: SiteDefinition; warnings: string[] }> {
+    const ids = assetIdsIn(def);
+    if (!ids.length) return { definition: def, warnings: [] };
+    const rows = await db.select({ id: contentAssets.id, assetType: contentAssets.assetType, status: contentAssets.status })
+        .from(contentAssets).where(and(inArray(contentAssets.id, ids), eq(contentAssets.organisationId, orgId)));
+    const ok = new Set(rows.filter((r) => r.assetType === 'image' && r.status !== 'rejected').map((r) => r.id));
+    const drop = new Set(ids.filter((id) => !ok.has(id)));
+    return {
+        definition: withoutAssets(def, drop),
+        warnings: drop.size ? [`${drop.size === 1 ? 'A picture was' : `${drop.size} pictures were`} left out: only pictures from your own library can be used.`] : [],
+    };
 }
 
 /**
@@ -288,6 +309,41 @@ export async function hasUnpublishedChanges(db: Db, site: SiteRow, maxPages: num
     if (site.publishedVersion == null) return false;
     const live = await publishedDefinition(db, site, maxPages);
     return !sameDefinition(live, definitionOf(site, maxPages).definition);
+}
+
+// ── The owner's own words (site-words.ts) ────────────────────────────────────────────────────
+
+/**
+ * Place the owner's own text on one page: a PROPOSAL (ops + preview), nothing saved. The model only
+ * maps numbered blocks to sections; the words are the owner's by construction. 1 task, charged once
+ * a proposal exists. The editor's "Add your own words" and the chat's attachment card both call this.
+ */
+export async function proposeOwnWords(db: Db, site: SiteRow, opts: { pageId: string; text: string; note: string | null; maxPages: number }): Promise<{ ok: true; proposal: WordsProposal; blocks: number } | { ok: false; error: string; status: number }> {
+    const def = definitionOf(site, opts.maxPages).definition;
+    const page = def.pages.find((p) => p.id === opts.pageId);
+    if (!page) return { ok: false, status: 404, error: 'That page no longer exists.' };
+    const text = tidyWords(opts.text);
+    if (!text) return { ok: false, status: 400, error: 'There are no words to add — paste some in, or choose a file.' };
+    if (text.length > MAX_WORDS_CHARS) return { ok: false, status: 400, error: `That's more than one page can hold (${text.length.toLocaleString('en-GB')} characters; the limit is ${MAX_WORDS_CHARS.toLocaleString('en-GB')}). Split it across pages.` };
+    const blocks = wordsToBlocks(text);
+    if (!(await hasTaskCapacity(db, site.organisationId))) return { ok: false, status: 402, error: TASK_LIMIT_MESSAGE };
+
+    const prompt = buildPlacementPrompt(page, blocks, opts.note);
+    let plan: WordsPlan | null = null;
+    try {
+        const res = await gatewayGenerate({
+            system: prompt.system, messages: [{ role: 'user', content: prompt.user }], maxTokens: 1500,
+            usage: { workspaceId: site.organisationId, assistantId: site.aiAssistantId },
+        });
+        plan = readPlan(parseModelJson(res.text));
+    } catch (err) {
+        console.error('[site-store] words placement failed', { siteId: site.id, message: err instanceof Error ? err.message : String(err) });
+    }
+    // No plan at all: still nothing is lost — the words go at the end of the page, in order.
+    const proposal = assemblePlacement(def, page.id, blocks, plan ?? { summary: '', changes: [] });
+    if ('error' in proposal) return { ok: false, status: 400, error: proposal.error };
+    await recordCompletedWork(db, site.organisationId, 'site_words', 1, site.id);
+    return { ok: true, proposal, blocks: blocks.length };
 }
 
 // ── What the chat sees (chat-orchestrator.ts route `usesSiteSnapshot`) ──────────────────────

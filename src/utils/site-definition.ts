@@ -28,6 +28,11 @@ export interface SiteTheme {
     radius: RadiusKey;
     /** https URL of the logo; null = the site name in text. */
     logoUrl: string | null;
+    /**
+     * A logo from the workspace's own media library (content_assets id) — what "Choose picture"
+     * sets. Wins over logoUrl. Ownership is checked when it is saved (site-store.ts verifySiteAssets).
+     */
+    logoAssetId?: number | null;
 }
 
 export interface SiteSettings {
@@ -42,7 +47,13 @@ export interface SiteSettings {
 }
 
 export interface Link { label: string; href: string; }
-export interface Image { url: string; alt: string; }
+/**
+ * A picture: either a web address (url) or one of the workspace's own library pictures (assetId —
+ * what "Choose picture" and chat attachments set; url is then ''). A library picture is drawn
+ * through a signed, permanent link (newsletter-media-url.ts), and is checked to belong to the
+ * workspace whenever it is saved (site-store.ts verifySiteAssets).
+ */
+export interface Image { url: string; alt: string; assetId?: number | null; }
 
 export interface HeroProps {
     layout: 'centered' | 'split' | 'banner';
@@ -190,8 +201,13 @@ function cleanLink(v: unknown): Link | null {
 function cleanImage(v: unknown, warn: (m: string) => void): Image | null {
     if (!v || typeof v !== 'object') return null;
     const o = v as Record<string, unknown>;
-    const url = cleanHref(o.url);
     const alt = cleanText(o.alt, LIMITS.alt);
+    const assetId = Number(o.assetId);
+    if (Number.isInteger(assetId) && assetId > 0) {
+        if (!alt) { warn('A picture was left out: every picture needs a short description of what it shows.'); return null; }
+        return { url: '', alt, assetId };
+    }
+    const url = cleanHref(o.url);
     if (!url || !url.startsWith('https://')) { if (o.url) warn('An image was left out: it needs an https address.'); return null; }
     if (!alt) { warn('An image was left out: every image needs a short description (alt text).'); return null; }
     return { url, alt };
@@ -329,6 +345,36 @@ export function cleanTheme(raw: unknown, warn: (m: string) => void, base: SiteTh
         font: FONTS.includes(t.font as FontKey) ? (t.font as FontKey) : base.font,
         radius: RADII.includes(t.radius as RadiusKey) ? (t.radius as RadiusKey) : base.radius,
         logoUrl: logo && logo.startsWith('https://') ? logo : (t.logoUrl === null ? null : base.logoUrl),
+        logoAssetId: t.logoAssetId === null ? null
+            : Number.isInteger(Number(t.logoAssetId)) && Number(t.logoAssetId) > 0 ? Number(t.logoAssetId) : (base.logoAssetId ?? null),
+    };
+}
+
+/** Every library picture the site uses (logo, hero pictures, product pictures). */
+export function assetIdsIn(def: SiteDefinition): number[] {
+    const ids = new Set<number>();
+    if (def.theme.logoAssetId) ids.add(def.theme.logoAssetId);
+    for (const p of def.pages) {
+        for (const s of p.sections) {
+            if (s.type === 'hero' && s.props.image?.assetId) ids.add(s.props.image.assetId);
+            if (s.type === 'products') for (const it of s.props.items) if (it.image?.assetId) ids.add(it.image.assetId);
+        }
+    }
+    return [...ids];
+}
+
+/** The same site with these library pictures taken out (they are not this workspace's to use). */
+export function withoutAssets(def: SiteDefinition, drop: Set<number>): SiteDefinition {
+    if (!drop.size) return def;
+    const keep = <T extends { assetId?: number | null } | null>(img: T): T | null => (img && img.assetId && drop.has(img.assetId) ? null : img);
+    return {
+        ...def,
+        theme: { ...def.theme, logoAssetId: def.theme.logoAssetId && drop.has(def.theme.logoAssetId) ? null : def.theme.logoAssetId ?? null },
+        pages: def.pages.map((p) => ({ ...p, sections: p.sections.map((s) => {
+            if (s.type === 'hero') return { ...s, props: { ...s.props, image: keep(s.props.image) } };
+            if (s.type === 'products') return { ...s, props: { ...s.props, items: s.props.items.map((it) => ({ ...it, image: keep(it.image) })) } };
+            return s;
+        }) })),
     };
 }
 

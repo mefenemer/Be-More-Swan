@@ -116,11 +116,15 @@ export interface BuyRequest {
     body: URLSearchParams;
     ip: string;
     backPath: string;
+    /** Library pictures → their public link (site-serve.ts passes newsletterMediaUrl). */
+    assetUrl?: (assetId: number) => string | null;
 }
 
 /** The Checkout Session parameters for one item — pure, so the money rules are testable. */
-export function checkoutParams(req: { origin: string; site: SiteRow; sectionId: string; index: number; item: ProductItem; collectAddress: boolean; backPath: string }): Stripe.Checkout.SessionCreateParams {
+export function checkoutParams(req: { origin: string; site: SiteRow; sectionId: string; index: number; item: ProductItem; collectAddress: boolean; backPath: string; imageUrl?: string | null }): Stripe.Checkout.SessionCreateParams {
     const { item } = req;
+    // Stripe shows the picture on its checkout page: it needs a real https address.
+    const picture = req.imageUrl ?? (item.image && !item.image.assetId ? item.image.url : null);
     return {
         mode: 'payment',
         line_items: [{
@@ -132,7 +136,7 @@ export function checkoutParams(req: { origin: string; site: SiteRow; sectionId: 
                 product_data: {
                     name: item.name,
                     ...(item.description ? { description: item.description.slice(0, 500) } : {}),
-                    ...(item.image ? { images: [item.image.url] } : {}),
+                    ...(picture && picture.startsWith('https://') ? { images: [picture] } : {}),
                 },
             },
         }],
@@ -172,7 +176,10 @@ export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome
     }
     try {
         const session = await getStripe().checkout.sessions.create(
-            checkoutParams({ origin: req.origin, site: req.site, sectionId, index, item: found.item, collectAddress: found.section.props.collectAddress, backPath: back }),
+            checkoutParams({
+                origin: req.origin, site: req.site, sectionId, index, item: found.item, collectAddress: found.section.props.collectAddress, backPath: back,
+                imageUrl: found.item.image?.assetId ? (req.assetUrl?.(found.item.image.assetId) ?? null) : undefined,
+            }),
             { stripeAccount: account.stripeAccountId },
         );
         if (!session.url) throw new Error('Stripe returned no checkout address');

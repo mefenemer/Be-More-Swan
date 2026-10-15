@@ -26,7 +26,7 @@ import { canSell, startCheckout } from '../../src/utils/site-shop';
 import { safeBackPath } from '../../src/utils/site-forms';
 import { handleSiteForm, loadSiteForms, sentMessage } from '../../src/utils/site-forms';
 import audiencePublic from './audience-public';
-import { siteOrigin, sitesDomain, slugFromHost } from '../../src/utils/site-hosting';
+import { siteAssetUrl, siteOrigin, sitesDomain, slugFromHost } from '../../src/utils/site-hosting';
 import { maxPagesFor, publishedDefinition } from '../../src/utils/site-store';
 
 // form-action: the site's own forms post to its own /_form and /_buy (steps 3b, 3c), and nowhere
@@ -116,6 +116,7 @@ export default withLambda(async (event) => {
         origin, preview: false,
         reportUrl: `${app}/report-site.html?site=${encodeURIComponent(slug)}`,
         creditUrl: site.credit ? `${app}/assistant.html?role=website_assistant` : null,
+        assetUrl: (id: number) => siteAssetUrl(app, id),
     };
 
     // ── Forms (step 3b) and Buy buttons (step 3c) ──
@@ -125,7 +126,7 @@ export default withLambda(async (event) => {
         const ip = (h['x-site-client-ip'] || '').slice(0, 64) || 'unknown';
         if (path === BUY_ACTION) {
             const form = new URLSearchParams(raw.slice(0, 4000));
-            const bought = await startCheckout(db, { site, definition, origin, ip, body: form, backPath: safeBackPath(definition, form.get('_p')) });
+            const bought = await startCheckout(db, { site, definition, origin, ip, body: form, backPath: safeBackPath(definition, form.get('_p')), assetUrl: ctx.assetUrl });
             if (bought.kind === 'redirect') return { statusCode: 303, headers: { Location: bought.location, 'Cache-Control': 'no-store' } as Record<string, string>, body: '' };
             return { statusCode: bought.status, headers: headers('text/html; charset=utf-8', 'no-store'), body: renderSiteNotice(definition, ctx, bought.title, bought.message, { label: 'Go back', path: bought.backPath }) };
         }

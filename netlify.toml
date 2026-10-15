@@ -1105,6 +1105,12 @@ node_bundler = "esbuild"
 [functions.chat-orchestrator]
   timeout = 26
 
+# The Website Assistant's API. "Add your own words" makes one model call (a short placement plan —
+# the words themselves are never generated) and may read a PDF or Word file first: seconds, but
+# more than the 10s default allows on a slow reply.
+[functions.sites]
+  timeout = 26
+
 # Conversations tab. `list` and `get` are cheap reads, but the "Send the next chase now" action
 # runs the outreach-sequence worker INLINE and awaits it — one LLM call to draft the follow-up plus
 # one mail-API call to send it, inside the worker's own 20s wall-clock budget (WORKER_BUDGET_MS).

@@ -60,6 +60,11 @@ export interface RenderContext {
     renderedAt?: number;
     /** The workspace's Stripe account can take payments — Buy buttons are drawn (live site only). */
     canSell?: boolean;
+    /**
+     * The public address of a library picture (signed, permanent — newsletterMediaUrl). Without it a
+     * library picture is not drawn (it has no web address of its own).
+     */
+    assetUrl?: (assetId: number) => string | null;
 }
 
 export interface RenderedPage { status: 200 | 404; html: string; }
@@ -113,6 +118,17 @@ const paragraphs = (text: string) => text.split(/\n{2,}/).map((p) => `<p>${esc(p
 
 /** Set per render call (renderSitePage) — internal links go through the context's pagePath. */
 let mapPath: (path: string) => string = (p) => p;
+/** Set per render call — library pictures (assetId) resolve through the context's assetUrl. */
+let assetUrlOf: (id: number) => string | null = () => null;
+/** Where a picture loads from: its library link, else its web address; '' when it has neither. */
+export function imageSrc(img: { url: string; assetId?: number | null } | null | undefined): string {
+    if (!img) return '';
+    if (img.assetId) return assetUrlOf(img.assetId) || '';
+    return img.url || '';
+}
+function logoSrc(theme: SiteTheme): string {
+    return theme.logoAssetId ? (assetUrlOf(theme.logoAssetId) || theme.logoUrl || '') : (theme.logoUrl || '');
+}
 /** Set per render call — forms are drawn live, or switched off in the preview. */
 let formState: { preview: boolean; forms: Record<number, SiteSignupForm>; renderedAt: number; path: string; canSell: boolean } = { preview: true, forms: {}, renderedAt: 0, path: '/', canSell: false };
 
@@ -160,7 +176,8 @@ function sectionHtml(s: Section, h1: boolean, alt: boolean): string {
             const p = s.props;
             const buttons = [p.primaryCta && linkHtml(p.primaryCta), p.secondaryCta && linkHtml(p.secondaryCta, true)].filter(Boolean).join('');
             const copy = `${p.eyebrow ? `<p class="eb">${esc(p.eyebrow)}</p>` : ''}<${H}>${esc(p.headline)}</${H}>${p.subheadline ? `<p class="sub">${esc(p.subheadline)}</p>` : ''}${buttons ? `<p>${buttons}</p>` : ''}`;
-            const img = p.image ? `<img src="${esc(p.image.url)}" alt="${esc(p.image.alt)}" loading="eager">` : '';
+            const src = imageSrc(p.image);
+            const img = p.image && src ? `<img src="${esc(src)}" alt="${esc(p.image.alt)}" loading="eager">` : '';
             return `<section class="hero ${p.layout}" id="${esc(s.id)}"><div class="w">${p.layout === 'split' ? `<div>${copy}</div>${img}` : `${copy}${img}`}</div></section>`;
         }
         case 'features':
@@ -208,7 +225,8 @@ ${formButton(p.buttonLabel)}
                         buy = `<form method="post" action="${BUY_ACTION}"><input type="hidden" name="_s" value="${esc(s.id)}"><input type="hidden" name="_i" value="${i}"><input type="hidden" name="_n" value="${esc(it.name)}"><input type="hidden" name="_p" value="${esc(formState.path)}"><button class="btn" type="submit">${esc(p.buyLabel)}</button></form>`;
                     }
                 }
-                return `<div class="card">${it.image ? `<img src="${esc(it.image.url)}" alt="${esc(it.image.alt)}" loading="lazy" style="border-radius:var(--r);margin-bottom:12px">` : ''}<h3>${esc(it.name)}</h3>${it.price !== null ? `<p class="price"><strong>${formatPrice(it.price)}</strong></p>` : ''}${it.description ? paragraphs(it.description) : ''}${buy}</div>`;
+                const src = imageSrc(it.image);
+                return `<div class="card">${it.image && src ? `<img src="${esc(src)}" alt="${esc(it.image.alt)}" loading="lazy" style="border-radius:var(--r);margin-bottom:12px">` : ''}<h3>${esc(it.name)}</h3>${it.price !== null ? `<p class="price"><strong>${formatPrice(it.price)}</strong></p>` : ''}${it.description ? paragraphs(it.description) : ''}${buy}</div>`;
             }).join('');
             const note = formState.preview && p.items.some((it) => it.price !== null)
                 ? '<p class="fine">Buy buttons work on your live site once your Stripe account is connected (Orders tab).</p>' : '';
@@ -256,7 +274,7 @@ function structuredData(def: SiteDefinition, page: SitePageDef, origin: string):
         out.push({
             '@context': 'https://schema.org', '@type': s.businessType, name: s.siteName, url: `${origin}/`,
             ...(s.description ? { description: s.description } : {}),
-            ...(def.theme.logoUrl ? { logo: def.theme.logoUrl } : {}),
+            ...(logoSrc(def.theme) ? { logo: logoSrc(def.theme) } : {}),
             ...(s.email ? { email: s.email } : {}),
             ...(s.phone ? { telephone: s.phone } : {}),
             ...(s.locality ? { address: { '@type': 'PostalAddress', addressLocality: s.locality } } : {}),
@@ -268,7 +286,7 @@ function structuredData(def: SiteDefinition, page: SitePageDef, origin: string):
         out.push({
             '@context': 'https://schema.org', '@type': 'Product', name: it.name,
             ...(it.description ? { description: it.description } : {}),
-            ...(it.image ? { image: it.image.url } : {}),
+            ...(imageSrc(it.image) ? { image: imageSrc(it.image) } : {}),
             offers: { '@type': 'Offer', price: (it.price / 100).toFixed(2), priceCurrency: 'GBP', seller: { '@type': 'Organization', name: s.siteName } },
         });
     }
@@ -309,7 +327,7 @@ ${ld.map((x) => `<script type="application/ld+json">${jsonLd(x)}</script>`).join
 <body>
 ${ctx.preview ? '<div class="pv">Preview — this version is not live yet.</div>' : ''}
 <header class="hd"><div class="w">
-<a class="brand" href="${esc(href('/'))}">${def.theme.logoUrl ? `<img src="${esc(def.theme.logoUrl)}" alt="${esc(s.siteName)}">` : esc(s.siteName)}</a>
+<a class="brand" href="${esc(href('/'))}">${logoSrc(def.theme) ? `<img src="${esc(logoSrc(def.theme))}" alt="${esc(s.siteName)}">` : esc(s.siteName)}</a>
 ${menu.length > 1 ? `<nav aria-label="Main"><ul class="nav">${menu.map((m) => `<li><a href="${esc(href(m.path))}"${page && m.pageId === page.id ? ' aria-current="page"' : ''}>${esc(m.label)}</a></li>`).join('')}</ul></nav>` : ''}
 </div></header>
 <main>
@@ -326,6 +344,7 @@ ${body}
 /** One page by path ('/', '/services'). An unknown path is a real 404 page in the site's own look. */
 export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderContext): RenderedPage {
     mapPath = ctx.pagePath ?? ((p) => p);
+    assetUrlOf = ctx.assetUrl ?? (() => null);
     const page = findPage(def, path);
     formState = { preview: ctx.preview, forms: ctx.forms ?? {}, renderedAt: ctx.renderedAt ?? Date.now(), path: page ? (page.slug ? `/${page.slug}` : '/') : '/', canSell: ctx.canSell === true };
     if (!page) {
@@ -345,6 +364,7 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
 /** A plain page in the site's own look — what a visitor sees after sending a form, or when it fails. */
 export function renderSiteNotice(def: SiteDefinition, ctx: RenderContext, title: string, message: string, back: { label: string; path: string }): string {
     mapPath = ctx.pagePath ?? ((p) => p);
+    assetUrlOf = ctx.assetUrl ?? (() => null);
     const body = `<section><div class="w n"><h1>${esc(title)}</h1>${paragraphs(message)}<p><a class="btn" href="${esc(href(back.path))}">${esc(back.label)}</a></p></div></section>`;
     return documentHtml(def, null, { ...ctx }, body).replace('<title>Page not found |', `<title>${esc(title)} |`);
 }

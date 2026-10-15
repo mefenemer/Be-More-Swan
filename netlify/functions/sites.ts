@@ -17,6 +17,11 @@
 //   payments_connect { assistantId }          → Stripe's onboarding link for the workspace's Standard
 //                                               account (created the first time). Owner/admin only.
 //   payments_refresh { assistantId }          → re-read the account from Stripe (back from onboarding)
+//   words     { assistantId, pageId, text? | file?: {name, type, data(base64)} | attachmentId? |
+//               quote? + chatSessionId?, note? }   (attachmentId / quote: the chat's site_words card)
+//                                             → "Add your own words": a PROPOSAL placing the owner's
+//                                               text on the page WORD FOR WORD (site-words.ts). Saves
+//                                               nothing — Apply sends its ops through `apply`. 1 task.
 //   orders    { assistantId }                 → paid orders from the site's Buy buttons
 //   order_done { assistantId, id, done }      → mark one dealt with (or not)
 //
@@ -31,16 +36,18 @@ import { aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
-import { SECTION_TYPES, type SiteOperation } from '../../src/utils/site-definition';
+import { assetIdsIn, SECTION_TYPES, type SiteOperation } from '../../src/utils/site-definition';
 import { placeholdersIn } from '../../src/utils/site-draft';
-import { cleanSiteSlugInput, siteOrigin, sitesDomain, siteVisibleText, suggestSiteSlug } from '../../src/utils/site-hosting';
+import { cleanSiteSlugInput, siteAssetUrl, siteOrigin, sitesDomain, siteVisibleText, suggestSiteSlug } from '../../src/utils/site-hosting';
 import { listSignupForms } from '../../src/utils/site-forms';
+import { readWordsFile } from '../../src/utils/site-words';
+import { attachmentText, quoteFromChat } from '../../src/utils/chat-attachments';
 import { connectAccountFor, connectOnboardingLink, markOrderDone, refreshConnectAccount } from '../../src/utils/site-shop';
 import { siteEnquiries, siteOrders, users } from '../../db/schema';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import {
     applySiteOperations, claimDraft, definitionOf, endDraft, hasUnpublishedChanges, listSiteVersions, loadOrCreateSite, maxPagesFor,
-    publishBlocker, publishSite, restoreVersionToDraft, setSiteAddress, unpublishSite, DRAFT_TIMEOUT_MS, type SiteRow,
+    proposeOwnWords, publishBlocker, publishSite, restoreVersionToDraft, setSiteAddress, unpublishSite, DRAFT_TIMEOUT_MS, type SiteRow,
 } from '../../src/utils/site-store';
 import { triggerSiteDraft } from '../../src/utils/trigger-site-draft';
 
@@ -89,6 +96,8 @@ export default withLambda(async (event) => {
             },
             definition, warnings: [...new Set([...warnings, ...extraWarnings])], maxPages,
             placeholders: placeholdersIn(definition),
+            // Thumbnails for the editor's picture fields: library picture id → its link.
+            assetUrls: Object.fromEntries(assetIdsIn(definition).map((id) => [id, siteAssetUrl(resolveBaseUrl(event.headers as Record<string, string | undefined>) || 'https://bemoreswan.com', id)])),
             forms: await listSignupForms(db, orgId),
             payments: await (async () => {
                 const acct = await connectAccountFor(db, orgId);
@@ -187,6 +196,38 @@ export default withLambda(async (event) => {
     if (action === 'payments_refresh') {
         try { await refreshConnectAccount(db, orgId); } catch (err) { console.error('[sites] Stripe refresh failed', err instanceof Error ? err.message : err); }
         return json(200, await view(site));
+    }
+
+    if (action === 'words') {
+        const pageId = String(body.pageId || '');
+        const note = typeof body.note === 'string' && body.note.trim() ? body.note.trim().slice(0, 500) : null;
+        let text = typeof body.text === 'string' ? body.text : '';
+        const file = body.file && typeof body.file === 'object' ? body.file as { name?: unknown; type?: unknown; data?: unknown } : null;
+        if (file && typeof file.data === 'string') {
+            try {
+                const fromFile = await readWordsFile(String(file.name || ''), String(file.type || ''), Buffer.from(file.data, 'base64'));
+                text = text ? `${text}\n\n${fromFile}` : fromFile;
+            } catch (err) {
+                return json(400, { error: err instanceof Error ? err.message : 'That file couldn\'t be read.' });
+            }
+        }
+        // From the chat's site_words card: an attached document's words, or words the assistant quoted
+        // from the owner's own message — accepted only if they really are in it (chat-attachments.ts).
+        const attachmentId = Number(body.attachmentId);
+        if (Number.isInteger(attachmentId) && attachmentId > 0) {
+            const fromAttachment = await attachmentText(db, orgId, attachmentId);
+            if (!fromAttachment) return json(404, { error: 'That attached document isn\'t available any more. Attach it again.' });
+            text = text ? `${text}\n\n${fromAttachment}` : fromAttachment;
+        } else if (typeof body.quote === 'string' && body.quote.trim()) {
+            const fromChat = await quoteFromChat(db, orgId, Number(body.chatSessionId), body.quote);
+            if (!fromChat) return json(400, { error: 'Those words weren\'t found in your messages, so they weren\'t used. Paste them again, or use "Add your own words" on the Website tab.' });
+            text = text ? `${text}\n\n${fromChat}` : fromChat;
+        }
+        const blocked = await enforcePromptModeration({ text: `${text}\n${note ?? ''}`.slice(0, 20000), userId, organisationId: orgId, source: 'site_words' });
+        if (blocked) return blocked;
+        const r = await proposeOwnWords(db, site, { pageId, text, note, maxPages });
+        if (!r.ok) return json(r.status, { error: r.error });
+        return json(200, { proposal: r.proposal });
     }
 
     if (action === 'orders') {

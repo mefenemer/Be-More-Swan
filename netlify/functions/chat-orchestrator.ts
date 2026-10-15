@@ -60,6 +60,8 @@ const HANDOFF_TARGETS_PROMPT = HANDOFF_TARGETS.map((t) => `"${t}"`).join(' | ');
 import { loadProductsBlock } from '../../src/utils/org-products';
 import { buildTeamActivityBlock } from '../../src/utils/team-activity';
 import { buildBlogSnapshot, buildEmailsSnapshot, buildPostsSnapshot } from '../../src/utils/content-snapshot';
+import { attachmentLine, buildAttachmentsBlock, readAttachments, saveAttachments, type AcceptedAttachment } from '../../src/utils/chat-attachments';
+import { enforcePromptModeration } from '../../src/utils/moderation';
 import { BRIEF_PURPOSES, BRIEF_ASPECT_RATIOS, REJECT_REASONS, SOURCE_SPECS } from '../../src/config/visual-brief-vocab';
 import { FUNNEL_STAGES, FUNNEL_STAGE_DESCRIPTIONS, stageOutcomes } from '../../src/config/campaign-vocab';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -161,6 +163,8 @@ interface RouteContext {
     siteAuditSnapshot?: string | null;
     /** This Website Assistant's site — pages and sections by id — read per turn (usesSiteSnapshot). */
     siteSnapshot?: string | null;
+    /** Files attached in this conversation (chat-attachments.ts) — routes with acceptsAttachments. */
+    attachmentsBlock?: string | null;
     /** This assistant's own posts / articles / emails, column by column, read per turn — only
      *  populated for routes with contentSnapshot. See src/utils/content-snapshot.ts. */
     contentSnapshot?: string | null;
@@ -191,6 +195,8 @@ interface AssistantRoute {
     usesSiteAuditSnapshot?: boolean;
     /** When true the handler reads this assistant's site for this turn (rc.siteSnapshot). */
     usesSiteSnapshot?: boolean;
+    /** The chat takes pictures and documents (paperclip / drag / paste — chat-session.js). Read per turn. */
+    acceptsAttachments?: boolean;
     /** Which of this assistant's own queues the handler reads for this turn (rc.contentSnapshot). */
     contentSnapshot?: 'posts' | 'blog' | 'emails';
     /** Role-specific prompt body. buildSystemPrompt() appends the hardened
@@ -1409,6 +1415,7 @@ or, to decide on options:
         model: DEFAULT_MODEL,
         maxTokens: 2500,
         usesSiteSnapshot: true,
+        acceptsAttachments: true,
         buildRolePrompt: (rc) => [
             sharedContextBlock(rc),
             `You are this business's Website Assistant: you build and keep up to date their website. You change it by proposing changes the user approves; you never write HTML, CSS or code.
@@ -1432,6 +1439,12 @@ CHANGING THE SITE. When they ask for a change, emit a site_changes card: a short
 - {"op":"set_footer","text":"..."}
 Section props: hero {layout:"centered|split|banner", eyebrow, headline (max ${SITE_LIMITS.headline} chars), subheadline, primaryCta:{label,href}, secondaryCta:{label,href}}; features and steps {heading, intro, items:[{title, body}]}; text {heading, body}; faq {heading, items:[{q, a}]}; testimonials {heading, items:[{quote, name, detail}]}; cta {heading, body, button:{label, href}}; contact {heading, intro, askPhone (true|false), buttonLabel} — an enquiry form: messages go to the owner's email and the Enquiries list, NOT into their Audience; signup {heading, intro, formId} — one of their sign-up forms listed above by id (use only those ids; if they have none, tell them to make one with their Email Marketing Assistant first); products {heading, intro, buyLabel, collectAddress (true|false — ask for a UK delivery address), items:[{name, description, price}]} — things they sell; price is in PENCE (1250 = £12.50) and must be a price THEY told you in this conversation or that is in their products above with an exact amount — never estimate one; leave price null (no Buy button) when you do not have it. Buy buttons work only once they connect Stripe on the Orders tab (they keep all the money; Be More Swan takes no fee; payments are in pounds sterling). Links: "/" or "/<page address>", "#<sectionId>", mailto:, tel:, or https only.
 
+${rc.attachmentsBlock ?? 'They have not attached any files in this conversation. They can attach pictures and documents with the paperclip, or by dragging them into the chat.'}
+
+THEIR PICTURES. Put a picture they attached on the site by its assetId in a site_changes card: an image is {"assetId": <id>, "alt": "<what the picture shows>"} — a hero's "image", a products item's "image", or set_theme {"logoAssetId": <id>} for their logo. Write "alt" from what they told you the picture shows; if you don't know, ask before proposing it.
+
+THEIR OWN WORDS. When they give you wording to use — an attached document, or text they wrote in this chat — NEVER retype, shorten, tidy or reword it in a site_changes card. Emit a site_words card instead: {"type":"site_words","pageId":"<a pageId above>","attachmentId":<the document's attachmentId, or null>,"quote":"<only when the words are in their chat message: copy them EXACTLY, character for character; else null>","note":"<where it should go, in their words>"}. The server places their exact words on that page and shows them where everything goes before anything changes; it uses 1 task — say so. One page per card; for words meant for two pages, ask which part goes where, then send one card per page.
+
 DRAFTING THE WHOLE SITE. When they want the whole site written (or rewritten), emit a site_draft_request card with their wishes in "request". It replaces the current draft and uses 1 task from their monthly allowance — say so.
 
 PUBLISHING. You cannot publish, take the site offline or choose its address — those are buttons on the Publish card of the Website tab, so the owner always decides what goes live. Changes you make land in the draft; tell them to press Publish when they want them live. Publishing is refused while any part is still in [square brackets].
@@ -1445,6 +1458,11 @@ or
 {
   "reply": "your conversational message to the user",
   "uiElement": { "type": "site_draft_request", "request": "<what the site should cover, in their words>" }
+}
+or
+{
+  "reply": "your conversational message to the user",
+  "uiElement": { "type": "site_words", "pageId": "...", "attachmentId": 12, "quote": null, "note": "<where it goes>" }
 }`,
         ].filter(Boolean).join('\n\n'),
         parseResponse: parseStructuredReply,
@@ -2238,12 +2256,29 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
          *  caption is offered to that post instead of being saved as a new one. See
          *  draftTarget below. */
         forPostId?: number;
+        /** Pictures (library assetIds) and documents (base64) — chat-attachments.ts. */
+        attachments?: unknown;
     };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
-    const message = (body.message || '').trim();
-    if (!message) return json(400, { error: 'message is required' });
-    if (message.length > MAX_MESSAGE_CHARS) return json(400, { error: `Message too long (max ${MAX_MESSAGE_CHARS} characters).` });
+    // Attachments are checked BEFORE the turn's task is spent: a file that can't be read, or isn't
+    // theirs, is refused with nothing charged.
+    let attached: AcceptedAttachment[] = [];
+    if (Array.isArray(body.attachments) && body.attachments.length) {
+        try { attached = await readAttachments(db, orgId, body.attachments); }
+        catch (err) { return json(400, { error: err instanceof Error ? err.message : 'Those files couldn\'t be attached.' }); }
+        const words = attached.filter((a) => a.text).map((a) => a.text).join('\n\n');
+        if (words) {
+            const blocked = await enforcePromptModeration({ text: words.slice(0, 20000), userId, organisationId: orgId, source: 'chat_attachment' });
+            if (blocked) return blocked;
+        }
+    }
+
+    const typed = (body.message || '').trim();
+    if (!typed && !attached.length) return json(400, { error: 'message is required' });
+    if (typed.length > MAX_MESSAGE_CHARS) return json(400, { error: `Message too long (max ${MAX_MESSAGE_CHARS} characters).` });
+    // What the transcript shows: their words, then what they attached.
+    const message = [typed, attachmentLine(attached)].filter(Boolean).join('\n\n');
 
     // ── Foreground cap check — consume this turn's task credit before any state is
     // created or the LLM is called. Over-limit turns get the 403 paywall payload, not
@@ -2386,6 +2421,19 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
     const route = (assistantRow.roleKey && ROUTES[assistantRow.roleKey]) || defaultRoute;
 
+    // Kept with the conversation, so "put that document on the About page" works on a later turn.
+    // A role that doesn't take files ignores them (the browser only offers the paperclip where it does).
+    if (attached.length && route.acceptsAttachments) {
+        await saveAttachments(db, orgId, session.id, userMessage.id, attached)
+            .catch((err) => console.error('[chat-orchestrator] could not save attachments', err));
+    }
+    const attachmentsBlock = route.acceptsAttachments
+        ? await buildAttachmentsBlock(db, orgId, session.id).catch((err) => {
+            console.error('[chat-orchestrator] attachments block failed:', err);
+            return null;
+        })
+        : null;
+
     // Knowledge Base retrieval — per-turn RAG for routes that ground answers in the
     // business's own KB (tier1_support_agent). Failures degrade to "no KB" inside
     // retrieveKnowledgeBase, so this never blocks the turn.
@@ -2467,6 +2515,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         siteAuditSnapshot,
         siteSnapshot,
         contentSnapshot,
+        attachmentsBlock,
     });
     // The user's rules (their Assistant Rules, learned directives and workspace-wide rules) for the
     // roles in RULE_READING_ROLES: the chat-only records roles, whose rules reached nothing before,

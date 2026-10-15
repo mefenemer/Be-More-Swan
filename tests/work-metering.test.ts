@@ -32,6 +32,8 @@ const WORKERS: Array<[string, string, string]> = [
     ['src/utils/site-audit.ts', 'site_audit', 'if (!latched) return;'],
     // The Website Assistant's whole-site draft: charged after the draft is saved under its claim.
     ['src/utils/site-store.ts', 'site_draft', 'if (!saved) return;'],
+    // "Add your own words": charged once a proposal exists (nothing saved yet — the owner applies it).
+    ['src/utils/site-store.ts', 'site_words', "if ('error' in proposal) return"],
 ];
 
 for (const [file, kind, marker] of WORKERS) {
