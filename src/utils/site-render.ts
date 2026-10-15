@@ -14,6 +14,9 @@
 //   · forms (contact, sign-up — step 3b) are plain HTML that POST to the site's own /_form: they work
 //     with no script at all. In the editor's preview they are drawn but switched off.
 
+import { directionsUrl, openingHoursSpecification, openStatus, upcomingClosures, weekRows, whatsappUrl } from './business-hours';
+import { formatDate } from './booking-time';
+import type { WeeklyHours } from './booking-availability';
 import { buttonInk, menuOf, type Link, type Section, type SiteDefinition, type SitePageDef, type SiteTheme } from './site-definition';
 
 /** What a sign-up section needs to draw one Form Builder form (form-definition.ts publicDefinition). */
@@ -29,6 +32,9 @@ export const FORM_ACTION = '/_form';
 export interface SiteRenderProduct { id: number; name: string; description: string | null; price: string | null; buyPence: number | null; imageAssetId: number | null; }
 
 /** A booking section's first step needs only this: the services (with duration) and the largest party. */
+/** Business Information's hours and location, as the site needs them (bookings.ts businessSummary). */
+export interface SiteRenderBusiness { timezone: string; weeklyHours: WeeklyHours; closures: Array<{ date: string; note?: string | null }>; visitAddress: string | null; whatsapp: string | null; }
+
 export interface SiteRenderBooking { ready: boolean; services: Array<{ id: number; name: string; price: string | null; durationMinutes: number }>; maxPartySize: number; }
 
 /** Where every booking step lives (booking-render.ts, served by site-serve.ts). */
@@ -73,6 +79,10 @@ export interface RenderContext {
     products?: Record<number, SiteRenderProduct>;
     /** What a booking section can offer (bookings.ts loadBookingSetup, summarised); null = not set up. */
     booking?: SiteRenderBooking | null;
+    /** Opening hours and where to find the business (Business Information) — the hours section and search data. */
+    business?: SiteRenderBusiness | null;
+    /** "Now", for the Open-now badge (tests pass a fixed time). */
+    now?: Date;
     /**
      * The public address of a library picture (signed, permanent — newsletterMediaUrl). Without it a
      * library picture is not drawn (it has no web address of its own).
@@ -121,6 +131,9 @@ section{padding:64px 0}.alt{background:rgba(0,0,0,.035)}
 .cta{text-align:center}.cta .box{background:var(--p);color:var(--ink);border-radius:var(--r);padding:44px 24px}.cta .btn{background:var(--ink);color:var(--p)}
 .ft{border-top:1px solid rgba(0,0,0,.08);padding:28px 0;font-size:.85rem;opacity:.85}.ft .w{display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:space-between}.ft a{color:inherit}
 .pv{background:#111;color:#fff;text-align:center;font-size:.85rem;padding:8px}
+.badge{display:inline-block;padding:6px 12px;border-radius:999px;font-size:.9rem}.badge.on{background:#dcfce7;color:#14532d}.badge.off{background:#f3f4f6;color:#1f2937}
+.hrs{border-collapse:collapse;margin:8px 0 12px;min-width:min(100%,360px)}.hrs th{text-align:left;font-weight:600;padding:6px 24px 6px 0}.hrs td{padding:6px 0}.hrs tr.today{font-weight:800}.hrs tr+tr{border-top:1px solid rgba(0,0,0,.08)}
+address{font-style:normal;margin:0 0 12px}
 html{scroll-behavior:smooth}section[id]{scroll-margin-top:12px}
 .band{background:var(--p);color:var(--ink)}.band a:not(.btn){color:var(--ink)}.band .card,.band details{color:var(--t)}.band .btn{background:var(--ink);color:var(--p)}
 @media(min-width:700px){.grid.c2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid.c3{grid-template-columns:repeat(3,minmax(0,1fr))}}
@@ -147,6 +160,7 @@ function logoSrc(theme: SiteTheme): string {
     return theme.logoAssetId ? (assetUrlOf(theme.logoAssetId) || theme.logoUrl || '') : (theme.logoUrl || '');
 }
 /** Set per render call — forms are drawn live, or switched off in the preview. */
+let business: { info: SiteRenderBusiness | null; now: Date; settings: SiteDefinition['settings'] | null } = { info: null, now: new Date(0), settings: null };
 let formState: { preview: boolean; forms: Record<number, SiteSignupForm>; renderedAt: number; path: string; canSell: boolean; products: Record<number, SiteRenderProduct>; booking: SiteRenderBooking | null } = { preview: true, forms: {}, renderedAt: 0, path: '/', canSell: false, products: {}, booking: null };
 
 function formOpen(sectionId: string, kind: 'contact' | 'signup'): string {
@@ -266,6 +280,32 @@ ${formButton(p.buttonLabel)}
                 ? '<p class="fine">Buy buttons work on your live site once your Stripe account is connected (Orders tab).</p>' : '';
             return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${note}<div class="grid">${cards.join('')}</div></div></section>`;
         }
+        case 'hours': {
+            // Everything from Business Information and the site's business details — nothing typed here.
+            const p = s.props;
+            const info = business.info;
+            const st = business.settings!;
+            const status = info ? openStatus(info.weeklyHours, info.closures, info.timezone, business.now) : null;
+            const rows = info && status ? weekRows(info.weeklyHours, info.timezone, business.now) : [];
+            const closed = info ? upcomingClosures(info.closures, info.timezone, business.now) : [];
+            const wa = info?.whatsapp ? whatsappUrl(info.whatsapp) : null;
+            const buttons = p.showContact ? [
+                st.phone ? `<a class="btn" href="tel:${esc(st.phone.replace(/[^0-9+]/g, ''))}">Call ${esc(st.phone)}</a>` : '',
+                wa ? `<a class="btn s" href="${esc(wa)}" rel="noopener">WhatsApp</a>` : '',
+                st.email ? `<a class="btn s" href="mailto:${esc(st.email)}">Email us</a>` : '',
+                info?.visitAddress ? `<a class="btn s" href="${esc(directionsUrl(info.visitAddress))}" rel="noopener">Get directions</a>` : '',
+            ].filter(Boolean) : [];
+            const hoursHtml = p.showHours && status ? `<p class="badge ${status.open ? 'on' : 'off'}"><strong>${esc(status.text)}</strong></p>
+<table class="hrs"><tbody>${rows.map((r) => `<tr${r.today ? ' class="today"' : ''}><th scope="row">${esc(r.day)}</th><td>${esc(r.text)}</td></tr>`).join('')}</tbody></table>
+${closed.length ? `<p class="fine">${closed.map((c) => `Closed ${esc(formatDate(c.date))}${c.note ? ` (${esc(c.note)})` : ''}`).join(' · ')}</p>` : ''}` : '';
+            const addressHtml = p.showAddress && info?.visitAddress ? `<address>${info.visitAddress.split('\n').map(esc).join('<br>')}</address>` : '';
+            if (!hoursHtml && !addressHtml && !buttons.length) {
+                return formState.preview
+                    ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Opening hours section: add your hours and where to find you in Business Information ▸ Hours, Location &amp; Bookings, and a phone or email in the Website tab's Business details. Until then it doesn't appear on your live site.</p></div></section>`
+                    : '';
+            }
+            return `<section${cls} id="${esc(s.id)}"><div class="w n">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? paragraphs(p.intro) : ''}${hoursHtml}${addressHtml}${buttons.length ? `<p>${buttons.join('')}</p>` : ''}</div></section>`;
+        }
         case 'booking': {
             // Step 1 only — what, or how many. Every later step is its own page (/_book), so the whole
             // flow works with no script. A GET form: choosing a time changes nothing until the last step.
@@ -332,7 +372,10 @@ function structuredData(def: SiteDefinition, page: SitePageDef, origin: string):
             ...(logoSrc(def.theme) ? { logo: logoSrc(def.theme) } : {}),
             ...(s.email ? { email: s.email } : {}),
             ...(s.phone ? { telephone: s.phone } : {}),
-            ...(s.locality ? { address: { '@type': 'PostalAddress', addressLocality: s.locality } } : {}),
+            ...(s.locality || business.info?.visitAddress ? { address: { '@type': 'PostalAddress',
+                ...(business.info?.visitAddress ? { streetAddress: business.info.visitAddress.split('\n').join(', ') } : {}),
+                ...(s.locality ? { addressLocality: s.locality } : {}) } } : {}),
+            ...(business.info && openingHoursSpecification(business.info.weeklyHours).length ? { openingHoursSpecification: openingHoursSpecification(business.info.weeklyHours) } : {}),
         });
     }
     // Things for sale, as Product + Offer — so search engines and AI assistants can quote the price.
@@ -407,6 +450,7 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
     mapPath = ctx.pagePath ?? ((p) => p);
     assetUrlOf = ctx.assetUrl ?? (() => null);
     const page = findPage(def, path);
+    business = { info: ctx.business ?? null, now: ctx.now ?? new Date(), settings: def.settings };
     formState = { preview: ctx.preview, forms: ctx.forms ?? {}, renderedAt: ctx.renderedAt ?? Date.now(), path: page ? (page.slug ? `/${page.slug}` : '/') : '/', canSell: ctx.canSell === true, products: ctx.products ?? {}, booking: ctx.booking ?? null };
     if (!page) {
         return { status: 404, html: documentHtml(def, null, ctx, `<section><div class="w n"><h1>Page not found</h1><p>That page isn't here. <a href="${esc(href('/'))}">Go to the home page</a>.</p></div></section>`) };

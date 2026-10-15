@@ -5587,6 +5587,9 @@ export const bookingSettings = pgTable("booking_settings", {
   tableMinutes: integer("table_minutes").notNull().default(90),
   maxPartySize: integer("max_party_size").notNull().default(8),
   cancellationPolicy: text("cancellation_policy"),
+  // Where customers find the business (db/z-business-location.sql) — published on the website.
+  visitAddress: text("visit_address"),
+  whatsapp: text(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [
   uniqueIndex("booking_settings_org_uq").on(t.organisationId),
