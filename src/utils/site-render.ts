@@ -391,12 +391,17 @@ ${closed.length ? `<p class="fine">${closed.map((c) => `Closed ${esc(formatDate(
             const consent = form.consent.requireCheckbox
                 ? `<label class="opt"><input type="checkbox" name="_consent" value="yes" required> ${esc(form.consent.text)}</label>`
                 : `<p class="fine">${esc(form.consent.text)}</p>`;
-            return `<section${cls} id="${esc(s.id)}"><div class="w n">${heading ? `<${H}>${esc(heading)}</${H}>` : ''}${intro ? paragraphs(intro) : ''}
+            const inner = `${heading ? `<${H}>${esc(heading)}</${H}>` : ''}${intro ? paragraphs(intro) : ''}
 ${formOpen(s.id, 'signup')}
 ${form.fields.map(signupFieldHtml).join('\n')}
 ${consent}
 ${formButton(form.content.buttonLabel || 'Sign up')}
-</form></div></section>`;
+</form>`;
+            const cover = p.image ? imageSrc(p.image) : '';
+            // With a cover (a free guide's front page): beside the form on a wide screen, above it on a phone.
+            return cover
+                ? `<section${cls} id="${esc(s.id)}"><div class="w tx left"><img src="${esc(cover)}" alt="${esc(p.image!.alt)}" loading="lazy"><div>${inner}</div></div></section>`
+                : `<section${cls} id="${esc(s.id)}"><div class="w n">${inner}</div></section>`;
         }
     }
 }

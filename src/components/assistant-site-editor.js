@@ -55,7 +55,8 @@
       { k: 'askPhone', kind: 'checkbox', label: 'Ask for a phone number (optional for the visitor)' }, { k: 'buttonLabel', kind: 'text', label: 'Button text' }],
     // One of the workspace's Form Builder forms; its questions, consent and double opt-in come from it.
     signup: [{ k: 'formId', kind: 'formpick', label: 'Sign-up form', required: true }, { k: 'heading', kind: 'text', label: 'Heading (leave empty to use the form\'s own)' },
-      { k: 'intro', kind: 'textarea', label: 'Introduction (leave empty to use the form\'s own)' }],
+      { k: 'intro', kind: 'textarea', label: 'Introduction (leave empty to use the form\'s own)' },
+      { k: 'image', kind: 'image', label: 'Cover picture beside the form (optional — e.g. your free guide\'s front page)' }],
     // Things for sale: chosen from Business Information ▸ Products & Services — the ONE place names,
     // prices and pictures live (the page and checkout read them from there). Buy buttons appear on
     // fixed-price products once Stripe is connected on the Orders tab.
@@ -224,7 +225,7 @@
     if (f.kind === 'formpick') {
       const forms = state.data.forms || [];
       if (!forms.length) return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</p><p class="text-xs text-gray-500">You have no sign-up forms yet. Make one with your Email Marketing Assistant or in Audience → Forms, then come back.</p><input type="hidden" name="${name}" value="">`;
-      return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</label><select name="${name}" class="${inputCls}"><option value="">Choose a form…</option>${forms.map((x) => `<option value="${esc(x.id)}" ${Number(value) === x.id ? 'selected' : ''}>${esc(x.name)}${x.active ? '' : ' (switched off)'}</option>`).join('')}</select>
+      return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</label><select name="${name}" class="${inputCls}"><option value="">Choose a form…</option>${forms.map((x) => `<option value="${esc(x.id)}" ${Number(value) === x.id ? 'selected' : ''}>${esc(x.name)}${x.download ? ` — sends “${esc(x.download)}”` : ''}${x.active ? '' : ' (switched off)'}</option>`).join('')}</select>
         <p class="text-xs text-gray-500 mt-1">The form's questions, consent wording and confirmation email are used. People who sign up join your Audience, as they would from any of your forms.</p>`;
     }
     if (f.kind === 'link') {

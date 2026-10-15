@@ -75,6 +75,13 @@ async function prepareDefinition(db: Db, orgId: number, raw: unknown, opts: { fo
             .where(and(eq(contentAssets.id, def.style.logo.assetId), eq(contentAssets.organisationId, orgId))).limit(1);
         if (!asset) { def.style.logo = null; warnings.push('The logo could not be found in your library, so it was removed.'); }
     }
+    if (def.reward) {
+        // The free download is emailed through a signed link to anyone who signs up — so it must be
+        // THIS workspace's own document (form-reward.ts re-checks it at every download, too).
+        const [asset] = await db.select({ id: contentAssets.id }).from(contentAssets)
+            .where(and(eq(contentAssets.id, def.reward.assetId), eq(contentAssets.organisationId, orgId), eq(contentAssets.assetType, 'document'))).limit(1);
+        if (!asset) { def.reward = null; warnings.push('The free download could not be found in your library, so it was removed.'); }
+    }
     if (def.delivery.embed.allowedOrigins) {
         const list = def.delivery.embed.allowedOrigins.map((o) => normaliseOrigin(o));
         if (list.some((o) => o === null)) return { error: 'Each allowed website must be a full address, e.g. https://example.com', status: 400 };

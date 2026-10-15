@@ -69,10 +69,14 @@ export async function loadSiteForms(db: Db, orgId: number, def: SiteDefinition):
 }
 
 /** The workspace's sign-up forms, for the editor's picker. */
-export async function listSignupForms(db: Db, orgId: number): Promise<Array<{ id: number; name: string; active: boolean }>> {
-    const rows = await db.select({ id: audienceForms.id, name: audienceForms.name, status: audienceForms.status })
+export async function listSignupForms(db: Db, orgId: number): Promise<Array<{ id: number; name: string; active: boolean; download: string | null }>> {
+    const rows = await db.select({ id: audienceForms.id, name: audienceForms.name, status: audienceForms.status, definition: audienceForms.definition })
         .from(audienceForms).where(eq(audienceForms.organisationId, orgId));
-    return rows.map((r) => ({ id: r.id, name: r.name || `Form ${r.id}`, active: r.status === 'active' })).sort((a, b) => a.name.localeCompare(b.name));
+    // `download`: the form's free download (form-reward.ts), so the editor and chat can say "sends your price list".
+    return rows.map((r) => ({
+        id: r.id, name: r.name || `Form ${r.id}`, active: r.status === 'active',
+        download: r.definition ? normaliseFormDefinition(r.definition).definition.reward?.label ?? null : null,
+    })).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function findSection(def: SiteDefinition, sectionId: string): Section | null {

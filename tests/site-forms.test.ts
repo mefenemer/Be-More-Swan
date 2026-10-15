@@ -208,7 +208,7 @@ async function main() {
         assert.ok(ed.includes("contact: 'Contact form', signup: 'Sign-up form'"));
         assert.ok(ed.includes("kind: 'formpick'") && ed.includes("action: 'enquiries'") && ed.includes("action: 'enquiry_done'"));
         const chat = read('netlify/functions/chat-orchestrator.ts');
-        assert.ok(chat.includes('contact {heading, intro, askPhone') && chat.includes('signup {heading, intro, formId}'));
+        assert.ok(chat.includes('contact {heading, intro, askPhone') && chat.includes('signup {heading, intro, formId, image:{assetId,alt}|null}'));
         assert.ok(read('src/utils/site-store.ts').includes('for a signup section\'s formId'));
     });
 

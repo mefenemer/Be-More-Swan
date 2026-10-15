@@ -81,7 +81,8 @@ export interface ContactProps { heading: string | null; intro: string | null; as
  * audience_forms id; whether it belongs to this workspace and is active is checked when the page is
  * drawn and again when someone signs up — a form that is not usable draws nothing on the live site.
  */
-export interface SignupProps { heading: string | null; intro: string | null; formId: number | null; }
+/** `image`: optional — a cover beside the form, e.g. the free guide's front page (a lead magnet). */
+export interface SignupProps { heading: string | null; intro: string | null; formId: number | null; image: Image | null; }
 /**
  * Things the business sells. `productIds` are Business Information ▸ Products & Services rows
  * (org_products) — the ONE place names, prices and pictures live: the page and checkout read them
@@ -445,6 +446,7 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
                 heading: textOrNull(p.heading, LIMITS.headline),
                 intro: textOrNull(p.intro, LIMITS.intro, true),
                 formId: Number.isInteger(id) && id > 0 ? id : null,
+                image: cleanImage(p.image, warn),
             } };
         }
         default:
@@ -502,7 +504,7 @@ export function assetIdsIn(def: SiteDefinition): number[] {
     if (def.theme.logoAssetId) ids.add(def.theme.logoAssetId);
     for (const p of def.pages) {
         for (const s of p.sections) {
-            if ((s.type === 'hero' || s.type === 'text') && s.props.image?.assetId) ids.add(s.props.image.assetId);
+            if ((s.type === 'hero' || s.type === 'text' || s.type === 'signup') && s.props.image?.assetId) ids.add(s.props.image.assetId);
             if (s.type === 'products') for (const it of s.props.items) if (it.image?.assetId) ids.add(it.image.assetId);
             if (s.type === 'gallery') for (const im of s.props.images) if (im.assetId) ids.add(im.assetId);
         }
@@ -520,6 +522,7 @@ export function withoutAssets(def: SiteDefinition, drop: Set<number>): SiteDefin
         pages: def.pages.map((p) => ({ ...p, sections: p.sections.map((s) => {
             if (s.type === 'hero') return { ...s, props: { ...s.props, image: keep(s.props.image) } };
             if (s.type === 'text') return { ...s, props: { ...s.props, image: keep(s.props.image) } };
+            if (s.type === 'signup') return { ...s, props: { ...s.props, image: keep(s.props.image) } };
             if (s.type === 'products') return { ...s, props: { ...s.props, items: s.props.items.map((it) => ({ ...it, image: keep(it.image) })) } };
             if (s.type === 'gallery') return { ...s, props: { ...s.props, images: s.props.images.filter((im) => keep(im)) } };
             return s;
