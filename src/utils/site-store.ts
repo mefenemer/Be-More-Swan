@@ -398,7 +398,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
     const catalogue = await db.select({ id: orgProducts.id, name: orgProducts.name, price: orgProducts.price, priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount })
         .from(orgProducts).where(and(eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active'))).orderBy(orgProducts.sortOrder, orgProducts.id).catch(() => []);
     lines.push(catalogue.length
-        ? `Their Business Information products (for a products section's productIds): ${catalogue.slice(0, 40).map((p) => `${p.name} (productId ${p.id}, ${p.price ?? 'no price shown'}${buyablePence(p) !== null ? ', can be bought online' : ''})`).join('; ')}.`
+        ? `Their Business Information products (for productIds in a products or menu section): ${catalogue.slice(0, 40).map((p) => `${p.name} (productId ${p.id}, ${p.price ?? 'no price shown'}${buyablePence(p) !== null ? ', can be bought online' : ''})`).join('; ')}.`
         : 'They have no products in Business Information yet — a products section needs them (Business Information ▸ Products & Services).');
     const bk = await loadBookingSetup(db, orgId).catch(() => null);
     if (bk) {
