@@ -165,7 +165,7 @@ export default withLambda(async (event) => {
     const page = renderSitePage(definition, path, {
         ...ctx, forms: await loadSiteForms(db, site.organisationId, definition), renderedAt: Date.now(),
         canSell: hasShop ? await canSell(db, site.organisationId) : false,
-        products: hasShop ? await loadSiteProducts(db, site.organisationId, definition) : {},
+        products: hasShop || definition.pages.some((p) => p.sections.some((s) => s.type === 'menu')) ? await loadSiteProducts(db, site.organisationId, definition) : {},
         booking: hasBooking ? await bookingSummary(db, site.organisationId) : null,
         business: await businessSummary(db, site.organisationId),
     });

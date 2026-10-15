@@ -103,6 +103,14 @@ export interface SignupProps { heading: string | null; intro: string | null; for
  * up, and one-tap Call / WhatsApp / Email / Directions — all read from Business Information (hours,
  * where to find you) and the site's business details (phone, email). Holds no facts of its own.
  */
+/**
+ * A menu or price list: Business Information products and services, in groups the owner names
+ * ("Starters", "Cuts & colour"), as name · price lines. Like `products`, it holds only WHICH products
+ * and in what order — names, prices, descriptions and lengths are read from Business Information when
+ * the page is drawn, so a price changed there changes here. Nothing on it is bought; see `products`.
+ */
+export interface MenuGroup { title: string | null; productIds: number[]; }
+export interface MenuProps { heading: string | null; intro: string | null; groups: MenuGroup[]; showDescriptions: boolean; showDurations: boolean; note: string | null; }
 export interface HoursProps { heading: string | null; intro: string | null; showHours: boolean; showContact: boolean; showAddress: boolean; }
 export type BookingSectionKind = 'appointment' | 'consultation' | 'table';
 export interface BookingProps { heading: string | null; intro: string | null; kind: BookingSectionKind; serviceIds: number[]; askStaff: boolean; buttonLabel: string; }
@@ -131,9 +139,10 @@ export type SectionBody =
     | { id: string; type: 'signup'; props: SignupProps }
     | { id: string; type: 'products'; props: ProductsProps }
     | { id: string; type: 'booking'; props: BookingProps }
-    | { id: string; type: 'hours'; props: HoursProps };
+    | { id: string; type: 'hours'; props: HoursProps }
+    | { id: string; type: 'menu'; props: MenuProps };
 export type SectionType = SectionBody['type'];
-export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking', 'hours'];
+export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking', 'hours', 'menu'];
 
 export interface SitePageDef {
     id: string;
@@ -172,6 +181,7 @@ export const LIMITS = {
     itemTitle: 80, itemBody: 400, intro: 300, textBody: 3000, faqItems: 15, q: 200, a: 1000,
     features: 9, stepsMin: 2, steps: 6, testimonials: 9, quote: 500, personName: 80, personDetail: 80,
     buttonLabel: 40, products: 12, productName: 80, productDescription: 400,
+    menuGroups: 12, menuItems: 100, menuNote: 300,
     /** Pence. Stripe's GBP minimum is 30p; the ceiling is a sanity bound for a small-business shop. */
     minPrice: 30, maxPrice: 1_000_000,
 } as const;
@@ -349,6 +359,28 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
                 buyLabel: cleanText(p.buyLabel, LIMITS.buttonLabel) || 'Buy now',
             } };
         }
+        case 'menu': {
+            // Each product once across the whole menu; empty groups dropped; the item cap counts all groups.
+            const seen = new Set<number>();
+            let left: number = LIMITS.menuItems;
+            const rawGroups = Array.isArray(p.groups) ? p.groups : [];
+            if (rawGroups.length > LIMITS.menuGroups) warn(`Only the first ${LIMITS.menuGroups} menu groups were kept.`);
+            const groups = rawGroups.slice(0, LIMITS.menuGroups).map((g) => {
+                const o = (g && typeof g === 'object' ? g : {}) as Record<string, unknown>;
+                const ids = (Array.isArray(o.productIds) ? o.productIds : []).map(Number)
+                    .filter((n) => Number.isInteger(n) && n > 0 && !seen.has(n) && (seen.add(n), true));
+                const kept = ids.slice(0, Math.max(0, left));
+                if (kept.length < ids.length) warn(`A menu shows up to ${LIMITS.menuItems} items; the rest were left out.`);
+                left -= kept.length;
+                return { title: textOrNull(o.title, LIMITS.itemTitle), productIds: kept };
+            }).filter((g) => g.productIds.length);
+            if (!groups.length) { warn('A menu was left out: choose at least one of your products or services.'); return null; }
+            return { type: 'menu', props: {
+                heading: textOrNull(p.heading, LIMITS.headline), intro: textOrNull(p.intro, LIMITS.intro, true), groups,
+                showDescriptions: p.showDescriptions !== false, showDurations: p.showDurations === true,
+                note: textOrNull(p.note, LIMITS.menuNote, true),
+            } };
+        }
         case 'hours': {
             const flag = (k: string) => p[k] !== false;   // on unless turned off
             return { type: 'hours', props: {
@@ -380,7 +412,7 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
 }
 
 /** A section's look: a closed set of choices, so nothing here can become CSS. */
-export const GRID_TYPES: readonly SectionType[] = ['features', 'steps', 'testimonials', 'products'];
+export const GRID_TYPES: readonly SectionType[] = ['features', 'steps', 'testimonials', 'products', 'menu'];
 export function cleanLook(raw: unknown, type: SectionType): SectionLook {
     const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
     const background = o.background === 'plain' || o.background === 'soft' || o.background === 'brand' ? o.background : 'auto';

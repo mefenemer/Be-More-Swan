@@ -110,18 +110,23 @@ export interface SiteProduct {
     /** Pence, when it can be bought online (a fixed price); else null. */
     buyPence: number | null;
     imageAssetId: number | null;
+    /** Minutes, for a service with a length (shown on a menu / price list when asked). */
+    durationMinutes?: number | null;
 }
 
 /** The active products a site's products sections name, keyed by id — only this workspace's. */
 export async function loadSiteProducts(db: Db, orgId: number, def: SiteDefinition): Promise<Record<number, SiteProduct>> {
-    const ids = [...new Set(def.pages.flatMap((p) => p.sections).flatMap((s) => (s.type === 'products' ? s.props.productIds : [])))];
+    const ids = [...new Set(def.pages.flatMap((p) => p.sections).flatMap((s) => (s.type === 'products' ? s.props.productIds
+        : s.type === 'menu' ? s.props.groups.flatMap((g) => g.productIds) : [])))];
     if (!ids.length) return {};
     const rows = await db.select({
         id: orgProducts.id, name: orgProducts.name, description: orgProducts.description, price: orgProducts.price,
         priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, imageAssetId: orgProducts.imageAssetId,
+        durationMinutes: orgProducts.durationMinutes,
     }).from(orgProducts).where(and(inArray(orgProducts.id, ids), eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active')));
     return Object.fromEntries(rows.map((r) => [r.id, {
         id: r.id, name: r.name, description: r.description, price: r.price, buyPence: buyablePence(r), imageAssetId: r.imageAssetId,
+        durationMinutes: r.durationMinutes ?? null,
     }]));
 }
 

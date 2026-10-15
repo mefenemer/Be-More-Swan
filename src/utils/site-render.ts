@@ -29,7 +29,14 @@ export interface SiteSignupForm {
 /** Where forms post, on the site's own origin (sites-host forwards it to site-serve.ts). */
 export const FORM_ACTION = '/_form';
 /** A product as drawn: from Business Information, never typed into the site (site-shop.ts SiteProduct). */
-export interface SiteRenderProduct { id: number; name: string; description: string | null; price: string | null; buyPence: number | null; imageAssetId: number | null; }
+export interface SiteRenderProduct { id: number; name: string; description: string | null; price: string | null; buyPence: number | null; imageAssetId: number | null; durationMinutes?: number | null; }
+
+/** "45 min", "1 hr", "1 hr 30 min". */
+export function formatDuration(minutes: number): string {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return [h ? `${h} hr` : '', m ? `${m} min` : ''].filter(Boolean).join(' ');
+}
 
 /** A booking section's first step needs only this: the services (with duration) and the largest party. */
 /** Business Information's hours and location, as the site needs them (bookings.ts businessSummary). */
@@ -131,6 +138,7 @@ section{padding:64px 0}.alt{background:rgba(0,0,0,.035)}
 .cta{text-align:center}.cta .box{background:var(--p);color:var(--ink);border-radius:var(--r);padding:44px 24px}.cta .btn{background:var(--ink);color:var(--p)}
 .ft{border-top:1px solid rgba(0,0,0,.08);padding:28px 0;font-size:.85rem;opacity:.85}.ft .w{display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:space-between}.ft a{color:inherit}
 .pv{background:#111;color:#fff;text-align:center;font-size:.85rem;padding:8px}
+.menu{list-style:none;padding:0;margin:8px 0 0}.menu li{padding:10px 0;border-bottom:1px solid rgba(0,0,0,.08)}.mi{display:flex;align-items:baseline;gap:8px}.mn{font-weight:600}.mt{font-weight:400;font-size:.85rem;opacity:.7;white-space:nowrap}.ml{flex:1;min-width:16px;border-bottom:1px dotted currentColor;opacity:.35}.mp{font-weight:700;white-space:nowrap}.md{margin:4px 0 0;font-size:.92rem;opacity:.8}.mnote{margin-top:20px}
 .badge{display:inline-block;padding:6px 12px;border-radius:999px;font-size:.9rem}.badge.on{background:#dcfce7;color:#14532d}.badge.off{background:#f3f4f6;color:#1f2937}
 .hrs{border-collapse:collapse;margin:8px 0 12px;min-width:min(100%,360px)}.hrs th{text-align:left;font-weight:600;padding:6px 24px 6px 0}.hrs td{padding:6px 0}.hrs tr.today{font-weight:800}.hrs tr+tr{border-top:1px solid rgba(0,0,0,.08)}
 address{font-style:normal;margin:0 0 12px}
@@ -280,6 +288,15 @@ ${formButton(p.buttonLabel)}
                 ? '<p class="fine">Buy buttons work on your live site once your Stripe account is connected (Orders tab).</p>' : '';
             return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${note}<div class="grid">${cards.join('')}</div></div></section>`;
         }
+        case 'menu': {
+            // Names, prices, descriptions and lengths from Business Information; the groups are the owner's.
+            const p = s.props;
+            const groups = p.groups.map((g) => ({ title: g.title, items: g.productIds.map((id) => formState.products[id]).filter(Boolean) })).filter((g) => g.items.length);
+            if (!groups.length) return formState.preview
+                ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Menu / price list: the products it shows are archived or removed in Business Information.</p></div></section>` : '';
+            const line = (pr: SiteRenderProduct) => `<li><div class="mi"><span class="mn">${esc(pr.name)}${p.showDurations && pr.durationMinutes ? ` <span class="mt">${esc(formatDuration(pr.durationMinutes))}</span>` : ''}</span><span class="ml" aria-hidden="true"></span>${pr.price ? `<span class="mp">${esc(pr.price)}</span>` : ''}</div>${p.showDescriptions && pr.description ? `<p class="md">${esc(pr.description)}</p>` : ''}</li>`;
+            return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}<div class="grid">${groups.map((g) => `<div>${g.title ? `<h3>${esc(g.title)}</h3>` : ''}<ul class="menu">${g.items.map(line).join('')}</ul></div>`).join('')}</div>${p.note ? `<div class="fine mnote">${paragraphs(p.note)}</div>` : ''}</div></section>`;
+        }
         case 'hours': {
             // Everything from Business Information and the site's business details — nothing typed here.
             const p = s.props;
@@ -380,9 +397,12 @@ function structuredData(def: SiteDefinition, page: SitePageDef, origin: string):
     }
     // Things for sale, as Product + Offer — so search engines and AI assistants can quote the price.
     // Only a fixed price becomes an Offer; "from" or "on request" is shown on the page, not claimed here.
+    const listed = new Set<number>();
     for (const sec of page.sections) {
-        if (sec.type !== 'products') continue;
-        for (const id of sec.props.productIds) {
+        if (sec.type !== 'products' && sec.type !== 'menu') continue;
+        for (const id of sec.type === 'products' ? sec.props.productIds : sec.props.groups.flatMap((g) => g.productIds)) {
+            if (listed.has(id)) continue;
+            listed.add(id);
             const pr = formState.products[id];
             if (!pr) continue;
             const img = pr.imageAssetId ? assetUrlOf(pr.imageAssetId) : null;

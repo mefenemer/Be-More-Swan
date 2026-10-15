@@ -26,7 +26,7 @@
   const API = '/.netlify/functions/sites';
   const POLL_MS = 5000;
 
-  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale', booking: 'Bookings', hours: 'Opening hours & contact' };
+  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale', booking: 'Bookings', hours: 'Opening hours & contact', menu: 'Menu / price list' };
   /** The edit form for each section type — the props the gate accepts (site-definition.ts cleanSection). */
   const FORMS = {
     hero: [
@@ -70,6 +70,13 @@
       { k: 'serviceIds', kind: 'servicePick', label: 'Which services can be booked' },
       { k: 'askStaff', kind: 'checkbox', label: 'Let people choose who they book with (or "anyone available")' },
       { k: 'buttonLabel', kind: 'text', label: 'Button text' }],
+    // Menu / price list: groups the owner names, filled with Business Information products. Names,
+    // prices, descriptions and lengths are read from there — never typed here.
+    menu: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
+      { k: 'groups', kind: 'menuGroups', label: 'Groups and what is in each' },
+      { k: 'showDescriptions', kind: 'checkbox', label: 'Show each description' },
+      { k: 'showDurations', kind: 'checkbox', label: 'Show how long each service takes' },
+      { k: 'note', kind: 'textarea', label: 'Note under the list (e.g. allergies, "prices include VAT")', rows: 2 }],
     // Opening hours & contact: everything shown comes from Business Information (hours, where to find
     // you) and Site settings (phone, email) — this section only chooses which parts to show.
     hours: [{ k: '_info', kind: 'hoursInfo', label: 'What this shows' },
@@ -85,6 +92,7 @@
     products: { heading: 'Shop', productIds: [], collectAddress: false, buyLabel: 'Buy now' },
     booking: { kind: 'appointment', heading: 'Book an appointment', serviceIds: [], askStaff: false, buttonLabel: '' },
     hours: { heading: 'Opening hours', intro: '', showHours: true, showAddress: true, showContact: true },
+    menu: { heading: 'Prices', intro: '', groups: [{ title: '', productIds: [] }], showDescriptions: true, showDurations: false, note: '' },
   };
   /** A library picture's thumbnail: picked this session, or the link the server sent with the site. */
   const thumbOf = (assetId) => (assetId && (state.thumbs[assetId] || (state.data && state.data.assetUrls && state.data.assetUrls[assetId]))) || '';
@@ -266,6 +274,30 @@
           : '<p class="text-xs text-gray-500 mt-1">You haven\'t added any products or services yet.</p>'}
         <p class="text-xs text-gray-500 mt-2">Add products, or change a name, price or picture, in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} — every page and checkout follows. Only fixed prices can be bought online.</p>`;
     }
+    if (f.kind === 'menuGroups') {
+      // One box per group: its name, then a tick for each Business Information product. A product
+      // ticked in one group is greyed out in the others (each appears once on the menu).
+      const groups = Array.isArray(value) && value.length ? value : [{ title: '', productIds: [] }];
+      const list = state.data.catalogue || [];
+      const owner = {};
+      groups.forEach((g, gi) => (g.productIds || []).forEach((id) => { if (!(id in owner)) owner[id] = gi; }));
+      if (!list.length) return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p><p class="text-xs text-gray-500">You haven't added any products or services yet. Add them, with their prices, in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')}.</p>`;
+      return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
+        <div data-menu-groups class="space-y-2 mt-1">${groups.map((g, gi) => `
+          <div class="border border-gray-200 rounded-lg p-3" data-menu-group>
+            <div class="flex items-center gap-2"><input data-menu-title class="${inputCls}" placeholder="Group name — e.g. Starters, Cuts & colour (optional)" value="${esc(g.title || '')}">
+              ${groups.length > 1 ? `<button type="button" data-menu-group-remove="${gi}" class="text-xs text-gray-500 underline whitespace-nowrap">Remove group</button>` : ''}</div>
+            <div class="grid gap-1 mt-2 sm:grid-cols-2">${list.map((p) => {
+              const mine = owner[p.id] === gi;
+              const elsewhere = p.id in owner && !mine;
+              return `<label class="flex items-center gap-2 text-xs ${elsewhere ? 'text-gray-400' : 'text-gray-800'} cursor-pointer">
+                <input type="checkbox" data-menu-pick value="${esc(p.id)}" ${mine ? 'checked' : ''} ${elsewhere ? 'disabled' : ''}>
+                <span class="font-bold">${esc(p.name)}</span><span class="text-gray-500">${esc(p.price || 'No price shown')}</span>${elsewhere ? '<span>(in another group)</span>' : ''}</label>`;
+            }).join('')}</div>
+          </div>`).join('')}</div>
+        <button type="button" data-menu-group-add class="text-xs text-gray-600 underline mt-2">+ Add a group</button>
+        <p class="text-xs text-gray-500 mt-2">Items appear in Business Information order. Change a name, price or description in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} — the menu follows. Nothing on a menu is bought online; use a Products for sale section for that.</p>`;
+    }
     if (f.kind === 'items') {
       const list = Array.isArray(value) && value.length ? value : [{}];
       return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
@@ -299,6 +331,11 @@
         props[f.k] = assetId ? { assetId, url: '', alt } : url ? { url, alt } : null;
       } else if (f.kind === 'servicePick') {
         props[f.k] = [...form.querySelectorAll('[data-service-pick]:checked')].map((el) => Number(el.value));
+      } else if (f.kind === 'menuGroups') {
+        props[f.k] = [...form.querySelectorAll('[data-menu-group]')].map((g) => ({
+          title: g.querySelector('[data-menu-title]').value,
+          productIds: [...g.querySelectorAll('[data-menu-pick]:checked')].map((el) => Number(el.value)),
+        }));
       } else if (f.kind === 'productPick') {
         props[f.k] = [...form.querySelectorAll('[data-product-pick]:checked')].map((el) => Number(el.value));
       } else if (f.kind === 'items') {
@@ -314,7 +351,7 @@
 
   // ── How a section looks (site-definition.ts SectionLook — a closed set of choices) ──────────
   const LOOK_DEFAULT = { background: 'auto', columns: 'auto', menuLabel: null };
-  const GRID_TYPES = ['features', 'steps', 'testimonials', 'products'];
+  const GRID_TYPES = ['features', 'steps', 'testimonials', 'products', 'menu'];
   function lookHtml(e) {
     const l = e.look || LOOK_DEFAULT;
     const onePage = def().structure === 'one_page';
@@ -845,6 +882,20 @@
     }
     if (t('[data-site-logo-clear]')) { await apply([{ op: 'set_theme', theme: { logoAssetId: null, logoUrl: null } }]); return; }
 
+    const addGroup = t('[data-menu-group-add]');
+    if (addGroup) {
+      syncEditing(addGroup.closest('form'));
+      state.editing.props.groups = [...(state.editing.props.groups || []), { title: '', productIds: [] }];
+      render();
+      return;
+    }
+    const rmGroup = t('[data-menu-group-remove]');
+    if (rmGroup) {
+      syncEditing(rmGroup.closest('form'));
+      state.editing.props.groups.splice(Number(rmGroup.dataset.menuGroupRemove), 1);
+      render();
+      return;
+    }
     const addItem = t('[data-item-add]');
     if (addItem) {
       const form = addItem.closest('form');
@@ -980,6 +1031,13 @@
     const f = input.files && input.files[0];
     input.value = '';
     if (f) chooseWordsFile(f);
+  });
+  // A product ticked in one menu group is greyed out in the others: redraw the form on each tick.
+  document.addEventListener('change', (e) => {
+    const pick = e.target.closest && e.target.closest('[data-menu-pick]');
+    if (!pick || !state.editing) return;
+    syncEditing(pick.closest('form'));
+    render();
   });
   document.addEventListener('dragover', (e) => { if (e.target.closest && e.target.closest('[data-site-words-drop]')) e.preventDefault(); });
   document.addEventListener('drop', (e) => {
