@@ -15,7 +15,7 @@ import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import type { BrandKit } from './brand-kit';
 import { currentDatePromptBlock } from './current-date-prompt';
 import {
-    cleanHref, DEFAULT_THEME, LIMITS, normaliseSiteDefinition, type BusinessType, type SiteDefinition, type SiteTheme,
+    applySiteOperation, cleanHref, DEFAULT_THEME, LIMITS, normaliseSiteDefinition, type BusinessType, type SiteDefinition, type SiteTheme,
 } from './site-definition';
 
 export interface BusinessFacts {
@@ -165,7 +165,13 @@ export function siteFromDraftReply(raw: unknown, current: SiteDefinition, maxPag
         const o = pg as { sections?: unknown };
         return Array.isArray(o.sections) ? { ...o, sections: o.sections.filter((x) => !(x && typeof x === 'object' && (x as { type?: unknown }).type === 'products')) } : pg;
     });
-    const result = normaliseSiteDefinition({ theme: current.theme, settings, nav: [], pages, footer: current.footer }, { maxPages });
+    const result = normaliseSiteDefinition({ theme: current.theme, settings, nav: [], pages, footer: current.footer, structure: current.structure }, { maxPages });
     if (!result.definition.pages.some((p) => p.sections.length)) return null;
+    // A one-page site stays one page: a draft written as several pages is combined, each page's first
+    // section becoming its menu entry (the same operation as the editor's "Combine into one page").
+    if (current.structure === 'one_page' && result.definition.pages.length > 1) {
+        const combined = applySiteOperation(result.definition, { op: 'combine_pages' }, { maxPages });
+        if (combined.ok) return { definition: combined.definition, warnings: [...result.warnings, ...combined.warnings] };
+    }
     return result;
 }

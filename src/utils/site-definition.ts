@@ -65,7 +65,8 @@ export interface HeroProps {
     image: Image | null;
 }
 export interface ItemsProps { heading: string | null; intro: string | null; items: Array<{ title: string; body: string }>; }
-export interface TextProps { heading: string | null; body: string; }
+/** Text, optionally with a picture beside it (left or right — on a phone it sits above the words). */
+export interface TextProps { heading: string | null; body: string; image: Image | null; imageSide: 'left' | 'right'; }
 export interface FaqProps { heading: string | null; items: Array<{ q: string; a: string }>; }
 export interface CtaProps { heading: string; body: string | null; button: Link; }
 /** What customers say — the proof a buyer looks for (and the Mystery Shopper checks for). */
@@ -102,7 +103,17 @@ export interface BookingProps { heading: string | null; intro: string | null; ki
 export interface ProductItem { name: string; description: string | null; price: number | null; image: Image | null; }
 export interface ProductsProps { heading: string | null; intro: string | null; productIds: number[]; items: ProductItem[]; collectAddress: boolean; buyLabel: string; }
 
-export type Section =
+/**
+ * How a section looks, on top of what it says — the same for every section type. Closed set of
+ * choices (never CSS): `background` auto = the alternating tint the page has always had; `columns`
+ * applies to grid sections (features, steps, testimonials, products); `menuLabel` makes the section
+ * a menu entry on a one-page site (the menu links down the page to it).
+ */
+export interface SectionLook { background: 'auto' | 'plain' | 'soft' | 'brand'; columns: 'auto' | 2 | 3; menuLabel: string | null; }
+export const DEFAULT_LOOK: SectionLook = { background: 'auto', columns: 'auto', menuLabel: null };
+
+export type Section = SectionBody & { look?: SectionLook };
+export type SectionBody =
     | { id: string; type: 'hero'; props: HeroProps }
     | { id: string; type: 'features'; props: ItemsProps }
     | { id: string; type: 'steps'; props: ItemsProps }
@@ -114,7 +125,7 @@ export type Section =
     | { id: string; type: 'signup'; props: SignupProps }
     | { id: string; type: 'products'; props: ProductsProps }
     | { id: string; type: 'booking'; props: BookingProps };
-export type SectionType = Section['type'];
+export type SectionType = SectionBody['type'];
 export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking'];
 
 export interface SitePageDef {
@@ -124,6 +135,8 @@ export interface SitePageDef {
     title: string;
     seo: { title: string | null; description: string | null };
     sections: Section[];
+    /** Left out of the menu, still reachable by its address — a landing page for an ad or a post. */
+    hideFromMenu: boolean;
 }
 
 export interface SiteDefinition {
@@ -134,6 +147,12 @@ export interface SiteDefinition {
     nav: Array<{ label: string; pageId: string }>;
     pages: SitePageDef[];
     footer: { text: string | null };
+    /**
+     * 'pages' — the menu lists pages. 'one_page' — everything that matters is on the home page and
+     * the menu links down it to the sections that have a menu label (other pages may still exist,
+     * e.g. landing pages, and are listed after those unless hidden).
+     */
+    structure: 'pages' | 'one_page';
 }
 
 // ── Limits ──────────────────────────────────────────────────────────────────────────────────
@@ -265,7 +284,7 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
         case 'text': {
             const body = cleanText(p.body, LIMITS.textBody, true);
             if (!body) { warn('A text section was left out: it is empty.'); return null; }
-            return { type: 'text', props: { heading: textOrNull(p.heading, LIMITS.headline), body } };
+            return { type: 'text', props: { heading: textOrNull(p.heading, LIMITS.headline), body, image: cleanImage(p.image, warn), imageSide: p.imageSide === 'left' ? 'left' : 'right' } };
         }
         case 'faq': {
             const list = (Array.isArray(p.items) ? p.items : []).map((x) => {
@@ -346,6 +365,20 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
     }
 }
 
+/** A section's look: a closed set of choices, so nothing here can become CSS. */
+export const GRID_TYPES: readonly SectionType[] = ['features', 'steps', 'testimonials', 'products'];
+export function cleanLook(raw: unknown, type: SectionType): SectionLook {
+    const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const background = o.background === 'plain' || o.background === 'soft' || o.background === 'brand' ? o.background : 'auto';
+    const cols = Number(o.columns);
+    return {
+        // The opening section already has its own layouts (centred / beside a picture / banner).
+        background: type === 'hero' ? 'auto' : background,
+        columns: GRID_TYPES.includes(type) && (cols === 2 || cols === 3) ? cols : 'auto',
+        menuLabel: textOrNull(o.menuLabel, LIMITS.navLabel),
+    };
+}
+
 // ── Theme and settings ──────────────────────────────────────────────────────────────────────
 
 const FONTS: readonly FontKey[] = ['sans', 'serif', 'rounded', 'system'];
@@ -381,7 +414,7 @@ export function assetIdsIn(def: SiteDefinition): number[] {
     if (def.theme.logoAssetId) ids.add(def.theme.logoAssetId);
     for (const p of def.pages) {
         for (const s of p.sections) {
-            if (s.type === 'hero' && s.props.image?.assetId) ids.add(s.props.image.assetId);
+            if ((s.type === 'hero' || s.type === 'text') && s.props.image?.assetId) ids.add(s.props.image.assetId);
             if (s.type === 'products') for (const it of s.props.items) if (it.image?.assetId) ids.add(it.image.assetId);
         }
     }
@@ -397,6 +430,7 @@ export function withoutAssets(def: SiteDefinition, drop: Set<number>): SiteDefin
         theme: { ...def.theme, logoAssetId: def.theme.logoAssetId && drop.has(def.theme.logoAssetId) ? null : def.theme.logoAssetId ?? null },
         pages: def.pages.map((p) => ({ ...p, sections: p.sections.map((s) => {
             if (s.type === 'hero') return { ...s, props: { ...s.props, image: keep(s.props.image) } };
+            if (s.type === 'text') return { ...s, props: { ...s.props, image: keep(s.props.image) } };
             if (s.type === 'products') return { ...s, props: { ...s.props, items: s.props.items.map((it) => ({ ...it, image: keep(it.image) })) } };
             return s;
         }) })),
@@ -477,27 +511,29 @@ export function normaliseSiteDefinition(raw: unknown, opts: NormaliseOptions = {
         for (const rs of rawSections.slice(0, LIMITS.sectionsPerPage)) {
             const s = (rs && typeof rs === 'object' ? rs : {}) as Record<string, unknown>;
             const cleaned = cleanSection(s.type, s.props, warn);
-            if (cleaned) sections.push({ id: nextSectionId(s.id), ...cleaned } as Section);
+            if (cleaned) sections.push({ id: nextSectionId(s.id), ...cleaned, look: cleanLook(s.look, cleaned.type) } as Section);
         }
         const seo = (p.seo && typeof p.seo === 'object' ? p.seo : {}) as Record<string, unknown>;
         pages.push({
             id, slug: unique, title,
             seo: { title: textOrNull(seo.title, LIMITS.seoTitle), description: textOrNull(seo.description, LIMITS.seoDescription) },
             sections,
+            hideFromMenu: p.hideFromMenu === true,
         });
     }
 
     // Exactly one home page: the first page becomes home when none is.
     if (!pages.length) {
-        pages.push({ id: 'p1', slug: '', title: 'Home', seo: { title: null, description: null }, sections: [
-            { id: nextSectionId(null), type: 'hero', props: { layout: 'centered', eyebrow: null, headline: settings.siteName, subheadline: null, primaryCta: null, secondaryCta: null, image: null } },
+        pages.push({ id: 'p1', slug: '', title: 'Home', seo: { title: null, description: null }, hideFromMenu: false, sections: [
+            { id: nextSectionId(null), type: 'hero', props: { layout: 'centered', eyebrow: null, headline: settings.siteName, subheadline: null, primaryCta: null, secondaryCta: null, image: null }, look: { ...DEFAULT_LOOK } },
         ] });
     } else if (!pages.some((p) => p.slug === '')) {
         usedSlugs.delete(pages[0].slug);
         pages[0].slug = '';
     }
-    // Home first, so the menu and the sitemap start where a visitor does.
+    // Home first, so the menu and the sitemap start where a visitor does. The home page is always in the menu.
     pages.sort((a, b) => (a.slug === '' ? -1 : b.slug === '' ? 1 : 0));
+    pages[0].hideFromMenu = false;
 
     // Internal links must point at a page that exists.
     const pagePaths = new Set(pages.map((p) => (p.slug ? `/${p.slug}` : '/')));
@@ -532,15 +568,27 @@ export function normaliseSiteDefinition(raw: unknown, opts: NormaliseOptions = {
 
     const footer = { text: textOrNull((r.footer as Record<string, unknown> | undefined)?.text, LIMITS.footer, true) };
 
-    return { definition: { version: 1, theme, settings, nav, pages, footer }, warnings };
+    const structure = r.structure === 'one_page' ? 'one_page' : 'pages';
+    return { definition: { version: 1, theme, settings, nav, pages, footer, structure }, warnings };
 }
 
-/** The menu a visitor sees: the nav as set, or every page in order when it is empty. */
-export function menuOf(def: SiteDefinition): Array<{ label: string; path: string; pageId: string }> {
-    const entries = def.nav.length ? def.nav : def.pages.slice(0, LIMITS.navItems).map((p) => ({ label: p.title.slice(0, LIMITS.navLabel), pageId: p.id }));
+/**
+ * The menu a visitor sees. Several pages: the nav as set, or every page not hidden, in order.
+ * One page: the home page's sections that have a menu label (links down the page), then any other
+ * page not hidden. `pageId` is the page the entry belongs to; `sectionId` when it is a jump.
+ */
+export function menuOf(def: SiteDefinition): Array<{ label: string; path: string; pageId: string; sectionId?: string }> {
+    const toPage = (p: SitePageDef, label?: string) => ({ label: (label || p.title).slice(0, LIMITS.navLabel), path: p.slug ? `/${p.slug}` : '/', pageId: p.id });
+    if (def.structure === 'one_page') {
+        const home = def.pages[0];
+        const jumps = home ? home.sections.filter((s) => s.look?.menuLabel).map((s) => ({ label: s.look!.menuLabel!, path: `#${s.id}`, pageId: home.id, sectionId: s.id })) : [];
+        const others = def.pages.slice(1).filter((p) => !p.hideFromMenu).map((p) => toPage(p));
+        return [...jumps, ...others].slice(0, LIMITS.navItems);
+    }
+    const entries = def.nav.length ? def.nav : def.pages.filter((p) => !p.hideFromMenu).slice(0, LIMITS.navItems).map((p) => ({ label: p.title.slice(0, LIMITS.navLabel), pageId: p.id }));
     return entries.flatMap((n) => {
         const page = def.pages.find((p) => p.id === n.pageId);
-        return page ? [{ label: n.label, path: page.slug ? `/${page.slug}` : '/', pageId: page.id }] : [];
+        return page ? [toPage(page, n.label)] : [];
     });
 }
 
@@ -548,10 +596,13 @@ export function menuOf(def: SiteDefinition): Array<{ label: string; path: string
 
 export type SiteOperation =
     | { op: 'add_page'; title: string; slug?: string }
-    | { op: 'update_page'; pageId: string; title?: string; slug?: string; seo?: { title?: string | null; description?: string | null } }
+    | { op: 'update_page'; pageId: string; title?: string; slug?: string; seo?: { title?: string | null; description?: string | null }; hideFromMenu?: boolean }
     | { op: 'remove_page'; pageId: string }
-    | { op: 'add_section'; pageId: string; section: { type: SectionType; props: unknown }; index?: number }
-    | { op: 'update_section'; pageId: string; sectionId: string; props: Record<string, unknown> }
+    | { op: 'add_section'; pageId: string; section: { type: SectionType; props: unknown; look?: Partial<SectionLook> }; index?: number }
+    | { op: 'update_section'; pageId: string; sectionId: string; props?: Record<string, unknown>; look?: Partial<SectionLook> }
+    | { op: 'set_structure'; structure: 'pages' | 'one_page' }
+    /** Every page's sections onto the home page, in page order; links to those pages become jumps. */
+    | { op: 'combine_pages' }
     | { op: 'remove_section'; pageId: string; sectionId: string }
     | { op: 'move_section'; pageId: string; sectionId: string; toIndex: number }
     | { op: 'set_nav'; items: Array<{ label?: string; pageId: string }> }
@@ -590,7 +641,7 @@ export function applySiteOperation(def: SiteDefinition, op: SiteOperation, opts:
             if (next.pages.length >= maxPages) return { ok: false, error: `Your plan includes ${maxPages} page${maxPages === 1 ? '' : 's'}, and this site has them all. Remove one, or move to a plan with more.` };
             const title = cleanText(op.title, LIMITS.pageTitle);
             if (!title) return { ok: false, error: 'A new page needs a title.' };
-            next.pages.push({ id: '', slug: slugify(op.slug || title) || 'page', title, seo: { title: null, description: null }, sections: [] });
+            next.pages.push({ id: '', slug: slugify(op.slug || title) || 'page', title, seo: { title: null, description: null }, sections: [], hideFromMenu: false });
             break;
         }
         case 'update_page': {
@@ -602,6 +653,10 @@ export function applySiteOperation(def: SiteDefinition, op: SiteOperation, opts:
                 page!.slug = s;
             }
             if (op.seo) page!.seo = { ...page!.seo, ...op.seo } as SitePageDef['seo'];
+            if (op.hideFromMenu !== undefined) {
+                if (page!.slug === '' && op.hideFromMenu) return { ok: false, error: 'The home page is always in the menu.' };
+                page!.hideFromMenu = op.hideFromMenu === true;
+            }
             break;
         }
         case 'remove_page': {
@@ -616,15 +671,15 @@ export function applySiteOperation(def: SiteDefinition, op: SiteOperation, opts:
             const cleaned = cleanSection(op.section?.type, op.section?.props, (m) => why.push(m));
             if (!cleaned) return { ok: false, error: refusalFrom(why[0], 'That section isn\'t complete yet.') };
             const at = Number.isInteger(op.index) ? Math.max(0, Math.min(op.index!, page!.sections.length)) : page!.sections.length;
-            page!.sections.splice(at, 0, { id: '', ...cleaned } as Section);
+            page!.sections.splice(at, 0, { id: '', ...cleaned, look: cleanLook(op.section?.look, cleaned.type) } as Section);
             break;
         }
         case 'update_section': {
             const current = page!.sections[sectionIndex];
             const why: string[] = [];
-            const cleaned = cleanSection(current.type, { ...current.props, ...op.props }, (m) => why.push(m));
+            const cleaned = cleanSection(current.type, { ...current.props, ...(op.props ?? {}) }, (m) => why.push(m));
             if (!cleaned) return { ok: false, error: refusalFrom(why[0], 'That change would leave the section incomplete.') };
-            page!.sections[sectionIndex] = { id: current.id, ...cleaned } as Section;
+            page!.sections[sectionIndex] = { id: current.id, ...cleaned, look: cleanLook({ ...(current.look ?? DEFAULT_LOOK), ...(op.look ?? {}) }, current.type) } as Section;
             break;
         }
         case 'remove_section': {
@@ -653,6 +708,34 @@ export function applySiteOperation(def: SiteDefinition, op: SiteOperation, opts:
         }
         case 'set_footer': {
             next.footer = { text: op.text };
+            break;
+        }
+        case 'set_structure': {
+            next.structure = op.structure === 'one_page' ? 'one_page' : 'pages';
+            break;
+        }
+        case 'combine_pages': {
+            const [home, ...rest] = next.pages;
+            if (!rest.length) return { ok: false, error: 'Your site already has just one page.' };
+            const total = next.pages.reduce((n, p) => n + p.sections.length, 0);
+            if (total > LIMITS.sectionsPerPage) return { ok: false, error: `One page can hold up to ${LIMITS.sectionsPerPage} sections, and your pages have ${total} between them. Remove ${total - LIMITS.sectionsPerPage} first.` };
+            // Each page's first section becomes its menu entry; links to a page become jumps to that section.
+            const jumpTo = new Map<string, string>();
+            for (const p of rest) {
+                if (!p.sections.length) continue;
+                const first = p.sections[0];
+                first.look = { ...(first.look ?? DEFAULT_LOOK), menuLabel: first.look?.menuLabel || p.title.slice(0, LIMITS.navLabel) };
+                jumpTo.set(`/${p.slug}`, `#${first.id}`);
+                home.sections.push(...p.sections);
+            }
+            const fix = (l: Link | null): Link | null => (l && jumpTo.has(l.href) ? { ...l, href: jumpTo.get(l.href)! } : l);
+            for (const sec of home.sections) {
+                if (sec.type === 'hero') { sec.props.primaryCta = fix(sec.props.primaryCta); sec.props.secondaryCta = fix(sec.props.secondaryCta); }
+                if (sec.type === 'cta') sec.props.button = fix(sec.props.button) ?? sec.props.button;
+            }
+            next.pages = [home];
+            next.nav = [];
+            next.structure = 'one_page';
             break;
         }
         default:
