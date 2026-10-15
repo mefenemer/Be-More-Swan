@@ -12,12 +12,14 @@
 //   unpublish { assistantId }                 → take the site offline (versions kept)
 //   versions  { assistantId }                 → the earlier published versions
 //   restore   { assistantId, version }        → copy an earlier version into the DRAFT (not live)
+//   enquiries { assistantId }                 → messages sent from the site's contact sections
+//   enquiry_done { assistantId, id, done }    → mark one dealt with (or not)
 //
 // address / publish / unpublish / restore are buttons on the Website tab's Publish card ONLY — the
 // chat cards never send them (chat-session.js sends only apply and draft), so the owner always
 // decides what goes live. Publishing refuses [placeholders] and runs the safety check on every word.
 
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { aiAssistants } from '../../db/schema';
@@ -27,6 +29,8 @@ import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
 import { SECTION_TYPES, type SiteOperation } from '../../src/utils/site-definition';
 import { placeholdersIn } from '../../src/utils/site-draft';
 import { cleanSiteSlugInput, siteOrigin, sitesDomain, siteVisibleText, suggestSiteSlug } from '../../src/utils/site-hosting';
+import { listSignupForms } from '../../src/utils/site-forms';
+import { siteEnquiries } from '../../db/schema';
 import {
     applySiteOperations, claimDraft, definitionOf, endDraft, hasUnpublishedChanges, listSiteVersions, loadOrCreateSite, maxPagesFor,
     publishBlocker, publishSite, restoreVersionToDraft, setSiteAddress, unpublishSite, DRAFT_TIMEOUT_MS, type SiteRow,
@@ -78,6 +82,9 @@ export default withLambda(async (event) => {
             },
             definition, warnings: [...new Set([...warnings, ...extraWarnings])], maxPages,
             placeholders: placeholdersIn(definition),
+            forms: await listSignupForms(db, orgId),
+            newEnquiries: Number((await db.select({ n: sql<number>`count(*)::int` }).from(siteEnquiries)
+                .where(and(eq(siteEnquiries.siteId, s.id), eq(siteEnquiries.status, 'new'))))[0]?.n ?? 0),
             vocab: { sectionTypes: SECTION_TYPES },
         };
     };
@@ -132,6 +139,23 @@ export default withLambda(async (event) => {
     if (action === 'unpublish') return json(200, await view(await unpublishSite(db, site)));
 
     if (action === 'versions') return json(200, { versions: await listSiteVersions(db, site.id), publishedVersion: site.publishedVersion });
+
+    if (action === 'enquiries') {
+        // Every enquiry, newest first — the list pages itself in the browser.
+        const rows = await db.select({
+            id: siteEnquiries.id, name: siteEnquiries.name, email: siteEnquiries.email, phone: siteEnquiries.phone,
+            message: siteEnquiries.message, pagePath: siteEnquiries.pagePath, status: siteEnquiries.status, createdAt: siteEnquiries.createdAt,
+        }).from(siteEnquiries).where(and(eq(siteEnquiries.siteId, site.id), eq(siteEnquiries.organisationId, orgId))).orderBy(desc(siteEnquiries.createdAt));
+        return json(200, { enquiries: rows });
+    }
+
+    if (action === 'enquiry_done') {
+        const eid = Number(body.id);
+        const [row] = await db.update(siteEnquiries).set({ status: body.done === false ? 'new' : 'done' })
+            .where(and(eq(siteEnquiries.id, eid), eq(siteEnquiries.siteId, site.id), eq(siteEnquiries.organisationId, orgId))).returning({ id: siteEnquiries.id });
+        if (!row) return json(404, { error: 'Enquiry not found.' });
+        return json(200, { ok: true });
+    }
 
     if (action === 'restore') {
         const version = Number(body.version);

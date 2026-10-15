@@ -190,6 +190,9 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             // row resolves to the workspace-wide value, which has no UI, and becomes permanently
             // ON. Same trap as strategy_proposal_pending above; don't drop it from that call.
             'lead_reply_received',
+            // A visitor sent a message from the website's contact form (site-forms.ts). Same shape
+            // as a prospect replying: a person is waiting. metadata.assistantId is passed.
+            'site_enquiry_received',
         ],
     },
     {

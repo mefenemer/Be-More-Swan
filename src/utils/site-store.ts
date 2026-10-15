@@ -7,7 +7,8 @@
 
 import { and, desc, eq, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, organisations, sites, siteVersions, users } from '../../db/schema';
+import { aiAssistants, organisations, siteEnquiries, sites, siteVersions, users } from '../../db/schema';
+import { listSignupForms } from './site-forms';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { loadAssistantRulesBlock } from './assistant-rules-prompt';
 import { normalizeBrandKit } from './brand-kit';
@@ -19,7 +20,7 @@ import {
     applySiteOperation, DEFAULT_MAX_PAGES, normaliseSiteDefinition, type SiteDefinition, type SiteOperation,
 } from './site-definition';
 import { buildDraftPrompt, placeholdersIn, siteFromDraftReply, starterSite, themeFromBrandKit, type BusinessFacts } from './site-draft';
-import { KEEP_VERSIONS, sameDefinition, siteOrigin, siteSlugProblem } from './site-hosting';
+import { KEEP_VERSIONS, sameDefinition, siteOrigin, siteSlugProblem, slugFromHost } from './site-hosting';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
 
 type Db = ReturnType<typeof getDb>;
@@ -194,6 +195,9 @@ export async function setSiteAddress(db: Db, site: SiteRow, slug: string): Promi
 export function publishBlocker(site: SiteRow, def: SiteDefinition): string | null {
     if (site.status === 'suspended') return 'This site has been taken offline by Be More Swan and can\'t be published. Contact us if you think that is wrong.';
     if (!site.slug) return 'Choose your site\'s address first.';
+    for (const p of def.pages) {
+        if (p.sections.some((s) => s.type === 'signup' && !s.props.formId)) return `Choose a sign-up form for the sign-up section on "${p.title}", or remove that section.`;
+    }
     const holes = placeholdersIn(def);
     if (holes.length) return `Fill in the ${holes.length} part${holes.length === 1 ? '' : 's'} still in [square brackets] first — ${holes.slice(0, 3).map((h) => `${h.pageTitle}: ${h.text}`).join('; ')}${holes.length > 3 ? '…' : ''}.`;
     return null;
@@ -260,6 +264,24 @@ export async function restoreVersionToDraft(db: Db, site: SiteRow, version: numb
     return saved;
 }
 
+/**
+ * Whether `origin` is a PUBLISHED site of organisation `orgId` (https://<slug>.<sites domain>).
+ * audience-public.ts uses it to let a workspace's own site post to that workspace's own forms.
+ */
+export async function isOwnPublishedSite(db: Db, origin: string, orgId: number): Promise<boolean> {
+    let host: string;
+    try {
+        const u = new URL(origin);
+        if (u.protocol !== 'https:') return false;
+        host = u.host;
+    } catch { return false; }
+    const slug = slugFromHost(host);
+    if (!slug) return false;
+    const [row] = await db.select({ id: sites.id }).from(sites)
+        .where(and(eq(sites.slug, slug), eq(sites.organisationId, orgId), eq(sites.status, 'published'))).limit(1);
+    return !!row;
+}
+
 /** Whether the draft differs from what is live (false when nothing is live). */
 export async function hasUnpublishedChanges(db: Db, site: SiteRow, maxPages: number): Promise<boolean> {
     if (site.publishedVersion == null) return false;
@@ -306,6 +328,13 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
             lines.push(`    · ${s.type} (sectionId ${s.id})${main ? `: "${clip(main, 90)}"` : ''}${items}${typeof pr.body === 'string' ? ` · "${clip(pr.body, 80)}"` : ''}`);
         }
     }
+    const forms = await listSignupForms(db, orgId).catch(() => []);
+    lines.push(forms.length
+        ? `Their sign-up forms (for a signup section's formId): ${forms.map((f) => `${f.name} (formId ${f.id}${f.active ? '' : ', switched off'})`).join('; ')}.`
+        : 'They have no sign-up forms yet — a signup section needs one (made with the Email Marketing Assistant or in Audience).');
+    const [{ n: newEnquiries } = { n: 0 }] = await db.select({ n: sql<number>`count(*)::int` }).from(siteEnquiries)
+        .where(and(eq(siteEnquiries.siteId, site.id), eq(siteEnquiries.status, 'new')));
+    if (Number(newEnquiries)) lines.push(`${newEnquiries} enquiry message(s) from the website's contact form are waiting on the Enquiries tab. You cannot read or answer them — the owner replies by email.`);
     const holes = placeholdersIn(d);
     if (holes.length) lines.push(`Parts still in [square brackets] for the owner to fill in: ${holes.slice(0, 8).map((h) => `${h.text} (${h.pageTitle})`).join(', ')}.`);
     return lines.join('\n');

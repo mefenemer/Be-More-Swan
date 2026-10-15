@@ -98,6 +98,7 @@ const SECTION_SCHEMA = `Section types and their props (use ONLY these; any other
 - "faq": { "heading", "items": [ { "q", "a" } ] }  (1–${LIMITS.faqItems})
 - "testimonials": { "heading", "items": [ { "quote", "name", "detail" } ] }
 - "cta": { "heading", "body", "button": { "label", "href" } }
+- "contact": { "heading", "intro", "askPhone": true | false, "buttonLabel" }  (an enquiry form — put one on the contact page)
 Links ("href") may only be "/" (home), "/<slug>" of a page in this site, "#<section-id>", "mailto:…", "tel:…" or an https address.`;
 
 export function buildDraftPrompt(brief: DraftBrief): { system: string; user: string } {

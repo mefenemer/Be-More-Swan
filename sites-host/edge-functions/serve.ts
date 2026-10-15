@@ -4,26 +4,39 @@
 //
 // Every request — any host, any path — is forwarded to the app's site-serve function with the host
 // the visitor asked for and SITE_SERVE_SECRET. Nothing about a site lives here: no database, no
-// pages, no secrets beyond the shared key. Only GET and HEAD are passed on (published sites have
-// no forms yet).
+// pages, no secrets beyond the shared key. GET and HEAD are passed on for every path; POST only for
+// /_form (the site's contact and sign-up forms, step 3b), with the visitor's IP for rate limits.
 
 declare const Netlify: { env: { get(name: string): string | undefined } };
 
-export default async (request: Request): Promise<Response> => {
-    if (request.method !== 'GET' && request.method !== 'HEAD') {
+const FORM_PATH = '/_form';
+const MAX_FORM_BYTES = 20_000;
+
+export default async (request: Request, context?: { ip?: string }): Promise<Response> => {
+    const url = new URL(request.url);
+    const isForm = request.method === 'POST' && url.pathname === FORM_PATH;
+    if (!isForm && request.method !== 'GET' && request.method !== 'HEAD') {
         return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'GET, HEAD' } });
     }
-    const url = new URL(request.url);
     const app = (Netlify.env.get('APP_ORIGIN') || 'https://bemoreswan.com').replace(/\/+$/, '');
     const key = Netlify.env.get('SITE_SERVE_SECRET') || '';
     if (!key) return new Response('This site is not available right now.', { status: 503 });
 
-    const target = `${app}/.netlify/functions/site-serve?path=${encodeURIComponent(url.pathname)}`;
+    let body: string | undefined;
+    if (isForm) {
+        body = await request.text();
+        if (body.length > MAX_FORM_BYTES) return new Response('That form was too large to send.', { status: 413 });
+    }
+    const target = `${app}/.netlify/functions/site-serve?path=${encodeURIComponent(url.pathname)}${url.search ? `&q=${encodeURIComponent(url.search.slice(1))}` : ''}`;
     const upstream = await fetch(target, {
         method: request.method,
-        headers: { 'x-site-host': url.host, 'x-site-serve-key': key, 'user-agent': request.headers.get('user-agent') || '' },
+        headers: {
+            'x-site-host': url.host, 'x-site-serve-key': key, 'user-agent': request.headers.get('user-agent') || '',
+            ...(isForm ? { 'content-type': 'application/x-www-form-urlencoded', 'x-site-client-ip': context?.ip || '' } : {}),
+        },
+        body,
         redirect: 'manual',
-        signal: AbortSignal.timeout(10_000),
+        signal: AbortSignal.timeout(isForm ? 20_000 : 10_000),
     }).catch(() => null);
     if (!upstream) return new Response('This site is not available right now. Please try again in a minute.', { status: 503, headers: { 'Retry-After': '60' } });
 

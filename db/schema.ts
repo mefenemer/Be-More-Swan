@@ -5527,6 +5527,25 @@ export const siteVersions = pgTable("site_versions", {
   uniqueIndex("site_versions_site_version_uq").on(t.siteId, t.version),
 ]);
 
+// A message from a site's contact section (db/z-website-forms.sql). Not a sign-up: nothing here
+// touches the Audience.
+export const siteEnquiries = pgTable("site_enquiries", {
+  id: serial().primaryKey(),
+  siteId: integer("site_id").notNull().references(() => sites.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  name: text().notNull(),
+  email: text().notNull(),
+  phone: text(),
+  message: text().notNull(),
+  pagePath: text("page_path"),
+  status: text().notNull().default("new"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("site_enquiries_site_idx").on(t.siteId, t.createdAt),
+  index("site_enquiries_org_idx").on(t.organisationId),
+  check("site_enquiries_status_check", sql`${t.status} IN ('new','done')`),
+]);
+
 // "Report this site" — public, from every hosted site's footer (db/z-website-hosting.sql).
 export const siteReports = pgTable("site_reports", {
   id: serial().primaryKey(),

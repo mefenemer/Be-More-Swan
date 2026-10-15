@@ -283,6 +283,20 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // A visitor sent a message from a site's contact section (site-forms.ts). The owner is also
+        // emailed the message itself; this card points at the Website tab's enquiries list.
+        templateKey: 'site_enquiry_received',
+        name: 'New enquiry from your website',
+        category: 'Assistants',
+        type: 'site_enquiry_received',
+        title: '{{enquiry.name}} sent a message from your website',
+        message: 'It is on the Website tab under Enquiries, and in your email. Reply to them directly — {{assistant.name}} does not answer enquiries for you.',
+        variables: [
+            ASSISTANT_NAME,
+            v('enquiry.name', 'Who sent it', 'Sam Patel'),
+        ],
+    },
+    {
         // An erasure request took a COMPANY-grain block (lead-generation.ts `erase_prospect`).
         //
         // Raised only when the erased prospect had no address. With one, `lead_opt_outs` stops us

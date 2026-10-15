@@ -88,6 +88,9 @@ export const WORKSPACE_TABLES: Record<string, any> = {
     goals: s.goals,
     knowledgeBase: s.kbArticles,
     inspiration: s.inspoItems,
+    // The Website Assistant: the site's definition (draft and settings) and messages from its contact form.
+    websites: s.sites,
+    websiteEnquiries: s.siteEnquiries,
     swanIndexProfiles: s.swanIndexProfiles,
     swanIndexPosts: s.swanIndexPosts,
     assistantRecords: s.assistantRecords,
