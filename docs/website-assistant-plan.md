@@ -137,6 +137,14 @@ published_by) · `site_domains` (hostname, verification, cert state). Form submi
 2. Draft preview + editor GUI + chat operations; hosting on the sites subdomain.
 3. Publish/versions/rollback, sitemap/robots/JSON-LD, forms + newsletter + blog feed, abuse
    controls, **products + Stripe Connect checkout** (D4: in the first release).
+   - **3a built 2026-10-14:** publish / take offline / versions (newest 20) / copy a version into the
+     draft; addresses on `bemoreswan.site` (src/utils/site-hosting.ts — reserved + phishing words);
+     publish refuses `[placeholders]` and runs the safety check on every visible word; served by the
+     separate `sites-host/` Netlify project → `site-serve.ts` (shared SITE_SERVE_SECRET, published
+     version only, no scripts); "Report this site" → report-site.html → site-reports.ts; Admin ▸
+     Trust ▸ Hosted Sites (admin-sites.ts) suspends. SQL: db/z-website-hosting.sql. No CDN cache yet
+     (every view is one function call) — add tag-purged caching when traffic warrants.
+   - 3b forms + newsletter, 3c Stripe Connect checkout: next.
 4. Custom domains (D2). Mystery Shopper → one-click fixes.
 5. (moved into 3)
 6. Import-my-site, remaining sections, widget catalogue (post-launch).

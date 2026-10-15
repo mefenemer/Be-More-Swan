@@ -1,0 +1,29 @@
+# sites-host/netlify.toml — the Netlify project that serves customer websites on *.bemoreswan.site.
+# docs/website-assistant-plan.md §5.2, decision D3. A SEPARATE Netlify project from bemoreswan.com:
+# a site with wildcard subdomains cannot also carry domain aliases, and customer pages must not share
+# an origin (cookies, reputation) with the app.
+#
+# This project holds no data and no pages. Its one edge function (edge-functions/serve.ts) forwards
+# every request to the app's netlify/functions/site-serve.ts with the visitor's host and a shared key.
+#
+# ── One-time setup (Netlify UI) ──────────────────────────────────────────────────────────────────
+# 1. New project from this same GitHub repo, production branch `main`, Base directory `sites-host`
+#    (Netlify then reads THIS file, and builds nothing from the rest of the repo).
+# 2. Environment variables on the new project:
+#      SITE_SERVE_SECRET  a long random value — the SAME value set on the bemoreswan project
+#      APP_ORIGIN         https://bemoreswan.com
+# 3. Domain management: add www.bemoreswan.site as the PRIMARY domain (Netlify's wildcard rule:
+#    the primary domain must sit at the same level as *.bemoreswan.site), then bemoreswan.site.
+#    The bemoreswan.site DNS zone must be on Netlify DNS so the wildcard certificate is automatic.
+# 4. Ask Netlify support to enable wildcard subdomains (*.bemoreswan.site) for this project.
+#    Until they do, only www/bare respond, and they redirect to the Website Assistant's page.
+
+[build]
+  base = "sites-host"
+  publish = "public"
+  edge_functions = "edge-functions"
+  command = "echo 'Nothing to build: sites are served by the edge function'"
+
+[[edge_functions]]
+  function = "serve"
+  path = "/*"

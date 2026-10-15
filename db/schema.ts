@@ -5488,8 +5488,9 @@ export const siteAuditFixes = pgTable("site_audit_fixes", {
 ]);
 
 // ── Website Assistant — one site per hired assistant (docs/website-assistant-plan.md §6) ─────────
-// `draft` has always passed normaliseSiteDefinition (src/utils/site-definition.ts). Publishing and
-// versions arrive in step 3. Requires db/z-website-assistant.sql.
+// `draft` has always passed normaliseSiteDefinition (src/utils/site-definition.ts). The live site is
+// served from site_versions (published_version), never from the draft. Requires
+// db/z-website-assistant.sql + db/z-website-hosting.sql.
 export const sites = pgTable("sites", {
   id: serial().primaryKey(),
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
@@ -5501,6 +5502,10 @@ export const sites = pgTable("sites", {
   credit: boolean().notNull().default(true),
   draftingAt: timestamp("drafting_at"),
   draftNote: text("draft_note"),
+  publishedVersion: integer("published_version"),
+  publishedAt: timestamp("published_at"),
+  suspendedAt: timestamp("suspended_at"),
+  suspendedReason: text("suspended_reason"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [
@@ -5508,4 +5513,33 @@ export const sites = pgTable("sites", {
   uniqueIndex("sites_slug_uq").on(t.slug).where(sql`slug IS NOT NULL`),
   index("sites_org_idx").on(t.organisationId),
   check("sites_status_check", sql`${t.status} IN ('draft','published','suspended')`),
+]);
+
+// Every publish, frozen (db/z-website-hosting.sql). The newest 20 per site are kept.
+export const siteVersions = pgTable("site_versions", {
+  id: serial().primaryKey(),
+  siteId: integer("site_id").notNull().references(() => sites.id, { onDelete: "cascade" }),
+  version: integer().notNull(),
+  definition: jsonb().notNull(),
+  publishedBy: integer("published_by").references(() => users.id, { onDelete: "set null" }),
+  publishedAt: timestamp("published_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("site_versions_site_version_uq").on(t.siteId, t.version),
+]);
+
+// "Report this site" — public, from every hosted site's footer (db/z-website-hosting.sql).
+export const siteReports = pgTable("site_reports", {
+  id: serial().primaryKey(),
+  siteId: integer("site_id").notNull().references(() => sites.id, { onDelete: "cascade" }),
+  reason: text().notNull(),
+  details: text(),
+  reporterEmail: text("reporter_email"),
+  status: text().notNull().default("open"),
+  reviewedBy: integer("reviewed_by").references(() => users.id, { onDelete: "set null" }),
+  reviewedAt: timestamp("reviewed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("site_reports_site_idx").on(t.siteId),
+  check("site_reports_reason_check", sql`${t.reason} IN ('scam','impersonation','harmful','copyright','other')`),
+  check("site_reports_status_check", sql`${t.status} IN ('open','dismissed','actioned')`),
 ]);

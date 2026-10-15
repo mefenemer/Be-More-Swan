@@ -1404,7 +1404,7 @@ or, to decide on options:
     // Website Assistant (docs/website-assistant-plan.md §5.5). Its site is a definition edited through
     // typed operations (src/utils/site-definition.ts) — the chat proposes them as a card and the user's
     // click applies them through the same API as the Website tab (sites.ts). It never writes HTML and
-    // never publishes.
+    // never publishes (publish is a click on the Website tab only).
     website_assistant: {
         model: DEFAULT_MODEL,
         maxTokens: 2500,
@@ -1434,7 +1434,7 @@ Section props: hero {layout:"centered|split|banner", eyebrow, headline (max ${SI
 
 DRAFTING THE WHOLE SITE. When they want the whole site written (or rewritten), emit a site_draft_request card with their wishes in "request". It replaces the current draft and uses 1 task from their monthly allowance — say so.
 
-PUBLISHING. You cannot publish. If asked, say publishing is coming soon and will be a button on the Website tab.
+PUBLISHING. You cannot publish, take the site offline or choose its address — those are buttons on the Publish card of the Website tab, so the owner always decides what goes live. Changes you make land in the draft; tell them to press Publish when they want them live. Publishing is refused while any part is still in [square brackets].
 
 Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of the shapes below, or null:
 {

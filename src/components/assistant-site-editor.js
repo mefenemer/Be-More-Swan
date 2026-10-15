@@ -11,8 +11,13 @@
  * site:apply / site:draft). Every change is a typed operation that the server passes through the one
  * gate (site-definition.ts normaliseSiteDefinition); this file never builds HTML for the site itself.
  *
+ * The Publish card (step 3a): choose the address (<name>.bemoreswan.site), Publish, take the site
+ * offline, and copy an earlier version back into the draft. The live site is a frozen copy — edits
+ * here change only the draft until Publish. These are clicks on this card ONLY; the chat cards never
+ * send them (sites.ts address / publish / unpublish / restore).
+ *
  * ── What this tab may not do ─────────────────────────────────────────────────
- * Publish. Nothing here is live; publishing is step 3 and will be its own click.
+ * Publish without a click, or with [placeholders] left (the server refuses those too).
  * Spend without a click: only "Draft my whole site" uses a task, and it says so first.
  *
  * Handlers are bound to `document` once, at load, never from render. Server values are escaped.
@@ -52,6 +57,7 @@
   const state = {
     assistantId: null, assistantName: null, data: null, loaded: false, loadError: null, rendered: false,
     panel: 'pages', pageId: null, editing: null, device: 'desktop', previewPath: '/', note: null, pollTimer: null, version: 0,
+    editingAddress: false, slugTyped: null, versions: null, publishNote: null,
   };
 
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -92,10 +98,24 @@
     try {
       state.data = await post({ action: 'apply', assistantId: state.assistantId, ops });
       state.version++;
+      state.publishNote = null;
       state.note = (state.data.warnings || []).length ? { text: state.data.warnings.join(' '), tone: 'warn' } : { text: 'Saved.', tone: 'ok' };
       if (done) done();
     } catch (err) {
       state.note = { text: err.message, tone: 'error' };
+    }
+    rerender();
+  }
+
+  /** Publish-card actions: same response shape as get/apply, so the whole tab refreshes from it. */
+  async function publishAction(payload, okText, done) {
+    try {
+      state.data = await post({ ...payload, assistantId: state.assistantId });
+      state.version++;
+      state.publishNote = { text: okText, tone: 'ok' };
+      if (done) done();
+    } catch (err) {
+      state.publishNote = { text: err.message, tone: 'error' };
     }
     rerender();
   }
@@ -250,7 +270,7 @@
     const width = state.device === 'mobile' ? '390px' : '100%';
     return card(`
       <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <p class="text-sm font-black text-gray-900">Preview <span class="text-xs font-semibold text-gray-500">— not live yet</span></p>
+        <p class="text-sm font-black text-gray-900">Preview <span class="text-xs font-semibold text-gray-500">— ${state.data.site.status === 'published' ? 'your draft' : 'not live yet'}</span></p>
         <div class="flex gap-1">${btn(`data-site-device="desktop"`, 'Desktop', state.device === 'desktop')}${btn(`data-site-device="mobile"`, 'Phone', state.device === 'mobile')}</div>
       </div>
       <div class="bg-gray-100 rounded-lg p-2" style="overflow:auto"><iframe title="Preview of your website" src="${esc(src)}" style="display:block;margin:0 auto;width:${width};height:720px;border:0;background:#fff;border-radius:8px"></iframe></div>`);
@@ -261,10 +281,50 @@
     if (s.drafting) return card('<p class="text-sm font-semibold text-indigo-700">Drafting your whole site — this takes a minute or two. You can leave this page; you\'ll be notified when it\'s ready.</p>');
     return card(`
       <p class="text-sm font-black text-gray-900">Draft my whole site</p>
-      <p class="text-xs text-gray-500 mt-1">${esc(state.assistantName || 'Your Website Assistant')} writes every page from your business details, products and set-up answers. It replaces the current draft (nothing is live yet) and uses 1 task.</p>
+      <p class="text-xs text-gray-500 mt-1">${esc(state.assistantName || 'Your Website Assistant')} writes every page from your business details, products and set-up answers. It replaces the current draft (${s.status === 'published' ? 'your live site doesn\'t change until you publish' : 'nothing is live yet'}) and uses 1 task.</p>
       <textarea data-site-draft-request rows="2" class="${inputCls} mt-3" placeholder="Anything to include? e.g. a page for each service, a friendly tone, mention free delivery"></textarea>
       <div class="mt-3">${btn('data-site-draft', 'Draft my whole site', true)}</div>
       ${s.draftNote ? `<p class="text-xs font-semibold text-amber-800 mt-2">${esc(s.draftNote)}</p>` : ''}`);
+  }
+
+  // ── Publish ────────────────────────────────────────────────────────────────
+  function publishCard() {
+    const s = state.data.site;
+    const pnote = state.publishNote ? `<p class="text-xs font-semibold ${state.publishNote.tone === 'error' ? 'text-red-600' : 'text-green-700'} mt-3">${esc(state.publishNote.text)}</p>` : '';
+    if (s.status === 'suspended') {
+      return `<div class="bg-red-50 border border-red-200 rounded-2xl p-4">
+        <p class="text-sm font-bold text-red-700">Your site has been taken offline by Be More Swan</p>
+        <p class="text-xs text-red-700 mt-1">${esc(s.suspendedReason)}</p>
+        <p class="text-xs text-red-700 mt-2">You can keep editing your draft, but it can't be published. If you think this is a mistake, <a href="/contact.html" class="underline">contact us</a>.</p></div>`;
+    }
+    const live = s.status === 'published';
+    const address = (!s.slug || state.editingAddress)
+      ? `<label class="block text-xs font-bold text-gray-700 mt-3" for="sitebuilder-slug">Your site's address</label>
+         <div class="flex flex-wrap items-center gap-2 mt-1">
+           <span class="flex items-center gap-1 min-w-0"><input id="sitebuilder-slug" data-site-slug class="${inputCls}" style="max-width:220px" value="${esc(state.slugTyped != null ? state.slugTyped : (s.slug || s.suggestedSlug || ''))}" autocomplete="off" spellcheck="false"><span class="text-xs text-gray-500">.${esc(s.domain)}</span></span>
+           ${btn('data-site-address-save', 'Save address', true)}${s.slug ? btn('data-site-address-cancel', 'Cancel') : ''}
+         </div>
+         <p class="text-xs text-gray-500 mt-1">Lower-case letters, numbers and hyphens. You can connect your own domain name later.</p>`
+      : `<p class="text-xs text-gray-600 mt-2">Address: <a href="${esc(s.url)}" target="_blank" rel="noopener" class="font-semibold underline">${esc(s.url.replace('https://', ''))}</a> ${btn('data-site-address-edit', 'Change')}</p>`;
+    const status = live
+      ? `<p class="text-sm font-black text-gray-900">Your site is live</p>
+         <p class="text-xs text-gray-500 mt-1">${s.unpublishedChanges ? 'You have changes that aren\'t live yet — visitors see the version you last published until you press Publish.' : 'Visitors see exactly what is in the preview.'}</p>`
+      : `<p class="text-sm font-black text-gray-900">Publish your site</p>
+         <p class="text-xs text-gray-500 mt-1">${s.publishedVersion ? 'Your site is offline. Publish to put it back.' : 'Nothing is live yet. When you publish, anyone can visit your site and search engines can find it.'}</p>`;
+    const canPublish = !s.publishBlocker && (!live || s.unpublishedChanges);
+    const actions = `<div class="flex flex-wrap gap-2 mt-3">
+        ${btn(`data-site-publish ${canPublish ? '' : 'disabled'}`, live ? 'Publish changes' : 'Publish', true)}
+        ${live ? `<a href="${esc(s.url)}" target="_blank" rel="noopener" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">View live site</a>${btn('data-site-unpublish', 'Take offline')}` : ''}
+        ${s.publishedVersion ? btn('data-site-versions', state.versions ? 'Hide earlier versions' : 'Earlier versions') : ''}
+      </div>
+      ${s.publishBlocker && s.slug ? `<p class="text-xs font-semibold text-amber-800 mt-2">${esc(s.publishBlocker)}</p>` : ''}`;
+    const versions = state.versions ? `<ul class="mt-3 space-y-1">${state.versions.length ? state.versions.map((v) => `
+        <li class="flex flex-wrap items-center justify-between gap-2 text-xs border border-gray-200 rounded-lg px-3 py-2">
+          <span>Version ${esc(v.version)} · ${esc(new Date(v.publishedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }))} · ${esc(v.pages)} page${v.pages === 1 ? '' : 's'}${v.version === s.publishedVersion && live ? ' · <strong>live</strong>' : ''}</span>
+          ${btn(`data-site-restore="${esc(v.version)}"`, 'Copy into my draft')}
+        </li>`).join('') : '<li class="text-xs text-gray-500">No earlier versions.</li>'}</ul>
+        <p class="text-xs text-gray-500 mt-1">Copying a version replaces your draft with it. Your live site only changes when you publish.</p>` : '';
+    return card(`${status}${address}${actions}${versions}${pnote}`, live ? 'border-green-200' : '');
   }
 
   function placeholdersCard() {
@@ -284,6 +344,7 @@
     host.innerHTML = `
       <div class="grid gap-4 lg:grid-cols-2">
         <div class="space-y-4 min-w-0">
+          ${publishCard()}
           ${placeholdersCard()}
           <div class="flex flex-wrap gap-2">${tabs}</div>
           ${noteHtml()}
@@ -391,9 +452,51 @@
       await apply([{ op: 'set_settings', settings }, { op: 'set_footer', text: hostOf(e).querySelector('[data-site-footer]').value || null }]);
       return;
     }
+    if (t('[data-site-address-edit]')) { state.editingAddress = true; state.publishNote = null; render(); return; }
+    if (t('[data-site-address-cancel]')) { state.editingAddress = false; state.slugTyped = null; render(); return; }
+    if (t('[data-site-address-save]')) {
+      const slug = hostOf(e).querySelector('[data-site-slug]').value;
+      state.slugTyped = slug;   // kept if the address is refused, so what they typed isn't lost
+      const s = state.data.site;
+      if (s.status === 'published' && s.slug && slug.trim().toLowerCase() !== s.slug) {
+        const ok = await window.confirmModal(`${s.url.replace('https://', '')} stops working straight away and your site moves to the new address. Anyone with the old link will not find it.`, { title: 'Change your site\'s address?', confirmLabel: 'Change address', cancelLabel: 'Keep it' });
+        if (!ok) return;
+      }
+      await publishAction({ action: 'address', slug }, 'Address saved.', () => { state.editingAddress = false; state.slugTyped = null; });
+      return;
+    }
+    if (t('[data-site-publish]')) {
+      const s = state.data.site;
+      const where = s.url ? s.url.replace('https://', '') : 'your address';
+      const ok = await window.confirmModal(s.status === 'published'
+        ? `Visitors to ${where} will see your draft as it is now.`
+        : `Your site goes live at ${where}. Anyone can visit it and search engines can find it.`, { title: s.status === 'published' ? 'Publish your changes?' : 'Publish your site?', confirmLabel: 'Publish', cancelLabel: 'Not yet' });
+      if (!ok) return;
+      await publishAction({ action: 'publish' }, 'Published — your site is live. It can take a minute to show everywhere.', () => { state.versions = null; });
+      return;
+    }
+    if (t('[data-site-unpublish]')) {
+      const ok = await window.confirmModal('Visitors will see "There\'s no website here yet" until you publish again. Your pages and earlier versions are kept.', { title: 'Take your site offline?', confirmLabel: 'Take offline', cancelLabel: 'Keep it live' });
+      if (!ok) return;
+      await publishAction({ action: 'unpublish' }, 'Your site is offline.');
+      return;
+    }
+    if (t('[data-site-versions]')) {
+      if (state.versions) { state.versions = null; render(); return; }
+      try { state.versions = (await post({ action: 'versions', assistantId: state.assistantId })).versions || []; } catch (err) { state.publishNote = { text: err.message, tone: 'error' }; }
+      render();
+      return;
+    }
+    const rv = t('[data-site-restore]');
+    if (rv) {
+      const ok = await window.confirmModal(`Your current draft is replaced with version ${rv.dataset.siteRestore}. Your live site doesn't change until you publish.`, { title: 'Copy this version into your draft?', confirmLabel: 'Copy into draft', cancelLabel: 'Not now' });
+      if (!ok) return;
+      await publishAction({ action: 'restore', version: Number(rv.dataset.siteRestore) }, `Version ${rv.dataset.siteRestore} is now your draft. Publish to make it live.`);
+      return;
+    }
     if (t('[data-site-draft]')) {
       const ok = typeof window.confirmModal === 'function'
-        ? await window.confirmModal('Your Website Assistant writes every page again, replacing your current draft. Nothing is live yet. This uses 1 task.', { title: 'Draft your whole site?', confirmLabel: 'Draft my site', cancelLabel: 'Not now' })
+        ? await window.confirmModal(`Your Website Assistant writes every page again, replacing your current draft. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing is live yet.'} This uses 1 task.`, { title: 'Draft your whole site?', confirmLabel: 'Draft my site', cancelLabel: 'Not now' })
         : true;
       if (!ok) return;
       try {
@@ -414,7 +517,7 @@
   window.AssistantSiteEditor = {
     init({ assistantId, assistantName }) {
       clearTimeout(state.pollTimer);
-      Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null });
+      Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null });
       load();
     },
     activate() {

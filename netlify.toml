@@ -52,6 +52,13 @@
   status = 404
   force = true
 
+# The *.bemoreswan.site project's own folder (a separate Netlify project — sites-host/netlify.toml).
+[[redirects]]
+  from = "/sites-host/*"
+  to = "/404.html"
+  status = 404
+  force = true
+
 [[redirects]]
   from = "/tests/*"
   to = "/404.html"
