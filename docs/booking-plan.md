@@ -43,7 +43,22 @@ restaurants, hairdressers, consultants and more, configured through the website 
    sending. SQL: `db/z-bookings-changes.sql`.
 3. Two-way Google / Outlook calendar sync (busy times block slots; bookings appear in the diary).
 4. Optional deposits through Stripe Connect (the shop's connected account, no platform fee).
-5. Classes / events (sessions with fixed times and a capacity).
+5. Classes / events (sessions with fixed times and a capacity). Today a class can only be
+   approximated: a resource with a capacity (e.g. Studio, 12), linked to one service, whose own hours
+   are exactly one class long — so only that start time is offered and 12 people can take it. That
+   cannot express one-off dates, offers extra start times when the hours are longer than the class,
+   and shows "choose a time" rather than a timetable with spaces left. The real kind: dated sessions
+   (optionally repeating weekly) with a class, teacher and capacity; a timetable on the site with
+   spaces left; reusing the manage links and reminders.
+
+## Opening hours & contact section (built 2026-10-15)
+
+The `hours` section shows an Open-now badge, the week, closed days in the next three weeks, the visit
+address and Call / WhatsApp / Email / Get directions buttons. It holds no facts: hours and the visit
+address + WhatsApp (`booking_settings.visit_address`, `.whatsapp`; SQL `db/z-business-location.sql`)
+come from Business Information ▸ Hours, location & bookings; phone and email from the site's business
+details. The home page's search data gains `openingHoursSpecification` and the street address.
+`src/utils/business-hours.ts`, tests/business-hours.test.ts.
 
 ## Escape hatch
 

@@ -213,7 +213,7 @@ check('decisions only from a state where they make sense; the customer is told',
 
 check('Business Information owns hours, rules and resources; services are Products & Services with a length', () => {
     const ui = read('assets.html');
-    assert.ok(ui.includes('data-tab="hours">Opening Hours &amp; Bookings') && ui.includes("const API = '/.netlify/functions/booking-settings'"));
+    assert.ok(ui.includes('data-tab="hours">Hours, Location &amp; Bookings') && ui.includes("const API = '/.netlify/functions/booking-settings'"));
     const api = read('netlify/functions/booking-settings.ts');
     assert.ok(api.includes('cleanBookingSettings(body)') && api.includes('cleanResource(body, false)'));
     assert.strictEqual((api.match(/eq\(bookableResources\.organisationId, orgId\)/g) || []).length, 4, 'every statement scoped');

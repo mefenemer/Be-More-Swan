@@ -26,7 +26,7 @@
   const API = '/.netlify/functions/sites';
   const POLL_MS = 5000;
 
-  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale', booking: 'Bookings' };
+  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale', booking: 'Bookings', hours: 'Opening hours & contact' };
   /** The edit form for each section type — the props the gate accepts (site-definition.ts cleanSection). */
   const FORMS = {
     hero: [
@@ -70,6 +70,13 @@
       { k: 'serviceIds', kind: 'servicePick', label: 'Which services can be booked' },
       { k: 'askStaff', kind: 'checkbox', label: 'Let people choose who they book with (or "anyone available")' },
       { k: 'buttonLabel', kind: 'text', label: 'Button text' }],
+    // Opening hours & contact: everything shown comes from Business Information (hours, where to find
+    // you) and Site settings (phone, email) — this section only chooses which parts to show.
+    hours: [{ k: '_info', kind: 'hoursInfo', label: 'What this shows' },
+      { k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
+      { k: 'showHours', kind: 'checkbox', label: 'Show the opening hours and an "Open now" badge' },
+      { k: 'showAddress', kind: 'checkbox', label: 'Show the address' },
+      { k: 'showContact', kind: 'checkbox', label: 'Show Call, WhatsApp, Email and Get directions buttons' }],
   };
   const BLANK = {
     hero: { layout: 'centered', headline: '' }, features: { items: [{ title: '', body: '' }] }, steps: { items: [{ title: '', body: '' }, { title: '', body: '' }] },
@@ -77,6 +84,7 @@
     contact: { heading: 'Get in touch', intro: '', askPhone: false, buttonLabel: 'Send message' }, signup: { formId: null },
     products: { heading: 'Shop', productIds: [], collectAddress: false, buyLabel: 'Buy now' },
     booking: { kind: 'appointment', heading: 'Book an appointment', serviceIds: [], askStaff: false, buttonLabel: '' },
+    hours: { heading: 'Opening hours', intro: '', showHours: true, showAddress: true, showContact: true },
   };
   /** A library picture's thumbnail: picked this session, or the link the server sent with the site. */
   const thumbOf = (assetId) => (assetId && (state.thumbs[assetId] || (state.data && state.data.assetUrls && state.data.assetUrls[assetId]))) || '';
@@ -218,10 +226,20 @@
         <details class="mt-1" ${!v.assetId && v.url ? 'open' : ''}><summary class="text-xs text-gray-500 cursor-pointer">Use a web address instead</summary>
           <input name="${name}-url" class="${inputCls} mt-1" placeholder="https://… picture address" value="${esc(v.assetId ? '' : (v.url || ''))}"></details>`;
     }
+    if (f.kind === 'hoursInfo') {
+      const b = state.data.booking || {};
+      const st = (state.data.definition && state.data.definition.settings) || {};
+      const line = (ok, text) => `<li class="${ok ? 'text-gray-700' : 'text-amber-800'}">${ok ? '✓' : '○'} ${text}</li>`;
+      return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p><ul class="text-xs space-y-0.5 mt-1">
+        ${line(b.ready, b.ready ? `Hours: ${esc(b.hours)}` : 'No opening hours yet')}
+        ${line(!!b.visitAddress, b.visitAddress ? `Address: ${esc(b.visitAddress.split('\n').join(', '))}` : 'No address yet (no directions button)')}
+        ${line(!!(st.phone || st.email || b.whatsapp), [st.phone && `Phone ${esc(st.phone)}`, b.whatsapp && `WhatsApp ${esc(b.whatsapp)}`, st.email && `Email ${esc(st.email)}`].filter(Boolean).join(' · ') || 'No phone, WhatsApp or email yet')}</ul>
+        <p class="text-xs text-gray-500 mt-1">Change them once and every page updates. ${btn('data-site-open-hours', 'Hours, location & bookings')}</p>`;
+    }
     if (f.kind === 'servicePick') {
       const b = state.data.booking || {};
       const chosen = new Set((Array.isArray(value) ? value : []).map(Number));
-      const hoursNote = `<p class="text-xs ${b.ready ? 'text-gray-500' : 'text-amber-800 font-semibold'} mt-2">${b.ready ? `Opening hours: ${esc(b.hours)}.` : 'Set your opening hours first — booking only shows on your site once they are set.'} ${btn('data-site-open-hours', 'Opening hours & bookings')}</p>`;
+      const hoursNote = `<p class="text-xs ${b.ready ? 'text-gray-500' : 'text-amber-800 font-semibold'} mt-2">${b.ready ? `Opening hours: ${esc(b.hours)}.` : 'Set your opening hours first — booking only shows on your site once they are set.'} ${btn('data-site-open-hours', 'Hours, location & bookings')}</p>`;
       if (!(b.services || []).length) return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p><p class="text-xs text-gray-500">None of your Products &amp; Services has a length yet. Give a service a length (e.g. 45 minutes) in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} to offer it here. (Tables don't need one.)</p>${hoursNote}`;
       return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
         <div class="space-y-1 mt-1">${b.services.map((x) => `<label class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 text-xs cursor-pointer">
@@ -553,7 +571,7 @@
   function bookingsPanel() {
     const b = state.data.booking || {};
     const head = card(`<p class="text-sm font-black text-gray-900">Bookings</p>
-      <p class="text-xs text-gray-500 mt-1">${b.ready ? `Opening hours: ${esc(b.hours)}. ${b.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}` : 'Set your opening hours to take bookings on your site.'} ${btn('data-site-open-hours', 'Opening hours & bookings')}</p>
+      <p class="text-xs text-gray-500 mt-1">${b.ready ? `Opening hours: ${esc(b.hours)}. ${b.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}` : 'Set your opening hours to take bookings on your site.'} ${btn('data-site-open-hours', 'Hours, location & bookings')}</p>
       <p class="text-xs text-gray-500 mt-1">Add a "Bookings" section to a page to show it on your website.</p>`);
     const list = state.bookings;
     if (!list) return head + card('<p class="text-sm text-gray-400 text-center">Loading bookings…</p>');

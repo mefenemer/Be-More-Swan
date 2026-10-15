@@ -127,6 +127,7 @@ export default withLambda(async (event) => {
                 const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(bookings).where(and(eq(bookings.organisationId, orgId), eq(bookings.status, 'pending')));
                 return {
                     ready: Object.keys(b.settings.weeklyHours).length > 0, hours: describeHours(b.settings.weeklyHours), mode: b.settings.mode,
+                    visitAddress: b.settings.visitAddress, whatsapp: b.settings.whatsapp,
                     services: b.services.map((x) => ({ id: x.id, name: x.name, durationMinutes: x.durationMinutes, price: x.price })),
                     resources: b.resources.map((r) => ({ id: r.id, name: r.name, kind: r.kind })), waiting: Number(n),
                 };
@@ -317,7 +318,7 @@ export default withLambda(async (event) => {
             if (!r.ok) return json(400, { error: r.error });
             site = r.site;
         }
-        return json(200, await view(site, ['Bookings are set up. Change your hours and rules any time in Business Information ▸ Opening hours & bookings.']));
+        return json(200, await view(site, ['Bookings are set up. Change your hours and rules any time in Business Information ▸ Hours, location & bookings.']));
     }
 
     if (action === 'orders') {

@@ -1937,12 +1937,14 @@
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
-      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Set up bookings · Approval needed</p>
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${settings.mode || section ? 'Set up bookings' : 'Hours &amp; location'} · Approval needed</p>
       ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
       ${hoursList ? `<p class="text-xs font-bold text-gray-800 mt-2">Opening hours</p><ul class="mt-1 space-y-0.5">${hoursList}</ul>` : ''}
+      ${typeof settings.visitAddress === 'string' && settings.visitAddress.trim() ? `<p class="text-xs font-bold text-gray-800 mt-2">Address customers visit</p><p class="text-xs text-gray-700">${esc(settings.visitAddress).replace(/\n/g, '<br>')}</p>` : ''}
+      ${typeof settings.whatsapp === 'string' && settings.whatsapp.trim() ? `<p class="text-xs text-gray-700 mt-1">WhatsApp: ${esc(settings.whatsapp)}</p>` : ''}
       ${settings.mode ? `<p class="text-xs text-gray-700 mt-2">${settings.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}</p>` : ''}
       ${section ? `<p class="text-xs text-gray-700 mt-1">Adds a ${esc(kinds[section.kind] || 'booking')} section to your site.</p>` : ''}
-      <p class="text-xs text-gray-600 mt-2">Saved to Business Information ▸ Opening hours &amp; bookings, where you can change it any time. Uses no tasks.</p>
+      <p class="text-xs text-gray-600 mt-2">Saved to Business Information ▸ Hours, location &amp; bookings, where you can change it any time. Uses no tasks.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-bs-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Set up bookings</button>
         <button type="button" data-bs-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>

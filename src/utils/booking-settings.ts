@@ -6,10 +6,10 @@ import { DATE_RE, DAY_KEYS, TIME_RE, toMinutes, type DayKey } from './booking-ti
 import type { AvailabilitySettings, Interval, WeeklyHours } from './booking-availability';
 import { isValidTimezone } from './newsletter-schedule';
 
-export const BOOKING_DEFAULTS: AvailabilitySettings & { mode: 'instant' | 'request'; cancellationPolicy: string | null } = {
+export const BOOKING_DEFAULTS: AvailabilitySettings & { mode: 'instant' | 'request'; cancellationPolicy: string | null; visitAddress: string | null; whatsapp: string | null } = {
     timezone: 'Europe/London', weeklyHours: {}, closures: [], mode: 'request',
     minNoticeMinutes: 120, maxAdvanceDays: 60, slotIntervalMinutes: 30, bufferMinutes: 0, tableMinutes: 90, maxPartySize: 8,
-    cancellationPolicy: null,
+    cancellationPolicy: null, visitAddress: null, whatsapp: null,
 };
 export const SLOT_INTERVALS = [5, 10, 15, 20, 30, 45, 60, 90, 120] as const;
 export const MAX_INTERVALS_PER_DAY = 3;
@@ -100,6 +100,15 @@ export function cleanBookingSettings(raw: Record<string, unknown>): Result<Recor
         if (!(SLOT_INTERVALS as readonly number[]).includes(n)) return { ok: false, error: `Times are offered every ${SLOT_INTERVALS.join(', ')} minutes.` };
         out.slotIntervalMinutes = n;
     }
+    if (has('visitAddress')) {
+        const a = typeof raw.visitAddress === 'string' ? raw.visitAddress.replace(/\r\n?/g, '\n').split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 6).join('\n').slice(0, 300) : '';
+        out.visitAddress = a || null;
+    }
+    if (has('whatsapp')) {
+        const w = typeof raw.whatsapp === 'string' ? raw.whatsapp.trim() : '';
+        if (w && !/^\+?[0-9 ()-]{7,20}$/.test(w)) return { ok: false, error: 'The WhatsApp number should look like +44 7700 900123.' };
+        out.whatsapp = w || null;
+    }
     if (has('cancellationPolicy')) {
         out.cancellationPolicy = typeof raw.cancellationPolicy === 'string' && raw.cancellationPolicy.trim() ? raw.cancellationPolicy.trim().slice(0, 500) : null;
     }
@@ -156,6 +165,8 @@ export function settingsFromRow(row: Partial<Record<string, unknown>> | null | u
         minNoticeMinutes: num('minNoticeMinutes'), maxAdvanceDays: num('maxAdvanceDays'), slotIntervalMinutes: num('slotIntervalMinutes'),
         bufferMinutes: num('bufferMinutes'), tableMinutes: num('tableMinutes'), maxPartySize: num('maxPartySize'),
         cancellationPolicy: typeof row.cancellationPolicy === 'string' ? row.cancellationPolicy : null,
+        visitAddress: typeof row.visitAddress === 'string' && row.visitAddress.trim() ? row.visitAddress : null,
+        whatsapp: typeof row.whatsapp === 'string' && row.whatsapp.trim() ? row.whatsapp : null,
     };
 }
 

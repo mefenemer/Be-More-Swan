@@ -25,7 +25,7 @@
     <nav id="bizinfo-tabs" class="-mb-px flex gap-x-6" aria-label="Business information tabs">
       <button type="button" class="bizinfo-tab active" data-tab="profile">Business Profile</button>
       <button type="button" class="bizinfo-tab" data-tab="products">Products &amp; Services</button>
-      <button type="button" class="bizinfo-tab" data-tab="hours">Opening Hours &amp; Bookings</button>
+      <button type="button" class="bizinfo-tab" data-tab="hours">Hours, Location &amp; Bookings</button>
       <button type="button" class="bizinfo-tab" data-tab="legal">Legal &amp; Billing</button>
       <button type="button" class="bizinfo-tab" data-tab="team">Team Members</button>
       <button type="button" class="bizinfo-tab" data-tab="assets">Brand Assets</button>
@@ -525,12 +525,21 @@
   <section id="bh-section" class="mb-8">
     <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
       <h2 class="text-lg font-bold text-gray-900">Opening hours</h2>
-      <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">When you're open. Bookings are only offered inside these hours, and your assistants use them when they mention when to visit or call.</p>
+      <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">When you're open. Your website shows them (with an "Open now" badge), bookings are only offered inside them, and your assistants use them when they mention when to visit or call.</p>
       <div id="bh-days" class="mt-4 space-y-2"></div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
         <div><label for="bh-tz" class="block text-sm font-semibold text-gray-700 mb-1">Timezone</label>
           <input id="bh-tz" list="bh-tz-list" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm" value="Europe/London">
           <datalist id="bh-tz-list"><option value="Europe/London"><option value="Europe/Dublin"><option value="Europe/Paris"><option value="Europe/Berlin"><option value="Europe/Madrid"><option value="Europe/Athens"><option value="America/New_York"><option value="America/Chicago"><option value="America/Los_Angeles"><option value="Australia/Sydney"></datalist></div>
+      </div>
+      <h3 class="text-sm font-bold text-gray-900 mt-6">Where to find you</h3>
+      <p class="text-xs text-gray-500">Shown on your website's opening hours section, with a Get directions button. Leave it empty if customers don't visit you.</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+        <div><label for="bh-address" class="block text-sm font-semibold text-gray-700 mb-1">Address customers visit</label>
+          <textarea id="bh-address" rows="3" maxlength="300" placeholder="12 High Street&#10;Leeds&#10;LS1 4AB" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></textarea></div>
+        <div><label for="bh-whatsapp" class="block text-sm font-semibold text-gray-700 mb-1">WhatsApp number (optional)</label>
+          <input id="bh-whatsapp" type="tel" maxlength="20" placeholder="+44 7700 900123" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm">
+          <p class="text-xs text-gray-500 mt-1">Adds a WhatsApp button. Your phone and email come from Details.</p></div>
       </div>
       <h3 class="text-sm font-bold text-gray-900 mt-6">Closed days</h3>
       <p class="text-xs text-gray-500">Bank holidays, holidays, days off — nobody can book these.</p>
@@ -556,7 +565,7 @@
       </div>
       <p id="bh-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3 mt-3"></p>
       <div class="flex items-center justify-end gap-3 mt-4"><span id="bh-saved" class="text-sm text-emerald-700 font-semibold hidden">Saved</span>
-        <button type="button" id="bh-save" class="btn-primary text-sm font-bold px-4 py-2 rounded-md">Save hours &amp; rules</button></div>
+        <button type="button" id="bh-save" class="btn-primary text-sm font-bold px-4 py-2 rounded-md">Save hours, location &amp; rules</button></div>
     </div>
 
     <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6">
@@ -623,6 +632,8 @@
       $('bh-table').value = st.tableMinutes ?? 90;
       $('bh-party').value = st.maxPartySize ?? 8;
       $('bh-policy').value = st.cancellationPolicy || '';
+      $('bh-address').value = st.visitAddress || '';
+      $('bh-whatsapp').value = st.whatsapp || '';
     }
     function renderResources() {
       const list = data.resources;
@@ -679,6 +690,7 @@
           slotIntervalMinutes: Number($('bh-interval').value), bufferMinutes: Number($('bh-buffer').value || 0),
           tableMinutes: Number($('bh-table').value || 90), maxPartySize: Number($('bh-party').value || 8),
           cancellationPolicy: $('bh-policy').value,
+          visitAddress: $('bh-address').value, whatsapp: $('bh-whatsapp').value,
         };
         const { settings } = await call('PUT', body);
         data.settings = { ...data.settings, ...settings };

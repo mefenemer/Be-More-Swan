@@ -98,6 +98,12 @@ export interface SignupProps { heading: string | null; intro: string | null; for
  * hours & bookings, and every step after the first is a page of its own (/_book — booking-render.ts).
  * `serviceIds` empty = every bookable service. `askStaff` offers a choice of who (or "anyone").
  */
+/**
+ * Opening hours & contact: the "Open now · closes 6pm" badge, the week's hours, closed days coming
+ * up, and one-tap Call / WhatsApp / Email / Directions — all read from Business Information (hours,
+ * where to find you) and the site's business details (phone, email). Holds no facts of its own.
+ */
+export interface HoursProps { heading: string | null; intro: string | null; showHours: boolean; showContact: boolean; showAddress: boolean; }
 export type BookingSectionKind = 'appointment' | 'consultation' | 'table';
 export interface BookingProps { heading: string | null; intro: string | null; kind: BookingSectionKind; serviceIds: number[]; askStaff: boolean; buttonLabel: string; }
 export interface ProductItem { name: string; description: string | null; price: number | null; image: Image | null; }
@@ -124,9 +130,10 @@ export type SectionBody =
     | { id: string; type: 'contact'; props: ContactProps }
     | { id: string; type: 'signup'; props: SignupProps }
     | { id: string; type: 'products'; props: ProductsProps }
-    | { id: string; type: 'booking'; props: BookingProps };
+    | { id: string; type: 'booking'; props: BookingProps }
+    | { id: string; type: 'hours'; props: HoursProps };
 export type SectionType = SectionBody['type'];
-export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking'];
+export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking', 'hours'];
 
 export interface SitePageDef {
     id: string;
@@ -340,6 +347,13 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
                 productIds: ids.slice(0, LIMITS.products),
                 items: list.slice(0, LIMITS.products), collectAddress: p.collectAddress === true,
                 buyLabel: cleanText(p.buyLabel, LIMITS.buttonLabel) || 'Buy now',
+            } };
+        }
+        case 'hours': {
+            const flag = (k: string) => p[k] !== false;   // on unless turned off
+            return { type: 'hours', props: {
+                heading: textOrNull(p.heading, LIMITS.headline) ?? 'Opening hours', intro: textOrNull(p.intro, LIMITS.intro, true),
+                showHours: flag('showHours'), showContact: flag('showContact'), showAddress: flag('showAddress'),
             } };
         }
         case 'booking': {

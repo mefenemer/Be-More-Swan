@@ -18,7 +18,7 @@ import { settingsFromRow, BOOKING_DEFAULTS, cleanWeeklyHours } from './booking-s
 import { addDays, formatDate, formatTime, utcToZoned } from './booking-time';
 import { createNotification } from './notify';
 import { sendEmail } from './email';
-import { esc, type SiteRenderBooking } from './site-render';
+import { esc, type SiteRenderBooking, type SiteRenderBusiness } from './site-render';
 import { manageBookingUrl } from './booking-links';
 
 type Db = ReturnType<typeof getDb>;
@@ -54,6 +54,14 @@ export async function loadBookingSetup(db: Db | Tx, orgId: number): Promise<Book
         }),
         services: svc.filter((s) => (s.durationMinutes ?? 0) > 0).map((s) => ({ ...s, durationMinutes: s.durationMinutes! })),
     };
+}
+
+/** Hours and where to find the business, for the site's hours section and search data. Null = never set up. */
+export async function businessSummary(db: Db, orgId: number): Promise<SiteRenderBusiness | null> {
+    const [row] = await db.select().from(bookingSettings).where(eq(bookingSettings.organisationId, orgId)).limit(1);
+    if (!row) return null;
+    const st = settingsFromRow(row as Record<string, unknown>);
+    return { timezone: st.timezone, weeklyHours: st.weeklyHours, closures: st.closures, visitAddress: st.visitAddress, whatsapp: st.whatsapp };
 }
 
 /** Which resources a booking kind uses: tables/areas for tables; staff and rooms for appointments. */
