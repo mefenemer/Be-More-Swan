@@ -140,6 +140,7 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'site_audit_competitor_change' THEN 'state_change'  -- a competitor changed its page (call site passes category)
     WHEN 'site_audit_goal_met' THEN 'state_change'       -- the website reached its target score (call site passes category)
     WHEN 'site_draft_ready' THEN 'state_change'          -- a Website Assistant draft is ready (call site passes category)
+    WHEN 'site_order_received' THEN 'state_change'       -- someone paid on the website (call site passes category)
     -- celebratory
     WHEN 'setup_complete' THEN 'celebratory'
     WHEN 'milestone_unlock' THEN 'celebratory'

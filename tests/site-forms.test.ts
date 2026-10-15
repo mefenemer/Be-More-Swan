@@ -178,12 +178,13 @@ async function main() {
 
     await check('serving: forms post only to /_form, and the page may only post to itself', () => {
         const serve = read('netlify/functions/site-serve.ts');
-        assert.ok(serve.includes("form-action 'self'"));
-        assert.ok(serve.includes('if (isPost && path !== FORM_ACTION)'));
+        assert.ok(serve.includes("form-action 'self' https://checkout.stripe.com"));
+        assert.ok(serve.includes('if (isPost && path !== FORM_ACTION && path !== BUY_ACTION)'));
         assert.ok(serve.indexOf("keyMatches(h['x-site-serve-key']") < serve.indexOf('const isPost'), 'the key is checked before anything else');
         assert.ok(serve.includes("h['x-site-client-ip']"));
         const edge = read('sites-host/edge-functions/serve.ts');
-        assert.ok(edge.includes("request.method === 'POST' && url.pathname === FORM_PATH"));
+        assert.ok(edge.includes("request.method === 'POST' && FORM_PATHS.has(url.pathname)"));
+        assert.ok(edge.includes("new Set(['/_form', '/_buy'])"));
         assert.ok(edge.includes("'x-site-client-ip': context?.ip"));
         assert.ok(edge.includes('MAX_FORM_BYTES'));
     });

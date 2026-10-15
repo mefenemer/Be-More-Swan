@@ -150,7 +150,12 @@ published_by) · `site_domains` (hostname, verification, cert state). Form submi
      ACCOUNT's address; never the Audience. Sign-ups → audience-public subscribe in-process, which
      now also accepts the workspace's own published site as an origin. Enquiries tab on the Website
      tab; both in the data export. SQL: db/z-website-forms.sql.
-   - 3c Stripe Connect checkout: next (needs Connect enabled + D5).
+   - **3c built 2026-10-15:** `products` section (owner-typed prices in pence; the AI draft drops it;
+     JSON-LD Product/Offer). Orders tab: "Connect Stripe" → Standard account + Stripe onboarding
+     (owner/admin). Buy → `/_buy` → Checkout Session ON the connected account, price read from the
+     published site, GBP, qty 1–10, optional UK delivery address, **no application fee (D5 = 0%)**.
+     Orders recorded by `stripe-connect-webhook.ts` (own secret STRIPE_CONNECT_WEBHOOK_SECRET),
+     unique per session; owner notified (`site_order_received`) and emailed. SQL: db/z-website-shop.sql.
 4. Custom domains (D2). Mystery Shopper → one-click fixes.
 5. (moved into 3)
 6. Import-my-site, remaining sections, widget catalogue (post-launch).
@@ -183,7 +188,7 @@ Still open:
   registrar. Recommendation: build behind one `site-domains.ts` interface, launch on Netlify
   aliases (first ~50 custom domains), switch to Cloudflare when 40 are in use — the free subdomain
   covers everyone else.
-- **D5.** Platform fee — a percentage Be More Swan takes from each sale, on top of Stripe's own
+- **D5. ✅ 0% (decided 2026-10-15).** Platform fee — a percentage Be More Swan takes from each sale, on top of Stripe's own
   fee (a Connect "application fee"). Recommendation: **0%** at launch and say so — "no
   transaction fees" is a sharper line against Shopify and Squarespace than the revenue would be.
   Can be added later for new sites only.

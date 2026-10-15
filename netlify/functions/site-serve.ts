@@ -21,15 +21,19 @@ import { eq } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { sites } from '../../db/schema';
-import { renderRobots, renderSitemap, renderSiteNotice, renderSitePage, esc, FORM_ACTION, FORM_SENT_PATH } from '../../src/utils/site-render';
+import { renderRobots, renderSitemap, renderSiteNotice, renderSitePage, esc, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH } from '../../src/utils/site-render';
+import { canSell, startCheckout } from '../../src/utils/site-shop';
+import { safeBackPath } from '../../src/utils/site-forms';
 import { handleSiteForm, loadSiteForms, sentMessage } from '../../src/utils/site-forms';
 import audiencePublic from './audience-public';
 import { siteOrigin, sitesDomain, slugFromHost } from '../../src/utils/site-hosting';
 import { maxPagesFor, publishedDefinition } from '../../src/utils/site-store';
 
-// form-action 'self': the site's own contact / sign-up forms post to its own /_form (step 3b), and
-// nowhere else — a script-free page cannot be made to post a visitor's details to another site.
-const CSP = "default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+// form-action: the site's own forms post to its own /_form and /_buy (steps 3b, 3c), and nowhere
+// else — a script-free page cannot be made to post a visitor's details to another site. Stripe
+// Checkout is listed because /_buy answers with a redirect there, and browsers apply form-action to
+// the redirect too.
+const CSP = "default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://checkout.stripe.com";
 
 /** The app's own address — where "Report this site" and "Made with Be More Swan" lead. */
 export function appOrigin(env: Record<string, string | undefined> = process.env): string {
@@ -92,8 +96,8 @@ export default withLambda(async (event) => {
 
     const rawPath = String(event.queryStringParameters?.path || '/');
     const path = rawPath.startsWith('/') ? rawPath.slice(0, 300) : '/';
-    // Only a form may be posted, and only to its one address.
-    if (isPost && path !== FORM_ACTION) return { statusCode: 405, headers: { Allow: 'GET, HEAD' } as Record<string, string>, body: 'Method Not Allowed' };
+    // Only a form or a Buy button may be posted, and only to their own addresses.
+    if (isPost && path !== FORM_ACTION && path !== BUY_ACTION) return { statusCode: 405, headers: { Allow: 'GET, HEAD' } as Record<string, string>, body: 'Method Not Allowed' };
     if (path === '/favicon.ico') return { statusCode: 404, headers: headers('text/plain', 'public, max-age=3600'), body: '' };
 
     const db = getDb();
@@ -114,11 +118,17 @@ export default withLambda(async (event) => {
         creditUrl: site.credit ? `${app}/assistant.html?role=website_assistant` : null,
     };
 
-    // ── Forms (step 3b) ──
+    // ── Forms (step 3b) and Buy buttons (step 3c) ──
     if (isPost) {
         const raw = event.isBase64Encoded ? Buffer.from(event.body || '', 'base64').toString('utf8') : (event.body || '');
         // The visitor's IP: sent by the sites-host edge function, trusted only because the key matched.
         const ip = (h['x-site-client-ip'] || '').slice(0, 64) || 'unknown';
+        if (path === BUY_ACTION) {
+            const form = new URLSearchParams(raw.slice(0, 4000));
+            const bought = await startCheckout(db, { site, definition, origin, ip, body: form, backPath: safeBackPath(definition, form.get('_p')) });
+            if (bought.kind === 'redirect') return { statusCode: 303, headers: { Location: bought.location, 'Cache-Control': 'no-store' } as Record<string, string>, body: '' };
+            return { statusCode: bought.status, headers: headers('text/html; charset=utf-8', 'no-store'), body: renderSiteNotice(definition, ctx, bought.title, bought.message, { label: 'Go back', path: bought.backPath }) };
+        }
         const outcome = await handleSiteForm(db, {
             site, definition, origin, ip, userAgent: h['user-agent'] ?? null,
             body: new URLSearchParams(raw.slice(0, 20000)),
@@ -136,6 +146,10 @@ export default withLambda(async (event) => {
     if (path === '/robots.txt') return { statusCode: 200, headers: headers('text/plain; charset=utf-8', 'public, max-age=300'), body: renderRobots(origin, false) };
     if (path === '/sitemap.xml') return { statusCode: 200, headers: headers('application/xml; charset=utf-8', 'public, max-age=300'), body: renderSitemap(definition, origin) };
 
-    const page = renderSitePage(definition, path, { ...ctx, forms: await loadSiteForms(db, site.organisationId, definition), renderedAt: Date.now() });
+    const hasShop = definition.pages.some((p) => p.sections.some((s) => s.type === 'products'));
+    const page = renderSitePage(definition, path, {
+        ...ctx, forms: await loadSiteForms(db, site.organisationId, definition), renderedAt: Date.now(),
+        canSell: hasShop ? await canSell(db, site.organisationId) : false,
+    });
     return { statusCode: page.status, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : page.html };
 });

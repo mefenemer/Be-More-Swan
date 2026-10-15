@@ -283,6 +283,21 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // A visitor paid on a site's products section (site-shop.ts recordPaidCheckout, from the
+        // Connect webhook). The owner is also emailed the order with the delivery address.
+        templateKey: 'site_order_received',
+        name: 'New order from your website',
+        category: 'Assistants',
+        type: 'site_order_received',
+        title: 'New order: {{order.item}} ({{order.total}})',
+        message: 'Someone paid on your website. The money is in your Stripe account; the order and any delivery address are on the Website tab under Orders, and in your email.',
+        variables: [
+            ASSISTANT_NAME,
+            v('order.item', 'What they bought', 'House Blend, 1kg'),
+            v('order.total', 'Amount paid', '£24'),
+        ],
+    },
+    {
         // A visitor sent a message from a site's contact section (site-forms.ts). The owner is also
         // emailed the message itself; this card points at the Website tab's enquiries list.
         templateKey: 'site_enquiry_received',

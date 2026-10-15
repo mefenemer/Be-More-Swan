@@ -14,6 +14,11 @@
 //   restore   { assistantId, version }        → copy an earlier version into the DRAFT (not live)
 //   enquiries { assistantId }                 → messages sent from the site's contact sections
 //   enquiry_done { assistantId, id, done }    → mark one dealt with (or not)
+//   payments_connect { assistantId }          → Stripe's onboarding link for the workspace's Standard
+//                                               account (created the first time). Owner/admin only.
+//   payments_refresh { assistantId }          → re-read the account from Stripe (back from onboarding)
+//   orders    { assistantId }                 → paid orders from the site's Buy buttons
+//   order_done { assistantId, id, done }      → mark one dealt with (or not)
 //
 // address / publish / unpublish / restore are buttons on the Website tab's Publish card ONLY — the
 // chat cards never send them (chat-session.js sends only apply and draft), so the owner always
@@ -30,7 +35,9 @@ import { SECTION_TYPES, type SiteOperation } from '../../src/utils/site-definiti
 import { placeholdersIn } from '../../src/utils/site-draft';
 import { cleanSiteSlugInput, siteOrigin, sitesDomain, siteVisibleText, suggestSiteSlug } from '../../src/utils/site-hosting';
 import { listSignupForms } from '../../src/utils/site-forms';
-import { siteEnquiries } from '../../db/schema';
+import { connectAccountFor, connectOnboardingLink, markOrderDone, refreshConnectAccount } from '../../src/utils/site-shop';
+import { siteEnquiries, siteOrders, users } from '../../db/schema';
+import { resolveBaseUrl } from '../../src/utils/base-url';
 import {
     applySiteOperations, claimDraft, definitionOf, endDraft, hasUnpublishedChanges, listSiteVersions, loadOrCreateSite, maxPagesFor,
     publishBlocker, publishSite, restoreVersionToDraft, setSiteAddress, unpublishSite, DRAFT_TIMEOUT_MS, type SiteRow,
@@ -49,7 +56,7 @@ export default withLambda(async (event) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
-    const { organisationId: orgId, userId } = ctx;
+    const { organisationId: orgId, userId, role } = ctx;
 
     let body: Record<string, unknown>;
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
@@ -83,6 +90,12 @@ export default withLambda(async (event) => {
             definition, warnings: [...new Set([...warnings, ...extraWarnings])], maxPages,
             placeholders: placeholdersIn(definition),
             forms: await listSignupForms(db, orgId),
+            payments: await (async () => {
+                const acct = await connectAccountFor(db, orgId);
+                return { connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, detailsSubmitted: !!acct?.detailsSubmitted, canConnect: role === 'owner' || role === 'admin' };
+            })(),
+            newOrders: Number((await db.select({ n: sql<number>`count(*)::int` }).from(siteOrders)
+                .where(and(eq(siteOrders.siteId, s.id), eq(siteOrders.status, 'paid'))))[0]?.n ?? 0),
             newEnquiries: Number((await db.select({ n: sql<number>`count(*)::int` }).from(siteEnquiries)
                 .where(and(eq(siteEnquiries.siteId, s.id), eq(siteEnquiries.status, 'new'))))[0]?.n ?? 0),
             vocab: { sectionTypes: SECTION_TYPES },
@@ -154,6 +167,39 @@ export default withLambda(async (event) => {
         const [row] = await db.update(siteEnquiries).set({ status: body.done === false ? 'new' : 'done' })
             .where(and(eq(siteEnquiries.id, eid), eq(siteEnquiries.siteId, site.id), eq(siteEnquiries.organisationId, orgId))).returning({ id: siteEnquiries.id });
         if (!row) return json(404, { error: 'Enquiry not found.' });
+        return json(200, { ok: true });
+    }
+
+    if (action === 'payments_connect') {
+        if (role !== 'owner' && role !== 'admin') return json(403, { error: 'Only the workspace owner or an admin can connect a Stripe account.' });
+        const base = resolveBaseUrl(event.headers as Record<string, string | undefined>) || 'https://bemoreswan.com';
+        const back = `${base}/workspace.html?view=assistant-detail&assistantId=${assistant.id}&tab=sitebuilder&payments=return`;
+        const [u] = await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
+        try {
+            const url = await connectOnboardingLink(db, { orgId, userId, email: u?.email ?? null, returnUrl: back, refreshUrl: back });
+            return json(200, { url });
+        } catch (err) {
+            console.error('[sites] Stripe connect failed', err instanceof Error ? err.message : err);
+            return json(503, { error: 'Stripe couldn\'t be reached just now. Try again in a minute.' });
+        }
+    }
+
+    if (action === 'payments_refresh') {
+        try { await refreshConnectAccount(db, orgId); } catch (err) { console.error('[sites] Stripe refresh failed', err instanceof Error ? err.message : err); }
+        return json(200, await view(site));
+    }
+
+    if (action === 'orders') {
+        const rows = await db.select({
+            id: siteOrders.id, itemName: siteOrders.itemName, quantity: siteOrders.quantity, amountTotal: siteOrders.amountTotal, currency: siteOrders.currency,
+            customerName: siteOrders.customerName, customerEmail: siteOrders.customerEmail, shippingAddress: siteOrders.shippingAddress,
+            status: siteOrders.status, createdAt: siteOrders.createdAt,
+        }).from(siteOrders).where(and(eq(siteOrders.siteId, site.id), eq(siteOrders.organisationId, orgId))).orderBy(desc(siteOrders.createdAt));
+        return json(200, { orders: rows });
+    }
+
+    if (action === 'order_done') {
+        if (!(await markOrderDone(db, orgId, site.id, Number(body.id), body.done !== false))) return json(404, { error: 'Order not found.' });
         return json(200, { ok: true });
     }
 
