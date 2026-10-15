@@ -19,6 +19,7 @@ import { addDays, formatDate, formatTime, utcToZoned } from './booking-time';
 import { createNotification } from './notify';
 import { sendEmail } from './email';
 import { esc, type SiteRenderBooking } from './site-render';
+import { manageBookingUrl } from './booking-links';
 
 type Db = ReturnType<typeof getDb>;
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
@@ -103,17 +104,33 @@ export interface NewBooking extends SlotRequest {
 
 export type CreateResult = { ok: true; booking: typeof bookings.$inferSelect } | { ok: false; reason: 'gone' | 'invalid'; message: string };
 
+/** Thrown inside the transaction to undo a half-made move (the old booking stays as it was). */
+class UndoMove extends Error {}
+
 /** Make a booking: re-check the time under the lock, then hold it. Never double-books. */
-export async function createBooking(db: Db, orgId: number, b: NewBooking): Promise<CreateResult> {
-    return db.transaction(async (tx) => {
+/**
+ * `replaceBookingId` — a MOVE: the customer's existing booking is released and the new time booked in
+ * the same locked transaction. If the new time has gone meanwhile, the whole thing is undone and the
+ * old booking stands, so a move can neither double-book nor leave them with nothing.
+ */
+export async function createBooking(db: Db, orgId: number, b: NewBooking & { replaceBookingId?: number }): Promise<CreateResult> {
+    const gone: CreateResult = { ok: false, reason: 'gone', message: 'Sorry — that time has just been taken. Please choose another.' };
+    try {
+        return await db.transaction(async (tx) => {
         // One booking at a time per workspace — the re-check below sees every booking made before ours.
         await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`bookings:${orgId}`}))`);
+        if (b.replaceBookingId) {
+            // Release the old time first, so the new one may be the same person's next slot.
+            const [old] = await tx.update(bookings).set({ status: 'cancelled', cancelledBy: 'customer', decidedAt: new Date() })
+                .where(and(eq(bookings.id, b.replaceBookingId), eq(bookings.organisationId, orgId), inArray(bookings.status, ['pending', 'confirmed']))).returning({ id: bookings.id });
+            if (!old) return { ok: false, reason: 'invalid', message: 'That booking can\'t be changed any more.' } as CreateResult;
+        }
         const setup = await loadBookingSetup(tx, orgId);
         const slots = await slotsForDay(tx, orgId, setup, b);
         const slot = slots.find((s) => s.time === b.time);
-        if (!slot) return { ok: false, reason: 'gone', message: 'Sorry — that time has just been taken. Please choose another.' };
+        if (!slot) { if (b.replaceBookingId) throw new UndoMove(); return gone; }
         const resourceId = b.resourceId !== null ? (slot.resourceIds.includes(b.resourceId) ? b.resourceId : undefined) : slot.resourceIds[0];
-        if (resourceId === undefined) return { ok: false, reason: 'gone', message: 'Sorry — that time has just been taken. Please choose another.' };
+        if (resourceId === undefined) { if (b.replaceBookingId) throw new UndoMove(); return gone; }
         const service = b.serviceId ? setup.services.find((s) => s.id === b.serviceId) : null;
         const resource = resourceId !== null ? setup.resources.find((r) => r.id === resourceId) : null;
         const [row] = await tx.insert(bookings).values({
@@ -123,9 +140,58 @@ export async function createBooking(db: Db, orgId: number, b: NewBooking): Promi
             serviceName: service?.name ?? null, resourceName: resource?.name ?? null,
             status: setup.settings.mode === 'instant' ? 'confirmed' : 'pending',
             decidedAt: setup.settings.mode === 'instant' ? new Date() : null,
+            movedFromId: b.replaceBookingId ?? null,
         }).returning();
-        return { ok: true, booking: row };
-    });
+        return { ok: true, booking: row } as CreateResult;
+        });
+    } catch (err) {
+        if (err instanceof UndoMove) return gone;
+        throw err;
+    }
+}
+
+// ── The customer's own changes (phase 2) ──────────────────────────────────────────────────────
+
+/**
+ * Whether the customer may still cancel or move it themselves: it is pending or confirmed and starts
+ * later than the notice the business needs. After that they are asked to get in touch instead.
+ */
+export function customerCanChange(b: Pick<BookingRow, 'status' | 'startsAt'>, minNoticeMinutes: number, now: Date): boolean {
+    return (b.status === 'pending' || b.status === 'confirmed') && new Date(b.startsAt).getTime() > now.getTime() + minNoticeMinutes * 60000;
+}
+
+export async function loadBooking(db: Db, id: number): Promise<BookingRow | null> {
+    const [row] = await db.select().from(bookings).where(eq(bookings.id, id)).limit(1);
+    return row ?? null;
+}
+
+export async function customerCancel(db: Db, orgId: number, id: number): Promise<BookingRow | null> {
+    const [row] = await db.update(bookings).set({ status: 'cancelled', cancelledBy: 'customer', decidedAt: new Date() })
+        .where(and(eq(bookings.id, id), eq(bookings.organisationId, orgId), inArray(bookings.status, ['pending', 'confirmed']))).returning();
+    return row ?? null;
+}
+
+/** The owner hears about a customer's cancel or move: a card, and an email with the details. */
+export async function announceCustomerChange(db: Db, change: 'cancelled' | 'moved', b: BookingRow, ctx: BookingNoticeContext, before?: BookingRow): Promise<void> {
+    const { when, what } = describeBooking(b, ctx.timezone);
+    const was = before ? describeBooking(before, ctx.timezone).when : null;
+    const owner = await ownerOf(db, ctx.assistantId);
+    if (!owner) return;
+    const next = change === 'cancelled'
+        ? 'The time is free again.'
+        : b.status === 'pending' ? 'Confirm or decline the new time on the Website tab, under Bookings.' : 'The new time is confirmed — the old one is free again.';
+    await createNotification(db, 'site_booking_changed', {
+        userId: owner.userId, assistantId: ctx.assistantId ?? undefined, category: change === 'moved' && b.status === 'pending' ? 'suggested_action' : 'state_change',
+        context: { assistant: { name: owner.name }, booking: { who: b.customerName, what, when, change: change === 'cancelled' ? `cancelled their booking for ${when}` : `moved their booking${was ? ` from ${was}` : ''} to ${when}`, next } },
+        metadata: { assistantId: ctx.assistantId, bookingId: b.id },
+    }).catch((err) => console.error('[bookings] change notification failed', err));
+    if (owner.email) {
+        await sendEmail({
+            to: owner.email, replyTo: b.customerEmail,
+            subject: change === 'cancelled' ? `Booking cancelled: ${what}, ${when}` : `Booking moved: ${what}, now ${when}`,
+            html: `<p><strong>${esc(b.customerName)}</strong> ${change === 'cancelled' ? `cancelled their booking for <strong>${esc(what)}</strong> on <strong>${esc(when)}</strong>` : `moved their booking for <strong>${esc(what)}</strong>${was ? ` from ${esc(was)}` : ''} to <strong>${esc(when)}</strong>`}.</p><p>${esc(next)}</p>`,
+        }).catch((err: unknown) => console.error('[bookings] change email failed', err instanceof Error ? err.message : err));
+    }
 }
 
 // ── What the booking looks like, in words and as a calendar entry ────────────────────────────
@@ -171,7 +237,11 @@ async function ownerOf(db: Db, assistantId: number | null): Promise<{ userId: nu
     return o ? { userId: o.userId, name: o.name, email: o.email ?? null } : null;
 }
 
-export interface BookingNoticeContext { business: string; timezone: string; assistantId: number | null; cancellationPolicy: string | null; }
+export interface BookingNoticeContext {
+    business: string; timezone: string; assistantId: number | null; cancellationPolicy: string | null;
+    /** https://<slug>.bemoreswan.site — where the customer's manage link points. Null: no link. */
+    siteOrigin: string | null;
+}
 
 /** After a booking is made: the owner is told (card + email); the customer gets a receipt. */
 export async function announceNewBooking(db: Db, b: BookingRow, ctx: BookingNoticeContext): Promise<void> {
@@ -198,7 +268,7 @@ ${b.notes ? `<p style="white-space:pre-wrap">${esc(b.notes)}</p>` : ''}
     await emailCustomer(b, pending ? 'received' : 'confirmed', ctx, owner?.email ?? null);
 }
 
-export type CustomerNotice = 'received' | 'confirmed' | 'declined' | 'cancelled';
+export type CustomerNotice = 'received' | 'confirmed' | 'declined' | 'cancelled' | 'cancelled_by_you' | 'reminder';
 
 export async function emailCustomer(b: BookingRow, notice: CustomerNotice, ctx: BookingNoticeContext, ownerEmail: string | null): Promise<void> {
     const { when, what } = describeBooking(b, ctx.timezone);
@@ -207,12 +277,17 @@ export async function emailCustomer(b: BookingRow, notice: CustomerNotice, ctx: 
         confirmed: { subject: `Booking confirmed — ${ctx.business}, ${when}`, body: `<p>Thanks, ${esc(b.customerName)}. Your booking is confirmed: <strong>${esc(what)}</strong> on <strong>${esc(when)}</strong>.</p><p>The attached invite adds it to your calendar.</p>` },
         declined: { subject: `About your booking request — ${ctx.business}`, body: `<p>Sorry, ${esc(b.customerName)} — ${esc(ctx.business)} can't take your booking for <strong>${esc(what)}</strong> on <strong>${esc(when)}</strong>. Please choose another time on their website.</p>` },
         cancelled: { subject: `Your booking has been cancelled — ${ctx.business}`, body: `<p>${esc(b.customerName)}, your booking for <strong>${esc(what)}</strong> on <strong>${esc(when)}</strong> has been cancelled by ${esc(ctx.business)}.</p>` },
+        cancelled_by_you: { subject: `You've cancelled your booking — ${ctx.business}`, body: `<p>${esc(b.customerName)}, your booking for <strong>${esc(what)}</strong> on <strong>${esc(when)}</strong> is cancelled. Thanks for letting ${esc(ctx.business)} know.</p>` },
+        reminder: { subject: `See you tomorrow — ${ctx.business}, ${when}`, body: `<p>Hi ${esc(b.customerName)}, a reminder of your booking for <strong>${esc(what)}</strong> on <strong>${esc(when)}</strong>.</p>` },
     };
+    // The way to cancel or move it themselves, while that is still possible (site-booking.ts manage page).
+    const link = ctx.siteOrigin && (notice === 'received' || notice === 'confirmed' || notice === 'reminder') ? manageBookingUrl(ctx.siteOrigin, b.id) : null;
+    const manage = link ? `<p><a href="${esc(link)}">Change or cancel your booking</a></p>` : '';
     const { subject, body } = lines[notice];
     const policy = (notice === 'confirmed' || notice === 'received') && ctx.cancellationPolicy ? `<p><strong>Cancellation:</strong> ${esc(ctx.cancellationPolicy)}</p>` : '';
     await sendEmail({
         to: b.customerEmail, from: fromLine(ctx.business), ...(ownerEmail ? { replyTo: ownerEmail } : {}),
-        subject, html: `${body}${policy}<p>To change anything, reply to this email.</p>`,
+        subject, html: `${body}${policy}${manage}<p>${manage ? 'Or reply to this email.' : 'To change anything, reply to this email.'}</p>`,
         ...(notice === 'confirmed' ? { attachments: [{ filename: 'booking.ics', content: Buffer.from(bookingIcs(b, ctx.business)).toString('base64'), contentType: 'text/calendar' }] } : {}),
     }).catch((err: unknown) => console.error('[bookings] customer email failed', err instanceof Error ? err.message : err));
 }
@@ -221,7 +296,7 @@ export async function emailCustomer(b: BookingRow, notice: CustomerNotice, ctx: 
 export async function decideBooking(db: Db, orgId: number, id: number, action: 'confirm' | 'decline' | 'cancel', ctx: BookingNoticeContext): Promise<{ ok: true; booking: BookingRow } | { ok: false; error: string }> {
     const from: Record<typeof action, string[]> = { confirm: ['pending'], decline: ['pending'], cancel: ['pending', 'confirmed'] };
     const to = { confirm: 'confirmed', decline: 'declined', cancel: 'cancelled' }[action];
-    const [row] = await db.update(bookings).set({ status: to, decidedAt: new Date() })
+    const [row] = await db.update(bookings).set({ status: to, decidedAt: new Date(), ...(action === 'cancel' ? { cancelledBy: 'owner' } : {}) })
         .where(and(eq(bookings.id, id), eq(bookings.organisationId, orgId), inArray(bookings.status, from[action]))).returning();
     if (!row) return { ok: false, error: 'That booking has already been dealt with.' };
     const [owner] = ctx.assistantId ? await db.select({ email: users.email }).from(aiAssistants).leftJoin(users, eq(users.id, aiAssistants.userId)).where(eq(aiAssistants.id, ctx.assistantId)).limit(1) : [];

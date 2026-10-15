@@ -16,7 +16,11 @@ import type { BookingProps, Section, SiteDefinition } from './site-definition';
 import { BOOK_PATH, esc, FORM_SENT_PATH, renderSiteShell, type RenderContext } from './site-render';
 import { bookableDates } from './booking-availability';
 import { formatDate, formatTime, DATE_RE, TIME_RE } from './booking-time';
-import { announceNewBooking, createBooking, emailKey, loadBookingSetup, resourcesForKind, slotsForDay, type BookingSetup } from './bookings';
+import {
+    announceCustomerChange, announceNewBooking, createBooking, customerCancel, customerCanChange, describeBooking, emailCustomer, emailKey,
+    loadBooking, loadBookingSetup, resourcesForKind, slotsForDay, type BookingRow, type BookingSetup,
+} from './bookings';
+import { verifyBookingToken } from './booking-links';
 import { checkRateLimit } from './rate-limit';
 import { looksLikeEmail, normaliseEmail } from './audience-contacts';
 import { cleanText } from './site-definition';
@@ -27,7 +31,8 @@ export const BOOK_LIMITS = { perIp: { maxAttempts: 10, windowSecs: 3600 }, perEm
 export const BOOK_MIN_FILL_MS = 2500;
 const DATES_SHOWN = 21;
 
-export interface BookChoice { s: string; svc: number | null; party: number; res: number | 'any' | null; date: string | null; time: string | null; }
+/** `mv`/`mt`: moving an existing booking (its id and signed token — booking-links.ts). */
+export interface BookChoice { s: string; svc: number | null; party: number; res: number | 'any' | null; date: string | null; time: string | null; mv?: number | null; mt?: string | null; }
 
 export function readChoice(q: URLSearchParams): BookChoice {
     const n = (k: string) => { const v = Number(q.get(k)); return Number.isInteger(v) && v > 0 ? v : null; };
@@ -39,6 +44,8 @@ export function readChoice(q: URLSearchParams): BookChoice {
         res: res === 'any' ? 'any' : n('res'),
         date: DATE_RE.test(String(q.get('date'))) ? String(q.get('date')) : null,
         time: TIME_RE.test(String(q.get('time'))) ? String(q.get('time')) : null,
+        mv: n('mv'),
+        mt: /^[0-9a-f]{20}$/.test(String(q.get('mt'))) ? String(q.get('mt')) : null,
     };
 }
 
@@ -52,6 +59,7 @@ export function bookLink(c: BookChoice, over: Partial<BookChoice> = {}): string 
     if (m.res) q.set('res', String(m.res));
     if (m.date) q.set('date', m.date);
     if (m.time) q.set('time', m.time);
+    if (m.mv && m.mt) { q.set('mv', String(m.mv)); q.set('mt', m.mt); }
     return `${BOOK_PATH}?${q.toString()}`;
 }
 
@@ -86,8 +94,47 @@ function summary(c: BookChoice, props: BookingProps, setup: BookingSetup): strin
     return bits.length ? `<p class="fine"><strong>${esc(bits.join(' · '))}</strong> · <a href="${esc(bookLink({ ...c, svc: null, party: 0, res: null, date: null, time: null }))}">Start again</a></p>` : '';
 }
 
+/** The booking a manage link names — only if the signature is right and it belongs to this site's business. */
+async function bookingFromLink(b: BookCtx, idRaw: unknown, token: unknown): Promise<BookingRow | null> {
+    const id = Number(idRaw);
+    if (!Number.isInteger(id) || id <= 0 || !verifyBookingToken(id, String(token || ''))) return null;
+    const row = await loadBooking(b.db, id);
+    return row && row.organisationId === b.site.organisationId ? row : null;
+}
+
+/** The first booking section on the site that takes this kind of booking — where a move starts. */
+function sectionForKind(def: SiteDefinition, kind: string): string | null {
+    for (const p of def.pages) for (const s of p.sections) if (s.type === 'booking' && s.props.kind === kind) return s.id;
+    return null;
+}
+
+/** GET /_book?manage=<id>&t=<sig> — the customer's own booking: see it, cancel it, or choose a new time. */
+async function managePage(b: BookCtx, q: URLSearchParams): Promise<BookPage> {
+    const row = await bookingFromLink(b, q.get('manage'), q.get('t'));
+    if (!row) return page(b, 'Booking not found', '<h1>We couldn\'t find that booking</h1><p>The link may be incomplete. Please get in touch with us.</p><p><a class="btn" href="/">Go to the home page</a></p>', 404);
+    const setup = await loadBookingSetup(b.db, b.site.organisationId);
+    const { when, what } = describeBooking(row, setup.settings.timezone);
+    const status = { pending: 'Waiting to be confirmed', confirmed: 'Confirmed', declined: 'Not accepted', cancelled: 'Cancelled' }[row.status] ?? row.status;
+    const head = `<h1>Your booking</h1><p><strong>${esc(what)}</strong><br>${esc(when)}<br>${esc(status)}</p>`;
+    if (!customerCanChange(row, setup.settings.minNoticeMinutes, b.now)) {
+        const why = row.status === 'cancelled' || row.status === 'declined' ? '' : '<p>It\'s too close to the time to change it here — please get in touch with us directly.</p>';
+        return page(b, 'Your booking', `${head}${why}<p><a class="btn s" href="/">Go to the website</a></p>`);
+    }
+    const token = String(q.get('t'));
+    if (q.get('do') === 'cancel') {
+        return page(b, 'Cancel your booking?', `${head}<h2>Cancel this booking?</h2>
+<form class="fm" method="post" action="${BOOK_PATH}"><input type="hidden" name="_action" value="cancel"><input type="hidden" name="manage" value="${row.id}"><input type="hidden" name="t" value="${esc(token)}">
+<button class="btn" type="submit">Yes, cancel it</button></form><p><a href="${esc(`${BOOK_PATH}?manage=${row.id}&t=${token}`)}">No, keep it</a></p>`);
+    }
+    const s = sectionForKind(b.def, row.kind);
+    const move = s ? `<a class="btn" href="${esc(bookLink({ s, svc: row.serviceId, party: row.kind === 'table' ? row.partySize : 0, res: row.resourceId ?? 'any', date: null, time: null, mv: row.id, mt: token }))}">Choose a new time</a> ` : '';
+    const policy = setup.settings.cancellationPolicy ? `<p class="fine"><strong>Cancellation:</strong> ${esc(setup.settings.cancellationPolicy)}</p>` : '';
+    return page(b, 'Your booking', `${head}<p>${move}<a class="btn s" href="${esc(`${BOOK_PATH}?manage=${row.id}&t=${token}&do=cancel`)}">Cancel it</a></p>${policy}`);
+}
+
 /** GET /_book — the next step for the choices made so far. */
 export async function bookStep(b: BookCtx, q: URLSearchParams, message: string | null = null): Promise<BookPage> {
+    if (q.get('manage')) return managePage(b, q);
     const c = readChoice(q);
     const found = findBookingSection(b.def, c.s);
     if (!found) return page(b, 'Booking isn\'t available', '<h1>Booking isn\'t available</h1><p>This page has changed since you opened it.</p><p><a class="btn" href="/">Go to the home page</a></p>', 404);
@@ -135,6 +182,18 @@ export async function bookStep(b: BookCtx, q: URLSearchParams, message: string |
         return page(b, 'Choose a time', `<h1>Choose a time</h1>${summary({ ...c, time: null }, props, setup)}${note}${times}<p><a href="${esc(bookLink(c, { date: null, time: null }))}">Choose another day</a></p>${back}`);
     }
 
+    // 5a. Moving a booking: the details are the booking's own — confirm the new time.
+    if (c.mv && c.mt) {
+        const old = await bookingFromLink(b, c.mv, c.mt);
+        if (!old || !customerCanChange(old, setup.settings.minNoticeMinutes, b.now)) return page(b, 'Booking can\'t be changed', '<h1>That booking can\'t be changed here</h1><p>Please get in touch with us directly.</p>');
+        const was = describeBooking(old, setup.settings.timezone).when;
+        return page(b, 'Move your booking', `<h1>Move your booking</h1>${summary(c, props, setup)}${note}<p>From <strong>${esc(was)}</strong> to <strong>${esc(formatDate(c.date))}, ${esc(formatTime(c.time))}</strong>.</p>
+<form class="fm" method="post" action="${BOOK_PATH}">
+${['s', 'svc', 'party', 'res', 'date', 'time', 'mv', 'mt'].map((k) => { const v = (c as unknown as Record<string, unknown>)[k]; return v ? `<input type="hidden" name="${k}" value="${esc(String(v))}">` : ''; }).join('')}
+<button class="btn" type="submit">Move my booking</button>
+<p class="fine">Your old time is released when the new one is booked.${setup.settings.mode === 'instant' ? '' : ' We\'ll confirm the new time by email.'}</p></form>${back}`);
+    }
+
     // 5. Your details — the only step that changes anything.
     const policy = setup.settings.cancellationPolicy ? `<p class="fine"><strong>Cancellation:</strong> ${esc(setup.settings.cancellationPolicy)}</p>` : '';
     const how = setup.settings.mode === 'instant' ? 'Your booking is confirmed straight away, by email.' : 'We\'ll confirm your booking by email.';
@@ -152,8 +211,10 @@ ${['s', 'svc', 'party', 'res', 'date', 'time'].map((k) => { const v = (c as unkn
 </form>${policy}${back}`);
 }
 
-/** POST /_book — make the booking. */
+/** POST /_book — make, cancel or move a booking. */
 export async function bookSubmit(b: BookCtx, body: URLSearchParams, ip: string): Promise<BookPage> {
+    if (body.get('_action') === 'cancel') return cancelSubmit(b, body);
+    if (body.get('mv')) return moveSubmit(b, body);
     const c = readChoice(body);
     const found = findBookingSection(b.def, c.s);
     if (!found || !c.date || !c.time) return bookStep(b, body, 'Something was missing — please choose again.');
@@ -194,7 +255,53 @@ export async function bookSubmit(b: BookCtx, body: URLSearchParams, ip: string):
     }
     await announceNewBooking(b.db, made.booking, {
         business: b.def.settings.siteName, timezone: setup.settings.timezone, assistantId: b.site.aiAssistantId,
-        cancellationPolicy: setup.settings.cancellationPolicy,
+        cancellationPolicy: setup.settings.cancellationPolicy, siteOrigin: b.ctx.origin,
     }).catch((err) => console.error('[site-booking] notices failed', err));
     return { status: 303, location: `${FORM_SENT_PATH}?k=booking&st=${made.booking.status === 'confirmed' ? 'confirmed' : 'pending'}&b=${encodeURIComponent(found.pagePath)}` };
+}
+
+function noticeCtx(b: BookCtx, setup: BookingSetup) {
+    return { business: b.def.settings.siteName, timezone: setup.settings.timezone, assistantId: b.site.aiAssistantId, cancellationPolicy: setup.settings.cancellationPolicy, siteOrigin: b.ctx.origin };
+}
+
+/** POST /_book _action=cancel — the customer cancels from their manage link. */
+async function cancelSubmit(b: BookCtx, body: URLSearchParams): Promise<BookPage> {
+    const row = await bookingFromLink(b, body.get('manage'), body.get('t'));
+    if (!row) return page(b, 'Booking not found', '<h1>We couldn\'t find that booking</h1>', 404);
+    const setup = await loadBookingSetup(b.db, b.site.organisationId);
+    if (!customerCanChange(row, setup.settings.minNoticeMinutes, b.now)) return managePage(b, new URLSearchParams({ manage: String(row.id), t: String(body.get('t')) }));
+    const done = await customerCancel(b.db, b.site.organisationId, row.id);
+    if (done) {
+        const ctx = noticeCtx(b, setup);
+        await emailCustomer(done, 'cancelled_by_you', ctx, null);
+        await announceCustomerChange(b.db, 'cancelled', done, ctx).catch((err) => console.error('[site-booking] cancel notice failed', err));
+    }
+    return { status: 303, location: `${FORM_SENT_PATH}?k=booking&st=cancelled&b=%2F` };
+}
+
+/** POST /_book with mv — move a booking: release the old time and book the new in one locked step. */
+async function moveSubmit(b: BookCtx, body: URLSearchParams): Promise<BookPage> {
+    const c = readChoice(body);
+    const found = findBookingSection(b.def, c.s);
+    const old = await bookingFromLink(b, c.mv, c.mt);
+    if (!found || !old || !c.date || !c.time) return page(b, 'Booking can\'t be changed', '<h1>That booking can\'t be changed here</h1><p>Please get in touch with us directly.</p>', 404);
+    const setup = await loadBookingSetup(b.db, b.site.organisationId);
+    if (!customerCanChange(old, setup.settings.minNoticeMinutes, b.now)) return managePage(b, new URLSearchParams({ manage: String(old.id), t: String(c.mt) }));
+    const props = found.section.props;
+    const made = await createBooking(b.db, b.site.organisationId, {
+        siteId: b.site.id, kind: props.kind, date: c.date, time: c.time,
+        serviceId: props.kind === 'table' ? null : c.svc, resourceId: typeof c.res === 'number' ? c.res : null,
+        partySize: props.kind === 'table' ? c.party : 1, now: b.now,
+        customerName: old.customerName, customerEmail: old.customerEmail, customerPhone: old.customerPhone, notes: old.notes,
+        replaceBookingId: old.id,
+    });
+    if (!made.ok) {
+        const q = new URLSearchParams(body);
+        q.delete('time');
+        return bookStep(b, q, made.message);
+    }
+    const ctx = noticeCtx(b, setup);
+    await emailCustomer(made.booking, made.booking.status === 'confirmed' ? 'confirmed' : 'received', ctx, null);
+    await announceCustomerChange(b.db, 'moved', made.booking, ctx, old).catch((err) => console.error('[site-booking] move notice failed', err));
+    return { status: 303, location: `${FORM_SENT_PATH}?k=booking&st=${made.booking.status === 'confirmed' ? 'moved' : 'pending'}&b=${encodeURIComponent(found.pagePath)}` };
 }

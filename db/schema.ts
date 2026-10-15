@@ -5631,6 +5631,10 @@ export const bookings = pgTable("bookings", {
   status: text().notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   decidedAt: timestamp("decided_at"),
+  // Phase 2 (db/z-bookings-changes.sql): who cancelled, the booking a move replaced, the reminder.
+  cancelledBy: text("cancelled_by"),
+  movedFromId: integer("moved_from_id"),
+  reminderSentAt: timestamp("reminder_sent_at"),
 }, (t) => [
   index("bookings_org_time_idx").on(t.organisationId, t.startsAt),
   check("bookings_kind_check", sql`${t.kind} IN ('appointment','consultation','table')`),

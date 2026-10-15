@@ -99,6 +99,7 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'lead_reply_received' THEN 'suggested_action'   -- a prospect replied to outreach
     WHEN 'site_enquiry_received' THEN 'suggested_action' -- someone sent a message from the website's contact form (call site passes category)
     WHEN 'site_booking_received' THEN 'suggested_action' -- a booking from the website; state_change when confirmed instantly (call site passes category)
+    WHEN 'site_booking_changed' THEN 'state_change'      -- a customer cancelled or moved their booking (call site passes category)
     WHEN 'leads_expiring_soon' THEN 'suggested_action'   -- leads about to leave the Outreach queue
     -- state_change
     WHEN 'goal_autonomous_adjustment' THEN 'state_change'  -- SMART Goals AC3.3.3

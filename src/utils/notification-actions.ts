@@ -124,6 +124,9 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     // A booking from the website (bookings.ts). A REQUEST waits for the owner's Confirm — the call
     // site passes 'state_change' instead when the business confirms bookings instantly.
     site_booking_received: 'suggested_action',
+    // A customer cancelled or moved their own booking (bookings.ts announceCustomerChange). News —
+    // except a move in "request" mode, which the call site sends as suggested_action (confirm it).
+    site_booking_changed: 'state_change',
     // A welcome sequence / email campaign has subscribers queued and no way to send (no verified
     // domain, no mailbox). suggested_action: it is blocked on the owner, and each queued person
     // gives up after NO_ROUTE_WAIT_DAYS — work that decays.

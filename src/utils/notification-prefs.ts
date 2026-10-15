@@ -195,6 +195,8 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             'site_enquiry_received',
             // A booking from the website (bookings.ts) — a person is waiting when it is a request.
             'site_booking_received',
+            // A customer cancelled or moved their booking from their manage link (bookings.ts).
+            'site_booking_changed',
         ],
     },
     {

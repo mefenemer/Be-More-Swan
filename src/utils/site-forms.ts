@@ -213,6 +213,8 @@ async function handleEnquiry(db: Db, req: SiteFormRequest, section: Extract<Sect
 export async function sentMessage(db: Db, site: SiteRow, def: SiteDefinition, q: URLSearchParams): Promise<{ title: string; message: string; back: string }> {
     const back = safeBackPath(def, q.get('b'));
     if (q.get('k') === 'booking') {
+        if (q.get('st') === 'cancelled') return { title: 'Your booking is cancelled', message: 'We\'ve emailed you to confirm. Thanks for letting us know.', back };
+        if (q.get('st') === 'moved') return { title: 'Your booking has moved', message: 'Your new time is confirmed — we\'ve emailed you the details, with an invite for your calendar.', back };
         return q.get('st') === 'confirmed'
             ? { title: 'You\'re booked in', message: 'Your booking is confirmed. We\'ve emailed you the details, with an invite for your calendar.', back }
             : { title: 'Thank you — we\'ve got your request', message: 'We\'ll confirm your booking by email. Nothing more to do for now.', back };

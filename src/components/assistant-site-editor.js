@@ -562,11 +562,13 @@
     const order = (x) => (x.status === 'pending' ? 0 : 1);
     const sorted = list.slice().sort((a, c) => order(a) - order(c) || new Date(a.startsAt) - new Date(c.startsAt));
     return head + card(`<ul class="space-y-2">${sorted.map((x) => {
-      const [label, tone] = BOOKING_TONE[x.status] || [x.status, 'text-gray-500'];
+      let [label, tone] = BOOKING_TONE[x.status] || [x.status, 'text-gray-500'];
+      if (x.status === 'cancelled') label = x.cancelledBy === 'customer' ? 'Cancelled by them' : 'Cancelled by you';
+      if (x.moved && x.status !== 'cancelled') label += ' · moved by them';
       const past = new Date(x.startsAt).getTime() < now;
       return `<li class="border ${x.status === 'pending' ? 'border-indigo-200' : 'border-gray-200'} rounded-lg p-3 ${past ? 'opacity-70' : ''}">
         <div class="flex flex-wrap items-center justify-between gap-2"><p class="text-xs font-bold text-gray-900">${esc(x.when)}</p><span class="text-xs font-bold ${tone}">${esc(label)}</span></div>
-        <p class="text-xs text-gray-800 mt-1">${esc(x.what)} · ${esc(x.customerName)}</p>
+        <p class="text-xs text-gray-800 mt-1">${esc(x.what)} · ${esc(x.customerName)}${x.reminded ? ' <span class="text-gray-500">· reminder sent</span>' : ''}</p>
         <p class="text-xs text-gray-600 mt-1"><a class="underline" href="mailto:${esc(x.customerEmail)}">${esc(x.customerEmail)}</a>${x.customerPhone ? ` · <a class="underline" href="tel:${esc(x.customerPhone)}">${esc(x.customerPhone)}</a>` : ''}</p>
         ${x.notes ? `<p class="text-xs text-gray-700 mt-1" style="white-space:pre-wrap">${esc(x.notes)}</p>` : ''}
         ${!past && (x.status === 'pending' || x.status === 'confirmed') ? `<div class="flex flex-wrap gap-2 mt-2">

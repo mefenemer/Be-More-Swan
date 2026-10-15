@@ -282,7 +282,8 @@ export default withLambda(async (event) => {
         const setup = await loadBookingSetup(db, orgId);
         const rows = await listBookings(db, orgId);
         return json(200, { bookings: rows.map((b) => ({ ...describeBooking(b, setup.settings.timezone), id: b.id, status: b.status, customerName: b.customerName,
-            customerEmail: b.customerEmail, customerPhone: b.customerPhone, notes: b.notes, partySize: b.partySize, startsAt: b.startsAt, createdAt: b.createdAt })) });
+            customerEmail: b.customerEmail, customerPhone: b.customerPhone, notes: b.notes, partySize: b.partySize, startsAt: b.startsAt, createdAt: b.createdAt,
+            cancelledBy: b.cancelledBy, moved: b.movedFromId !== null, reminded: b.reminderSentAt !== null })) });
     }
 
     if (action === 'booking_decide') {
@@ -292,6 +293,7 @@ export default withLambda(async (event) => {
         const { definition } = definitionOf(site, maxPages);
         const r = await decideBooking(db, orgId, Number(body.id), decision, {
             business: definition.settings.siteName, timezone: setup.settings.timezone, assistantId: assistant.id, cancellationPolicy: setup.settings.cancellationPolicy,
+            siteOrigin: site.slug ? siteOrigin(site.slug) : null,
         });
         if (!r.ok) return json(409, { error: r.error });
         return json(200, { ok: true, status: r.booking.status });

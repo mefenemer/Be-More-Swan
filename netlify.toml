@@ -1111,6 +1111,11 @@ node_bundler = "esbuild"
 [functions.sites]
   timeout = 26
 
+# Website bookings: the day-before reminder (send-booking-reminders.ts). Hourly at :20 — one indexed
+# query that usually finds nothing; a booking is reminded once (reminder_sent_at).
+[functions.send-booking-reminders]
+  schedule = "20 * * * *"
+
 # Conversations tab. `list` and `get` are cheap reads, but the "Send the next chase now" action
 # runs the outreach-sequence worker INLINE and awaits it — one LLM call to draft the follow-up plus
 # one mail-API call to send it, inside the worker's own 20s wall-clock budget (WORKER_BUDGET_MS).
