@@ -37,7 +37,7 @@
 // chat cards never send them (chat-session.js sends only apply and draft), so the owner always
 // decides what goes live. Publishing refuses [placeholders] and runs the safety check on every word.
 
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { aiAssistants } from '../../db/schema';
@@ -51,9 +51,10 @@ import { listSignupForms } from '../../src/utils/site-forms';
 import { readWordsFile } from '../../src/utils/site-words';
 import { attachmentText, quoteFromChat } from '../../src/utils/chat-attachments';
 import { connectAccountFor, connectOnboardingLink, markOrderDone, refreshConnectAccount } from '../../src/utils/site-shop';
-import { bookings, bookingSettings, orgProducts, siteEnquiries, siteOrders, users } from '../../db/schema';
+import { bookings, bookingSettings, orgProducts, orgReviews, siteEnquiries, siteOrders, users } from '../../db/schema';
 import { decideBooking, describeBooking, listBookings, loadBookingSetup } from '../../src/utils/bookings';
 import { cleanBookingSettings, describeHours } from '../../src/utils/booking-settings';
+import { reviewSummary } from '../../src/utils/reviews';
 import { buyablePence, priceDisplay } from '../../src/utils/product-price';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import {
@@ -118,6 +119,13 @@ export default withLambda(async (event) => {
                 .orderBy(asc(orgProducts.sortOrder), asc(orgProducts.id)))
                 .map((r) => ({ id: r.id, name: r.name, kind: r.kind, price: r.price, buyable: buyablePence(r) !== null,
                     imageUrl: r.imageAssetId ? siteAssetUrl(resolveBaseUrl(event.headers as Record<string, string | undefined>) || 'https://bemoreswan.com', r.imageAssetId) : null })),
+            // Business Information ▸ Reviews — the customers' words, for the reviews section's picker.
+            reviews: await (async () => {
+                const rows = await db.select({ id: orgReviews.id, authorName: orgReviews.authorName, rating: orgReviews.rating, body: orgReviews.body, status: orgReviews.status, source: orgReviews.source, reviewedOn: orgReviews.reviewedOn })
+                    .from(orgReviews).where(and(eq(orgReviews.organisationId, orgId), inArray(orgReviews.status, ['published', 'hidden'])))
+                    .orderBy(desc(orgReviews.reviewedOn), desc(orgReviews.id));
+                return { summary: reviewSummary(rows), list: rows.filter((r) => r.status === 'published').map((r) => ({ id: r.id, authorName: r.authorName, rating: r.rating, body: r.body.slice(0, 140), source: r.source, reviewedOn: r.reviewedOn })) };
+            })(),
             payments: await (async () => {
                 const acct = await connectAccountFor(db, orgId);
                 return { connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, detailsSubmitted: !!acct?.detailsSubmitted, canConnect: role === 'owner' || role === 'admin' };

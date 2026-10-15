@@ -1973,6 +1973,51 @@
   }
   register('booking_setup', renderBookingSetupCard);
 
+  // { type: 'reviews_add', summary, reviews: [{ authorName, authorDetail, rating, body, source, reviewedOn }] }
+  // Reviews the owner pasted, set out for them to check WORD FOR WORD before they are saved to
+  // Business Information ▸ Reviews (org-reviews.ts, the same checks as the form there).
+  const RV_SOURCES = { google: 'Google', facebook: 'Facebook', trustpilot: 'Trustpilot', tripadvisor: 'Tripadvisor', checkatrade: 'Checkatrade', yell: 'Yell', direct: 'Sent directly', website: 'Their website', other: 'Elsewhere' };
+  function renderReviewsAddCard(ui, esc) {
+    const reviews = (Array.isArray(ui.reviews) ? ui.reviews : []).filter((r) => r && typeof r === 'object' && typeof r.body === 'string' && r.body.trim()).slice(0, 50)
+      .map((r) => ({ authorName: String(r.authorName || ''), authorDetail: r.authorDetail ? String(r.authorDetail) : null, rating: Number.isInteger(r.rating) ? r.rating : null, body: String(r.body), source: RV_SOURCES[r.source] ? r.source : 'other', reviewedOn: typeof r.reviewedOn === 'string' ? r.reviewedOn : null }));
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Add reviews · Check them first</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <div class="space-y-2 mt-2 max-h-80 overflow-y-auto">${reviews.map((r) => `
+        <div class="bg-white border border-gray-200 rounded-lg p-3">
+          <p class="text-xs"><span class="text-amber-500">${r.rating ? '★'.repeat(r.rating) + '☆'.repeat(5 - r.rating) : 'No stars'}</span> <strong>${esc(r.authorName || '(no name)')}</strong>${r.authorDetail ? ` · ${esc(r.authorDetail)}` : ''} <span class="text-gray-500">· ${esc(RV_SOURCES[r.source])}${r.reviewedOn ? ` · ${esc(r.reviewedOn)}` : ''}</span></p>
+          <p class="text-xs text-gray-700 mt-1 whitespace-pre-line">${esc(r.body)}</p></div>`).join('')}</div>
+      <p class="text-xs text-gray-600 mt-2">Check each one matches what the customer wrote, word for word. They're saved to Business Information ▸ Reviews, where you can edit or hide them.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-rv-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${reviews.length ? '' : 'disabled'}>Add ${reviews.length} review${reviews.length === 1 ? '' : 's'}</button>
+        <button type="button" data-rv-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-rv-status></p>`;
+    const status = el.querySelector('[data-rv-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-rv-cancel]')) { setBusy(true); say('Not added.'); return; }
+      if (!e.target.closest('[data-rv-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('site:reviewsAdd', {
+        bubbles: true,
+        detail: {
+          reviews,
+          respond({ ok, error }) {
+            if (!ok) { setBusy(false); say(error || 'They couldn\'t be saved — nothing was added.', 'error'); return; }
+            say('Added to Business Information ▸ Reviews.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('reviews_add', renderReviewsAddCard);
+
   // ── Built-in: Visual Option Review Card (Brand Designer) ───────────────────
   // { type: 'visual_option_review', briefId, decisions: [{ optionId, decision, reason?, note? }], remake? }
   //

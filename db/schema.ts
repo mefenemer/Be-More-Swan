@@ -5396,6 +5396,28 @@ export const orgProducts = pgTable("org_products", {
   check("org_products_status_check", sql`${t.status} IN ('active','archived')`),
 ]);
 
+// ── Business Information ▸ Reviews (db/z-reviews.sql) ─────────────────────────────────────────────
+// The customer's words, word for word. `hidden` reviews are not quoted but still count in the average.
+export const orgReviews = pgTable("org_reviews", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  authorName: text("author_name").notNull(),
+  authorDetail: text("author_detail"),
+  rating: smallint(),
+  body: text().notNull(),
+  source: text().notNull().default("direct"),
+  sourceUrl: text("source_url"),
+  reviewedOn: date("reviewed_on"),
+  status: text().notNull().default("published"),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("org_reviews_org_idx").on(t.organisationId, t.status, t.reviewedOn),
+  check("org_reviews_rating_check", sql`${t.rating} BETWEEN 1 AND 5`),
+  check("org_reviews_status_check", sql`${t.status} IN ('published','hidden','pending','declined')`),
+]);
+
 // ── The Team feed (db/z-team-feed.sql) ───────────────────────────────────────────────────────────
 // Assistants and the person tell each other things and ask questions. Assistant messages are
 // generated from real state changes (src/utils/team-messages.ts is the ONLY writer); a person's

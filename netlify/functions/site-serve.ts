@@ -23,6 +23,7 @@ import { getDb } from '../../db/client';
 import { sites } from '../../db/schema';
 import { renderRobots, renderSitemap, renderSiteNotice, renderSitePage, esc, BOOK_PATH, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH } from '../../src/utils/site-render';
 import { bookStep, bookSubmit } from '../../src/utils/site-booking';
+import { loadSiteReviews } from '../../src/utils/reviews';
 import { bookingSummary, businessSummary } from '../../src/utils/bookings';
 import { canSell, loadSiteProducts, startCheckout } from '../../src/utils/site-shop';
 import { safeBackPath } from '../../src/utils/site-forms';
@@ -168,6 +169,7 @@ export default withLambda(async (event) => {
         products: hasShop || definition.pages.some((p) => p.sections.some((s) => s.type === 'menu')) ? await loadSiteProducts(db, site.organisationId, definition) : {},
         booking: hasBooking ? await bookingSummary(db, site.organisationId) : null,
         business: await businessSummary(db, site.organisationId),
+        reviews: await loadSiteReviews(db, site.organisationId, definition),
     });
     return { statusCode: page.status, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : page.html };
 });

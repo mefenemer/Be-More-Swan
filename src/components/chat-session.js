@@ -827,6 +827,19 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // "Add N reviews" on a reviews_add card — org-reviews.ts, the same checks as Business Information ▸ Reviews.
+    function onReviewsAdd(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/org-reviews', {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reviews: Array.isArray(d.reviews) ? d.reviews : [] }),
+      })
+        .then(async (r) => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'They couldn\'t be saved.'); })
+        .then(() => { respond({ ok: true }); siteChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     function onSiteDraft(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -1134,6 +1147,7 @@
     container.addEventListener('site:draft', onSiteDraft);
     container.addEventListener('site:words', onSiteWords);
     container.addEventListener('site:bookingSetup', onBookingSetup);
+    container.addEventListener('site:reviewsAdd', onReviewsAdd);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
     container.addEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
@@ -1187,6 +1201,7 @@
         container.removeEventListener('site:draft', onSiteDraft);
         container.removeEventListener('site:words', onSiteWords);
         container.removeEventListener('site:bookingSetup', onBookingSetup);
+        container.removeEventListener('site:reviewsAdd', onReviewsAdd);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
         container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
