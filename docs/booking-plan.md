@@ -34,7 +34,13 @@ restaurants, hairdressers, consultants and more, configured through the website 
 
 1. ✅ (built 2026-10-15) Data, availability engine, `/_book` steps, Bookings tab, emails + .ics,
    chat setup card, Business Information tab. SQL: `db/z-bookings.sql`.
-2. Customer self-service: a signed link to cancel or move a booking; reminder email the day before.
+2. ✅ (built 2026-10-15) Customer self-service: a signed link (`booking-links.ts`, HMAC of the id)
+   in the request, confirmation and reminder emails opens `/_book?manage=…` to cancel (asks first)
+   or choose a new time. A move releases the old time and books the new one in ONE locked
+   transaction, undone if the new time has gone. Allowed until the business's notice period; after
+   that, "get in touch". The owner is told (`site_booking_changed`). Day-before reminder: hourly
+   `send-booking-reminders.ts`, confirmed bookings made more than a day ahead, claimed before
+   sending. SQL: `db/z-bookings-changes.sql`.
 3. Two-way Google / Outlook calendar sync (busy times block slots; bookings appear in the diary).
 4. Optional deposits through Stripe Connect (the shop's connected account, no platform fee).
 5. Classes / events (sessions with fixed times and a capacity).

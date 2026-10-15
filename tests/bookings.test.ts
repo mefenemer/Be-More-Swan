@@ -170,7 +170,7 @@ check('the booking section: a GET doorway to /_book — nothing is held until th
 
 check('the steps read only what was chosen — every choice is checked again against the site and Business Information', () => {
     const c = readChoice(new URLSearchParams('s=abc&svc=5&res=any&date=2026-10-16&time=09:30&party=x&evil=1'));
-    assert.deepStrictEqual(c, { s: 'abc', svc: 5, party: 0, res: 'any', date: '2026-10-16', time: '09:30' });
+    assert.deepStrictEqual(c, { s: 'abc', svc: 5, party: 0, res: 'any', date: '2026-10-16', time: '09:30', mv: null, mt: null });
     assert.deepStrictEqual(readChoice(new URLSearchParams('date=16/10/2026&time=9am')).date, null);
     assert.strictEqual(bookLink(c, { time: null }), '/_book?s=abc&svc=5&res=any&date=2026-10-16');
     const src = read('src/utils/site-booking.ts');

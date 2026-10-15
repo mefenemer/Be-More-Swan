@@ -300,6 +300,22 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // A customer cancelled or moved their own booking from the link in their email (bookings.ts
+        // announceCustomerChange). `booking.change` is a phrase; `booking.next` a full sentence.
+        templateKey: 'site_booking_changed',
+        name: 'A customer changed their booking',
+        category: 'Assistants',
+        type: 'site_booking_changed',
+        title: '{{booking.who}} {{booking.change}}',
+        message: '{{booking.next}}',
+        variables: [
+            ASSISTANT_NAME,
+            v('booking.who', 'Who', 'Sam Patel'),
+            v('booking.change', 'What they did (phrase)', 'moved their booking from Friday 16 October, 10am to Saturday 17 October, 11am'),
+            v('booking.next', 'What happens next (sentence)', 'The new time is confirmed — the old one is free again.'),
+        ],
+    },
+    {
         // A visitor paid on a site's products section (site-shop.ts recordPaidCheckout, from the
         // Connect webhook). The owner is also emailed the order with the delivery address.
         templateKey: 'site_order_received',
