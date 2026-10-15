@@ -138,6 +138,7 @@ section{padding:64px 0}.alt{background:rgba(0,0,0,.035)}
 .cta{text-align:center}.cta .box{background:var(--p);color:var(--ink);border-radius:var(--r);padding:44px 24px}.cta .btn{background:var(--ink);color:var(--p)}
 .ft{border-top:1px solid rgba(0,0,0,.08);padding:28px 0;font-size:.85rem;opacity:.85}.ft .w{display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:space-between}.ft a{color:inherit}
 .pv{background:#111;color:#fff;text-align:center;font-size:.85rem;padding:8px}
+.gal{gap:12px}@media(max-width:699px){.gal{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(min-width:700px){.gal{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}}.gi{margin:0}.gi a{display:block}.gi img{display:block;width:100%;border-radius:var(--r)}.gal.sq img{aspect-ratio:1/1;object-fit:cover}.gal.nat{align-items:start}.gi figcaption{font-size:.85rem;margin-top:6px;opacity:.8}
 .menu{list-style:none;padding:0;margin:8px 0 0}.menu li{padding:10px 0;border-bottom:1px solid rgba(0,0,0,.08)}.mi{display:flex;align-items:baseline;gap:8px}.mn{font-weight:600}.mt{font-weight:400;font-size:.85rem;opacity:.7;white-space:nowrap}.ml{flex:1;min-width:16px;border-bottom:1px dotted currentColor;opacity:.35}.mp{font-weight:700;white-space:nowrap}.md{margin:4px 0 0;font-size:.92rem;opacity:.8}.mnote{margin-top:20px}
 .badge{display:inline-block;padding:6px 12px;border-radius:999px;font-size:.9rem}.badge.on{background:#dcfce7;color:#14532d}.badge.off{background:#f3f4f6;color:#1f2937}
 .hrs{border-collapse:collapse;margin:8px 0 12px;min-width:min(100%,360px)}.hrs th{text-align:left;font-weight:600;padding:6px 24px 6px 0}.hrs td{padding:6px 0}.hrs tr.today{font-weight:800}.hrs tr+tr{border-top:1px solid rgba(0,0,0,.08)}
@@ -287,6 +288,16 @@ ${formButton(p.buttonLabel)}
             const note = formState.preview && fromCatalogue.length && p.productIds.some((id) => formState.products[id]?.buyPence != null)
                 ? '<p class="fine">Buy buttons work on your live site once your Stripe account is connected (Orders tab).</p>' : '';
             return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${note}<div class="grid">${cards.join('')}</div></div></section>`;
+        }
+        case 'gallery': {
+            const p = s.props;
+            const tiles = p.images.map((im) => {
+                const src = imageSrc(im);
+                if (!src) return '';
+                return `<figure class="gi"><a href="${esc(src)}"><img src="${esc(src)}" alt="${esc(im.alt)}" loading="lazy"></a>${im.caption ? `<figcaption>${esc(im.caption)}</figcaption>` : ''}</figure>`;
+            }).filter(Boolean);
+            if (!tiles.length) return '';
+            return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}<div class="grid gal ${p.layout === 'natural' ? 'nat' : 'sq'}">${tiles.join('')}</div></div></section>`;
         }
         case 'menu': {
             // Names, prices, descriptions and lengths from Business Information; the groups are the owner's.
@@ -487,7 +498,7 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
         if (s.type !== 'hero' && s.type !== 'cta') shade = !shade;
         let html = sectionHtml(s, i === h1At, bg);
         // Columns for grid sections (look.columns) — a class on the section's one grid.
-        if (look && look.columns !== 'auto') html = html.replace('class="grid"', `class="grid c${look.columns}"`);
+        if (look && look.columns !== 'auto') html = html.replace(/class="grid(?=[ "])/, `class="grid c${look.columns}`);
         return html;
     }).join('\n');
     return { status: 200, html: documentHtml(def, page, ctx, body) };

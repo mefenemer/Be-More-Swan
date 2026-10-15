@@ -26,7 +26,7 @@
   const API = '/.netlify/functions/sites';
   const POLL_MS = 5000;
 
-  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale', booking: 'Bookings', hours: 'Opening hours & contact', menu: 'Menu / price list' };
+  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale', booking: 'Bookings', hours: 'Opening hours & contact', menu: 'Menu / price list', gallery: 'Gallery' };
   /** The edit form for each section type — the props the gate accepts (site-definition.ts cleanSection). */
   const FORMS = {
     hero: [
@@ -70,6 +70,10 @@
       { k: 'serviceIds', kind: 'servicePick', label: 'Which services can be booked' },
       { k: 'askStaff', kind: 'checkbox', label: 'Let people choose who they book with (or "anyone available")' },
       { k: 'buttonLabel', kind: 'text', label: 'Button text' }],
+    // Gallery: the owner's own pictures, each with what it shows (needed) and an optional caption.
+    gallery: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
+      { k: 'layout', kind: 'select', label: 'Layout', options: [['square', 'Even squares (pictures are cropped to fit)'], ['natural', 'Each picture at its own shape']] },
+      { k: 'images', kind: 'gallery', label: 'Pictures' }],
     // Menu / price list: groups the owner names, filled with Business Information products. Names,
     // prices, descriptions and lengths are read from there — never typed here.
     menu: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
@@ -92,6 +96,7 @@
     products: { heading: 'Shop', productIds: [], collectAddress: false, buyLabel: 'Buy now' },
     booking: { kind: 'appointment', heading: 'Book an appointment', serviceIds: [], askStaff: false, buttonLabel: '' },
     hours: { heading: 'Opening hours', intro: '', showHours: true, showAddress: true, showContact: true },
+    gallery: { heading: 'Gallery', intro: '', layout: 'square', images: [] },
     menu: { heading: 'Prices', intro: '', groups: [{ title: '', productIds: [] }], showDescriptions: true, showDurations: false, note: '' },
   };
   /** A library picture's thumbnail: picked this session, or the link the server sent with the site. */
@@ -274,6 +279,28 @@
           : '<p class="text-xs text-gray-500 mt-1">You haven\'t added any products or services yet.</p>'}
         <p class="text-xs text-gray-500 mt-2">Add products, or change a name, price or picture, in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} — every page and checkout follows. Only fixed prices can be bought online.</p>`;
     }
+    if (f.kind === 'gallery') {
+      const list = Array.isArray(value) ? value : [];
+      return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)} <span class="font-normal text-gray-500">(${list.length} of 24)</span></p>
+        <div data-gallery class="space-y-2 mt-1">${list.map((im, i) => {
+          const src = im.assetId ? thumbOf(im.assetId) : (im.url || '');
+          return `<div class="flex gap-3 border border-gray-200 rounded-lg p-2" data-gallery-item>
+            <input type="hidden" data-g-asset value="${esc(im.assetId || '')}"><input type="hidden" data-g-url value="${esc(im.assetId ? '' : (im.url || ''))}">
+            ${src ? `<img src="${esc(src)}" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:8px;flex-shrink:0">` : '<span style="width:72px;height:72px;flex-shrink:0" class="bg-gray-100 rounded-lg"></span>'}
+            <div class="flex-1 min-w-0">
+              <input data-g-alt class="${inputCls} ${im.alt ? '' : 'border-amber-500'}" placeholder="What the picture shows (needed)" value="${esc(im.alt || '')}">
+              <input data-g-caption class="${inputCls} mt-1" placeholder="Caption under it (optional)" value="${esc(im.caption || '')}">
+              <div class="flex gap-3 mt-1 text-xs">
+                ${i > 0 ? `<button type="button" data-gallery-move="${i}" data-to="${i - 1}" class="text-gray-600 underline">Move up</button>` : ''}
+                ${i < list.length - 1 ? `<button type="button" data-gallery-move="${i}" data-to="${i + 1}" class="text-gray-600 underline">Move down</button>` : ''}
+                <button type="button" data-gallery-remove="${i}" class="text-gray-500 underline">Remove</button>
+              </div>
+            </div>
+          </div>`;
+        }).join('')}</div>
+        ${list.length < 24 ? `<div class="mt-2">${btn('data-gallery-add', list.length ? 'Add more pictures' : 'Choose pictures', !list.length)}</div>` : ''}
+        <p class="text-xs text-gray-500 mt-1">Each picture needs a few words on what it shows — for people using screen readers, and for search engines. Visitors can tap a picture to see it full size.</p>`;
+    }
     if (f.kind === 'menuGroups') {
       // One box per group: its name, then a tick for each Business Information product. A product
       // ticked in one group is greyed out in the others (each appears once on the menu).
@@ -331,6 +358,12 @@
         props[f.k] = assetId ? { assetId, url: '', alt } : url ? { url, alt } : null;
       } else if (f.kind === 'servicePick') {
         props[f.k] = [...form.querySelectorAll('[data-service-pick]:checked')].map((el) => Number(el.value));
+      } else if (f.kind === 'gallery') {
+        props[f.k] = [...form.querySelectorAll('[data-gallery-item]')].map((row) => {
+          const assetId = Number(row.querySelector('[data-g-asset]').value) || null;
+          const base = { alt: row.querySelector('[data-g-alt]').value.trim(), caption: row.querySelector('[data-g-caption]').value.trim() };
+          return assetId ? { ...base, assetId, url: '' } : { ...base, url: row.querySelector('[data-g-url]').value };
+        });
       } else if (f.kind === 'menuGroups') {
         props[f.k] = [...form.querySelectorAll('[data-menu-group]')].map((g) => ({
           title: g.querySelector('[data-menu-title]').value,
@@ -351,7 +384,7 @@
 
   // ── How a section looks (site-definition.ts SectionLook — a closed set of choices) ──────────
   const LOOK_DEFAULT = { background: 'auto', columns: 'auto', menuLabel: null };
-  const GRID_TYPES = ['features', 'steps', 'testimonials', 'products', 'menu'];
+  const GRID_TYPES = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery'];
   function lookHtml(e) {
     const l = e.look || LOOK_DEFAULT;
     const onePage = def().structure === 'one_page';
@@ -882,6 +915,38 @@
     }
     if (t('[data-site-logo-clear]')) { await apply([{ op: 'set_theme', theme: { logoAssetId: null, logoUrl: null } }]); return; }
 
+    const gAdd = t('[data-gallery-add]');
+    if (gAdd && window.MediaPicker) {
+      const form = gAdd.closest('form');
+      window.MediaPicker.open({
+        title: 'Choose pictures for your gallery', multiple: true,
+        onPickMany: (assets) => {
+          syncEditing(form);
+          const have = state.editing.props.images || [];
+          const fresh = assets.filter((a) => !have.some((im) => im.assetId === a.id));
+          fresh.forEach((a) => { state.thumbs[a.id] = a.url; });
+          state.editing.props.images = [...have, ...fresh.map((a) => ({ assetId: a.id, url: '', alt: altFromName(a.name), caption: '' }))].slice(0, 24);
+          render();
+        },
+      });
+      return;
+    }
+    const gMove = t('[data-gallery-move]');
+    if (gMove) {
+      syncEditing(gMove.closest('form'));
+      const list = state.editing.props.images;
+      const [it] = list.splice(Number(gMove.dataset.galleryMove), 1);
+      list.splice(Number(gMove.dataset.to), 0, it);
+      render();
+      return;
+    }
+    const gRm = t('[data-gallery-remove]');
+    if (gRm) {
+      syncEditing(gRm.closest('form'));
+      state.editing.props.images.splice(Number(gRm.dataset.galleryRemove), 1);
+      render();
+      return;
+    }
     const addGroup = t('[data-menu-group-add]');
     if (addGroup) {
       syncEditing(addGroup.closest('form'));
