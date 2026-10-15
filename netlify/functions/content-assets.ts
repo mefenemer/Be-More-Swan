@@ -383,9 +383,13 @@ export default withLambda(async (event) => {
 
             // 'audio' is blog-body only (plan §4 Phase 2) and upload-only. No DDL was needed:
             // asset_type is a text column, so this is a validation change, not a migration.
-            const validTypes = ['image', 'video', 'audio', 'link'];
+            // 'document' is a sign-up form's free download (form-reward.ts): PDF only, upload-only.
+            const validTypes = ['image', 'video', 'audio', 'link', 'document'];
             if (!validTypes.includes(assetType)) {
-                return { statusCode: 400, body: JSON.stringify({ error: 'assetType must be image, video, audio, or link.' }) };
+                return { statusCode: 400, body: JSON.stringify({ error: 'assetType must be image, video, audio, document, or link.' }) };
+            }
+            if (assetType === 'document' && String(mimeType || '').toLowerCase() !== 'application/pdf') {
+                return { statusCode: 400, body: JSON.stringify({ error: 'A document must be a PDF.' }) };
             }
 
             if (assetType === 'link' && !externalUrl) {

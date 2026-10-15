@@ -70,7 +70,7 @@ export async function resolveAssetDisplayUrl(asset: {
     externalUrl?: string | null;
 }): Promise<string | null> {
     if (asset.storageUrl) return asset.storageUrl;
-    const isStored = asset.assetType === 'image' || asset.assetType === 'video' || asset.assetType === 'audio';
+    const isStored = asset.assetType === 'image' || asset.assetType === 'video' || asset.assetType === 'audio' || asset.assetType === 'document';
     if (!isStored) return asset.externalUrl || null;
     if (asset.storageKey) {
         // Stable within a window so a re-read list hands the browser the same URLs it already has

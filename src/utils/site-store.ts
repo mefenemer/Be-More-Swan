@@ -411,7 +411,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
     lines.push(await reviewsForPrompt(db, orgId).catch(() => 'Their reviews could not be read this turn.'));
     const forms = await listSignupForms(db, orgId).catch(() => []);
     lines.push(forms.length
-        ? `Their sign-up forms (for a signup section's formId): ${forms.map((f) => `${f.name} (formId ${f.id}${f.active ? '' : ', switched off'})`).join('; ')}.`
+        ? `Their sign-up forms (for a signup section's formId): ${forms.map((f) => `${f.name} (formId ${f.id}${f.download ? `, emails a free download: "${f.download}"` : ''}${f.active ? '' : ', switched off'})`).join('; ')}.`
         : 'They have no sign-up forms yet — a signup section needs one (made with the Email Marketing Assistant or in Audience).');
     const [{ n: newEnquiries } = { n: 0 }] = await db.select({ n: sql<number>`count(*)::int` }).from(siteEnquiries)
         .where(and(eq(siteEnquiries.siteId, site.id), eq(siteEnquiries.status, 'new')));

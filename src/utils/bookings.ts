@@ -236,9 +236,9 @@ export function bookingIcs(b: BookingRow, business: string, uidDomain = 'bemores
 }
 
 /** "Willowbrook Coffee (via Be More Swan)" — the business named, the address ours (email.ts). */
-const fromLine = (business: string) => `${business.replace(/[<>"\\\r\n]/g, '').slice(0, 60) || 'Your booking'} (via Be More Swan) <noreply@bemoreswan.com>`;
+export const fromLine = (business: string) => `${business.replace(/[<>"\\\r\n]/g, '').slice(0, 60) || 'Your booking'} (via Be More Swan) <noreply@bemoreswan.com>`;
 
-async function ownerOf(db: Db, assistantId: number | null): Promise<{ userId: number; name: string; email: string | null } | null> {
+export async function ownerOf(db: Db, assistantId: number | null): Promise<{ userId: number; name: string; email: string | null } | null> {
     if (!assistantId) return null;
     const [o] = await db.select({ userId: aiAssistants.userId, name: aiAssistants.name, email: users.email })
         .from(aiAssistants).leftJoin(users, eq(users.id, aiAssistants.userId)).where(eq(aiAssistants.id, assistantId)).limit(1);

@@ -84,7 +84,7 @@
       tab: 'questions',
       openField: null,
       previewAs: 'hosted',
-      segments: [], sequences: [], images: [],
+      segments: [], sequences: [], images: [], documents: [], rewardUploading: false, rewardError: null,
       slugState: null,
       dragFrom: null,
       dirty: false,
@@ -108,7 +108,10 @@
     S.images = [].concat(groups.pending || [], groups.scheduled || [], groups.posted || [])
       .filter((a) => a.assetType === 'image' && (a.storageUrl || a.externalUrl))
       .map((a) => ({ id: a.id, url: a.storageUrl || a.externalUrl, name: a.name || '' }));
-    if (S.tab === 'after' || S.tab === 'look') renderPanel();
+    S.documents = [].concat(groups.pending || [], groups.scheduled || [], groups.posted || [])
+      .filter((a) => a.assetType === 'document' && a.status !== 'rejected')
+      .map((a) => ({ id: a.id, name: a.name || 'Untitled PDF' }));
+    if (S.tab === 'after' || S.tab === 'look' || S.tab === 'words') renderPanel();
     renderPreview();
   }
 
@@ -309,7 +312,48 @@
       <p class="text-[11px] text-gray-400 -mt-1 mb-2">Shown beside the button, and kept with every sign-up as the record of what they agreed to.</p>
       <label class="flex items-center gap-2 text-sm text-gray-700 mb-4 cursor-pointer"><input type="checkbox" data-fb-consent="requireCheckbox" ${S.def.consent.requireCheckbox ? 'checked' : ''}> <span data-explain="form-consent-checkbox">They must tick a box to agree</span></label>
       ${label('Message after signing up', 'form-success')}${input('data-fb-content="successMessage" maxlength="300" placeholder="Leave blank for the standard message"', c.successMessage)}
-      ${label('Or send them to a page (optional)', 'form-redirect')}${input('data-fb-content="redirectUrl" maxlength="500" placeholder="https://…"', c.redirectUrl || '')}`;
+      ${label('Or send them to a page (optional)', 'form-redirect')}${input('data-fb-content="redirectUrl" maxlength="500" placeholder="https://…"', c.redirectUrl || '')}
+      ${panelReward()}`;
+  }
+
+  // A free download (a lead magnet — src/utils/form-reward.ts): a PDF emailed to each person once
+  // they're subscribed (after confirming, if the form asks for that). Chosen from the library's
+  // documents or uploaded here; the server checks it is this workspace's own at save time.
+  function panelReward() {
+    const r = S.def.reward || null;
+    const chosen = r ? S.documents.find((x) => Number(x.id) === Number(r.assetId)) : null;
+    return `<div class="rounded-xl border border-gray-200 bg-gray-50 p-3 mt-2">
+      <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Free download (optional)</p>
+      <p class="text-[11px] text-gray-500 mb-2">A PDF — a guide, a price list, a checklist — emailed to everyone who signs up${S.def.audience.doubleOptIn ? ', once they confirm' : ''}. The link stops working if you remove or replace it here.</p>
+      ${r ? `<div class="flex flex-wrap items-center gap-2 mb-2"><span class="text-sm font-bold text-gray-900">📄 ${esc(chosen ? chosen.name : 'Chosen PDF')}</span><button type="button" data-fb-reward="" class="text-xs font-bold text-red-600 cursor-pointer">Remove</button></div>
+        ${label('Call it', '')}${input('data-fb-reward-label maxlength="80" placeholder="e.g. 2026 price list"', r.label === 'your free download' ? '' : r.label)}` : ''}
+      ${S.documents.length ? `<select data-fb-reward-pick class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm mb-2 bg-white"><option value="">${r ? 'Use a different PDF from your library…' : 'Choose a PDF from your library…'}</option>${S.documents.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select>` : ''}
+      <label class="btn-secondary inline-block px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">${S.rewardUploading ? 'Uploading…' : 'Upload a PDF'}<input type="file" accept="application/pdf" data-fb-reward-file hidden></label>
+      ${S.rewardError ? `<p class="text-xs text-red-600 mt-2">${esc(S.rewardError)}</p>` : ''}
+    </div>`;
+  }
+
+  async function uploadRewardPdf(file) {
+    if (!file || file.type !== 'application/pdf') { S.rewardError = 'Choose a PDF file.'; renderPanel(); return; }
+    if (file.size > 25 * 1024 * 1024) { S.rewardError = 'That PDF is too large (the limit is 25 MB).'; renderPanel(); return; }
+    S.rewardUploading = true; S.rewardError = null; renderPanel();
+    try {
+      const post = (url, body) => fetch(url, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(async (r) => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'The upload failed. Please try again.'); return j; });
+      const u = await post('/.netlify/functions/content-upload-url', { fileName: file.name, mimeType: file.type, fileSize: file.size });
+      if (!u.mock) {
+        const put = await fetch(u.uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+        if (!put.ok) throw new Error('The upload failed. Please try again.');
+      }
+      const c = await post('/.netlify/functions/content-assets', { name: file.name, assetType: 'document', mimeType: file.type, fileSize: file.size, storageKey: u.storageKey });
+      if (c.rejected) throw new Error((c.asset && c.asset.rejectionReason) || 'That file was flagged and can\'t be used.');
+      if (!S) return;
+      S.documents.unshift({ id: c.asset.id, name: c.asset.name || file.name });
+      // A new file gets a name from its own file name; the owner can change it under "Call it".
+      S.def.reward = { assetId: c.asset.id, label: file.name.replace(/\.pdf$/i, '').replace(/[-_]+/g, ' ').trim() || 'your free download' };
+      touched();
+    } catch (err) { if (S) S.rewardError = err.message; }
+    if (S) { S.rewardUploading = false; renderPanel(); }
   }
 
   function panelShare() {
@@ -437,6 +481,8 @@
     if (mv && !mv.disabled) { move(Number(mv.getAttribute('data-fb-move')), Number(mv.getAttribute('data-dir'))); return; }
     const rm = t.closest('[data-fb-remove]');
     if (rm) { S.def.fields.splice(Number(rm.getAttribute('data-fb-remove')), 1); touched(); renderPanel(); renderPreview(); return; }
+    const rw = t.closest('[data-fb-reward]');
+    if (rw) { S.def.reward = null; touched(); renderPanel(); return; }
     const logo = t.closest('[data-fb-logo]');
     if (logo) {
       const id = Number(logo.getAttribute('data-fb-logo'));
@@ -517,6 +563,15 @@
       touched(); renderPreview();
       return;
     }
+    if (t.hasAttribute('data-fb-reward-pick')) {
+      const id = Number(t.value);
+      if (!id) return;
+      const doc = S.documents.find((x) => Number(x.id) === id);
+      S.def.reward = { assetId: id, label: (doc ? doc.name.replace(/\.pdf$/i, '').replace(/[-_]+/g, ' ').trim() : '') || 'your free download' };
+      touched(); renderPanel(); return;
+    }
+    if (t.hasAttribute('data-fb-reward-label')) { if (S.def.reward) S.def.reward.label = t.value.trim() || 'your free download'; touched(); return; }
+    if (t.hasAttribute('data-fb-reward-file')) { if (e.type !== 'change') return; const f = t.files && t.files[0]; t.value = ''; if (f) uploadRewardPdf(f); return; }
     if (t.hasAttribute('data-fb-content')) { const k = t.getAttribute('data-fb-content'); d.content[k] = k === 'redirectUrl' ? (t.value.trim() || null) : t.value; touched(); renderPreview(); return; }
     if (t.hasAttribute('data-fb-consent')) { const k = t.getAttribute('data-fb-consent'); d.consent[k] = k === 'requireCheckbox' ? t.checked : t.value; touched(); renderPreview(); return; }
     if (t.hasAttribute('data-fb-delivery')) { d.delivery[t.getAttribute('data-fb-delivery')].enabled = t.checked; touched(); renderPanel(); return; }

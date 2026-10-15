@@ -84,6 +84,12 @@ export interface FormDefinition {
     audience: { doubleOptIn: boolean; segmentId: number | null; tags: string[] };
     /** sequenceId null = the welcome sequence. skipWelcome is meaningful only with a linked campaign. */
     campaign: { sequenceId: number | null; skipWelcome: boolean };
+    /**
+     * A free download (a lead magnet): a document in the workspace's library, emailed to each person
+     * who signs up — when they subscribe, or when they confirm if the form asks for confirmation
+     * (form-reward.ts). Verified to belong to the org at save time, like the logo. Optional.
+     */
+    reward?: { assetId: number; label: string } | null;
 }
 
 export const DEFAULT_STYLE: FormStyle = {
@@ -273,6 +279,12 @@ export function normaliseFormDefinition(raw: unknown, ctx: NormaliseContext = {}
             tags,
         },
         campaign: { sequenceId, skipWelcome: sequenceId ? camp.skipWelcome !== false : false },
+        reward: (() => {
+            const rw = (r.reward && typeof r.reward === 'object' ? r.reward : null) as Record<string, any> | null;
+            const assetId = rw ? Math.floor(Number(rw.assetId)) : 0;
+            if (!rw || !(assetId > 0)) return null;
+            return { assetId, label: str(rw.label, 80) || 'your free download' };
+        })(),
     };
     return { definition, warnings: [...new Set(warnings)] };
 }

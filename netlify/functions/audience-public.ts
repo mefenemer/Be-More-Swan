@@ -30,6 +30,7 @@ import { looksLikeEmail, normaliseEmail, cleanName } from '../../src/utils/audie
 import { addToSegment, applyTagsByName, recordConsentEvent, setContactStatus, upsertContact } from '../../src/utils/audience-store';
 import { bindConversion } from '../../src/utils/campaign-attribution-store';
 import { enrolAfterSignup, enrolInWelcomeSequence } from '../../src/utils/newsletter-sequence';
+import { deliverFormReward } from '../../src/utils/form-reward';
 import {
     FORM_KEY_RE, MIN_FILL_MS, originAllowed,
     DEFAULT_CONSENT_TEXT, DEFAULT_SUCCESS_MESSAGE, SINGLE_OPT_IN_SUCCESS_MESSAGE,
@@ -407,6 +408,8 @@ export default withLambda(async (event: HandlerEvent) => {
                         email: row.email,
                     });
                 }
+                // Confirmed: now the form's free download, if it has one (form-reward.ts). Never throws.
+                await deliverFormReward(db, { formId: row.formId ?? null, contactId: row.contactId, email: row.email, baseUrl: resolveBaseUrl((event.headers || {}) as Record<string, string | undefined>) });
             }
 
             return page(200, 'You are subscribed', `<p>Thanks — you will hear from ${who} soon. Every email carries an unsubscribe link.</p>`);
@@ -661,6 +664,8 @@ export default withLambda(async (event: HandlerEvent) => {
                 formSequenceId: form.sequenceId ?? null,
                 skipWelcome: def.campaign.skipWelcome,
             });
+            // The form's free download, if it has one (form-reward.ts). Never throws.
+            await deliverFormReward(db, { formId: form.id, contactId, email, baseUrl: resolveBaseUrl((event.headers || {}) as Record<string, string | undefined>) });
             return json(200, successBody, origin);
         }
 

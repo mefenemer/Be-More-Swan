@@ -21,7 +21,8 @@ import { eq } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { sites } from '../../db/schema';
-import { renderRobots, renderSitemap, renderSiteNotice, renderSitePage, esc, BOOK_PATH, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH } from '../../src/utils/site-render';
+import { renderRobots, renderSitemap, renderSiteNotice, renderSitePage, esc, BOOK_PATH, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH, REVIEW_PATH } from '../../src/utils/site-render';
+import { reviewPage, reviewSubmit } from '../../src/utils/site-review';
 import { bookStep, bookSubmit } from '../../src/utils/site-booking';
 import { loadSiteReviews } from '../../src/utils/reviews';
 import { bookingSummary, businessSummary } from '../../src/utils/bookings';
@@ -138,6 +139,13 @@ export default withLambda(async (event) => {
             if (bought.kind === 'redirect') return { statusCode: 303, headers: { Location: bought.location, 'Cache-Control': 'no-store' } as Record<string, string>, body: '' };
             return { statusCode: bought.status, headers: headers('text/html; charset=utf-8', 'no-store'), body: renderSiteNotice(definition, ctx, bought.title, bought.message, { label: 'Go back', path: bought.backPath }) };
         }
+        // A review from the link in a review request email (site-review.ts) — it posts to /_form too.
+        const posted = new URLSearchParams(raw.slice(0, 8000));
+        if (posted.get('_k') === 'review' || posted.get('_k') === 'review_stop') {
+            const r = await reviewSubmit({ db, site, def: definition, ctx, now: new Date() }, posted, ip);
+            if ('location' in r) return { statusCode: 303, headers: { Location: r.location, 'Cache-Control': 'no-store' } as Record<string, string>, body: '' };
+            return { statusCode: r.status, headers: headers('text/html; charset=utf-8', 'no-store'), body: r.html };
+        }
         const outcome = await handleSiteForm(db, {
             site, definition, origin, ip, userAgent: h['user-agent'] ?? null,
             body: new URLSearchParams(raw.slice(0, 20000)),
@@ -151,6 +159,11 @@ export default withLambda(async (event) => {
         const step = await bookStep({ db, site, def: definition, ctx, now: new Date() }, new URLSearchParams(String(event.queryStringParameters?.q || '')));
         if ('location' in step) return { statusCode: 303, headers: { Location: step.location } as Record<string, string>, body: '' };
         return { statusCode: step.status, headers: headers('text/html; charset=utf-8', 'no-store'), body: step.html };
+    }
+    if (path === REVIEW_PATH) {
+        const r = await reviewPage({ db, site, def: definition, ctx, now: new Date() }, new URLSearchParams(String(event.queryStringParameters?.q || '')));
+        if ('location' in r) return { statusCode: 303, headers: { Location: r.location } as Record<string, string>, body: '' };
+        return { statusCode: r.status, headers: { ...headers('text/html; charset=utf-8', 'no-store'), 'X-Robots-Tag': 'noindex' }, body: r.html };
     }
     if (path === FORM_SENT_PATH) {
         const q = new URLSearchParams(String(event.queryStringParameters?.q || ''));

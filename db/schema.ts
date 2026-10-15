@@ -5418,6 +5418,42 @@ export const orgReviews = pgTable("org_reviews", {
   check("org_reviews_status_check", sql`${t.status} IN ('published','hidden','pending','declined')`),
 ]);
 
+// ── Asking customers for reviews (db/z-review-requests.sql) ──────────────────────────────────────
+export const reviewSettings = pgTable("review_settings", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  askAfterBookings: boolean("ask_after_bookings").notNull().default(false),
+  askAfterOrders: boolean("ask_after_orders").notNull().default(false),
+  bookingDelayHours: integer("booking_delay_hours").notNull().default(24),
+  orderDelayDays: integer("order_delay_days").notNull().default(7),
+  googleReviewUrl: text("google_review_url"),
+  enabledAt: timestamp("enabled_at"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [uniqueIndex("review_settings_org_uq").on(t.organisationId)]);
+
+export const reviewRequests = pgTable("review_requests", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  siteId: integer("site_id").references(() => sites.id, { onDelete: "set null" }),
+  bookingId: integer("booking_id").references(() => bookings.id, { onDelete: "set null" }),
+  orderId: integer("order_id").references(() => siteOrders.id, { onDelete: "set null" }),
+  customerName: text("customer_name"),
+  customerEmail: text("customer_email").notNull(),
+  about: text(),
+  sentAt: timestamp("sent_at"),
+  skippedReason: text("skipped_reason"),
+  respondedAt: timestamp("responded_at"),
+  reviewId: integer("review_id").references(() => orgReviews.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const reviewOptOuts = pgTable("review_opt_outs", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  emailKey: text("email_key").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [uniqueIndex("review_opt_outs_org_email_uq").on(t.organisationId, t.emailKey)]);
+
 // ── The Team feed (db/z-team-feed.sql) ───────────────────────────────────────────────────────────
 // Assistants and the person tell each other things and ask questions. Assistant messages are
 // generated from real state changes (src/utils/team-messages.ts is the ONLY writer); a person's

@@ -316,6 +316,22 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // A customer answered a review request email (site-review.ts). The review is 'pending' until
+        // the owner approves it in Business Information ▸ Reviews. `review.stars` is "5★" or "no stars".
+        templateKey: 'site_review_received',
+        name: 'A customer sent a review',
+        category: 'Assistants',
+        type: 'site_review_received',
+        title: 'New review from {{review.who}} ({{review.stars}})',
+        message: '{{review.next}}',
+        variables: [
+            ASSISTANT_NAME,
+            v('review.who', 'Their name, as they want it shown', 'Sam P.'),
+            v('review.stars', 'Their stars', '5★'),
+            v('review.next', 'What happens next (sentence)', 'Approve it in Business Information ▸ Reviews to show it on your website.'),
+        ],
+    },
+    {
         // A visitor paid on a site's products section (site-shop.ts recordPaidCheckout, from the
         // Connect webhook). The owner is also emailed the order with the delivery address.
         templateKey: 'site_order_received',

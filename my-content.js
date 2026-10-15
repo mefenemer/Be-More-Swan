@@ -55,6 +55,7 @@ const MEDIA_TYPES = {
     video: 'Video',
     card:  'Branded card',
     audio: 'Sound',
+    document: 'Document',
     link:  'Link',
 };
 

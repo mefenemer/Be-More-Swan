@@ -26,7 +26,11 @@ export const ALLOWED_MIME_TYPES = new Set([
     // AI generation. audio/mpeg covers .mp3; mp4 covers .m4a. Kept in step with the Studio's
     // inline upload `accept` list — widening one without the other just moves the rejection.
     'audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/webm', 'audio/ogg',
+    // A free download for a sign-up form (a lead magnet — form-reward.ts). PDF only, upload-only,
+    // stored as assetType 'document'; kept small (MAX_DOCUMENT_SIZE) because it is emailed out.
+    'application/pdf',
 ]);
+const MAX_DOCUMENT_SIZE = 25 * 1024 * 1024; // 25 MB
 
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB
 
@@ -76,6 +80,9 @@ export default withLambda(async (event) => {
         }
         if (fileSize && fileSize > MAX_FILE_SIZE) {
             return { statusCode: 400, body: JSON.stringify({ error: 'File exceeds 500 MB limit.' }) };
+        }
+        if (baseMime(mimeType) === 'application/pdf' && (!fileSize || fileSize > MAX_DOCUMENT_SIZE)) {
+            return { statusCode: 400, body: JSON.stringify({ error: 'A PDF can be up to 25 MB.' }) };
         }
 
         const ext = fileName.split('.').pop()?.toLowerCase() || 'bin';
