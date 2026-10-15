@@ -1116,6 +1116,11 @@ node_bundler = "esbuild"
 [functions.send-booking-reminders]
   schedule = "20 * * * *"
 
+# Review requests (send-review-requests.ts): once per booking / order, only for workspaces that turned
+# it on. Hourly at :35 — two indexed queries that usually find nothing.
+[functions.send-review-requests]
+  schedule = "35 * * * *"
+
 # Conversations tab. `list` and `get` are cheap reads, but the "Send the next chase now" action
 # runs the outreach-sequence worker INLINE and awaits it — one LLM call to draft the follow-up plus
 # one mail-API call to send it, inside the worker's own 20s wall-clock budget (WORKER_BUDGET_MS).

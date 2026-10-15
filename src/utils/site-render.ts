@@ -48,6 +48,9 @@ export interface SiteRenderBooking { ready: boolean; services: Array<{ id: numbe
 /** Where every booking step lives (booking-render.ts, served by site-serve.ts). */
 export const BOOK_PATH = '/_book';
 
+/** A customer's review page (site-review.ts): the link in a review request email. Its form posts to FORM_ACTION. */
+export const REVIEW_PATH = '/_review';
+
 /** Where a Buy button posts (step 3c) — site-serve.ts starts a Stripe Checkout and redirects. */
 export const BUY_ACTION = '/_buy';
 

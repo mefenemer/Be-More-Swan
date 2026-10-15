@@ -6,7 +6,7 @@
 // stops it being quoted, never improves the score (DMCC Act 2024: reviews must not be presented in
 // a misleading way). Pending / declined are customer-sent reviews not yet approved — never counted.
 
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { orgReviews } from '../../db/schema';
 import type { SiteDefinition } from './site-definition';
@@ -120,8 +120,10 @@ export async function reviewsForPrompt(db: Db, orgId: number): Promise<string> {
     const rows = await db.select({ id: orgReviews.id, authorName: orgReviews.authorName, rating: orgReviews.rating, body: orgReviews.body, status: orgReviews.status, source: orgReviews.source })
         .from(orgReviews).where(and(eq(orgReviews.organisationId, orgId), inArray(orgReviews.status, [...COUNTED_STATUSES])))
         .orderBy(desc(orgReviews.reviewedOn), desc(orgReviews.id));
-    if (!rows.length) return 'They have no reviews in Business Information yet — a reviews section needs them (Business Information ▸ Reviews, or they can paste reviews to you and you offer a reviews_add card).';
+    const [{ n: waiting }] = await db.select({ n: sql<number>`count(*)::int` }).from(orgReviews).where(and(eq(orgReviews.organisationId, orgId), eq(orgReviews.status, 'pending')));
+    const pendingLine = Number(waiting) ? ` ${waiting} review${Number(waiting) === 1 ? '' : 's'} sent in by customers ${Number(waiting) === 1 ? 'is' : 'are'} waiting for their approval in Business Information ▸ Reviews (you cannot approve them; point them there).` : '';
+    if (!rows.length) return (pendingLine ? pendingLine.trim() + ' ' : '') + 'They have no reviews in Business Information yet — a reviews section needs them (Business Information ▸ Reviews, or they can paste reviews to you and you offer a reviews_add card).';
     const s = reviewSummary(rows);
     const shown = rows.filter((r) => r.status === 'published').slice(0, 30);
-    return `Their reviews (Business Information ▸ Reviews; for a reviews section's reviewIds)${s ? `, average ${s.average} from ${s.rated} rated` : ''}: ${shown.map((r) => `reviewId ${r.id} — ${r.authorName}${r.rating ? `, ${r.rating}★` : ''}, ${r.source}: "${r.body.replace(/\s+/g, ' ').slice(0, 80)}${r.body.length > 80 ? '…' : ''}"`).join('; ')}${rows.length > shown.length ? ` (and ${rows.length - shown.length} more, some hidden)` : ''}.`;
+    return `Their reviews (Business Information ▸ Reviews; for a reviews section's reviewIds)${s ? `, average ${s.average} from ${s.rated} rated` : ''}: ${shown.map((r) => `reviewId ${r.id} — ${r.authorName}${r.rating ? `, ${r.rating}★` : ''}, ${r.source}: "${r.body.replace(/\s+/g, ' ').slice(0, 80)}${r.body.length > 80 ? '…' : ''}"`).join('; ')}${rows.length > shown.length ? ` (and ${rows.length - shown.length} more, some hidden)` : ''}.${pendingLine}`;
 }
