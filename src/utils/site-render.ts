@@ -121,6 +121,10 @@ section{padding:64px 0}.alt{background:rgba(0,0,0,.035)}
 .cta{text-align:center}.cta .box{background:var(--p);color:var(--ink);border-radius:var(--r);padding:44px 24px}.cta .btn{background:var(--ink);color:var(--p)}
 .ft{border-top:1px solid rgba(0,0,0,.08);padding:28px 0;font-size:.85rem;opacity:.85}.ft .w{display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:space-between}.ft a{color:inherit}
 .pv{background:#111;color:#fff;text-align:center;font-size:.85rem;padding:8px}
+html{scroll-behavior:smooth}section[id]{scroll-margin-top:12px}
+.band{background:var(--p);color:var(--ink)}.band a:not(.btn){color:var(--ink)}.band .card,.band details{color:var(--t)}.band .btn{background:var(--ink);color:var(--p)}
+@media(min-width:700px){.grid.c2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid.c3{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.tx{display:grid;gap:28px;align-items:center}.tx img{border-radius:var(--r)}@media(min-width:800px){.tx{grid-template-columns:1fr 1fr}.tx.left img{order:0}.tx.right img{order:2}}
 .fm{display:grid;gap:14px;margin-top:20px;max-width:560px}.fm label{display:grid;gap:4px;font-weight:600;font-size:.95rem}.fm .opt{display:flex;gap:8px;align-items:flex-start;font-weight:400}
 .fm input:not([type=checkbox]):not([type=radio]),.fm textarea,.fm select{font:inherit;color:var(--t);background:var(--b);border:1px solid rgba(0,0,0,.25);border-radius:var(--r);padding:10px 12px;width:100%}
 .fm fieldset{border:0;padding:0;margin:0;display:grid;gap:6px}.fm legend{font-weight:600;font-size:.95rem;margin-bottom:4px}.fm .help,.fm .fine{font-size:.85rem;opacity:.8;font-weight:400;margin:0}
@@ -181,9 +185,12 @@ function linkHtml(l: Link, secondary = false): string {
 }
 
 /** One section. `h1` is true for the single section that carries the page's main heading. */
-function sectionHtml(s: Section, h1: boolean, alt: boolean): string {
+/** The background a section is drawn on: none, the soft tint, or the brand colour (look.background). */
+type SectionBg = '' | 'alt' | 'band';
+
+function sectionHtml(s: Section, h1: boolean, bg: SectionBg): string {
     const H = h1 ? 'h1' : 'h2';
-    const cls = alt ? ' class="alt"' : '';
+    const cls = bg ? ` class="${bg}"` : '';
     switch (s.type) {
         case 'hero': {
             const p = s.props;
@@ -202,7 +209,13 @@ function sectionHtml(s: Section, h1: boolean, alt: boolean): string {
         }
         case 'text': {
             const p = s.props;
-            return `<section${cls} id="${esc(s.id)}"><div class="w n">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${paragraphs(p.body)}</div></section>`;
+            const words = `${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${paragraphs(p.body)}`;
+            const src = imageSrc(p.image);
+            if (p.image && src) {
+                // Beside the words on a wide screen (left or right), above them on a phone.
+                return `<section${cls} id="${esc(s.id)}"><div class="w tx ${p.imageSide}"><img src="${esc(src)}" alt="${esc(p.image.alt)}" loading="lazy"><div>${words}</div></div></section>`;
+            }
+            return `<section${cls} id="${esc(s.id)}"><div class="w n">${words}</div></section>`;
         }
         case 'faq': {
             const p = s.props;
@@ -376,7 +389,7 @@ ${ld.map((x) => `<script type="application/ld+json">${jsonLd(x)}</script>`).join
 ${ctx.preview ? '<div class="pv">Preview — this version is not live yet.</div>' : ''}
 <header class="hd"><div class="w">
 <a class="brand" href="${esc(href('/'))}">${logoSrc(def.theme) ? `<img src="${esc(logoSrc(def.theme))}" alt="${esc(s.siteName)}">` : esc(s.siteName)}</a>
-${menu.length > 1 ? `<nav aria-label="Main"><ul class="nav">${menu.map((m) => `<li><a href="${esc(href(m.path))}"${page && m.pageId === page.id ? ' aria-current="page"' : ''}>${esc(m.label)}</a></li>`).join('')}</ul></nav>` : ''}
+${menu.length > (def.structure === 'one_page' ? 0 : 1) ? `<nav aria-label="Main"><ul class="nav">${menu.map((m) => `<li><a href="${esc(m.sectionId && page && page.slug !== '' ? `${href('/')}${m.path}` : href(m.path))}"${page && m.pageId === page.id && !m.sectionId ? ' aria-current="page"' : ''}>${esc(m.label)}</a></li>`).join('')}</ul></nav>` : ''}
 </div></header>
 <main>
 ${body}
@@ -402,8 +415,15 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
     let body = h1At < 0 ? `<section><div class="w n"><h1>${esc(page.title)}</h1></div></section>` : '';
     let shade = false;
     body += page.sections.map((s, i) => {
-        const html = sectionHtml(s, i === h1At, shade && s.type !== 'hero' && s.type !== 'cta');
+        // Background: 'auto' keeps the gentle alternation pages have always had; the owner can choose
+        // plain, the soft tint, or a band of their brand colour (look.background).
+        const look = s.look;
+        const auto: SectionBg = shade && s.type !== 'hero' && s.type !== 'cta' ? 'alt' : '';
+        const bg: SectionBg = !look || look.background === 'auto' ? auto : look.background === 'soft' ? 'alt' : look.background === 'brand' ? 'band' : '';
         if (s.type !== 'hero' && s.type !== 'cta') shade = !shade;
+        let html = sectionHtml(s, i === h1At, bg);
+        // Columns for grid sections (look.columns) — a class on the section's one grid.
+        if (look && look.columns !== 'auto') html = html.replace('class="grid"', `class="grid c${look.columns}"`);
         return html;
     }).join('\n');
     return { status: 200, html: documentHtml(def, page, ctx, body) };

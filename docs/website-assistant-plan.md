@@ -172,6 +172,11 @@ published_by) · `site_domains` (hostname, verification, cert state). Form submi
      JSON-LD and checkout read Business Information (site-shop.ts loadSiteProducts). Only a fixed
      price is buyable; Buy re-checks name AND price at the click. Old typed-in items: shown, never
      sold, "Move them into Business Information" (sites.ts products_import).
+   - **Layouts, built 2026-10-15:** `structure` pages | one_page (menu = home sections with
+     `look.menuLabel`, as jumps); `combine_pages` (every page onto home, links → jumps, refused over
+     20 sections; an AI draft keeps one-page sites one page); `hideFromMenu` per page (landing
+     pages); `look` per section (background auto | plain | soft | brand, columns for grid sections,
+     menu label) and a picture beside text (left / right). All closed choices through the gate.
 4. Custom domains (D2). Mystery Shopper → one-click fixes.
 5. (moved into 3)
 6. Import-my-site, remaining sections, widget catalogue (post-launch).

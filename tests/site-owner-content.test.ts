@@ -167,7 +167,7 @@ Our roastery is open on Saturdays from 9 until 1.`;
         let work = d;
         for (const op of pr.ops) { const r = applySiteOperation(work, op, { maxPages: 5 }); assert.ok(r.ok, JSON.stringify(op)); if (r.ok) work = r.definition; }
         const secs = work.pages[1].sections;
-        assert.deepStrictEqual(secs[0].props, { heading: 'About Willowbrook', body: blocks[1] });
+        assert.deepStrictEqual(secs[0].props, { heading: 'About Willowbrook', body: blocks[1], image: null, imageSide: 'right' });
         assert.strictEqual(secs[1].type, 'faq');
         assert.deepStrictEqual((secs[1].props as { items: unknown }).items, [{ q: 'Do you deliver?', a: blocks[3] }, { q: 'Can I visit?', a: blocks[5] }]);
         assert.ok(proposalKeepsEveryWord(blocks, pr));

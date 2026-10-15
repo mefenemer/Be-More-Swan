@@ -374,18 +374,20 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
                 ? `TAKEN OFFLINE by Be More Swan${site.suspendedReason ? ` (${site.suspendedReason})` : ''} — they cannot publish; tell them to contact Be More Swan`
                 : `private draft — not published${site.slug ? ` (address chosen: ${siteOrigin(site.slug)})` : ''}`}${drafting ? '; an AI draft of the whole site is being written right now' : ''}.`,
         'Publishing, taking the site offline and choosing its address are buttons on the Website tab only — you cannot do them from chat; point them to the Publish card there.',
-        `Pages: ${d.pages.length} of ${maxPages} on their plan.`,
+        `Pages: ${d.pages.length} of ${maxPages} on their plan. Layout: ${d.structure === 'one_page' ? 'ONE PAGE — the menu jumps down the home page to sections with a menu label' : 'several pages — the menu lists the pages not hidden'}.`,
         `Business: ${d.settings.siteName}${d.settings.locality ? `, ${d.settings.locality}` : ''} · email ${d.settings.email ?? 'none'} · phone ${d.settings.phone ?? 'none'} · type ${d.settings.businessType}`,
         `Theme: main colour ${d.theme.primaryColor}, text ${d.theme.textColor}, background ${d.theme.backgroundColor}, lettering ${d.theme.font}, corners ${d.theme.radius}${d.theme.logoUrl ? ', has a logo' : ', no logo'}.`,
     ];
     for (const p of d.pages) {
-        lines.push(`- Page "${p.title}" (pageId ${p.id}, address ${p.slug ? `/${p.slug}` : '/'}${p.seo.title ? `, search title "${clip(p.seo.title, 70)}"` : ', no search title'}):`);
+        lines.push(`- Page "${p.title}" (pageId ${p.id}, address ${p.slug ? `/${p.slug}` : '/'}${p.hideFromMenu ? ', HIDDEN from the menu' : ''}${p.seo.title ? `, search title "${clip(p.seo.title, 70)}"` : ', no search title'}):`);
         if (!p.sections.length) lines.push('    (no sections)');
         for (const s of p.sections) {
             const pr = s.props as unknown as Record<string, unknown>;
             const items = Array.isArray(pr.items) ? ` · ${pr.items.length} item(s)` : '';
             const main = pr.headline ?? pr.heading ?? '';
-            lines.push(`    · ${s.type} (sectionId ${s.id})${main ? `: "${clip(main, 90)}"` : ''}${items}${typeof pr.body === 'string' ? ` · "${clip(pr.body, 80)}"` : ''}`);
+            const lk = s.look && (s.look.background !== 'auto' || s.look.columns !== 'auto' || s.look.menuLabel)
+                ? ` · look: ${[s.look.background !== 'auto' ? `${s.look.background} background` : '', s.look.columns !== 'auto' ? `${s.look.columns} columns` : '', s.look.menuLabel ? `menu label "${s.look.menuLabel}"` : ''].filter(Boolean).join(', ')}` : '';
+            lines.push(`    · ${s.type} (sectionId ${s.id})${main ? `: "${clip(main, 90)}"` : ''}${items}${typeof pr.body === 'string' ? ` · "${clip(pr.body, 80)}"` : ''}${lk}`);
         }
     }
     const acct = await connectAccountFor(db, orgId).catch(() => null);

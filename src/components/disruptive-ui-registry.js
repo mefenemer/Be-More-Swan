@@ -1758,10 +1758,18 @@
     image: 'picture', heading: 'heading', intro: 'introduction', items: 'items', body: 'text', button: 'button', layout: 'layout' };
   const SITE_OP_WORDS = {
     add_page: (o) => `Add a page: “${o.title || ''}”`,
-    update_page: (o) => (o.title ? `Rename a page to “${o.title}”` : o.seo ? 'Update a page\'s search title and description' : 'Update a page'),
+    update_page: (o) => (o.title ? `Rename a page to “${o.title}”` : o.hideFromMenu === true ? 'Hide a page from the menu' : o.hideFromMenu === false ? 'Show a page in the menu' : o.seo ? 'Update a page\'s search title and description' : 'Update a page'),
     remove_page: () => 'Remove a page',
     add_section: (o) => `Add a ${SITE_SECTION_WORDS[(o.section || {}).type] || 'new'} section`,
-    update_section: (o) => `Change the ${Object.keys(o.props || {}).map((k) => SITE_PROP_WORDS[k] || k).join(', ') || 'section'}`,
+    update_section: (o) => {
+      const words = Object.keys(o.props || {}).map((k) => SITE_PROP_WORDS[k] || k);
+      const look = o.look || {};
+      if (look.menuLabel) words.push(`menu label (“${look.menuLabel}”)`);
+      if (look.background || look.columns) words.push('look');
+      return `Change the ${words.join(', ') || 'section'}`;
+    },
+    set_structure: (o) => (o.structure === 'one_page' ? 'Make it a one-page site (the menu jumps down the page)' : 'Make it a site of several pages'),
+    combine_pages: () => 'Combine every page into one page',
     remove_section: () => 'Remove a section',
     move_section: () => 'Move a section',
     set_theme: () => 'Change the design (colours, lettering or corners)',

@@ -42,7 +42,9 @@
       { k: 'items', kind: 'items', label: 'Features', fields: [['title', 'text', 'Title'], ['body', 'textarea', 'Text']] }],
     steps: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
       { k: 'items', kind: 'items', label: 'Steps', fields: [['title', 'text', 'Step'], ['body', 'textarea', 'Text']] }],
-    text: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'body', kind: 'textarea', label: 'Text (a blank line starts a new paragraph)', rows: 8, required: true }],
+    text: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'body', kind: 'textarea', label: 'Text (a blank line starts a new paragraph)', rows: 8, required: true },
+      { k: 'image', kind: 'image', label: 'Picture beside the text (optional)' },
+      { k: 'imageSide', kind: 'select', label: 'Picture on the', options: [['right', 'Right'], ['left', 'Left']] }],
     faq: [{ k: 'heading', kind: 'text', label: 'Heading' },
       { k: 'items', kind: 'items', label: 'Questions', fields: [['q', 'text', 'Question'], ['a', 'textarea', 'Answer']] }],
     testimonials: [{ k: 'heading', kind: 'text', label: 'Heading' },
@@ -292,6 +294,35 @@
     return props;
   }
 
+  // ── How a section looks (site-definition.ts SectionLook — a closed set of choices) ──────────
+  const LOOK_DEFAULT = { background: 'auto', columns: 'auto', menuLabel: null };
+  const GRID_TYPES = ['features', 'steps', 'testimonials', 'products'];
+  function lookHtml(e) {
+    const l = e.look || LOOK_DEFAULT;
+    const onePage = def().structure === 'one_page';
+    const sel = (name, options, value) => `<select name="${name}" class="${inputCls}">${options.map(([v, t]) => `<option value="${esc(v)}" ${String(v) === String(value) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
+    const bg = e.type === 'hero' ? '' : `<div><label class="block text-xs font-bold text-gray-700">Background</label>${sel('look-background', [['auto', 'Automatic'], ['plain', 'Plain'], ['soft', 'Soft tint'], ['brand', 'Your main colour']], l.background)}</div>`;
+    const cols = GRID_TYPES.includes(e.type) ? `<div><label class="block text-xs font-bold text-gray-700">Columns on a wide screen</label>${sel('look-columns', [['auto', 'Automatic'], ['2', 'Two'], ['3', 'Three']], l.columns)}</div>` : '';
+    const menu = onePage || l.menuLabel ? `<div><label class="block text-xs font-bold text-gray-700">Menu label${onePage ? '' : ' (one-page sites)'}</label><input name="look-menu" class="${inputCls}" maxlength="30" value="${esc(l.menuLabel || '')}" placeholder="e.g. Prices — leave empty to keep it out of the menu"></div>` : '';
+    if (!bg && !cols && !menu) return '';
+    return `<details class="mt-4 border border-gray-200 rounded-lg p-3" ${l.background !== 'auto' || l.columns !== 'auto' || l.menuLabel ? 'open' : ''}>
+      <summary class="text-xs font-bold text-gray-700 cursor-pointer">Look${onePage ? ' & menu' : ''}</summary>
+      <div class="grid gap-3 md:grid-cols-2 mt-2">${bg}${cols}${menu}</div></details>`;
+  }
+  function readLook(form) {
+    const v = (n) => { const el = form.querySelector(`[name="${n}"]`); return el ? el.value : undefined; };
+    const out = {};
+    if (v('look-background') !== undefined) out.background = v('look-background');
+    if (v('look-columns') !== undefined) out.columns = v('look-columns') === 'auto' ? 'auto' : Number(v('look-columns'));
+    if (v('look-menu') !== undefined) out.menuLabel = v('look-menu').trim() || null;
+    return out;
+  }
+  /** Keep what is typed in the open form (props AND look) across a re-render. */
+  function syncEditing(form) {
+    state.editing.props = readForm(form, state.editing.type);
+    state.editing.look = { ...(state.editing.look || LOOK_DEFAULT), ...readLook(form) };
+  }
+
   function editorHtml() {
     const e = state.editing;
     return card(`
@@ -299,6 +330,7 @@
         <div class="flex items-center justify-between"><p class="text-sm font-black text-gray-900">${e.sectionId ? 'Edit' : 'Add'} ${esc(TYPE_LABEL[e.type])}</p>
           <button type="button" data-site-edit-cancel class="text-xs text-gray-500 underline">Cancel</button></div>
         ${FORMS[e.type].map((f) => fieldHtml(f, e.props[f.k])).join('')}
+        ${lookHtml(e)}
         <div class="mt-4">${btn('data-site-section-save type="submit"', e.sectionId ? 'Save section' : 'Add section', true).replace('type="button" ', '')}</div>
       </form>`);
   }
@@ -309,7 +341,7 @@
     const pageTabs = d.pages.map((x) => `<button type="button" data-site-page="${esc(x.id)}" class="px-3 py-1.5 text-xs font-bold rounded-lg border ${x.id === p.id ? 'btn-primary' : 'btn-secondary'}">${esc(x.title)}</button>`).join(' ');
     const sections = p.sections.map((s, i) => `
       <li class="border border-gray-200 rounded-lg p-3 flex flex-wrap items-center justify-between gap-2">
-        <div class="min-w-0"><p class="text-xs font-bold text-gray-900">${esc(TYPE_LABEL[s.type])}</p><p class="text-xs text-gray-500 truncate">${esc(sectionSummary(s))}</p></div>
+        <div class="min-w-0"><p class="text-xs font-bold text-gray-900">${esc(TYPE_LABEL[s.type])}${s.look && s.look.menuLabel && d.structure === 'one_page' ? ` <span class="font-semibold text-indigo-700">· In the menu as “${esc(s.look.menuLabel)}”</span>` : ''}</p><p class="text-xs text-gray-500 truncate">${esc(sectionSummary(s))}</p></div>
         <div class="flex flex-wrap gap-1">
           ${btn(`data-site-edit="${esc(s.id)}"`, 'Edit')}
           ${i > 0 ? btn(`data-site-move="${esc(s.id)}" data-to="${i - 1}" aria-label="Move up"`, '↑') : ''}
@@ -327,7 +359,9 @@
           <div><label class="block text-xs font-bold text-gray-700">Search title</label><input data-site-seo-title class="${inputCls}" value="${esc(p.seo.title || '')}" placeholder="Shown in search results"></div>
           <div><label class="block text-xs font-bold text-gray-700">Search description</label><input data-site-seo-desc class="${inputCls}" value="${esc(p.seo.description || '')}" placeholder="One or two sentences"></div>
         </div>
+        ${p.slug ? `<label class="flex items-center gap-2 text-xs font-bold text-gray-700 mt-3"><input type="checkbox" data-site-page-hidden ${p.hideFromMenu ? 'checked' : ''}> Hide from the menu <span class="font-normal text-gray-500">— still there for anyone with its address, e.g. a page for an ad or an offer</span></label>` : ''}
         <div class="flex flex-wrap gap-2 mt-3">${btn('data-site-page-save', 'Save page details', true)}${p.slug ? btn('data-site-remove-page', 'Remove this page') : ''}</div>`)}
+      ${structureCard()}
       ${wordsCard(p)}
       ${state.editing ? editorHtml() : ''}
       ${card(`
@@ -398,6 +432,20 @@
     if (t) state.words.text = t.value;
     if (n) state.words.note = n.value;
   };
+
+  // ── One page or several (site-definition.ts structure / combine_pages) ─────────────────────
+  function structureCard() {
+    const d = def();
+    const one = d.structure === 'one_page';
+    return card(`
+      <p class="text-sm font-black text-gray-900">How your site is laid out</p>
+      <div class="flex flex-wrap gap-4 mt-2 text-xs">
+        <label class="flex items-center gap-2"><input type="radio" name="site-structure" value="pages" data-site-structure ${one ? '' : 'checked'}> <span><strong>Several pages</strong> — the menu lists your pages</span></label>
+        <label class="flex items-center gap-2"><input type="radio" name="site-structure" value="one_page" data-site-structure ${one ? 'checked' : ''}> <span><strong>One page</strong> — everything on one page; the menu jumps down it</span></label>
+      </div>
+      ${one ? '<p class="text-xs text-gray-500 mt-2">Give a section a <strong>Menu label</strong> (Edit ▸ Look &amp; menu) to put it in the menu. Other pages stay reachable by their address.</p>' : ''}
+      ${d.pages.length > 1 ? `<div class="mt-3">${btn('data-site-combine', 'Combine everything into one page')}<p class="text-xs text-gray-500 mt-1">Moves every page's sections onto the home page, in order, and puts each page in the menu. Earlier versions are kept if you change your mind.</p></div>` : ''}`);
+  }
 
   function designPanel() {
     const t = def().theme;
@@ -643,9 +691,10 @@
     e.preventDefault();
     const ed = state.editing;
     const props = readForm(form, ed.type);
+    const look = readLook(form);
     const op = ed.sectionId
-      ? { op: 'update_section', pageId: ed.pageId, sectionId: ed.sectionId, props }
-      : { op: 'add_section', pageId: ed.pageId, section: { type: ed.type, props } };
+      ? { op: 'update_section', pageId: ed.pageId, sectionId: ed.sectionId, props, look }
+      : { op: 'add_section', pageId: ed.pageId, section: { type: ed.type, props, look } };
     await apply([op], () => { state.editing = null; });
   });
 
@@ -696,11 +745,11 @@
     if (t('[data-site-edit-cancel]')) { state.editing = null; render(); return; }
 
     const edit = t('[data-site-edit]');
-    if (edit) { const s = p.sections.find((x) => x.id === edit.dataset.siteEdit); state.editing = { pageId: p.id, sectionId: s.id, type: s.type, props: JSON.parse(JSON.stringify(s.props)) }; render(); return; }
+    if (edit) { const s = p.sections.find((x) => x.id === edit.dataset.siteEdit); state.editing = { pageId: p.id, sectionId: s.id, type: s.type, props: JSON.parse(JSON.stringify(s.props)), look: { ...LOOK_DEFAULT, ...(s.look || {}) } }; render(); return; }
     if (t('[data-site-new-section]')) {
       const type = document.querySelector('[data-site-new-type]').value;
       if (!FORMS[type]) return;   // a type this editor has no form for — nothing to open
-      state.editing = { pageId: p.id, sectionId: null, type, props: JSON.parse(JSON.stringify(BLANK[type] || {})) };
+      state.editing = { pageId: p.id, sectionId: null, type, props: JSON.parse(JSON.stringify(BLANK[type] || {})), look: { ...LOOK_DEFAULT } };
       render();
       return;
     }
@@ -735,7 +784,7 @@
         title: 'Choose a picture',
         onPick: (asset) => {
           state.thumbs[asset.id] = asset.url;
-          state.editing.props = readForm(form, state.editing.type);
+          syncEditing(form);
           const k = pickField.dataset.sitePick;
           const prev = state.editing.props[k] || {};
           state.editing.props[k] = { assetId: asset.id, url: '', alt: prev.alt || altFromName(asset.name) };
@@ -745,7 +794,7 @@
       return;
     }
     const clearField = t('[data-site-pick-clear]');
-    if (clearField) { const form = clearField.closest('form'); state.editing.props = readForm(form, state.editing.type); state.editing.props[clearField.dataset.sitePickClear] = null; render(); return; }
+    if (clearField) { const form = clearField.closest('form'); syncEditing(form); state.editing.props[clearField.dataset.sitePickClear] = null; render(); return; }
     if (t('[data-site-products-import]')) {
       // An older products section: its typed-in items become Business Information products.
       const ed = state.editing;
@@ -779,7 +828,7 @@
     const addItem = t('[data-item-add]');
     if (addItem) {
       const form = addItem.closest('form');
-      state.editing.props = readForm(form, state.editing.type);
+      syncEditing(form);
       state.editing.props[addItem.dataset.itemAdd] = [...(state.editing.props[addItem.dataset.itemAdd] || []), {}];
       render();
       return;
@@ -788,7 +837,7 @@
     if (rmItem) {
       const form = rmItem.closest('form');
       const key = rmItem.closest('[data-items]').dataset.items;
-      state.editing.props = readForm(form, state.editing.type);
+      syncEditing(form);
       state.editing.props[key].splice(Number(rmItem.dataset.itemRemove), 1);
       render();
       return;
@@ -820,7 +869,17 @@
       const op = { op: 'update_page', pageId: p.id, title: host.querySelector('[data-site-page-title]').value,
         seo: { title: host.querySelector('[data-site-seo-title]').value || null, description: host.querySelector('[data-site-seo-desc]').value || null } };
       if (p.slug) op.slug = host.querySelector('[data-site-page-slug]').value.replace(/^\//, '');
+      const hidden = host.querySelector('[data-site-page-hidden]');
+      if (hidden) op.hideFromMenu = hidden.checked;
       await apply([op], () => { state.previewPath = pathOf(page()); });
+      return;
+    }
+    const structure = t('[data-site-structure]');
+    if (structure) { if (structure.value !== def().structure) await apply([{ op: 'set_structure', structure: structure.value }]); return; }
+    if (t('[data-site-combine]')) {
+      const n = def().pages.length;
+      const ok = await window.confirmModal(`All ${n} pages become one: their sections are moved onto the home page in order, the other pages are removed, and the menu jumps down the page. Buttons that linked to those pages now jump to their part of the page. If your site is live, publish again to show it — earlier published versions are kept.`, { title: 'Combine into one page?', confirmLabel: 'Combine', cancelLabel: 'Keep my pages' });
+      if (ok) await apply([{ op: 'combine_pages' }], () => { state.pageId = def().pages[0].id; state.previewPath = '/'; });
       return;
     }
     if (t('[data-site-theme-save]')) {
