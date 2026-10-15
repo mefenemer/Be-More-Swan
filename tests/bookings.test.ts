@@ -187,9 +187,11 @@ check('no double bookings: availability is recomputed inside a transaction holdi
     const fn = src.slice(src.indexOf('export async function createBooking'), src.indexOf('// ── What the booking looks like'));
     assert.ok(fn.includes('db.transaction(') && fn.includes('pg_advisory_xact_lock('));
     assert.ok(fn.indexOf('pg_advisory_xact_lock(') < fn.indexOf('slotsForDay(tx,') && fn.indexOf('slotsForDay(tx,') < fn.indexOf('tx.insert(bookings)'));
-    assert.ok(fn.includes("setup.settings.mode === 'instant' ? 'confirmed' : 'pending'"));
+    assert.ok(fn.includes("status: awaiting ? 'awaiting_payment' : instant ? 'confirmed' : 'pending'"));
     const taken = src.slice(src.indexOf('async function takenOn'), src.indexOf('export interface SlotRequest'));
-    assert.ok(taken.includes("inArray(bookings.status, ['pending', 'confirmed'])"), 'a request holds its time too');
+    // holdsTime (booking-deposits.ts): pending and confirmed, plus an unpaid deposit hold still in time.
+    assert.ok(taken.includes('holdsTime'), 'a request holds its time too');
+    assert.ok(read('src/utils/booking-deposits.ts').includes("${bookings.status} IN ('pending', 'confirmed')"), 'a request holds its time too');
 });
 
 check('serving: /_book GET steps and POST — the edge forwards it, the key is checked first', () => {

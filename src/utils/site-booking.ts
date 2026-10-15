@@ -23,6 +23,9 @@ import {
 import { verifyBookingToken } from './booking-links';
 import { classStep, classSubmit } from './site-classes';
 import { offerFreedPlaces } from './class-sessions';
+import { depositToTake, refundDeposit, releaseHold, startDepositCheckout } from './booking-deposits';
+import { connectAccountFor } from './site-shop';
+import { depositFor, depositLabel, formatPounds } from './product-price';
 import { checkRateLimit } from './rate-limit';
 import { looksLikeEmail, normaliseEmail } from './audience-contacts';
 import { cleanText } from './site-definition';
@@ -139,6 +142,15 @@ async function managePage(b: BookCtx, q: URLSearchParams): Promise<BookPage> {
 /** GET /_book — the next step for the choices made so far. */
 export async function bookStep(b: BookCtx, q: URLSearchParams, message: string | null = null): Promise<BookPage> {
     if (q.get('manage')) return managePage(b, q);
+    // Back from Stripe without paying: let the held time go now, and return to where they were.
+    if (q.get('release')) {
+        const id = Number(q.get('release'));
+        if (Number.isInteger(id) && verifyBookingToken(id, String(q.get('t') || ''))) {
+            const row = await loadBooking(b.db, id);
+            if (row && row.organisationId === b.site.organisationId && row.status === 'awaiting_payment') await releaseHold(b.db, id);
+        }
+        return { status: 303, location: safeBack(b.def, q.get('b')) };
+    }
     const c = readChoice(q);
     const found = findBookingSection(b.def, c.s);
     if (!found) return page(b, 'Booking isn\'t available', '<h1>Booking isn\'t available</h1><p>This page has changed since you opened it.</p><p><a class="btn" href="/">Go to the home page</a></p>', 404);
@@ -153,12 +165,13 @@ export async function bookStep(b: BookCtx, q: URLSearchParams, message: string |
         return page(b, 'Booking isn\'t open', `<h1>Booking isn't open right now</h1><p>Please get in touch with us to book.</p>${back}`);
     }
 
-    // 1. What — or how many.
+    // 1. What — or how many. (A deposit is mentioned only where it will actually be taken.)
+    const takesDeposits = props.kind !== 'table' && !!(await connectAccountFor(b.db, b.site.organisationId))?.chargesEnabled;
     const svc = props.kind === 'table' ? null : services.find((x) => x.id === c.svc) ?? null;
     if (props.kind === 'table' ? !(c.party >= 1 && c.party <= setup.settings.maxPartySize) : !svc) {
         const choose = props.kind === 'table'
             ? `<label>How many people?<select name="party">${Array.from({ length: setup.settings.maxPartySize }, (_, i) => `<option value="${i + 1}"${i === 1 ? ' selected' : ''}>${i + 1}</option>`).join('')}</select></label>`
-            : `<fieldset><legend>What would you like to book?</legend>${services.map((x, i) => `<label class="opt"><input type="radio" name="svc" value="${x.id}"${i === 0 ? ' checked' : ''}> <span><strong>${esc(x.name)}</strong> · ${x.durationMinutes} min${x.price ? ` · ${esc(x.price)}` : ''}</span></label>`).join('')}</fieldset>`;
+            : `<fieldset><legend>What would you like to book?</legend>${services.map((x, i) => `<label class="opt"><input type="radio" name="svc" value="${x.id}"${i === 0 ? ' checked' : ''}> <span><strong>${esc(x.name)}</strong> · ${x.durationMinutes} min${x.price ? ` · ${esc(x.price)}` : ''}${takesDeposits && depositLabel(x) ? ` · ${esc(depositLabel(x)!)}` : ''}</span></label>`).join('')}</fieldset>`;
         return page(b, 'Book', `<h1>Book</h1>${note}<form class="fm" method="get" action="${BOOK_PATH}"><input type="hidden" name="s" value="${esc(c.s)}">${choose}<button class="btn" type="submit">Next</button></form>${back}`);
     }
 
@@ -212,7 +225,8 @@ ${['s', 'svc', 'party', 'res', 'date', 'time'].map((k) => { const v = (c as unkn
 <label>Email<input type="email" name="email" required maxlength="254" autocomplete="email"></label>
 <label>Phone <span class="help">(optional)</span><input type="tel" name="phone" maxlength="30" autocomplete="tel"></label>
 <label>${esc(NOTES_LABEL[props.kind])}<textarea name="notes" rows="3" maxlength="1000"></textarea></label>
-<button class="btn" type="submit">${setup.settings.mode === 'instant' ? 'Confirm booking' : 'Request booking'}</button>
+${svc && takesDeposits && depositFor(svc) ? `<p class="fine"><strong>A ${esc(formatPounds(depositFor(svc)!))} deposit is paid now, by card</strong> — refunded if you cancel online in time.</p>` : ''}
+<button class="btn" type="submit">${svc && takesDeposits && depositFor(svc) ? `Continue to pay ${esc(formatPounds(depositFor(svc)!))} deposit` : setup.settings.mode === 'instant' ? 'Confirm booking' : 'Request booking'}</button>
 <p class="fine">${how} Your details are used only for this booking.</p>
 </form>${policy}${back}`);
 }
@@ -253,11 +267,12 @@ export async function bookSubmit(b: BookCtx, body: URLSearchParams, ip: string):
         console.error('[site-booking] rate limiter unavailable — allowing the booking', err);
     }
     const setup = await loadBookingSetup(b.db, b.site.organisationId);
+    const deposit = props.kind === 'table' ? null : await depositToTake(b.db, b.site.organisationId, c.svc, 1);
     const made = await createBooking(b.db, b.site.organisationId, {
         siteId: b.site.id, kind: props.kind, date: c.date, time: c.time,
         serviceId: props.kind === 'table' ? null : c.svc, resourceId: typeof c.res === 'number' ? c.res : null,
         partySize: props.kind === 'table' ? c.party : 1, now: b.now,
-        customerName: name, customerEmail: email, customerPhone: phone, notes,
+        customerName: name, customerEmail: email, customerPhone: phone, notes, deposit,
     });
     if (!made.ok) {
         // The time went while they were typing: back to the times still free, with what happened.
@@ -265,11 +280,30 @@ export async function bookSubmit(b: BookCtx, body: URLSearchParams, ip: string):
         q.delete('time');
         return bookStep(b, q, made.message);
     }
+    // A deposit: pay first; nobody is told until it's paid (the Connect webhook announces it).
+    if (made.booking.status === 'awaiting_payment' && deposit) return payDeposit(b, made.booking, deposit, setup.settings.timezone, found.pagePath, body);
     await announceNewBooking(b.db, made.booking, {
         business: b.def.settings.siteName, timezone: setup.settings.timezone, assistantId: b.site.aiAssistantId,
         cancellationPolicy: setup.settings.cancellationPolicy, siteOrigin: b.ctx.origin,
     }).catch((err) => console.error('[site-booking] notices failed', err));
     return { status: 303, location: `${FORM_SENT_PATH}?k=booking&st=${made.booking.status === 'confirmed' ? 'confirmed' : 'pending'}&b=${encodeURIComponent(found.pagePath)}` };
+}
+
+/** Off to Stripe to pay the deposit; if checkout can't start, the hold is let go and they're told. */
+export async function payDeposit(b: BookCtx, booking: BookingRow, pence: number, timezone: string, backPath: string, body: URLSearchParams): Promise<BookPage> {
+    const { when, what } = describeBooking(booking, timezone);
+    const pay = await startDepositCheckout(b.db, { origin: b.ctx.origin, booking, pence, what, when, backPath, now: b.now });
+    if (pay.ok) return { status: 303, location: pay.url };
+    await releaseHold(b.db, booking.id);
+    const q = new URLSearchParams(body);
+    q.delete('time');
+    return bookStep(b, q, 'Card payments aren\'t working just now, so nothing was booked or charged. Please try again in a few minutes, or get in touch with us.');
+}
+
+/** A local path from the query, or the home page. */
+function safeBack(def: SiteDefinition, raw: string | null): string {
+    const p = String(raw || '/');
+    return /^\/[a-z0-9-]*$/.test(p) && (p === '/' || def.pages.some((pg) => `/${pg.slug}` === p)) ? p : '/';
 }
 
 function noticeCtx(b: BookCtx, setup: BookingSetup) {
@@ -283,6 +317,8 @@ async function cancelSubmit(b: BookCtx, body: URLSearchParams): Promise<BookPage
     const setup = await loadBookingSetup(b.db, b.site.organisationId);
     if (!customerCanChange(row, setup.settings.minNoticeMinutes, b.now)) return managePage(b, new URLSearchParams({ manage: String(row.id), t: String(body.get('t')) }));
     const done = await customerCancel(b.db, b.site.organisationId, row.id);
+    // Cancelled online, so in time: a deposit goes back in full, before they're told.
+    if (done && done.paymentStatus === 'paid') done.paymentStatus = await refundDeposit(b.db, done) === 'refunded' ? 'refunded' : 'refund_failed';
     if (done) {
         const ctx = noticeCtx(b, setup);
         await emailCustomer(done, 'cancelled_by_you', ctx, null);

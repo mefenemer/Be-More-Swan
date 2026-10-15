@@ -42,7 +42,15 @@ restaurants, hairdressers, consultants and more, configured through the website 
    `send-booking-reminders.ts`, confirmed bookings made more than a day ahead, claimed before
    sending. SQL: `db/z-bookings-changes.sql`.
 3. Two-way Google / Outlook calendar sync (busy times block slots; bookings appear in the diary).
-4. Optional deposits through Stripe Connect (the shop's connected account, no platform fee).
+4. ✅ (built 2026-10-15) Deposits through Stripe Connect (the shop's connected account, no platform
+   fee). Per product: a fixed £ or a % of its fixed price (per place for a class); tables never.
+   The booking is made 'awaiting_payment', holding its time / places for 35 minutes while they pay
+   on Stripe Checkout (closes at 31); the Connect webhook makes it pending / confirmed and only then
+   announces it. Unpaid holds stop counting at hold_expires_at and are tidied hourly. Refunded in
+   full when the customer cancels online (only possible before the notice cut-off), the owner
+   declines or cancels, or a class date is cancelled; a move keeps the deposit. A payment that
+   arrives after its hold went is refunded at once. SQL: `db/z-booking-deposits.sql`
+   (`booking-deposits.ts`).
 5. ✅ (built 2026-10-15) Classes and events. A booking section of kind `class` shows dated SESSIONS
    (`class_sessions`: a Business Information product = the class, a date and time in the business's
    timezone, an optional teacher / room, a number of places; a weekly class = sessions sharing a
@@ -53,7 +61,7 @@ restaurants, hairdressers, consultants and more, configured through the website 
    people whose places fit are emailed a link to book (first come, first served — nothing held).
    The owner adds and cancels dates on the Website tab ▸ Bookings ▸ Timetable (cancelling emails
    everyone booked), or the chat proposes them with a `class_sessions` card. Opening hours don't limit
-   classes; notice and "how far ahead" do. SQL: `db/z-classes.sql`. Deposits (phase 4) still open.
+   classes; notice and "how far ahead" do. SQL: `db/z-classes.sql`.
 
 ## Opening hours & contact section (built 2026-10-15)
 

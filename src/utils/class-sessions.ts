@@ -11,6 +11,7 @@ import { bookableResources, bookings, classSessions, classWaitlist, orgProducts 
 import { addDays, DATE_RE, formatDate, formatTime, TIME_RE, toMinutes, utcToZoned, zonedToUtc } from './booking-time';
 import { loadBookingSetup, type BookingRow } from './bookings';
 import { sendEmail } from './email';
+import { holdsTime, holdUntil } from './booking-deposits';
 import { esc } from './site-render';
 
 type Db = ReturnType<typeof getDb>;
@@ -83,7 +84,7 @@ export async function addSessions(db: Db, orgId: number, n: NewSessions): Promis
 async function takenBySession(db: Db | Parameters<Parameters<Db['transaction']>[0]>[0], ids: number[]): Promise<Map<number, number>> {
     if (!ids.length) return new Map();
     const rows = await db.select({ id: bookings.sessionId, n: sql<number>`coalesce(sum(${bookings.partySize}), 0)::int` })
-        .from(bookings).where(and(inArray(bookings.sessionId, ids), inArray(bookings.status, HELD))).groupBy(bookings.sessionId);
+        .from(bookings).where(and(inArray(bookings.sessionId, ids), holdsTime)).groupBy(bookings.sessionId);
     return new Map(rows.map((r) => [Number(r.id), Number(r.n)]));
 }
 
@@ -142,7 +143,9 @@ export async function loadSession(db: Db, orgId: number, id: number): Promise<Se
 
 // ── Booking a place ─────────────────────────────────────────────────────────────────────────────
 
-export interface NewClassBooking { sessionId: number; places: number; siteId: number | null; customerName: string; customerEmail: string; customerPhone: string | null; notes: string | null; now: Date; }
+export interface NewClassBooking { sessionId: number; places: number; siteId: number | null; customerName: string; customerEmail: string; customerPhone: string | null; notes: string | null; now: Date;
+    /** Pence: held as 'awaiting_payment' until paid (booking-deposits.ts). */
+    deposit?: number | null; }
 export type ClassBookResult = { ok: true; booking: BookingRow } | { ok: false; reason: 'full' | 'gone'; message: string; left: number };
 
 /** Book places on a session: re-count under the lock, then hold them. Never overbooks. */
@@ -166,7 +169,8 @@ export async function bookSession(db: Db, orgId: number, b: NewClassBooking): Pr
             startsAt: s.startsAt, endsAt: s.endsAt, partySize: b.places,
             customerName: b.customerName, customerEmail: b.customerEmail, customerPhone: b.customerPhone, notes: b.notes,
             serviceName: s.title, resourceName: s.resourceName,
-            status: instant ? 'confirmed' : 'pending', decidedAt: instant ? new Date() : null,
+            status: b.deposit ? 'awaiting_payment' : instant ? 'confirmed' : 'pending', decidedAt: !b.deposit && instant ? new Date() : null,
+            ...(b.deposit ? { depositPence: b.deposit, paymentStatus: 'unpaid', holdExpiresAt: holdUntil(b.now) } : {}),
         }).returning();
         return { ok: true, booking: row as BookingRow } as ClassBookResult;
     });
@@ -229,7 +233,7 @@ export async function cancelSessions(db: Db, orgId: number, id: number, wholeSer
     const sessions = await db.update(classSessions).set({ status: 'cancelled', updatedAt: new Date() }).where(target).returning();
     const ids = sessions.map((x) => x.id);
     const cancelled = ids.length ? await db.update(bookings).set({ status: 'cancelled', cancelledBy: 'owner', decidedAt: new Date() })
-        .where(and(inArray(bookings.sessionId, ids), inArray(bookings.status, HELD))).returning() : [];
+        .where(and(inArray(bookings.sessionId, ids), inArray(bookings.status, [...HELD, 'awaiting_payment']))).returning() : [];
     if (ids.length) await db.delete(classWaitlist).where(inArray(classWaitlist.sessionId, ids));
     return { sessions, bookings: cancelled as BookingRow[] };
 }

@@ -22,7 +22,7 @@ import { getDb } from '../../db/client';
 import { orgProducts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { PRODUCT_LIMITS } from '../../src/utils/org-products';
-import { cleanPrice, priceFromText } from '../../src/utils/product-price';
+import { cleanDeposit, cleanPrice, priceFromText } from '../../src/utils/product-price';
 import { siteAssetUrl } from '../../src/utils/site-hosting';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { contentAssets } from '../../db/schema';
@@ -51,7 +51,7 @@ export function cleanProductUrl(v: unknown): string | null | 'invalid' {
 }
 
 /** The editable fields of a request body, validated. `partial` = only what was sent (PATCH). */
-export function productFields(body: Record<string, unknown>, partial: boolean): { error: string } | { values: Record<string, unknown> } {
+export function productFields(body: Record<string, unknown>, partial: boolean, currentPrice?: { priceType: string | null; priceAmount: number | null }): { error: string } | { values: Record<string, unknown> } {
     const values: Record<string, unknown> = {};
     const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k);
     if (!partial || has('name')) {
@@ -77,6 +77,14 @@ export function productFields(body: Record<string, unknown>, partial: boolean): 
         const pr = cleanPrice({ priceType: t.priceType, priceAmount: t.priceAmount != null ? t.priceAmount / 100 : null, priceUnit: t.priceUnit, price: t.priceText ?? null });
         if ('error' in pr) return pr;
         Object.assign(values, pr);
+    }
+    // The deposit is checked against the price being saved (or, for an edit that leaves the price
+    // alone, the stored one — the handler passes it as `currentPrice`).
+    if (has('depositType')) {
+        const price = { priceType: (values.priceType as string | null | undefined) ?? currentPrice?.priceType ?? null, priceAmount: (values.priceAmount as number | null | undefined) ?? currentPrice?.priceAmount ?? null };
+        const dep = cleanDeposit({ depositType: body.depositType, depositAmount: body.depositAmount }, price);
+        if ('error' in dep) return dep;
+        Object.assign(values, dep);
     }
     if (!partial || has('durationMinutes')) {
         const d = body.durationMinutes === null || body.durationMinutes === '' || body.durationMinutes === undefined ? null : Number(body.durationMinutes);
@@ -110,6 +118,7 @@ const COLUMNS = {
     benefits: orgProducts.benefits, price: orgProducts.price, audience: orgProducts.audience, url: orgProducts.url,
     priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, priceUnit: orgProducts.priceUnit,
     durationMinutes: orgProducts.durationMinutes, imageAssetId: orgProducts.imageAssetId,
+    depositType: orgProducts.depositType, depositAmount: orgProducts.depositAmount,
     status: orgProducts.status, sortOrder: orgProducts.sortOrder, updatedAt: orgProducts.updatedAt,
 };
 
@@ -164,7 +173,11 @@ export default withLambda(async (event) => {
         if (method === 'PATCH') {
             const id = Number(body.id);
             if (!Number.isInteger(id)) return json(400, { error: 'id is required.' });
-            const parsed = productFields(body, true);
+            // A deposit is checked against the price — the stored one, when this edit leaves it alone.
+            const [current] = Object.prototype.hasOwnProperty.call(body, 'depositType')
+                ? await db.select({ priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount }).from(orgProducts).where(and(eq(orgProducts.id, id), eq(orgProducts.organisationId, orgId))).limit(1)
+                : [];
+            const parsed = productFields(body, true, current);
             if ('error' in parsed) return json(400, parsed);
             if (!Object.keys(parsed.values).length) return json(400, { error: 'Nothing to change.' });
             if (!(await pictureIsOurs(db, orgId, parsed.values.imageAssetId as number | null))) return json(400, { error: 'Only pictures from your own library can be used.' });

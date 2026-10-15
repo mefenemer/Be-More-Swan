@@ -262,7 +262,9 @@
 
     function card(p, i, active) {
       const meta = [p.price ? `<span class="font-semibold text-gray-800">${esc(p.price)}</span>` : '',
-        p.durationMinutes ? `${esc(p.durationMinutes)} min` : '', p.audience ? `For ${esc(p.audience)}` : ''].filter(Boolean).join(' · ');
+        p.durationMinutes ? `${esc(p.durationMinutes)} min` : '',
+        p.depositType === 'fixed' && p.depositAmount ? `£${esc((p.depositAmount / 100).toFixed(2).replace(/\.00$/, ''))} deposit` : p.depositType === 'percent' && p.depositAmount ? `${esc(p.depositAmount)}% deposit` : '',
+        p.audience ? `For ${esc(p.audience)}` : ''].filter(Boolean).join(' · ');
       return `<div class="op-card border border-gray-200 rounded-xl p-4" data-id="${p.id}">
         <div class="flex items-start justify-between gap-3">
           ${p.imageUrl ? `<img src="${esc(p.imageUrl)}" alt="" class="shrink-0" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">` : ''}
@@ -383,6 +385,20 @@
           <label for="op-duration" class="block text-sm font-semibold text-gray-700 mb-1">How long it takes (minutes)</label>
           <input id="op-duration" type="number" min="5" max="1440" step="5" value="${esc(v.durationMinutes || '')}" placeholder="e.g. 45" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm">
           <p class="text-xs text-gray-500 mt-1">Used when people book it.</p>
+        </div>
+        <div>
+          <label for="op-deposit-type" class="block text-sm font-semibold text-gray-700 mb-1">Deposit when booked online (optional)</label>
+          <select id="op-deposit-type" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm bg-white">
+            <option value="" ${!v.depositType ? 'selected' : ''}>No deposit</option>
+            <option value="fixed" ${v.depositType === 'fixed' ? 'selected' : ''}>A fixed amount</option>
+            <option value="percent" ${v.depositType === 'percent' ? 'selected' : ''}>A percentage of the price</option>
+          </select>
+          <div id="op-deposit-amount-row" class="flex items-center gap-1 mt-2 ${v.depositType ? '' : 'hidden'}">
+            <span id="op-deposit-pound" class="text-sm font-semibold text-gray-600 ${v.depositType === 'percent' ? 'hidden' : ''}">£</span>
+            <input id="op-deposit-amount" type="text" inputmode="decimal" value="${esc(v.depositType === 'fixed' && v.depositAmount != null ? (v.depositAmount / 100).toFixed(2).replace(/\.00$/, '') : v.depositType === 'percent' ? String(v.depositAmount || '') : '')}" placeholder="${v.depositType === 'percent' ? '20' : '10'}" aria-label="Deposit amount" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm">
+            <span id="op-deposit-pct" class="text-sm font-semibold text-gray-600 ${v.depositType === 'percent' ? '' : 'hidden'}">%</span>
+          </div>
+          <p class="text-xs text-gray-500 mt-1">Paid to your own Stripe account when someone books it from your website (per place for a class). Refunded automatically if they cancel online in time, or if you cancel or decline. Needs Stripe connected on the Website tab's Orders.</p>
         </div>`;
     }
 
@@ -404,6 +420,7 @@
         priceType: get('op-price-type') || null, priceAmount: get('op-price-amount'), priceUnit: get('op-price-unit'),
         price: get('op-price-text'),
         durationMinutes: get('op-duration') ? Number(get('op-duration')) : null,
+        depositType: get('op-deposit-type') || null, depositAmount: get('op-deposit-amount'),
         imageAssetId: get('op-image') ? Number(get('op-image')) : null,
       };
       if (!body.name.trim()) { showError('Give the product or service a name.'); f.querySelector('#op-name').focus(); return; }
@@ -458,6 +475,12 @@
         f.querySelector('#op-price-text').classList.toggle('hidden', t !== 'text');
       }
       if (e.target.name === 'op-kind') f.querySelector('#op-duration-row').classList.toggle('hidden', e.target.value !== 'service');
+      if (e.target.id === 'op-deposit-type') {
+        const t = e.target.value;
+        f.querySelector('#op-deposit-amount-row').classList.toggle('hidden', !t);
+        f.querySelector('#op-deposit-pound').classList.toggle('hidden', t !== 'fixed');
+        f.querySelector('#op-deposit-pct').classList.toggle('hidden', t !== 'percent');
+      }
     });
     section.addEventListener('click', async (e) => {
       const t = e.target.closest('button');

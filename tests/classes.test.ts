@@ -116,7 +116,7 @@ check('the Website tab has a timetable to add and cancel dates; the chat can pro
     assert.ok(ed.includes('function timetableCard()') && ed.includes("action: 'session_add'") && ed.includes("action: 'session_cancel'"));
     assert.ok(ed.includes("['class', 'Classes and events (dates you set, with places)']"));
     const sites = read('netlify/functions/sites.ts');
-    assert.ok(sites.includes("if (action === 'session_add')") && sites.includes("for (const b of r.bookings) await emailCustomer(b, 'cancelled', ctx, owner?.email ?? null);"));
+    assert.ok(sites.includes("if (action === 'session_add')") && sites.includes("await emailCustomer(b, 'cancelled', ctx, owner?.email ?? null);"));
     assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('{"type":"class_sessions","summary":"<one sentence>","session":{"serviceId":'));
     assert.ok(read('src/components/disruptive-ui-registry.js').includes("register('class_sessions', renderClassSessionsCard)"));
     assert.ok(read('src/components/chat-session.js').includes("container.addEventListener('site:classSessions', onClassSessions)"));

@@ -5385,6 +5385,9 @@ export const orgProducts = pgTable("org_products", {
   priceAmount: integer("price_amount"),   // pence
   priceUnit: text("price_unit"),
   durationMinutes: integer("duration_minutes"),
+  // Deposit when booked from the website (db/z-booking-deposits.sql): 'fixed' pence | 'percent' of a fixed price.
+  depositType: text("deposit_type"),
+  depositAmount: integer("deposit_amount"),
   imageAssetId: integer("image_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
   status: text().notNull().default("active"),
   sortOrder: integer("sort_order").notNull().default(0),
@@ -5698,10 +5701,16 @@ export const bookings = pgTable("bookings", {
   reminderSentAt: timestamp("reminder_sent_at"),
   // Phase 5 (db/z-classes.sql): the class session a 'class' booking is for; party_size = places.
   sessionId: integer("session_id").references((): any => classSessions.id, { onDelete: "set null" }),
+  // Phase 4 (db/z-booking-deposits.sql): a deposit paid on the business's own Stripe account.
+  depositPence: integer("deposit_pence"),
+  paymentStatus: text("payment_status"),
+  checkoutSessionId: text("checkout_session_id"),
+  paymentIntentId: text("payment_intent_id"),
+  holdExpiresAt: timestamp("hold_expires_at", { withTimezone: true }),
 }, (t) => [
   index("bookings_org_time_idx").on(t.organisationId, t.startsAt),
   check("bookings_kind_check", sql`${t.kind} IN ('appointment','consultation','table','class')`),
-  check("bookings_status_check", sql`${t.status} IN ('pending','confirmed','declined','cancelled')`),
+  check("bookings_status_check", sql`${t.status} IN ('pending','confirmed','declined','cancelled','awaiting_payment')`),
 ]);
 
 // Classes and events (db/z-classes.sql): dated sessions with places, and their waitlist.

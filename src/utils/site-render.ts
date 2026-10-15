@@ -44,7 +44,7 @@ export function formatDuration(minutes: number): string {
 /** Business Information's hours and location, as the site needs them (bookings.ts businessSummary). */
 export interface SiteRenderBusiness { timezone: string; weeklyHours: WeeklyHours; closures: Array<{ date: string; note?: string | null }>; visitAddress: string | null; whatsapp: string | null; }
 
-export interface SiteRenderBooking { ready: boolean; services: Array<{ id: number; name: string; price: string | null; durationMinutes: number }>; maxPartySize: number;
+export interface SiteRenderBooking { ready: boolean; services: Array<{ id: number; name: string; price: string | null; durationMinutes: number; deposit?: string | null }>; maxPartySize: number;
     /** Upcoming bookable class sessions (class-sessions.ts), for a 'class' booking section; absent = none loaded. */
     sessions?: SessionView[]; }
 
@@ -407,7 +407,7 @@ ${closed.length ? `<p class="fine">${closed.map((c) => `Closed ${esc(formatDate(
             }
             const choose = p.kind === 'table'
                 ? `<label>How many people?<select name="party" required>${Array.from({ length: b!.maxPartySize }, (_, i) => `<option value="${i + 1}"${i === 1 ? ' selected' : ''}>${i + 1}</option>`).join('')}</select></label>`
-                : `<fieldset><legend>${p.kind === 'consultation' ? 'Which kind of session?' : 'What would you like to book?'}</legend>${services.map((x, i) => `<label class="opt"><input type="radio" name="svc" value="${x.id}" required${i === 0 ? ' checked' : ''}> <span><strong>${esc(x.name)}</strong> · ${x.durationMinutes} min${x.price ? ` · ${esc(x.price)}` : ''}</span></label>`).join('')}</fieldset>`;
+                : `<fieldset><legend>${p.kind === 'consultation' ? 'Which kind of session?' : 'What would you like to book?'}</legend>${services.map((x, i) => `<label class="opt"><input type="radio" name="svc" value="${x.id}" required${i === 0 ? ' checked' : ''}> <span><strong>${esc(x.name)}</strong> · ${x.durationMinutes} min${x.price ? ` · ${esc(x.price)}` : ''}${x.deposit ? ` · ${esc(x.deposit)}` : ''}</span></label>`).join('')}</fieldset>`;
             const button = formState.preview
                 ? `<button class="btn" type="submit" disabled>${esc(p.buttonLabel)}</button><p class="fine">Booking works on your live site, not in this preview.</p>`
                 : `<button class="btn" type="submit">${esc(p.buttonLabel)}</button>`;

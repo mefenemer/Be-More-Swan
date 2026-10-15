@@ -55,6 +55,7 @@ import { bookings, bookingSettings, orgProducts, orgReviews, siteEnquiries, site
 import { decideBooking, describeBooking, emailCustomer, listBookings, loadBookingSetup } from '../../src/utils/bookings';
 import { cleanBookingSettings, describeHours } from '../../src/utils/booking-settings';
 import { reviewSummary } from '../../src/utils/reviews';
+import { depositNote, refundDeposit } from '../../src/utils/booking-deposits';
 import { addSessions, cancelSessions, cleanNewSessions, offerFreedPlaces, ownerTimetable } from '../../src/utils/class-sessions';
 import { utcToZoned } from '../../src/utils/booking-time';
 import { sessionLink } from '../../src/utils/site-render';
@@ -295,7 +296,9 @@ export default withLambda(async (event) => {
         const rows = await listBookings(db, orgId);
         return json(200, { bookings: rows.map((b) => ({ ...describeBooking(b, setup.settings.timezone), id: b.id, status: b.status, customerName: b.customerName,
             customerEmail: b.customerEmail, customerPhone: b.customerPhone, notes: b.notes, partySize: b.partySize, startsAt: b.startsAt, createdAt: b.createdAt,
-            cancelledBy: b.cancelledBy, moved: b.movedFromId !== null, reminded: b.reminderSentAt !== null })) });
+            cancelledBy: b.cancelledBy, moved: b.movedFromId !== null, reminded: b.reminderSentAt !== null, deposit: depositNote(b) }))
+            // An unpaid deposit hold that lapsed was never a booking: left out.
+            .filter((b, i) => !(rows[i].paymentStatus === 'expired')) });
     }
 
     // ── Classes and events (class-sessions.ts): the timetable ──
@@ -318,7 +321,12 @@ export default withLambda(async (event) => {
         if (!r.sessions.length) return json(409, { error: 'That session has already been cancelled.' });
         const [owner] = await db.select({ email: users.email }).from(aiAssistants).leftJoin(users, eq(users.id, aiAssistants.userId)).where(eq(aiAssistants.id, assistant.id)).limit(1);
         const ctx = { business: definition.settings.siteName, timezone: setup.settings.timezone, assistantId: assistant.id, cancellationPolicy: setup.settings.cancellationPolicy, siteOrigin: site.slug ? siteOrigin(site.slug) : null };
-        for (const b of r.bookings) await emailCustomer(b, 'cancelled', ctx, owner?.email ?? null);
+        for (const b of r.bookings) {
+            if (b.status === 'cancelled' && b.paymentStatus === 'paid') b.paymentStatus = await refundDeposit(db, b) === 'refunded' ? 'refunded' : 'refund_failed';
+            // An unpaid hold had told nobody yet, so there is nobody to tell.
+            if (b.paymentStatus === 'unpaid') continue;
+            await emailCustomer(b, 'cancelled', ctx, owner?.email ?? null);
+        }
         return json(200, { cancelled: r.sessions.length, told: r.bookings.length, sessions: await ownerTimetable(db, orgId, new Date()) });
     }
 

@@ -13,6 +13,7 @@ import { bookingSettings, bookings, organisations, sites } from '../../db/schema
 import { emailCustomer, type BookingRow } from '../../src/utils/bookings';
 import { settingsFromRow } from '../../src/utils/booking-settings';
 import { siteOrigin } from '../../src/utils/site-hosting';
+import { sweepExpiredHolds } from '../../src/utils/booking-deposits';
 
 const BATCH = 200;
 
@@ -51,6 +52,9 @@ export async function sendDueReminders(db: ReturnType<typeof getDb>, now: Date):
 
 export default withLambda(async () => {
     try {
+        // Unpaid deposit holds past their time (booking-deposits.ts) — they already stopped counting.
+        const lapsed = await sweepExpiredHolds(getDb(), new Date()).catch((err) => { console.error('[send-booking-reminders] hold sweep failed', err); return 0; });
+        if (lapsed) console.log(`[send-booking-reminders] released ${lapsed} unpaid holds`);
         const sent = await sendDueReminders(getDb(), new Date());
         if (sent) console.log(`[send-booking-reminders] sent ${sent}`);
         return { statusCode: 200, body: JSON.stringify({ sent }) };

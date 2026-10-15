@@ -20,11 +20,15 @@ import { createNotification } from './notify';
 import { sendEmail } from './email';
 import { esc, type SiteRenderBooking, type SiteRenderBusiness } from './site-render';
 import { manageBookingUrl } from './booking-links';
+import { depositNote, holdsTime, holdUntil, refundDeposit } from './booking-deposits';
+import { connectAccountFor } from './site-shop';
+import { depositLabel } from './product-price';
 
 type Db = ReturnType<typeof getDb>;
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
-export interface BookableService { id: number; name: string; price: string | null; durationMinutes: number; description: string | null; }
+export interface BookableService { id: number; name: string; price: string | null; durationMinutes: number; description: string | null;
+    depositType: string | null; depositAmount: number | null; priceType: string | null; priceAmount: number | null; }
 export interface BookingSetup {
     exists: boolean;
     settings: typeof BOOKING_DEFAULTS;
@@ -37,7 +41,8 @@ export async function loadBookingSetup(db: Db | Tx, orgId: number): Promise<Book
     const res = await db.select().from(bookableResources)
         .where(and(eq(bookableResources.organisationId, orgId), eq(bookableResources.status, 'active')))
         .orderBy(asc(bookableResources.sortOrder), asc(bookableResources.id));
-    const svc = await db.select({ id: orgProducts.id, name: orgProducts.name, price: orgProducts.price, durationMinutes: orgProducts.durationMinutes, description: orgProducts.description })
+    const svc = await db.select({ id: orgProducts.id, name: orgProducts.name, price: orgProducts.price, durationMinutes: orgProducts.durationMinutes, description: orgProducts.description,
+        depositType: orgProducts.depositType, depositAmount: orgProducts.depositAmount, priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount })
         .from(orgProducts)
         .where(and(eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active'), isNotNull(orgProducts.durationMinutes)))
         .orderBy(asc(orgProducts.sortOrder), asc(orgProducts.id));
@@ -75,16 +80,18 @@ async function takenOn(db: Db | Tx, orgId: number, date: string): Promise<TakenB
     const to = new Date(`${addDays(date, 2)}T00:00:00Z`);
     const rows = await db.select({ resourceId: bookings.resourceId, startsAt: bookings.startsAt, endsAt: bookings.endsAt, partySize: bookings.partySize })
         .from(bookings)
-        .where(and(eq(bookings.organisationId, orgId), inArray(bookings.status, ['pending', 'confirmed']), gte(bookings.startsAt, from), lt(bookings.startsAt, to)));
+        .where(and(eq(bookings.organisationId, orgId), holdsTime, gte(bookings.startsAt, from), lt(bookings.startsAt, to)));
     return rows.map((r) => ({ resourceId: r.resourceId, startsAt: new Date(r.startsAt), endsAt: new Date(r.endsAt), partySize: r.partySize }));
 }
 
 /** What a booking section's first step needs (site-render.ts SiteRenderBooking). */
 export async function bookingSummary(db: Db, orgId: number): Promise<SiteRenderBooking> {
     const setup = await loadBookingSetup(db, orgId);
+    // A deposit is mentioned only where it will actually be taken: Stripe connected and able to charge.
+    const takes = !!(await connectAccountFor(db, orgId))?.chargesEnabled;
     return {
         ready: Object.keys(setup.settings.weeklyHours).length > 0,
-        services: setup.services.map((s) => ({ id: s.id, name: s.name, price: s.price, durationMinutes: s.durationMinutes })),
+        services: setup.services.map((s) => ({ id: s.id, name: s.name, price: s.price, durationMinutes: s.durationMinutes, deposit: takes ? depositLabel(s) : null })),
         maxPartySize: setup.settings.maxPartySize,
     };
 }
@@ -108,6 +115,8 @@ export interface NewBooking extends SlotRequest {
     customerEmail: string;
     customerPhone: string | null;
     notes: string | null;
+    /** Pence: made as 'awaiting_payment', holding its time until paid (booking-deposits.ts). */
+    deposit?: number | null;
 }
 
 export type CreateResult = { ok: true; booking: typeof bookings.$inferSelect } | { ok: false; reason: 'gone' | 'invalid'; message: string };
@@ -123,6 +132,7 @@ class UndoMove extends Error {}
  */
 export async function createBooking(db: Db, orgId: number, b: NewBooking & { replaceBookingId?: number }): Promise<CreateResult> {
     const gone: CreateResult = { ok: false, reason: 'gone', message: 'Sorry — that time has just been taken. Please choose another.' };
+    let moved: BookingRow | null = null;
     try {
         return await db.transaction(async (tx) => {
         // One booking at a time per workspace — the re-check below sees every booking made before ours.
@@ -130,7 +140,8 @@ export async function createBooking(db: Db, orgId: number, b: NewBooking & { rep
         if (b.replaceBookingId) {
             // Release the old time first, so the new one may be the same person's next slot.
             const [old] = await tx.update(bookings).set({ status: 'cancelled', cancelledBy: 'customer', decidedAt: new Date() })
-                .where(and(eq(bookings.id, b.replaceBookingId), eq(bookings.organisationId, orgId), inArray(bookings.status, ['pending', 'confirmed']))).returning({ id: bookings.id });
+                .where(and(eq(bookings.id, b.replaceBookingId), eq(bookings.organisationId, orgId), inArray(bookings.status, ['pending', 'confirmed']))).returning();
+            moved = old ?? null;
             if (!old) return { ok: false, reason: 'invalid', message: 'That booking can\'t be changed any more.' } as CreateResult;
         }
         const setup = await loadBookingSetup(tx, orgId);
@@ -141,14 +152,19 @@ export async function createBooking(db: Db, orgId: number, b: NewBooking & { rep
         if (resourceId === undefined) { if (b.replaceBookingId) throw new UndoMove(); return gone; }
         const service = b.serviceId ? setup.services.find((s) => s.id === b.serviceId) : null;
         const resource = resourceId !== null ? setup.resources.find((r) => r.id === resourceId) : null;
+        const awaiting = !b.replaceBookingId && !!b.deposit;
+        const instant = setup.settings.mode === 'instant';
         const [row] = await tx.insert(bookings).values({
             organisationId: orgId, siteId: b.siteId, serviceId: service?.id ?? null, resourceId: resourceId ?? null, kind: b.kind,
             startsAt: slot.startsAt, endsAt: slot.endsAt, partySize: b.kind === 'table' ? b.partySize : 1,
             customerName: b.customerName, customerEmail: b.customerEmail, customerPhone: b.customerPhone, notes: b.notes,
             serviceName: service?.name ?? null, resourceName: resource?.name ?? null,
-            status: setup.settings.mode === 'instant' ? 'confirmed' : 'pending',
-            decidedAt: setup.settings.mode === 'instant' ? new Date() : null,
+            status: awaiting ? 'awaiting_payment' : instant ? 'confirmed' : 'pending',
+            decidedAt: !awaiting && instant ? new Date() : null,
             movedFromId: b.replaceBookingId ?? null,
+            // A deposit: held until paid. A MOVE keeps the deposit already paid on the booking it replaces.
+            ...(awaiting ? { depositPence: b.deposit, paymentStatus: 'unpaid', holdExpiresAt: holdUntil(b.now) } : {}),
+            ...(moved?.depositPence ? { depositPence: moved.depositPence, paymentStatus: moved.paymentStatus, paymentIntentId: moved.paymentIntentId } : {}),
         }).returning();
         return { ok: true, booking: row } as CreateResult;
         });
@@ -293,9 +309,15 @@ export async function emailCustomer(b: BookingRow, notice: CustomerNotice, ctx: 
     const manage = link ? `<p><a href="${esc(link)}">Change or cancel your booking</a></p>` : '';
     const { subject, body } = lines[notice];
     const policy = (notice === 'confirmed' || notice === 'received') && ctx.cancellationPolicy ? `<p><strong>Cancellation:</strong> ${esc(ctx.cancellationPolicy)}</p>` : '';
+    // The deposit, where there is one: paid with the booking, or given back when it ended.
+    const money = depositNote(b);
+    const depositLine = !money ? ''
+        : b.paymentStatus === 'refunded' ? `<p>Your ${esc(money.replace(' refunded', ''))} has been refunded — it usually reaches your card within 5–10 days.</p>`
+        : b.paymentStatus === 'paid' && (notice === 'received' || notice === 'confirmed' || notice === 'reminder') ? `<p>${esc(money)} — thank you.</p>`
+        : b.paymentStatus === 'refund_failed' ? `<p>${esc(ctx.business)} will refund your deposit.</p>` : '';
     await sendEmail({
         to: b.customerEmail, from: fromLine(ctx.business), ...(ownerEmail ? { replyTo: ownerEmail } : {}),
-        subject, html: `${body}${policy}${manage}<p>${manage ? 'Or reply to this email.' : 'To change anything, reply to this email.'}</p>`,
+        subject, html: `${body}${depositLine}${policy}${manage}<p>${manage ? 'Or reply to this email.' : 'To change anything, reply to this email.'}</p>`,
         ...(notice === 'confirmed' ? { attachments: [{ filename: 'booking.ics', content: Buffer.from(bookingIcs(b, ctx.business)).toString('base64'), contentType: 'text/calendar' }] } : {}),
     }).catch((err: unknown) => console.error('[bookings] customer email failed', err instanceof Error ? err.message : err));
 }
@@ -307,6 +329,8 @@ export async function decideBooking(db: Db, orgId: number, id: number, action: '
     const [row] = await db.update(bookings).set({ status: to, decidedAt: new Date(), ...(action === 'cancel' ? { cancelledBy: 'owner' } : {}) })
         .where(and(eq(bookings.id, id), eq(bookings.organisationId, orgId), inArray(bookings.status, from[action]))).returning();
     if (!row) return { ok: false, error: 'That booking has already been dealt with.' };
+    // Declined or cancelled by the business: a deposit always goes back, before they're told.
+    if (action !== 'confirm' && row.paymentStatus === 'paid') row.paymentStatus = await refundDeposit(db, row) === 'refunded' ? 'refunded' : 'refund_failed';
     const [owner] = ctx.assistantId ? await db.select({ email: users.email }).from(aiAssistants).leftJoin(users, eq(users.id, aiAssistants.userId)).where(eq(aiAssistants.id, ctx.assistantId)).limit(1) : [];
     await emailCustomer(row, ({ confirm: 'confirmed', decline: 'declined', cancel: 'cancelled' } as const)[action], ctx, owner?.email ?? null);
     return { ok: true, booking: row };

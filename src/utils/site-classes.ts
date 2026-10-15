@@ -10,7 +10,9 @@ import type { BookingProps, Section, SiteDefinition } from './site-definition';
 import { cleanText } from './site-definition';
 import { BOOK_PATH, esc, FORM_SENT_PATH, placesText, renderSiteShell, sessionLink, timetableHtml, type RenderContext } from './site-render';
 import { bookableSessions, bookSession, joinWaitlist, loadSession } from './class-sessions';
-import { announceNewBooking, emailKey, loadBookingSetup } from './bookings';
+import { announceNewBooking, describeBooking, emailKey, loadBookingSetup } from './bookings';
+import { depositToTake, releaseHold, startDepositCheckout } from './booking-deposits';
+import { formatPounds } from './product-price';
 import { looksLikeEmail, normaliseEmail } from './audience-contacts';
 import { checkRateLimit } from './rate-limit';
 import type { getDb } from '../../db/client';
@@ -62,13 +64,16 @@ export async function classStep(b: ClassCtx, found: Found, q: URLSearchParams, m
 <button class="btn" type="submit">Join the waitlist</button><p class="fine">Your details are used only for this.</p></form>${all}${back}`);
     }
     const policy = setup.settings.cancellationPolicy ? `<p class="fine"><strong>Cancellation:</strong> ${esc(setup.settings.cancellationPolicy)}</p>` : '';
+    // A deposit per place, mentioned only where it will actually be taken.
+    const perPlace = await depositToTake(b.db, b.site.organisationId, s.serviceId, 1);
+    const depositHtml = perPlace ? `<p class="fine"><strong>A ${esc(formatPounds(perPlace))} deposit per place is paid now, by card</strong> — refunded if you cancel online in time.</p>` : '';
     const how = setup.settings.mode === 'instant' ? 'Your place is confirmed straight away, by email.' : 'We\'ll confirm your place by email.';
     return page(b, `Book ${v.title}`, `${head}${note}
 <form class="fm" method="post" action="${BOOK_PATH}"><input type="hidden" name="_action" value="class_book">${common}
 <label>Phone <span class="help">(optional)</span><input type="tel" name="phone" maxlength="30" autocomplete="tel" value="${esc(kept.phone ?? '')}"></label>
 ${placesSelect(maxPlaces(v.left))}
 <label>Anything we should know? <span class="help">(optional)</span><textarea name="notes" rows="3" maxlength="1000">${esc(kept.notes ?? '')}</textarea></label>
-<button class="btn" type="submit">${setup.settings.mode === 'instant' ? 'Book my place' : 'Request my place'}</button>
+${depositHtml}<button class="btn" type="submit">${perPlace ? 'Continue to pay the deposit' : setup.settings.mode === 'instant' ? 'Book my place' : 'Request my place'}</button>
 <p class="fine">${how} Your details are used only for this booking.</p></form>${policy}${all}${back}`);
 }
 
@@ -111,8 +116,17 @@ export async function classSubmit(b: ClassCtx, found: Found, body: URLSearchPara
         if (!r.ok) return retry(r.error);
         return { status: 303, location: `${FORM_SENT_PATH}?k=booking&st=waitlist&b=${encodeURIComponent(found.pagePath)}` };
     }
-    const made = await bookSession(b.db, b.site.organisationId, { sessionId: s.id, places, siteId: b.site.id, customerName: name, customerEmail: email, customerPhone: phone, notes, now: b.now });
+    const deposit = await depositToTake(b.db, b.site.organisationId, s.serviceId, places);
+    const made = await bookSession(b.db, b.site.organisationId, { sessionId: s.id, places, siteId: b.site.id, customerName: name, customerEmail: email, customerPhone: phone, notes, now: b.now, deposit });
     if (!made.ok) return retry(made.message);
+    if (made.booking.status === 'awaiting_payment' && deposit) {
+        // Pay first; nobody is told until it's paid (the Connect webhook announces it).
+        const { when, what } = describeBooking(made.booking, setup.settings.timezone);
+        const pay = await startDepositCheckout(b.db, { origin: b.ctx.origin, booking: made.booking, pence: deposit, what, when, backPath: found.pagePath, now: b.now });
+        if (pay.ok) return { status: 303, location: pay.url };
+        await releaseHold(b.db, made.booking.id);
+        return retry('Card payments aren\'t working just now, so nothing was booked or charged. Please try again in a few minutes, or get in touch with us.');
+    }
     await announceNewBooking(b.db, made.booking, {
         business: b.def.settings.siteName, timezone: setup.settings.timezone, assistantId: b.site.aiAssistantId,
         cancellationPolicy: setup.settings.cancellationPolicy, siteOrigin: b.ctx.origin,

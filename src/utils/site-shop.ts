@@ -223,6 +223,8 @@ export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome
  */
 export async function recordPaidCheckout(db: Db, accountId: string, session: Stripe.Checkout.Session): Promise<boolean> {
     if (session.payment_status !== 'paid') return false;
+    // A booking deposit is not an order (booking-deposits.ts; the webhook routes it there first).
+    if (session.metadata?.bms_kind === 'booking_deposit') return false;
     const siteId = Number(session.metadata?.bms_site_id);
     if (!Number.isInteger(siteId)) return false;
     const [site] = await db.select().from(sites).where(eq(sites.id, siteId)).limit(1);
