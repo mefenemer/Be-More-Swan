@@ -5,6 +5,7 @@
 // in normaliseSiteDefinition — there is no other writer. The editor (assistant-site-editor.js) and
 // the chat cards call the same API actions (netlify/functions/sites.ts), so they cannot disagree.
 
+import { reviewsForPrompt } from './reviews';
 import { and, desc, eq, inArray, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, contentAssets, organisations, orgProducts, siteEnquiries, sites, siteVersions, users } from '../../db/schema';
@@ -407,6 +408,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
             : 'Bookings: not set up (no opening hours yet).');
         lines.push(`Where to find them (Business Information, for an hours section): ${bk.settings.visitAddress ? `visit address "${bk.settings.visitAddress.split('\n').join(', ')}"` : 'no visit address'}; ${bk.settings.whatsapp ? `WhatsApp ${bk.settings.whatsapp}` : 'no WhatsApp number'}.`);
     }
+    lines.push(await reviewsForPrompt(db, orgId).catch(() => 'Their reviews could not be read this turn.'));
     const forms = await listSignupForms(db, orgId).catch(() => []);
     lines.push(forms.length
         ? `Their sign-up forms (for a signup section's formId): ${forms.map((f) => `${f.name} (formId ${f.id}${f.active ? '' : ', switched off'})`).join('; ')}.`

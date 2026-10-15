@@ -16,6 +16,7 @@
 
 import { directionsUrl, openingHoursSpecification, openStatus, upcomingClosures, weekRows, whatsappUrl } from './business-hours';
 import { formatDate } from './booking-time';
+import type { SiteRenderReview, SiteRenderReviews } from './reviews';
 import type { WeeklyHours } from './booking-availability';
 import { buttonInk, menuOf, type Link, type Section, type SiteDefinition, type SitePageDef, type SiteTheme } from './site-definition';
 
@@ -88,6 +89,8 @@ export interface RenderContext {
     booking?: SiteRenderBooking | null;
     /** Opening hours and where to find the business (Business Information) — the hours section and search data. */
     business?: SiteRenderBusiness | null;
+    /** Business Information ▸ Reviews (reviews.ts loadSiteReviews); null = no reviews section. */
+    reviews?: SiteRenderReviews | null;
     /** "Now", for the Open-now badge (tests pass a fixed time). */
     now?: Date;
     /**
@@ -138,6 +141,7 @@ section{padding:64px 0}.alt{background:rgba(0,0,0,.035)}
 .cta{text-align:center}.cta .box{background:var(--p);color:var(--ink);border-radius:var(--r);padding:44px 24px}.cta .btn{background:var(--ink);color:var(--p)}
 .ft{border-top:1px solid rgba(0,0,0,.08);padding:28px 0;font-size:.85rem;opacity:.85}.ft .w{display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:space-between}.ft a{color:inherit}
 .pv{background:#111;color:#fff;text-align:center;font-size:.85rem;padding:8px}
+.stars{color:#f59e0b;letter-spacing:1px}.stars .off{color:rgba(0,0,0,.15)}.rv{margin:0}.rv blockquote{margin:8px 0}.rv figcaption{font-size:.95rem}.rsum{margin:8px 0 0}
 .gal{gap:12px}@media(max-width:699px){.gal{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(min-width:700px){.gal{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}}.gi{margin:0}.gi a{display:block}.gi img{display:block;width:100%;border-radius:var(--r)}.gal.sq img{aspect-ratio:1/1;object-fit:cover}.gal.nat{align-items:start}.gi figcaption{font-size:.85rem;margin-top:6px;opacity:.8}
 .menu{list-style:none;padding:0;margin:8px 0 0}.menu li{padding:10px 0;border-bottom:1px solid rgba(0,0,0,.08)}.mi{display:flex;align-items:baseline;gap:8px}.mn{font-weight:600}.mt{font-weight:400;font-size:.85rem;opacity:.7;white-space:nowrap}.ml{flex:1;min-width:16px;border-bottom:1px dotted currentColor;opacity:.35}.mp{font-weight:700;white-space:nowrap}.md{margin:4px 0 0;font-size:.92rem;opacity:.8}.mnote{margin-top:20px}
 .badge{display:inline-block;padding:6px 12px;border-radius:999px;font-size:.9rem}.badge.on{background:#dcfce7;color:#14532d}.badge.off{background:#f3f4f6;color:#1f2937}
@@ -169,6 +173,9 @@ function logoSrc(theme: SiteTheme): string {
     return theme.logoAssetId ? (assetUrlOf(theme.logoAssetId) || theme.logoUrl || '') : (theme.logoUrl || '');
 }
 /** Set per render call — forms are drawn live, or switched off in the preview. */
+let reviewsData: SiteRenderReviews | null = null;
+const stars = (n: number) => `<span class="stars" role="img" aria-label="${n} out of 5 stars">${'★'.repeat(n)}<span class="off">${'★'.repeat(5 - n)}</span></span>`;
+const monthYear = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 let business: { info: SiteRenderBusiness | null; now: Date; settings: SiteDefinition['settings'] | null } = { info: null, now: new Date(0), settings: null };
 let formState: { preview: boolean; forms: Record<number, SiteSignupForm>; renderedAt: number; path: string; canSell: boolean; products: Record<number, SiteRenderProduct>; booking: SiteRenderBooking | null } = { preview: true, forms: {}, renderedAt: 0, path: '/', canSell: false, products: {}, booking: null };
 
@@ -289,6 +296,18 @@ ${formButton(p.buttonLabel)}
                 ? '<p class="fine">Buy buttons work on your live site once your Stripe account is connected (Orders tab).</p>' : '';
             return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${note}<div class="grid">${cards.join('')}</div></div></section>`;
         }
+        case 'reviews': {
+            // The customers' words from Business Information; the summary is the honest average of all.
+            const p = s.props;
+            const data = reviewsData;
+            const chosen = (p.reviewIds.length ? p.reviewIds : (data?.latest ?? []).slice(0, p.limit)).map((id) => data?.byId[id]).filter(Boolean) as SiteRenderReview[];
+            const sum = p.showSummary && data?.summary ? data.summary : null;
+            if (!chosen.length && !sum) return formState.preview
+                ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Reviews section: add your reviews in Business Information ▸ Reviews. Until then it doesn't appear on your live site.</p></div></section>` : '';
+            const card = (r: SiteRenderReview) => `<figure class="card rv">${r.rating ? `<p>${stars(r.rating)}</p>` : ''}<blockquote>${paragraphs(r.body)}</blockquote><figcaption><strong>${esc(r.authorName)}</strong>${r.authorDetail ? `, ${esc(r.authorDetail)}` : ''}<br><span class="fine">${r.sourceUrl ? `<a href="${esc(r.sourceUrl)}" rel="noopener">${esc(r.sourceLabel)}</a>` : esc(r.sourceLabel)}${r.reviewedOn ? ` · ${esc(monthYear(r.reviewedOn))}` : ''}</span></figcaption></figure>`;
+            const summary = sum ? `<p class="rsum">${stars(Math.round(sum.average))} <strong>${sum.average.toFixed(1)} out of 5</strong> <span class="fine">from ${sum.rated} rated review${sum.rated === 1 ? '' : 's'}</span></p>` : '';
+            return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${summary}${chosen.length ? `<div class="grid">${chosen.map(card).join('')}</div>` : ''}</div></section>`;
+        }
         case 'gallery': {
             const p = s.props;
             const tiles = p.images.map((im) => {
@@ -404,6 +423,7 @@ function structuredData(def: SiteDefinition, page: SitePageDef, origin: string):
                 ...(business.info?.visitAddress ? { streetAddress: business.info.visitAddress.split('\n').join(', ') } : {}),
                 ...(s.locality ? { addressLocality: s.locality } : {}) } } : {}),
             ...(business.info && openingHoursSpecification(business.info.weeklyHours).length ? { openingHoursSpecification: openingHoursSpecification(business.info.weeklyHours) } : {}),
+            ...(reviewsData?.summary ? { aggregateRating: { '@type': 'AggregateRating', ratingValue: reviewsData.summary.average.toFixed(1), reviewCount: reviewsData.summary.rated, bestRating: 5, worstRating: 1 } } : {}),
         });
     }
     // Things for sale, as Product + Offer — so search engines and AI assistants can quote the price.
@@ -481,6 +501,7 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
     mapPath = ctx.pagePath ?? ((p) => p);
     assetUrlOf = ctx.assetUrl ?? (() => null);
     const page = findPage(def, path);
+    reviewsData = ctx.reviews ?? null;
     business = { info: ctx.business ?? null, now: ctx.now ?? new Date(), settings: def.settings };
     formState = { preview: ctx.preview, forms: ctx.forms ?? {}, renderedAt: ctx.renderedAt ?? Date.now(), path: page ? (page.slug ? `/${page.slug}` : '/') : '/', canSell: ctx.canSell === true, products: ctx.products ?? {}, booking: ctx.booking ?? null };
     if (!page) {

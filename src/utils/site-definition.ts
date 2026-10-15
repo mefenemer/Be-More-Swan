@@ -119,6 +119,12 @@ export interface MenuProps { heading: string | null; intro: string | null; group
  */
 export interface GalleryImage extends Image { caption: string | null; }
 export interface GalleryProps { heading: string | null; intro: string | null; layout: 'square' | 'natural'; images: GalleryImage[]; }
+/**
+ * Reviews from Business Information ▸ Reviews (org_reviews) — the customers' words, never typed into
+ * the site. `reviewIds` chooses which to quote, in order; empty = the newest. The summary ("4.8 ★
+ * from 23 reviews") is always the honest average of every review recorded, hidden ones included.
+ */
+export interface ReviewsProps { heading: string | null; intro: string | null; reviewIds: number[]; limit: number; showSummary: boolean; }
 export interface HoursProps { heading: string | null; intro: string | null; showHours: boolean; showContact: boolean; showAddress: boolean; }
 export type BookingSectionKind = 'appointment' | 'consultation' | 'table';
 export interface BookingProps { heading: string | null; intro: string | null; kind: BookingSectionKind; serviceIds: number[]; askStaff: boolean; buttonLabel: string; }
@@ -149,9 +155,10 @@ export type SectionBody =
     | { id: string; type: 'booking'; props: BookingProps }
     | { id: string; type: 'hours'; props: HoursProps }
     | { id: string; type: 'menu'; props: MenuProps }
-    | { id: string; type: 'gallery'; props: GalleryProps };
+    | { id: string; type: 'gallery'; props: GalleryProps }
+    | { id: string; type: 'reviews'; props: ReviewsProps };
 export type SectionType = SectionBody['type'];
-export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking', 'hours', 'menu', 'gallery'];
+export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking', 'hours', 'menu', 'gallery', 'reviews'];
 
 export interface SitePageDef {
     id: string;
@@ -190,7 +197,7 @@ export const LIMITS = {
     itemTitle: 80, itemBody: 400, intro: 300, textBody: 3000, faqItems: 15, q: 200, a: 1000,
     features: 9, stepsMin: 2, steps: 6, testimonials: 9, quote: 500, personName: 80, personDetail: 80,
     buttonLabel: 40, products: 12, productName: 80, productDescription: 400,
-    menuGroups: 12, menuItems: 100, menuNote: 300, galleryImages: 24, caption: 150,
+    menuGroups: 12, menuItems: 100, menuNote: 300, galleryImages: 24, caption: 150, reviewsShown: 12,
     /** Pence. Stripe's GBP minimum is 30p; the ceiling is a sanity bound for a small-business shop. */
     minPrice: 30, maxPrice: 1_000_000,
 } as const;
@@ -368,6 +375,17 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
                 buyLabel: cleanText(p.buyLabel, LIMITS.buttonLabel) || 'Buy now',
             } };
         }
+        case 'reviews': {
+            const ids = [...new Set((Array.isArray(p.reviewIds) ? p.reviewIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+            if (ids.length > LIMITS.reviewsShown) warn(`A reviews section quotes up to ${LIMITS.reviewsShown} reviews; the rest were left out.`);
+            const limit = Number(p.limit);
+            return { type: 'reviews', props: {
+                heading: textOrNull(p.heading, LIMITS.headline) ?? 'What our customers say', intro: textOrNull(p.intro, LIMITS.intro, true),
+                reviewIds: ids.slice(0, LIMITS.reviewsShown),
+                limit: Number.isInteger(limit) && limit >= 1 && limit <= LIMITS.reviewsShown ? limit : 6,
+                showSummary: p.showSummary !== false,
+            } };
+        }
         case 'gallery': {
             const raw = Array.isArray(p.images) ? p.images : [];
             const images = raw.map((x) => {
@@ -436,7 +454,7 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
 }
 
 /** A section's look: a closed set of choices, so nothing here can become CSS. */
-export const GRID_TYPES: readonly SectionType[] = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery'];
+export const GRID_TYPES: readonly SectionType[] = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery', 'reviews'];
 export function cleanLook(raw: unknown, type: SectionType): SectionLook {
     const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
     const background = o.background === 'plain' || o.background === 'soft' || o.background === 'brand' ? o.background : 'auto';

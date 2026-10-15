@@ -26,7 +26,7 @@
   const API = '/.netlify/functions/sites';
   const POLL_MS = 5000;
 
-  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale', booking: 'Bookings', hours: 'Opening hours & contact', menu: 'Menu / price list', gallery: 'Gallery' };
+  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale', booking: 'Bookings', hours: 'Opening hours & contact', menu: 'Menu / price list', gallery: 'Gallery', reviews: 'Reviews' };
   /** The edit form for each section type — the props the gate accepts (site-definition.ts cleanSection). */
   const FORMS = {
     hero: [
@@ -70,6 +70,11 @@
       { k: 'serviceIds', kind: 'servicePick', label: 'Which services can be booked' },
       { k: 'askStaff', kind: 'checkbox', label: 'Let people choose who they book with (or "anyone available")' },
       { k: 'buttonLabel', kind: 'text', label: 'Button text' }],
+    // Reviews: quoted from Business Information ▸ Reviews (the customers' words, never typed here).
+    reviews: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
+      { k: 'reviewIds', kind: 'reviewPick', label: 'Which reviews to quote' },
+      { k: 'limit', kind: 'select', label: 'When none are ticked, show the newest', options: [[3, '3 reviews'], [6, '6 reviews'], [9, '9 reviews'], [12, '12 reviews']] },
+      { k: 'showSummary', kind: 'checkbox', label: 'Show your average rating (counts every review, including hidden ones)' }],
     // Gallery: the owner's own pictures, each with what it shows (needed) and an optional caption.
     gallery: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
       { k: 'layout', kind: 'select', label: 'Layout', options: [['square', 'Even squares (pictures are cropped to fit)'], ['natural', 'Each picture at its own shape']] },
@@ -96,6 +101,7 @@
     products: { heading: 'Shop', productIds: [], collectAddress: false, buyLabel: 'Buy now' },
     booking: { kind: 'appointment', heading: 'Book an appointment', serviceIds: [], askStaff: false, buttonLabel: '' },
     hours: { heading: 'Opening hours', intro: '', showHours: true, showAddress: true, showContact: true },
+    reviews: { heading: 'What our customers say', intro: '', reviewIds: [], limit: 6, showSummary: true },
     gallery: { heading: 'Gallery', intro: '', layout: 'square', images: [] },
     menu: { heading: 'Prices', intro: '', groups: [{ title: '', productIds: [] }], showDescriptions: true, showDurations: false, note: '' },
   };
@@ -213,7 +219,7 @@
     const req = f.required ? ' <span class="text-red-500">*</span>' : '';
     if (f.kind === 'text') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</label><input name="${name}" class="${inputCls}" value="${esc(value || '')}">`;
     if (f.kind === 'textarea') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</label><textarea name="${name}" rows="${f.rows || 3}" class="${inputCls}">${esc(value || '')}</textarea>`;
-    if (f.kind === 'select') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</label><select name="${name}" class="${inputCls}">${f.options.map(([v, l]) => `<option value="${esc(v)}" ${v === value ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+    if (f.kind === 'select') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</label><select name="${name}" class="${inputCls}">${f.options.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(value) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
     if (f.kind === 'checkbox') return `<label class="flex items-center gap-2 text-xs font-bold text-gray-700 mt-3"><input type="checkbox" name="${name}" ${value ? 'checked' : ''}> ${esc(f.label)}</label>`;
     if (f.kind === 'formpick') {
       const forms = state.data.forms || [];
@@ -278,6 +284,23 @@
           </label>`).join('')}</div>`
           : '<p class="text-xs text-gray-500 mt-1">You haven\'t added any products or services yet.</p>'}
         <p class="text-xs text-gray-500 mt-2">Add products, or change a name, price or picture, in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} — every page and checkout follows. Only fixed prices can be bought online.</p>`;
+    }
+    if (f.kind === 'reviewPick') {
+      const rv = state.data.reviews || { list: [], summary: null };
+      const chosen = (Array.isArray(value) ? value : []).map(Number);
+      const starsOf = (n) => (n ? '★'.repeat(n) + '☆'.repeat(5 - n) : 'No stars');
+      // Ticked ones first, in the order they will appear; then the rest, newest first.
+      const ordered = [...chosen.map((id) => rv.list.find((r) => r.id === id)).filter(Boolean), ...rv.list.filter((r) => !chosen.includes(r.id))];
+      return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
+        ${rv.summary ? `<p class="text-xs text-gray-600 mt-1">Your average: <strong>${esc(rv.summary.average.toFixed(1))}</strong> from ${esc(rv.summary.rated)} rated review${rv.summary.rated === 1 ? '' : 's'}.</p>` : ''}
+        ${rv.list.length ? `<div class="space-y-1 mt-1 max-h-72 overflow-y-auto">${ordered.map((r) => `
+          <label class="flex items-start gap-2 border border-gray-200 rounded-lg px-3 py-2 text-xs cursor-pointer">
+            <input type="checkbox" data-review-pick value="${esc(r.id)}" ${chosen.includes(r.id) ? 'checked' : ''} class="mt-0.5">
+            <span class="min-w-0"><span class="text-amber-500">${esc(starsOf(r.rating))}</span> <span class="font-bold text-gray-900">${esc(r.authorName)}</span>
+              <span class="block text-gray-600 truncate">${esc(r.body)}</span></span></label>`).join('')}</div>
+          <p class="text-xs text-gray-500 mt-1">Tick none to show your newest reviews automatically.</p>`
+          : '<p class="text-xs text-gray-500 mt-1">You haven\'t added any reviews yet.</p>'}
+        <p class="text-xs text-gray-500 mt-2">Add, edit or hide reviews in ${btn('data-site-open-reviews', 'Business Information ▸ Reviews')} — or paste them into this chat.</p>`;
     }
     if (f.kind === 'gallery') {
       const list = Array.isArray(value) ? value : [];
@@ -358,6 +381,8 @@
         props[f.k] = assetId ? { assetId, url: '', alt } : url ? { url, alt } : null;
       } else if (f.kind === 'servicePick') {
         props[f.k] = [...form.querySelectorAll('[data-service-pick]:checked')].map((el) => Number(el.value));
+      } else if (f.kind === 'reviewPick') {
+        props[f.k] = [...form.querySelectorAll('[data-review-pick]:checked')].map((el) => Number(el.value));
       } else if (f.kind === 'gallery') {
         props[f.k] = [...form.querySelectorAll('[data-gallery-item]')].map((row) => {
           const assetId = Number(row.querySelector('[data-g-asset]').value) || null;
@@ -384,7 +409,7 @@
 
   // ── How a section looks (site-definition.ts SectionLook — a closed set of choices) ──────────
   const LOOK_DEFAULT = { background: 'auto', columns: 'auto', menuLabel: null };
-  const GRID_TYPES = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery'];
+  const GRID_TYPES = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery', 'reviews'];
   function lookHtml(e) {
     const l = e.look || LOOK_DEFAULT;
     const onePage = def().structure === 'one_page';
@@ -894,6 +919,7 @@
       return;
     }
     if (t('[data-site-open-products]')) { window._bizinfoInitialTab = 'products'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
+    if (t('[data-site-open-reviews]')) { window._bizinfoInitialTab = 'reviews'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
     if (t('[data-site-open-hours]')) { window._bizinfoInitialTab = 'hours'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
     const dec = t('[data-site-booking]');
     if (dec) {
