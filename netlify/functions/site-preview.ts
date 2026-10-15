@@ -15,6 +15,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
 import { renderSitePage } from '../../src/utils/site-render';
 import { definitionOf, maxPagesFor } from '../../src/utils/site-store';
+import { loadSiteForms } from '../../src/utils/site-forms';
 
 const CSP = "default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'";
 
@@ -52,6 +53,8 @@ export default withLambda(async (event) => {
         reportUrl: '#',
         creditUrl: row.site.credit ? 'https://bemoreswan.com' : null,
         pagePath: self,
+        // Sign-up sections draw their form (switched off — the preview's CSP forbids posting anyway).
+        forms: await loadSiteForms(db, ctx.organisationId, definition),
     });
     return page(rendered.status, rendered.html);
 });

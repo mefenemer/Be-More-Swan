@@ -26,7 +26,7 @@
   const API = '/.netlify/functions/sites';
   const POLL_MS = 5000;
 
-  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action' };
+  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form' };
   /** The edit form for each section type — the props the gate accepts (site-definition.ts cleanSection). */
   const FORMS = {
     hero: [
@@ -48,16 +48,24 @@
     testimonials: [{ k: 'heading', kind: 'text', label: 'Heading' },
       { k: 'items', kind: 'items', label: 'Testimonials', fields: [['quote', 'textarea', 'What they said'], ['name', 'text', 'Their name'], ['detail', 'text', 'Business or town']] }],
     cta: [{ k: 'heading', kind: 'text', label: 'Heading', required: true }, { k: 'body', kind: 'textarea', label: 'Text' }, { k: 'button', kind: 'link', label: 'Button', required: true }],
+    // Enquiries land on the Enquiries tab and in the owner's email — never in the Audience.
+    contact: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
+      { k: 'askPhone', kind: 'checkbox', label: 'Ask for a phone number (optional for the visitor)' }, { k: 'buttonLabel', kind: 'text', label: 'Button text' }],
+    // One of the workspace's Form Builder forms; its questions, consent and double opt-in come from it.
+    signup: [{ k: 'formId', kind: 'formpick', label: 'Sign-up form', required: true }, { k: 'heading', kind: 'text', label: 'Heading (leave empty to use the form\'s own)' },
+      { k: 'intro', kind: 'textarea', label: 'Introduction (leave empty to use the form\'s own)' }],
   };
   const BLANK = {
     hero: { layout: 'centered', headline: '' }, features: { items: [{ title: '', body: '' }] }, steps: { items: [{ title: '', body: '' }, { title: '', body: '' }] },
     text: { body: '' }, faq: { items: [{ q: '', a: '' }] }, testimonials: { items: [{ quote: '', name: '', detail: '' }] }, cta: { heading: '', button: { label: '', href: '/' } },
+    contact: { heading: 'Get in touch', intro: '', askPhone: false, buttonLabel: 'Send message' }, signup: { formId: null },
   };
 
   const state = {
     assistantId: null, assistantName: null, data: null, loaded: false, loadError: null, rendered: false,
     panel: 'pages', pageId: null, editing: null, device: 'desktop', previewPath: '/', note: null, pollTimer: null, version: 0,
     editingAddress: false, slugTyped: null, versions: null, publishNote: null,
+    enquiries: null, enquiryShown: 20,
   };
 
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -141,6 +149,13 @@
     if (f.kind === 'text') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</label><input name="${name}" class="${inputCls}" value="${esc(value || '')}">`;
     if (f.kind === 'textarea') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</label><textarea name="${name}" rows="${f.rows || 3}" class="${inputCls}">${esc(value || '')}</textarea>`;
     if (f.kind === 'select') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</label><select name="${name}" class="${inputCls}">${f.options.map(([v, l]) => `<option value="${esc(v)}" ${v === value ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+    if (f.kind === 'checkbox') return `<label class="flex items-center gap-2 text-xs font-bold text-gray-700 mt-3"><input type="checkbox" name="${name}" ${value ? 'checked' : ''}> ${esc(f.label)}</label>`;
+    if (f.kind === 'formpick') {
+      const forms = state.data.forms || [];
+      if (!forms.length) return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</p><p class="text-xs text-gray-500">You have no sign-up forms yet. Make one with your Email Marketing Assistant or in Audience → Forms, then come back.</p><input type="hidden" name="${name}" value="">`;
+      return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</label><select name="${name}" class="${inputCls}"><option value="">Choose a form…</option>${forms.map((x) => `<option value="${esc(x.id)}" ${Number(value) === x.id ? 'selected' : ''}>${esc(x.name)}${x.active ? '' : ' (switched off)'}</option>`).join('')}</select>
+        <p class="text-xs text-gray-500 mt-1">The form's questions, consent wording and confirmation email are used. People who sign up join your Audience, as they would from any of your forms.</p>`;
+    }
     if (f.kind === 'link') {
       const v = value || {};
       const pages = def().pages.map((p) => [pathOf(p), p.title]);
@@ -175,6 +190,8 @@
     for (const f of FORMS[type]) {
       const n = `f-${f.k}`;
       if (f.kind === 'text' || f.kind === 'textarea' || f.kind === 'select') props[f.k] = form.querySelector(`[name="${n}"]`).value;
+      else if (f.kind === 'checkbox') props[f.k] = form.querySelector(`[name="${n}"]`).checked;
+      else if (f.kind === 'formpick') props[f.k] = Number(form.querySelector(`[name="${n}"]`).value) || null;
       else if (f.kind === 'link') {
         const label = form.querySelector(`[name="${n}-label"]`).value.trim();
         const href = form.querySelector(`[name="${n}-href"]`).value.trim();
@@ -265,6 +282,33 @@
       <div class="mt-4">${btn('data-site-details-save', 'Save details', true)}</div>`);
   }
 
+  function enquiriesPanel() {
+    const list = state.enquiries;
+    if (!list) return card('<p class="text-sm text-gray-400 text-center">Loading enquiries…</p>');
+    if (!list.length) return card(`<p class="text-sm font-black text-gray-900">Enquiries</p><p class="text-xs text-gray-500 mt-1">Messages people send from a contact form on your site appear here, and in your email. Add a "Contact form" section to a page to start receiving them.</p>`);
+    const shown = list.slice(0, state.enquiryShown);
+    return card(`
+      <p class="text-sm font-black text-gray-900">Enquiries</p>
+      <p class="text-xs text-gray-500 mt-1 mb-3">Sent from the contact forms on your site. Each one was also emailed to you — reply to them directly. They are not added to your Audience.</p>
+      <ul class="space-y-2">${shown.map((q) => `
+        <li class="border ${q.status === 'new' ? 'border-indigo-200' : 'border-gray-200'} rounded-lg p-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <p class="text-xs font-bold text-gray-900">${esc(q.name)} ${q.status === 'new' ? '<span class="text-xs font-bold text-indigo-700">· New</span>' : ''}</p>
+            <p class="text-xs text-gray-500">${esc(new Date(q.createdAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }))}${q.pagePath ? ` · ${esc(q.pagePath)}` : ''}</p>
+          </div>
+          <p class="text-xs text-gray-600 mt-1"><a class="underline" href="mailto:${esc(q.email)}">${esc(q.email)}</a>${q.phone ? ` · <a class="underline" href="tel:${esc(q.phone)}">${esc(q.phone)}</a>` : ''}</p>
+          <p class="text-xs text-gray-800 mt-2" style="white-space:pre-wrap">${esc(q.message)}</p>
+          <div class="mt-2">${btn(`data-site-enquiry="${esc(q.id)}" data-done="${q.status === 'new' ? '1' : '0'}"`, q.status === 'new' ? 'Mark as dealt with' : 'Mark as new')}</div>
+        </li>`).join('')}</ul>
+      ${list.length > shown.length ? `<div class="mt-3">${btn('data-site-enquiries-more', `Show more (${list.length - shown.length})`)}</div>` : ''}`);
+  }
+
+  async function loadEnquiries() {
+    try { state.enquiries = (await post({ action: 'enquiries', assistantId: state.assistantId })).enquiries || []; }
+    catch (err) { state.enquiries = []; state.note = { text: err.message, tone: 'error' }; }
+    rerender();
+  }
+
   function previewHtml() {
     const src = `/.netlify/functions/site-preview?assistantId=${encodeURIComponent(state.assistantId)}&path=${encodeURIComponent(state.previewPath)}&v=${state.version}`;
     const width = state.device === 'mobile' ? '390px' : '100%';
@@ -340,7 +384,8 @@
     if (!host) return;
     if (!state.loaded) { host.innerHTML = card('<p class="text-sm text-gray-400 text-center">Loading your website…</p>'); return; }
     if (state.loadError && !state.data) { host.innerHTML = card(`<p class="text-sm font-bold text-gray-700 text-center">Could not load your website</p><p class="text-xs text-gray-500 mt-2 text-center">${esc(state.loadError)}</p>`); return; }
-    const tabs = [['pages', 'Pages'], ['design', 'Design'], ['details', 'Details']].map(([k, l]) => btn(`data-site-panel="${k}"`, l, state.panel === k)).join(' ');
+    const newCount = state.data.newEnquiries || 0;
+    const tabs = [['pages', 'Pages'], ['design', 'Design'], ['details', 'Details'], ['enquiries', newCount ? `Enquiries (${newCount} new)` : 'Enquiries']].map(([k, l]) => btn(`data-site-panel="${k}"`, esc(l), state.panel === k)).join(' ');
     host.innerHTML = `
       <div class="grid gap-4 lg:grid-cols-2">
         <div class="space-y-4 min-w-0">
@@ -348,7 +393,7 @@
           ${placeholdersCard()}
           <div class="flex flex-wrap gap-2">${tabs}</div>
           ${noteHtml()}
-          ${state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : detailsPanel()}
+          ${state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : state.panel === 'enquiries' ? enquiriesPanel() : detailsPanel()}
           ${draftCard()}
         </div>
         <div class="min-w-0">${previewHtml()}</div>
@@ -378,7 +423,22 @@
     const p = page();
 
     const panel = t('[data-site-panel]');
-    if (panel) { state.panel = panel.dataset.sitePanel; state.editing = null; render(); return; }
+    if (panel) {
+      state.panel = panel.dataset.sitePanel; state.editing = null;
+      if (state.panel === 'enquiries') { state.enquiries = null; state.enquiryShown = 20; loadEnquiries(); }
+      render();
+      return;
+    }
+    const enq = t('[data-site-enquiry]');
+    if (enq) {
+      try {
+        await post({ action: 'enquiry_done', assistantId: state.assistantId, id: Number(enq.dataset.siteEnquiry), done: enq.dataset.done === '1' });
+        state.data = await post({ action: 'get', assistantId: state.assistantId });
+      } catch (err) { state.note = { text: err.message, tone: 'error' }; }
+      await loadEnquiries();
+      return;
+    }
+    if (t('[data-site-enquiries-more]')) { state.enquiryShown += 20; render(); return; }
     const pg = t('[data-site-page]');
     if (pg) { state.pageId = pg.dataset.sitePage; state.editing = null; state.previewPath = pathOf(page()); render(); return; }
     const dev = t('[data-site-device]');
@@ -517,7 +577,7 @@
   window.AssistantSiteEditor = {
     init({ assistantId, assistantName }) {
       clearTimeout(state.pollTimer);
-      Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null });
+      Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20 });
       load();
     },
     activate() {

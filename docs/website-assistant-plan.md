@@ -144,7 +144,13 @@ published_by) · `site_domains` (hostname, verification, cert state). Form submi
      version only, no scripts); "Report this site" → report-site.html → site-reports.ts; Admin ▸
      Trust ▸ Hosted Sites (admin-sites.ts) suspends. SQL: db/z-website-hosting.sql. No CDN cache yet
      (every view is one function call) — add tag-purged caching when traffic warrants.
-   - 3b forms + newsletter, 3c Stripe Connect checkout: next.
+   - **3b built 2026-10-15:** `contact` and `signup` sections, script-free HTML posting to the site's
+     own `/_form` (sites-host forwards POST + visitor IP → site-serve → src/utils/site-forms.ts).
+     Enquiries → `site_enquiries` + owner notification (`site_enquiry_received`) + email to the
+     ACCOUNT's address; never the Audience. Sign-ups → audience-public subscribe in-process, which
+     now also accepts the workspace's own published site as an origin. Enquiries tab on the Website
+     tab; both in the data export. SQL: db/z-website-forms.sql.
+   - 3c Stripe Connect checkout: next (needs Connect enabled + D5).
 4. Custom domains (D2). Mystery Shopper → one-click fixes.
 5. (moved into 3)
 6. Import-my-site, remaining sections, widget catalogue (post-launch).

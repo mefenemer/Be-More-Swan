@@ -53,7 +53,10 @@ check('our own origin is allowed ONLY for a form that switched the page on', () 
     // deliberately locked to an intranet — could be posted to from a page anyone can open.
     const fn = PUBLIC.slice(landmark(PUBLIC, 'const fromHostedPage'), landmark(PUBLIC, 'const successBody'));
     assert.match(fn, /form\.hostedEnabled && !!origin && origin === resolveBaseUrl/);
-    assert.match(fn, /if \(!fromHostedPage && !originAllowed\(/);
+    // The one other allowance (Website Assistant step 3b): the workspace's OWN published site —
+    // checked against the form's organisation, never "any bemoreswan.site address".
+    assert.match(fn, /if \(!fromHostedPage && !fromOwnSite && !originAllowed\(/);
+    assert.match(fn, /isOwnPublishedSite\(db, origin, form\.organisationId\)/);
 });
 
 check('the allowance is tied to the request origin, not to the mere existence of the page', () => {

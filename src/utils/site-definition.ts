@@ -59,6 +59,17 @@ export interface FaqProps { heading: string | null; items: Array<{ q: string; a:
 export interface CtaProps { heading: string; body: string | null; button: Link; }
 /** What customers say — the proof a buyer looks for (and the Mystery Shopper checks for). */
 export interface TestimonialsProps { heading: string | null; items: Array<{ quote: string; name: string; detail: string | null }>; }
+/**
+ * An enquiry form (step 3b). Name, email, message (and phone when asked). Messages are kept for the
+ * site's owner (site_enquiries) — they are NOT a sign-up: nobody joins the Audience by asking a question.
+ */
+export interface ContactProps { heading: string | null; intro: string | null; askPhone: boolean; buttonLabel: string; }
+/**
+ * One of the workspace's Form Builder sign-up forms, drawn on the site (step 3b). `formId` is an
+ * audience_forms id; whether it belongs to this workspace and is active is checked when the page is
+ * drawn and again when someone signs up — a form that is not usable draws nothing on the live site.
+ */
+export interface SignupProps { heading: string | null; intro: string | null; formId: number | null; }
 
 export type Section =
     | { id: string; type: 'hero'; props: HeroProps }
@@ -67,9 +78,11 @@ export type Section =
     | { id: string; type: 'text'; props: TextProps }
     | { id: string; type: 'faq'; props: FaqProps }
     | { id: string; type: 'cta'; props: CtaProps }
-    | { id: string; type: 'testimonials'; props: TestimonialsProps };
+    | { id: string; type: 'testimonials'; props: TestimonialsProps }
+    | { id: string; type: 'contact'; props: ContactProps }
+    | { id: string; type: 'signup'; props: SignupProps };
 export type SectionType = Section['type'];
-export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta'];
+export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup'];
 
 export interface SitePageDef {
     id: string;
@@ -99,6 +112,7 @@ export const LIMITS = {
     headline: 120, subheadline: 300, eyebrow: 40, ctaLabel: 40, href: 500, alt: 150,
     itemTitle: 80, itemBody: 400, intro: 300, textBody: 3000, faqItems: 15, q: 200, a: 1000,
     features: 9, stepsMin: 2, steps: 6, testimonials: 9, quote: 500, personName: 80, personDetail: 80,
+    buttonLabel: 40,
 } as const;
 
 /** Pages a site may have when the plan sets no number (decision D1: 5 on £29). */
@@ -237,6 +251,22 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
             const button = cleanLink(p.button);
             if (!heading || !button) { warn('A call-to-action section was left out: it needs a heading and a button.'); return null; }
             return { type: 'cta', props: { heading, body: textOrNull(p.body, LIMITS.subheadline, true), button } };
+        }
+        case 'contact': {
+            return { type: 'contact', props: {
+                heading: textOrNull(p.heading, LIMITS.headline),
+                intro: textOrNull(p.intro, LIMITS.intro, true),
+                askPhone: p.askPhone === true,
+                buttonLabel: cleanText(p.buttonLabel, LIMITS.buttonLabel) || 'Send message',
+            } };
+        }
+        case 'signup': {
+            const id = Number(p.formId);
+            return { type: 'signup', props: {
+                heading: textOrNull(p.heading, LIMITS.headline),
+                intro: textOrNull(p.intro, LIMITS.intro, true),
+                formId: Number.isInteger(id) && id > 0 ? id : null,
+            } };
         }
         default:
             warn(`A section of an unknown kind was left out.`);

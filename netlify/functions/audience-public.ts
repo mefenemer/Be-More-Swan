@@ -47,6 +47,7 @@ import {
     type FormDefinition,
 } from '../../src/utils/form-definition';
 import { signAssetId } from '../../src/utils/newsletter-media-url';
+import { isOwnPublishedSite } from '../../src/utils/site-store';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Per-IP: a person signs up once. Ten a minute is already a script. */
@@ -454,7 +455,13 @@ export default withLambda(async (event: HandlerEvent) => {
     // the check for our origin unconditionally would mean any form, including one deliberately
     // locked down, could be posted to from a page anyone can open.
     const fromHostedPage = form.hostedEnabled && !!origin && origin === resolveBaseUrl(event.headers as Record<string, string | undefined>);
-    if (!fromHostedPage && !originAllowed(form.allowedOrigins, origin)) {
+    // ⚠️ THE WORKSPACE'S OWN WEBSITE (Website Assistant, <slug>.bemoreswan.site) is an allowed origin
+    // for ITS OWN forms only: the site must be published and belong to the same organisation as the
+    // form. That is the owner putting their own form on their own site — the thing the allow-list
+    // exists to permit — so they need not also list an address we gave them. Another workspace's
+    // site, or a draft, gets the ordinary check.
+    const fromOwnSite = !fromHostedPage && !!origin && await isOwnPublishedSite(db, origin, form.organisationId);
+    if (!fromHostedPage && !fromOwnSite && !originAllowed(form.allowedOrigins, origin)) {
         return json(403, {
             error: 'This website is not on the allowed list for this sign-up form.',
             code: 'origin_not_allowed',

@@ -97,6 +97,7 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     -- most time-critical event in the Lead Generator, and mis-stamping it produces precisely the
     -- silence the notification was built to end.
     WHEN 'lead_reply_received' THEN 'suggested_action'   -- a prospect replied to outreach
+    WHEN 'site_enquiry_received' THEN 'suggested_action' -- someone sent a message from the website's contact form (call site passes category)
     WHEN 'leads_expiring_soon' THEN 'suggested_action'   -- leads about to leave the Outreach queue
     -- state_change
     WHEN 'goal_autonomous_adjustment' THEN 'state_change'  -- SMART Goals AC3.3.3

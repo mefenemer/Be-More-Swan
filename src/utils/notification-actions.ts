@@ -118,6 +118,9 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     // is PARKED work that DECAYS — a warm reply loses value by the day, and nothing else in the
     // product will answer it. It is not a completed run reporting what it found.
     lead_reply_received: 'suggested_action',
+    // Someone sent a message from the Website Assistant's contact form (site-forms.ts). They are
+    // waiting for a reply — a do-something item, like a prospect writing back.
+    site_enquiry_received: 'suggested_action',
     // A welcome sequence / email campaign has subscribers queued and no way to send (no verified
     // domain, no mailbox). suggested_action: it is blocked on the owner, and each queued person
     // gives up after NO_ROUTE_WAIT_DAYS — work that decays.

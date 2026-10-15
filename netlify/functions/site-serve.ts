@@ -21,11 +21,15 @@ import { eq } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { sites } from '../../db/schema';
-import { renderRobots, renderSitemap, renderSitePage, esc } from '../../src/utils/site-render';
+import { renderRobots, renderSitemap, renderSiteNotice, renderSitePage, esc, FORM_ACTION, FORM_SENT_PATH } from '../../src/utils/site-render';
+import { handleSiteForm, loadSiteForms, sentMessage } from '../../src/utils/site-forms';
+import audiencePublic from './audience-public';
 import { siteOrigin, sitesDomain, slugFromHost } from '../../src/utils/site-hosting';
 import { maxPagesFor, publishedDefinition } from '../../src/utils/site-store';
 
-const CSP = "default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+// form-action 'self': the site's own contact / sign-up forms post to its own /_form (step 3b), and
+// nowhere else — a script-free page cannot be made to post a visitor's details to another site.
+const CSP = "default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
 /** The app's own address — where "Report this site" and "Made with Be More Swan" lead. */
 export function appOrigin(env: Record<string, string | undefined> = process.env): string {
@@ -56,10 +60,30 @@ function notice(status: number, title: string, body: string, app: string) {
     return { statusCode: status, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: html };
 }
 
+/**
+ * A sign-up from a hosted site goes through audience-public's subscribe — the one path that records
+ * consent, sends the confirmation and enrols the welcome sequence — called in-process with the
+ * site as the Origin (allowed there only for the workspace's own published site).
+ */
+async function subscribeInProcess(payload: Record<string, unknown>, meta: { origin: string; ip: string; userAgent: string | null }, app: string): Promise<{ status: number; body: { error?: string } }> {
+    const host = new URL(app).host;
+    const res = await (audiencePublic as unknown as (r: Request, c: unknown) => Promise<Response>)(new Request(`${app}/api/audience/subscribe`, {
+        method: 'POST',
+        headers: {
+            'content-type': 'application/json', origin: meta.origin, 'user-agent': meta.userAgent || '',
+            'x-nf-client-connection-ip': meta.ip, 'x-forwarded-for': meta.ip,
+            'x-forwarded-host': host, 'x-forwarded-proto': 'https',
+        },
+        body: JSON.stringify(payload),
+    }), {});
+    return { status: res.status, body: await res.json().catch(() => ({})) };
+}
+
 export default withLambda(async (event) => {
-    if (event.httpMethod !== 'GET' && event.httpMethod !== 'HEAD') return { statusCode: 405, body: 'Method Not Allowed' };
     const h = event.headers as Record<string, string | undefined>;
     if (!keyMatches(h['x-site-serve-key'], process.env.SITE_SERVE_SECRET)) return { statusCode: 404, body: 'Not found' };
+    const isPost = event.httpMethod === 'POST';
+    if (!isPost && event.httpMethod !== 'GET' && event.httpMethod !== 'HEAD') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const app = appOrigin();
     const slug = slugFromHost(h['x-site-host']);
@@ -68,6 +92,8 @@ export default withLambda(async (event) => {
 
     const rawPath = String(event.queryStringParameters?.path || '/');
     const path = rawPath.startsWith('/') ? rawPath.slice(0, 300) : '/';
+    // Only a form may be posted, and only to its one address.
+    if (isPost && path !== FORM_ACTION) return { statusCode: 405, headers: { Allow: 'GET, HEAD' } as Record<string, string>, body: 'Method Not Allowed' };
     if (path === '/favicon.ico') return { statusCode: 404, headers: headers('text/plain', 'public, max-age=3600'), body: '' };
 
     const db = getDb();
@@ -82,14 +108,34 @@ export default withLambda(async (event) => {
     }
 
     const origin = siteOrigin(slug);
+    const ctx = {
+        origin, preview: false,
+        reportUrl: `${app}/report-site.html?site=${encodeURIComponent(slug)}`,
+        creditUrl: site.credit ? `${app}/assistant.html?role=website_assistant` : null,
+    };
+
+    // ── Forms (step 3b) ──
+    if (isPost) {
+        const raw = event.isBase64Encoded ? Buffer.from(event.body || '', 'base64').toString('utf8') : (event.body || '');
+        // The visitor's IP: sent by the sites-host edge function, trusted only because the key matched.
+        const ip = (h['x-site-client-ip'] || '').slice(0, 64) || 'unknown';
+        const outcome = await handleSiteForm(db, {
+            site, definition, origin, ip, userAgent: h['user-agent'] ?? null,
+            body: new URLSearchParams(raw.slice(0, 20000)),
+            subscribe: (payload, meta) => subscribeInProcess(payload, meta, app),
+        });
+        if (outcome.kind === 'sent') return { statusCode: 303, headers: { Location: outcome.location, 'Cache-Control': 'no-store' } as Record<string, string>, body: '' };
+        return { statusCode: outcome.status, headers: headers('text/html; charset=utf-8', 'no-store'), body: renderSiteNotice(definition, ctx, outcome.title, outcome.message, { label: 'Go back', path: outcome.backPath }) };
+    }
+    if (path === FORM_SENT_PATH) {
+        const q = new URLSearchParams(String(event.queryStringParameters?.q || ''));
+        const m = await sentMessage(db, site, definition, q);
+        return { statusCode: 200, headers: headers('text/html; charset=utf-8', 'no-store'), body: renderSiteNotice(definition, ctx, m.title, m.message, { label: 'Back to the site', path: m.back }) };
+    }
+
     if (path === '/robots.txt') return { statusCode: 200, headers: headers('text/plain; charset=utf-8', 'public, max-age=300'), body: renderRobots(origin, false) };
     if (path === '/sitemap.xml') return { statusCode: 200, headers: headers('application/xml; charset=utf-8', 'public, max-age=300'), body: renderSitemap(definition, origin) };
 
-    const page = renderSitePage(definition, path, {
-        origin,
-        preview: false,
-        reportUrl: `${app}/report-site.html?site=${encodeURIComponent(slug)}`,
-        creditUrl: site.credit ? `${app}/assistant.html?role=website_assistant` : null,
-    });
+    const page = renderSitePage(definition, path, { ...ctx, forms: await loadSiteForms(db, site.organisationId, definition), renderedAt: Date.now() });
     return { statusCode: page.status, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : page.html };
 });

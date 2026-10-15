@@ -11,8 +11,22 @@
 //   · every piece of text escaped; links are only what the gate allowed;
 //   · a "Report this site" link in the footer — we host it, so anyone must be able to report abuse;
 //   · on a draft preview, noindex and a robots.txt that disallows everything.
+//   · forms (contact, sign-up — step 3b) are plain HTML that POST to the site's own /_form: they work
+//     with no script at all. In the editor's preview they are drawn but switched off.
 
 import { buttonInk, menuOf, type Link, type Section, type SiteDefinition, type SitePageDef, type SiteTheme } from './site-definition';
+
+/** What a sign-up section needs to draw one Form Builder form (form-definition.ts publicDefinition). */
+export interface SiteSignupForm {
+    content: { headline: string; intro: string; buttonLabel: string };
+    fields: Array<{ id: string; type: string; label: string; placeholder: string; help: string; required: boolean; options: Array<{ value: string; label: string }> }>;
+    consent: { text: string; requireCheckbox: boolean };
+}
+
+/** Where forms post, on the site's own origin (sites-host forwards it to site-serve.ts). */
+export const FORM_ACTION = '/_form';
+/** The page a form lands on afterwards — drawn by site-serve.ts in the site's own look. */
+export const FORM_SENT_PATH = '/_sent';
 
 export interface RenderContext {
     /** The site's own origin, e.g. https://willowbrook.bemoreswan.site — canonical URLs start here. */
@@ -31,6 +45,10 @@ export interface RenderContext {
      * stays inside it instead of landing on the app.
      */
     pagePath?: (path: string) => string;
+    /** Sign-up forms by audience_forms id, already checked to be this workspace's and active. */
+    forms?: Record<number, SiteSignupForm>;
+    /** When this page was drawn (ms) — a form posted back faster than a person could is a bot. */
+    renderedAt?: number;
 }
 
 export interface RenderedPage { status: 200 | 404; html: string; }
@@ -73,13 +91,49 @@ section{padding:64px 0}.alt{background:rgba(0,0,0,.035)}
 .intro{max-width:680px;opacity:.85}details{border:1px solid rgba(0,0,0,.1);border-radius:var(--r);padding:14px 18px;margin:10px 0;background:var(--b)}summary{cursor:pointer;font-weight:700}details p{margin:.6em 0 0}
 .cta{text-align:center}.cta .box{background:var(--p);color:var(--ink);border-radius:var(--r);padding:44px 24px}.cta .btn{background:var(--ink);color:var(--p)}
 .ft{border-top:1px solid rgba(0,0,0,.08);padding:28px 0;font-size:.85rem;opacity:.85}.ft .w{display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:space-between}.ft a{color:inherit}
-.pv{background:#111;color:#fff;text-align:center;font-size:.85rem;padding:8px}`;
+.pv{background:#111;color:#fff;text-align:center;font-size:.85rem;padding:8px}
+.fm{display:grid;gap:14px;margin-top:20px;max-width:560px}.fm label{display:grid;gap:4px;font-weight:600;font-size:.95rem}.fm .opt{display:flex;gap:8px;align-items:flex-start;font-weight:400}
+.fm input:not([type=checkbox]):not([type=radio]),.fm textarea,.fm select{font:inherit;color:var(--t);background:var(--b);border:1px solid rgba(0,0,0,.25);border-radius:var(--r);padding:10px 12px;width:100%}
+.fm fieldset{border:0;padding:0;margin:0;display:grid;gap:6px}.fm legend{font-weight:600;font-size:.95rem;margin-bottom:4px}.fm .help,.fm .fine{font-size:.85rem;opacity:.8;font-weight:400;margin:0}
+.fm button{border:0;cursor:pointer;font:inherit;justify-self:start}.fm button[disabled]{opacity:.6;cursor:not-allowed}.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}`;
 }
 
 const paragraphs = (text: string) => text.split(/\n{2,}/).map((p) => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`).join('');
 
 /** Set per render call (renderSitePage) — internal links go through the context's pagePath. */
 let mapPath: (path: string) => string = (p) => p;
+/** Set per render call — forms are drawn live, or switched off in the preview. */
+let formState: { preview: boolean; forms: Record<number, SiteSignupForm>; renderedAt: number; path: string } = { preview: true, forms: {}, renderedAt: 0, path: '/' };
+
+function formOpen(sectionId: string, kind: 'contact' | 'signup'): string {
+    return `<form class="fm" method="post" action="${FORM_ACTION}">
+<input type="hidden" name="_s" value="${esc(sectionId)}"><input type="hidden" name="_k" value="${kind}"><input type="hidden" name="_t" value="${formState.renderedAt}"><input type="hidden" name="_p" value="${esc(formState.path)}">
+<div class="hp" aria-hidden="true"><label>Leave this empty <input name="website" tabindex="-1" autocomplete="off"></label></div>`;
+}
+function formButton(label: string): string {
+    return formState.preview
+        ? `<button class="btn" type="submit" disabled>${esc(label)}</button><p class="fine">Forms work on your live site, not in this preview.</p>`
+        : `<button class="btn" type="submit">${esc(label)}</button>`;
+}
+
+function signupFieldHtml(f: SiteSignupForm['fields'][number]): string {
+    const name = `a_${f.id}`;
+    const req = f.required ? ' required' : '';
+    const help = f.help ? `<span class="help">${esc(f.help)}</span>` : '';
+    const ph = f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : '';
+    if (f.type === 'radio' || f.type === 'checkbox') {
+        const kind = f.type === 'radio' ? 'radio' : 'checkbox';
+        if (!f.options.length) return `<label class="opt"><input type="checkbox" name="${esc(name)}" value="yes"${req}> ${esc(f.label)}</label>${help}`;
+        return `<fieldset><legend>${esc(f.label)}</legend>${help}${f.options.map((o) => `<label class="opt"><input type="${kind}" name="${esc(name)}" value="${esc(o.value)}"${f.type === 'radio' ? req : ''}> ${esc(o.label)}</label>`).join('')}</fieldset>`;
+    }
+    if (f.type === 'select') {
+        return `<label>${esc(f.label)}${help}<select name="${esc(name)}"${req}><option value="">Choose…</option>${f.options.map((o) => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('')}</select></label>`;
+    }
+    if (f.type === 'textarea') return `<label>${esc(f.label)}${help}<textarea name="${esc(name)}" rows="4" maxlength="2000"${ph}${req}></textarea></label>`;
+    const type = f.type === 'email' ? 'email' : f.type === 'phone' ? 'tel' : 'text';
+    const auto = f.type === 'email' ? ' autocomplete="email"' : f.type === 'phone' ? ' autocomplete="tel"' : '';
+    return `<label>${esc(f.label)}${help}<input type="${type}" name="${esc(name)}" maxlength="300"${auto}${ph}${req}></label>`;
+}
 const href = (h: string) => (h.startsWith('/') ? mapPath(h) : h);
 
 function linkHtml(l: Link, secondary = false): string {
@@ -120,6 +174,39 @@ function sectionHtml(s: Section, h1: boolean, alt: boolean): string {
         case 'cta': {
             const p = s.props;
             return `<section class="cta" id="${esc(s.id)}"><div class="w"><div class="box"><${H}>${esc(p.heading)}</${H}>${p.body ? paragraphs(p.body) : ''}<p>${linkHtml(p.button)}</p></div></div></section>`;
+        }
+        case 'contact': {
+            const p = s.props;
+            return `<section${cls} id="${esc(s.id)}"><div class="w n">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? paragraphs(p.intro) : ''}
+${formOpen(s.id, 'contact')}
+<label>Your name<input name="name" required maxlength="120" autocomplete="name"></label>
+<label>Email<input type="email" name="email" required maxlength="254" autocomplete="email"></label>
+${p.askPhone ? '<label>Phone <span class="help">(optional)</span><input type="tel" name="phone" maxlength="30" autocomplete="tel"></label>' : ''}
+<label>Message<textarea name="message" rows="5" required maxlength="4000"></textarea></label>
+${formButton(p.buttonLabel)}
+<p class="fine">Your details are used only to reply to you.</p>
+</form></div></section>`;
+        }
+        case 'signup': {
+            const p = s.props;
+            const form = p.formId ? formState.forms[p.formId] : undefined;
+            if (!form) {
+                // Nothing to sign up to: the live site draws nothing; the preview says why.
+                return formState.preview
+                    ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Sign-up section: choose one of your sign-up forms for it on the Website tab. Until then it doesn't appear on your live site.</p></div></section>`
+                    : '';
+            }
+            const heading = p.heading || form.content.headline;
+            const intro = p.intro || form.content.intro;
+            const consent = form.consent.requireCheckbox
+                ? `<label class="opt"><input type="checkbox" name="_consent" value="yes" required> ${esc(form.consent.text)}</label>`
+                : `<p class="fine">${esc(form.consent.text)}</p>`;
+            return `<section${cls} id="${esc(s.id)}"><div class="w n">${heading ? `<${H}>${esc(heading)}</${H}>` : ''}${intro ? paragraphs(intro) : ''}
+${formOpen(s.id, 'signup')}
+${form.fields.map(signupFieldHtml).join('\n')}
+${consent}
+${formButton(form.content.buttonLabel || 'Sign up')}
+</form></div></section>`;
         }
     }
 }
@@ -203,6 +290,7 @@ ${body}
 export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderContext): RenderedPage {
     mapPath = ctx.pagePath ?? ((p) => p);
     const page = findPage(def, path);
+    formState = { preview: ctx.preview, forms: ctx.forms ?? {}, renderedAt: ctx.renderedAt ?? Date.now(), path: page ? (page.slug ? `/${page.slug}` : '/') : '/' };
     if (!page) {
         return { status: 404, html: documentHtml(def, null, ctx, `<section><div class="w n"><h1>Page not found</h1><p>That page isn't here. <a href="${esc(href('/'))}">Go to the home page</a>.</p></div></section>`) };
     }
@@ -215,6 +303,13 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
         return html;
     }).join('\n');
     return { status: 200, html: documentHtml(def, page, ctx, body) };
+}
+
+/** A plain page in the site's own look — what a visitor sees after sending a form, or when it fails. */
+export function renderSiteNotice(def: SiteDefinition, ctx: RenderContext, title: string, message: string, back: { label: string; path: string }): string {
+    mapPath = ctx.pagePath ?? ((p) => p);
+    const body = `<section><div class="w n"><h1>${esc(title)}</h1>${paragraphs(message)}<p><a class="btn" href="${esc(href(back.path))}">${esc(back.label)}</a></p></div></section>`;
+    return documentHtml(def, null, { ...ctx }, body).replace('<title>Page not found |', `<title>${esc(title)} |`);
 }
 
 export function renderSitemap(def: SiteDefinition, origin: string): string {
