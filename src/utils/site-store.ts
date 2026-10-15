@@ -5,9 +5,9 @@
 // in normaliseSiteDefinition — there is no other writer. The editor (assistant-site-editor.js) and
 // the chat cards call the same API actions (netlify/functions/sites.ts), so they cannot disagree.
 
-import { and, eq, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, organisations, sites, users } from '../../db/schema';
+import { aiAssistants, organisations, sites, siteVersions, users } from '../../db/schema';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { loadAssistantRulesBlock } from './assistant-rules-prompt';
 import { normalizeBrandKit } from './brand-kit';
@@ -19,6 +19,7 @@ import {
     applySiteOperation, DEFAULT_MAX_PAGES, normaliseSiteDefinition, type SiteDefinition, type SiteOperation,
 } from './site-definition';
 import { buildDraftPrompt, placeholdersIn, siteFromDraftReply, starterSite, themeFromBrandKit, type BusinessFacts } from './site-draft';
+import { KEEP_VERSIONS, sameDefinition, siteOrigin, siteSlugProblem } from './site-hosting';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
 
 type Db = ReturnType<typeof getDb>;
@@ -166,6 +167,106 @@ export async function runSiteDraft(db: Db, siteId: number, request: string | nul
     }
 }
 
+// ── Publishing (step 3a — docs/website-assistant-plan.md §5.2) ──────────────────────────────
+// The public is served a frozen copy (site_versions), never the draft: editing changes nothing live
+// until the owner presses Publish on the Website tab. Publish is a click only — never a chat card.
+
+export type PublishResult = { ok: true; site: SiteRow; version: number } | { ok: false; error: string };
+
+/** Choose (or change) the site's address. Refused with the reason in plain words. */
+export async function setSiteAddress(db: Db, site: SiteRow, slug: string): Promise<{ ok: true; site: SiteRow } | { ok: false; error: string }> {
+    const problem = siteSlugProblem(slug);
+    if (problem) return { ok: false, error: problem };
+    if (site.slug === slug) return { ok: true, site };
+    const [taken] = await db.select({ id: sites.id }).from(sites).where(and(eq(sites.slug, slug), ne(sites.id, site.id))).limit(1);
+    if (taken) return { ok: false, error: 'Someone already has that address. Try another.' };
+    try {
+        const [saved] = await db.update(sites).set({ slug, updatedAt: new Date() }).where(eq(sites.id, site.id)).returning();
+        return { ok: true, site: saved };
+    } catch (err) {
+        // The unique index is the real guard: two people choosing the same address at once.
+        if ((err as { code?: string })?.code === '23505') return { ok: false, error: 'Someone already has that address. Try another.' };
+        throw err;
+    }
+}
+
+/** Why the draft cannot be published right now, or null. Checked again inside publishSite. */
+export function publishBlocker(site: SiteRow, def: SiteDefinition): string | null {
+    if (site.status === 'suspended') return 'This site has been taken offline by Be More Swan and can\'t be published. Contact us if you think that is wrong.';
+    if (!site.slug) return 'Choose your site\'s address first.';
+    const holes = placeholdersIn(def);
+    if (holes.length) return `Fill in the ${holes.length} part${holes.length === 1 ? '' : 's'} still in [square brackets] first — ${holes.slice(0, 3).map((h) => `${h.pageTitle}: ${h.text}`).join('; ')}${holes.length > 3 ? '…' : ''}.`;
+    return null;
+}
+
+/**
+ * Freeze the draft as the next version and make it live. The caller has already run the safety
+ * check on the site's words (sites.ts). Older versions beyond KEEP_VERSIONS are trimmed.
+ */
+export async function publishSite(db: Db, site: SiteRow, userId: number | null, maxPages: number): Promise<PublishResult> {
+    const { definition } = definitionOf(site, maxPages);
+    const blocker = publishBlocker(site, definition);
+    if (blocker) return { ok: false, error: blocker };
+    const result = await db.transaction(async (tx) => {
+        const [{ next }] = await tx.select({ next: sql<number>`COALESCE(MAX(${siteVersions.version}), 0) + 1` })
+            .from(siteVersions).where(eq(siteVersions.siteId, site.id));
+        const version = Number(next);
+        await tx.insert(siteVersions).values({ siteId: site.id, version, definition, publishedBy: userId });
+        const [saved] = await tx.update(sites)
+            .set({ status: 'published', publishedVersion: version, publishedAt: new Date(), updatedAt: new Date() })
+            .where(and(eq(sites.id, site.id), ne(sites.status, 'suspended'))).returning();
+        if (!saved) throw new Error('suspended');
+        if (version > KEEP_VERSIONS) {
+            await tx.delete(siteVersions).where(and(eq(siteVersions.siteId, site.id), lte(siteVersions.version, version - KEEP_VERSIONS)));
+        }
+        return { site: saved, version };
+    }).catch((err) => {
+        if (err instanceof Error && err.message === 'suspended') return null;
+        throw err;
+    });
+    if (!result) return { ok: false, error: 'This site has been taken offline by Be More Swan and can\'t be published.' };
+    return { ok: true, ...result };
+}
+
+/** Take the site offline. Its versions are kept; Publish puts it back. */
+export async function unpublishSite(db: Db, site: SiteRow): Promise<SiteRow> {
+    if (site.status !== 'published') return site;
+    const [saved] = await db.update(sites).set({ status: 'draft', updatedAt: new Date() })
+        .where(and(eq(sites.id, site.id), eq(sites.status, 'published'))).returning();
+    return saved ?? site;
+}
+
+export async function listSiteVersions(db: Db, siteId: number): Promise<Array<{ version: number; publishedAt: Date; pages: number }>> {
+    const rows = await db.select({ version: siteVersions.version, publishedAt: siteVersions.publishedAt, definition: siteVersions.definition })
+        .from(siteVersions).where(eq(siteVersions.siteId, siteId)).orderBy(desc(siteVersions.version)).limit(KEEP_VERSIONS);
+    return rows.map((r) => ({ version: r.version, publishedAt: r.publishedAt, pages: Array.isArray((r.definition as SiteDefinition)?.pages) ? (r.definition as SiteDefinition).pages.length : 0 }));
+}
+
+/** The published definition, through the gate (a plan's page cap lowered since still holds). */
+export async function publishedDefinition(db: Db, site: SiteRow, maxPages: number): Promise<SiteDefinition | null> {
+    if (site.publishedVersion == null) return null;
+    const [row] = await db.select({ definition: siteVersions.definition }).from(siteVersions)
+        .where(and(eq(siteVersions.siteId, site.id), eq(siteVersions.version, site.publishedVersion))).limit(1);
+    return row ? normaliseSiteDefinition(row.definition, { maxPages }).definition : null;
+}
+
+/** Copy an earlier version back into the DRAFT. Nothing changes live until the owner publishes. */
+export async function restoreVersionToDraft(db: Db, site: SiteRow, version: number, maxPages: number): Promise<SiteRow | null> {
+    const [row] = await db.select({ definition: siteVersions.definition }).from(siteVersions)
+        .where(and(eq(siteVersions.siteId, site.id), eq(siteVersions.version, version))).limit(1);
+    if (!row) return null;
+    const { definition } = normaliseSiteDefinition(row.definition, { maxPages });
+    const [saved] = await db.update(sites).set({ draft: definition, updatedAt: new Date() }).where(eq(sites.id, site.id)).returning();
+    return saved;
+}
+
+/** Whether the draft differs from what is live (false when nothing is live). */
+export async function hasUnpublishedChanges(db: Db, site: SiteRow, maxPages: number): Promise<boolean> {
+    if (site.publishedVersion == null) return false;
+    const live = await publishedDefinition(db, site, maxPages);
+    return !sameDefinition(live, definitionOf(site, maxPages).definition);
+}
+
 // ── What the chat sees (chat-orchestrator.ts route `usesSiteSnapshot`) ──────────────────────
 
 const clip = (s: unknown, n: number) => {
@@ -185,7 +286,12 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
     const drafting = !!site.draftingAt && Date.now() - new Date(site.draftingAt).getTime() < DRAFT_TIMEOUT_MS;
     const lines = [
         'YOUR SITE RIGHT NOW (read from the Website tab this turn — use only these ids):',
-        `Status: ${site.status === 'published' ? 'live' : 'private draft — not published'}${drafting ? '; an AI draft of the whole site is being written right now' : ''}.`,
+        `Status: ${site.status === 'published'
+            ? `LIVE at ${siteOrigin(site.slug ?? '')} (version ${site.publishedVersion})${(await hasUnpublishedChanges(db, site, maxPages)) ? '; the draft below has changes that are NOT live until they press Publish' : '; the draft below is what is live'}`
+            : site.status === 'suspended'
+                ? `TAKEN OFFLINE by Be More Swan${site.suspendedReason ? ` (${site.suspendedReason})` : ''} — they cannot publish; tell them to contact Be More Swan`
+                : `private draft — not published${site.slug ? ` (address chosen: ${siteOrigin(site.slug)})` : ''}`}${drafting ? '; an AI draft of the whole site is being written right now' : ''}.`,
+        'Publishing, taking the site offline and choosing its address are buttons on the Website tab only — you cannot do them from chat; point them to the Publish card there.',
         `Pages: ${d.pages.length} of ${maxPages} on their plan.`,
         `Business: ${d.settings.siteName}${d.settings.locality ? `, ${d.settings.locality}` : ''} · email ${d.settings.email ?? 'none'} · phone ${d.settings.phone ?? 'none'} · type ${d.settings.businessType}`,
         `Theme: main colour ${d.theme.primaryColor}, text ${d.theme.textColor}, background ${d.theme.backgroundColor}, lettering ${d.theme.font}, corners ${d.theme.radius}${d.theme.logoUrl ? ', has a logo' : ', no logo'}.`,

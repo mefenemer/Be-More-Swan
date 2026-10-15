@@ -192,9 +192,9 @@ check('chat cards are registered, dispatch events the session handles, and call 
     assert.match(editor, /document\.addEventListener\('site:changed'/);
 });
 
-check('nothing publishes yet, and nothing spends without saying so', () => {
-    assert.ok(!/action === 'publish'/.test(read('netlify/functions/sites.ts')));
-    assert.match(chat, /You cannot publish\./);
+check('the chat never publishes (step 3a: a click on the Website tab), and nothing spends without saying so', () => {
+    assert.ok(!/action: 'publish'/.test(read('src/components/chat-session.js')));
+    assert.match(chat, /You cannot publish, take the site offline or choose its address/);
     assert.match(editor, /uses 1 task/);
     assert.match(cards, /Uses 1 task from your monthly allowance/);
 });

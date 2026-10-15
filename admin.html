@@ -344,6 +344,20 @@
         </div>
       </section>
 
+      <!-- ── Hosted Sites (Website Assistant, *.bemoreswan.site) ─────── -->
+      <!-- netlify/functions/admin-sites.ts. Reports come from "Report this site" in every hosted
+           site's footer (report-site.html). Suspending answers 410 at once (site-serve.ts). -->
+      <section id="view-hosted-sites" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <p class="text-sm text-gray-500 mb-4">Customer websites on bemoreswan.site. Reports from visitors land here; taking a site offline shows visitors "This site is unavailable" straight away, and the owner sees your reason on their Website tab.</p>
+        <div class="flex gap-2 mb-5">
+          <button type="button" data-hs-filter="reported" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg">Reported or offline</button>
+          <button type="button" data-hs-filter="all" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">All published sites</button>
+        </div>
+        <div id="hosted-sites-list" class="space-y-4">
+          <div class="text-sm text-gray-400 animate-pulse">Loading…</div>
+        </div>
+      </section>
+
       <!-- ── AI Model Config ────────────────────────────────────────── -->
       <section id="view-model-config" class="admin-view hidden">
         <p class="text-sm text-gray-500 mb-5">Update the active AI model routing without deploying code. Changes take effect immediately on the next request.</p>
@@ -2796,6 +2810,7 @@ const VIEW_LABELS = {
   'swan-contributors': 'Swan Index — Contributors', 'swan-optouts': 'Swan Index — Opt-outs',
   'music-library': 'Music Library',
   'site-styles': 'Site Styles',
+  'hosted-sites': 'Hosted Sites',
 };
 
 // Category → child items mapping.
@@ -2888,6 +2903,7 @@ const ADMIN_CATS = {
     { view: 'audit-log',       icon: '🔐', label: 'Audit Log',        perm: 'view_audit_log',      group: 'Monitoring' },
     { view: 'logs',            icon: '📋', label: 'System Logs',      perm: 'view_audit_log',      group: 'Monitoring' },
     { view: 'security-abuse',  icon: '🚩', label: 'Security & Abuse', perm: 'view_security_abuse', group: 'Monitoring' },
+    { view: 'hosted-sites',    icon: '🌐', label: 'Hosted Sites',     perm: 'platform_config',     group: 'Monitoring' },
     { view: 'breach-response', icon: '🚨', label: 'Breach Response',  perm: 'breach_response',     group: 'Incidents' },
     { view: 'bias-audit',      icon: '⚖️', label: 'Bias Audit',       perm: 'breach_response',     group: 'Incidents' },
   ]},
@@ -3192,6 +3208,7 @@ function adminNav(view) {
   if (view === 'logs')         loadLogs();
   if (view === 'audit-log')    loadAuditLog();
   if (view === 'security-abuse') loadSecurityAbuse();
+  if (view === 'hosted-sites')   loadHostedSites();
   if (view === 'cogs')            loadCogsDashboard();
   if (view === 'coupons')         loadCoupons();
   if (view === 'beta-testers')    loadBetaTesters();
@@ -7527,6 +7544,82 @@ async function loadSecurityAbuse() {
     wrap.innerHTML = `<div class="bg-white rounded-2xl border border-gray-200 p-5 text-red-500 text-sm">${e.message}</div>`;
   }
 }
+
+// ── Hosted Sites — Website Assistant sites on bemoreswan.site (admin-sites.ts) ──
+// Handlers are bound once to document (never from render); every server value is escaped.
+const HS_API = '/.netlify/functions/admin-sites';
+const _hs = { filter: 'reported', reasons: {} };
+const _hsEsc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+async function loadHostedSites() {
+  const wrap = document.getElementById('hosted-sites-list');
+  document.querySelectorAll('[data-hs-filter]').forEach((b) => { b.className = `${b.dataset.hsFilter === _hs.filter ? 'btn-primary' : 'btn-secondary border'} px-3 py-1.5 text-xs font-bold rounded-lg`; });
+  wrap.innerHTML = '<div class="text-sm text-gray-400 animate-pulse">Loading…</div>';
+  try {
+    const d = await api(`${HS_API}?filter=${_hs.filter}`);
+    _hs.reasons = d.reasons || {};
+    const list = d.sites || [];
+    if (!list.length) {
+      wrap.innerHTML = `<div class="bg-white rounded-2xl border border-gray-200 p-8 text-center text-gray-500 text-sm">${_hs.filter === 'all' ? 'No published sites yet.' : '✅ No open reports and no sites offline.'}</div>`;
+      return;
+    }
+    wrap.innerHTML = list.map((s) => {
+      const badge = s.status === 'suspended'
+        ? '<span class="text-xs font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">Offline (suspended)</span>'
+        : s.status === 'published' ? '<span class="text-xs font-bold bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Live</span>'
+        : '<span class="text-xs font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">Not live</span>';
+      const reports = (s.reports || []).map((r) => `
+        <li class="border-t border-gray-100 px-5 py-3 text-sm">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span><strong>${_hsEsc(_hs.reasons[r.reason] || r.reason)}</strong> <span class="text-xs text-gray-400">${r.createdAt ? fmt(r.createdAt) : ''} · ${r.reporterEmail ? _hsEsc(r.reporterEmail) : 'no email'} · ${_hsEsc(r.status)}</span></span>
+            ${r.status === 'open' ? `<span class="flex gap-1"><button type="button" data-hs-close="${r.id}" data-outcome="dismissed" class="btn-secondary border px-2 py-1 text-xs font-bold rounded-lg">Dismiss</button></span>` : ''}
+          </div>
+          ${r.details ? `<p class="text-xs text-gray-600 mt-1 whitespace-pre-line">${_hsEsc(r.details)}</p>` : ''}
+        </li>`).join('');
+      return `
+        <div class="bg-white rounded-2xl border ${s.status === 'suspended' ? 'border-red-200' : 'border-gray-200'} overflow-hidden">
+          <div class="px-5 py-3 flex flex-wrap items-center justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-sm font-bold text-gray-900">${s.url ? `<a href="${_hsEsc(s.url)}" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:underline">${_hsEsc(s.url.replace('https://', ''))}</a>` : '(no address)'} ${badge}</p>
+              <p class="text-xs text-gray-500">${_hsEsc(s.workspace)} · ${s.openReports} open report${s.openReports === 1 ? '' : 's'}${s.publishedAt ? ` · published ${fmt(s.publishedAt)}` : ''}${s.suspendedReason ? ` · offline: ${_hsEsc(s.suspendedReason)}` : ''}</p>
+            </div>
+            ${s.status === 'suspended'
+              ? `<button type="button" data-hs-restore="${s.id}" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Put back online</button>`
+              : `<button type="button" data-hs-suspend="${s.id}" data-slug="${_hsEsc(s.slug || '')}" class="btn-destructive px-3 py-1.5 text-xs font-bold rounded-lg">Take offline</button>`}
+          </div>
+          ${reports ? `<ul>${reports}</ul>` : ''}
+        </div>`;
+    }).join('');
+  } catch (e) {
+    wrap.innerHTML = `<div class="bg-white rounded-2xl border border-gray-200 p-5 text-red-500 text-sm">${_hsEsc(e.message)}</div>`;
+  }
+}
+document.addEventListener('click', async (e) => {
+  const t = (sel) => e.target.closest && e.target.closest(sel);
+  const f = t('[data-hs-filter]');
+  if (f) { _hs.filter = f.dataset.hsFilter; loadHostedSites(); return; }
+  const post = (body) => api(HS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  try {
+    const sus = t('[data-hs-suspend]');
+    if (sus) {
+      const reason = await window.promptModal(`Visitors to ${sus.dataset.slug || 'this site'} will see "This site is unavailable" straight away. The owner sees your reason and cannot publish until you put it back.`, { title: 'Take this site offline?', confirmLabel: 'Take offline', placeholder: 'Reason (the owner sees this)' });
+      if (!reason || !reason.trim()) return;
+      await post({ action: 'suspend', siteId: Number(sus.dataset.hsSuspend), reason: reason.trim() });
+      loadHostedSites();
+      return;
+    }
+    const res = t('[data-hs-restore]');
+    if (res) {
+      if (!(await window.confirmModal('It comes back exactly as it was before it was taken offline.', { title: 'Put this site back online?', confirmLabel: 'Put back online' }))) return;
+      await post({ action: 'restore', siteId: Number(res.dataset.hsRestore) });
+      loadHostedSites();
+      return;
+    }
+    const cl = t('[data-hs-close]');
+    if (cl) { await post({ action: 'close_report', reportId: Number(cl.dataset.hsClose), outcome: cl.dataset.outcome }); loadHostedSites(); }
+  } catch (err) {
+    window.alertModal ? window.alertModal(err.message, { title: 'That didn\'t work' }) : console.error(err);
+  }
+});
 
 // ── US-ADM-5.1.1: Admin Audit Log viewer ──────────────────────────────────────
 let _auditPage = 0;

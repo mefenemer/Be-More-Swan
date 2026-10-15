@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Report a Website | Be More Swan</title>
+    <!-- "Report this site" — linked from the footer of every website we host on bemoreswan.site.
+         Posts to netlify/functions/site-reports.ts. Not for search: noindex. -->
+    <meta name="description" content="Tell Be More Swan about a website we host that is a scam, pretends to be someone else, or breaks the law.">
+    <meta name="robots" content="noindex, follow">
+    <link rel="canonical" href="https://bemoreswan.com/report-site">
+    <link href="./style.css" rel="stylesheet">
+    <script src="/site-theme.js"></script>
+    <link rel="icon" href="/favicon/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
+    <link rel="manifest" href="/favicon/manifest.json">
+    <script src="/src/i18n.js"></script>
+</head>
+<body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
+
+<div id="nav-placeholder"></div>
+
+<main class="flex-grow">
+    <div class="max-w-3xl mx-auto px-4 py-16">
+        <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-8">
+            <h1 class="text-2xl font-extrabold text-gray-900 mb-1">Report a website</h1>
+            <p class="text-gray-500 text-sm mb-8">Websites on <strong>bemoreswan.site</strong> are built by Be More Swan customers. If one is a scam, pretends to be someone else, or breaks the law, tell us and we will look at it. We can take it offline.</p>
+
+            <form id="report-form" class="space-y-5" novalidate>
+                <div>
+                    <label for="rs-site" class="block text-sm font-semibold text-gray-700 mb-1.5">Website address</label>
+                    <input id="rs-site" type="text" autocomplete="off" placeholder="name.bemoreswan.site"
+                           class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition">
+                </div>
+                <div>
+                    <label for="rs-reason" class="block text-sm font-semibold text-gray-700 mb-1.5">What is wrong with it?</label>
+                    <select id="rs-reason" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 bg-white focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition cursor-pointer">
+                        <option value="">Choose one…</option>
+                        <option value="scam">A scam or fraud</option>
+                        <option value="impersonation">Pretending to be someone else</option>
+                        <option value="harmful">Harmful, hateful or illegal content</option>
+                        <option value="copyright">Uses my work without permission</option>
+                        <option value="other">Something else</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="rs-details" class="block text-sm font-semibold text-gray-700 mb-1.5">Details <span class="font-normal text-gray-400">(optional)</span></label>
+                    <textarea id="rs-details" rows="5" maxlength="2000" placeholder="Which page, and what you saw."
+                              class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition resize-y"></textarea>
+                </div>
+                <div>
+                    <label for="rs-email" class="block text-sm font-semibold text-gray-700 mb-1.5">Your email <span class="font-normal text-gray-400">(optional — only if you'd like a reply)</span></label>
+                    <input id="rs-email" type="email" autocomplete="email"
+                           class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition">
+                </div>
+                <!-- Left empty by people; filled in by bots. -->
+                <div aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden">
+                    <label for="rs-website">Leave this empty</label><input id="rs-website" type="text" tabindex="-1" autocomplete="off">
+                </div>
+
+                <p id="rs-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3"></p>
+                <button id="rs-submit" type="submit" class="btn-primary inline-flex items-center justify-center gap-2 w-full sm:w-auto px-6 py-3 font-bold rounded-xl shadow-sm transition text-sm disabled:opacity-60 disabled:cursor-not-allowed">Send report</button>
+                <p class="text-xs text-gray-400 leading-relaxed">If someone is in danger, contact the police. To report a scam in the UK you can also use <a href="https://www.actionfraud.police.uk/" class="text-emerald-600 hover:underline" rel="noopener">Action Fraud</a>. How we use what you send: <a href="privacy.html" class="text-emerald-600 hover:underline">Privacy Policy</a>.</p>
+            </form>
+
+            <div id="rs-success" class="hidden text-center py-10">
+                <h2 class="text-xl font-extrabold text-gray-900 mb-2">Thank you — we have your report</h2>
+                <p class="text-gray-500 text-sm max-w-sm mx-auto">We will look at the website. If you gave your email, we may reply to ask for more.</p>
+            </div>
+        </div>
+    </div>
+</main>
+
+<div id="footer-placeholder"></div>
+<script src="./mobileMenu.js"></script>
+<script>
+(function () {
+    const startedAt = Date.now();
+    async function loadComponent(id, path) {
+        try { const r = await fetch(path); if (r.ok) document.getElementById(id).innerHTML = await r.text(); } catch {}
+    }
+
+    async function handleSubmit(e) {
+        e.preventDefault();
+        const errEl = document.getElementById('rs-error');
+        const btn = document.getElementById('rs-submit');
+        const site = document.getElementById('rs-site').value.trim();
+        const reason = document.getElementById('rs-reason').value;
+        errEl.classList.add('hidden');
+        const fail = (msg) => { errEl.textContent = msg; errEl.classList.remove('hidden'); };
+        if (!site) return fail('Enter the website\'s address.');
+        if (!reason) return fail('Choose what is wrong with the website.');
+        btn.disabled = true;
+        btn.textContent = 'Sending…';
+        try {
+            const res = await fetch('/.netlify/functions/site-reports', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    site, reason, startedAt,
+                    details: document.getElementById('rs-details').value,
+                    email: document.getElementById('rs-email').value,
+                    website: document.getElementById('rs-website').value,
+                }),
+            });
+            const d = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(d.error || 'Something went wrong. Please try again.');
+            document.getElementById('report-form').classList.add('hidden');
+            document.getElementById('rs-success').classList.remove('hidden');
+        } catch (err) {
+            fail(err.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Send report';
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        await loadComponent('nav-placeholder', './components/nav.html');
+        loadComponent('footer-placeholder', './components/footer.html');
+        if (typeof setupMobileMenu === 'function') setupMobileMenu();
+        if (window.i18n) window.i18n.apply();
+        const fromLink = new URLSearchParams(location.search).get('site');
+        if (fromLink && /^[a-z0-9-]{1,63}$/.test(fromLink)) document.getElementById('rs-site').value = `${fromLink}.bemoreswan.site`;
+        document.getElementById('report-form').addEventListener('submit', handleSubmit);
+    });
+})();
+</script>
+</body>
+</html>

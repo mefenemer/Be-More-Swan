@@ -71,7 +71,10 @@ export type AdminAction =
     // End of beta (Admin → Customers → Beta testers): emails customers and decides when they pause.
     | 'beta_ending_update'
     | 'beta_notice_sent'
-    | 'beta_reminder_sent';
+    | 'beta_reminder_sent'
+    // Hosted sites (Admin → Trust → Hosted Sites): taking a customer's public website offline, or
+    // putting it back, and closing the reports that led there — "who took it down, and why".
+    | 'hosted_site_moderation';
 
 export interface AdminAuditParams {
     adminId: number;
