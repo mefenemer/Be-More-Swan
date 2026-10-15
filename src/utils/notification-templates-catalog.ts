@@ -283,6 +283,23 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // A booking made on a site's booking section (bookings.ts announceNewBooking). `booking.next`
+        // is a full sentence: confirm/decline for a request, "it is confirmed" for instant bookings.
+        templateKey: 'site_booking_received',
+        name: 'New booking from your website',
+        category: 'Assistants',
+        type: 'site_booking_received',
+        title: '{{booking.who}}: {{booking.what}}, {{booking.when}}',
+        message: '{{booking.next}}',
+        variables: [
+            ASSISTANT_NAME,
+            v('booking.who', 'Who booked', 'Sam Patel'),
+            v('booking.what', 'What they booked', 'Cut & blow-dry with Elena'),
+            v('booking.when', 'When', 'Friday 16 October, 10am–10:45am'),
+            v('booking.next', 'What happens next (sentence)', 'Confirm or decline it on the Website tab, under Bookings.'),
+        ],
+    },
+    {
         // A visitor paid on a site's products section (site-shop.ts recordPaidCheckout, from the
         // Connect webhook). The owner is also emailed the order with the delivery address.
         templateKey: 'site_order_received',
@@ -661,13 +678,16 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [v('failure.reason', 'Failure reason', 'Instagram rejected the image format.')],
     },
     {
+        // `failure.reason` is generation-failure.ts's plain-words explanation — never the raw error
+        // (it can carry our provider's billing state). "See why" opens the assistant's Activity tab
+        // on that post, where "Try again" re-queues it (notifications.js → retry-generation.ts).
         templateKey: 'post_generation_failed',
         name: 'Post generation failed',
         category: 'Content',
         type: 'post_generation_failed',
-        title: 'Post generation failed',
-        message: 'We were unable to generate your post. Please try again or contact support if the issue persists.',
-        variables: [],
+        title: 'A post couldn\'t be written',
+        message: '{{failure.reason}}',
+        variables: [v('failure.reason', 'Why, in plain words', 'Our writing service was very busy and did not answer in time. Trying again usually works.')],
     },
     {
         // ⚠️ The one above says "Please try again or contact support", and for eleven days in

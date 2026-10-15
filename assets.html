@@ -25,6 +25,7 @@
     <nav id="bizinfo-tabs" class="-mb-px flex gap-x-6" aria-label="Business information tabs">
       <button type="button" class="bizinfo-tab active" data-tab="profile">Business Profile</button>
       <button type="button" class="bizinfo-tab" data-tab="products">Products &amp; Services</button>
+      <button type="button" class="bizinfo-tab" data-tab="hours">Opening Hours &amp; Bookings</button>
       <button type="button" class="bizinfo-tab" data-tab="legal">Legal &amp; Billing</button>
       <button type="button" class="bizinfo-tab" data-tab="team">Team Members</button>
       <button type="button" class="bizinfo-tab" data-tab="assets">Brand Assets</button>
@@ -259,10 +260,12 @@
     }
 
     function card(p, i, active) {
-      const meta = [p.price ? `<span class="font-semibold text-gray-800">${esc(p.price)}</span>` : '', p.audience ? `For ${esc(p.audience)}` : ''].filter(Boolean).join(' · ');
+      const meta = [p.price ? `<span class="font-semibold text-gray-800">${esc(p.price)}</span>` : '',
+        p.durationMinutes ? `${esc(p.durationMinutes)} min` : '', p.audience ? `For ${esc(p.audience)}` : ''].filter(Boolean).join(' · ');
       return `<div class="op-card border border-gray-200 rounded-xl p-4" data-id="${p.id}">
         <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
+          ${p.imageUrl ? `<img src="${esc(p.imageUrl)}" alt="" class="shrink-0" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">` : ''}
+          <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2 flex-wrap">
               <h3 class="text-sm font-bold text-gray-900">${esc(p.name)}</h3>
               <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-100 rounded px-1.5 py-0.5">${p.kind === 'service' ? 'Service' : 'Product'}</span>
@@ -331,13 +334,23 @@
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           ${field('op-name', 'Name <span class="text-red-500">*</span>', v.name, { max: 120, ph: 'e.g. Sourdough Starter Kit', explain: 'acct-product-name' })}
-          ${field('op-price', 'Price', v.price, { max: 120, ph: 'e.g. £29, from £450, £15/month — leave blank to keep it off', explain: 'acct-product-price' })}
+          ${priceFieldsHtml(v)}
           ${field('op-description', 'What it is', v.description, { area: true, max: 1200, wide: true, ph: 'What the customer gets, in a sentence or two.', explain: 'acct-product-description' })}
           ${field('op-benefits', 'Key benefits', v.benefits, { area: true, rows: 2, max: 1200, wide: true, ph: 'Why people buy it — the results or features you want mentioned.', explain: 'acct-product-benefits' })}
           ${field('op-audience', 'Who it’s for', v.audience, { max: 400, ph: 'e.g. home bakers starting out', explain: 'acct-product-audience' })}
           ${field('op-url', 'Link', v.url, { max: 500, ph: 'https://yourbusiness.com/product', explain: 'acct-product-url' })}
         </div>
-        <p class="text-xs text-gray-500 mt-3">Your assistants quote prices exactly as written here, and never state one you leave blank.</p>
+        <div class="mt-3">
+          <p class="block text-sm font-semibold text-gray-700 mb-1">Picture</p>
+          <div class="flex flex-wrap items-center gap-3">
+            <span data-op-thumb>${v.imageUrl ? `<img src="${esc(v.imageUrl)}" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">` : '<span class="inline-flex items-center justify-center text-xs text-gray-400 border border-dashed border-gray-300 rounded-lg" style="width:72px;height:72px">None</span>'}</span>
+            <input type="hidden" id="op-image" value="${esc(v.imageAssetId || '')}">
+            <button type="button" id="op-pick" class="btn-secondary text-sm font-bold px-3 py-1.5 rounded-md border">${v.imageAssetId ? 'Change picture' : 'Choose picture'}</button>
+            <button type="button" id="op-pick-clear" class="btn-utility text-xs font-bold px-2.5 py-1 rounded ${v.imageAssetId ? '' : 'hidden'}">Remove</button>
+          </div>
+          <p class="text-xs text-gray-500 mt-1">Shown with it on your website and at checkout.</p>
+        </div>
+        <p class="text-xs text-gray-500 mt-3">This is the one place prices live. Your assistants, your website and checkout all use the price exactly as set here — and never state one you leave off.</p>
         <div class="flex items-center justify-end gap-2 mt-3">
           <button type="button" id="op-cancel" class="btn-secondary text-sm font-bold px-3 py-1.5 rounded-md border">Cancel</button>
           <button type="button" id="op-save" class="btn-primary text-sm font-bold px-3 py-1.5 rounded-md">${p ? 'Save Changes' : 'Add'}</button>
@@ -346,6 +359,32 @@
       f.dataset.id = p ? String(p.id) : '';
       f.querySelector('#op-name').focus();
     }
+    // The price, structured (src/utils/product-price.ts): how it is shown, the amount, an optional unit.
+    // Only a fixed price can be bought online from your website. Services also get how long they take.
+    function priceFieldsHtml(v) {
+      const t = v.priceType || '';
+      const pounds = v.priceAmount != null ? (v.priceAmount / 100).toFixed(2).replace(/\.00$/, '') : '';
+      const opt = (val, label) => `<option value="${val}" ${t === val ? 'selected' : ''}>${label}</option>`;
+      return `<div data-explain="acct-product-price">
+          <label for="op-price-type" class="block text-sm font-semibold text-gray-700 mb-1">Price</label>
+          <select id="op-price-type" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm bg-white">
+            ${opt('', 'No price shown')}${opt('fixed', 'A fixed price')}${opt('from', 'From a price')}${opt('on_request', 'Price on request')}${opt('text', 'I\'ll write it myself')}
+          </select>
+          <div id="op-price-amount-row" class="grid grid-cols-2 gap-2 mt-2 ${t === 'fixed' || t === 'from' ? '' : 'hidden'}">
+            <div class="flex items-center gap-1"><span class="text-sm font-semibold text-gray-600">£</span>
+              <input id="op-price-amount" type="text" inputmode="decimal" value="${esc(pounds)}" placeholder="24.50" aria-label="Price in pounds" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
+            <input id="op-price-unit" type="text" maxlength="30" value="${esc(v.priceUnit || '')}" placeholder="per hour (optional)" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm">
+          </div>
+          <input id="op-price-text" type="text" maxlength="120" value="${esc(t === 'text' ? (v.price || '') : '')}" placeholder="e.g. £15 a month, first month free" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm mt-2 ${t === 'text' ? '' : 'hidden'}">
+          <p class="text-xs text-gray-500 mt-1">Only a fixed price can be bought online from your website.</p>
+        </div>
+        <div id="op-duration-row" class="${v.kind === 'service' ? '' : 'hidden'}">
+          <label for="op-duration" class="block text-sm font-semibold text-gray-700 mb-1">How long it takes (minutes)</label>
+          <input id="op-duration" type="number" min="5" max="1440" step="5" value="${esc(v.durationMinutes || '')}" placeholder="e.g. 45" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm">
+          <p class="text-xs text-gray-500 mt-1">Used when people book it.</p>
+        </div>`;
+    }
+
     function closeEditor() {
       const open = document.getElementById('op-editor');
       if (!open) return;
@@ -359,8 +398,12 @@
       const get = id => f.querySelector('#' + id).value;
       const body = {
         kind: (f.querySelector('input[name="op-kind"]:checked') || {}).value || 'product',
-        name: get('op-name'), price: get('op-price'), description: get('op-description'),
+        name: get('op-name'), description: get('op-description'),
         benefits: get('op-benefits'), audience: get('op-audience'), url: get('op-url'),
+        priceType: get('op-price-type') || null, priceAmount: get('op-price-amount'), priceUnit: get('op-price-unit'),
+        price: get('op-price-text'),
+        durationMinutes: get('op-duration') ? Number(get('op-duration')) : null,
+        imageAssetId: get('op-image') ? Number(get('op-image')) : null,
       };
       if (!body.name.trim()) { showError('Give the product or service a name.'); f.querySelector('#op-name').focus(); return; }
       const btn = f.querySelector('#op-save');
@@ -404,6 +447,17 @@
 
     // Bound on the section, which this script owns for the life of the page (never re-rendered).
     const section = listEl.closest('section');
+    // Show the price boxes that fit the choice; services also ask how long they take.
+    section.addEventListener('change', (e) => {
+      const f = document.getElementById('op-editor');
+      if (!f) return;
+      if (e.target.id === 'op-price-type') {
+        const t = e.target.value;
+        f.querySelector('#op-price-amount-row').classList.toggle('hidden', !(t === 'fixed' || t === 'from'));
+        f.querySelector('#op-price-text').classList.toggle('hidden', t !== 'text');
+      }
+      if (e.target.name === 'op-kind') f.querySelector('#op-duration-row').classList.toggle('hidden', e.target.value !== 'service');
+    });
     section.addEventListener('click', async (e) => {
       const t = e.target.closest('button');
       if (!t) return;
@@ -411,6 +465,24 @@
       if (t.id === 'op-add') return openEditor(null);
       if (t.id === 'op-cancel') return closeEditor();
       if (t.id === 'op-save') return save();
+      if (t.id === 'op-pick' && window.MediaPicker) {
+        return window.MediaPicker.open({ title: 'Choose a picture', onPick: (asset) => {
+          const f = document.getElementById('op-editor');
+          if (!f) return;
+          f.querySelector('#op-image').value = String(asset.id);
+          f.querySelector('[data-op-thumb]').innerHTML = `<img src="${esc(asset.url)}" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">`;
+          f.querySelector('#op-pick').textContent = 'Change picture';
+          f.querySelector('#op-pick-clear').classList.remove('hidden');
+        } });
+      }
+      if (t.id === 'op-pick-clear') {
+        const f = document.getElementById('op-editor');
+        f.querySelector('#op-image').value = '';
+        f.querySelector('[data-op-thumb]').innerHTML = '<span class="inline-flex items-center justify-center text-xs text-gray-400 border border-dashed border-gray-300 rounded-lg" style="width:72px;height:72px">None</span>';
+        f.querySelector('#op-pick').textContent = 'Choose picture';
+        t.classList.add('hidden');
+        return;
+      }
       if (t.classList.contains('op-edit')) return openEditor(products.find(p => p.id === id));
       if (t.classList.contains('op-archive')) return setStatus(id, 'archived');
       if (t.classList.contains('op-restore')) return setStatus(id, 'active');
@@ -444,6 +516,226 @@
   })();
   </script>
   </div><!-- /panel: products -->
+
+  <!-- ══ Opening hours & bookings (docs/booking-plan.md) ════════════════════
+       The business's opening hours live HERE — not in a widget — so the website's booking section
+       (and later an "Open now" badge) all read one set. Booking rules and who/what can be booked sit
+       beside them. Services are Products & Services with a length. API: booking-settings.ts. -->
+  <div class="bizinfo-tab-panel hidden" data-panel="hours">
+  <section id="bh-section" class="mb-8">
+    <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
+      <h2 class="text-lg font-bold text-gray-900">Opening hours</h2>
+      <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">When you're open. Bookings are only offered inside these hours, and your assistants use them when they mention when to visit or call.</p>
+      <div id="bh-days" class="mt-4 space-y-2"></div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+        <div><label for="bh-tz" class="block text-sm font-semibold text-gray-700 mb-1">Timezone</label>
+          <input id="bh-tz" list="bh-tz-list" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm" value="Europe/London">
+          <datalist id="bh-tz-list"><option value="Europe/London"><option value="Europe/Dublin"><option value="Europe/Paris"><option value="Europe/Berlin"><option value="Europe/Madrid"><option value="Europe/Athens"><option value="America/New_York"><option value="America/Chicago"><option value="America/Los_Angeles"><option value="Australia/Sydney"></datalist></div>
+      </div>
+      <h3 class="text-sm font-bold text-gray-900 mt-6">Closed days</h3>
+      <p class="text-xs text-gray-500">Bank holidays, holidays, days off — nobody can book these.</p>
+      <div id="bh-closures" class="mt-2 space-y-2"></div>
+      <button type="button" id="bh-closure-add" class="btn-utility text-xs font-bold px-2.5 py-1 rounded mt-2">+ Add a closed day</button>
+    </div>
+
+    <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
+      <h2 class="text-lg font-bold text-gray-900">Booking rules</h2>
+      <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">How bookings from your website work. Services and their length come from Products &amp; Services.</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+        <div class="sm:col-span-2"><span class="block text-sm font-semibold text-gray-700 mb-1">When someone books</span>
+          <label class="inline-flex items-center gap-1.5 mr-4 text-sm"><input type="radio" name="bh-mode" value="request" checked> I confirm each booking</label>
+          <label class="inline-flex items-center gap-1.5 text-sm"><input type="radio" name="bh-mode" value="instant"> Confirm it straight away</label></div>
+        <div><label for="bh-notice" class="block text-sm font-semibold text-gray-700 mb-1">Notice needed (hours)</label><input id="bh-notice" type="number" min="0" max="720" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
+        <div><label for="bh-advance" class="block text-sm font-semibold text-gray-700 mb-1">How far ahead people can book (days)</label><input id="bh-advance" type="number" min="1" max="365" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
+        <div><label for="bh-interval" class="block text-sm font-semibold text-gray-700 mb-1">Offer a time every</label><select id="bh-interval" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm bg-white"></select></div>
+        <div><label for="bh-buffer" class="block text-sm font-semibold text-gray-700 mb-1">Gap between bookings (minutes)</label><input id="bh-buffer" type="number" min="0" max="240" step="5" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
+        <div><label for="bh-table" class="block text-sm font-semibold text-gray-700 mb-1">A table is held for (minutes)</label><input id="bh-table" type="number" min="15" max="480" step="15" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
+        <div><label for="bh-party" class="block text-sm font-semibold text-gray-700 mb-1">Largest party that can book online</label><input id="bh-party" type="number" min="1" max="100" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
+        <div class="sm:col-span-2"><label for="bh-policy" class="block text-sm font-semibold text-gray-700 mb-1">Cancellation policy (optional)</label>
+          <textarea id="bh-policy" rows="2" maxlength="500" placeholder="e.g. Please give us 24 hours' notice if you can't make it." class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></textarea></div>
+      </div>
+      <p id="bh-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3 mt-3"></p>
+      <div class="flex items-center justify-end gap-3 mt-4"><span id="bh-saved" class="text-sm text-emerald-700 font-semibold hidden">Saved</span>
+        <button type="button" id="bh-save" class="btn-primary text-sm font-bold px-4 py-2 rounded-md">Save hours &amp; rules</button></div>
+    </div>
+
+    <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div><h2 class="text-lg font-bold text-gray-900">Who or what can be booked</h2>
+          <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">Your team, tables or seating areas, rooms. Leave this empty if it's just you — then one booking is taken at a time.</p></div>
+        <button type="button" id="bh-res-add" class="btn-primary text-sm font-bold px-3 py-1.5 rounded-md">+ Add</button>
+      </div>
+      <div id="bh-res-list" class="space-y-2 mt-4"></div>
+      <p id="bh-res-error" class="hidden text-sm text-red-600 mt-2"></p>
+    </div>
+  </section>
+
+  <script>
+  (function () {
+    const API = '/.netlify/functions/booking-settings';
+    const panel = document.querySelector('.bizinfo-tab-panel[data-panel="hours"]');
+    if (!panel) return;
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const DAYS = [['mon', 'Monday'], ['tue', 'Tuesday'], ['wed', 'Wednesday'], ['thu', 'Thursday'], ['fri', 'Friday'], ['sat', 'Saturday'], ['sun', 'Sunday']];
+    const INTERVALS = [5, 10, 15, 20, 30, 45, 60, 90, 120];
+    const KINDS = [['staff', 'A person'], ['table', 'A table or seating area'], ['room', 'A room'], ['other', 'Something else']];
+    const $ = (id) => panel.querySelector('#' + id);
+    let data = { settings: {}, resources: [], services: [] };
+    let closures = [];
+
+    async function call(method, body, query) {
+      const res = await fetch(API + (query || ''), { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || 'Something went wrong. Please try again.');
+      return d;
+    }
+
+    function renderDays() {
+      const h = data.settings.weeklyHours || {};
+      $('bh-days').innerHTML = DAYS.map(([k, label]) => {
+        const p = h[k] || [];
+        const open = p.length > 0;
+        const a = p[0] || { start: '09:00', end: '17:00' }, b = p[1] || { start: '', end: '' };
+        return `<div class="flex flex-wrap items-center gap-2 text-sm" data-day="${k}">
+          <label class="inline-flex items-center gap-1.5 w-32"><input type="checkbox" data-open ${open ? 'checked' : ''}> ${label}</label>
+          <span class="flex flex-wrap items-center gap-1 ${open ? '' : 'opacity-40'}" data-times>
+            <input type="time" data-s1 value="${esc(a.start)}" class="px-2 py-1 border border-gray-300 rounded"> to <input type="time" data-e1 value="${esc(a.end)}" class="px-2 py-1 border border-gray-300 rounded">
+            <span class="text-gray-400 mx-1">and</span>
+            <input type="time" data-s2 value="${esc(b.start)}" class="px-2 py-1 border border-gray-300 rounded" aria-label="${label} second opening"> to <input type="time" data-e2 value="${esc(b.end)}" class="px-2 py-1 border border-gray-300 rounded" aria-label="${label} second closing">
+          </span></div>`;
+      }).join('') + '<p class="text-xs text-gray-500">The second time is optional — for a break, like lunch and dinner.</p>';
+    }
+    function renderClosures() {
+      $('bh-closures').innerHTML = closures.length ? closures.map((c, i) => `<div class="flex flex-wrap items-center gap-2" data-closure="${i}">
+          <input type="date" data-cdate value="${esc(c.date)}" class="px-2 py-1 border border-gray-300 rounded text-sm">
+          <input type="text" data-cnote value="${esc(c.note || '')}" maxlength="80" placeholder="Why (optional)" class="px-2 py-1 border border-gray-300 rounded text-sm">
+          <button type="button" data-cremove="${i}" class="btn-utility text-xs px-2 py-1 rounded">Remove</button></div>`).join('')
+        : '<p class="text-xs text-gray-400">None.</p>';
+    }
+    function renderRules() {
+      const st = data.settings;
+      panel.querySelectorAll('input[name="bh-mode"]').forEach(r => { r.checked = r.value === (st.mode || 'request'); });
+      $('bh-tz').value = st.timezone || 'Europe/London';
+      $('bh-notice').value = Math.round((st.minNoticeMinutes ?? 120) / 60);
+      $('bh-advance').value = st.maxAdvanceDays ?? 60;
+      $('bh-interval').innerHTML = INTERVALS.map(n => `<option value="${n}" ${n === (st.slotIntervalMinutes ?? 30) ? 'selected' : ''}>${n} minutes</option>`).join('');
+      $('bh-buffer').value = st.bufferMinutes ?? 0;
+      $('bh-table').value = st.tableMinutes ?? 90;
+      $('bh-party').value = st.maxPartySize ?? 8;
+      $('bh-policy').value = st.cancellationPolicy || '';
+    }
+    function renderResources() {
+      const list = data.resources;
+      const svc = data.services;
+      $('bh-res-list').innerHTML = list.length ? list.map(r => {
+        const ids = Array.isArray(r.serviceIds) ? r.serviceIds : null;
+        return `<div class="border border-gray-200 rounded-xl p-3 ${r.status === 'active' ? '' : 'opacity-60'}" data-res="${r.id}">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <input data-rname value="${esc(r.name)}" maxlength="80" class="px-3 py-2 border border-gray-300 rounded-lg text-sm" aria-label="Name">
+            <select data-rkind class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">${KINDS.map(([v, l]) => `<option value="${v}" ${r.kind === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+            <label class="flex items-center gap-2 text-sm">Seats / at once <input data-rcap type="number" min="1" max="500" value="${esc(r.capacity)}" class="w-20 px-2 py-1 border border-gray-300 rounded"></label>
+          </div>
+          ${svc.length && r.kind !== 'table' ? `<details class="mt-2"><summary class="text-xs text-gray-600 cursor-pointer">Services they do: ${ids ? esc(ids.length) + ' chosen' : 'all'}</summary>
+            <div class="flex flex-wrap gap-2 mt-1">${svc.map(x => `<label class="inline-flex items-center gap-1 text-xs"><input type="checkbox" data-rsvc value="${x.id}" ${!ids || ids.includes(x.id) ? 'checked' : ''}> ${esc(x.name)}</label>`).join('')}</div></details>` : ''}
+          <div class="flex gap-2 mt-2">
+            <button type="button" data-rsave="${r.id}" class="btn-secondary border text-xs font-bold px-2.5 py-1 rounded">Save</button>
+            <button type="button" data-rstatus="${r.id}" class="btn-utility text-xs font-bold px-2.5 py-1 rounded">${r.status === 'active' ? 'Archive' : 'Restore'}</button>
+            ${r.status === 'active' ? '' : `<button type="button" data-rdelete="${r.id}" class="btn-destructive text-xs font-bold px-2.5 py-1 rounded">Delete</button>`}
+          </div></div>`;
+      }).join('') : '<p class="text-sm text-gray-500 bg-gray-50 border border-dashed border-gray-200 rounded-xl px-4 py-4 text-center">Nothing yet — that\'s fine if it\'s just you.</p>';
+    }
+
+    function collectHours() {
+      const out = {};
+      panel.querySelectorAll('[data-day]').forEach(row => {
+        if (!row.querySelector('[data-open]').checked) return;
+        const g = (a) => row.querySelector(a).value;
+        const periods = [{ start: g('[data-s1]'), end: g('[data-e1]') }];
+        if (g('[data-s2]') || g('[data-e2]')) periods.push({ start: g('[data-s2]'), end: g('[data-e2]') });
+        out[row.dataset.day] = periods;
+      });
+      return out;
+    }
+    function collectClosures() {
+      return [...panel.querySelectorAll('[data-closure]')].map(row => ({ date: row.querySelector('[data-cdate]').value, note: row.querySelector('[data-cnote]').value })).filter(c => c.date);
+    }
+
+    async function load() {
+      try {
+        data = await call('GET');
+        closures = (data.settings.closures || []).slice();
+        renderDays(); renderClosures(); renderRules(); renderResources();
+      } catch (e) { $('bh-error').textContent = 'Your opening hours could not be loaded. Please refresh and try again.'; $('bh-error').classList.remove('hidden'); }
+    }
+
+    async function save() {
+      const err = $('bh-error'); err.classList.add('hidden');
+      const btn = $('bh-save'); btn.disabled = true;
+      try {
+        const body = {
+          timezone: $('bh-tz').value.trim(), weeklyHours: collectHours(), closures: collectClosures(),
+          mode: (panel.querySelector('input[name="bh-mode"]:checked') || {}).value || 'request',
+          minNoticeMinutes: Math.round(Number($('bh-notice').value || 0) * 60), maxAdvanceDays: Number($('bh-advance').value || 60),
+          slotIntervalMinutes: Number($('bh-interval').value), bufferMinutes: Number($('bh-buffer').value || 0),
+          tableMinutes: Number($('bh-table').value || 90), maxPartySize: Number($('bh-party').value || 8),
+          cancellationPolicy: $('bh-policy').value,
+        };
+        const { settings } = await call('PUT', body);
+        data.settings = { ...data.settings, ...settings };
+        closures = (settings.closures || []).slice();
+        renderClosures();
+        $('bh-saved').classList.remove('hidden'); setTimeout(() => $('bh-saved').classList.add('hidden'), 2500);
+      } catch (e) { err.textContent = e.message; err.classList.remove('hidden'); }
+      btn.disabled = false;
+    }
+
+    async function saveResource(id) {
+      const row = panel.querySelector(`[data-res="${id}"]`);
+      const ticks = [...row.querySelectorAll('[data-rsvc]')];
+      const chosen = ticks.filter(t => t.checked).map(t => Number(t.value));
+      const body = { id, name: row.querySelector('[data-rname]').value, kind: row.querySelector('[data-rkind]').value, capacity: Number(row.querySelector('[data-rcap]').value || 1),
+        serviceIds: ticks.length && chosen.length < ticks.length ? chosen : null };
+      try { const { resource } = await call('PATCH', body); data.resources = data.resources.map(r => r.id === id ? resource : r); renderResources(); $('bh-res-error').classList.add('hidden'); }
+      catch (e) { $('bh-res-error').textContent = e.message; $('bh-res-error').classList.remove('hidden'); }
+    }
+
+    panel.addEventListener('click', async (e) => {
+      const t = e.target.closest('button');
+      if (!t) return;
+      if (t.id === 'bh-save') return save();
+      if (t.id === 'bh-closure-add') { closures = collectClosures(); closures.push({ date: '', note: '' }); renderClosures(); return; }
+      if (t.dataset.cremove !== undefined) { closures = collectClosures().filter((_, i) => i !== Number(t.dataset.cremove)); renderClosures(); return; }
+      if (t.id === 'bh-res-add') {
+        const name = await window.promptModal('Who or what can be booked? e.g. Sarah, Terrace, Room 1', { title: 'Add someone or something to book', confirmLabel: 'Add', placeholder: 'Name' });
+        if (!name || !name.trim()) return;
+        try { const { resource } = await call('POST', { name: name.trim(), kind: 'staff', capacity: 1 }); data.resources.push(resource); renderResources(); }
+        catch (err) { $('bh-res-error').textContent = err.message; $('bh-res-error').classList.remove('hidden'); }
+        return;
+      }
+      if (t.dataset.rsave) return saveResource(Number(t.dataset.rsave));
+      if (t.dataset.rstatus) {
+        const r = data.resources.find(x => x.id === Number(t.dataset.rstatus));
+        try { const { resource } = await call('PATCH', { id: r.id, status: r.status === 'active' ? 'archived' : 'active' }); data.resources = data.resources.map(x => x.id === r.id ? resource : x); renderResources(); }
+        catch (err) { $('bh-res-error').textContent = err.message; $('bh-res-error').classList.remove('hidden'); }
+        return;
+      }
+      if (t.dataset.rdelete) {
+        if (!(await window.confirmModal('Past bookings keep their name. This can\'t be undone.', { title: 'Delete for good?', confirmLabel: 'Delete', cancelLabel: 'Keep' }))) return;
+        try { await call('DELETE', null, '?id=' + Number(t.dataset.rdelete)); data.resources = data.resources.filter(x => x.id !== Number(t.dataset.rdelete)); renderResources(); }
+        catch (err) { $('bh-res-error').textContent = err.message; $('bh-res-error').classList.remove('hidden'); }
+      }
+    });
+    panel.addEventListener('change', (e) => {
+      if (e.target.matches('[data-open]')) e.target.closest('[data-day]').querySelector('[data-times]').classList.toggle('opacity-40', !e.target.checked);
+    });
+
+    let loaded = false;
+    const maybeLoad = () => { if (loaded || panel.classList.contains('hidden')) return; loaded = true; load(); };
+    new MutationObserver(maybeLoad).observe(panel, { attributes: true, attributeFilter: ['class'] });
+    maybeLoad();
+  })();
+  </script>
+  </div><!-- /panel: hours -->
 
   <!-- ══ Legal & Billing ════════════════════════════════════════════════════ -->
   <div class="bizinfo-tab-panel hidden" data-panel="legal">

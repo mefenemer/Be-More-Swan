@@ -17,6 +17,19 @@
 //   payments_connect { assistantId }          → Stripe's onboarding link for the workspace's Standard
 //                                               account (created the first time). Owner/admin only.
 //   payments_refresh { assistantId }          → re-read the account from Stripe (back from onboarding)
+//   words     { assistantId, pageId, text? | file?: {name, type, data(base64)} | attachmentId? |
+//               quote? + chatSessionId?, note? }   (attachmentId / quote: the chat's site_words card)
+//                                             → "Add your own words": a PROPOSAL placing the owner's
+//                                               text on the page WORD FOR WORD (site-words.ts). Saves
+//                                               nothing — Apply sends its ops through `apply`. 1 task.
+//   products_import { assistantId, sectionId } → an older products section's typed-in items become
+//                                               Business Information products; the section then names them
+//   bookings  { assistantId }                 → bookings from the last 30 days on (bookings.ts)
+//   booking_decide { assistantId, id, decision: confirm|decline|cancel } → the owner's decision; the
+//                                               customer is emailed (a calendar invite on confirm)
+//   booking_setup { assistantId, settings, section?: { pageId, kind, serviceIds, askStaff } }
+//                                             → the chat's "Set up bookings" card: hours & rules saved
+//                                               to Business Information, and a booking section added
 //   orders    { assistantId }                 → paid orders from the site's Buy buttons
 //   order_done { assistantId, id, done }      → mark one dealt with (or not)
 //
@@ -24,23 +37,28 @@
 // chat cards never send them (chat-session.js sends only apply and draft), so the owner always
 // decides what goes live. Publishing refuses [placeholders] and runs the safety check on every word.
 
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
-import { SECTION_TYPES, type SiteOperation } from '../../src/utils/site-definition';
+import { assetIdsIn, SECTION_TYPES, type SiteOperation } from '../../src/utils/site-definition';
 import { placeholdersIn } from '../../src/utils/site-draft';
-import { cleanSiteSlugInput, siteOrigin, sitesDomain, siteVisibleText, suggestSiteSlug } from '../../src/utils/site-hosting';
+import { cleanSiteSlugInput, siteAssetUrl, siteOrigin, sitesDomain, siteVisibleText, suggestSiteSlug } from '../../src/utils/site-hosting';
 import { listSignupForms } from '../../src/utils/site-forms';
+import { readWordsFile } from '../../src/utils/site-words';
+import { attachmentText, quoteFromChat } from '../../src/utils/chat-attachments';
 import { connectAccountFor, connectOnboardingLink, markOrderDone, refreshConnectAccount } from '../../src/utils/site-shop';
-import { siteEnquiries, siteOrders, users } from '../../db/schema';
+import { bookings, bookingSettings, orgProducts, siteEnquiries, siteOrders, users } from '../../db/schema';
+import { decideBooking, describeBooking, listBookings, loadBookingSetup } from '../../src/utils/bookings';
+import { cleanBookingSettings, describeHours } from '../../src/utils/booking-settings';
+import { buyablePence, priceDisplay } from '../../src/utils/product-price';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import {
     applySiteOperations, claimDraft, definitionOf, endDraft, hasUnpublishedChanges, listSiteVersions, loadOrCreateSite, maxPagesFor,
-    publishBlocker, publishSite, restoreVersionToDraft, setSiteAddress, unpublishSite, DRAFT_TIMEOUT_MS, type SiteRow,
+    proposeOwnWords, publishBlocker, publishSite, restoreVersionToDraft, setSiteAddress, unpublishSite, DRAFT_TIMEOUT_MS, type SiteRow,
 } from '../../src/utils/site-store';
 import { triggerSiteDraft } from '../../src/utils/trigger-site-draft';
 
@@ -89,10 +107,29 @@ export default withLambda(async (event) => {
             },
             definition, warnings: [...new Set([...warnings, ...extraWarnings])], maxPages,
             placeholders: placeholdersIn(definition),
+            // Thumbnails for the editor's picture fields: library picture id → its link.
+            assetUrls: Object.fromEntries(assetIdsIn(definition).map((id) => [id, siteAssetUrl(resolveBaseUrl(event.headers as Record<string, string | undefined>) || 'https://bemoreswan.com', id)])),
             forms: await listSignupForms(db, orgId),
+            // Business Information ▸ Products & Services — the ONE place products and prices live.
+            catalogue: (await db.select({
+                id: orgProducts.id, name: orgProducts.name, kind: orgProducts.kind, price: orgProducts.price,
+                priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, imageAssetId: orgProducts.imageAssetId,
+            }).from(orgProducts).where(and(eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active')))
+                .orderBy(asc(orgProducts.sortOrder), asc(orgProducts.id)))
+                .map((r) => ({ id: r.id, name: r.name, kind: r.kind, price: r.price, buyable: buyablePence(r) !== null,
+                    imageUrl: r.imageAssetId ? siteAssetUrl(resolveBaseUrl(event.headers as Record<string, string | undefined>) || 'https://bemoreswan.com', r.imageAssetId) : null })),
             payments: await (async () => {
                 const acct = await connectAccountFor(db, orgId);
                 return { connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, detailsSubmitted: !!acct?.detailsSubmitted, canConnect: role === 'owner' || role === 'admin' };
+            })(),
+            booking: await (async () => {
+                const b = await loadBookingSetup(db, orgId);
+                const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(bookings).where(and(eq(bookings.organisationId, orgId), eq(bookings.status, 'pending')));
+                return {
+                    ready: Object.keys(b.settings.weeklyHours).length > 0, hours: describeHours(b.settings.weeklyHours), mode: b.settings.mode,
+                    services: b.services.map((x) => ({ id: x.id, name: x.name, durationMinutes: x.durationMinutes, price: x.price })),
+                    resources: b.resources.map((r) => ({ id: r.id, name: r.name, kind: r.kind })), waiting: Number(n),
+                };
             })(),
             newOrders: Number((await db.select({ n: sql<number>`count(*)::int` }).from(siteOrders)
                 .where(and(eq(siteOrders.siteId, s.id), eq(siteOrders.status, 'paid'))))[0]?.n ?? 0),
@@ -187,6 +224,98 @@ export default withLambda(async (event) => {
     if (action === 'payments_refresh') {
         try { await refreshConnectAccount(db, orgId); } catch (err) { console.error('[sites] Stripe refresh failed', err instanceof Error ? err.message : err); }
         return json(200, await view(site));
+    }
+
+    if (action === 'words') {
+        const pageId = String(body.pageId || '');
+        const note = typeof body.note === 'string' && body.note.trim() ? body.note.trim().slice(0, 500) : null;
+        let text = typeof body.text === 'string' ? body.text : '';
+        const file = body.file && typeof body.file === 'object' ? body.file as { name?: unknown; type?: unknown; data?: unknown } : null;
+        if (file && typeof file.data === 'string') {
+            try {
+                const fromFile = await readWordsFile(String(file.name || ''), String(file.type || ''), Buffer.from(file.data, 'base64'));
+                text = text ? `${text}\n\n${fromFile}` : fromFile;
+            } catch (err) {
+                return json(400, { error: err instanceof Error ? err.message : 'That file couldn\'t be read.' });
+            }
+        }
+        // From the chat's site_words card: an attached document's words, or words the assistant quoted
+        // from the owner's own message — accepted only if they really are in it (chat-attachments.ts).
+        const attachmentId = Number(body.attachmentId);
+        if (Number.isInteger(attachmentId) && attachmentId > 0) {
+            const fromAttachment = await attachmentText(db, orgId, attachmentId);
+            if (!fromAttachment) return json(404, { error: 'That attached document isn\'t available any more. Attach it again.' });
+            text = text ? `${text}\n\n${fromAttachment}` : fromAttachment;
+        } else if (typeof body.quote === 'string' && body.quote.trim()) {
+            const fromChat = await quoteFromChat(db, orgId, Number(body.chatSessionId), body.quote);
+            if (!fromChat) return json(400, { error: 'Those words weren\'t found in your messages, so they weren\'t used. Paste them again, or use "Add your own words" on the Website tab.' });
+            text = text ? `${text}\n\n${fromChat}` : fromChat;
+        }
+        const blocked = await enforcePromptModeration({ text: `${text}\n${note ?? ''}`.slice(0, 20000), userId, organisationId: orgId, source: 'site_words' });
+        if (blocked) return blocked;
+        const r = await proposeOwnWords(db, site, { pageId, text, note, maxPages });
+        if (!r.ok) return json(r.status, { error: r.error });
+        return json(200, { proposal: r.proposal });
+    }
+
+    if (action === 'products_import') {
+        // Items typed into a products section before products moved to Business Information: each
+        // becomes a Business Information product (its price as a fixed price), and the section names them.
+        const sectionId = String(body.sectionId || '');
+        const { definition } = definitionOf(site, maxPages);
+        const page = definition.pages.find((pg) => pg.sections.some((x) => x.id === sectionId));
+        const section = page?.sections.find((x) => x.id === sectionId);
+        if (!page || !section || section.type !== 'products' || !section.props.items.length) return json(404, { error: 'There\'s nothing to move in that section.' });
+        const [{ maxOrder }] = await db.select({ maxOrder: sql<number>`coalesce(max(${orgProducts.sortOrder}), -1)::int` }).from(orgProducts).where(eq(orgProducts.organisationId, orgId));
+        const created = await db.insert(orgProducts).values(section.props.items.map((it, i) => ({
+            organisationId: orgId, createdBy: userId ?? null, kind: 'product', status: 'active', sortOrder: maxOrder + 1 + i,
+            name: it.name.slice(0, 120), description: it.description,
+            ...(it.price !== null ? { priceType: 'fixed', priceAmount: it.price, price: priceDisplay({ priceType: 'fixed', priceAmount: it.price, priceUnit: null }) } : {}),
+            imageAssetId: it.image?.assetId ?? null,
+        }))).returning({ id: orgProducts.id });
+        const r = await applySiteOperations(db, site, [{ op: 'update_section', pageId: page.id, sectionId, props: { productIds: created.map((c) => c.id), items: [] } }], maxPages);
+        if (!r.ok) return json(400, { error: r.error });
+        return json(200, await view(r.site, [`${created.length} item${created.length === 1 ? '' : 's'} moved into Business Information ▸ Products & Services. Change prices there from now on.`]));
+    }
+
+    if (action === 'bookings') {
+        const setup = await loadBookingSetup(db, orgId);
+        const rows = await listBookings(db, orgId);
+        return json(200, { bookings: rows.map((b) => ({ ...describeBooking(b, setup.settings.timezone), id: b.id, status: b.status, customerName: b.customerName,
+            customerEmail: b.customerEmail, customerPhone: b.customerPhone, notes: b.notes, partySize: b.partySize, startsAt: b.startsAt, createdAt: b.createdAt })) });
+    }
+
+    if (action === 'booking_decide') {
+        const decision = body.decision === 'confirm' || body.decision === 'decline' || body.decision === 'cancel' ? body.decision : null;
+        if (!decision) return json(400, { error: 'Confirm, decline or cancel?' });
+        const setup = await loadBookingSetup(db, orgId);
+        const { definition } = definitionOf(site, maxPages);
+        const r = await decideBooking(db, orgId, Number(body.id), decision, {
+            business: definition.settings.siteName, timezone: setup.settings.timezone, assistantId: assistant.id, cancellationPolicy: setup.settings.cancellationPolicy,
+        });
+        if (!r.ok) return json(409, { error: r.error });
+        return json(200, { ok: true, status: r.booking.status });
+    }
+
+    if (action === 'booking_setup') {
+        // The chat's card, after the owner's click: hours & rules into Business Information, then
+        // (optionally) a booking section on a page. Both through their usual gates.
+        const raw = body.settings && typeof body.settings === 'object' ? body.settings as Record<string, unknown> : {};
+        const cleaned = cleanBookingSettings(raw);
+        if (!cleaned.ok) return json(400, { error: cleaned.error });
+        if (Object.keys(cleaned.value).length) {
+            const values = { ...cleaned.value, updatedAt: new Date() };
+            await db.insert(bookingSettings).values({ organisationId: orgId, ...values }).onConflictDoUpdate({ target: bookingSettings.organisationId, set: values });
+        }
+        const sec = body.section && typeof body.section === 'object' ? body.section as Record<string, unknown> : null;
+        if (sec && typeof sec.pageId === 'string') {
+            const r = await applySiteOperations(db, site, [{ op: 'add_section', pageId: sec.pageId, section: { type: 'booking', props: {
+                kind: sec.kind, serviceIds: sec.serviceIds, askStaff: sec.askStaff, heading: sec.heading ?? (sec.kind === 'table' ? 'Book a table' : 'Book an appointment'),
+            } } }], maxPages);
+            if (!r.ok) return json(400, { error: r.error });
+            site = r.site;
+        }
+        return json(200, await view(site, ['Bookings are set up. Change your hours and rules any time in Business Information ▸ Opening hours & bookings.']));
     }
 
     if (action === 'orders') {

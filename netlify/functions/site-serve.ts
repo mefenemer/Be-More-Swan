@@ -21,12 +21,14 @@ import { eq } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { sites } from '../../db/schema';
-import { renderRobots, renderSitemap, renderSiteNotice, renderSitePage, esc, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH } from '../../src/utils/site-render';
-import { canSell, startCheckout } from '../../src/utils/site-shop';
+import { renderRobots, renderSitemap, renderSiteNotice, renderSitePage, esc, BOOK_PATH, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH } from '../../src/utils/site-render';
+import { bookStep, bookSubmit } from '../../src/utils/site-booking';
+import { bookingSummary } from '../../src/utils/bookings';
+import { canSell, loadSiteProducts, startCheckout } from '../../src/utils/site-shop';
 import { safeBackPath } from '../../src/utils/site-forms';
 import { handleSiteForm, loadSiteForms, sentMessage } from '../../src/utils/site-forms';
 import audiencePublic from './audience-public';
-import { siteOrigin, sitesDomain, slugFromHost } from '../../src/utils/site-hosting';
+import { siteAssetUrl, siteOrigin, sitesDomain, slugFromHost } from '../../src/utils/site-hosting';
 import { maxPagesFor, publishedDefinition } from '../../src/utils/site-store';
 
 // form-action: the site's own forms post to its own /_form and /_buy (steps 3b, 3c), and nowhere
@@ -97,7 +99,7 @@ export default withLambda(async (event) => {
     const rawPath = String(event.queryStringParameters?.path || '/');
     const path = rawPath.startsWith('/') ? rawPath.slice(0, 300) : '/';
     // Only a form or a Buy button may be posted, and only to their own addresses.
-    if (isPost && path !== FORM_ACTION && path !== BUY_ACTION) return { statusCode: 405, headers: { Allow: 'GET, HEAD' } as Record<string, string>, body: 'Method Not Allowed' };
+    if (isPost && path !== FORM_ACTION && path !== BUY_ACTION && path !== BOOK_PATH) return { statusCode: 405, headers: { Allow: 'GET, HEAD' } as Record<string, string>, body: 'Method Not Allowed' };
     if (path === '/favicon.ico') return { statusCode: 404, headers: headers('text/plain', 'public, max-age=3600'), body: '' };
 
     const db = getDb();
@@ -116,6 +118,7 @@ export default withLambda(async (event) => {
         origin, preview: false,
         reportUrl: `${app}/report-site.html?site=${encodeURIComponent(slug)}`,
         creditUrl: site.credit ? `${app}/assistant.html?role=website_assistant` : null,
+        assetUrl: (id: number) => siteAssetUrl(app, id),
     };
 
     // ── Forms (step 3b) and Buy buttons (step 3c) ──
@@ -123,9 +126,14 @@ export default withLambda(async (event) => {
         const raw = event.isBase64Encoded ? Buffer.from(event.body || '', 'base64').toString('utf8') : (event.body || '');
         // The visitor's IP: sent by the sites-host edge function, trusted only because the key matched.
         const ip = (h['x-site-client-ip'] || '').slice(0, 64) || 'unknown';
+        if (path === BOOK_PATH) {
+            const result = await bookSubmit({ db, site, def: definition, ctx, now: new Date() }, new URLSearchParams(raw.slice(0, 8000)), ip);
+            if ('location' in result) return { statusCode: 303, headers: { Location: result.location, 'Cache-Control': 'no-store' } as Record<string, string>, body: '' };
+            return { statusCode: result.status, headers: headers('text/html; charset=utf-8', 'no-store'), body: result.html };
+        }
         if (path === BUY_ACTION) {
             const form = new URLSearchParams(raw.slice(0, 4000));
-            const bought = await startCheckout(db, { site, definition, origin, ip, body: form, backPath: safeBackPath(definition, form.get('_p')) });
+            const bought = await startCheckout(db, { site, definition, origin, ip, body: form, backPath: safeBackPath(definition, form.get('_p')), assetUrl: ctx.assetUrl });
             if (bought.kind === 'redirect') return { statusCode: 303, headers: { Location: bought.location, 'Cache-Control': 'no-store' } as Record<string, string>, body: '' };
             return { statusCode: bought.status, headers: headers('text/html; charset=utf-8', 'no-store'), body: renderSiteNotice(definition, ctx, bought.title, bought.message, { label: 'Go back', path: bought.backPath }) };
         }
@@ -137,6 +145,12 @@ export default withLambda(async (event) => {
         if (outcome.kind === 'sent') return { statusCode: 303, headers: { Location: outcome.location, 'Cache-Control': 'no-store' } as Record<string, string>, body: '' };
         return { statusCode: outcome.status, headers: headers('text/html; charset=utf-8', 'no-store'), body: renderSiteNotice(definition, ctx, outcome.title, outcome.message, { label: 'Go back', path: outcome.backPath }) };
     }
+    // Booking steps (site-booking.ts): every step a page, every choice a link — no script.
+    if (path === BOOK_PATH) {
+        const step = await bookStep({ db, site, def: definition, ctx, now: new Date() }, new URLSearchParams(String(event.queryStringParameters?.q || '')));
+        if ('location' in step) return { statusCode: 303, headers: { Location: step.location } as Record<string, string>, body: '' };
+        return { statusCode: step.status, headers: headers('text/html; charset=utf-8', 'no-store'), body: step.html };
+    }
     if (path === FORM_SENT_PATH) {
         const q = new URLSearchParams(String(event.queryStringParameters?.q || ''));
         const m = await sentMessage(db, site, definition, q);
@@ -147,9 +161,12 @@ export default withLambda(async (event) => {
     if (path === '/sitemap.xml') return { statusCode: 200, headers: headers('application/xml; charset=utf-8', 'public, max-age=300'), body: renderSitemap(definition, origin) };
 
     const hasShop = definition.pages.some((p) => p.sections.some((s) => s.type === 'products'));
+    const hasBooking = definition.pages.some((p) => p.sections.some((s) => s.type === 'booking'));
     const page = renderSitePage(definition, path, {
         ...ctx, forms: await loadSiteForms(db, site.organisationId, definition), renderedAt: Date.now(),
         canSell: hasShop ? await canSell(db, site.organisationId) : false,
+        products: hasShop ? await loadSiteProducts(db, site.organisationId, definition) : {},
+        booking: hasBooking ? await bookingSummary(db, site.organisationId) : null,
     });
     return { statusCode: page.status, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : page.html };
 });

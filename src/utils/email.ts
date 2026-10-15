@@ -46,10 +46,12 @@ interface SendEmailParams {
      * its own named field.
      */
     headers?: Record<string, string>;
+    /** Files to attach — a booking's calendar invite (.ics). Content as text or base64. */
+    attachments?: Array<{ filename: string; content: string | Buffer; contentType?: string }>;
 }
 
 // sendEmail is an alias for sendMagicLinkEmail used by most Netlify functions
-export const sendEmail = async ({ to, subject, html, text, from, replyTo, headers }: SendEmailParams) => {
+export const sendEmail = async ({ to, subject, html, text, from, replyTo, headers, attachments }: SendEmailParams) => {
     if (!resend) {
         console.warn(`[DEV MODE] RESEND_API_KEY missing. Simulated email to ${to}`);
         return null;
@@ -67,6 +69,7 @@ export const sendEmail = async ({ to, subject, html, text, from, replyTo, header
             ...(text ? { text } : {}),
             ...(replyTo ? { replyTo } : {}),
             ...(headers ? { headers } : {}),
+            ...(attachments && attachments.length ? { attachments } : {}),
         })
         .catch((err: any) => ({ data: null, error: { name: 'ResendException', message: err?.message ?? String(err) } }));
 

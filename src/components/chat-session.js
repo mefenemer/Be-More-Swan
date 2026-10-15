@@ -32,6 +32,12 @@
 
   const ORCHESTRATOR_URL = '/.netlify/functions/chat-orchestrator';
   const MAX_MESSAGE_CHARS = 4000; // mirrors the orchestrator's server-side cap
+  // Roles whose chat takes files (route flag `acceptsAttachments` in chat-orchestrator.ts). Pictures
+  // go into the media library first (media-picker.js upload); documents are read on the server.
+  const ATTACH_ROLES = new Set(['website_assistant']);
+  const ATTACH_MAX = 5;
+  const DOC_MAX_BYTES = 4 * 1024 * 1024;
+  const DOC_TYPES = /\.(docx|pdf|txt|md)$/i;
 
   function escapeHtml(value) {
     return String(value ?? '')
@@ -92,6 +98,9 @@
     let chatSessionId = props.chatSessionId ?? null;
     const assistantId = props.assistantId ?? null;
     let sending = false;
+    const canAttach = props.readOnly !== true && ATTACH_ROLES.has(props.roleKey);
+    /** Files waiting to go with the next message: { file, kind: 'image' | 'document' }. */
+    let pending = [];
 
     // Zero-state: a brand-new session (no visible history — system rows don't count)
     // greets with clickable starter prompts tailored to the assistant's roleKey.
@@ -144,8 +153,13 @@
         ${readOnly ? readOnlyFooterHtml : `
         <div class="border-t border-gray-200 bg-white px-4 sm:px-6 py-4">
           <div class="hidden mb-2 text-sm text-red-600 font-semibold" data-chat-error role="alert"></div>
+          ${canAttach ? '<div class="hidden flex-wrap gap-2 mb-2" data-chat-chips></div>' : ''}
           <form class="flex items-end gap-3" data-chat-form>
-            <textarea rows="1" placeholder="Type your message…" maxlength="${MAX_MESSAGE_CHARS}"
+            ${canAttach ? `<label class="btn-secondary border px-3 py-3 rounded-lg cursor-pointer shrink-0 text-sm" title="Attach pictures or documents (Word, PDF, text)">
+              <span aria-hidden="true">📎</span><span class="sr-only">Attach pictures or documents</span>
+              <input type="file" multiple hidden data-chat-attach accept="image/*,.docx,.pdf,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain">
+            </label>` : ''}
+            <textarea rows="1" placeholder="${canAttach ? 'Type your message, or attach pictures and documents…' : 'Type your message…'}" maxlength="${MAX_MESSAGE_CHARS}"
               class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm bg-white resize-none max-h-40"
               data-chat-input></textarea>
             <button type="submit"
@@ -161,6 +175,70 @@
     const inputEl = container.querySelector('[data-chat-input]');
     const sendBtn = container.querySelector('[data-chat-send]');
     const errorEl = container.querySelector('[data-chat-error]');
+    const chipsEl = container.querySelector('[data-chat-chips]');
+    const attachInput = container.querySelector('[data-chat-attach]');
+
+    // ── Attachments (only where canAttach) ──
+    function renderChips() {
+      if (!chipsEl) return;
+      chipsEl.classList.toggle('hidden', !pending.length);
+      chipsEl.style.display = pending.length ? 'flex' : 'none';
+      chipsEl.innerHTML = pending.map((p, i) => `
+        <span class="inline-flex items-center gap-1 bg-gray-100 border border-gray-200 rounded-full pl-3 pr-1 py-1 text-xs text-gray-800">
+          ${p.kind === 'image' ? '🖼️' : '📄'} ${escapeHtml(p.file.name)}
+          <button type="button" data-chat-chip-remove="${i}" class="px-1 text-gray-500 hover:text-gray-900" aria-label="Remove ${escapeHtml(p.file.name)}">×</button>
+        </span>`).join('');
+    }
+    function addFiles(files) {
+      for (const file of files) {
+        if (pending.length >= ATTACH_MAX) { showError(`Attach up to ${ATTACH_MAX} files at a time.`); break; }
+        const kind = /^image\//.test(file.type) ? 'image' : DOC_TYPES.test(file.name) || file.type === 'application/pdf' || /^text\//.test(file.type) ? 'document' : null;
+        if (!kind) { showError(`"${file.name}" can't be attached — use pictures, Word documents, PDFs or text files.`); continue; }
+        if (kind === 'document' && file.size > DOC_MAX_BYTES) { showError(`"${file.name}" is too large (the limit is 4 MB).`); continue; }
+        pending.push({ file, kind });
+      }
+      renderChips();
+    }
+    function readAsBase64(file) {
+      return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ''));
+        r.onerror = () => reject(new Error(`"${file.name}" couldn't be read.`));
+        r.readAsDataURL(file);
+      });
+    }
+    /** Pictures into the library, documents read — the wire shape chat-attachments.ts accepts. */
+    async function prepareAttachments(items) {
+      const out = [];
+      for (const p of items) {
+        if (p.kind === 'image') {
+          if (!window.MediaPicker || typeof window.MediaPicker.upload !== 'function') throw new Error('Pictures can\'t be attached on this page — add them on the Website tab instead.');
+          const asset = await window.MediaPicker.upload(p.file);
+          out.push({ kind: 'image', assetId: asset.id, name: p.file.name });
+        } else {
+          out.push({ kind: 'document', name: p.file.name, type: p.file.type, data: await readAsBase64(p.file) });
+        }
+      }
+      return out;
+    }
+    function onAttachChange() { addFiles(Array.from(attachInput.files || [])); attachInput.value = ''; }
+    function onChipsClick(e) {
+      const b = e.target.closest('[data-chat-chip-remove]');
+      if (!b) return;
+      pending.splice(Number(b.dataset.chatChipRemove), 1);
+      renderChips();
+    }
+    function onDragOver(e) { if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) e.preventDefault(); }
+    function onDrop(e) {
+      const files = e.dataTransfer && e.dataTransfer.files;
+      if (!files || !files.length) return;
+      e.preventDefault();
+      addFiles(Array.from(files));
+    }
+    function onPaste(e) {
+      const files = Array.from((e.clipboardData && e.clipboardData.items) || []).filter((i) => i.kind === 'file').map((i) => i.getAsFile()).filter(Boolean);
+      if (files.length) { e.preventDefault(); addFiles(files); }
+    }
 
     function scrollToBottom() {
       scrollEl.scrollTop = scrollEl.scrollHeight;
@@ -318,16 +396,25 @@
      */
     async function sendMessage(text, opts) {
       const message = String(text ?? '').trim();
+      const files = canAttach ? pending.slice() : [];
       // An archived conversation is read-only end to end: the orchestrator would 409 anyway,
       // so a programmatic send must not append an optimistic user bubble that never gets a reply.
-      if (readOnly || !message || sending) return;
+      if (readOnly || (!message && !files.length) || sending) return;
       if (message.length > MAX_MESSAGE_CHARS) {
         showError(`Message too long (max ${MAX_MESSAGE_CHARS} characters).`);
         return;
       }
 
       clearError();
-      appendMessage({ role: 'user', content: message });
+      let attachments = [];
+      if (files.length) {
+        setSending(true);
+        try { attachments = await prepareAttachments(files); }
+        catch (err) { setSending(false); showError(err.message || 'Those files couldn\'t be attached.'); return; }
+        pending = [];
+        renderChips();
+      }
+      appendMessage({ role: 'user', content: [message, files.length ? `📎 Attached: ${files.map((f) => f.file.name).join(', ')}` : ''].filter(Boolean).join('\n\n') });
       setSending(true);
       const skeleton = showTypingSkeleton();
 
@@ -335,6 +422,7 @@
         const body = chatSessionId != null
           ? { chatSessionId, message }
           : { aiAssistantId: assistantId, message };
+        if (attachments.length) body.attachments = attachments;
         if (opts && opts.approvedHandoff) body.approvedHandoff = opts.approvedHandoff;
         // The post the user has open in the editor, when this chat was opened from there
         // (window.ChatDraftTarget, set by whoever opened it). Sent on EVERY turn, not just the
@@ -720,6 +808,25 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // "Place my words" on a site_words card → sites.ts `words`: a preview of where the owner's own
+    // words would go. Nothing is saved until the card's Apply (site:apply).
+    function onSiteWords(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      sitePost({ action: 'words', assistantId, pageId: d.pageId, attachmentId: d.attachmentId, quote: d.quote, chatSessionId, note: d.note || '' })
+        .then((data) => respond({ ok: true, proposal: data.proposal }))
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
+    // "Set up bookings" on a booking_setup card → sites.ts `booking_setup` (hours & rules, + a section).
+    function onBookingSetup(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      sitePost({ action: 'booking_setup', assistantId, settings: d.settings || {}, section: d.section || null })
+        .then(() => { respond({ ok: true }); siteChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     function onSiteDraft(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -1001,6 +1108,13 @@
       formEl.addEventListener('submit', onSubmit);
       inputEl.addEventListener('keydown', onKeydown);
       inputEl.addEventListener('input', onInput);
+      if (canAttach) {
+        attachInput.addEventListener('change', onAttachChange);
+        chipsEl.addEventListener('click', onChipsClick);
+        container.addEventListener('dragover', onDragOver);
+        container.addEventListener('drop', onDrop);
+        inputEl.addEventListener('paste', onPaste);
+      }
     }
     container.addEventListener('handoff:response', onHandoffResponse);
     container.addEventListener('discovery:create', onDiscoveryCreate);
@@ -1018,6 +1132,8 @@
     container.addEventListener('siteaudit:handoff', onSiteAuditHandoff);
     container.addEventListener('site:apply', onSiteApply);
     container.addEventListener('site:draft', onSiteDraft);
+    container.addEventListener('site:words', onSiteWords);
+    container.addEventListener('site:bookingSetup', onBookingSetup);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
     container.addEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
@@ -1045,6 +1161,13 @@
           formEl.removeEventListener('submit', onSubmit);
           inputEl.removeEventListener('keydown', onKeydown);
           inputEl.removeEventListener('input', onInput);
+          if (canAttach) {
+            attachInput.removeEventListener('change', onAttachChange);
+            chipsEl.removeEventListener('click', onChipsClick);
+            container.removeEventListener('dragover', onDragOver);
+            container.removeEventListener('drop', onDrop);
+            inputEl.removeEventListener('paste', onPaste);
+          }
         }
         container.removeEventListener('handoff:response', onHandoffResponse);
         container.removeEventListener('discovery:create', onDiscoveryCreate);
@@ -1062,6 +1185,8 @@
         container.removeEventListener('siteaudit:handoff', onSiteAuditHandoff);
         container.removeEventListener('site:apply', onSiteApply);
         container.removeEventListener('site:draft', onSiteDraft);
+        container.removeEventListener('site:words', onSiteWords);
+        container.removeEventListener('site:bookingSetup', onBookingSetup);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
         container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);

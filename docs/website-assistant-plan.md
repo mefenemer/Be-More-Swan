@@ -156,6 +156,22 @@ published_by) · `site_domains` (hostname, verification, cert state). Form submi
      published site, GBP, qty 1–10, optional UK delivery address, **no application fee (D5 = 0%)**.
      Orders recorded by `stripe-connect-webhook.ts` (own secret STRIPE_CONNECT_WEBHOOK_SECRET),
      unique per session; owner notified (`site_order_received`) and emailed. SQL: db/z-website-shop.sql.
+   - **Owner's words & pictures, built 2026-10-15:** (1) "Choose picture" (src/components/media-picker.js)
+     on every picture and the logo — library pictures (`assetId`) drawn through the signed permanent
+     link emails use; ownership checked on every save (site-store.ts verifySiteAssets). (2) "Add your
+     own words" (site-words.ts): text / Word / PDF → numbered blocks → the model returns only a
+     block-to-section PLAN → sections are built from the owner's blocks, so the wording is theirs by
+     construction; nothing dropped, nothing truncated; a proposal until Apply; 1 task. (3) Chat
+     attachments (chat-attachments.ts, chat_attachments table): paperclip / drag / paste for the
+     Website Assistant; pictures used by assetId in site_changes, words only via a `site_words` card
+     (attached document, or a quote verified against the owner's own messages).
+   - **Products mastered in Business Information, 2026-10-15:** org_products gets structured prices
+     (db/z-product-pricing.sql, src/utils/product-price.ts: fixed | from | on_request | text, amount in
+     pence, unit), duration (for bookings) and a picture. `price` = the displayed wording, derived on
+     save, so every prompt is unchanged. The site's products section holds only `productIds`; page,
+     JSON-LD and checkout read Business Information (site-shop.ts loadSiteProducts). Only a fixed
+     price is buyable; Buy re-checks name AND price at the click. Old typed-in items: shown, never
+     sold, "Move them into Business Information" (sites.ts products_import).
 4. Custom domains (D2). Mystery Shopper → one-click fixes.
 5. (moved into 3)
 6. Import-my-site, remaining sections, widget catalogue (post-launch).

@@ -3175,6 +3175,24 @@ export const chatMessages = pgTable("chat_messages", {
   check("chat_messages_role_check", sql`${t.role} IN ('user', 'assistant', 'system')`),
 ]);
 
+// Files attached to a chat turn (db/z-chat-attachments.sql). A picture is uploaded into the media
+// library first (assetId); a document keeps only its words (text). Scoped by organisation.
+export const chatAttachments = pgTable("chat_attachments", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  chatSessionId: integer("chat_session_id").notNull().references(() => chatSessions.id, { onDelete: "cascade" }),
+  chatMessageId: integer("chat_message_id").references(() => chatMessages.id, { onDelete: "set null" }),
+  kind: text().notNull(),
+  assetId: integer("asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
+  name: text().notNull(),
+  text: text(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("chat_attachments_session_idx").on(t.chatSessionId, t.createdAt),
+  index("chat_attachments_org_idx").on(t.organisationId),
+  check("chat_attachments_kind_check", sql`${t.kind} IN ('image','document')`),
+]);
+
 // ── Internal Data Hub (Golden Rule 2) ─────────────────────────────────────────
 // Tenant work products produced by the Tier 1 assistants — processed leads,
 // enrichment diffs, meeting notes, ledger invoices, triaged tickets. One table for
@@ -5361,6 +5379,13 @@ export const orgProducts = pgTable("org_products", {
   price: text(),
   audience: text(),
   url: text(),
+  // Structured price (db/z-product-pricing.sql). `price` above is the DISPLAYED wording, written by
+  // the server from these (product-price.ts). Only 'fixed' can be bought online.
+  priceType: text("price_type"),          // 'fixed' | 'from' | 'on_request' | 'text' | null
+  priceAmount: integer("price_amount"),   // pence
+  priceUnit: text("price_unit"),
+  durationMinutes: integer("duration_minutes"),
+  imageAssetId: integer("image_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
   status: text().notNull().default("active"),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -5544,6 +5569,72 @@ export const siteEnquiries = pgTable("site_enquiries", {
   index("site_enquiries_site_idx").on(t.siteId, t.createdAt),
   index("site_enquiries_org_idx").on(t.organisationId),
   check("site_enquiries_status_check", sql`${t.status} IN ('new','done')`),
+]);
+
+// ── Bookings (db/z-bookings.sql, docs/booking-plan.md) ────────────────────────────────────────
+// Opening hours + booking rules, one row per workspace (Business Information ▸ Opening hours & bookings).
+export const bookingSettings = pgTable("booking_settings", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  timezone: text().notNull().default("Europe/London"),
+  weeklyHours: jsonb("weekly_hours").notNull().default({}),
+  closures: jsonb().notNull().default([]),
+  mode: text().notNull().default("request"),
+  minNoticeMinutes: integer("min_notice_minutes").notNull().default(120),
+  maxAdvanceDays: integer("max_advance_days").notNull().default(60),
+  slotIntervalMinutes: integer("slot_interval_minutes").notNull().default(30),
+  bufferMinutes: integer("buffer_minutes").notNull().default(0),
+  tableMinutes: integer("table_minutes").notNull().default(90),
+  maxPartySize: integer("max_party_size").notNull().default(8),
+  cancellationPolicy: text("cancellation_policy"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("booking_settings_org_uq").on(t.organisationId),
+  check("booking_settings_mode_check", sql`${t.mode} IN ('instant','request')`),
+]);
+
+// Who or what is booked: staff, a table / seating area (capacity = seats), a room.
+export const bookableResources = pgTable("bookable_resources", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  name: text().notNull(),
+  kind: text().notNull().default("staff"),
+  capacity: integer().notNull().default(1),
+  weeklyHours: jsonb("weekly_hours"),
+  serviceIds: jsonb("service_ids"),
+  status: text().notNull().default("active"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("bookable_resources_org_idx").on(t.organisationId, t.status, t.sortOrder),
+  check("bookable_resources_kind_check", sql`${t.kind} IN ('staff','table','room','other')`),
+  check("bookable_resources_status_check", sql`${t.status} IN ('active','archived')`),
+]);
+
+export const bookings = pgTable("bookings", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  siteId: integer("site_id").references(() => sites.id, { onDelete: "set null" }),
+  serviceId: integer("service_id").references(() => orgProducts.id, { onDelete: "set null" }),
+  resourceId: integer("resource_id").references(() => bookableResources.id, { onDelete: "set null" }),
+  kind: text().notNull(),
+  startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+  endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+  partySize: integer("party_size").notNull().default(1),
+  customerName: text("customer_name").notNull(),
+  customerEmail: text("customer_email").notNull(),
+  customerPhone: text("customer_phone"),
+  notes: text(),
+  serviceName: text("service_name"),
+  resourceName: text("resource_name"),
+  status: text().notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  decidedAt: timestamp("decided_at"),
+}, (t) => [
+  index("bookings_org_time_idx").on(t.organisationId, t.startsAt),
+  check("bookings_kind_check", sql`${t.kind} IN ('appointment','consultation','table')`),
+  check("bookings_status_check", sql`${t.status} IN ('pending','confirmed','declined','cancelled')`),
 ]);
 
 // A workspace's Stripe STANDARD account for selling on its site (db/z-website-shop.sql). We take no

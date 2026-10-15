@@ -22,6 +22,7 @@ import {
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { explainGenerationFailure } from '../../src/utils/generation-failure';
 import { readCombineCrossPosts, joinPlatformLabels } from '../../src/utils/crosspost-view';
 
 export default withLambda(async (event) => {
@@ -77,6 +78,8 @@ export default withLambda(async (event) => {
             // Content generation jobs
             db.select({
                 id: contentGenerationJobs.id,
+                jobId: contentGenerationJobs.jobId,
+                errorMessage: contentGenerationJobs.errorMessage,
                 status: contentGenerationJobs.status,
                 platform: contentGenerationJobs.platform,
                 triggerType: contentGenerationJobs.triggerType,
@@ -239,6 +242,8 @@ export default withLambda(async (event) => {
             // Operational outcome for the unified Activity feed (Epic 2.2). Failed + needs_input
             // items are pinned into a "Needs attention" group on the assistant-detail Overview.
             status: ActivityStatus;
+            /** A post / article that could not be written: the job to retry, and whether that can help. */
+            failure?: { jobId: string; canRetry: boolean; action: string | null; owner: string };
         };
 
         const items: ActivityItem[] = [];
@@ -281,9 +286,15 @@ export default withLambda(async (event) => {
                 icon = 'sparkles';
                 status = 'success';
             } else if (j.status === 'failed') {
-                description = `${isBlog ? 'Blog post' : 'Post'} generation attempt failed${platformLabel}.`;
+                // The raw error never reaches the page: it can carry our provider's billing state.
+                // generation-failure.ts says why in plain words and whether "Try again" can help.
+                const why = explainGenerationFailure(j.errorMessage, isBlog ? 'article' : 'post');
+                description = `Couldn't write a ${noun}${platformLabel}${contextHint}. ${why.reason}`;
                 icon = 'alert';
                 status = 'failed';
+                items.push({ id: `gen-${j.id}`, type: 'content_generation', icon, description, createdAt: j.createdAt, status,
+                    failure: { jobId: j.jobId, canRetry: why.canRetry, action: why.action, owner: why.owner } });
+                continue;
             } else if (j.status === 'processing') {
                 description = `Writing a ${noun}${platformLabel}…`;
                 icon = 'sparkles';

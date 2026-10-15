@@ -30,7 +30,7 @@ import { resolveTaskLimit } from './task-credit';
 type Db = ReturnType<typeof getDb>;
 
 /** What one task bought — logged with every charge so a disputed count can be explained. */
-export type WorkKind = 'social_post' | 'blog_article' | 'lead_search' | 'email_issue' | 'email_campaign' | 'site_audit' | 'site_draft';
+export type WorkKind = 'social_post' | 'blog_article' | 'lead_search' | 'email_issue' | 'email_campaign' | 'site_audit' | 'site_draft' | 'site_words';
 
 /** The message stored on a job refused at the cap, and shown wherever the job's error is. */
 export const TASK_LIMIT_MESSAGE = 'Your monthly task allowance is used up, so this was not started. It resets on the 1st of the month.';

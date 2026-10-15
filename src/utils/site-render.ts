@@ -25,6 +25,15 @@ export interface SiteSignupForm {
 
 /** Where forms post, on the site's own origin (sites-host forwards it to site-serve.ts). */
 export const FORM_ACTION = '/_form';
+/** A product as drawn: from Business Information, never typed into the site (site-shop.ts SiteProduct). */
+export interface SiteRenderProduct { id: number; name: string; description: string | null; price: string | null; buyPence: number | null; imageAssetId: number | null; }
+
+/** A booking section's first step needs only this: the services (with duration) and the largest party. */
+export interface SiteRenderBooking { ready: boolean; services: Array<{ id: number; name: string; price: string | null; durationMinutes: number }>; maxPartySize: number; }
+
+/** Where every booking step lives (booking-render.ts, served by site-serve.ts). */
+export const BOOK_PATH = '/_book';
+
 /** Where a Buy button posts (step 3c) — site-serve.ts starts a Stripe Checkout and redirects. */
 export const BUY_ACTION = '/_buy';
 
@@ -60,6 +69,15 @@ export interface RenderContext {
     renderedAt?: number;
     /** The workspace's Stripe account can take payments — Buy buttons are drawn (live site only). */
     canSell?: boolean;
+    /** Business Information products the products sections name (site-shop.ts loadSiteProducts). */
+    products?: Record<number, SiteRenderProduct>;
+    /** What a booking section can offer (bookings.ts loadBookingSetup, summarised); null = not set up. */
+    booking?: SiteRenderBooking | null;
+    /**
+     * The public address of a library picture (signed, permanent — newsletterMediaUrl). Without it a
+     * library picture is not drawn (it has no web address of its own).
+     */
+    assetUrl?: (assetId: number) => string | null;
 }
 
 export interface RenderedPage { status: 200 | 404; html: string; }
@@ -113,8 +131,19 @@ const paragraphs = (text: string) => text.split(/\n{2,}/).map((p) => `<p>${esc(p
 
 /** Set per render call (renderSitePage) — internal links go through the context's pagePath. */
 let mapPath: (path: string) => string = (p) => p;
+/** Set per render call — library pictures (assetId) resolve through the context's assetUrl. */
+let assetUrlOf: (id: number) => string | null = () => null;
+/** Where a picture loads from: its library link, else its web address; '' when it has neither. */
+export function imageSrc(img: { url: string; assetId?: number | null } | null | undefined): string {
+    if (!img) return '';
+    if (img.assetId) return assetUrlOf(img.assetId) || '';
+    return img.url || '';
+}
+function logoSrc(theme: SiteTheme): string {
+    return theme.logoAssetId ? (assetUrlOf(theme.logoAssetId) || theme.logoUrl || '') : (theme.logoUrl || '');
+}
 /** Set per render call — forms are drawn live, or switched off in the preview. */
-let formState: { preview: boolean; forms: Record<number, SiteSignupForm>; renderedAt: number; path: string; canSell: boolean } = { preview: true, forms: {}, renderedAt: 0, path: '/', canSell: false };
+let formState: { preview: boolean; forms: Record<number, SiteSignupForm>; renderedAt: number; path: string; canSell: boolean; products: Record<number, SiteRenderProduct>; booking: SiteRenderBooking | null } = { preview: true, forms: {}, renderedAt: 0, path: '/', canSell: false, products: {}, booking: null };
 
 function formOpen(sectionId: string, kind: 'contact' | 'signup'): string {
     return `<form class="fm" method="post" action="${FORM_ACTION}">
@@ -160,7 +189,8 @@ function sectionHtml(s: Section, h1: boolean, alt: boolean): string {
             const p = s.props;
             const buttons = [p.primaryCta && linkHtml(p.primaryCta), p.secondaryCta && linkHtml(p.secondaryCta, true)].filter(Boolean).join('');
             const copy = `${p.eyebrow ? `<p class="eb">${esc(p.eyebrow)}</p>` : ''}<${H}>${esc(p.headline)}</${H}>${p.subheadline ? `<p class="sub">${esc(p.subheadline)}</p>` : ''}${buttons ? `<p>${buttons}</p>` : ''}`;
-            const img = p.image ? `<img src="${esc(p.image.url)}" alt="${esc(p.image.alt)}" loading="eager">` : '';
+            const src = imageSrc(p.image);
+            const img = p.image && src ? `<img src="${esc(src)}" alt="${esc(p.image.alt)}" loading="eager">` : '';
             return `<section class="hero ${p.layout}" id="${esc(s.id)}"><div class="w">${p.layout === 'split' ? `<div>${copy}</div>${img}` : `${copy}${img}`}</div></section>`;
         }
         case 'features':
@@ -200,19 +230,49 @@ ${formButton(p.buttonLabel)}
         }
         case 'products': {
             const p = s.props;
-            const cards = p.items.map((it, i) => {
+            const card = (name: string, description: string | null, price: string | null, imgSrc: string, imgAlt: string, buy: string) =>
+                `<div class="card">${imgSrc ? `<img src="${esc(imgSrc)}" alt="${esc(imgAlt)}" loading="lazy" style="border-radius:var(--r);margin-bottom:12px">` : ''}<h3>${esc(name)}</h3>${price ? `<p class="price"><strong>${esc(price)}</strong></p>` : ''}${description ? paragraphs(description) : ''}${buy}</div>`;
+            // Business Information products, in the section's order; one archived or deleted since is skipped.
+            const fromCatalogue = p.productIds.map((id) => formState.products[id]).filter(Boolean).map((pr) => {
                 let buy = '';
-                if (it.price !== null) {
+                if (pr.buyPence !== null) {
                     if (formState.preview) buy = `<p><button class="btn" type="button" disabled>${esc(p.buyLabel)}</button></p>`;
                     else if (formState.canSell) {
-                        buy = `<form method="post" action="${BUY_ACTION}"><input type="hidden" name="_s" value="${esc(s.id)}"><input type="hidden" name="_i" value="${i}"><input type="hidden" name="_n" value="${esc(it.name)}"><input type="hidden" name="_p" value="${esc(formState.path)}"><button class="btn" type="submit">${esc(p.buyLabel)}</button></form>`;
+                        buy = `<form method="post" action="${BUY_ACTION}"><input type="hidden" name="_s" value="${esc(s.id)}"><input type="hidden" name="_pid" value="${pr.id}"><input type="hidden" name="_n" value="${esc(pr.name)}"><input type="hidden" name="_v" value="${pr.buyPence}"><input type="hidden" name="_p" value="${esc(formState.path)}"><button class="btn" type="submit">${esc(p.buyLabel)}</button></form>`;
                     }
                 }
-                return `<div class="card">${it.image ? `<img src="${esc(it.image.url)}" alt="${esc(it.image.alt)}" loading="lazy" style="border-radius:var(--r);margin-bottom:12px">` : ''}<h3>${esc(it.name)}</h3>${it.price !== null ? `<p class="price"><strong>${formatPrice(it.price)}</strong></p>` : ''}${it.description ? paragraphs(it.description) : ''}${buy}</div>`;
-            }).join('');
-            const note = formState.preview && p.items.some((it) => it.price !== null)
+                const src = pr.imageAssetId ? assetUrlOf(pr.imageAssetId) || '' : '';
+                return card(pr.name, pr.description, pr.price, src, pr.name, buy);
+            });
+            // Older sites: items typed into the site itself — shown, never sold (moved via Business Information).
+            const legacy = p.productIds.length ? [] : p.items.map((it) => card(it.name, it.description, it.price !== null ? formatPrice(it.price) : null, imageSrc(it.image), it.image?.alt ?? '', ''));
+            const cards = [...fromCatalogue, ...legacy];
+            if (!cards.length) return formState.preview
+                ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Products section: the products it shows are archived or removed in Business Information.</p></div></section>` : '';
+            const note = formState.preview && fromCatalogue.length && p.productIds.some((id) => formState.products[id]?.buyPence != null)
                 ? '<p class="fine">Buy buttons work on your live site once your Stripe account is connected (Orders tab).</p>' : '';
-            return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${note}<div class="grid">${cards}</div></div></section>`;
+            return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${note}<div class="grid">${cards.join('')}</div></div></section>`;
+        }
+        case 'booking': {
+            // Step 1 only — what, or how many. Every later step is its own page (/_book), so the whole
+            // flow works with no script. A GET form: choosing a time changes nothing until the last step.
+            const p = s.props;
+            const b = formState.booking;
+            const services = b ? b.services.filter((x) => !p.serviceIds.length || p.serviceIds.includes(x.id)) : [];
+            const ready = !!b && b.ready && (p.kind === 'table' || services.length > 0);
+            if (!ready) {
+                return formState.preview
+                    ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Booking section: set your opening hours${p.kind === 'table' ? '' : ' and give your services a length'} in Business Information ▸ Opening hours &amp; bookings. Until then it doesn't appear on your live site.</p></div></section>`
+                    : '';
+            }
+            const choose = p.kind === 'table'
+                ? `<label>How many people?<select name="party" required>${Array.from({ length: b!.maxPartySize }, (_, i) => `<option value="${i + 1}"${i === 1 ? ' selected' : ''}>${i + 1}</option>`).join('')}</select></label>`
+                : `<fieldset><legend>${p.kind === 'consultation' ? 'Which kind of session?' : 'What would you like to book?'}</legend>${services.map((x, i) => `<label class="opt"><input type="radio" name="svc" value="${x.id}" required${i === 0 ? ' checked' : ''}> <span><strong>${esc(x.name)}</strong> · ${x.durationMinutes} min${x.price ? ` · ${esc(x.price)}` : ''}</span></label>`).join('')}</fieldset>`;
+            const button = formState.preview
+                ? `<button class="btn" type="submit" disabled>${esc(p.buttonLabel)}</button><p class="fine">Booking works on your live site, not in this preview.</p>`
+                : `<button class="btn" type="submit">${esc(p.buttonLabel)}</button>`;
+            return `<section${cls} id="${esc(s.id)}"><div class="w n">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? paragraphs(p.intro) : ''}
+<form class="fm" method="get" action="${BOOK_PATH}"><input type="hidden" name="s" value="${esc(s.id)}">${choose}${button}</form></div></section>`;
         }
         case 'signup': {
             const p = s.props;
@@ -256,21 +316,27 @@ function structuredData(def: SiteDefinition, page: SitePageDef, origin: string):
         out.push({
             '@context': 'https://schema.org', '@type': s.businessType, name: s.siteName, url: `${origin}/`,
             ...(s.description ? { description: s.description } : {}),
-            ...(def.theme.logoUrl ? { logo: def.theme.logoUrl } : {}),
+            ...(logoSrc(def.theme) ? { logo: logoSrc(def.theme) } : {}),
             ...(s.email ? { email: s.email } : {}),
             ...(s.phone ? { telephone: s.phone } : {}),
             ...(s.locality ? { address: { '@type': 'PostalAddress', addressLocality: s.locality } } : {}),
         });
     }
     // Things for sale, as Product + Offer — so search engines and AI assistants can quote the price.
-    for (const it of page.sections.flatMap((x) => (x.type === 'products' ? x.props.items : []))) {
-        if (it.price === null) continue;
-        out.push({
-            '@context': 'https://schema.org', '@type': 'Product', name: it.name,
-            ...(it.description ? { description: it.description } : {}),
-            ...(it.image ? { image: it.image.url } : {}),
-            offers: { '@type': 'Offer', price: (it.price / 100).toFixed(2), priceCurrency: 'GBP', seller: { '@type': 'Organization', name: s.siteName } },
-        });
+    // Only a fixed price becomes an Offer; "from" or "on request" is shown on the page, not claimed here.
+    for (const sec of page.sections) {
+        if (sec.type !== 'products') continue;
+        for (const id of sec.props.productIds) {
+            const pr = formState.products[id];
+            if (!pr) continue;
+            const img = pr.imageAssetId ? assetUrlOf(pr.imageAssetId) : null;
+            out.push({
+                '@context': 'https://schema.org', '@type': 'Product', name: pr.name,
+                ...(pr.description ? { description: pr.description } : {}),
+                ...(img ? { image: img } : {}),
+                ...(pr.buyPence !== null ? { offers: { '@type': 'Offer', price: (pr.buyPence / 100).toFixed(2), priceCurrency: 'GBP', seller: { '@type': 'Organization', name: s.siteName } } } : {}),
+            });
+        }
     }
     const faqs = page.sections.flatMap((x) => (x.type === 'faq' ? x.props.items : []));
     if (faqs.length) {
@@ -309,7 +375,7 @@ ${ld.map((x) => `<script type="application/ld+json">${jsonLd(x)}</script>`).join
 <body>
 ${ctx.preview ? '<div class="pv">Preview — this version is not live yet.</div>' : ''}
 <header class="hd"><div class="w">
-<a class="brand" href="${esc(href('/'))}">${def.theme.logoUrl ? `<img src="${esc(def.theme.logoUrl)}" alt="${esc(s.siteName)}">` : esc(s.siteName)}</a>
+<a class="brand" href="${esc(href('/'))}">${logoSrc(def.theme) ? `<img src="${esc(logoSrc(def.theme))}" alt="${esc(s.siteName)}">` : esc(s.siteName)}</a>
 ${menu.length > 1 ? `<nav aria-label="Main"><ul class="nav">${menu.map((m) => `<li><a href="${esc(href(m.path))}"${page && m.pageId === page.id ? ' aria-current="page"' : ''}>${esc(m.label)}</a></li>`).join('')}</ul></nav>` : ''}
 </div></header>
 <main>
@@ -326,8 +392,9 @@ ${body}
 /** One page by path ('/', '/services'). An unknown path is a real 404 page in the site's own look. */
 export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderContext): RenderedPage {
     mapPath = ctx.pagePath ?? ((p) => p);
+    assetUrlOf = ctx.assetUrl ?? (() => null);
     const page = findPage(def, path);
-    formState = { preview: ctx.preview, forms: ctx.forms ?? {}, renderedAt: ctx.renderedAt ?? Date.now(), path: page ? (page.slug ? `/${page.slug}` : '/') : '/', canSell: ctx.canSell === true };
+    formState = { preview: ctx.preview, forms: ctx.forms ?? {}, renderedAt: ctx.renderedAt ?? Date.now(), path: page ? (page.slug ? `/${page.slug}` : '/') : '/', canSell: ctx.canSell === true, products: ctx.products ?? {}, booking: ctx.booking ?? null };
     if (!page) {
         return { status: 404, html: documentHtml(def, null, ctx, `<section><div class="w n"><h1>Page not found</h1><p>That page isn't here. <a href="${esc(href('/'))}">Go to the home page</a>.</p></div></section>`) };
     }
@@ -345,8 +412,16 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
 /** A plain page in the site's own look — what a visitor sees after sending a form, or when it fails. */
 export function renderSiteNotice(def: SiteDefinition, ctx: RenderContext, title: string, message: string, back: { label: string; path: string }): string {
     mapPath = ctx.pagePath ?? ((p) => p);
+    assetUrlOf = ctx.assetUrl ?? (() => null);
     const body = `<section><div class="w n"><h1>${esc(title)}</h1>${paragraphs(message)}<p><a class="btn" href="${esc(href(back.path))}">${esc(back.label)}</a></p></div></section>`;
     return documentHtml(def, null, { ...ctx }, body).replace('<title>Page not found |', `<title>${esc(title)} |`);
+}
+
+/** A page of the site's own, with any body — the booking steps (booking-render.ts). Never indexed. */
+export function renderSiteShell(def: SiteDefinition, ctx: RenderContext, title: string, bodyHtml: string): string {
+    mapPath = ctx.pagePath ?? ((p) => p);
+    assetUrlOf = ctx.assetUrl ?? (() => null);
+    return documentHtml(def, null, { ...ctx }, bodyHtml).replace('<title>Page not found |', `<title>${esc(title)} |`);
 }
 
 export function renderSitemap(def: SiteDefinition, origin: string): string {

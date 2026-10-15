@@ -7,26 +7,29 @@
 // is the merchant of record — their refunds, disputes, VAT and payouts — and Be More Swan takes NO
 // fee (decision D5: 0%, so there is no application_fee_amount anywhere in this file).
 //
-// ── The price is never the visitor's ────────────────────────────────────────────────────────────
-// The Buy form carries only which item (section id, index, and its name as a check). The price,
-// name and picture come from the PUBLISHED site definition at the moment of the click. If the item
-// changed since the page was drawn, the visitor is sent back rather than charged a surprise.
+// ── The price is never the visitor's, and never the site's ──────────────────────────────────────
+// Prices live in ONE place: Business Information ▸ Products & Services (org_products, structured by
+// product-price.ts). The Buy form carries only which product (section id, product id, and the name
+// and price the visitor SAW, as a check). At the click the product is read from Business Information
+// and must still be offered by that section on the PUBLISHED site; if its name or price changed since
+// the page was drawn, the visitor is sent back rather than charged a surprise.
 //
 // ── Orders ──────────────────────────────────────────────────────────────────────────────────────
 // Recorded from the Connect webhook (stripe-connect-webhook.ts → recordPaidCheckout), not from the
 // success page: a visitor who closes the tab after paying has still paid.
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import type { getDb } from '../../db/client';
-import { aiAssistants, siteOrders, sites, stripeConnectAccounts, users } from '../../db/schema';
+import { aiAssistants, orgProducts, siteOrders, sites, stripeConnectAccounts, users } from '../../db/schema';
 import { createNotification } from './notify';
 import { sendEmail } from './email';
 import { checkRateLimit } from './rate-limit';
 import { getStripe } from './stripe';
 import { currentEnv } from './env-context';
 import { esc, formatPrice, FORM_SENT_PATH } from './site-render';
-import type { ProductItem, Section, SiteDefinition } from './site-definition';
+import type { SiteDefinition } from './site-definition';
+import { buyablePence } from './product-price';
 import type { SiteRow } from './site-store';
 
 type Db = ReturnType<typeof getDb>;
@@ -97,16 +100,29 @@ export type BuyOutcome =
     | { kind: 'redirect'; location: string }
     | { kind: 'error'; status: 400 | 404 | 409 | 429 | 503; title: string; message: string; backPath: string };
 
-export function findProduct(def: SiteDefinition, sectionId: string, index: number): { section: Extract<Section, { type: 'products' }>; item: ProductItem } | null {
-    for (const p of def.pages) {
-        for (const s of p.sections) {
-            if (s.id === sectionId && s.type === 'products') {
-                const item = s.props.items[index];
-                return item ? { section: s, item } : null;
-            }
-        }
-    }
-    return null;
+/** A product as a site shows it — read from Business Information (org_products), never from the site. */
+export interface SiteProduct {
+    id: number;
+    name: string;
+    description: string | null;
+    /** The displayed price ("£24", "from £450", "Price on request", their own words), or null. */
+    price: string | null;
+    /** Pence, when it can be bought online (a fixed price); else null. */
+    buyPence: number | null;
+    imageAssetId: number | null;
+}
+
+/** The active products a site's products sections name, keyed by id — only this workspace's. */
+export async function loadSiteProducts(db: Db, orgId: number, def: SiteDefinition): Promise<Record<number, SiteProduct>> {
+    const ids = [...new Set(def.pages.flatMap((p) => p.sections).flatMap((s) => (s.type === 'products' ? s.props.productIds : [])))];
+    if (!ids.length) return {};
+    const rows = await db.select({
+        id: orgProducts.id, name: orgProducts.name, description: orgProducts.description, price: orgProducts.price,
+        priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, imageAssetId: orgProducts.imageAssetId,
+    }).from(orgProducts).where(and(inArray(orgProducts.id, ids), eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active')));
+    return Object.fromEntries(rows.map((r) => [r.id, {
+        id: r.id, name: r.name, description: r.description, price: r.price, buyPence: buyablePence(r), imageAssetId: r.imageAssetId,
+    }]));
 }
 
 export interface BuyRequest {
@@ -116,11 +132,15 @@ export interface BuyRequest {
     body: URLSearchParams;
     ip: string;
     backPath: string;
+    /** Library pictures → their public link (site-serve.ts passes newsletterMediaUrl). */
+    assetUrl?: (assetId: number) => string | null;
 }
 
-/** The Checkout Session parameters for one item — pure, so the money rules are testable. */
-export function checkoutParams(req: { origin: string; site: SiteRow; sectionId: string; index: number; item: ProductItem; collectAddress: boolean; backPath: string }): Stripe.Checkout.SessionCreateParams {
-    const { item } = req;
+/** The Checkout Session parameters for one product — pure, so the money rules are testable. */
+export function checkoutParams(req: { origin: string; site: SiteRow; sectionId: string; product: SiteProduct; collectAddress: boolean; backPath: string; imageUrl?: string | null }): Stripe.Checkout.SessionCreateParams {
+    const { product } = req;
+    // Stripe shows the picture on its checkout page: it needs a real https address.
+    const picture = req.imageUrl ?? null;
     return {
         mode: 'payment',
         line_items: [{
@@ -128,11 +148,11 @@ export function checkoutParams(req: { origin: string; site: SiteRow; sectionId: 
             adjustable_quantity: { enabled: true, minimum: 1, maximum: MAX_QUANTITY },
             price_data: {
                 currency: 'gbp',
-                unit_amount: item.price!,
+                unit_amount: product.buyPence!,
                 product_data: {
-                    name: item.name,
-                    ...(item.description ? { description: item.description.slice(0, 500) } : {}),
-                    ...(item.image ? { images: [item.image.url] } : {}),
+                    name: product.name,
+                    ...(product.description ? { description: product.description.slice(0, 500) } : {}),
+                    ...(picture && picture.startsWith('https://') ? { images: [picture] } : {}),
                 },
             },
         }],
@@ -140,10 +160,10 @@ export function checkoutParams(req: { origin: string; site: SiteRow; sectionId: 
         success_url: `${req.origin}${FORM_SENT_PATH}?k=order&b=${encodeURIComponent(req.backPath)}`,
         cancel_url: `${req.origin}${req.backPath}`,
         // What the order records — the name and unit price as they were at checkout (Stripe caps a
-        // metadata value at 500 characters; names are capped at 80 by the gate).
+        // metadata value at 500 characters; names are capped at 120 in Business Information).
         metadata: {
             bms_site_id: String(req.site.id), bms_org_id: String(req.site.organisationId), bms_section: req.sectionId,
-            bms_item: String(req.index), bms_item_name: item.name, bms_unit: String(item.price), bms_page: req.backPath,
+            bms_product: String(product.id), bms_item_name: product.name, bms_unit: String(product.buyPence), bms_page: req.backPath,
         },
     };
 }
@@ -151,13 +171,16 @@ export function checkoutParams(req: { origin: string; site: SiteRow; sectionId: 
 export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome> {
     const back = req.backPath;
     const sectionId = String(req.body.get('_s') || '');
-    const index = Number(req.body.get('_i'));
-    const found = Number.isInteger(index) && index >= 0 ? findProduct(req.definition, sectionId, index) : null;
-    if (!found || found.item.price === null) {
-        return { kind: 'error', status: 404, title: 'That item isn\'t for sale here any more', message: 'The page may have changed since you opened it. Go back and have another look.', backPath: back };
-    }
+    const productId = Number(req.body.get('_pid'));
+    const notForSale: BuyOutcome = { kind: 'error', status: 404, title: 'That item isn\'t for sale here any more', message: 'The page may have changed since you opened it. Go back and have another look.', backPath: back };
+    // The section must be on the PUBLISHED site and must offer this product.
+    const section = req.definition.pages.flatMap((p) => p.sections).find((s) => s.id === sectionId);
+    if (!section || section.type !== 'products' || !Number.isInteger(productId) || !section.props.productIds.includes(productId)) return notForSale;
+    // Name, price and picture: read from Business Information now — never from the visitor's browser.
+    const product = (await loadSiteProducts(db, req.site.organisationId, req.definition))[productId];
+    if (!product || product.buyPence === null) return notForSale;
     // The item the visitor saw must be the item they buy.
-    if (String(req.body.get('_n') || '') !== found.item.name) {
+    if (String(req.body.get('_n') || '') !== product.name || Number(req.body.get('_v')) !== product.buyPence) {
         return { kind: 'error', status: 409, title: 'This item has changed', message: 'The details changed since you opened the page. Go back to see the current price before you buy.', backPath: back };
     }
     const account = await connectAccountFor(db, req.site.organisationId);
@@ -172,7 +195,10 @@ export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome
     }
     try {
         const session = await getStripe().checkout.sessions.create(
-            checkoutParams({ origin: req.origin, site: req.site, sectionId, index, item: found.item, collectAddress: found.section.props.collectAddress, backPath: back }),
+            checkoutParams({
+                origin: req.origin, site: req.site, sectionId, product, collectAddress: section.props.collectAddress, backPath: back,
+                imageUrl: product.imageAssetId ? (req.assetUrl?.(product.imageAssetId) ?? null) : null,
+            }),
             { stripeAccount: account.stripeAccountId },
         );
         if (!session.url) throw new Error('Stripe returned no checkout address');

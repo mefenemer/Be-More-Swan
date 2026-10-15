@@ -28,6 +28,11 @@ export interface SiteTheme {
     radius: RadiusKey;
     /** https URL of the logo; null = the site name in text. */
     logoUrl: string | null;
+    /**
+     * A logo from the workspace's own media library (content_assets id) — what "Choose picture"
+     * sets. Wins over logoUrl. Ownership is checked when it is saved (site-store.ts verifySiteAssets).
+     */
+    logoAssetId?: number | null;
 }
 
 export interface SiteSettings {
@@ -42,7 +47,13 @@ export interface SiteSettings {
 }
 
 export interface Link { label: string; href: string; }
-export interface Image { url: string; alt: string; }
+/**
+ * A picture: either a web address (url) or one of the workspace's own library pictures (assetId —
+ * what "Choose picture" and chat attachments set; url is then ''). A library picture is drawn
+ * through a signed, permanent link (newsletter-media-url.ts), and is checked to belong to the
+ * workspace whenever it is saved (site-store.ts verifySiteAssets).
+ */
+export interface Image { url: string; alt: string; assetId?: number | null; }
 
 export interface HeroProps {
     layout: 'centered' | 'split' | 'banner';
@@ -71,13 +82,25 @@ export interface ContactProps { heading: string | null; intro: string | null; as
  */
 export interface SignupProps { heading: string | null; intro: string | null; formId: number | null; }
 /**
- * Things the business sells (step 3c). `price` is in PENCE (GBP) and only ever typed by the owner —
- * the AI draft never produces this section (site-draft.ts drops it) and the chat only proposes it.
- * An item with no price is shown without a Buy button. Checkout reads the price from the PUBLISHED
- * site, never from the visitor's browser (site-shop.ts).
+ * Things the business sells. `productIds` are Business Information ▸ Products & Services rows
+ * (org_products) — the ONE place names, prices and pictures live: the page and checkout read them
+ * from there (site-shop.ts loadSiteProducts), so a price changed once changes everywhere. Only a
+ * product with a FIXED price gets a Buy button (product-price.ts buyablePence).
+ *
+ * `items` is the older shape (owner-typed copies inside the site), kept only so a site made before
+ * products moved can still be drawn and its items moved into Business Information (sites.ts
+ * products_import). New sections never get items; legacy items are shown but never sold.
  */
+/**
+ * Bookings (docs/booking-plan.md). The section is only the doorway: services come from Business
+ * Information products with a duration, opening hours and rules from Business Information ▸ Opening
+ * hours & bookings, and every step after the first is a page of its own (/_book — booking-render.ts).
+ * `serviceIds` empty = every bookable service. `askStaff` offers a choice of who (or "anyone").
+ */
+export type BookingSectionKind = 'appointment' | 'consultation' | 'table';
+export interface BookingProps { heading: string | null; intro: string | null; kind: BookingSectionKind; serviceIds: number[]; askStaff: boolean; buttonLabel: string; }
 export interface ProductItem { name: string; description: string | null; price: number | null; image: Image | null; }
-export interface ProductsProps { heading: string | null; intro: string | null; items: ProductItem[]; collectAddress: boolean; buyLabel: string; }
+export interface ProductsProps { heading: string | null; intro: string | null; productIds: number[]; items: ProductItem[]; collectAddress: boolean; buyLabel: string; }
 
 export type Section =
     | { id: string; type: 'hero'; props: HeroProps }
@@ -89,9 +112,10 @@ export type Section =
     | { id: string; type: 'testimonials'; props: TestimonialsProps }
     | { id: string; type: 'contact'; props: ContactProps }
     | { id: string; type: 'signup'; props: SignupProps }
-    | { id: string; type: 'products'; props: ProductsProps };
+    | { id: string; type: 'products'; props: ProductsProps }
+    | { id: string; type: 'booking'; props: BookingProps };
 export type SectionType = Section['type'];
-export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products'];
+export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking'];
 
 export interface SitePageDef {
     id: string;
@@ -190,8 +214,13 @@ function cleanLink(v: unknown): Link | null {
 function cleanImage(v: unknown, warn: (m: string) => void): Image | null {
     if (!v || typeof v !== 'object') return null;
     const o = v as Record<string, unknown>;
-    const url = cleanHref(o.url);
     const alt = cleanText(o.alt, LIMITS.alt);
+    const assetId = Number(o.assetId);
+    if (Number.isInteger(assetId) && assetId > 0) {
+        if (!alt) { warn('A picture was left out: every picture needs a short description of what it shows.'); return null; }
+        return { url: '', alt, assetId };
+    }
+    const url = cleanHref(o.url);
     if (!url || !url.startsWith('https://')) { if (o.url) warn('An image was left out: it needs an https address.'); return null; }
     if (!alt) { warn('An image was left out: every image needs a short description (alt text).'); return null; }
     return { url, alt };
@@ -272,6 +301,8 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
             } };
         }
         case 'products': {
+            const ids = [...new Set((Array.isArray(p.productIds) ? p.productIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+            if (ids.length > LIMITS.products) warn(`Only the first ${LIMITS.products} products were kept.`);
             const list = (Array.isArray(p.items) ? p.items : []).map((x) => {
                 const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
                 const raw = o.price;
@@ -283,12 +314,22 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
                 }
                 return { name: cleanText(o.name, LIMITS.productName), description: textOrNull(o.description, LIMITS.productDescription, true), price, image: cleanImage(o.image, warn) };
             }).filter((x) => x.name);
-            if (!list.length) { warn('A products section was left out: it has no items with a name.'); return null; }
+            if (!ids.length && !list.length) { warn('A products section was left out: choose at least one of your products.'); return null; }
             if (list.length > LIMITS.products) warn(`Only the first ${LIMITS.products} items were kept.`);
             return { type: 'products', props: {
                 heading: textOrNull(p.heading, LIMITS.headline), intro: textOrNull(p.intro, LIMITS.intro, true),
+                productIds: ids.slice(0, LIMITS.products),
                 items: list.slice(0, LIMITS.products), collectAddress: p.collectAddress === true,
                 buyLabel: cleanText(p.buyLabel, LIMITS.buttonLabel) || 'Buy now',
+            } };
+        }
+        case 'booking': {
+            const kind = p.kind === 'table' || p.kind === 'consultation' ? p.kind : 'appointment';
+            return { type: 'booking', props: {
+                heading: textOrNull(p.heading, LIMITS.headline), intro: textOrNull(p.intro, LIMITS.intro, true), kind,
+                serviceIds: [...new Set((Array.isArray(p.serviceIds) ? p.serviceIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 50),
+                askStaff: kind !== 'table' && p.askStaff === true,
+                buttonLabel: cleanText(p.buttonLabel, LIMITS.buttonLabel) || (kind === 'table' ? 'Find a table' : 'Choose a time'),
             } };
         }
         case 'signup': {
@@ -329,6 +370,36 @@ export function cleanTheme(raw: unknown, warn: (m: string) => void, base: SiteTh
         font: FONTS.includes(t.font as FontKey) ? (t.font as FontKey) : base.font,
         radius: RADII.includes(t.radius as RadiusKey) ? (t.radius as RadiusKey) : base.radius,
         logoUrl: logo && logo.startsWith('https://') ? logo : (t.logoUrl === null ? null : base.logoUrl),
+        logoAssetId: t.logoAssetId === null ? null
+            : Number.isInteger(Number(t.logoAssetId)) && Number(t.logoAssetId) > 0 ? Number(t.logoAssetId) : (base.logoAssetId ?? null),
+    };
+}
+
+/** Every library picture the site uses (logo, hero pictures, product pictures). */
+export function assetIdsIn(def: SiteDefinition): number[] {
+    const ids = new Set<number>();
+    if (def.theme.logoAssetId) ids.add(def.theme.logoAssetId);
+    for (const p of def.pages) {
+        for (const s of p.sections) {
+            if (s.type === 'hero' && s.props.image?.assetId) ids.add(s.props.image.assetId);
+            if (s.type === 'products') for (const it of s.props.items) if (it.image?.assetId) ids.add(it.image.assetId);
+        }
+    }
+    return [...ids];
+}
+
+/** The same site with these library pictures taken out (they are not this workspace's to use). */
+export function withoutAssets(def: SiteDefinition, drop: Set<number>): SiteDefinition {
+    if (!drop.size) return def;
+    const keep = <T extends { assetId?: number | null } | null>(img: T): T | null => (img && img.assetId && drop.has(img.assetId) ? null : img);
+    return {
+        ...def,
+        theme: { ...def.theme, logoAssetId: def.theme.logoAssetId && drop.has(def.theme.logoAssetId) ? null : def.theme.logoAssetId ?? null },
+        pages: def.pages.map((p) => ({ ...p, sections: p.sections.map((s) => {
+            if (s.type === 'hero') return { ...s, props: { ...s.props, image: keep(s.props.image) } };
+            if (s.type === 'products') return { ...s, props: { ...s.props, items: s.props.items.map((it) => ({ ...it, image: keep(it.image) })) } };
+            return s;
+        }) })),
     };
 }
 

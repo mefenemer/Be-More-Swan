@@ -26,7 +26,7 @@
   const API = '/.netlify/functions/sites';
   const POLL_MS = 5000;
 
-  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale' };
+  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale', booking: 'Bookings' };
   /** The edit form for each section type — the props the gate accepts (site-definition.ts cleanSection). */
   const FORMS = {
     hero: [
@@ -54,34 +54,55 @@
     // One of the workspace's Form Builder forms; its questions, consent and double opt-in come from it.
     signup: [{ k: 'formId', kind: 'formpick', label: 'Sign-up form', required: true }, { k: 'heading', kind: 'text', label: 'Heading (leave empty to use the form\'s own)' },
       { k: 'intro', kind: 'textarea', label: 'Introduction (leave empty to use the form\'s own)' }],
-    // Things for sale (step 3c). Prices are typed here in pounds and stored in pence; checkout reads
-    // them from the PUBLISHED site. Buy buttons appear once Stripe is connected on the Orders tab.
+    // Things for sale: chosen from Business Information ▸ Products & Services — the ONE place names,
+    // prices and pictures live (the page and checkout read them from there). Buy buttons appear on
+    // fixed-price products once Stripe is connected on the Orders tab.
     products: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
-      { k: 'items', kind: 'productItems', label: 'Items' },
+      { k: 'productIds', kind: 'productPick', label: 'Which of your products to show' },
       { k: 'collectAddress', kind: 'checkbox', label: 'Ask buyers for a UK delivery address' },
       { k: 'buyLabel', kind: 'text', label: 'Buy button text' }],
+    // Bookings (docs/booking-plan.md): the services are Products & Services with a length; hours and
+    // rules are Business Information ▸ Opening hours & bookings. This section only chooses what to offer.
+    booking: [{ k: 'kind', kind: 'select', label: 'What people book', options: [['appointment', 'Appointments (a service with you or your team)'], ['consultation', 'Consultations or calls'], ['table', 'Tables (restaurants, cafés, bars)']] },
+      { k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
+      { k: 'serviceIds', kind: 'servicePick', label: 'Which services can be booked' },
+      { k: 'askStaff', kind: 'checkbox', label: 'Let people choose who they book with (or "anyone available")' },
+      { k: 'buttonLabel', kind: 'text', label: 'Button text' }],
   };
   const BLANK = {
     hero: { layout: 'centered', headline: '' }, features: { items: [{ title: '', body: '' }] }, steps: { items: [{ title: '', body: '' }, { title: '', body: '' }] },
     text: { body: '' }, faq: { items: [{ q: '', a: '' }] }, testimonials: { items: [{ quote: '', name: '', detail: '' }] }, cta: { heading: '', button: { label: '', href: '/' } },
     contact: { heading: 'Get in touch', intro: '', askPhone: false, buttonLabel: 'Send message' }, signup: { formId: null },
-    products: { heading: 'Shop', items: [{ name: '', description: '', price: null, image: null }], collectAddress: false, buyLabel: 'Buy now' },
+    products: { heading: 'Shop', productIds: [], collectAddress: false, buyLabel: 'Buy now' },
+    booking: { kind: 'appointment', heading: 'Book an appointment', serviceIds: [], askStaff: false, buttonLabel: '' },
   };
-  /** Pence → "12.50" for the price box; "" when there is no price. */
-  const poundsText = (pence) => (Number.isFinite(pence) && pence !== null ? (pence / 100).toFixed(2).replace(/\.00$/, '') : '');
-  /** What was typed ("£12.50", "12", "1,200") → pence, or null when empty or not a number. */
-  const toPence = (txt) => {
-    const t = String(txt || '').replace(/[£,\s]/g, '');
-    if (!t) return null;
-    const n = Number(t);
-    return Number.isFinite(n) ? Math.round(n * 100) : null;
+  /** A library picture's thumbnail: picked this session, or the link the server sent with the site. */
+  const thumbOf = (assetId) => (assetId && (state.thumbs[assetId] || (state.data && state.data.assetUrls && state.data.assetUrls[assetId]))) || '';
+  /** A starting description from a file name ("cafe-front.jpg" → "Cafe front"); none for camera names. */
+  const altFromName = (name) => {
+    const base = String(name || '').replace(/\.[a-z0-9]+$/i, '').replace(/[-_]+/g, ' ').trim();
+    if (!base || /^(img|dsc|dscn|pxl|photo|image|screenshot)[\s\d]/i.test(base) || /^\d[\d\s]*$/.test(base)) return '';
+    return base.charAt(0).toUpperCase() + base.slice(1);
   };
+  /** Picture field: thumbnail, Choose/Change, Remove — the web address tucked away behind a link. */
+  function pictureHtml(img, attrs) {
+    const v = img || {};
+    const src = v.assetId ? thumbOf(v.assetId) : (v.url || '');
+    return `<div class="flex flex-wrap items-center gap-3 mt-1">
+        ${src ? `<img src="${esc(src)}" alt="" style="width:96px;height:64px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">`
+          : '<span class="inline-flex items-center justify-center text-xs text-gray-400 border border-dashed border-gray-300 rounded-lg" style="width:96px;height:64px">No picture</span>'}
+        ${btn(`${attrs.pick}`, src ? 'Change picture' : 'Choose picture', !src)}
+        ${src ? btn(`${attrs.clear}`, 'Remove') : ''}
+      </div>`;
+  }
 
   const state = {
     assistantId: null, assistantName: null, data: null, loaded: false, loadError: null, rendered: false,
     panel: 'pages', pageId: null, editing: null, device: 'desktop', previewPath: '/', note: null, pollTimer: null, version: 0,
     editingAddress: false, slugTyped: null, versions: null, publishNote: null,
     enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false,
+    thumbs: {}, bookings: null,
+    words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
   };
 
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -187,26 +208,43 @@
     }
     if (f.kind === 'image') {
       const v = value || {};
-      return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</label>
-        <div class="grid gap-2 md:grid-cols-2"><input name="${name}-url" class="${inputCls}" placeholder="https://… picture address" value="${esc(v.url || '')}">
-        <input name="${name}-alt" class="${inputCls}" placeholder="What the picture shows (required)" value="${esc(v.alt || '')}"></div>`;
+      const has = !!(v.assetId || v.url);
+      return `<p class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
+        ${pictureHtml(v, { pick: `data-site-pick="${esc(f.k)}"`, clear: `data-site-pick-clear="${esc(f.k)}"` })}
+        <input type="hidden" name="${name}-asset" value="${esc(v.assetId || '')}">
+        <input name="${name}-alt" class="${inputCls} mt-2 ${has && !v.alt ? 'border-amber-500' : ''}" placeholder="What the picture shows — e.g. Our roastery in Leeds (needed)" value="${esc(v.alt || '')}">
+        <details class="mt-1" ${!v.assetId && v.url ? 'open' : ''}><summary class="text-xs text-gray-500 cursor-pointer">Use a web address instead</summary>
+          <input name="${name}-url" class="${inputCls} mt-1" placeholder="https://… picture address" value="${esc(v.assetId ? '' : (v.url || ''))}"></details>`;
     }
-    if (f.kind === 'productItems') {
-      const list = Array.isArray(value) && value.length ? value : [{}];
+    if (f.kind === 'servicePick') {
+      const b = state.data.booking || {};
+      const chosen = new Set((Array.isArray(value) ? value : []).map(Number));
+      const hoursNote = `<p class="text-xs ${b.ready ? 'text-gray-500' : 'text-amber-800 font-semibold'} mt-2">${b.ready ? `Opening hours: ${esc(b.hours)}.` : 'Set your opening hours first — booking only shows on your site once they are set.'} ${btn('data-site-open-hours', 'Opening hours & bookings')}</p>`;
+      if (!(b.services || []).length) return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p><p class="text-xs text-gray-500">None of your Products &amp; Services has a length yet. Give a service a length (e.g. 45 minutes) in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} to offer it here. (Tables don't need one.)</p>${hoursNote}`;
       return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
-        <div data-items="${esc(f.k)}" class="space-y-2">${list.map((it, i) => `
-          <div class="border border-gray-200 rounded-lg p-3" data-item>
-            <input data-item-field="name" class="${inputCls} mt-1" placeholder="Name (required)" value="${esc(it.name || '')}">
-            <textarea data-item-field="description" rows="2" class="${inputCls} mt-1" placeholder="Description">${esc(it.description || '')}</textarea>
-            <div class="grid gap-2 md:grid-cols-3 mt-1">
-              <input data-item-field="price" class="${inputCls}" inputmode="decimal" placeholder="Price in £, e.g. 12.50" value="${esc(it.price !== undefined ? poundsText(it.price) : (it.priceText || ''))}">
-              <input data-item-field="imageUrl" class="${inputCls}" placeholder="Picture (https address)" value="${esc((it.image && it.image.url) || it.imageUrl || '')}">
-              <input data-item-field="imageAlt" class="${inputCls}" placeholder="What the picture shows" value="${esc((it.image && it.image.alt) || it.imageAlt || '')}">
-            </div>
-            <button type="button" data-item-remove="${i}" class="text-xs text-gray-500 underline mt-1">Remove</button>
-          </div>`).join('')}</div>
-        <button type="button" data-item-add="${esc(f.k)}" class="text-xs text-gray-600 underline mt-2">+ Add another</button>
-        <p class="text-xs text-gray-500 mt-1">Leave the price empty to show an item without a Buy button. Prices are in pounds; buyers pay you directly through Stripe.</p>`;
+        <div class="space-y-1 mt-1">${b.services.map((x) => `<label class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 text-xs cursor-pointer">
+          <input type="checkbox" data-service-pick value="${esc(x.id)}" ${chosen.has(x.id) ? 'checked' : ''}> <span class="font-bold text-gray-900">${esc(x.name)}</span>
+          <span class="text-gray-500">${esc(x.durationMinutes)} min${x.price ? ` · ${esc(x.price)}` : ''}</span></label>`).join('')}</div>
+        <p class="text-xs text-gray-500 mt-1">Tick none to offer all of them.</p>${hoursNote}`;
+    }
+    if (f.kind === 'productPick') {
+      // Business Information products, in their own order. Prices are changed THERE, never here.
+      const chosen = new Set((Array.isArray(value) ? value : []).map(Number));
+      const list = (state.data.catalogue || []);
+      const legacy = state.editing && Array.isArray(state.editing.props.items) && state.editing.props.items.length && !chosen.size;
+      return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
+        ${legacy ? `<div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-1"><p class="text-xs text-amber-800">This section has ${esc(state.editing.props.items.length)} item${state.editing.props.items.length === 1 ? '' : 's'} typed in here. Products and prices now live in Business Information, so they're kept in one place.</p>
+          <div class="mt-2">${btn('data-site-products-import', 'Move them into Business Information', true)}</div></div>` : ''}
+        ${list.length ? `<div class="space-y-1 mt-1">${list.map((p) => `
+          <label class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 text-xs cursor-pointer">
+            <input type="checkbox" data-product-pick value="${esc(p.id)}" ${chosen.has(p.id) ? 'checked' : ''}>
+            ${p.imageUrl ? `<img src="${esc(p.imageUrl)}" alt="" style="width:32px;height:32px;object-fit:cover;border-radius:6px">` : ''}
+            <span class="font-bold text-gray-900">${esc(p.name)}</span>
+            <span class="text-gray-500">${esc(p.price || 'No price shown')}</span>
+            ${p.buyable ? '<span class="ml-auto text-green-700 font-bold">Can be bought online</span>' : ''}
+          </label>`).join('')}</div>`
+          : '<p class="text-xs text-gray-500 mt-1">You haven\'t added any products or services yet.</p>'}
+        <p class="text-xs text-gray-500 mt-2">Add products, or change a name, price or picture, in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} — every page and checkout follows. Only fixed prices can be bought online.</p>`;
     }
     if (f.kind === 'items') {
       const list = Array.isArray(value) && value.length ? value : [{}];
@@ -235,15 +273,14 @@
         const href = form.querySelector(`[name="${n}-href"]`).value.trim();
         props[f.k] = label || href ? { label, href } : null;
       } else if (f.kind === 'image') {
+        const assetId = Number(form.querySelector(`[name="${n}-asset"]`).value) || null;
         const url = form.querySelector(`[name="${n}-url"]`).value.trim();
         const alt = form.querySelector(`[name="${n}-alt"]`).value.trim();
-        props[f.k] = url ? { url, alt } : null;
-      } else if (f.kind === 'productItems') {
-        props[f.k] = [...form.querySelectorAll(`[data-items="${f.k}"] [data-item]`)].map((row) => {
-          const g = (k) => row.querySelector(`[data-item-field="${k}"]`).value.trim();
-          const url = g('imageUrl');
-          return { name: g('name'), description: g('description'), price: toPence(g('price')), image: url ? { url, alt: g('imageAlt') } : null };
-        });
+        props[f.k] = assetId ? { assetId, url: '', alt } : url ? { url, alt } : null;
+      } else if (f.kind === 'servicePick') {
+        props[f.k] = [...form.querySelectorAll('[data-service-pick]:checked')].map((el) => Number(el.value));
+      } else if (f.kind === 'productPick') {
+        props[f.k] = [...form.querySelectorAll('[data-product-pick]:checked')].map((el) => Number(el.value));
       } else if (f.kind === 'items') {
         props[f.k] = [...form.querySelectorAll(`[data-items="${f.k}"] [data-item]`)].map((row) => {
           const o = {};
@@ -291,12 +328,76 @@
           <div><label class="block text-xs font-bold text-gray-700">Search description</label><input data-site-seo-desc class="${inputCls}" value="${esc(p.seo.description || '')}" placeholder="One or two sentences"></div>
         </div>
         <div class="flex flex-wrap gap-2 mt-3">${btn('data-site-page-save', 'Save page details', true)}${p.slug ? btn('data-site-remove-page', 'Remove this page') : ''}</div>`)}
+      ${wordsCard(p)}
       ${state.editing ? editorHtml() : ''}
       ${card(`
         <p class="text-sm font-black text-gray-900 mb-3">Sections on this page</p>
         <ul class="space-y-2">${sections || '<li class="text-xs text-gray-500">No sections yet.</li>'}</ul>
         <div class="flex flex-wrap gap-2 items-center mt-4"><select data-site-new-type class="${inputCls}" style="max-width:220px">${state.data.vocab.sectionTypes.map((t) => `<option value="${esc(t)}">${esc(TYPE_LABEL[t] || t)}</option>`).join('')}</select>${btn('data-site-new-section', 'Add a section')}</div>`)}`;
   }
+
+  // ── "Add your own words" (site-words.ts — the owner's wording is used unchanged) ──────────
+  function wordsCard(p) {
+    const w = state.words;
+    if (w.proposal && w.pageId === p.id) {
+      const pr = w.proposal;
+      return card(`
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <p class="text-sm font-black text-gray-900">Here's where your words would go</p>
+          <span class="text-xs font-bold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">Your wording, unchanged</span>
+        </div>
+        <p class="text-xs text-gray-600 mt-1">${esc(pr.summary)}</p>
+        <ul class="space-y-2 mt-3">${pr.preview.map((x) => `
+          <li class="border border-gray-200 rounded-lg p-3">
+            <p class="text-xs font-bold text-gray-900">${esc(x.label)}</p>
+            ${x.text ? `<p class="text-xs text-gray-700 mt-1" style="white-space:pre-wrap">${esc(x.text)}</p>` : ''}
+          </li>`).join('')}</ul>
+        <div class="flex flex-wrap gap-2 mt-3">${btn('data-site-words-apply', 'Apply to my page', true)}${btn('data-site-words-discard', 'Discard')}</div>
+        <p class="text-xs text-gray-500 mt-2">Nothing has changed yet. After you apply, you can still edit any section.</p>`, 'border-green-200');
+    }
+    if (!w.open || w.pageId !== p.id) {
+      return card(`<div class="flex flex-wrap items-center justify-between gap-2">
+        <div><p class="text-sm font-black text-gray-900">Have your own words for this page?</p>
+        <p class="text-xs text-gray-500 mt-1">Paste them in or drop in a Word document or PDF — they're placed on the page exactly as you wrote them.</p></div>
+        ${btn('data-site-words-open', 'Add your own words', true)}</div>`);
+    }
+    return card(`
+      <p class="text-sm font-black text-gray-900">Add your own words to "${esc(p.title)}"</p>
+      <p class="text-xs text-gray-500 mt-1">They're split into headings and paragraphs and placed on the page word for word — nothing is reworded. You'll see where everything goes before anything changes.</p>
+      <textarea data-site-words-text rows="7" class="${inputCls} mt-3" placeholder="Paste your words here">${esc(w.text)}</textarea>
+      <label data-site-words-drop class="block border-2 border-dashed border-gray-300 rounded-xl p-3 text-center cursor-pointer mt-2">
+        <input type="file" hidden data-site-words-file accept=".docx,.pdf,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain">
+        <span class="block text-xs font-bold text-gray-800">${w.file ? `📄 ${esc(w.file.name)} — choose a different file` : 'Or choose a file — Word (.docx), PDF or text'}</span>
+        <span class="block text-xs text-gray-500">Click, or drag it here</span>
+      </label>
+      <input data-site-words-note class="${inputCls} mt-2" placeholder="Anything to know? e.g. this replaces the text about us" value="${esc(w.note)}">
+      ${w.error ? `<p class="text-xs font-semibold text-red-600 mt-2">${esc(w.error)}</p>` : ''}
+      <div class="flex flex-wrap gap-2 items-center mt-3">
+        ${btn(`data-site-words-place ${w.busy ? 'disabled' : ''}`, w.busy ? 'Placing your words…' : 'Place my words', true)}
+        ${btn('data-site-words-cancel', 'Cancel')}
+        <span class="text-xs text-gray-500">Uses 1 task.</span>
+      </div>`);
+  }
+
+  /** A chosen file → { name, type, data(base64) } for the `words` action (4 MB limit, as the server). */
+  function readWordsFile(file) {
+    return new Promise((resolve, reject) => {
+      if (file.size > 4 * 1024 * 1024) { reject(new Error('That file is too large (the limit is 4 MB). Paste the words in instead.')); return; }
+      const r = new FileReader();
+      r.onload = () => resolve({ name: file.name, type: file.type, data: String(r.result).replace(/^data:[^,]*,/, '') });
+      r.onerror = () => reject(new Error('That file couldn\'t be read.'));
+      r.readAsDataURL(file);
+    });
+  }
+  async function chooseWordsFile(file) {
+    try { state.words.file = await readWordsFile(file); state.words.error = null; } catch (err) { state.words.error = err.message; }
+    render();
+  }
+  const keepWordsDraft = (host) => {
+    const t = host.querySelector('[data-site-words-text]'); const n = host.querySelector('[data-site-words-note]');
+    if (t) state.words.text = t.value;
+    if (n) state.words.note = n.value;
+  };
 
   function designPanel() {
     const t = def().theme;
@@ -307,7 +408,10 @@
       <div class="grid gap-3 md:grid-cols-2">${colour('primaryColor', 'Main colour (buttons, links)')}${colour('textColor', 'Text colour')}${colour('backgroundColor', 'Background colour')}
         <div><label class="block text-xs font-bold text-gray-700">Lettering</label><select data-theme="font" class="${inputCls}">${[['sans', 'Clean (sans-serif)'], ['serif', 'Classic (serif)'], ['rounded', 'Friendly (rounded)'], ['system', 'Device default']].map(([v, l]) => `<option value="${v}" ${t.font === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div><label class="block text-xs font-bold text-gray-700">Corners</label><select data-theme="radius" class="${inputCls}">${[['none', 'Square'], ['small', 'Slightly rounded'], ['medium', 'Rounded'], ['large', 'Very rounded']].map(([v, l]) => `<option value="${v}" ${t.radius === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-        <div><label class="block text-xs font-bold text-gray-700">Logo (https address)</label><input data-theme="logoUrl" class="${inputCls}" value="${esc(t.logoUrl || '')}"></div>
+        <div class="md:col-span-2"><p class="block text-xs font-bold text-gray-700">Logo</p>
+          ${pictureHtml(t.logoAssetId ? { assetId: t.logoAssetId, url: '' } : (t.logoUrl ? { url: t.logoUrl } : null), { pick: 'data-site-logo-pick', clear: 'data-site-logo-clear' })}
+          <details class="mt-1" ${!t.logoAssetId && t.logoUrl ? 'open' : ''}><summary class="text-xs text-gray-500 cursor-pointer">Use a web address instead</summary>
+            <input data-theme="logoUrl" class="${inputCls} mt-1" placeholder="https://… logo address" value="${esc(t.logoAssetId ? '' : (t.logoUrl || ''))}"></details></div>
       </div>
       <div class="mt-4">${btn('data-site-theme-save', 'Save design', true)}</div>`);
   }
@@ -396,6 +500,39 @@
     rerender();
   }
 
+  // ── Bookings (bookings.ts) ─────────────────────────────────────────────────
+  const BOOKING_TONE = { pending: ['Waiting for you', 'text-indigo-700'], confirmed: ['Confirmed', 'text-green-700'], declined: ['Declined', 'text-gray-500'], cancelled: ['Cancelled', 'text-gray-500'] };
+  function bookingsPanel() {
+    const b = state.data.booking || {};
+    const head = card(`<p class="text-sm font-black text-gray-900">Bookings</p>
+      <p class="text-xs text-gray-500 mt-1">${b.ready ? `Opening hours: ${esc(b.hours)}. ${b.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}` : 'Set your opening hours to take bookings on your site.'} ${btn('data-site-open-hours', 'Opening hours & bookings')}</p>
+      <p class="text-xs text-gray-500 mt-1">Add a "Bookings" section to a page to show it on your website.</p>`);
+    const list = state.bookings;
+    if (!list) return head + card('<p class="text-sm text-gray-400 text-center">Loading bookings…</p>');
+    if (!list.length) return head + card('<p class="text-xs text-gray-500">No bookings yet. They appear here, and in your email, as they come in.</p>');
+    const now = Date.now();
+    const order = (x) => (x.status === 'pending' ? 0 : 1);
+    const sorted = list.slice().sort((a, c) => order(a) - order(c) || new Date(a.startsAt) - new Date(c.startsAt));
+    return head + card(`<ul class="space-y-2">${sorted.map((x) => {
+      const [label, tone] = BOOKING_TONE[x.status] || [x.status, 'text-gray-500'];
+      const past = new Date(x.startsAt).getTime() < now;
+      return `<li class="border ${x.status === 'pending' ? 'border-indigo-200' : 'border-gray-200'} rounded-lg p-3 ${past ? 'opacity-70' : ''}">
+        <div class="flex flex-wrap items-center justify-between gap-2"><p class="text-xs font-bold text-gray-900">${esc(x.when)}</p><span class="text-xs font-bold ${tone}">${esc(label)}</span></div>
+        <p class="text-xs text-gray-800 mt-1">${esc(x.what)} · ${esc(x.customerName)}</p>
+        <p class="text-xs text-gray-600 mt-1"><a class="underline" href="mailto:${esc(x.customerEmail)}">${esc(x.customerEmail)}</a>${x.customerPhone ? ` · <a class="underline" href="tel:${esc(x.customerPhone)}">${esc(x.customerPhone)}</a>` : ''}</p>
+        ${x.notes ? `<p class="text-xs text-gray-700 mt-1" style="white-space:pre-wrap">${esc(x.notes)}</p>` : ''}
+        ${!past && (x.status === 'pending' || x.status === 'confirmed') ? `<div class="flex flex-wrap gap-2 mt-2">
+          ${x.status === 'pending' ? btn(`data-site-booking="${esc(x.id)}" data-decision="confirm"`, 'Confirm', true) + btn(`data-site-booking="${esc(x.id)}" data-decision="decline"`, 'Decline') : ''}
+          ${x.status === 'confirmed' ? btn(`data-site-booking="${esc(x.id)}" data-decision="cancel"`, 'Cancel booking') : ''}</div>` : ''}
+      </li>`;
+    }).join('')}</ul>`);
+  }
+  async function loadBookings() {
+    try { state.bookings = (await post({ action: 'bookings', assistantId: state.assistantId })).bookings || []; }
+    catch (err) { state.bookings = []; state.note = { text: err.message, tone: 'error' }; }
+    rerender();
+  }
+
   async function loadEnquiries() {
     try { state.enquiries = (await post({ action: 'enquiries', assistantId: state.assistantId })).enquiries || []; }
     catch (err) { state.enquiries = []; state.note = { text: err.message, tone: 'error' }; }
@@ -479,7 +616,8 @@
     if (state.loadError && !state.data) { host.innerHTML = card(`<p class="text-sm font-bold text-gray-700 text-center">Could not load your website</p><p class="text-xs text-gray-500 mt-2 text-center">${esc(state.loadError)}</p>`); return; }
     const newCount = state.data.newEnquiries || 0;
     const newOrders = state.data.newOrders || 0;
-    const tabs = [['pages', 'Pages'], ['design', 'Design'], ['details', 'Details'], ['enquiries', newCount ? `Enquiries (${newCount} new)` : 'Enquiries'], ['orders', newOrders ? `Orders (${newOrders} new)` : 'Orders']].map(([k, l]) => btn(`data-site-panel="${k}"`, esc(l), state.panel === k)).join(' ');
+    const waiting = (state.data.booking && state.data.booking.waiting) || 0;
+    const tabs = [['pages', 'Pages'], ['design', 'Design'], ['details', 'Details'], ['enquiries', newCount ? `Enquiries (${newCount} new)` : 'Enquiries'], ['orders', newOrders ? `Orders (${newOrders} new)` : 'Orders'], ['bookings', waiting ? `Bookings (${waiting} waiting)` : 'Bookings']].map(([k, l]) => btn(`data-site-panel="${k}"`, esc(l), state.panel === k)).join(' ');
     host.innerHTML = `
       <div class="grid gap-4 lg:grid-cols-2">
         <div class="space-y-4 min-w-0">
@@ -487,7 +625,7 @@
           ${placeholdersCard()}
           <div class="flex flex-wrap gap-2">${tabs}</div>
           ${noteHtml()}
-          ${state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : state.panel === 'enquiries' ? enquiriesPanel() : state.panel === 'orders' ? ordersPanel() : detailsPanel()}
+          ${state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : state.panel === 'enquiries' ? enquiriesPanel() : state.panel === 'orders' ? ordersPanel() : state.panel === 'bookings' ? bookingsPanel() : detailsPanel()}
           ${draftCard()}
         </div>
         <div class="min-w-0">${previewHtml()}</div>
@@ -521,6 +659,7 @@
       state.panel = panel.dataset.sitePanel; state.editing = null;
       if (state.panel === 'enquiries') { state.enquiries = null; state.enquiryShown = 20; loadEnquiries(); }
       if (state.panel === 'orders') { state.orders = null; state.orderShown = 20; loadOrders(); }
+      if (state.panel === 'bookings') { state.bookings = null; loadBookings(); }
       render();
       return;
     }
@@ -560,10 +699,83 @@
     if (edit) { const s = p.sections.find((x) => x.id === edit.dataset.siteEdit); state.editing = { pageId: p.id, sectionId: s.id, type: s.type, props: JSON.parse(JSON.stringify(s.props)) }; render(); return; }
     if (t('[data-site-new-section]')) {
       const type = document.querySelector('[data-site-new-type]').value;
+      if (!FORMS[type]) return;   // a type this editor has no form for — nothing to open
       state.editing = { pageId: p.id, sectionId: null, type, props: JSON.parse(JSON.stringify(BLANK[type] || {})) };
       render();
       return;
     }
+    // ── Add your own words ──
+    if (t('[data-site-words-open]')) { Object.assign(state.words, { open: true, pageId: p.id, error: null, proposal: null }); render(); return; }
+    if (t('[data-site-words-cancel]')) { Object.assign(state.words, { open: false, file: null, error: null, text: '', note: '' }); render(); return; }
+    if (t('[data-site-words-discard]')) { Object.assign(state.words, { proposal: null, open: true }); render(); return; }
+    if (t('[data-site-words-place]')) {
+      keepWordsDraft(hostOf(e));
+      const w = state.words;
+      if (!w.text.trim() && !w.file) { w.error = 'Paste your words in, or choose a file.'; render(); return; }
+      w.busy = true; w.error = null; render();
+      try {
+        const r = await post({ action: 'words', assistantId: state.assistantId, pageId: p.id, text: w.text, note: w.note, ...(w.file ? { file: w.file } : {}) });
+        w.proposal = r.proposal;
+      } catch (err) { w.error = err.message; }
+      w.busy = false;
+      render();
+      return;
+    }
+    if (t('[data-site-words-apply]')) {
+      const ops = state.words.proposal ? state.words.proposal.ops : [];
+      await apply(ops, () => { Object.assign(state.words, { open: false, proposal: null, file: null, text: '', note: '', error: null }); });
+      return;
+    }
+
+    // ── Pictures (media-picker.js) ──
+    const pickField = t('[data-site-pick]');
+    if (pickField && window.MediaPicker) {
+      const form = pickField.closest('form');
+      window.MediaPicker.open({
+        title: 'Choose a picture',
+        onPick: (asset) => {
+          state.thumbs[asset.id] = asset.url;
+          state.editing.props = readForm(form, state.editing.type);
+          const k = pickField.dataset.sitePick;
+          const prev = state.editing.props[k] || {};
+          state.editing.props[k] = { assetId: asset.id, url: '', alt: prev.alt || altFromName(asset.name) };
+          render();
+        },
+      });
+      return;
+    }
+    const clearField = t('[data-site-pick-clear]');
+    if (clearField) { const form = clearField.closest('form'); state.editing.props = readForm(form, state.editing.type); state.editing.props[clearField.dataset.sitePickClear] = null; render(); return; }
+    if (t('[data-site-products-import]')) {
+      // An older products section: its typed-in items become Business Information products.
+      const ed = state.editing;
+      const ok = await window.confirmModal('Each item becomes a product in Business Information ▸ Products & Services, with its price. From then on you change names and prices there, and every page and checkout follows.', { title: 'Move these items into Business Information?', confirmLabel: 'Move them', cancelLabel: 'Not now' });
+      if (!ok || !ed) return;
+      await publishAction({ action: 'products_import', sectionId: ed.sectionId }, 'Moved into Business Information.', () => { state.editing = null; });
+      return;
+    }
+    if (t('[data-site-open-products]')) { window._bizinfoInitialTab = 'products'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
+    if (t('[data-site-open-hours]')) { window._bizinfoInitialTab = 'hours'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
+    const dec = t('[data-site-booking]');
+    if (dec) {
+      const decision = dec.dataset.decision;
+      if (decision !== 'confirm') {
+        const ok = await window.confirmModal(decision === 'decline' ? 'They\'ll get an email saying you can\'t take it, and the time is freed up.' : 'They\'ll get an email saying it\'s cancelled, and the time is freed up.', { title: decision === 'decline' ? 'Decline this booking?' : 'Cancel this booking?', confirmLabel: decision === 'decline' ? 'Decline' : 'Cancel booking', cancelLabel: 'Keep it' });
+        if (!ok) return;
+      }
+      try {
+        await post({ action: 'booking_decide', assistantId: state.assistantId, id: Number(dec.dataset.siteBooking), decision });
+        state.data = await post({ action: 'get', assistantId: state.assistantId });
+      } catch (err) { state.note = { text: err.message, tone: 'error' }; }
+      await loadBookings();
+      return;
+    }
+    if (t('[data-site-logo-pick]') && window.MediaPicker) {
+      window.MediaPicker.open({ title: 'Choose your logo', onPick: (asset) => { state.thumbs[asset.id] = asset.url; apply([{ op: 'set_theme', theme: { logoAssetId: asset.id } }]); } });
+      return;
+    }
+    if (t('[data-site-logo-clear]')) { await apply([{ op: 'set_theme', theme: { logoAssetId: null, logoUrl: null } }]); return; }
+
     const addItem = t('[data-item-add]');
     if (addItem) {
       const form = addItem.closest('form');
@@ -614,6 +826,8 @@
     if (t('[data-site-theme-save]')) {
       const theme = {};
       hostOf(e).querySelectorAll('[data-theme]').forEach((el) => { theme[el.dataset.theme] = el.value || (el.dataset.theme === 'logoUrl' ? null : el.value); });
+      // A web address typed for the logo replaces a library logo; left empty, the library logo stays.
+      if (theme.logoUrl) theme.logoAssetId = null; else delete theme.logoUrl;
       await apply([{ op: 'set_theme', theme }]);
       return;
     }
@@ -679,6 +893,25 @@
     }
   });
 
+  // The words file: picked, or dropped on the box (bound once, like every handler here).
+  document.addEventListener('change', (e) => {
+    const input = e.target.closest && e.target.closest('[data-site-words-file]');
+    if (!input || !state.assistantId) return;
+    keepWordsDraft(hostOf(e) || document);
+    const f = input.files && input.files[0];
+    input.value = '';
+    if (f) chooseWordsFile(f);
+  });
+  document.addEventListener('dragover', (e) => { if (e.target.closest && e.target.closest('[data-site-words-drop]')) e.preventDefault(); });
+  document.addEventListener('drop', (e) => {
+    const box = e.target.closest && e.target.closest('[data-site-words-drop]');
+    if (!box || !state.assistantId) return;
+    e.preventDefault();
+    keepWordsDraft(hostOf(e) || document);
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) chooseWordsFile(f);
+  });
+
   document.addEventListener('site:changed', (e) => {
     const id = e.detail && e.detail.assistantId;
     if (!state.assistantId || Number(id) !== Number(state.assistantId)) return;
@@ -688,7 +921,8 @@
   window.AssistantSiteEditor = {
     init({ assistantId, assistantName }) {
       clearTimeout(state.pollTimer);
-      Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false });
+      Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false,
+        words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' } });
       load();
     },
     activate() {

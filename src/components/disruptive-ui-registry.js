@@ -1846,6 +1846,123 @@
   }
   register('site_draft_request', renderSiteDraftRequestCard);
 
+  // { type: 'site_words', pageId, attachmentId?, quote?, note? } — the owner's OWN words onto a page,
+  // word for word (sites.ts `words` → site-words.ts). The card never carries their words for the
+  // model to retype: it names an attached document, or quotes their own message (checked server-side).
+  // Two clicks: "Place my words" shows exactly where everything goes; "Apply" saves it (site:apply).
+  function renderSiteWordsCard(ui, esc) {
+    const pageId = typeof ui.pageId === 'string' ? ui.pageId.slice(0, 40) : '';
+    const attachmentId = Number.isInteger(Number(ui.attachmentId)) && Number(ui.attachmentId) > 0 ? Number(ui.attachmentId) : null;
+    const quote = typeof ui.quote === 'string' && ui.quote.trim() ? ui.quote.slice(0, 20000) : null;
+    const note = typeof ui.note === 'string' ? ui.note.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Your own words on your website</p>
+      ${note ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(note)}</p>` : ''}
+      <p class="text-xs text-gray-600 mt-2">Your words go on the page exactly as you wrote them — split into headings and paragraphs, never reworded. You'll see where everything goes before anything changes. Uses 1 task.</p>
+      <div data-sw-preview></div>
+      <div class="flex flex-wrap items-center gap-2 mt-3" data-sw-actions>
+        <button type="button" data-sw-go ${pageId && (attachmentId || quote) ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Place my words</button>
+        <button type="button" data-sw-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sw-status></p>`;
+    const status = el.querySelector('[data-sw-status]');
+    const preview = el.querySelector('[data-sw-preview]');
+    const actions = el.querySelector('[data-sw-actions]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    let proposal = null;
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-sw-cancel]')) { setBusy(true); say(proposal ? 'Not applied — nothing changed.' : 'Not placed.'); return; }
+      if (e.target.closest('[data-sw-go]')) {
+        setBusy(true);
+        say('Placing your words…');
+        el.dispatchEvent(new CustomEvent('site:words', {
+          bubbles: true,
+          detail: {
+            pageId, attachmentId, quote, note,
+            respond({ ok, error, proposal: p }) {
+              if (!ok || !p) { setBusy(false); say(error || 'Your words couldn\'t be placed.', 'error'); return; }
+              proposal = p;
+              preview.innerHTML = `
+                <p class="text-xs font-bold text-green-700 mt-3">Your wording, unchanged</p>
+                <ul class="mt-2 space-y-2">${(p.preview || []).map((x) => `<li class="bg-white border border-gray-200 rounded-lg p-2"><p class="text-xs font-bold text-gray-900">${esc(x.label)}</p>${x.text ? `<p class="text-xs text-gray-700 mt-1" style="white-space:pre-wrap">${esc(x.text)}</p>` : ''}</li>`).join('')}</ul>`;
+              actions.innerHTML = `
+                <button type="button" data-sw-apply class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Apply to my page</button>
+                <button type="button" data-sw-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`;
+              say('Nothing has changed yet.');
+            },
+          },
+        }));
+        return;
+      }
+      if (e.target.closest('[data-sw-apply]') && proposal) {
+        setBusy(true);
+        say('Applying…');
+        el.dispatchEvent(new CustomEvent('site:apply', {
+          bubbles: true,
+          detail: {
+            ops: proposal.ops || [],
+            respond({ ok, error, warnings }) {
+              if (!ok) { setBusy(false); say(error || 'Could not apply that — nothing was changed.', 'error'); return; }
+              say(warnings && warnings.length ? `Applied. ${warnings.join(' ')}` : 'Applied — see the preview on the Website tab.');
+            },
+          },
+        }));
+      }
+    });
+    return el;
+  }
+  register('site_words', renderSiteWordsCard);
+
+  // { type: 'booking_setup', summary, settings, section? } — hours & booking rules into Business
+  // Information, and (optionally) a booking section on a page: sites.ts `booking_setup`, after the
+  // owner's click. The settings pass the same checks as Business Information (booking-settings.ts).
+  const BK_DAYS = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']];
+  function renderBookingSetupCard(ui, esc) {
+    const settings = ui.settings && typeof ui.settings === 'object' ? ui.settings : {};
+    const section = ui.section && typeof ui.section === 'object' ? ui.section : null;
+    const hours = settings.weeklyHours && typeof settings.weeklyHours === 'object' ? settings.weeklyHours : null;
+    const hoursList = hours ? BK_DAYS.map(([k, l]) => `<li class="text-xs text-gray-700">${l}: ${Array.isArray(hours[k]) && hours[k].length ? hours[k].map((p) => `${esc(p.start)}–${esc(p.end)}`).join(', ') : 'closed'}</li>`).join('') : '';
+    const kinds = { appointment: 'Appointments', consultation: 'Consultations', table: 'Tables' };
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Set up bookings · Approval needed</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      ${hoursList ? `<p class="text-xs font-bold text-gray-800 mt-2">Opening hours</p><ul class="mt-1 space-y-0.5">${hoursList}</ul>` : ''}
+      ${settings.mode ? `<p class="text-xs text-gray-700 mt-2">${settings.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}</p>` : ''}
+      ${section ? `<p class="text-xs text-gray-700 mt-1">Adds a ${esc(kinds[section.kind] || 'booking')} section to your site.</p>` : ''}
+      <p class="text-xs text-gray-600 mt-2">Saved to Business Information ▸ Opening hours &amp; bookings, where you can change it any time. Uses no tasks.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-bs-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Set up bookings</button>
+        <button type="button" data-bs-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-bs-status></p>`;
+    const status = el.querySelector('[data-bs-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-bs-cancel]')) { setBusy(true); say('Not set up.'); return; }
+      if (!e.target.closest('[data-bs-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('site:bookingSetup', {
+        bubbles: true,
+        detail: {
+          settings, section,
+          respond({ ok, error }) {
+            if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved — nothing was changed.', 'error'); return; }
+            say('Bookings are set up — see the Website tab, under Bookings.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('booking_setup', renderBookingSetupCard);
+
   // ── Built-in: Visual Option Review Card (Brand Designer) ───────────────────
   // { type: 'visual_option_review', briefId, decisions: [{ optionId, decision, reason?, note? }], remake? }
   //
