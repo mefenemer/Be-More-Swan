@@ -21,6 +21,7 @@ import {
 } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { gatewayGenerate, isUpstreamBlocked } from '../../src/lib/ai-gateway';
+import { explainGenerationFailure } from '../../src/utils/generation-failure';
 import { voiceDirective, findNeverSay, normaliseVoice } from '../../src/utils/voice-profile';
 import { socialShapeLine } from '../../src/utils/content-shapes';
 import { parsePillars } from '../../src/public/content-pillars.js';
@@ -1420,7 +1421,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             // work when the fault is ours, and four customers were given it ~1,200 times.
             await createNotification(db, 'post_generation_blocked_upstream', {
                 userId: job.user_id,
-                metadata: { jobId: job.job_id, error: errorMessage, assistantId: job.assistant_id },
+                metadata: { jobId: job.job_id, assistantId: job.assistant_id },  // the raw error stays on the job + audit log, never in a customer's notification
             });
             await db.insert(auditLogs).values({ actionType: 'post_generation_failed', resourceType: 'content_generation_jobs', resourceId: job.job_id, userId: job.user_id, newState: { errorMessage, attempt, upstreamBlocked: true, ageHours } });
             return;
@@ -1432,7 +1433,8 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             );
             await createNotification(db, 'post_generation_failed', {
                 userId: job.user_id,
-                metadata: { jobId: job.job_id, error: errorMessage, assistantId: job.assistant_id },
+                context: { failure: { reason: explainGenerationFailure(errorMessage).reason } },
+                metadata: { jobId: job.job_id, assistantId: job.assistant_id },  // the raw error stays on the job + audit log, never in a customer's notification
             });
             await db.insert(auditLogs).values({ actionType: 'post_generation_failed', resourceType: 'content_generation_jobs', resourceId: job.job_id, userId: job.user_id, newState: { errorMessage, attempt } });
         } else {
@@ -1452,7 +1454,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             if (attempt === 1 && job.trigger_type === 'on_demand') {
                 await createNotification(db, 'post_generation_retrying', {
                     userId: job.user_id,
-                    metadata: { jobId: job.job_id, assistantId: job.assistant_id, error: errorMessage },
+                    metadata: { jobId: job.job_id, assistantId: job.assistant_id },
                 }).catch(() => {});
             }
         }

@@ -4835,6 +4835,27 @@ window._deleteDirective = async function(id) {
 // ── Tuning Session (Feature 3.1) — correct an output → learned directive ──────
 let _tuningCtx = null;
 
+// "Try again" on a post that could not be written (Activity tab) → retry-generation.ts re-queues the
+// same job. The row says what happened; the feed refreshes when the new attempt shows up.
+window._retryGeneration = async function (jobId, btn) {
+    const row = btn && btn.closest('[data-gen-job]');
+    const status = row && row.querySelector('[data-retry-status]');
+    const say = (text, ok) => { if (!status) return; status.textContent = text; status.className = `text-xs font-semibold mt-1 ${ok ? 'text-emerald-700' : 'text-red-600'}`; };
+    if (btn) btn.disabled = true;
+    try {
+        const res = await fetch('/.netlify/functions/retry-generation', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ jobId }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || `That didn't work (HTTP ${res.status}).`);
+        say(d.started ? 'Trying again now — it will appear in your Review queue when it is ready.' : 'Queued — it will be written in the next few minutes.', true);
+        if (btn) btn.remove();
+    } catch (err) {
+        say(err.message, false);
+        if (btn) btn.disabled = false;
+    }
+};
+
 window._openTuningSession = async function(ctx) {
     ctx = ctx || {};
     // ⚠️ postId and blogPostId are DELIBERATELY separate and never merged into one field.
@@ -7666,8 +7687,16 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                             ? `<button type="button" onclick="window._openTuningSession({ postId:${Number(postMatch[1])} })" class="mt-1 inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-800 transition cursor-pointer">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>Tune</button>`
                             : '';
+                        // A post that could not be written (get-assistant-activity → generation-failure.ts):
+                        // what they can do, and "Try again" when trying again can help.
+                        const f = log.failure && /^[0-9a-f-]{8,64}$/i.test(String(log.failure.jobId || '')) ? log.failure : null;
+                        const failureHtml = f ? `
+                            ${f.action ? `<p class="text-xs text-gray-600 mt-1">${_escapeHtml(f.action)}</p>` : ''}
+                            ${f.canRetry ? `<button type="button" onclick="window._retryGeneration('${f.jobId}', this)" class="btn-secondary border mt-1.5 inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg transition cursor-pointer">Try again</button>` : ''}
+                            <p class="text-xs font-semibold mt-1 hidden" data-retry-status></p>` : '';
+                        const focused = f && window._activityFocusJobId && window._activityFocusJobId === f.jobId;
                         return `
-                        <div class="flex items-start gap-3 py-2.5 px-2 rounded-lg border-b border-gray-100 last:border-0"${attention ? ` style="${tint}"` : ''}>
+                        <div class="flex items-start gap-3 py-2.5 px-2 rounded-lg border-b border-gray-100 last:border-0"${f ? ` data-gen-job="${f.jobId}"` : ''}${attention ? ` style="${tint}${focused ? ';outline:2px solid #f87171' : ''}"` : ''}>
                             <div class="w-6 h-6 rounded-full ${iconBg(log.icon)} flex items-center justify-center shrink-0 mt-0.5">${iconSvg(log.icon)}</div>
                             <div class="flex-1 min-w-0">
                                 <div class="flex items-start justify-between gap-2">
@@ -7676,6 +7705,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                                 </div>
                                 <p class="text-xs text-gray-400 mt-0.5">${log.createdAt ? new Date(log.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</p>
                                 ${tuneBtn}
+                                ${failureHtml}
                             </div>
                         </div>`;
                     };
@@ -7690,6 +7720,12 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                         html += sectionLabel('Recent') + rest.map(l => rowHtml(l, false)).join('');
                     }
                     activityList.innerHTML = html || '<p class="text-sm text-gray-400 text-center py-3">No activity yet.</p>';
+                    // Arrived from a "couldn't write a post" notification: bring that row into view, once.
+                    if (window._activityFocusJobId) {
+                        const row = activityList.querySelector(`[data-gen-job="${window._activityFocusJobId}"]`);
+                        window._activityFocusJobId = null;
+                        if (row) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                    }
                 } else {
                     activityList.innerHTML = '<p class="text-sm text-gray-400 text-center py-3">No activity yet — your assistant is ready to get to work.</p>';
                 }
@@ -7718,7 +7754,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         if (window._activityCrossPostListener) window.removeEventListener('bms:crosspost-view', window._activityCrossPostListener);
         window._activityCrossPostListener = () => { if (document.body.contains(activityList)) loadActivity(_activityTf); };
         window.addEventListener('bms:crosspost-view', window._activityCrossPostListener);
-        _loads.push(loadActivity('1d'));
+        // From a failure notification the post may be days old: open on 30 days so its row is there.
+        if (window._activityFocusJobId) _activityTf = '30d';
+        _loads.push(loadActivity(_activityTf));
     }
 
     // Performance Metrics is no longer loaded from here — it is fired, un-awaited, near the top of

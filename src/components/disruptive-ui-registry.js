@@ -1916,6 +1916,53 @@
   }
   register('site_words', renderSiteWordsCard);
 
+  // { type: 'booking_setup', summary, settings, section? } — hours & booking rules into Business
+  // Information, and (optionally) a booking section on a page: sites.ts `booking_setup`, after the
+  // owner's click. The settings pass the same checks as Business Information (booking-settings.ts).
+  const BK_DAYS = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']];
+  function renderBookingSetupCard(ui, esc) {
+    const settings = ui.settings && typeof ui.settings === 'object' ? ui.settings : {};
+    const section = ui.section && typeof ui.section === 'object' ? ui.section : null;
+    const hours = settings.weeklyHours && typeof settings.weeklyHours === 'object' ? settings.weeklyHours : null;
+    const hoursList = hours ? BK_DAYS.map(([k, l]) => `<li class="text-xs text-gray-700">${l}: ${Array.isArray(hours[k]) && hours[k].length ? hours[k].map((p) => `${esc(p.start)}–${esc(p.end)}`).join(', ') : 'closed'}</li>`).join('') : '';
+    const kinds = { appointment: 'Appointments', consultation: 'Consultations', table: 'Tables' };
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Set up bookings · Approval needed</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      ${hoursList ? `<p class="text-xs font-bold text-gray-800 mt-2">Opening hours</p><ul class="mt-1 space-y-0.5">${hoursList}</ul>` : ''}
+      ${settings.mode ? `<p class="text-xs text-gray-700 mt-2">${settings.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}</p>` : ''}
+      ${section ? `<p class="text-xs text-gray-700 mt-1">Adds a ${esc(kinds[section.kind] || 'booking')} section to your site.</p>` : ''}
+      <p class="text-xs text-gray-600 mt-2">Saved to Business Information ▸ Opening hours &amp; bookings, where you can change it any time. Uses no tasks.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-bs-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Set up bookings</button>
+        <button type="button" data-bs-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-bs-status></p>`;
+    const status = el.querySelector('[data-bs-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-bs-cancel]')) { setBusy(true); say('Not set up.'); return; }
+      if (!e.target.closest('[data-bs-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('site:bookingSetup', {
+        bubbles: true,
+        detail: {
+          settings, section,
+          respond({ ok, error }) {
+            if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved — nothing was changed.', 'error'); return; }
+            say('Bookings are set up — see the Website tab, under Bookings.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('booking_setup', renderBookingSetupCard);
+
   // ── Built-in: Visual Option Review Card (Brand Designer) ───────────────────
   // { type: 'visual_option_review', briefId, decisions: [{ optionId, decision, reason?, note? }], remake? }
   //

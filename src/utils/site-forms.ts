@@ -212,6 +212,11 @@ async function handleEnquiry(db: Db, req: SiteFormRequest, section: Extract<Sect
 /** What /_sent says, read from the published site (never from the query string). */
 export async function sentMessage(db: Db, site: SiteRow, def: SiteDefinition, q: URLSearchParams): Promise<{ title: string; message: string; back: string }> {
     const back = safeBackPath(def, q.get('b'));
+    if (q.get('k') === 'booking') {
+        return q.get('st') === 'confirmed'
+            ? { title: 'You\'re booked in', message: 'Your booking is confirmed. We\'ve emailed you the details, with an invite for your calendar.', back }
+            : { title: 'Thank you — we\'ve got your request', message: 'We\'ll confirm your booking by email. Nothing more to do for now.', back };
+    }
     if (q.get('k') === 'order') {
         // Stripe's success_url. The order itself is recorded by the webhook, not by this page.
         return { title: 'Thank you for your order', message: 'Your payment went through. You\'ll get a receipt by email, and the business will be in touch about your order.', back };

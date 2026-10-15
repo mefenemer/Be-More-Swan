@@ -3,6 +3,12 @@
 // (src/utils/org-products.ts), so they belong to the workspace, not to any one assistant.
 //
 // GET                         → { products: [...] }   every row, active first, in the business's order
+//
+// Prices are STRUCTURED (db/z-product-pricing.sql, src/utils/product-price.ts): priceType + priceAmount
+// (pence) + priceUnit, or the owner's own words (priceType 'text' + price). `price` is then written by
+// the server as the displayed wording, which every assistant's prompt reads. A body that sends only
+// `price` (an older client) is read with priceFromText. Also: durationMinutes (services, for bookings)
+// and imageAssetId (a picture from this workspace's library — checked).
 // POST   { kind, name, ... }  → { product }           add one (appended to the end of the list)
 // PATCH  { id, ...fields }    → { product }           edit, archive / restore (status), or reorder (sortOrder)
 // DELETE ?id=N                → { ok: true }          remove for good — the tab confirms first;
@@ -16,6 +22,10 @@ import { getDb } from '../../db/client';
 import { orgProducts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { PRODUCT_LIMITS } from '../../src/utils/org-products';
+import { cleanPrice, priceFromText } from '../../src/utils/product-price';
+import { siteAssetUrl } from '../../src/utils/site-hosting';
+import { resolveBaseUrl } from '../../src/utils/base-url';
+import { contentAssets } from '../../db/schema';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -54,8 +64,29 @@ export function productFields(body: Record<string, unknown>, partial: boolean): 
         if (kind !== 'product' && kind !== 'service') return { error: 'Kind must be product or service.' };
         values.kind = kind;
     }
-    for (const k of ['description', 'benefits', 'price', 'audience'] as const) {
+    for (const k of ['description', 'benefits', 'audience'] as const) {
         if (!partial || has(k)) values[k] = clip(body[k], PRODUCT_LIMITS[k]);
+    }
+    // The price: structured when priceType is sent; an older body with only `price` is read from its text.
+    if (has('priceType') || (!partial && !has('price'))) {
+        const pr = cleanPrice({ priceType: body.priceType, priceAmount: body.priceAmount, priceUnit: body.priceUnit, price: body.price });
+        if ('error' in pr) return pr;
+        Object.assign(values, pr);
+    } else if (has('price')) {
+        const t = priceFromText(clip(body.price, PRODUCT_LIMITS.price));
+        const pr = cleanPrice({ priceType: t.priceType, priceAmount: t.priceAmount != null ? t.priceAmount / 100 : null, priceUnit: t.priceUnit, price: t.priceText ?? null });
+        if ('error' in pr) return pr;
+        Object.assign(values, pr);
+    }
+    if (!partial || has('durationMinutes')) {
+        const d = body.durationMinutes === null || body.durationMinutes === '' || body.durationMinutes === undefined ? null : Number(body.durationMinutes);
+        if (d !== null && (!Number.isInteger(d) || d <= 0 || d > 1440)) return { error: 'The length must be in whole minutes, up to 24 hours.' };
+        values.durationMinutes = d;
+    }
+    if (!partial || has('imageAssetId')) {
+        const a = body.imageAssetId === null || body.imageAssetId === '' || body.imageAssetId === undefined ? null : Number(body.imageAssetId);
+        if (a !== null && (!Number.isInteger(a) || a <= 0)) return { error: 'That picture isn\'t valid.' };
+        values.imageAssetId = a;   // ownership checked by the handler (needs the database)
     }
     if (!partial || has('url')) {
         const url = cleanProductUrl(body.url);
@@ -77,8 +108,18 @@ export function productFields(body: Record<string, unknown>, partial: boolean): 
 const COLUMNS = {
     id: orgProducts.id, kind: orgProducts.kind, name: orgProducts.name, description: orgProducts.description,
     benefits: orgProducts.benefits, price: orgProducts.price, audience: orgProducts.audience, url: orgProducts.url,
+    priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, priceUnit: orgProducts.priceUnit,
+    durationMinutes: orgProducts.durationMinutes, imageAssetId: orgProducts.imageAssetId,
     status: orgProducts.status, sortOrder: orgProducts.sortOrder, updatedAt: orgProducts.updatedAt,
 };
+
+/** A picture may be used only if it is this workspace's, a picture, and not refused by moderation. */
+async function pictureIsOurs(db: ReturnType<typeof getDb>, orgId: number, assetId: number | null | undefined): Promise<boolean> {
+    if (!assetId) return true;
+    const [a] = await db.select({ assetType: contentAssets.assetType, status: contentAssets.status }).from(contentAssets)
+        .where(and(eq(contentAssets.id, assetId), eq(contentAssets.organisationId, orgId))).limit(1);
+    return !!a && a.assetType === 'image' && a.status !== 'rejected';
+}
 
 export default withLambda(async (event) => {
     const method = event.httpMethod || '';
@@ -94,7 +135,9 @@ export default withLambda(async (event) => {
                 .where(eq(orgProducts.organisationId, orgId))
                 // Active first, then the business's own order.
                 .orderBy(desc(sql`${orgProducts.status} = 'active'`), asc(orgProducts.sortOrder), asc(orgProducts.id));
-            return json(200, { products });
+            // The picture's link, for the editor's thumbnail (the same signed link sites and emails use).
+            const base = resolveBaseUrl(event.headers as Record<string, string | undefined>) || 'https://bemoreswan.com';
+            return json(200, { products: products.map((p) => ({ ...p, imageUrl: p.imageAssetId ? siteAssetUrl(base, p.imageAssetId) : null })) });
         }
 
         let body: Record<string, unknown> = {};
@@ -106,6 +149,7 @@ export default withLambda(async (event) => {
         if (method === 'POST') {
             const parsed = productFields(body, false);
             if ('error' in parsed) return json(400, parsed);
+            if (!(await pictureIsOurs(db, orgId, parsed.values.imageAssetId as number | null))) return json(400, { error: 'Only pictures from your own library can be used.' });
             const [{ n, maxOrder }] = await db.select({
                 n: sql<number>`count(*)::int`, maxOrder: sql<number>`coalesce(max(${orgProducts.sortOrder}), -1)::int`,
             }).from(orgProducts).where(eq(orgProducts.organisationId, orgId));
@@ -123,6 +167,7 @@ export default withLambda(async (event) => {
             const parsed = productFields(body, true);
             if ('error' in parsed) return json(400, parsed);
             if (!Object.keys(parsed.values).length) return json(400, { error: 'Nothing to change.' });
+            if (!(await pictureIsOurs(db, orgId, parsed.values.imageAssetId as number | null))) return json(400, { error: 'Only pictures from your own library can be used.' });
             const [product] = await db.update(orgProducts)
                 .set({ ...parsed.values, updatedAt: new Date() })
                 .where(and(eq(orgProducts.id, id), eq(orgProducts.organisationId, orgId)))

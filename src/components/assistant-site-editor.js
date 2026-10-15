@@ -26,7 +26,7 @@
   const API = '/.netlify/functions/sites';
   const POLL_MS = 5000;
 
-  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale' };
+  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale', booking: 'Bookings' };
   /** The edit form for each section type — the props the gate accepts (site-definition.ts cleanSection). */
   const FORMS = {
     hero: [
@@ -54,22 +54,28 @@
     // One of the workspace's Form Builder forms; its questions, consent and double opt-in come from it.
     signup: [{ k: 'formId', kind: 'formpick', label: 'Sign-up form', required: true }, { k: 'heading', kind: 'text', label: 'Heading (leave empty to use the form\'s own)' },
       { k: 'intro', kind: 'textarea', label: 'Introduction (leave empty to use the form\'s own)' }],
-    // Things for sale (step 3c). Prices are typed here in pounds and stored in pence; checkout reads
-    // them from the PUBLISHED site. Buy buttons appear once Stripe is connected on the Orders tab.
+    // Things for sale: chosen from Business Information ▸ Products & Services — the ONE place names,
+    // prices and pictures live (the page and checkout read them from there). Buy buttons appear on
+    // fixed-price products once Stripe is connected on the Orders tab.
     products: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
-      { k: 'items', kind: 'productItems', label: 'Items' },
+      { k: 'productIds', kind: 'productPick', label: 'Which of your products to show' },
       { k: 'collectAddress', kind: 'checkbox', label: 'Ask buyers for a UK delivery address' },
       { k: 'buyLabel', kind: 'text', label: 'Buy button text' }],
+    // Bookings (docs/booking-plan.md): the services are Products & Services with a length; hours and
+    // rules are Business Information ▸ Opening hours & bookings. This section only chooses what to offer.
+    booking: [{ k: 'kind', kind: 'select', label: 'What people book', options: [['appointment', 'Appointments (a service with you or your team)'], ['consultation', 'Consultations or calls'], ['table', 'Tables (restaurants, cafés, bars)']] },
+      { k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
+      { k: 'serviceIds', kind: 'servicePick', label: 'Which services can be booked' },
+      { k: 'askStaff', kind: 'checkbox', label: 'Let people choose who they book with (or "anyone available")' },
+      { k: 'buttonLabel', kind: 'text', label: 'Button text' }],
   };
   const BLANK = {
     hero: { layout: 'centered', headline: '' }, features: { items: [{ title: '', body: '' }] }, steps: { items: [{ title: '', body: '' }, { title: '', body: '' }] },
     text: { body: '' }, faq: { items: [{ q: '', a: '' }] }, testimonials: { items: [{ quote: '', name: '', detail: '' }] }, cta: { heading: '', button: { label: '', href: '/' } },
     contact: { heading: 'Get in touch', intro: '', askPhone: false, buttonLabel: 'Send message' }, signup: { formId: null },
-    products: { heading: 'Shop', items: [{ name: '', description: '', price: null, image: null }], collectAddress: false, buyLabel: 'Buy now' },
+    products: { heading: 'Shop', productIds: [], collectAddress: false, buyLabel: 'Buy now' },
+    booking: { kind: 'appointment', heading: 'Book an appointment', serviceIds: [], askStaff: false, buttonLabel: '' },
   };
-  /** Pence → "12.50" for the price box; "" when there is no price. */
-  const poundsText = (pence) => (Number.isFinite(pence) && pence !== null ? (pence / 100).toFixed(2).replace(/\.00$/, '') : '');
-  /** What was typed ("£12.50", "12", "1,200") → pence, or null when empty or not a number. */
   /** A library picture's thumbnail: picked this session, or the link the server sent with the site. */
   const thumbOf = (assetId) => (assetId && (state.thumbs[assetId] || (state.data && state.data.assetUrls && state.data.assetUrls[assetId]))) || '';
   /** A starting description from a file name ("cafe-front.jpg" → "Cafe front"); none for camera names. */
@@ -89,19 +95,13 @@
         ${src ? btn(`${attrs.clear}`, 'Remove') : ''}
       </div>`;
   }
-  const toPence = (txt) => {
-    const t = String(txt || '').replace(/[£,\s]/g, '');
-    if (!t) return null;
-    const n = Number(t);
-    return Number.isFinite(n) ? Math.round(n * 100) : null;
-  };
 
   const state = {
     assistantId: null, assistantName: null, data: null, loaded: false, loadError: null, rendered: false,
     panel: 'pages', pageId: null, editing: null, device: 'desktop', previewPath: '/', note: null, pollTimer: null, version: 0,
     editingAddress: false, slugTyped: null, versions: null, publishNote: null,
     enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false,
-    thumbs: {},
+    thumbs: {}, bookings: null,
     words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
   };
 
@@ -216,23 +216,35 @@
         <details class="mt-1" ${!v.assetId && v.url ? 'open' : ''}><summary class="text-xs text-gray-500 cursor-pointer">Use a web address instead</summary>
           <input name="${name}-url" class="${inputCls} mt-1" placeholder="https://… picture address" value="${esc(v.assetId ? '' : (v.url || ''))}"></details>`;
     }
-    if (f.kind === 'productItems') {
-      const list = Array.isArray(value) && value.length ? value : [{}];
+    if (f.kind === 'servicePick') {
+      const b = state.data.booking || {};
+      const chosen = new Set((Array.isArray(value) ? value : []).map(Number));
+      const hoursNote = `<p class="text-xs ${b.ready ? 'text-gray-500' : 'text-amber-800 font-semibold'} mt-2">${b.ready ? `Opening hours: ${esc(b.hours)}.` : 'Set your opening hours first — booking only shows on your site once they are set.'} ${btn('data-site-open-hours', 'Opening hours & bookings')}</p>`;
+      if (!(b.services || []).length) return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p><p class="text-xs text-gray-500">None of your Products &amp; Services has a length yet. Give a service a length (e.g. 45 minutes) in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} to offer it here. (Tables don't need one.)</p>${hoursNote}`;
       return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
-        <div data-items="${esc(f.k)}" class="space-y-2">${list.map((it, i) => `
-          <div class="border border-gray-200 rounded-lg p-3" data-item>
-            <input data-item-field="name" class="${inputCls} mt-1" placeholder="Name (required)" value="${esc(it.name || '')}">
-            <textarea data-item-field="description" rows="2" class="${inputCls} mt-1" placeholder="Description">${esc(it.description || '')}</textarea>
-            <input data-item-field="price" class="${inputCls} mt-1" inputmode="decimal" placeholder="Price in £, e.g. 12.50" value="${esc(it.price !== undefined ? poundsText(it.price) : (it.priceText || ''))}">
-            ${pictureHtml(it.image, { pick: `data-site-pick-item="${i}"`, clear: `data-site-pick-item-clear="${i}"` })}
-            <input type="hidden" data-item-field="imageAsset" value="${esc((it.image && it.image.assetId) || '')}">
-            <input data-item-field="imageAlt" class="${inputCls} mt-2" placeholder="What the picture shows" value="${esc((it.image && it.image.alt) || '')}">
-            <details class="mt-1" ${it.image && !it.image.assetId && it.image.url ? 'open' : ''}><summary class="text-xs text-gray-500 cursor-pointer">Use a web address instead</summary>
-              <input data-item-field="imageUrl" class="${inputCls} mt-1" placeholder="https://… picture address" value="${esc((it.image && !it.image.assetId && it.image.url) || '')}"></details>
-            <button type="button" data-item-remove="${i}" class="text-xs text-gray-500 underline mt-1">Remove</button>
-          </div>`).join('')}</div>
-        <button type="button" data-item-add="${esc(f.k)}" class="text-xs text-gray-600 underline mt-2">+ Add another</button>
-        <p class="text-xs text-gray-500 mt-1">Leave the price empty to show an item without a Buy button. Prices are in pounds; buyers pay you directly through Stripe.</p>`;
+        <div class="space-y-1 mt-1">${b.services.map((x) => `<label class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 text-xs cursor-pointer">
+          <input type="checkbox" data-service-pick value="${esc(x.id)}" ${chosen.has(x.id) ? 'checked' : ''}> <span class="font-bold text-gray-900">${esc(x.name)}</span>
+          <span class="text-gray-500">${esc(x.durationMinutes)} min${x.price ? ` · ${esc(x.price)}` : ''}</span></label>`).join('')}</div>
+        <p class="text-xs text-gray-500 mt-1">Tick none to offer all of them.</p>${hoursNote}`;
+    }
+    if (f.kind === 'productPick') {
+      // Business Information products, in their own order. Prices are changed THERE, never here.
+      const chosen = new Set((Array.isArray(value) ? value : []).map(Number));
+      const list = (state.data.catalogue || []);
+      const legacy = state.editing && Array.isArray(state.editing.props.items) && state.editing.props.items.length && !chosen.size;
+      return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
+        ${legacy ? `<div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-1"><p class="text-xs text-amber-800">This section has ${esc(state.editing.props.items.length)} item${state.editing.props.items.length === 1 ? '' : 's'} typed in here. Products and prices now live in Business Information, so they're kept in one place.</p>
+          <div class="mt-2">${btn('data-site-products-import', 'Move them into Business Information', true)}</div></div>` : ''}
+        ${list.length ? `<div class="space-y-1 mt-1">${list.map((p) => `
+          <label class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 text-xs cursor-pointer">
+            <input type="checkbox" data-product-pick value="${esc(p.id)}" ${chosen.has(p.id) ? 'checked' : ''}>
+            ${p.imageUrl ? `<img src="${esc(p.imageUrl)}" alt="" style="width:32px;height:32px;object-fit:cover;border-radius:6px">` : ''}
+            <span class="font-bold text-gray-900">${esc(p.name)}</span>
+            <span class="text-gray-500">${esc(p.price || 'No price shown')}</span>
+            ${p.buyable ? '<span class="ml-auto text-green-700 font-bold">Can be bought online</span>' : ''}
+          </label>`).join('')}</div>`
+          : '<p class="text-xs text-gray-500 mt-1">You haven\'t added any products or services yet.</p>'}
+        <p class="text-xs text-gray-500 mt-2">Add products, or change a name, price or picture, in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} — every page and checkout follows. Only fixed prices can be bought online.</p>`;
     }
     if (f.kind === 'items') {
       const list = Array.isArray(value) && value.length ? value : [{}];
@@ -265,14 +277,10 @@
         const url = form.querySelector(`[name="${n}-url"]`).value.trim();
         const alt = form.querySelector(`[name="${n}-alt"]`).value.trim();
         props[f.k] = assetId ? { assetId, url: '', alt } : url ? { url, alt } : null;
-      } else if (f.kind === 'productItems') {
-        props[f.k] = [...form.querySelectorAll(`[data-items="${f.k}"] [data-item]`)].map((row) => {
-          const g = (k) => row.querySelector(`[data-item-field="${k}"]`).value.trim();
-          const assetId = Number(g('imageAsset')) || null;
-          const url = g('imageUrl');
-          return { name: g('name'), description: g('description'), price: toPence(g('price')),
-            image: assetId ? { assetId, url: '', alt: g('imageAlt') } : url ? { url, alt: g('imageAlt') } : null };
-        });
+      } else if (f.kind === 'servicePick') {
+        props[f.k] = [...form.querySelectorAll('[data-service-pick]:checked')].map((el) => Number(el.value));
+      } else if (f.kind === 'productPick') {
+        props[f.k] = [...form.querySelectorAll('[data-product-pick]:checked')].map((el) => Number(el.value));
       } else if (f.kind === 'items') {
         props[f.k] = [...form.querySelectorAll(`[data-items="${f.k}"] [data-item]`)].map((row) => {
           const o = {};
@@ -492,6 +500,39 @@
     rerender();
   }
 
+  // ── Bookings (bookings.ts) ─────────────────────────────────────────────────
+  const BOOKING_TONE = { pending: ['Waiting for you', 'text-indigo-700'], confirmed: ['Confirmed', 'text-green-700'], declined: ['Declined', 'text-gray-500'], cancelled: ['Cancelled', 'text-gray-500'] };
+  function bookingsPanel() {
+    const b = state.data.booking || {};
+    const head = card(`<p class="text-sm font-black text-gray-900">Bookings</p>
+      <p class="text-xs text-gray-500 mt-1">${b.ready ? `Opening hours: ${esc(b.hours)}. ${b.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}` : 'Set your opening hours to take bookings on your site.'} ${btn('data-site-open-hours', 'Opening hours & bookings')}</p>
+      <p class="text-xs text-gray-500 mt-1">Add a "Bookings" section to a page to show it on your website.</p>`);
+    const list = state.bookings;
+    if (!list) return head + card('<p class="text-sm text-gray-400 text-center">Loading bookings…</p>');
+    if (!list.length) return head + card('<p class="text-xs text-gray-500">No bookings yet. They appear here, and in your email, as they come in.</p>');
+    const now = Date.now();
+    const order = (x) => (x.status === 'pending' ? 0 : 1);
+    const sorted = list.slice().sort((a, c) => order(a) - order(c) || new Date(a.startsAt) - new Date(c.startsAt));
+    return head + card(`<ul class="space-y-2">${sorted.map((x) => {
+      const [label, tone] = BOOKING_TONE[x.status] || [x.status, 'text-gray-500'];
+      const past = new Date(x.startsAt).getTime() < now;
+      return `<li class="border ${x.status === 'pending' ? 'border-indigo-200' : 'border-gray-200'} rounded-lg p-3 ${past ? 'opacity-70' : ''}">
+        <div class="flex flex-wrap items-center justify-between gap-2"><p class="text-xs font-bold text-gray-900">${esc(x.when)}</p><span class="text-xs font-bold ${tone}">${esc(label)}</span></div>
+        <p class="text-xs text-gray-800 mt-1">${esc(x.what)} · ${esc(x.customerName)}</p>
+        <p class="text-xs text-gray-600 mt-1"><a class="underline" href="mailto:${esc(x.customerEmail)}">${esc(x.customerEmail)}</a>${x.customerPhone ? ` · <a class="underline" href="tel:${esc(x.customerPhone)}">${esc(x.customerPhone)}</a>` : ''}</p>
+        ${x.notes ? `<p class="text-xs text-gray-700 mt-1" style="white-space:pre-wrap">${esc(x.notes)}</p>` : ''}
+        ${!past && (x.status === 'pending' || x.status === 'confirmed') ? `<div class="flex flex-wrap gap-2 mt-2">
+          ${x.status === 'pending' ? btn(`data-site-booking="${esc(x.id)}" data-decision="confirm"`, 'Confirm', true) + btn(`data-site-booking="${esc(x.id)}" data-decision="decline"`, 'Decline') : ''}
+          ${x.status === 'confirmed' ? btn(`data-site-booking="${esc(x.id)}" data-decision="cancel"`, 'Cancel booking') : ''}</div>` : ''}
+      </li>`;
+    }).join('')}</ul>`);
+  }
+  async function loadBookings() {
+    try { state.bookings = (await post({ action: 'bookings', assistantId: state.assistantId })).bookings || []; }
+    catch (err) { state.bookings = []; state.note = { text: err.message, tone: 'error' }; }
+    rerender();
+  }
+
   async function loadEnquiries() {
     try { state.enquiries = (await post({ action: 'enquiries', assistantId: state.assistantId })).enquiries || []; }
     catch (err) { state.enquiries = []; state.note = { text: err.message, tone: 'error' }; }
@@ -575,7 +616,8 @@
     if (state.loadError && !state.data) { host.innerHTML = card(`<p class="text-sm font-bold text-gray-700 text-center">Could not load your website</p><p class="text-xs text-gray-500 mt-2 text-center">${esc(state.loadError)}</p>`); return; }
     const newCount = state.data.newEnquiries || 0;
     const newOrders = state.data.newOrders || 0;
-    const tabs = [['pages', 'Pages'], ['design', 'Design'], ['details', 'Details'], ['enquiries', newCount ? `Enquiries (${newCount} new)` : 'Enquiries'], ['orders', newOrders ? `Orders (${newOrders} new)` : 'Orders']].map(([k, l]) => btn(`data-site-panel="${k}"`, esc(l), state.panel === k)).join(' ');
+    const waiting = (state.data.booking && state.data.booking.waiting) || 0;
+    const tabs = [['pages', 'Pages'], ['design', 'Design'], ['details', 'Details'], ['enquiries', newCount ? `Enquiries (${newCount} new)` : 'Enquiries'], ['orders', newOrders ? `Orders (${newOrders} new)` : 'Orders'], ['bookings', waiting ? `Bookings (${waiting} waiting)` : 'Bookings']].map(([k, l]) => btn(`data-site-panel="${k}"`, esc(l), state.panel === k)).join(' ');
     host.innerHTML = `
       <div class="grid gap-4 lg:grid-cols-2">
         <div class="space-y-4 min-w-0">
@@ -583,7 +625,7 @@
           ${placeholdersCard()}
           <div class="flex flex-wrap gap-2">${tabs}</div>
           ${noteHtml()}
-          ${state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : state.panel === 'enquiries' ? enquiriesPanel() : state.panel === 'orders' ? ordersPanel() : detailsPanel()}
+          ${state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : state.panel === 'enquiries' ? enquiriesPanel() : state.panel === 'orders' ? ordersPanel() : state.panel === 'bookings' ? bookingsPanel() : detailsPanel()}
           ${draftCard()}
         </div>
         <div class="min-w-0">${previewHtml()}</div>
@@ -617,6 +659,7 @@
       state.panel = panel.dataset.sitePanel; state.editing = null;
       if (state.panel === 'enquiries') { state.enquiries = null; state.enquiryShown = 20; loadEnquiries(); }
       if (state.panel === 'orders') { state.orders = null; state.orderShown = 20; loadOrders(); }
+      if (state.panel === 'bookings') { state.bookings = null; loadBookings(); }
       render();
       return;
     }
@@ -686,23 +729,16 @@
 
     // ── Pictures (media-picker.js) ──
     const pickField = t('[data-site-pick]');
-    const pickItem = t('[data-site-pick-item]');
-    if ((pickField || pickItem) && window.MediaPicker) {
-      const form = (pickField || pickItem).closest('form');
+    if (pickField && window.MediaPicker) {
+      const form = pickField.closest('form');
       window.MediaPicker.open({
         title: 'Choose a picture',
         onPick: (asset) => {
           state.thumbs[asset.id] = asset.url;
           state.editing.props = readForm(form, state.editing.type);
-          if (pickField) {
-            const k = pickField.dataset.sitePick;
-            const prev = state.editing.props[k] || {};
-            state.editing.props[k] = { assetId: asset.id, url: '', alt: prev.alt || altFromName(asset.name) };
-          } else {
-            const items = state.editing.props.items || [];
-            const it = items[Number(pickItem.dataset.sitePickItem)];
-            if (it) it.image = { assetId: asset.id, url: '', alt: (it.image && it.image.alt) || altFromName(asset.name) || it.name || '' };
-          }
+          const k = pickField.dataset.sitePick;
+          const prev = state.editing.props[k] || {};
+          state.editing.props[k] = { assetId: asset.id, url: '', alt: prev.alt || altFromName(asset.name) };
           render();
         },
       });
@@ -710,13 +746,28 @@
     }
     const clearField = t('[data-site-pick-clear]');
     if (clearField) { const form = clearField.closest('form'); state.editing.props = readForm(form, state.editing.type); state.editing.props[clearField.dataset.sitePickClear] = null; render(); return; }
-    const clearItem = t('[data-site-pick-item-clear]');
-    if (clearItem) {
-      const form = clearItem.closest('form');
-      state.editing.props = readForm(form, state.editing.type);
-      const it = (state.editing.props.items || [])[Number(clearItem.dataset.sitePickItemClear)];
-      if (it) it.image = null;
-      render();
+    if (t('[data-site-products-import]')) {
+      // An older products section: its typed-in items become Business Information products.
+      const ed = state.editing;
+      const ok = await window.confirmModal('Each item becomes a product in Business Information ▸ Products & Services, with its price. From then on you change names and prices there, and every page and checkout follows.', { title: 'Move these items into Business Information?', confirmLabel: 'Move them', cancelLabel: 'Not now' });
+      if (!ok || !ed) return;
+      await publishAction({ action: 'products_import', sectionId: ed.sectionId }, 'Moved into Business Information.', () => { state.editing = null; });
+      return;
+    }
+    if (t('[data-site-open-products]')) { window._bizinfoInitialTab = 'products'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
+    if (t('[data-site-open-hours]')) { window._bizinfoInitialTab = 'hours'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
+    const dec = t('[data-site-booking]');
+    if (dec) {
+      const decision = dec.dataset.decision;
+      if (decision !== 'confirm') {
+        const ok = await window.confirmModal(decision === 'decline' ? 'They\'ll get an email saying you can\'t take it, and the time is freed up.' : 'They\'ll get an email saying it\'s cancelled, and the time is freed up.', { title: decision === 'decline' ? 'Decline this booking?' : 'Cancel this booking?', confirmLabel: decision === 'decline' ? 'Decline' : 'Cancel booking', cancelLabel: 'Keep it' });
+        if (!ok) return;
+      }
+      try {
+        await post({ action: 'booking_decide', assistantId: state.assistantId, id: Number(dec.dataset.siteBooking), decision });
+        state.data = await post({ action: 'get', assistantId: state.assistantId });
+      } catch (err) { state.note = { text: err.message, tone: 'error' }; }
+      await loadBookings();
       return;
     }
     if (t('[data-site-logo-pick]') && window.MediaPicker) {

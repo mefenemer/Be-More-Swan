@@ -250,6 +250,16 @@ window.NotifKit = (function () {
         // Library, where the row opens with the failure reason and the re-queue actions. Needs the
         // assistant to route to; without it there's no page that can show the single post, so fall
         // through to the generic "View content" CTA below.
+        // A post that could not be WRITTEN — there is no post to show, so "View content" landed on the
+        // media library with nothing explaining anything. Its assistant's Activity tab shows why in
+        // plain words, with "Try again" (get-assistant-activity → generation-failure.ts).
+        if (notif.type === 'post_generation_failed' && meta.assistantId) {
+            return { label: 'See why', run: () => {
+                window._assistantDetailInitialTab = 'activity';
+                if (meta.jobId) window._activityFocusJobId = String(meta.jobId);
+                window.routeToAssistantDetail?.(meta.assistantId);
+            } };
+        }
         if (notif.type === 'post_publish_failed' && meta.postId && meta.assistantId) {
             return { label: 'View failed post', run: () => {
                 window._assistantDetailInitialTab = 'datahub';

@@ -7,9 +7,12 @@
 
 import { and, desc, eq, inArray, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, contentAssets, organisations, siteEnquiries, sites, siteVersions, users } from '../../db/schema';
+import { aiAssistants, contentAssets, organisations, orgProducts, siteEnquiries, sites, siteVersions, users } from '../../db/schema';
+import { buyablePence } from './product-price';
 import { listSignupForms } from './site-forms';
 import { connectAccountFor } from './site-shop';
+import { loadBookingSetup } from './bookings';
+import { describeHours } from './booking-settings';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { loadAssistantRulesBlock } from './assistant-rules-prompt';
 import { normalizeBrandKit } from './brand-kit';
@@ -390,6 +393,17 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
         ? 'Payments: their Stripe account is connected — Buy buttons on a products section work on the live site.'
         : acct ? 'Payments: they started connecting Stripe but it is not finished — Buy buttons do not show yet. Point them to the Orders tab.'
             : 'Payments: not connected. Buy buttons on a products section only appear once they connect Stripe on the Orders tab (owner or admin).');
+    const catalogue = await db.select({ id: orgProducts.id, name: orgProducts.name, price: orgProducts.price, priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount })
+        .from(orgProducts).where(and(eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active'))).orderBy(orgProducts.sortOrder, orgProducts.id).catch(() => []);
+    lines.push(catalogue.length
+        ? `Their Business Information products (for a products section's productIds): ${catalogue.slice(0, 40).map((p) => `${p.name} (productId ${p.id}, ${p.price ?? 'no price shown'}${buyablePence(p) !== null ? ', can be bought online' : ''})`).join('; ')}.`
+        : 'They have no products in Business Information yet — a products section needs them (Business Information ▸ Products & Services).');
+    const bk = await loadBookingSetup(db, orgId).catch(() => null);
+    if (bk) {
+        lines.push(Object.keys(bk.settings.weeklyHours).length
+            ? `Bookings: opening hours ${describeHours(bk.settings.weeklyHours)} (${bk.settings.timezone}); ${bk.settings.mode === 'instant' ? 'confirmed straight away' : 'they confirm each booking'}; bookable services (with a length): ${bk.services.length ? bk.services.map((x) => `${x.name} (serviceId ${x.id}, ${x.durationMinutes} min)`).join(', ') : 'none yet'}; who/what can be booked: ${bk.resources.length ? bk.resources.map((r) => `${r.name} (${r.kind})`).join(', ') : 'just them'}.`
+            : 'Bookings: not set up (no opening hours yet).');
+    }
     const forms = await listSignupForms(db, orgId).catch(() => []);
     lines.push(forms.length
         ? `Their sign-up forms (for a signup section's formId): ${forms.map((f) => `${f.name} (formId ${f.id}${f.active ? '' : ', switched off'})`).join('; ')}.`

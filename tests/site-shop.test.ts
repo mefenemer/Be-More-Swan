@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LIMITS, normaliseSiteDefinition, type SiteDefinition } from '../src/utils/site-definition';
 import { formatPrice, renderSitePage, BUY_ACTION } from '../src/utils/site-render';
-import { checkoutParams, findProduct, MAX_QUANTITY, startCheckout } from '../src/utils/site-shop';
+import { checkoutParams, MAX_QUANTITY, startCheckout, type SiteProduct } from '../src/utils/site-shop';
 import { siteFromDraftReply, starterSite } from '../src/utils/site-draft';
 import { WORKSPACE_TABLES } from '../src/utils/workspace-export';
 import { getNotificationDefault } from '../src/utils/notification-templates-catalog';
@@ -26,13 +26,20 @@ async function check(name: string, fn: () => void | Promise<void>): Promise<void
 
 const root = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
-const shop = (items: unknown[], extra: Record<string, unknown> = {}): SiteDefinition => normaliseSiteDefinition({
+const shop = (productIds: number[], extra: Record<string, unknown> = {}): SiteDefinition => normaliseSiteDefinition({
     settings: { siteName: 'Willowbrook Coffee' },
     pages: [
         { title: 'Home', slug: '', sections: [{ type: 'hero', props: { headline: 'Fresh coffee' } }] },
-        { title: 'Shop', slug: 'shop', sections: [{ type: 'products', props: { heading: 'Our coffee', items, ...extra } }] },
+        { title: 'Shop', slug: 'shop', sections: [{ type: 'products', props: { heading: 'Our coffee', productIds, ...extra } }] },
     ],
 }).definition;
+// Business Information products, as site-shop.ts loadSiteProducts returns them.
+const BLEND: SiteProduct = { id: 11, name: 'House Blend', description: 'Our everyday coffee.', price: '£12.50', buyPence: 1250, imageAssetId: null };
+const WHOLESALE: SiteProduct = { id: 12, name: 'Wholesale', description: null, price: 'Price on request', buyPence: null, imageAssetId: null };
+const CATALOGUE = { 11: BLEND, 12: WHOLESALE };
+/** A database that answers loadSiteProducts' one query with these Business Information rows. */
+const fakeDb = (rows: Array<Record<string, unknown>>) => ({ select: () => ({ from: () => ({ where: async () => rows }) }) }) as unknown as Parameters<typeof startCheckout>[0];
+const rowOf = (p: SiteProduct) => ({ id: p.id, name: p.name, description: p.description, price: p.price, priceType: p.buyPence !== null ? 'fixed' : 'on_request', priceAmount: p.buyPence, imageAssetId: p.imageAssetId });
 const row: SiteRow = {
     id: 9, organisationId: 3, aiAssistantId: 4, createdBy: null, status: 'published', draft: {}, slug: 'willowbrook', credit: true,
     draftingAt: null, draftNote: null, createdAt: new Date(), updatedAt: new Date(), publishedVersion: 1, publishedAt: null,
@@ -43,16 +50,14 @@ const live = { origin: 'https://willowbrook.bemoreswan.site', preview: false, re
 async function main() {
     console.log('\nThe products section');
 
-    await check('prices are whole pence within Stripe\'s minimum and a sane ceiling; a bad price is dropped, not the item', () => {
-        const warnings: string[] = [];
-        const d = normaliseSiteDefinition({ pages: [{ title: 'Home', slug: '', sections: [{ type: 'products', props: { items: [
-            { name: 'Beans', price: 1250 }, { name: 'Sample', price: 10 }, { name: 'Mug', price: '899.6' }, { name: 'Gift card', price: null }, { name: '', price: 500 },
-        ] } }] }] });
-        warnings.push(...d.warnings);
-        const items = (d.definition.pages[0].sections[0].props as { items: Array<{ name: string; price: number | null }> }).items;
-        assert.deepStrictEqual(items.map((i) => [i.name, i.price]), [['Beans', 1250], ['Sample', null], ['Mug', 900], ['Gift card', null]]);
-        assert.ok(warnings.some((w) => /between £0.30/.test(w)));
-        assert.strictEqual(LIMITS.minPrice, 30);
+    await check('a products section names Business Information products — it holds no names or prices of its own', () => {
+        const d = shop([11, 12, 11, -1, 'x' as unknown as number]);
+        const props = d.pages[1].sections[0].props as { productIds: number[]; items: unknown[] };
+        assert.deepStrictEqual(props.productIds, [11, 12]);
+        assert.deepStrictEqual(props.items, []);
+        const empty = normaliseSiteDefinition({ pages: [{ title: 'Home', slug: '', sections: [{ type: 'products', props: { productIds: [] } }] }] });
+        assert.ok(empty.warnings.some((w) => /choose at least one of your products/.test(w)));
+        assert.strictEqual(LIMITS.products, 12);
     });
 
     await check('formatPrice: pounds sterling, pence only when there are some', () => {
@@ -61,18 +66,29 @@ async function main() {
         assert.strictEqual(formatPrice(123456), '£1,234.56');
     });
 
-    await check('Buy buttons appear only on the live site, only with a price, and only once Stripe can take payments', () => {
-        const d = shop([{ name: 'House Blend', price: 1250, description: 'Our everyday coffee.' }, { name: 'Wholesale', price: null }]);
-        const selling = renderSitePage(d, '/shop', { ...live, canSell: true }).html;
-        assert.strictEqual((selling.match(new RegExp(`action="${BUY_ACTION}"`, 'g')) || []).length, 1, 'one priced item → one Buy form');
-        assert.ok(selling.includes('name="_n" value="House Blend"') && selling.includes('name="_i" value="0"'));
-        assert.ok(!selling.includes('name="price"') && !/value="1250"/.test(selling), 'the price is never sent by the browser');
-        assert.ok(selling.includes('£12.50'));
+    await check('Buy buttons: live site only, fixed-price products only, once Stripe can take payments; the price shown is Business Information\'s', () => {
+        const d = shop([11, 12]);
+        const selling = renderSitePage(d, '/shop', { ...live, canSell: true, products: CATALOGUE }).html;
+        assert.strictEqual((selling.match(new RegExp(`action="${BUY_ACTION}"`, 'g')) || []).length, 1, 'only the fixed-price product → one Buy form');
+        assert.ok(selling.includes('name="_pid" value="11"') && selling.includes('name="_n" value="House Blend"') && selling.includes('name="_v" value="1250"'));
+        assert.ok(selling.includes('£12.50') && selling.includes('Price on request'));
         assert.ok(selling.includes('"@type":"Product"') && selling.includes('"price":"12.50"') && selling.includes('"priceCurrency":"GBP"'));
-        const notConnected = renderSitePage(d, '/shop', { ...live, canSell: false }).html;
+        assert.strictEqual((selling.match(/"@type":"Offer"/g) || []).length, 1, 'no Offer is claimed for "on request"');
+        const notConnected = renderSitePage(d, '/shop', { ...live, canSell: false, products: CATALOGUE }).html;
         assert.ok(!notConnected.includes(`action="${BUY_ACTION}"`) && notConnected.includes('£12.50'), 'shown with its price, no button');
-        const preview = renderSitePage(d, '/shop', { ...live, preview: true, canSell: true }).html;
+        const preview = renderSitePage(d, '/shop', { ...live, preview: true, canSell: true, products: CATALOGUE }).html;
         assert.ok(!preview.includes(`action="${BUY_ACTION}"`) && preview.includes('disabled') && preview.includes('Orders tab'));
+        const archived = renderSitePage(d, '/shop', { ...live, canSell: true, products: { 12: WHOLESALE } }).html;
+        assert.ok(!archived.includes('House Blend'), 'a product archived in Business Information disappears from the site');
+    });
+
+    await check('an older section\'s typed-in items are shown but never sold, until moved into Business Information', () => {
+        const d = normaliseSiteDefinition({ pages: [{ title: 'Home', slug: '', sections: [{ type: 'products', props: { items: [{ name: 'Beans', price: 999 }] } }] }] }).definition;
+        const html = renderSitePage(d, '/', { ...live, canSell: true }).html;
+        assert.ok(html.includes('Beans') && html.includes('£9.99') && !html.includes(`action="${BUY_ACTION}"`));
+        const api = read('netlify/functions/sites.ts');
+        const imp = api.slice(api.indexOf("if (action === 'products_import')"), api.indexOf("if (action === 'orders')"));
+        assert.ok(imp.includes('db.insert(orgProducts)') && imp.includes("priceType: 'fixed'") && imp.includes('productIds: created.map((c) => c.id), items: []'));
     });
 
     await check('the AI draft never puts things up for sale', () => {
@@ -87,20 +103,20 @@ async function main() {
 
     console.log('\nCheckout');
 
-    await check('the checkout is built from the PUBLISHED item: its price, its name, sterling, quantity 1–10, no fee', () => {
-        const d = shop([{ name: 'House Blend', price: 1250, description: 'Everyday.', image: { url: 'https://img.example/b.jpg', alt: 'Bag' } }], { collectAddress: true });
-        const found = findProduct(d, d.pages[1].sections[0].id, 0)!;
-        const p = checkoutParams({ origin: live.origin, site: row, sectionId: d.pages[1].sections[0].id, index: 0, item: found.item, collectAddress: true, backPath: '/shop' });
+    await check('the checkout is built from the Business Information product: its price, its name, sterling, quantity 1–10, no fee', () => {
+        const p = checkoutParams({ origin: live.origin, site: row, sectionId: 's1', product: BLEND, collectAddress: true, backPath: '/shop', imageUrl: 'https://bemoreswan.com/api/newsletter/media?a=5&s=x' });
         const line = p.line_items![0];
         assert.strictEqual(p.mode, 'payment');
         assert.deepStrictEqual(line.price_data!.unit_amount, 1250);
         assert.strictEqual(line.price_data!.currency, 'gbp');
         assert.strictEqual(line.price_data!.product_data!.name, 'House Blend');
+        assert.deepStrictEqual(line.price_data!.product_data!.images, ['https://bemoreswan.com/api/newsletter/media?a=5&s=x']);
         assert.deepStrictEqual(line.adjustable_quantity, { enabled: true, minimum: 1, maximum: MAX_QUANTITY });
         assert.deepStrictEqual(p.shipping_address_collection, { allowed_countries: ['GB'] });
         assert.strictEqual(p.success_url, 'https://willowbrook.bemoreswan.site/_sent?k=order&b=%2Fshop');
         assert.strictEqual(p.cancel_url, 'https://willowbrook.bemoreswan.site/shop');
         assert.strictEqual(p.metadata!.bms_site_id, '9');
+        assert.strictEqual(p.metadata!.bms_product, '11');
         assert.strictEqual(p.metadata!.bms_unit, '1250');
         assert.ok(!('payment_intent_data' in p), 'no application fee — decision D5 (0%)');
         const src = read('src/utils/site-shop.ts');
@@ -108,17 +124,24 @@ async function main() {
         assert.ok(src.includes('{ stripeAccount: account.stripeAccountId }'), 'the session is created ON the connected account');
     });
 
-    await check('a stale or tampered Buy is refused before Stripe or the database is touched', async () => {
-        const d = shop([{ name: 'House Blend', price: 1250 }, { name: 'Wholesale', price: null }]);
+    await check('a stale or tampered Buy is refused before Stripe is touched', async () => {
+        const d = shop([11, 12]);
         const sid = d.pages[1].sections[0].id;
+        const go = (db: Parameters<typeof startCheckout>[0], o: Record<string, string>) => startCheckout(db, { site: row, definition: d, origin: live.origin, ip: '1.1.1.1', backPath: '/shop', body: new URLSearchParams(o) });
         const noDb = null as unknown as Parameters<typeof startCheckout>[0];
-        const go = (o: Record<string, string>) => startCheckout(noDb, { site: row, definition: d, origin: live.origin, ip: '1.1.1.1', backPath: '/shop', body: new URLSearchParams(o) });
-        const unpriced = await go({ _s: sid, _i: '1', _n: 'Wholesale' });
-        assert.ok(unpriced.kind === 'error' && unpriced.status === 404);
-        const changed = await go({ _s: sid, _i: '0', _n: 'Old Blend' });
-        assert.ok(changed.kind === 'error' && changed.status === 409 && /changed/.test(changed.title));
-        const missing = await go({ _s: 'nope', _i: '0', _n: 'House Blend' });
+        const notOffered = await go(noDb, { _s: sid, _pid: '99', _n: 'Anything', _v: '1' });
+        assert.ok(notOffered.kind === 'error' && notOffered.status === 404, 'a product that section does not offer');
+        const missing = await go(noDb, { _s: 'nope', _pid: '11', _n: 'House Blend', _v: '1250' });
         assert.ok(missing.kind === 'error' && missing.status === 404);
+        const db = fakeDb([rowOf(BLEND), rowOf(WHOLESALE)]);
+        const unpriced = await go(db, { _s: sid, _pid: '12', _n: 'Wholesale', _v: '0' });
+        assert.ok(unpriced.kind === 'error' && unpriced.status === 404, 'no fixed price → not for sale');
+        const renamed = await go(db, { _s: sid, _pid: '11', _n: 'Old Blend', _v: '1250' });
+        assert.ok(renamed.kind === 'error' && renamed.status === 409 && /changed/.test(renamed.title));
+        const repriced = await go(db, { _s: sid, _pid: '11', _n: 'House Blend', _v: '999' });
+        assert.ok(repriced.kind === 'error' && repriced.status === 409, 'the price changed in Business Information since the page was drawn');
+        const fn = read('src/utils/site-shop.ts');
+        assert.ok(fn.slice(fn.indexOf('export async function startCheckout')).indexOf('loadSiteProducts(db, req.site.organisationId') > 0, 'read from Business Information at the click');
     });
 
     await check('a checkout needs the workspace\'s account to be able to take payments, and is rate-limited', () => {
@@ -173,9 +196,10 @@ async function main() {
         assert.ok(WORKSPACE_TABLES.websiteOrders && WORKSPACE_TABLES.stripeConnectAccounts);
         assert.ok(read('db/schema.ts').includes('export const siteOrders = pgTable("site_orders"'));
         const ed = read('src/components/assistant-site-editor.js');
-        assert.ok(ed.includes("products: 'Products for sale'") && ed.includes("kind: 'productItems'") && ed.includes("action: 'payments_connect'") && ed.includes("action: 'orders'"));
+        assert.ok(ed.includes("products: 'Products for sale'") && ed.includes("kind: 'productPick'") && ed.includes("action: 'payments_connect'") && ed.includes("action: 'orders'"));
+        assert.ok(!ed.includes("kind: 'productItems'"), 'no typing prices into the site');
         const chat = read('netlify/functions/chat-orchestrator.ts');
-        assert.ok(chat.includes('price is in PENCE') && chat.includes('never estimate one'));
+        assert.ok(chat.includes('Names, prices and pictures come ONLY from Business Information') && chat.includes('you cannot set or change a price'));
     });
 
     console.log(`\n${passed}/${total} passed`);

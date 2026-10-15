@@ -82,13 +82,25 @@ export interface ContactProps { heading: string | null; intro: string | null; as
  */
 export interface SignupProps { heading: string | null; intro: string | null; formId: number | null; }
 /**
- * Things the business sells (step 3c). `price` is in PENCE (GBP) and only ever typed by the owner —
- * the AI draft never produces this section (site-draft.ts drops it) and the chat only proposes it.
- * An item with no price is shown without a Buy button. Checkout reads the price from the PUBLISHED
- * site, never from the visitor's browser (site-shop.ts).
+ * Things the business sells. `productIds` are Business Information ▸ Products & Services rows
+ * (org_products) — the ONE place names, prices and pictures live: the page and checkout read them
+ * from there (site-shop.ts loadSiteProducts), so a price changed once changes everywhere. Only a
+ * product with a FIXED price gets a Buy button (product-price.ts buyablePence).
+ *
+ * `items` is the older shape (owner-typed copies inside the site), kept only so a site made before
+ * products moved can still be drawn and its items moved into Business Information (sites.ts
+ * products_import). New sections never get items; legacy items are shown but never sold.
  */
+/**
+ * Bookings (docs/booking-plan.md). The section is only the doorway: services come from Business
+ * Information products with a duration, opening hours and rules from Business Information ▸ Opening
+ * hours & bookings, and every step after the first is a page of its own (/_book — booking-render.ts).
+ * `serviceIds` empty = every bookable service. `askStaff` offers a choice of who (or "anyone").
+ */
+export type BookingSectionKind = 'appointment' | 'consultation' | 'table';
+export interface BookingProps { heading: string | null; intro: string | null; kind: BookingSectionKind; serviceIds: number[]; askStaff: boolean; buttonLabel: string; }
 export interface ProductItem { name: string; description: string | null; price: number | null; image: Image | null; }
-export interface ProductsProps { heading: string | null; intro: string | null; items: ProductItem[]; collectAddress: boolean; buyLabel: string; }
+export interface ProductsProps { heading: string | null; intro: string | null; productIds: number[]; items: ProductItem[]; collectAddress: boolean; buyLabel: string; }
 
 export type Section =
     | { id: string; type: 'hero'; props: HeroProps }
@@ -100,9 +112,10 @@ export type Section =
     | { id: string; type: 'testimonials'; props: TestimonialsProps }
     | { id: string; type: 'contact'; props: ContactProps }
     | { id: string; type: 'signup'; props: SignupProps }
-    | { id: string; type: 'products'; props: ProductsProps };
+    | { id: string; type: 'products'; props: ProductsProps }
+    | { id: string; type: 'booking'; props: BookingProps };
 export type SectionType = Section['type'];
-export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products'];
+export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking'];
 
 export interface SitePageDef {
     id: string;
@@ -288,6 +301,8 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
             } };
         }
         case 'products': {
+            const ids = [...new Set((Array.isArray(p.productIds) ? p.productIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+            if (ids.length > LIMITS.products) warn(`Only the first ${LIMITS.products} products were kept.`);
             const list = (Array.isArray(p.items) ? p.items : []).map((x) => {
                 const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
                 const raw = o.price;
@@ -299,12 +314,22 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
                 }
                 return { name: cleanText(o.name, LIMITS.productName), description: textOrNull(o.description, LIMITS.productDescription, true), price, image: cleanImage(o.image, warn) };
             }).filter((x) => x.name);
-            if (!list.length) { warn('A products section was left out: it has no items with a name.'); return null; }
+            if (!ids.length && !list.length) { warn('A products section was left out: choose at least one of your products.'); return null; }
             if (list.length > LIMITS.products) warn(`Only the first ${LIMITS.products} items were kept.`);
             return { type: 'products', props: {
                 heading: textOrNull(p.heading, LIMITS.headline), intro: textOrNull(p.intro, LIMITS.intro, true),
+                productIds: ids.slice(0, LIMITS.products),
                 items: list.slice(0, LIMITS.products), collectAddress: p.collectAddress === true,
                 buyLabel: cleanText(p.buyLabel, LIMITS.buttonLabel) || 'Buy now',
+            } };
+        }
+        case 'booking': {
+            const kind = p.kind === 'table' || p.kind === 'consultation' ? p.kind : 'appointment';
+            return { type: 'booking', props: {
+                heading: textOrNull(p.heading, LIMITS.headline), intro: textOrNull(p.intro, LIMITS.intro, true), kind,
+                serviceIds: [...new Set((Array.isArray(p.serviceIds) ? p.serviceIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 50),
+                askStaff: kind !== 'table' && p.askStaff === true,
+                buttonLabel: cleanText(p.buttonLabel, LIMITS.buttonLabel) || (kind === 'table' ? 'Find a table' : 'Choose a time'),
             } };
         }
         case 'signup': {

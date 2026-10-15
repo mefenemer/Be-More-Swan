@@ -818,6 +818,15 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // "Set up bookings" on a booking_setup card → sites.ts `booking_setup` (hours & rules, + a section).
+    function onBookingSetup(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      sitePost({ action: 'booking_setup', assistantId, settings: d.settings || {}, section: d.section || null })
+        .then(() => { respond({ ok: true }); siteChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     function onSiteDraft(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -1124,6 +1133,7 @@
     container.addEventListener('site:apply', onSiteApply);
     container.addEventListener('site:draft', onSiteDraft);
     container.addEventListener('site:words', onSiteWords);
+    container.addEventListener('site:bookingSetup', onBookingSetup);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
     container.addEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
@@ -1176,6 +1186,7 @@
         container.removeEventListener('site:apply', onSiteApply);
         container.removeEventListener('site:draft', onSiteDraft);
         container.removeEventListener('site:words', onSiteWords);
+        container.removeEventListener('site:bookingSetup', onBookingSetup);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
         container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);

@@ -91,8 +91,8 @@ async function main() {
 
     await check('checkout shows a library picture through its link, never an empty address', () => {
         const row = { id: 1, organisationId: 1 } as SiteRow;
-        const item = { name: 'Beans', description: null, price: 999, image: { url: '', alt: 'Bag', assetId: 6 } };
-        const base = { origin: live.origin, site: row, sectionId: 's1', index: 0, item, collectAddress: false, backPath: '/' };
+        const product = { id: 3, name: 'Beans', description: null, price: '£9.99', buyPence: 999, imageAssetId: 6 };
+        const base = { origin: live.origin, site: row, sectionId: 's1', product, collectAddress: false, backPath: '/' };
         assert.deepStrictEqual(checkoutParams({ ...base, imageUrl: signed(6) }).line_items![0].price_data!.product_data!.images, [signed(6)]);
         assert.strictEqual(checkoutParams({ ...base, imageUrl: null }).line_items![0].price_data!.product_data!.images, undefined);
     });
@@ -102,7 +102,7 @@ async function main() {
     await check('every picture field and the logo use "Choose picture"; the web address is tucked away', () => {
         const ed = read('src/components/assistant-site-editor.js');
         assert.ok(ed.includes('function pictureHtml('));
-        assert.ok(ed.includes('data-site-pick=') && ed.includes('data-site-pick-item=') && ed.includes('data-site-logo-pick'));
+        assert.ok(ed.includes('data-site-pick=') && ed.includes('data-site-logo-pick'));
         assert.ok(ed.includes('Use a web address instead'));
         assert.ok(ed.includes('window.MediaPicker.open('));
         assert.ok(!ed.includes('Logo (https address)'));
