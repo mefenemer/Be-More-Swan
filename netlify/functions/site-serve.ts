@@ -89,12 +89,14 @@ async function subscribeInProcess(payload: Record<string, unknown>, meta: { orig
 }
 
 /**
- * ⚠️ EVERY response varies by the site's address. The sites host asks for site-serve?path=/… with the
- * site in the X-Site-Host header; the CDN would otherwise cache by URL alone and serve one site's page
- * at every other site's address (found the day wildcard routing went live, before any site was public).
- * Netlify-Vary splits the cache per header value; plain Vary covers any other cache on the way.
+ * ⚠️ EVERY response varies by the site's address AND by the query string. The sites host asks for
+ * site-serve?host=…&path=/…&q=… with the site also in the X-Site-Host header. Netlify's cache key
+ * IGNORES the query string unless told otherwise, so without `query` every page of every site shared
+ * one cache entry: a browser's /favicon.ico (an empty 404 kept an hour) became the home page — found
+ * on the first published site, 2026-10-16. And without the header one site's page showed at another's
+ * address. Netlify-Vary splits on both; plain Vary covers any other cache on the way.
  */
-export const SITE_VARY = { 'Netlify-Vary': 'header=X-Site-Host', Vary: 'X-Site-Host' } as const;
+export const SITE_VARY = { 'Netlify-Vary': 'query, header=X-Site-Host', Vary: 'X-Site-Host' } as const;
 
 type ServeResult = { statusCode: number; headers?: Record<string, string>; body?: string; isBase64Encoded?: boolean };
 
@@ -118,7 +120,7 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0]) {
     const path = rawPath.startsWith('/') ? rawPath.slice(0, 300) : '/';
     // Only a form or a Buy button may be posted, and only to their own addresses.
     if (isPost && path !== FORM_ACTION && path !== BUY_ACTION && path !== BOOK_PATH) return { statusCode: 405, headers: { Allow: 'GET, HEAD' } as Record<string, string>, body: 'Method Not Allowed' };
-    if (path === '/favicon.ico') return { statusCode: 404, headers: headers('text/plain', 'public, max-age=3600'), body: '' };
+    if (path === '/favicon.ico') return { statusCode: 404, headers: headers('text/plain', 'public, max-age=300'), body: '' };
 
     const db = getDb();
     const [site] = await db.select().from(sites).where(eq(sites.slug, slug)).limit(1);

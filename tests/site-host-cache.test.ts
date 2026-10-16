@@ -15,7 +15,7 @@ const check = (name: string, fn: () => void) => { fn(); passed++; console.log(` 
 
 check('every site-serve response varies by the site address', () => {
     const src = read('netlify/functions/site-serve.ts');
-    assert.ok(src.includes("export const SITE_VARY = { 'Netlify-Vary': 'header=X-Site-Host', Vary: 'X-Site-Host' } as const;"));
+    assert.ok(src.includes("export const SITE_VARY = { 'Netlify-Vary': 'query, header=X-Site-Host', Vary: 'X-Site-Host' } as const;"), 'by address AND query string (path=, q=)');
     assert.ok(src.includes('return { ...res, headers: { ...(res.headers || {}), ...SITE_VARY } };'), 'applied to the handler\'s every return');
     assert.strictEqual((src.match(/export default withLambda\(/g) || []).length, 1);
 });
