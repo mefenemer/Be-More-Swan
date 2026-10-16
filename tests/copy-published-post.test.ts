@@ -117,12 +117,14 @@ check('a destination that cannot carry the post is refused, with a reason', () =
 check('the caption is copied verbatim, and reworded ONLY when it cannot fit', () => {
     assert.match(COPY, /if \(caption\.length > limit\)/,
         'a caption that fits is the same post — rewriting it when nothing required it is not an improvement');
-    assert.match(COPY, /const credit = await consumeTaskCredit\(db, orgId\)/,
-        'the rewrite is paid work and must go through the cap like every other paid action');
+    // Metered as an editing helper: a task credit with the flag off, fair use under the single
+    // task allowance (meterInteraction, src/utils/task-credit.ts).
+    assert.match(COPY, /const credit = await meterInteraction\(db, orgId, 'helpers'\)/,
+        'the rewrite is a model call and must be metered like every other helper');
     // The credit is taken INSIDE the over-length branch, or every copy bills for nothing. Measured
     // against the CALL, not the import at the top of the file.
     const branch = COPY.indexOf('if (caption.length > limit)');
-    const call = COPY.indexOf('await consumeTaskCredit(');
+    const call = COPY.indexOf('await meterInteraction(');
     assert.ok(branch !== -1 && call !== -1 && call > branch,
         'a credit spent before the length check bills the user for copies that needed no rewrite');
 

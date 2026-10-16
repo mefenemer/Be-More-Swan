@@ -125,9 +125,9 @@ export default withLambda(async (event) => {
     if (blocked) return blocked;
 
     // Hold 5 credits; insufficient → 402 with upgrade CTA payload.
-    const hold = await holdCredits(db, { orgId, amount: VIDEO_CREDIT_COST });
+    const hold = await holdCredits(db, { orgId, amount: VIDEO_CREDIT_COST, mediaType: 'video' });
     if (!hold.ok) {
-        return { statusCode: 402, body: JSON.stringify({ error: 'insufficient_credits', cost: VIDEO_CREDIT_COST, balance: hold.balance }) };
+        return { statusCode: 402, body: JSON.stringify({ error: 'insufficient_credits', cost: hold.cost, balance: hold.balance, unit: hold.unit }) };
     }
 
     // Submit to Fal. A synchronous content-policy rejection refunds immediately.

@@ -6,12 +6,18 @@
 //
 // Cookie: aura_session (role must clear 'manage_ai_credits' — billing_admin and above).
 // Unlike admin-billing-override, this needs no Stripe — credits are DB-only and per-environment.
+//
+// Single task allowance ('unified_task_metering', docs/task-metering.md): the same endpoints
+// adjust BONUS TASKS instead (task_bonus, non-expiring, spent after the monthly allowance), and
+// the ledger is the org's recent task_ledger rows. Responses carry `unit: 'tasks'`.
 
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { eq, and, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, userOrganisations, aiCreditLedger } from '../../db/schema';
+import { users, userOrganisations, aiCreditLedger, taskLedger } from '../../db/schema';
+import { getTaskUsage, grantBonusTasks } from '../../src/utils/work-metering';
+import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { getBalance, adminAdjust } from '../../src/utils/ai-credits';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -56,7 +62,32 @@ export default withLambda(async (event) => {
     if (!membership) return { statusCode: 404, body: JSON.stringify({ error: 'No organisation found for that user.' }) };
     const orgId = membership.organisationId;
 
+    const tasks = await isUnifiedTaskMetering(orgId);
+
     // ── GET: balance + recent ledger ───────────────────────────────────────────
+    if (event.httpMethod === 'GET' && tasks) {
+        const usage = await getTaskUsage(db, orgId);
+        const rows = await db.select({
+                units: taskLedger.units, kind: taskLedger.kind, source: taskLedger.source,
+                bonusUnits: taskLedger.bonusUnits, note: taskLedger.note, createdAt: taskLedger.createdAt,
+            })
+            .from(taskLedger)
+            .where(eq(taskLedger.organisationId, orgId))
+            .orderBy(desc(taskLedger.createdAt))
+            .limit(20);
+        // Same row shape the admin modal already renders: a grant is +, work is −.
+        const ledger = rows.map(r => ({
+            delta: r.source === 'work' ? -r.units : r.units,
+            reason: r.source === 'work' ? r.kind : `${r.source}${r.note ? ` — ${r.note}` : ''}`,
+            balanceAfter: null,
+            isAutonomous: false,
+            createdAt: r.createdAt,
+        }));
+        return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+            unit: 'tasks', balance: usage.bonus, held: usage.inFlight,
+            used: usage.used, limit: usage.limit, ledger,
+        }) };
+    }
     if (event.httpMethod === 'GET') {
         const { balance, held } = await getBalance(db, orgId);
         const ledger = await db
@@ -83,6 +114,24 @@ export default withLambda(async (event) => {
             return { statusCode: 400, body: JSON.stringify({ error: 'delta must be a non-zero integer.' }) };
         }
         if (!reason) return { statusCode: 400, body: JSON.stringify({ error: 'A reason is required.' }) };
+
+        if (tasks) {
+            const beforeBonus = (await getTaskUsage(db, orgId)).bonus;
+            const bonus = await grantBonusTasks(db, orgId, delta, 'admin', { userId: adminId, note: reason.slice(0, 200) });
+            await insertAdminAuditLog({
+                adminId,
+                action: 'ai_credit_adjustment' as any,
+                targetType: 'organisation',
+                targetId: orgId,
+                previousState: { bonusTasks: beforeBonus },
+                newState: { bonusTasks: bonus },
+                reason,
+                ipAddress: getAdminIp(event.headers),
+                userAgent: event.headers['user-agent'] || undefined,
+                metadata: { targetUserId, delta, unit: 'tasks' },
+            });
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ unit: 'tasks', balance: bonus }) };
+        }
 
         const before = await getBalance(db, orgId);
         const balance = await adminAdjust(db, { orgId, delta, userId: adminId });

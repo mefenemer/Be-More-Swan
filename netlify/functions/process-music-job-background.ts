@@ -98,7 +98,7 @@ export default withLambda(async (event: HandlerEvent) => {
             status: 'pending',
         }).returning({ id: contentAssets.id });
 
-        await settleHold(db, { orgId, amount: cost, success: true, mediaType: 'audio', userId: ownerId, jobId: job.id });
+        await settleHold(db, { orgId, amount: cost, success: true, mediaType: 'audio', userId: ownerId, jobId: job.id, assistantId: job.assistantId ?? null });
         // Stability charges a SUCCESSFUL generation only — which is exactly here.
         logMediaCost(job.model, {}, { workspaceId: orgId, userId: ownerId, assistantId: job.assistantId ?? null, sessionId: 'stability-music' });
 

@@ -43,6 +43,8 @@ import { activeCampaignCapacity, campaignCapacityMessage, createDiscoveryRun } f
 import { triggerDiscoveryDrain } from '../../src/utils/trigger-drain';
 import { isSearchConfigured } from '../../src/lib/discovery-search';
 import { sendGmailMessage } from '../../src/utils/gmail';
+import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
+import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { sendOutlookMessage } from '../../src/utils/outlook';
 import { IntegrationError } from '../../src/utils/workspace-integrations';
 import { recordEvent, cycleDaysBetween } from '../../src/utils/revenue-ledger';
@@ -1286,6 +1288,13 @@ ${OUTREACH_SUBJECT_RULES}`;
             }
 
 
+            // Single task allowance: an outreach email is one finished piece of work, charged once it
+            // has actually gone out (below). Asked here, before any draft is generated or sent.
+            const metered = await isUnifiedTaskMetering(orgId);
+            if (metered && !(await hasTaskCapacity(db, orgId))) {
+                return json(200, { sent: false, reason: 'task_limit', detail: TASK_LIMIT_MESSAGE, to: recipient });
+            }
+
             // Use the stored draft if present; otherwise generate one from the lead's details.
             let subject = str(draft?.subject as string, 300);
             let bodyText = str(draft?.body as string, 4000);
@@ -1383,6 +1392,7 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
 
             // Record what actually went out. Best-effort by contract — the email has already been
             // delivered by this point, so a bookkeeping failure must not surface as a send failure.
+            if (metered) await recordCompletedWork(db, orgId, 'outreach_email', { ref: `record:${rec.id}`, assistantId: assistant.id });
             if (thread) {
                 // `generatedBody` is the AGENT's text, which is not always what we are sending: a
                 // reviewer can rewrite the draft in the Review Queue before approving, and that

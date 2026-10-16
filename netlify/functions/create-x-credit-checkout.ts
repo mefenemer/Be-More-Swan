@@ -13,6 +13,7 @@ import { getDb } from '../../db/client';
 import { users } from '../../db/schema';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
+import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { xCreditPack, xPackPrice } from '../../src/utils/ai-credits';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
@@ -30,6 +31,12 @@ export default withLambda(async (event) => {
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
     const { userId: currentUserId, organisationId: orgId } = ctx;
+
+    // Single task allowance (docs/task-metering.md): X credits no longer exist — an X post with a
+    // link costs tasks — so there is nothing to sell. 410, not 404: the endpoint is retired.
+    if (await isUnifiedTaskMetering(orgId)) {
+        return { statusCode: 410, body: JSON.stringify({ error: 'X credit packs have been retired. X posts now use your monthly task allowance.' }) };
+    }
 
     const baseUrl = resolveBaseUrl(event.headers);
     if (!baseUrl) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured: base URL unavailable' }) };

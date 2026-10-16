@@ -16,7 +16,7 @@ import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import {
     MAX_SUGGESTION_ROUNDS, openWarnings, readCachedReview, runQualityReview,
 } from '../../src/utils/post-quality-review';
-import { consumeTaskCredit } from '../../src/utils/task-credit';
+import { meterInteraction } from '../../src/utils/task-credit';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -118,12 +118,12 @@ export default withLambda(async (event) => {
     // Fresh suggestions are discretionary work a human asked for, so they cost a task credit. The
     // automatic compliance re-check does not — the system requires that for its own correctness.
     if (includeSuggestions) {
-        const credit = await consumeTaskCredit(db, post.organisationId!);
+        const credit = await meterInteraction(db, post.organisationId!, 'helpers');
         if (!credit.allowed) {
             return {
                 statusCode: 429,
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ error: credit.limitMessage, code: 'TASK_LIMIT' }),
+                body: JSON.stringify({ error: credit.limitMessage, code: credit.failed ? 'CAP_CHECK_FAILED' : credit.fairUse ? 'FAIR_USE_LIMIT' : 'TASK_LIMIT' }),
             };
         }
     }

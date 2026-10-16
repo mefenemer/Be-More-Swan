@@ -8,6 +8,7 @@ import { storeSecret, deleteSecret, buildRefKey } from '../../src/utils/vault';
 import { deleteIntegration, getIntegration, isIntegrationProvider, serviceAutoRefreshes } from '../../src/utils/workspace-integrations';
 import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant, usesOutreachMailbox, MAILBOX_PROVIDERS, usesSearchConsole, SEARCH_CONSOLE_PROVIDER } from '../../src/utils/connection-map';
 import { getXUsage } from '../../src/utils/ai-credits';
+import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { resolveActiveOrg } from '../../src/utils/tenant';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
@@ -203,7 +204,8 @@ export default withLambda(async (event) => {
             // db/x-post-credits.sql migration has run, its columns don't exist. Degrade to no gauge.
             let xCredits: { used: number; allowance: number; remaining: number } | null = null;
             try {
-                if (currentOrgId) xCredits = await getXUsage(db, currentOrgId);
+                // Single task allowance: no X credits, so no gauge (the X card shows nothing extra).
+                if (currentOrgId && !(await isUnifiedTaskMetering(currentOrgId))) xCredits = await getXUsage(db, currentOrgId);
             } catch (e) {
                 console.warn('[integrations] X usage lookup failed (migration pending?):', (e as Error).message);
             }

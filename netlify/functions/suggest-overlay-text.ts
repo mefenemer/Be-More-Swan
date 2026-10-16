@@ -24,7 +24,7 @@ import { scheduledPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
-import { consumeTaskCredit } from '../../src/utils/task-credit';
+import { meterInteraction } from '../../src/utils/task-credit';
 import { displayCaption } from '../../src/utils/model-json';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { stripCodeFences } from '../../src/utils/model-json';
@@ -121,11 +121,12 @@ export default withLambda(async (event: HandlerEvent) => {
 
     // A model call on the user's behalf is a task. Unmetered, the plan's cap quietly stops being a
     // cap — and this is a button that can be pressed indefinitely.
-    const credit = await consumeTaskCredit(db, ctx.organisationId);
+    const credit = await meterInteraction(db, ctx.organisationId, 'helpers');
     if (!credit.allowed) {
         // A cap that could not be EVALUATED is a server fault, not a plan limit — answering it with
         // the upgrade message would tell the user to buy a bigger plan to fix an outage.
         if (credit.failed) return json(503, { error: credit.limitMessage });
+        if (credit.fairUse) return json(429, { error: credit.limitMessage, code: 'FAIR_USE_LIMIT' });
         return json(403, { error: credit.limitMessage, upgradeRequired: true });
     }
 

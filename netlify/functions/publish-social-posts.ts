@@ -196,7 +196,7 @@ export default withLambda(async () => {
                 try {
                     const xHold = await holdXCredits(db, { orgId: post.organisation_id, amount: xCost });
                     if (!xHold.ok) {
-                        await pauseForXCredits(db, post, xPausedOrgs, now);
+                        await pauseForXCredits(db, post, xPausedOrgs, now, xHold.tasks ? 'tasks' : 'ledger');
                         return;
                     }
                     metered = true;
@@ -213,7 +213,7 @@ export default withLambda(async () => {
                 // is never charged, and the retry re-holds on its next attempt).
                 if (metered) {
                     try {
-                        await settleXHold(db, { orgId: post.organisation_id, amount: xCost, success: result.ok, hasLink: xPostHasLink(text), userId: post.user_id, assistantId: post.assistant_id });
+                        await settleXHold(db, { orgId: post.organisation_id, amount: xCost, success: result.ok, hasLink: xPostHasLink(text), userId: post.user_id, assistantId: post.assistant_id, ref: post.id });
                     } catch (e) {
                         console.warn(`[publish-social-posts] X credit settle failed for post ${post.id}:`, (e as Error)?.message || e);
                     }
@@ -380,13 +380,17 @@ async function handleFailure(db: ReturnType<typeof getDb>, post: PostRow, reason
 // 'api'     — our ledger said there was credit, we called X, and X answered 402. The two disagree:
 //             the connected X developer account has hit ITS quota, which our allowance knows
 //             nothing about.
+// 'tasks'   — single task allowance (docs/task-metering.md): a link post costs 10 tasks and the
+//             org has fewer left. Same park and the same 1st-of-month resume, because that is when
+//             the allowance resets; no notification of its own — task-volume-check sends the
+//             allowance notices, and the post's reason says why it is waiting.
 //
 // The API side used to fall through to handleFailure and land on 'failed', which is a one-way door:
 // BOTH resume sweeps (the monthly reset above, and stripe-webhook.ts on a credit top-up) select
 // `status = 'paused_credits' AND platform = 'x'`, and 'failed' has no Review Queue column either.
 // A post that was merely out of quota became permanently unrecoverable and invisible — exactly what
 // happened to the 2026-07-23 post whose LinkedIn sibling went out fine.
-type XPauseSource = 'ledger' | 'api';
+type XPauseSource = 'ledger' | 'api' | 'tasks';
 async function pauseForXCredits(
     db: ReturnType<typeof getDb>,
     post: PostRow,
@@ -405,6 +409,13 @@ async function pauseForXCredits(
             isRetryable: false,
             reason: 'x_api_quota_exhausted',
         }
+        : source === 'tasks'
+        ? {
+            httpStatus: null,
+            errorMessage: 'An X post with a link uses 10 tasks and your monthly task allowance doesn\'t have enough left — paused until it resets on the 1st.',
+            isRetryable: false,
+            reason: 'task_limit',
+        }
         : {
             httpStatus: null,
             errorMessage: 'X monthly posting allowance reached — paused until it resets.',
@@ -419,7 +430,7 @@ async function pauseForXCredits(
                 updated_at = now()
           WHERE id = ${post.id}`
     );
-    if (!notifiedOrgs.has(post.organisation_id)) {
+    if (source !== 'tasks' && !notifiedOrgs.has(post.organisation_id)) {
         notifiedOrgs.add(post.organisation_id);
         await createNotification(db, source === 'api' ? 'x_api_quota_exhausted' : 'x_credits_exhausted', {
             userId: post.user_id,

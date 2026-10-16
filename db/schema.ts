@@ -3028,6 +3028,11 @@ export const aiCreditBalance = pgTable("ai_credit_balance", {
   lastGrantedPeriod: date("last_granted_period"),                  // first-of-month (UTC) monthly grant last applied
   autonomousPeriodStart: date("autonomous_period_start"),          // US5 autonomous-cap window
   autonomousUsed: integer("autonomous_used").notNull().default(0),
+  // X posting credits (db/x-post-credits.sql, db/x-credit-packs.sql). Retired by the single task
+  // allowance (docs/task-metering.md); declared so the cutover conversion is type-checked.
+  xUsed: integer("x_used").notNull().default(0),
+  xPeriodStart: date("x_period_start"),
+  xBonus: integer("x_bonus").notNull().default(0),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
@@ -3050,6 +3055,33 @@ export const aiCreditLedger = pgTable("ai_credit_ledger", {
   index("ai_credit_ledger_org_created_idx").on(t.organisationId, t.createdAt),
   index("ai_credit_ledger_assistant_idx").on(t.organisationId, t.assistantId, t.createdAt),
 ]);
+
+// One task allowance (db/task-ledger.sql, docs/task-metering.md): what every task paid for.
+// usage_counters.task_count is the fast counter; this is the itemised breakdown behind it.
+export const taskLedger = pgTable("task_ledger", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  periodStart: timestamp("period_start").notNull(),
+  kind: text("kind").notNull(),                                    // WorkKind | 'bonus_grant'
+  units: integer("units").notNull(),
+  bonusUnits: integer("bonus_units").notNull().default(0),         // part of a work charge paid from bonus tasks
+  source: text("source").notNull().default('work'),                // work | conversion | admin | purchase
+  assistantId: integer("assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  ref: text("ref"),
+  note: text("note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("task_ledger_org_period_idx").on(t.organisationId, t.periodStart),
+  index("task_ledger_assistant_idx").on(t.organisationId, t.assistantId, t.periodStart),
+]);
+
+// Non-expiring bonus tasks, spent only after the monthly allowance (db/task-ledger.sql).
+export const taskBonus = pgTable("task_bonus", {
+  organisationId: integer("organisation_id").primaryKey().references(() => organisations.id, { onDelete: "cascade" }),
+  bonusTasks: integer("bonus_tasks").notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
 
 // Epic 1, US1/US2: one row per media generation request (image or video). Images complete
 // quickly (synchronous poll); video is async (submit → background poll → download to R2).
@@ -4017,10 +4049,10 @@ export const strategyProposals = pgTable("strategy_proposals", {
 // other assistants — posts, articles, searches; one work item == one artefact) and `money` (the
 // customer's own ad account — Phase 3, blocked on platform approvals; pinned to zero for organic).
 //
-// ⚠️ A work item is NOT a billing task. usage_counters.task_count is moved by chat turns and a few
-// on-demand buttons only — process-content-jobs.ts / generate-post.ts / process-discovery-jobs.ts
-// never call consumeTaskCredit. Denominating this budget in "tasks" would show the user a number
-// that measures nothing. The plan cap is read separately, as a gate. See db/campaigns.sql.
+// ⚠️ A work item is NOT a billing task. usage_counters.task_count counts finished work weighted by
+// src/config/task-weights.ts (docs/task-metering.md) — a unit of its own, spent by the assistants
+// the orchestrator gives orders to, not by this budget. Mixing the two would double-count. The plan
+// cap is read separately, as a gate (campaign-ledger.ts readPlanTaskGate).
 //
 // The orchestrator produces nothing itself: its artefacts are ORDERS to other assistants and
 // DECISIONS a human approves. Both mirror into assistantRecords so the existing Data Hub and

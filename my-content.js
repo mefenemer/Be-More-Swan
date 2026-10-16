@@ -131,6 +131,36 @@ window.initMyContent = async function (param) {
     _mcRefreshHeaderCredits();
 };
 
+// Single task allowance (docs/task-metering.md): get-ai-credit-balance answers in TASKS
+// (`unit: 'tasks'`, costs are task weights). Remembered from every balance read so the labels match.
+let _mcUnit = 'credits';
+let _mcVideoCost = 5;
+function _mcRemember(d) {
+    if (!d) return;
+    _mcUnit = d.unit === 'tasks' ? 'tasks' : 'credits';
+    if (typeof d.videoCost === 'number') _mcVideoCost = d.videoCost;
+    _mcApplyUnitLabels(d);
+}
+function _mcAmount(n) {
+    const word = _mcUnit === 'tasks' ? 'task' : 'credit';
+    return `${n} ${word}${n === 1 ? '' : 's'}${_mcUnit === 'tasks' ? ' left' : ''}`;
+}
+function _mcApplyUnitLabels(d) {
+    if (_mcUnit !== 'tasks') return;
+    const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+    set('mc-credit-unit', 'tasks left');
+    set('ai-cost-label', `${d.imageCost ?? 1} task`);
+    set('vid-cost-label', `${d.videoCost ?? 20} tasks`);
+    set('vid-insufficient-unit', 'tasks left this month');
+    const info = document.getElementById('mc-credit-info');
+    if (info) {
+        const t = 'Your monthly tasks cover all finished work. An AI image uses 1, an AI video 20 — uploads, stock and brand cards are free.';
+        info.title = t; info.setAttribute('aria-label', t);
+    }
+    const pill = document.getElementById('mc-credit-pill');
+    if (pill) pill.title = 'Tasks left this month';
+}
+
 // Show the persistent AI-credit balance pill in the page header.
 async function _mcRefreshHeaderCredits() {
     const pill = document.getElementById('mc-credit-pill');
@@ -139,7 +169,9 @@ async function _mcRefreshHeaderCredits() {
     try {
         const res = await fetch('/.netlify/functions/get-ai-credit-balance');
         if (!res.ok) return;
-        const { balance } = await res.json();
+        const d = await res.json();
+        _mcRemember(d);
+        const { balance } = d;
         count.textContent = balance;
         pill.classList.remove('hidden');
         pill.classList.add('flex');
@@ -803,8 +835,10 @@ async function _mcRefreshAiBalance() {
     try {
         const res = await fetch('/.netlify/functions/get-ai-credit-balance');
         if (!res.ok) return;
-        const { balance } = await res.json();
-        el.textContent = `${balance} credit${balance === 1 ? '' : 's'}`;
+        const d = await res.json();
+        _mcRemember(d);
+        const { balance } = d;
+        el.textContent = _mcAmount(balance);
         _mcSetAiAffordable(balance >= 1);
     } catch { /* leave placeholder */ }
 }
@@ -859,7 +893,7 @@ window._mcGenerateAI = async function () {
         }
         if (res.status === 402) {
             const { balance } = await res.json().catch(() => ({ balance: 0 }));
-            document.getElementById('ai-balance').textContent = `${balance} credit${balance === 1 ? '' : 's'}`;
+            document.getElementById('ai-balance').textContent = _mcAmount(balance);
             _mcSetAiAffordable(false);
             return;
         }
@@ -878,7 +912,7 @@ window._mcGenerateAI = async function () {
         const { jobId, images, balance } = await res.json();
         _mcAiJobId = jobId;
         if (typeof balance === 'number') {
-            document.getElementById('ai-balance').textContent = `${balance} credit${balance === 1 ? '' : 's'}`;
+            document.getElementById('ai-balance').textContent = _mcAmount(balance);
             _mcSetAiAffordable(balance >= 1);
         }
         resultsEl.innerHTML = (images || []).map(img => `
@@ -1011,15 +1045,17 @@ async function _mcVidOnOpen() {
     try {
         const res = await fetch('/.netlify/functions/get-ai-credit-balance');
         if (!res.ok) return;
-        const { balance, tierCanVideo } = await res.json();
-        document.getElementById('vid-balance').textContent = `${balance} credit${balance === 1 ? '' : 's'}`;
+        const d = await res.json();
+        _mcRemember(d);
+        const { balance, tierCanVideo } = d;
+        document.getElementById('vid-balance').textContent = _mcAmount(balance);
         // The tab is only shown when the assistant grants video, so here we only resolve the
         // remaining plan-tier gate: tier-locked → upgrade CTA; otherwise the credit check.
         locked.classList.toggle('hidden', !!tierCanVideo);
         form.classList.toggle('hidden', !tierCanVideo);
         if (tierCanVideo) {
             const warn = document.getElementById('vid-insufficient');
-            const canAfford = balance >= 5;
+            const canAfford = balance >= _mcVideoCost;
             _mcDisableBtn('vid-generate-btn', !canAfford);
             warn.classList.toggle('hidden', canAfford);
         }
@@ -1113,7 +1149,7 @@ function _mcVidStartPolling() {
                 const errEl = document.getElementById('vid-error');
                 errEl.textContent = status === 'flagged'
                     ? 'Prompt flagged for policy violation. Please adjust your text and try again.'
-                    : (errorMessage || 'Video generation failed. Your credits were refunded.');
+                    : (errorMessage || (_mcUnit === 'tasks' ? 'Video generation failed. No tasks were used.' : 'Video generation failed. Your credits were refunded.'));
                 errEl.classList.remove('hidden');
                 _mcRefreshHeaderCredits();   // refund restored balance
             }

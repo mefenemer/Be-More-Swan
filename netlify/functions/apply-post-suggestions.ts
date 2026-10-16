@@ -41,7 +41,7 @@ import { getDb } from '../../db/client';
 import { scheduledPosts, userOrganisations, auditLogs } from '../../db/schema';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
-import { consumeTaskCredit } from '../../src/utils/task-credit';
+import { meterInteraction } from '../../src/utils/task-credit';
 import {
     MAX_SUGGESTION_ROUNDS, openWarnings, persistReview, readCachedReview, runQualityReview,
 } from '../../src/utils/post-quality-review';
@@ -251,8 +251,11 @@ export default withLambda(async (event) => {
             });
         }
 
-        const credit = await consumeTaskCredit(db, post.organisationId!);
-        if (!credit.allowed) return json(429, { error: credit.limitMessage, code: 'TASK_LIMIT' });
+        const credit = await meterInteraction(db, post.organisationId!, 'helpers');
+        if (!credit.allowed) {
+            if (credit.failed) return json(503, { error: credit.limitMessage, code: 'CAP_CHECK_FAILED' });
+            return json(429, { error: credit.limitMessage, code: credit.fairUse ? 'FAIR_USE_LIMIT' : 'TASK_LIMIT' });
+        }
 
         const prompt = `Revise the social media caption below by applying the reviewer's suggestions.
 

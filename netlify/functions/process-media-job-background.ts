@@ -101,7 +101,7 @@ export default withLambda(async (event: HandlerEvent) => {
         }).returning({ id: contentAssets.id });
 
         // Settle the hold as a successful debit, mark job complete.
-        await settleHold(db, { orgId, amount: cost, success: true, mediaType: 'video', userId: ownerId, jobId: job.id, isAutonomous: job.isAutonomous });
+        await settleHold(db, { orgId, amount: cost, success: true, mediaType: 'video', userId: ownerId, jobId: job.id, isAutonomous: job.isAutonomous, assistantId: job.assistantId ?? null });
         await db.update(mediaGenerationJobs)
             .set({ status: 'completed', resultAssetIds: [asset.id], updatedAt: new Date() })
             .where(eq(mediaGenerationJobs.id, jobId));

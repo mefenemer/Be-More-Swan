@@ -66,7 +66,9 @@
         try {
             const res = await fetch('/.netlify/functions/get-usage-summary');
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const { media, x, byAssistant } = await res.json();
+            const summary = await res.json();
+            if (summary.unit === 'tasks') { _renderTaskUsage(summary); return; }
+            const { media, x, byAssistant } = summary;
 
             // AI media credits
             const bal = Number(media?.balance) || 0;
@@ -121,6 +123,52 @@
             bonusEl.textContent = bonus > 0 ? `Includes ${bonus.toLocaleString()} purchased booster credit${bonus === 1 ? '' : 's'} (carried over).` : '';
             bonusEl.classList.toggle('hidden', bonus <= 0);
         }
+    }
+
+    // Single task allowance: one card, a breakdown by kind, and tasks per assistant.
+    function _renderTaskUsage(summary) {
+        const t = summary.tasks || {};
+        const used = Number(t.used) || 0;
+        const bonus = Number(t.bonus) || 0;
+        const inFlight = Number(t.inFlight) || 0;
+        const uncapped = t.limit == null;
+        const remaining = uncapped ? null : Math.max(Number(t.remaining) || 0, 0);
+        document.getElementById('usage-heading').textContent = 'Usage';
+        document.getElementById('usage-credit-cards').classList.add('hidden');
+        document.getElementById('usage-tasks-card').classList.remove('hidden');
+        document.getElementById('usage-tasks-value').textContent = uncapped
+            ? `${used.toLocaleString()} used`
+            : `${remaining.toLocaleString()} left · ${used.toLocaleString()} used`;
+        const bar = document.getElementById('usage-tasks-bar');
+        const total = uncapped ? 0 : used + remaining;
+        const pct = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
+        bar.style.width = `${pct}%`;
+        bar.classList.toggle('bg-red-500', !uncapped && remaining <= Math.max(1, total * 0.1));
+        bar.classList.toggle('bg-pink-600', !( !uncapped && remaining <= Math.max(1, total * 0.1)));
+        const bonusEl = document.getElementById('usage-tasks-bonus-note');
+        bonusEl.textContent = bonus > 0 ? `Includes ${bonus.toLocaleString()} bonus task${bonus === 1 ? '' : 's'} — they never expire and are used only after your monthly allowance.` : '';
+        bonusEl.classList.toggle('hidden', bonus <= 0);
+        const flightEl = document.getElementById('usage-tasks-inflight-note');
+        flightEl.textContent = inFlight > 0 ? `${inFlight.toLocaleString()} task${inFlight === 1 ? '' : 's'} reserved by media still being generated.` : '';
+        flightEl.classList.toggle('hidden', inFlight <= 0);
+        const kinds = Array.isArray(summary.byKind) ? summary.byKind.filter(k => Number(k.units) > 0) : [];
+        const list = document.getElementById('usage-tasks-by-kind');
+        list.innerHTML = kinds.map(k => `<li class="flex justify-between gap-3"><span>${_esc(k.label)}</span><span class="font-bold">${Number(k.units).toLocaleString()}</span></li>`).join('');
+        list.classList.toggle('hidden', kinds.length === 0);
+
+        document.getElementById('usage-by-assistant-sub').textContent = 'Tasks used so far this month, per assistant.';
+        document.getElementById('usage-col-a').textContent = 'Tasks';
+        document.getElementById('usage-col-b').classList.add('hidden');
+        const rows = (Array.isArray(summary.byAssistant) ? summary.byAssistant : []).filter(r => Number(r.tasks) > 0);
+        const section = document.getElementById('usage-by-assistant');
+        const tbody = document.getElementById('usage-by-assistant-rows');
+        if (rows.length === 0) { section.classList.add('hidden'); return; }
+        tbody.innerHTML = rows.map(r => `
+            <tr>
+              <td class="px-5 py-2.5 font-semibold ${r.assistantId == null ? 'text-gray-400 italic' : 'text-gray-900'}">${_esc(r.name)}</td>
+              <td class="px-5 py-2.5 text-right text-gray-700">${(Number(r.tasks) || 0).toLocaleString()}</td>
+            </tr>`).join('');
+        section.classList.remove('hidden');
     }
 
     function _renderUsageByAssistant(rows) {

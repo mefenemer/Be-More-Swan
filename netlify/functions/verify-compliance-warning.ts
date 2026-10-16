@@ -35,7 +35,7 @@ import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, userOrganisations } from '../../db/schema';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
-import { consumeTaskCredit } from '../../src/utils/task-credit';
+import { meterInteraction } from '../../src/utils/task-credit';
 import {
     isVerificationInFlight,
     readCachedReview,
@@ -145,8 +145,11 @@ export default withLambda(async (event) => {
         }
 
         // Web search is real spend on top of the model call, and this is a user-initiated action.
-        const credit = await consumeTaskCredit(db, post.organisationId!);
-        if (!credit.allowed) return json(429, { error: credit.limitMessage, code: 'TASK_LIMIT' });
+        const credit = await meterInteraction(db, post.organisationId!, 'helpers');
+        if (!credit.allowed) {
+            if (credit.failed) return json(503, { error: credit.limitMessage, code: 'CAP_CHECK_FAILED' });
+            return json(429, { error: credit.limitMessage, code: credit.fairUse ? 'FAIR_USE_LIMIT' : 'TASK_LIMIT' });
+        }
 
         // Claim the slot BEFORE dispatching. If the trigger fails we overwrite this with a failure
         // below; if it succeeds, a second click between here and the worker's first write is caught

@@ -148,7 +148,8 @@ check('the two known billing sites bind an ISO string, not the Date', () => {
     assert.match(cap, /const periodStartParam = periodStart\.toISOString\(\)/, 'atomic-cap-check converts first');
     assert.match(cap, /AND period_start = \$\{periodStartParam\}/, 'and binds the converted value');
     const rec = readFileSync(path.join(ROOT, 'netlify/functions/reconcile-billing.ts'), 'utf8');
-    assert.match(rec, /AND created_at >= \$\{periodStartParam\}/,
+    // Since the single task allowance the cron compares with task_ledger by period_start.
+    assert.match(rec, /AND period_start = \$\{periodStartParam\}/,
         'the billing reconcile cron had the identical bug and would fail the same way');
 });
 

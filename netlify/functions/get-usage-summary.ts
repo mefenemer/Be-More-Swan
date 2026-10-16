@@ -11,10 +11,21 @@
 //   • X     — via ai_credit_ledger.assistant_id (stamped at settle; X debits carry no job)
 // Genuinely manual (user-initiated) spend has no assistant and is returned under assistantId=null so
 // the panel can show an honest "Unattributed" row rather than silently dropping it.
+//
+// Single task allowance ('unified_task_metering', docs/task-metering.md) → instead {
+//   unit: 'tasks',
+//   tasks: { used, limit, bonus, inFlight, remaining },
+//   byKind: [ { kind, label, units } ],                 // this month, from task_ledger
+//   byAssistant: [ { assistantId, name, tasks } ]
+// }
 
 import { getDb } from '../../db/client';
 import { requireTenant } from '../../src/utils/tenant';
 import { getBalance, monthlyAllowance, getXUsage } from '../../src/utils/ai-credits';
+import { getTaskUsage } from '../../src/utils/work-metering';
+import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
+import { getPeriodStart } from '../../src/utils/atomic-cap-check';
+import { WORK_KIND_LABELS, type WorkKind } from '../../src/config/task-weights';
 import { sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -25,6 +36,8 @@ export default withLambda(async (event) => {
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
     const orgId = ctx.organisationId;
+
+    if (await isUnifiedTaskMetering(orgId)) return taskSummary(db, orgId);
 
     const [{ balance, held }, monthly, x] = await Promise.all([
         getBalance(db, orgId),
@@ -98,3 +111,45 @@ export default withLambda(async (event) => {
         }),
     };
 });
+
+async function taskSummary(db: ReturnType<typeof getDb>, orgId: number) {
+    const period = getPeriodStart().toISOString();
+    const [usage, kindRows, assistantRows] = await Promise.all([
+        getTaskUsage(db, orgId),
+        db.execute<{ kind: string; units: number }>(sql`
+            SELECT kind, SUM(units)::int AS units FROM task_ledger
+             WHERE organisation_id = ${orgId} AND period_start = ${period} AND source = 'work'
+             GROUP BY kind ORDER BY units DESC`),
+        db.execute<{ assistant_id: number | null; name: string | null; units: number }>(sql`
+            SELECT l.assistant_id, a.name, SUM(l.units)::int AS units FROM task_ledger l
+              LEFT JOIN ai_assistants a ON a.id = l.assistant_id
+             WHERE l.organisation_id = ${orgId} AND l.period_start = ${period} AND l.source = 'work'
+             GROUP BY l.assistant_id, a.name`),
+    ]);
+    const byKind = (kindRows as unknown as Array<{ kind: string; units: number }>).map(r => ({
+        kind: r.kind,
+        label: WORK_KIND_LABELS[r.kind as WorkKind] ?? r.kind,
+        units: Number(r.units),
+    }));
+    const byAssistant = (assistantRows as unknown as Array<{ assistant_id: number | null; name: string | null; units: number }>)
+        .map(r => ({
+            assistantId: r.assistant_id,
+            name: r.assistant_id == null ? 'Unattributed' : (r.name || `Assistant #${r.assistant_id}`),
+            tasks: Number(r.units),
+        }))
+        .sort((a, b) => {
+            if (a.assistantId == null) return 1;
+            if (b.assistantId == null) return -1;
+            return b.tasks - a.tasks;
+        });
+    return {
+        statusCode: 200,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            unit: 'tasks',
+            tasks: { used: usage.used, limit: usage.limit, bonus: usage.bonus, inFlight: usage.inFlight, remaining: usage.remaining },
+            byKind,
+            byAssistant,
+        }),
+    };
+}

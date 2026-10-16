@@ -28,6 +28,7 @@
 import { HandlerEvent } from '@netlify/functions';
 import { and, desc, eq, gte, inArray, lte, or, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
+import { checkFairUse } from '../../src/utils/fair-use';
 import {
     aiAssistants, audienceContactSegments, audienceContacts, audienceSegments, blogPosts,
     newsletterIssues, newsletterSendingDomains, organisations,
@@ -844,6 +845,9 @@ export default withLambda(async (event: HandlerEvent) => {
     // The Swan icon beside the subject and preview lines: three options to choose from. RETURNS ONLY —
     // the field changes when the person picks one (src/utils/newsletter-suggest.ts).
     if (action === 'suggest') {
+        // An editing helper: free, but counted against the daily fair-use limit.
+        const fair = await checkFairUse(db, orgId, 'helpers');
+        if (!fair.allowed) return json(429, { error: fair.message, code: 'FAIR_USE_LIMIT' });
         const field = body.field === 'preheader' ? 'preheader' : 'subject';
         try {
             const suggestions = await suggestEmailLine(db, {

@@ -58,7 +58,7 @@ check('the schedulers enqueue nothing for an org that is out of tasks', () => {
 
 check('metering fails OPEN — a fault must never be what stops scheduled work', () => {
     assert.match(METERING, /fail open/i);
-    assert.match(METERING, /if \(!plan\.hasPlan \|\| plan\.limit === null\) return true;/);
+    assert.match(METERING, /if \(!usage\.hasPlan \|\| usage\.remaining === null\) return true;/);
 });
 
 check('the record is an unconditional upsert on the UTC month the cap reads', () => {

@@ -14,7 +14,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { getDb } from '../db/client';
 import { getStripe, stripeKeyAvailable, STRIPE_API_VERSION } from '../src/utils/stripe';
 import { masterPlans, planPrices, masterAssistants, platformConfig } from '../db/schema';
@@ -100,7 +100,10 @@ export async function runSeed(opts: SeedOptions = {}): Promise<SeedResult> {
                 appConnectionLimit: p.appConnectionLimit ?? null,
                 seatLimit: p.seatLimit ?? null,
                 storageLimitBytes: p.storageLimitBytes ?? null,
-                features: p.features ?? {},
+                // MERGE, never replace: several feature keys are added by SQL migrations and are not
+                // in master_plans.json (monthly_x_credits, website_pages, …). Replacing the jsonb
+                // wiped them on every re-seed of a live database. JSON keys still win on conflict.
+                features: sql`COALESCE(${masterPlans.features}, '{}'::jsonb) || ${JSON.stringify(p.features ?? {})}::jsonb`,
                 isActive: p.isActive,
             },
         });

@@ -54,7 +54,7 @@ const STATUS_META = {
     // may need to act on, and it resumes by itself only when the quota resets. Without an entry
     // here every lookup falls back to STATUS_META.draft, so a committed post parked on quota would
     // render on the calendar labelled "Draft" — the one word that is certainly wrong.
-    paused_credits:  { label: 'Paused · X credits', badge: 'bg-amber-100 text-amber-700 border-amber-300', chipBorder: 'border-amber-400', dot: 'bg-amber-500' },
+    paused_credits:  { label: 'Paused · X limit', badge: 'bg-amber-100 text-amber-700 border-amber-300', chipBorder: 'border-amber-400', dot: 'bg-amber-500' },
     // Newsletter issue states. ⚠️ Without an entry here each falls back to STATUS_META.draft, so a
     // SENT issue would render on the calendar labelled "Draft" — exactly the failure recorded for
     // paused_credits above. 'sending' is blue like 'publishing', its social twin: in flight, no

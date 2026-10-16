@@ -2364,11 +2364,11 @@
 
     <div class="flex items-center gap-4 mb-5 p-4 bg-pink-50 border border-pink-200 rounded-xl">
       <div>
-        <p class="text-xs font-bold text-gray-500 uppercase">Balance</p>
+        <p id="ai-credits-balance-label" class="text-xs font-bold text-gray-500 uppercase">Balance</p>
         <p id="ai-credits-balance" class="text-2xl font-extrabold text-gray-900">—</p>
       </div>
       <div>
-        <p class="text-xs font-bold text-gray-500 uppercase">Held</p>
+        <p id="ai-credits-held-label" class="text-xs font-bold text-gray-500 uppercase">Held</p>
         <p id="ai-credits-held" class="text-2xl font-extrabold text-gray-400">—</p>
       </div>
     </div>
@@ -9489,6 +9489,10 @@ async function refreshAiCredits() {
         if (!res.ok) throw new Error(data.error || res.statusText);
         document.getElementById('ai-credits-balance').textContent = data.balance;
         document.getElementById('ai-credits-held').textContent = data.held;
+        // Single task allowance: the same modal adjusts non-expiring bonus tasks.
+        const tasksUnit = data.unit === 'tasks';
+        document.getElementById('ai-credits-balance-label').textContent = tasksUnit ? 'Bonus tasks' : 'Balance';
+        document.getElementById('ai-credits-held-label').textContent = tasksUnit ? 'Tasks in flight' : 'Held';
         const led = data.ledger || [];
         document.getElementById('ai-credits-ledger').innerHTML = led.length
             ? led.map(r => {

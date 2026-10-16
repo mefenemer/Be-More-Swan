@@ -10,6 +10,7 @@ import { resolveActionNotifications, PAYMENT_RESTORED_TYPES } from '../../src/ut
 import { recordCardFingerprint } from '../../src/utils/billing-fingerprint';
 import { sendNewSubscriberAlert } from '../../src/utils/founder-alerts';
 import { grantXCredits } from '../../src/utils/ai-credits';
+import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { releasePausedLimit, resolveAssistantLimit } from '../../src/utils/release-paused-limit';
 import { backfillLivePlanForOrg } from '../../src/utils/plan-stripe-refs';
@@ -135,9 +136,11 @@ export default withLambda(async (event) => {
                 `);
                 console.log(`[stripe-webhook] granted ${packCredits} X credits to org ${packOrgId} (pack ${session.metadata.packId})`);
                 if (packUserId) {
-                    await createNotification(db, 'x_credits_purchased', {
+                    // Single task allowance: grantXCredits landed the pack as bonus tasks (1:1).
+                    const asTasks = await isUnifiedTaskMetering(packOrgId);
+                    await createNotification(db, asTasks ? 'bonus_tasks_added' : 'x_credits_purchased', {
                         userId: packUserId,
-                        context: { x: { credits: String(packCredits) } },
+                        context: asTasks ? { tasks: { count: String(packCredits) } } : { x: { credits: String(packCredits) } },
                         metadata: { credits: packCredits, packId: session.metadata.packId },
                     }).catch(() => {});
                 }

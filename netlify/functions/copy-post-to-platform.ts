@@ -33,7 +33,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { parseDestinations, destinationKey, canonicalPlatform, legacyPostFormat } from '../../src/utils/post-destinations';
 import { platformFormat } from '../../src/config/platform-formats';
 import { resolvePostingSchedule, computeScheduleSlots, resolveHorizonDays } from '../../src/config/posting-cadence';
-import { consumeTaskCredit } from '../../src/utils/task-credit';
+import { meterInteraction } from '../../src/utils/task-credit';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { displayCaption, stripCodeFences } from '../../src/utils/model-json';
@@ -265,11 +265,13 @@ export default withLambda(async (event) => {
                 // visible in the editor and the user can cut it themselves.
                 console.warn(`[copy-post-to-platform] AI disabled; copying an over-length caption to ${platform}`);
             } else {
-                const credit = await consumeTaskCredit(db, orgId);
+                const credit = await meterInteraction(db, orgId, 'helpers');
                 if (!credit.allowed) {
                     skipped.push({
                         platform,
-                        reason: `This caption is too long for ${label} and shortening it needs a task credit — ${credit.limitMessage}`,
+                        reason: credit.fairUse || credit.failed
+                            ? `This caption is too long for ${label} and couldn't be shortened just now — ${credit.limitMessage}`
+                            : `This caption is too long for ${label} and shortening it needs a task credit — ${credit.limitMessage}`,
                     });
                     continue;
                 }

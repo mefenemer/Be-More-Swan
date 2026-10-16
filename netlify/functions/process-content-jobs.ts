@@ -33,6 +33,7 @@ import { creditLine } from '../../src/utils/pexels';
 import { resolveMediaForPost } from '../../src/utils/media-resolver';
 import { raiseBriefForPost } from '../../src/utils/visual-briefs';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
+import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { generateAndPersistImage, renderAndPersistBrandCard, r2IsConfigured } from '../../src/lib/media-persist';
 import { headlineFromCaption, MAX_HEADLINE_CHARS } from '../../src/lib/brand-card';
 import { resolveBrandKitForOrg } from '../../src/lib/brand-extract-fetch';
@@ -1012,7 +1013,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                             orgId: job.organisation_id, userId: job.user_id,
                             prompt: aiMediaContext, aspectRatio: aspect, generationJobId: genJob.id,
                         });
-                        await settleHold(db, { orgId: job.organisation_id, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId: job.user_id, jobId: genJob.id });
+                        await settleHold(db, { orgId: job.organisation_id, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId: job.user_id, jobId: genJob.id, assistantId: job.assistant_id });
                         await db.update(mediaGenerationJobs).set({ status: 'completed', resultAssetIds: [assetId], updatedAt: new Date() }).where(eq(mediaGenerationJobs.id, genJob.id));
                         return assetId;
                     } catch (genErr) {
@@ -1301,7 +1302,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         await noteJobRowFinished(db, job.id);
         // One task per job, however many platforms it fanned out to: a cross-post is one piece of
         // work adapted per platform. Charged only now the post exists (never throws).
-        if (!isAdminTest) await recordCompletedWork(db, job.organisation_id, 'social_post', 1, job.job_id);
+        if (!isAdminTest) await recordCompletedWork(db, job.organisation_id, 'social_post', { ref: job.job_id, assistantId: job.assistant_id });
 
         // Admin test jobs do not notify the consumer
         if (!isAdminTest) {
@@ -1323,7 +1324,11 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 // The draft is ready but has no media. Send ONE actionable notice instead of the generic
                 // "draft ready", flagging the AI-credit case explicitly so the fix (top up) is obvious.
                 const outOfCredits = mediaExhaustedReason === 'ai_credits_exhausted';
-                await createNotification(db, outOfCredits ? 'draft_ready_no_credits' : 'draft_ready_no_media', {
+                // Single task allowance: the refusal was the task allowance, not a credit balance.
+                const outTemplate = outOfCredits
+                    ? (await isUnifiedTaskMetering(job.organisation_id) ? 'draft_ready_no_tasks' : 'draft_ready_no_credits')
+                    : 'draft_ready_no_media';
+                await createNotification(db, outTemplate, {
                     userId: job.user_id,
                     context: { assistant: { name: assistantLabel }, platform: { label: platformLabel } },
                     metadata: { jobId: job.job_id, postId: post.id, reason: mediaExhaustedReason, assistantId: job.assistant_id },

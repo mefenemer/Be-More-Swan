@@ -243,8 +243,8 @@ Our roastery is open on Saturdays from 9 until 1.`;
 
     await check('attachments are checked before the turn\'s task is spent, documents are moderated', () => {
         const fn = read('netlify/functions/chat-orchestrator.ts');
-        assert.ok(fn.indexOf('readAttachments(db, orgId, body.attachments)') < fn.indexOf('consumeTaskCredit(db, orgId)'));
-        assert.ok(fn.indexOf("source: 'chat_attachment'") < fn.indexOf('consumeTaskCredit(db, orgId)'));
+        assert.ok(fn.indexOf('readAttachments(db, orgId, body.attachments)') < fn.indexOf("meterInteraction(db, orgId, 'chat')"));
+        assert.ok(fn.indexOf("source: 'chat_attachment'") < fn.indexOf("meterInteraction(db, orgId, 'chat')"));
         assert.ok(fn.includes('if (attached.length && route.acceptsAttachments)') && fn.includes('saveAttachments(db, orgId, session.id, userMessage.id, attached)'));
         assert.ok(fn.includes('acceptsAttachments: true,'), 'on for the Website Assistant');
         assert.ok(fn.includes("if (!typed && !attached.length) return json(400"), 'a message may be just files');

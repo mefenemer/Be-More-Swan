@@ -1,13 +1,13 @@
 // netlify/functions/set-autonomous-media.ts
 // Epic 2 US5: toggle a per-assistant autonomous media-suggestions setting + monthly credit cap.
 //
-// PATCH { assistantId, enabled?, monthlyCap?, confirmOverage? }
+// PATCH { assistantId, enabled?, monthlyCap? }   (a stale confirmOverage is accepted and ignored)
 //   → { autonomousMediaEnabled, autonomousMediaMonthlyCap }
 //   Auth: aura_session cookie; caller must belong to the assistant's organisation.
 //
-// The cap is bounded by the org's plan (monthly_ai_credits). Raising it above the plan's included
-// allowance means the assistant may spend credits the plan doesn't cover, so that requires the
-// caller to pass confirmOverage:true (the UI shows a confirmation dialog first) — see issue #64.
+// The cap limits how much AI media this assistant makes on its own each month. It is never a
+// licence to overspend: generation stops when the org's allowance runs out (issue #64 asked for an
+// overage confirmation, but there is no overage — the plan allowance is a hard stop).
 
 import { Handler } from '@netlify/functions';
 import { and, eq } from 'drizzle-orm';
@@ -15,7 +15,6 @@ import { getDb } from '../../db/client';
 import { aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { normalizeMediaSources } from '../../src/utils/media-sources';
-import { monthlyAllowance } from '../../src/utils/ai-credits';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const MAX_CAP = 100000;
@@ -49,16 +48,11 @@ export default withLambda(async (event) => {
         if (!Number.isFinite(cap) || cap < 0 || cap > MAX_CAP) {
             return { statusCode: 400, body: JSON.stringify({ error: `monthlyCap must be between 0 and ${MAX_CAP}.` }) };
         }
-        const planAllowance = await monthlyAllowance(db, ctx.organisationId);
-        if (cap > planAllowance && !body.confirmOverage) {
-            return {
-                statusCode: 409,
-                body: JSON.stringify({
-                    error: 'confirm_overage_required',
-                    planMonthlyCredits: planAllowance,
-                }),
-            };
-        }
+        // No overage confirmation: there is no overage. Generation stops when the org's allowance
+        // runs out (a hold needs capacity — ai-credits.ts), so a cap above the plan allowance only
+        // means the allowance, not this cap, is what stops it. The old 409 + "extra usage will be
+        // charged" dialog promised a bill nothing ever sent, contradicting "never billed".
+        // Under the single task allowance the cap counts AI images/videos for this assistant.
         patch.autonomousMediaMonthlyCap = cap;
     }
     // Media Source Selection — store the normalized ordered list (position=priority, member=enabled).

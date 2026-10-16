@@ -375,7 +375,7 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
         // The Team feed: when this was the last article of a campaign order, its assistant says so.
         await noteJobRowFinished(db, job.id);
         // One task per article, charged only now it exists (never throws).
-        if (job.trigger_type !== 'admin_test') await recordCompletedWork(db, job.organisation_id, 'blog_article', 1, job.job_id);
+        if (job.trigger_type !== 'admin_test') await recordCompletedWork(db, job.organisation_id, 'blog_article', { ref: job.job_id, assistantId: job.assistant_id });
 
         // Autopilot's follow-ups. An interactive draft wants neither: the author is looking at the
         // post, so a "your draft is ready" notification is noise, and a hand-off on 'drafts_a_post'
