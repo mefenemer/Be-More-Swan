@@ -188,6 +188,9 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     // Someone paid for something on the website (site-shop.ts, from the Connect webhook). The money
     // is already in their Stripe account; the card is the news, not a task.
     site_order_received: 'state_change',
+    // The workspace's Stripe account can now take payments (site-shop.ts announcePaymentsReady) —
+    // Buy buttons and deposits are live on its site. News, not a task.
+    site_payments_ready: 'state_change',
     // Issue #191 follow-up — confirms a reinstate actually took effect.
     assistant_reinstated: 'state_change',
     goal_autonomous_adjustment: 'state_change', // SMART Goals AC3.3.3 — autonomous brief change FYI

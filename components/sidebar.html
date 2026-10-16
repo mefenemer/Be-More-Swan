@@ -39,6 +39,15 @@
         <span class="nav-label">Audience</span>
       </a>
 
+      <!-- Orders from the workspace's website(s) — Buy buttons on a Website Assistant's site. Shown
+           only once a Website Assistant is hired (workspace.html toggles style.display; the `hidden`
+           class alone loses to `flex`). The list itself is orders.html / orders.js. -->
+      <a href="#" id="nav-orders" style="display:none" class="flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-colors text-gray-600 hover:bg-gray-100 hover:text-gray-900">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>
+        <span class="nav-label">Orders</span>
+        <span id="nav-orders-badge" class="ml-auto bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full" style="display:none"></span>
+      </a>
+
       <!-- The Team feed: assistants say what they are doing and ask questions; the person writes back.
            Its own badge counts unread messages, and the bell adds them in (notifications.js). -->
       <a href="#" id="nav-team" class="flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-colors text-gray-600 hover:bg-gray-100 hover:text-gray-900">

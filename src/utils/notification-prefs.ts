@@ -256,6 +256,8 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             'site_draft_ready',
             // Someone paid on the website (site-shop.ts). metadata.assistantId is passed.
             'site_order_received',
+            // Stripe is connected and can take payments (site-shop.ts announcePaymentsReady).
+            'site_payments_ready',
         ],
     },
     {

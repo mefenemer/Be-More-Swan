@@ -144,6 +144,7 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'site_audit_goal_met' THEN 'state_change'       -- the website reached its target score (call site passes category)
     WHEN 'site_draft_ready' THEN 'state_change'          -- a Website Assistant draft is ready (call site passes category)
     WHEN 'site_order_received' THEN 'state_change'       -- someone paid on the website (call site passes category)
+    WHEN 'site_payments_ready' THEN 'state_change'       -- Stripe connected and able to take payments (call site passes category)
     -- celebratory
     WHEN 'setup_complete' THEN 'celebratory'
     WHEN 'milestone_unlock' THEN 'celebratory'

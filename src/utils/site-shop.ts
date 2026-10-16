@@ -53,11 +53,27 @@ export async function canSell(db: Db, orgId: number): Promise<boolean> {
 
 /** Copy Stripe's flags onto our row. Used on return from onboarding and by account.updated. */
 export async function syncConnectAccount(db: Db, account: Stripe.Account): Promise<ConnectRow | null> {
+    const [before] = await db.select({ chargesEnabled: stripeConnectAccounts.chargesEnabled }).from(stripeConnectAccounts).where(eq(stripeConnectAccounts.stripeAccountId, account.id)).limit(1);
     const [row] = await db.update(stripeConnectAccounts).set({
         chargesEnabled: !!account.charges_enabled, detailsSubmitted: !!account.details_submitted,
         payoutsEnabled: !!account.payouts_enabled, updatedAt: new Date(),
     }).where(eq(stripeConnectAccounts.stripeAccountId, account.id)).returning();
+    // The moment it can take payments (whichever path noticed first: the return from Stripe, or the
+    // webhook), tell the owner — once, because only that one update sees false → true.
+    if (row && before && !before.chargesEnabled && row.chargesEnabled) await announcePaymentsReady(db, row.organisationId).catch((err) => console.error('[site-shop] payments-ready notice failed', err));
     return row ?? null;
+}
+
+/** "Stripe is connected" — a card for the Website Assistant's owner. */
+async function announcePaymentsReady(db: Db, orgId: number): Promise<void> {
+    const [owner] = await db.select({ userId: aiAssistants.userId, name: aiAssistants.name, assistantId: aiAssistants.id })
+        .from(sites).innerJoin(aiAssistants, eq(aiAssistants.id, sites.aiAssistantId)).where(eq(sites.organisationId, orgId)).limit(1);
+    if (!owner?.userId) return;
+    await createNotification(db, 'site_payments_ready', {
+        userId: owner.userId, assistantId: owner.assistantId, category: 'state_change',
+        context: { assistant: { name: owner.name } },
+        metadata: { assistantId: owner.assistantId },
+    });
 }
 
 /**

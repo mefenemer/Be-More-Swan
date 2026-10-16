@@ -31,7 +31,7 @@ import { canSell, loadSiteProducts, startCheckout } from '../../src/utils/site-s
 import { safeBackPath } from '../../src/utils/site-forms';
 import { handleSiteForm, loadSiteForms, sentMessage } from '../../src/utils/site-forms';
 import audiencePublic from './audience-public';
-import { siteAssetUrl, siteOrigin, sitesDomain, slugFromHost } from '../../src/utils/site-hosting';
+import { siteAssetUrl, siteOrigin, sitesDomain, slugFromHost, siteCacheTag } from '../../src/utils/site-hosting';
 import { maxPagesFor, publishedDefinition } from '../../src/utils/site-store';
 
 // form-action: the site's own forms post to its own /_form and /_buy (steps 3b, 3c), and nowhere
@@ -102,7 +102,9 @@ type ServeResult = { statusCode: number; headers?: Record<string, string>; body?
 
 export default withLambda(async (event) => {
     const res = (await serve(event)) as ServeResult;
-    return { ...res, headers: { ...(res.headers || {}), ...SITE_VARY } };
+    // Tagged per site, so publishing clears that site's cached pages at once (sites.ts purgeSitePages).
+    const slug = slugFromHost((event.headers as Record<string, string | undefined>)['x-site-host']);
+    return { ...res, headers: { ...(res.headers || {}), ...SITE_VARY, ...(slug ? { 'Netlify-Cache-Tag': siteCacheTag(slug) } : {}) } };
 });
 
 async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0]) {

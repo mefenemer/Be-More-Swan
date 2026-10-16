@@ -1,0 +1,14 @@
+<!-- orders.html — Orders from the workspace's website (view fragment, loaded by workspace.html's router).
+     Controller: orders.js (window.initOrders). Shown in the side menu only when a Website Assistant
+     is hired. Each order is a paid Stripe Checkout on the business's OWN Stripe account
+     (site-shop.ts); refunds and payouts live in their Stripe dashboard, not here. -->
+<div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full pb-20">
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+    <div>
+      <h1 class="text-3xl font-extrabold text-gray-900">Orders</h1>
+      <p class="text-gray-500 mt-1">Things people have bought from your website. The money is already in your Stripe account.</p>
+    </div>
+    <a href="https://dashboard.stripe.com/payments" target="_blank" rel="noopener" class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg">Open Stripe</a>
+  </div>
+  <div id="orders-root"><p class="text-sm text-gray-400">Loading orders…</p></div>
+</div>

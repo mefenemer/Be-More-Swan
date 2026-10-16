@@ -54,6 +54,18 @@ import { connectAccountFor, connectOnboardingLink, markOrderDone, refreshConnect
 import { bookings, bookingSettings, orgProducts, orgReviews, siteEnquiries, siteOrders, users } from '../../db/schema';
 import { decideBooking, describeBooking, emailCustomer, listBookings, loadBookingSetup } from '../../src/utils/bookings';
 import { cleanBookingSettings, describeHours } from '../../src/utils/booking-settings';
+import { purgeCache } from '@netlify/functions';
+import { siteCacheTag } from '../../src/utils/site-hosting';
+
+/**
+ * Clear a site's cached pages so a publish (or taking it down) shows at once, not after the 60-second
+ * cache. Never fails the action: at worst the change appears a minute later.
+ */
+async function purgeSitePages(slug: string | null | undefined): Promise<void> {
+    if (!slug) return;
+    try { await purgeCache({ tags: [siteCacheTag(slug)] }); }
+    catch (err) { console.error('[sites] cache purge failed (the change shows within a minute)', err instanceof Error ? err.message : err); }
+}
 import { reviewSummary } from '../../src/utils/reviews';
 import { depositNote, refundDeposit } from '../../src/utils/booking-deposits';
 import { reconcileSoon } from '../../src/utils/calendar-microsoft';
@@ -183,8 +195,10 @@ export default withLambda(async (event) => {
     if (action === 'address') {
         const slug = cleanSiteSlugInput(body.slug);
         if (site.status === 'suspended') return json(409, { error: 'This site has been taken offline by Be More Swan.' });
+        const old = site.slug;
         const r = await setSiteAddress(db, site, slug);
         if (!r.ok) return json(400, { error: r.error });
+        await purgeSitePages(old);   // the old address must stop showing the site at once
         return json(200, await view(r.site));
     }
 
@@ -197,10 +211,15 @@ export default withLambda(async (event) => {
         if (blocked) return blocked;
         const r = await publishSite(db, site, userId, maxPages);
         if (!r.ok) return json(400, { error: r.error });
+        await purgeSitePages(r.site.slug);
         return json(200, await view(r.site));
     }
 
-    if (action === 'unpublish') return json(200, await view(await unpublishSite(db, site)));
+    if (action === 'unpublish') {
+        const down = await unpublishSite(db, site);
+        await purgeSitePages(site.slug);
+        return json(200, await view(down));
+    }
 
     if (action === 'versions') return json(200, { versions: await listSiteVersions(db, site.id), publishedVersion: site.publishedVersion });
 
