@@ -230,7 +230,13 @@ export default withLambda(async (event) => {
             const url = await connectOnboardingLink(db, { orgId, userId, email: u?.email ?? null, returnUrl: back, refreshUrl: back });
             return json(200, { url });
         } catch (err) {
-            console.error('[sites] Stripe connect failed', err instanceof Error ? err.message : err);
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error('[sites] Stripe connect failed', msg);
+            // Our own Stripe platform isn't set up for Connect (e.g. the platform profile questionnaire,
+            // 2026-10-16): nothing the business can fix — say so rather than "try again".
+            if (/platform profile|connect.*(not enabled|isn't enabled)|signed up for connect/i.test(msg)) {
+                return json(503, { error: 'Taking payments isn\'t available just yet — Be More Swan is finishing its set-up with Stripe. Please try again later today.' });
+            }
             return json(503, { error: 'Stripe couldn\'t be reached just now. Try again in a minute.' });
         }
     }
