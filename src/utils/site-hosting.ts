@@ -89,6 +89,9 @@ export function siteOrigin(slug: string, domain = sitesDomain()): string {
  * The slug a request's Host names, or null when it is not a site address: the bare domain, www,
  * anything deeper than one label, or another domain altogether. A port is ignored.
  */
+/** The CDN cache tag on every page of one site (site-serve.ts) — what publishing clears (sites.ts). */
+export const siteCacheTag = (slug: string) => `bms-site-${slug}`;
+
 export function slugFromHost(host: string | null | undefined, domain = sitesDomain()): string | null {
     const h = String(host || '').trim().toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
     if (!h.endsWith(`.${domain}`)) return null;

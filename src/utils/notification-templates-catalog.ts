@@ -332,6 +332,17 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // The workspace's Stripe account became able to take payments (site-shop.ts
+        // announcePaymentsReady — on return from Stripe's onboarding, or Stripe's account.updated).
+        templateKey: 'site_payments_ready',
+        name: 'Stripe connected — your website can take payments',
+        category: 'Assistants',
+        type: 'site_payments_ready',
+        title: 'Stripe is connected — your website can take payments',
+        message: 'Buy buttons on your products and any booking deposits are now live on your website. The money goes straight to your Stripe account; Be More Swan takes no fee.',
+        variables: [ASSISTANT_NAME],
+    },
+    {
         // A visitor paid on a site's products section (site-shop.ts recordPaidCheckout, from the
         // Connect webhook). The owner is also emailed the order with the delivery address.
         templateKey: 'site_order_received',

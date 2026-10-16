@@ -155,9 +155,20 @@
       state.data = await post({ action: 'get', assistantId: state.assistantId });
       state.loadError = null;
       // Back from Stripe's onboarding (or part-way through it): ask Stripe once for the latest.
-      if (state.data.payments && state.data.payments.connected && !state.data.payments.chargesEnabled && !state.refreshedPayments) {
+      const backFromStripe = window._sitePaymentsReturn === true;
+      window._sitePaymentsReturn = false;
+      if (state.data.payments && state.data.payments.connected && (backFromStripe || !state.data.payments.chargesEnabled) && !state.refreshedPayments) {
         state.refreshedPayments = true;
         try { state.data = await post({ action: 'payments_refresh', assistantId: state.assistantId }); } catch { /* shown as not finished */ }
+      }
+      if (backFromStripe) {
+        // Say how it went, where they'll look: the Orders card.
+        state.panel = 'orders';
+        const ok = state.data.payments && state.data.payments.chargesEnabled;
+        state.paymentsNotice = ok
+          ? { tone: 'ok', text: 'Stripe is connected. Buy buttons and any booking deposits are now live on your website.' }
+          : { tone: 'warn', text: 'Stripe still needs a few details before you can take payments. Click "Finish setting up Stripe" to carry on.' };
+        if (ok && typeof window.showToast === 'function') window.showToast('Stripe connected — your website can take payments.');
       }
       if (!state.pageId || !def().pages.some((p) => p.id === state.pageId)) state.pageId = def().pages[0].id;
     } catch (err) {
@@ -629,7 +640,7 @@
   function paymentsCard() {
     const p = state.data.payments || {};
     if (p.chargesEnabled) {
-      return card(`<p class="text-sm font-black text-gray-900">Payments: connected</p>
+      return card(`${state.paymentsNotice && state.paymentsNotice.tone === 'ok' ? `<p class="text-xs font-semibold text-green-700 mb-2" role="status">✓ ${esc(state.paymentsNotice.text)}</p>` : ''}<p class="text-sm font-black text-gray-900">Payments: connected</p>
         <p class="text-xs text-gray-500 mt-1">Your Stripe account is connected, so Buy buttons on your products show on your live site. Buyers pay you directly — Be More Swan takes no fee. Refunds, payouts and receipts are in your <a class="underline" href="https://dashboard.stripe.com" target="_blank" rel="noopener">Stripe dashboard</a>.</p>`, 'border-green-200');
     }
     const action = p.canConnect
@@ -639,8 +650,16 @@
       <p class="text-xs text-gray-500 mt-1">${p.connected
         ? 'Stripe still needs a few details before you can take payments. Pick up where you left off — it takes a few minutes.'
         : 'Connect a Stripe account to show Buy buttons on the products on your site. You are the seller: the money goes straight to your Stripe account, and Be More Swan takes no fee. Stripe charges its usual card fees. Prices are in pounds.'}</p>
+      ${p.canConnect ? (() => {
+        // Stripe asks for the business's website during sign-up — have it ready (2026-10-16 feedback).
+        const site = state.data.site || {};
+        return site.status === 'published' && site.url
+          ? `<p class="text-xs text-gray-700 mt-2"><strong>Have this ready:</strong> Stripe asks for your website. Give it <span class="font-semibold">${esc(site.url)}</span>.</p>`
+          : '<p class="text-xs text-amber-800 mt-2"><strong>Before you start:</strong> Stripe asks for your website. Publish your site first (above) so you have its address, or use another website you already have.</p>';
+      })() : ''}
       <div class="mt-3">${action}</div>
-      ${state.paymentsError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.paymentsError)}</p>` : ''}`);
+      ${state.paymentsError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.paymentsError)}</p>` : ''}
+      ${state.paymentsNotice && state.paymentsNotice.tone !== 'ok' ? `<p class="text-xs font-semibold text-amber-800 mt-2" role="status">${esc(state.paymentsNotice.text)}</p>` : ''}`);
   }
 
   function ordersPanel() {
