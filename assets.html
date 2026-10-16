@@ -613,7 +613,8 @@
     <!-- Your calendar (docs/booking-plan.md phase 3; calendar-sync.ts, booking-calendar-feed.ts) — no sign-in. -->
     <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
       <h2 class="text-lg font-bold text-gray-900">Your calendar</h2>
-      <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">Works with Google, Outlook and Apple calendars — no signing in.</p>
+      <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">Works with Google, Outlook and Apple calendars.</p>
+      <div id="cal-ms" class="hidden mt-4 border border-gray-200 rounded-xl p-4 bg-gray-50"></div>
 
       <h3 class="text-sm font-bold text-gray-900 mt-5">1. See your bookings in your calendar</h3>
       <p class="text-xs text-gray-500 mt-1">Add this private link to your calendar app as a subscribed calendar. Bookings, class dates and who's coming appear there. Google updates it every few hours (sometimes up to a day); Apple and Outlook more often — your booking emails stay the instant notice.</p>
@@ -630,6 +631,7 @@
         </ul></details>
       <p class="text-xs text-gray-500 mt-2">Keep it private — anyone with the link can see your bookings. <button type="button" id="cal-reset" class="link font-bold">Make a new link</button> (the old one stops working).</p>
 
+      <div id="cal-busy-block">
       <h3 class="text-sm font-bold text-gray-900 mt-6">2. Don't take bookings when you're busy</h3>
       <p class="text-xs text-gray-500 mt-1">Paste your calendar's <strong>private address in iCal format</strong>. Times you're busy there can't be booked; we check every 15 minutes. Only the start and end of each event are read — never titles or who's invited. Events marked "free" are ignored.</p>
       <details class="mt-1"><summary class="text-xs text-gray-600 cursor-pointer">Where to find it</summary>
@@ -644,6 +646,7 @@
         <button type="button" id="cal-busy-remove" class="btn-utility text-xs font-bold px-3 py-2 rounded-md hidden">Remove</button>
       </div>
       <p id="cal-busy-status" class="text-xs mt-2"></p>
+      </div>
       <p class="text-xs text-gray-500 mt-1">Each person in "Who or what can be booked" can have their own calendar too — it then blocks only their bookings.</p>
     </div>
   </section>
@@ -719,6 +722,21 @@
     function renderCalendar() {
       const c = data.calendar;
       if (!c) return;
+      // Signed-in Outlook / Microsoft 365 (calendar-microsoft.ts): instant both ways, replaces the iCal address.
+      const ms = c.microsoft || {};
+      const msBox = $('cal-ms');
+      msBox.classList.toggle('hidden', !ms.available && !ms.connected);
+      msBox.innerHTML = ms.connected
+        ? `<p class="text-sm font-bold text-gray-900">Outlook calendar connected${ms.account ? ` — ${esc(ms.account)}` : ''}</p>
+           <p class="text-xs text-gray-600 mt-1">New and changed bookings and class dates go straight into this calendar, and times you're busy there can't be booked (checked every 15 minutes). ${c.busy.error ? `<span class="text-red-600 font-semibold">${esc(c.busy.error)}</span>` : c.busy.syncedAt ? esc(busyLine({ ...c.busy, host: 'Outlook' })) : ''}</p>
+           <div class="flex flex-wrap gap-2 mt-2">${c.busy.error || ms.needsReconnect ? '<a class="btn-primary text-xs font-bold px-3 py-1.5 rounded-md" href="/api/oauth/outlook_calendar/connect?returnTo=bookings">Connect again</a>' : ''}
+             <button type="button" id="cal-ms-disconnect" class="btn-utility text-xs font-bold px-3 py-1.5 rounded-md">Disconnect</button></div>`
+        : `<p class="text-sm font-bold text-gray-900">Use Outlook or Microsoft 365?</p>
+           <p class="text-xs text-gray-600 mt-1">Sign in once and bookings appear in your Outlook calendar straight away — no waiting for it to refresh — and your busy times are read for you.</p>
+           <a class="btn-primary inline-block text-xs font-bold px-3 py-1.5 rounded-md mt-2" href="/api/oauth/outlook_calendar/connect?returnTo=bookings">Connect Outlook calendar</a>
+           <p class="text-xs text-gray-500 mt-2">Google Calendar sign-in is coming; until then, use the links below.</p>`;
+      // Signed in, the Outlook calendar is the business's busy times — the address box steps aside.
+      $('cal-busy-block').classList.toggle('hidden', !!ms.connected);
       $('cal-feed').value = c.feedUrl;
       $('cal-open').href = c.webcalUrl;
       $('cal-busy').value = '';
@@ -818,6 +836,16 @@
         const v = $('cal-feed').value;
         try { await navigator.clipboard.writeText(v); window.showToast ? window.showToast('Link copied.') : null; }
         catch (_) { window.promptModal && window.promptModal('Copy this link:', { title: 'Your private calendar link', value: v, confirmLabel: 'Done' }); }
+        return;
+      }
+      if (t.id === 'cal-ms-disconnect') {
+        const ok = window.confirmModal ? await window.confirmModal('Bookings stop going into your Outlook calendar and its busy times stop counting. Events already added stay in your calendar.', { title: 'Disconnect your Outlook calendar?', confirmLabel: 'Disconnect', cancelLabel: 'Keep it' }) : true;
+        if (!ok) return;
+        try {
+          const r = await fetch('/api/oauth/outlook_calendar/disconnect', { method: 'POST', credentials: 'same-origin' });
+          if (!r.ok) throw new Error('That didn\'t work — please try again.');
+          data = await call('GET'); renderCalendar();
+        } catch (err) { window.alertModal && window.alertModal(err.message); }
         return;
       }
       if (t.id === 'cal-reset') {

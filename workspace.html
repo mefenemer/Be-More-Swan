@@ -3832,6 +3832,10 @@ function formatCurrency(amount, currency) {
       // billing view reads this to open Change Plan on the tier they actually asked for.
       const changePlanParam = qs.get('changePlan');
       if (viewParam === 'billing' && changePlanParam) window._billingInitialChangePlan = changePlanParam;
+      // ?view=assets&tab=hours — Business Information on a given tab (e.g. back from connecting the
+      // Outlook calendar). Only a plain tab name is lifted; assets.html ignores one it doesn't have.
+      const tabParam = qs.get('tab');
+      if (viewParam === 'assets' && tabParam && /^[a-z]{2,20}$/.test(tabParam)) window._bizinfoInitialTab = tabParam;
       history.replaceState(null, '', window.location.pathname);
       await loadView(viewParam);
     }

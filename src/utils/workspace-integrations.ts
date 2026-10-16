@@ -28,9 +28,9 @@ import { singleFlight } from './single-flight';
 type Db = ReturnType<typeof getDb>;
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
-export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'outlook' | 'threads' | 'tiktok' | 'youtube' | 'wordpresscom' | 'searchconsole' | 'jira' | 'asana' | 'canva';
+export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'outlook' | 'outlook_calendar' | 'threads' | 'tiktok' | 'youtube' | 'wordpresscom' | 'searchconsole' | 'jira' | 'asana' | 'canva';
 
-export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'outlook', 'threads', 'tiktok', 'youtube', 'wordpresscom', 'searchconsole', 'jira', 'asana', 'canva'];
+export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'outlook', 'outlook_calendar', 'threads', 'tiktok', 'youtube', 'wordpresscom', 'searchconsole', 'jira', 'asana', 'canva'];
 
 /**
  * Providers that carry an offline refresh token and are renewed silently by
@@ -44,7 +44,7 @@ export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 
  * Keep this in sync with the refresh_token branches in refreshAccessToken() below.
  */
 export const AUTO_REFRESH_PROVIDERS: ReadonlySet<IntegrationProvider> = new Set<IntegrationProvider>([
-    'hubspot', 'xero', 'salesforce', 'zendesk', 'quickbooks', 'gmail', 'outlook',
+    'hubspot', 'xero', 'salesforce', 'zendesk', 'quickbooks', 'gmail', 'outlook', 'outlook_calendar',
     'threads', 'tiktok', 'youtube', 'searchconsole', 'jira', 'asana', 'canva',
 ]);
 
@@ -60,6 +60,20 @@ export function serviceAutoRefreshes(serviceName: string): boolean {
  * at all; without it a connection dies roughly an hour after consent.
  */
 export const OUTLOOK_SCOPE = 'offline_access https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/User.Read';
+
+/**
+ * Microsoft Graph delegated scope for the booking calendar (docs/booking-plan.md phase 3, sign-in):
+ * read busy times and write bookings into the signed-in owner's own calendar. The SAME Azure app as
+ * Outlook email (OUTLOOK_CLIENT_ID / _SECRET — envVarPrefix), a separate grant so connecting a
+ * calendar never widens the email connection or vice versa. Sent identically on authorize,
+ * exchange and refresh (Microsoft narrows the grant otherwise).
+ */
+export const OUTLOOK_CALENDAR_SCOPE = 'offline_access https://graph.microsoft.com/Calendars.ReadWrite https://graph.microsoft.com/User.Read';
+
+/** The env-var prefix for a provider's client id/secret: outlook_calendar shares Outlook's Azure app. */
+export function envVarPrefix(provider: IntegrationProvider): string {
+    return provider === 'outlook_calendar' ? 'OUTLOOK' : provider.toUpperCase();
+}
 
 export function isIntegrationProvider(value: unknown): value is IntegrationProvider {
     return typeof value === 'string' && (INTEGRATION_PROVIDERS as string[]).includes(value);
@@ -293,7 +307,7 @@ async function refreshProviderToken(provider: IntegrationProvider, refreshToken:
         return { accessToken: data.access_token, refreshToken: null, expiresInSec: data.expires_in ?? null };
     }
 
-    if (provider === 'outlook') {
+    if (provider === 'outlook' || provider === 'outlook_calendar') {
         // Microsoft identity platform v2.0. The /common authority serves both work/school
         // (Entra ID) and personal Microsoft accounts, matching the app's "any tenant +
         // personal" registration. The scope must be re-sent on refresh or Graph narrows the grant.
@@ -305,11 +319,11 @@ async function refreshProviderToken(provider: IntegrationProvider, refreshToken:
                 client_id: process.env.OUTLOOK_CLIENT_ID ?? '',
                 client_secret: process.env.OUTLOOK_CLIENT_SECRET ?? '',
                 refresh_token: refreshToken,
-                scope: OUTLOOK_SCOPE,
+                scope: provider === 'outlook_calendar' ? OUTLOOK_CALENDAR_SCOPE : OUTLOOK_SCOPE,
             }),
         });
         const data: { access_token?: string; refresh_token?: string; expires_in?: number } = await res.json().catch(() => ({}));
-        if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'Outlook token refresh was rejected.', 401);
+        if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', `${provider === 'outlook_calendar' ? 'Outlook calendar' : 'Outlook'} token refresh was rejected.`, 401);
         // Microsoft ROTATES the refresh token on use — persist the new one, or the next
         // refresh fails with invalid_grant and the user has to reconnect.
         return { accessToken: data.access_token, refreshToken: data.refresh_token ?? null, expiresInSec: data.expires_in ?? null };
@@ -589,6 +603,7 @@ const PROVIDER_LABELS: Record<IntegrationProvider, string> = {
     intercom: 'Intercom',
     gmail: 'Gmail',
     outlook: 'Outlook',
+    outlook_calendar: 'Outlook calendar',
     threads: 'Threads',
     tiktok: 'TikTok',
     youtube: 'YouTube',

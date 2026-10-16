@@ -5656,6 +5656,8 @@ export const bookingSettings = pgTable("booking_settings", {
   whatsapp: text(),
   // Phase 3 (db/z-calendar-sync.sql): the private subscribe link's secret, and the business calendar's busy-time status.
   calendarFeedToken: text("calendar_feed_token"),
+  /** Where the business's busy times come from: 'ical' | 'microsoft' (db/z-calendar-microsoft.sql). */
+  busySource: text("busy_source"),
   busyCalendarHost: text("busy_calendar_host"),
   busySyncedAt: timestamp("busy_synced_at"),
   busySyncError: text("busy_sync_error"),
@@ -5735,6 +5737,18 @@ export const calendarBusy = pgTable("calendar_busy", {
   startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
   endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
 }, (t) => [index("calendar_busy_org_time_idx").on(t.organisationId, t.startsAt)]);
+
+// Which event in the owner's own calendar is which booking or class date (db/z-calendar-microsoft.sql).
+export const calendarEvents = pgTable("calendar_events", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  provider: text().notNull().default("microsoft"),
+  itemKey: text("item_key").notNull(),
+  externalId: text("external_id").notNull(),
+  contentHash: text("content_hash").notNull(),
+  endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [uniqueIndex("calendar_events_org_item_uq").on(t.organisationId, t.provider, t.itemKey)]);
 
 // Classes and events (db/z-classes.sql): dated sessions with places, and their waitlist.
 export const classSessions = pgTable("class_sessions", {

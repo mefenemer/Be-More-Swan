@@ -23,6 +23,7 @@ import { cleanBookingSettings, cleanResource } from '../../src/utils/booking-set
 import { loadBookingSetup } from '../../src/utils/bookings';
 import { feedUrl, newFeedToken, webcalUrl } from '../../src/utils/booking-calendar-feed';
 import { setBusyCalendar, syncOne } from '../../src/utils/calendar-sync';
+import { microsoftConnected } from '../../src/utils/calendar-microsoft';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 
 /**
@@ -38,9 +39,12 @@ async function calendarInfo(db: ReturnType<typeof getDb>, orgId: number, event: 
     }
     const base = resolveBaseUrl((event.headers || {}) as Record<string, string | undefined>) || 'https://bemoreswan.com';
     const url = feedUrl(base, row.calendarFeedToken!);
+    const ms = await microsoftConnected(db, orgId);
     return {
         feedUrl: url, webcalUrl: webcalUrl(url),
-        busy: { host: row.busyCalendarHost ?? null, syncedAt: row.busySyncedAt ?? null, error: row.busySyncError ?? null, count: row.busyCount ?? null },
+        busy: { host: row.busyCalendarHost ?? null, source: row.busySource ?? null, syncedAt: row.busySyncedAt ?? null, error: row.busySyncError ?? null, count: row.busyCount ?? null },
+        // Signed-in Outlook (calendar-microsoft.ts): offered only where the Azure app is configured.
+        microsoft: { available: !!process.env.OUTLOOK_CLIENT_ID, connected: ms.connected, account: ms.account, needsReconnect: ms.status === 'expired' },
     };
 }
 

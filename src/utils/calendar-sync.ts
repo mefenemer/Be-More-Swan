@@ -61,7 +61,8 @@ export async function setBusyCalendar(db: Db, orgId: number, scope: CalendarScop
     if (scope.resourceId) {
         await db.update(bookableResources).set(status).where(and(eq(bookableResources.id, scope.resourceId), eq(bookableResources.organisationId, orgId)));
     } else {
-        await db.insert(bookingSettings).values({ organisationId: orgId, ...status }).onConflictDoUpdate({ target: bookingSettings.organisationId, set: status });
+        const biz = { ...status, busySource: host ? 'ical' : null };
+        await db.insert(bookingSettings).values({ organisationId: orgId, ...biz }).onConflictDoUpdate({ target: bookingSettings.organisationId, set: biz });
     }
     await db.delete(calendarBusy).where(and(eq(calendarBusy.organisationId, orgId), scope.resourceId ? eq(calendarBusy.resourceId, scope.resourceId) : isNull(calendarBusy.resourceId)));
     return { ok: true, value: { host } };
