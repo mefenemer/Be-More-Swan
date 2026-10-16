@@ -639,7 +639,8 @@
       <p class="text-xs text-gray-500 mt-1">${p.connected
         ? 'Stripe still needs a few details before you can take payments. Pick up where you left off — it takes a few minutes.'
         : 'Connect a Stripe account to show Buy buttons on the products on your site. You are the seller: the money goes straight to your Stripe account, and Be More Swan takes no fee. Stripe charges its usual card fees. Prices are in pounds.'}</p>
-      <div class="mt-3">${action}</div>`);
+      <div class="mt-3">${action}</div>
+      ${state.paymentsError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.paymentsError)}</p>` : ''}`);
   }
 
   function ordersPanel() {
@@ -907,8 +908,14 @@
     if (t('[data-site-orders-more]')) { state.orderShown += 20; render(); return; }
     if (t('[data-site-connect]')) {
       // Stripe's own onboarding, in this tab; Stripe sends them back to this Website tab.
-      try { window.location.href = (await post({ action: 'payments_connect', assistantId: state.assistantId })).url; }
-      catch (err) { state.note = { text: err.message, tone: 'error' }; render(); }
+      // The message goes beside the button: the page-level note sits above the tabs, out of sight down
+      // here, so a failure used to look like nothing happening but a preview refresh.
+      state.paymentsError = null;
+      try {
+        const r = await post({ action: 'payments_connect', assistantId: state.assistantId });
+        if (!r.url) throw new Error('Stripe didn\'t send a link to continue. Try again in a minute.');
+        window.location.href = r.url;
+      } catch (err) { state.paymentsError = err.message; render(); }
       return;
     }
     const pg = t('[data-site-page]');
