@@ -41,7 +41,15 @@ restaurants, hairdressers, consultants and more, configured through the website 
    that, "get in touch". The owner is told (`site_booking_changed`). Day-before reminder: hourly
    `send-booking-reminders.ts`, confirmed bookings made more than a day ahead, claimed before
    sending. SQL: `db/z-bookings-changes.sql`.
-3. Two-way Google / Outlook calendar sync (busy times block slots; bookings appear in the diary).
+3. ✅ (built 2026-10-15) The owner's calendar, with NO sign-in (owner's choice — no Google
+   verification): OUT, a private subscribe link (`/api/bookings/calendar.ics?t=<32-hex token>`,
+   reset-able) with bookings and class dates, who and how to reach them (Google refreshes it every
+   few hours); IN, the calendar's private iCal address — for the business (blocks appointments for
+   everyone) or a person (blocks only them) — read every 15 minutes through the SSRF fence, start
+   and end only (`calendar_busy`); free / cancelled / our own events ignored; tables and classes
+   never blocked. The address is a secret: vault only. SQL: `db/z-calendar-sync.sql`
+   (`ical-busy.ts`, `calendar-sync.ts`, `booking-calendar-feed.ts`). Live sign-in sync (Google /
+   Microsoft APIs) can come later as a faster upgrade.
 4. ✅ (built 2026-10-15) Deposits through Stripe Connect (the shop's connected account, no platform
    fee). Per product: a fixed £ or a % of its fixed price (per place for a class); tables never.
    The booking is made 'awaiting_payment', holding its time / places for 35 minutes while they pay

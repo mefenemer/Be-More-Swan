@@ -18,6 +18,7 @@ import { directionsUrl, openingHoursSpecification, openStatus, upcomingClosures,
 import { formatDate } from './booking-time';
 import type { SiteRenderReview, SiteRenderReviews } from './reviews';
 import type { SessionView } from './class-sessions';
+import { dietaryKey, dietaryMarks, dietaryWords } from './product-dietary';
 import type { WeeklyHours } from './booking-availability';
 import { buttonInk, menuOf, type Link, type Section, type SiteDefinition, type SitePageDef, type SiteTheme } from './site-definition';
 
@@ -31,7 +32,7 @@ export interface SiteSignupForm {
 /** Where forms post, on the site's own origin (sites-host forwards it to site-serve.ts). */
 export const FORM_ACTION = '/_form';
 /** A product as drawn: from Business Information, never typed into the site (site-shop.ts SiteProduct). */
-export interface SiteRenderProduct { id: number; name: string; description: string | null; price: string | null; buyPence: number | null; imageAssetId: number | null; durationMinutes?: number | null; }
+export interface SiteRenderProduct { id: number; name: string; description: string | null; price: string | null; buyPence: number | null; imageAssetId: number | null; durationMinutes?: number | null; dietary?: unknown; allergens?: string | null; }
 
 /** "45 min", "1 hr", "1 hr 30 min". */
 export function formatDuration(minutes: number): string {
@@ -171,6 +172,7 @@ section{padding:64px 0}.alt{background:rgba(0,0,0,.035)}
 .pv{background:#111;color:#fff;text-align:center;font-size:.85rem;padding:8px}
 .stars{color:#f59e0b;letter-spacing:1px}.stars .off{color:rgba(0,0,0,.15)}.rv{margin:0}.rv blockquote{margin:8px 0}.rv figcaption{font-size:.95rem}.rsum{margin:8px 0 0}
 .gal{gap:12px}@media(max-width:699px){.gal{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(min-width:700px){.gal{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}}.gi{margin:0}.gi a{display:block}.gi img{display:block;width:100%;border-radius:var(--r)}.gal.sq img{aspect-ratio:1/1;object-fit:cover}.gal.nat{align-items:start}.gi figcaption{font-size:.85rem;margin-top:6px;opacity:.8}
+.dm{font-size:.75rem;font-weight:700;letter-spacing:.02em;opacity:.75;white-space:nowrap}.al{font-style:italic}
 .menu{list-style:none;padding:0;margin:8px 0 0}.menu li{padding:10px 0;border-bottom:1px solid rgba(0,0,0,.08)}.mi{display:flex;align-items:baseline;gap:8px}.mn{font-weight:600}.mt{font-weight:400;font-size:.85rem;opacity:.7;white-space:nowrap}.ml{flex:1;min-width:16px;border-bottom:1px dotted currentColor;opacity:.35}.mp{font-weight:700;white-space:nowrap}.md{margin:4px 0 0;font-size:.92rem;opacity:.8}.mnote{margin-top:20px}.tt+h3{margin-top:24px}
 .badge{display:inline-block;padding:6px 12px;border-radius:999px;font-size:.9rem}.badge.on{background:#dcfce7;color:#14532d}.badge.off{background:#f3f4f6;color:#1f2937}
 .hrs{border-collapse:collapse;margin:8px 0 12px;min-width:min(100%,360px)}.hrs th{text-align:left;font-weight:600;padding:6px 24px 6px 0}.hrs td{padding:6px 0}.hrs tr.today{font-weight:800}.hrs tr+tr{border-top:1px solid rgba(0,0,0,.08)}
@@ -352,8 +354,13 @@ ${formButton(p.buttonLabel)}
             const groups = p.groups.map((g) => ({ title: g.title, items: g.productIds.map((id) => formState.products[id]).filter(Boolean) })).filter((g) => g.items.length);
             if (!groups.length) return formState.preview
                 ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Menu / price list: the products it shows are archived or removed in Business Information.</p></div></section>` : '';
-            const line = (pr: SiteRenderProduct) => `<li><div class="mi"><span class="mn">${esc(pr.name)}${p.showDurations && pr.durationMinutes ? ` <span class="mt">${esc(formatDuration(pr.durationMinutes))}</span>` : ''}</span><span class="ml" aria-hidden="true"></span>${pr.price ? `<span class="mp">${esc(pr.price)}</span>` : ''}</div>${p.showDescriptions && pr.description ? `<p class="md">${esc(pr.description)}</p>` : ''}</li>`;
-            return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}<div class="grid">${groups.map((g) => `<div>${g.title ? `<h3>${esc(g.title)}</h3>` : ''}<ul class="menu">${g.items.map(line).join('')}</ul></div>`).join('')}</div>${p.note ? `<div class="fine mnote">${paragraphs(p.note)}</div>` : ''}</div></section>`;
+            // Dietary marks (V · VG · GF …) and allergen words: the owner's statement from Business Information.
+            const marksOf = (pr: SiteRenderProduct) => { const m = dietaryMarks(pr.dietary); return m ? ` <span class="dm" title="${esc(dietaryWords(pr.dietary))}">${esc(m)}</span>` : ''; };
+            const line = (pr: SiteRenderProduct) => `<li><div class="mi"><span class="mn">${esc(pr.name)}${marksOf(pr)}${p.showDurations && pr.durationMinutes ? ` <span class="mt">${esc(formatDuration(pr.durationMinutes))}</span>` : ''}</span><span class="ml" aria-hidden="true"></span>${pr.price ? `<span class="mp">${esc(pr.price)}</span>` : ''}</div>${p.showDescriptions && pr.description ? `<p class="md">${esc(pr.description)}</p>` : ''}${pr.allergens ? `<p class="md al">${esc(pr.allergens)}</p>` : ''}</li>`;
+            const all = groups.flatMap((g) => g.items);
+            const key = dietaryKey(all.map((pr) => pr.dietary));
+            const foodNote = key || all.some((pr) => pr.allergens) ? `<p class="fine mnote">${key ? `${esc(key)}. ` : ''}Please tell us about any allergies before you order — ask us about allergens.</p>` : '';
+            return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}<div class="grid">${groups.map((g) => `<div>${g.title ? `<h3>${esc(g.title)}</h3>` : ''}<ul class="menu">${g.items.map(line).join('')}</ul></div>`).join('')}</div>${p.note ? `<div class="fine mnote">${paragraphs(p.note)}</div>` : ''}${foodNote}</div></section>`;
         }
         case 'hours': {
             // Everything from Business Information and the site's business details — nothing typed here.

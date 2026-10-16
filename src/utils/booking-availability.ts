@@ -31,6 +31,11 @@ export interface AvailabilitySettings {
 
 export interface AvailabilityResource { id: number; name: string; capacity: number; weeklyHours: WeeklyHours | null; serviceIds: number[] | null; }
 export interface TakenBooking { resourceId: number | null; startsAt: Date; endsAt: Date; partySize: number; }
+/**
+ * A busy time from the owner's own calendar (calendar-sync.ts). resourceId null = the business's
+ * calendar, which blocks appointments for everyone; a person's blocks only them. Tables are never blocked.
+ */
+export interface BusyBlock { resourceId: number | null; startsAt: Date; endsAt: Date; }
 
 export interface SlotQuery {
     date: string;
@@ -68,7 +73,7 @@ export function bookableDates(settings: AvailabilitySettings, now: Date, count =
 const within = (hours: Interval[] | undefined, startMin: number, endMin: number) =>
     (hours ?? []).some((h) => toMinutes(h.start) <= startMin && endMin <= toMinutes(h.end));
 
-export function availableSlots(settings: AvailabilitySettings, resources: AvailabilityResource[], taken: TakenBooking[], q: SlotQuery): Slot[] {
+export function availableSlots(settings: AvailabilitySettings, resources: AvailabilityResource[], taken: TakenBooking[], q: SlotQuery, busy: BusyBlock[] = []): Slot[] {
     if (!dateIsBookable(settings, q.date, q.now)) return [];
     if (q.kind === 'table' && (q.partySize < 1 || q.partySize > settings.maxPartySize)) return [];
     const length = q.kind === 'table' ? settings.tableMinutes : q.durationMinutes;
@@ -97,6 +102,9 @@ export function availableSlots(settings: AvailabilitySettings, resources: Availa
             for (const r of pool) {
                 // A resource with its own hours must be working the whole time.
                 if (r && r.weeklyHours && !within(r.weeklyHours[day], m, m + length)) continue;
+                // Busy in the owner's calendar (theirs, or the business's): not bookable then.
+                if (q.kind !== 'table' && busy.some((x) => (x.resourceId === null || x.resourceId === (r ? r.id : null))
+                    && x.startsAt.getTime() < endsAt.getTime() && startsAt.getTime() < x.endsAt.getTime())) continue;
                 const overlapping = taken.filter((b) => b.resourceId === (r ? r.id : null)
                     && b.startsAt.getTime() < endsAt.getTime() + buffer && startsAt.getTime() < b.endsAt.getTime() + buffer);
                 if (r === null) {

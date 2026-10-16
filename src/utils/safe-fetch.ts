@@ -338,6 +338,8 @@ export const USER_AGENTS = {
     inspo: 'Be More Swan Inspo Bot (+https://bemoreswan.com)',
     /** Lead enrichment: reading a prospect's own site for a published contact address. */
     leadDiscovery: 'BeMoreSwan-LeadDiscovery/1.0 (+https://bemoreswan.com)',
+    /** Calendar sync: reading the private iCal address an owner pasted, for their busy times (calendar-sync.ts). */
+    calendar: 'BeMoreSwan-CalendarSync/1.0 (+https://bemoreswan.com)',
     /** Mystery Shopper: reading a customer's own site and the competitors they named. Honours robots.txt. */
     mysteryShopper: 'BeMoreSwan-MysteryShopper/1.0 (+https://bemoreswan.com)',
 } as const;

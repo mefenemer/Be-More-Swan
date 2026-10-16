@@ -218,7 +218,8 @@ check('Business Information owns hours, rules and resources; services are Produc
     assert.ok(ui.includes('data-tab="hours">Hours, Location &amp; Bookings') && ui.includes("const API = '/.netlify/functions/booking-settings'"));
     const api = read('netlify/functions/booking-settings.ts');
     assert.ok(api.includes('cleanBookingSettings(body)') && api.includes('cleanResource(body, false)'));
-    assert.strictEqual((api.match(/eq\(bookableResources\.organisationId, orgId\)/g) || []).length, 4, 'every statement scoped');
+    // GET, POST count, PATCH, DELETE — and the calendar PATCH's ownership check and re-read (phase 3).
+    assert.strictEqual((api.match(/eq\(bookableResources\.organisationId, orgId\)/g) || []).length, 6, 'every statement scoped');
     assert.ok(read('src/utils/bookings.ts').includes('isNotNull(orgProducts.durationMinutes)'));
 });
 

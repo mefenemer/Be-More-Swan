@@ -120,8 +120,11 @@ export async function reviewsForPrompt(db: Db, orgId: number): Promise<string> {
     const rows = await db.select({ id: orgReviews.id, authorName: orgReviews.authorName, rating: orgReviews.rating, body: orgReviews.body, status: orgReviews.status, source: orgReviews.source })
         .from(orgReviews).where(and(eq(orgReviews.organisationId, orgId), inArray(orgReviews.status, [...COUNTED_STATUSES])))
         .orderBy(desc(orgReviews.reviewedOn), desc(orgReviews.id));
-    const [{ n: waiting }] = await db.select({ n: sql<number>`count(*)::int` }).from(orgReviews).where(and(eq(orgReviews.organisationId, orgId), eq(orgReviews.status, 'pending')));
-    const pendingLine = Number(waiting) ? ` ${waiting} review${Number(waiting) === 1 ? '' : 's'} sent in by customers ${Number(waiting) === 1 ? 'is' : 'are'} waiting for their approval in Business Information ▸ Reviews (you cannot approve them; point them there).` : '';
+    const waiting = await db.select({ id: orgReviews.id, authorName: orgReviews.authorName, rating: orgReviews.rating, body: orgReviews.body })
+        .from(orgReviews).where(and(eq(orgReviews.organisationId, orgId), eq(orgReviews.status, 'pending'))).orderBy(desc(orgReviews.createdAt)).limit(10);
+    const pendingLine = waiting.length
+        ? ` Waiting for their approval (sent in by customers; for a review_decisions card): ${waiting.map((r) => `reviewId ${r.id} — ${r.authorName}${r.rating ? `, ${r.rating}★` : ''}: "${r.body.replace(/\s+/g, ' ').slice(0, 160)}${r.body.length > 160 ? '…' : ''}"`).join('; ')}.`
+        : '';
     if (!rows.length) return (pendingLine ? pendingLine.trim() + ' ' : '') + 'They have no reviews in Business Information yet — a reviews section needs them (Business Information ▸ Reviews, or they can paste reviews to you and you offer a reviews_add card).';
     const s = reviewSummary(rows);
     const shown = rows.filter((r) => r.status === 'published').slice(0, 30);

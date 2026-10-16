@@ -372,6 +372,12 @@
   to = "/.netlify/functions/newsletter-media"
   status = 200
 
+# The owner's private bookings calendar (booking-calendar-feed.ts) — the link they subscribe to.
+[[redirects]]
+  from = "/api/bookings/calendar.ics"
+  to = "/.netlify/functions/booking-calendar-feed"
+  status = 200
+
 # A sign-up form's free download (form-download.ts) — the link in its email.
 [[redirects]]
   from = "/api/forms/download"
@@ -1126,6 +1132,12 @@ node_bundler = "esbuild"
 # it on. Hourly at :35 — two indexed queries that usually find nothing.
 [functions.send-review-requests]
   schedule = "35 * * * *"
+
+# Busy times from owners' own calendars (sync-busy-calendars.ts; calendar-sync.ts). Every 15 minutes,
+# oldest first, within a 20-second budget. Only workspaces that pasted a calendar address.
+[functions.sync-busy-calendars]
+  schedule = "*/15 * * * *"
+  timeout = 26
 
 # Conversations tab. `list` and `get` are cheap reads, but the "Send the next chase now" action
 # runs the outreach-sequence worker INLINE and awaits it — one LLM call to draft the follow-up plus

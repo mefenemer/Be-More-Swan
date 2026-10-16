@@ -22,6 +22,7 @@ import { esc, type SiteRenderBooking, type SiteRenderBusiness } from './site-ren
 import { manageBookingUrl } from './booking-links';
 import { depositNote, holdsTime, holdUntil, refundDeposit } from './booking-deposits';
 import { connectAccountFor } from './site-shop';
+import { loadBusy } from './calendar-sync';
 import { depositLabel } from './product-price';
 
 type Db = ReturnType<typeof getDb>;
@@ -102,10 +103,12 @@ export async function slotsForDay(db: Db | Tx, orgId: number, setup: BookingSetu
     const service = req.serviceId ? setup.services.find((s) => s.id === req.serviceId) : null;
     if (req.kind !== 'table' && !service) return [];
     const taken = await takenOn(db, orgId, req.date);
+    // Busy in the owner's own calendar (calendar-sync.ts) — appointments only; tables never.
+    const busy = req.kind === 'table' ? [] : await loadBusy(db as Db, orgId, new Date(`${addDays(req.date, -1)}T00:00:00Z`), new Date(`${addDays(req.date, 2)}T00:00:00Z`));
     return availableSlots(setup.settings, resourcesForKind(setup, req.kind), taken, {
         date: req.date, kind: req.kind, durationMinutes: service?.durationMinutes ?? 0,
         serviceId: req.serviceId, resourceId: req.resourceId, partySize: req.partySize, now: req.now,
-    });
+    }, busy);
 }
 
 export interface NewBooking extends SlotRequest {

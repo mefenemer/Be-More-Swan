@@ -7,6 +7,9 @@
 //   POST   { name, kind, … }     → { resource }   add someone / something that can be booked
 //   PATCH  { id, ... }           → { resource }   edit, archive / restore (status), reorder (sortOrder)
 //   DELETE ?id=N                 → { ok: true }   remove for good (past bookings keep its name)
+//   PUT    { feedReset: true }   → { calendar }   a new private calendar link (the old one stops working)
+//   PUT    { busyCalendarUrl }   → { calendar }   the business's private iCal address ('' to remove); read at once
+//   PATCH  { id, busyCalendarUrl } → { resource } the same for one person / room (calendar-sync.ts)
 //
 // Services are NOT here: they are Business Information products with a length (org-products.ts).
 // Tenant-scoped on every statement.
@@ -18,6 +21,28 @@ import { bookableResources, bookingSettings } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { cleanBookingSettings, cleanResource } from '../../src/utils/booking-settings';
 import { loadBookingSetup } from '../../src/utils/bookings';
+import { feedUrl, newFeedToken, webcalUrl } from '../../src/utils/booking-calendar-feed';
+import { setBusyCalendar, syncOne } from '../../src/utils/calendar-sync';
+import { resolveBaseUrl } from '../../src/utils/base-url';
+
+/**
+ * The owner's calendar links and the busy-time status. The private feed token is made on first
+ * look (or replaced on `reset`, retiring every copy of the old link).
+ */
+async function calendarInfo(db: ReturnType<typeof getDb>, orgId: number, event: { headers?: Record<string, string | undefined> }, reset: boolean) {
+    let [row] = await db.select().from(bookingSettings).where(eq(bookingSettings.organisationId, orgId)).limit(1);
+    if (!row?.calendarFeedToken || reset) {
+        const token = newFeedToken();
+        [row] = await db.insert(bookingSettings).values({ organisationId: orgId, calendarFeedToken: token })
+            .onConflictDoUpdate({ target: bookingSettings.organisationId, set: { calendarFeedToken: token } }).returning();
+    }
+    const base = resolveBaseUrl((event.headers || {}) as Record<string, string | undefined>) || 'https://bemoreswan.com';
+    const url = feedUrl(base, row.calendarFeedToken!);
+    return {
+        feedUrl: url, webcalUrl: webcalUrl(url),
+        busy: { host: row.busyCalendarHost ?? null, syncedAt: row.busySyncedAt ?? null, error: row.busySyncError ?? null, count: row.busyCount ?? null },
+    };
+}
 
 const json = (statusCode: number, body: unknown) => ({ statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const MAX_RESOURCES = 100;
@@ -35,7 +60,7 @@ export default withLambda(async (event) => {
             const setup = await loadBookingSetup(db, orgId);
             const resources = await db.select().from(bookableResources).where(eq(bookableResources.organisationId, orgId))
                 .orderBy(asc(bookableResources.sortOrder), asc(bookableResources.id));
-            return json(200, { exists: setup.exists, settings: setup.settings, resources, services: setup.services });
+            return json(200, { exists: setup.exists, settings: setup.settings, resources, services: setup.services, calendar: await calendarInfo(db, orgId, event, false) });
         }
 
         let body: Record<string, unknown> = {};
@@ -44,6 +69,15 @@ export default withLambda(async (event) => {
             if (!body || typeof body !== 'object' || Array.isArray(body)) return json(400, { error: 'Invalid body.' });
         }
 
+        if (method === 'PUT' && body.feedReset === true) {
+            return json(200, { calendar: await calendarInfo(db, orgId, event, true) });
+        }
+        if (method === 'PUT' && Object.prototype.hasOwnProperty.call(body, 'busyCalendarUrl')) {
+            const r = await setBusyCalendar(db, orgId, { resourceId: null }, body.busyCalendarUrl === '' || body.busyCalendarUrl === null ? null : body.busyCalendarUrl);
+            if (!r.ok) return json(400, { error: r.error });
+            if (r.value.host) await syncOne(db, orgId, { resourceId: null }, new Date());
+            return json(200, { calendar: await calendarInfo(db, orgId, event, false) });
+        }
         if (method === 'PUT') {
             const r = cleanBookingSettings(body);
             if (!r.ok) return json(400, { error: r.error });
@@ -63,6 +97,16 @@ export default withLambda(async (event) => {
             return json(201, { resource });
         }
 
+        if (method === 'PATCH' && Object.prototype.hasOwnProperty.call(body, 'busyCalendarUrl')) {
+            const id = Number(body.id);
+            const [own] = Number.isInteger(id) ? await db.select({ id: bookableResources.id }).from(bookableResources).where(and(eq(bookableResources.id, id), eq(bookableResources.organisationId, orgId))).limit(1) : [];
+            if (!own) return json(404, { error: 'Not found.' });
+            const r = await setBusyCalendar(db, orgId, { resourceId: id }, body.busyCalendarUrl === '' || body.busyCalendarUrl === null ? null : body.busyCalendarUrl);
+            if (!r.ok) return json(400, { error: r.error });
+            if (r.value.host) await syncOne(db, orgId, { resourceId: id }, new Date());
+            const [resource] = await db.select().from(bookableResources).where(and(eq(bookableResources.id, id), eq(bookableResources.organisationId, orgId))).limit(1);
+            return json(200, { resource });
+        }
         if (method === 'PATCH') {
             const id = Number(body.id);
             if (!Number.isInteger(id)) return json(400, { error: 'id is required.' });
