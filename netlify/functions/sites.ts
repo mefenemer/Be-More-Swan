@@ -32,6 +32,8 @@
 //                                               to Business Information, and a booking section added
 //   orders    { assistantId }                 → paid orders from the site's Buy buttons
 //   order_done { assistantId, id, done }      → mark one dealt with (or not)
+//   split_preview { assistantId }             → the pages split_pages WOULD make (nothing saved), for
+//                                               the "Several pages" approval; or why it can't
 //
 // address / publish / unpublish / restore are buttons on the Website tab's Publish card ONLY — the
 // chat cards never send them (chat-session.js sends only apply and draft), so the owner always
@@ -44,7 +46,7 @@ import { aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
-import { assetIdsIn, SECTION_TYPES, type SiteOperation } from '../../src/utils/site-definition';
+import { applySiteOperation, assetIdsIn, SECTION_TYPES, type SiteOperation } from '../../src/utils/site-definition';
 import { placeholdersIn } from '../../src/utils/site-draft';
 import { cleanSiteSlugInput, siteAssetUrl, siteOrigin, sitesDomain, siteVisibleText, suggestSiteSlug } from '../../src/utils/site-hosting';
 import { listSignupForms } from '../../src/utils/site-forms';
@@ -85,7 +87,7 @@ function json(statusCode: number, body: unknown) {
 }
 
 const MAX_OPS = 25;
-const OP_NAMES = ['add_page', 'update_page', 'remove_page', 'add_section', 'update_section', 'remove_section', 'move_section', 'set_nav', 'set_theme', 'set_settings', 'set_footer', 'set_structure', 'combine_pages'];
+const OP_NAMES = ['add_page', 'update_page', 'remove_page', 'add_section', 'update_section', 'remove_section', 'move_section', 'set_nav', 'set_theme', 'set_settings', 'set_footer', 'set_structure', 'combine_pages', 'split_pages'];
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -166,6 +168,12 @@ export default withLambda(async (event) => {
     };
 
     if (action === 'get') return json(200, await view(site));
+
+    if (action === 'split_preview') {
+        const r = applySiteOperation(definitionOf(site, maxPages).definition, { op: 'split_pages' }, { maxPages });
+        if (!r.ok) return json(200, { pages: null, reason: r.error });
+        return json(200, { pages: r.definition.pages.map((p) => ({ title: p.title, path: p.slug ? `/${p.slug}` : '/', sections: p.sections.length })) });
+    }
 
     if (action === 'apply') {
         const ops = Array.isArray(body.ops) ? body.ops : [];

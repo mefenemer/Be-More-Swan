@@ -99,6 +99,19 @@
     return a ? a.name : 'An assistant';
   }
 
+  /** The assistant's avatar — its own letter and colour (assistant-colors.js), as on its card. */
+  function avatarHtml(inst, id, size) {
+    const known = inst.assistants.find((x) => Number(x.id) === Number(id));
+    const a = known || { id, name: assistantName(inst, id) };
+    const AC = window.AssistantColors;
+    if (known) AC?.remember?.(known);   // never with the stand-in: that would drop a cached choice
+    const colour = AC?.colorFor(a.id, a.avatarColor) || '#9ca3af';
+    const letter = String(AC?.letterFor(a.id, a.name, a.avatarLetter) || (a.name || 'A').charAt(0).toUpperCase()).slice(0, 2);
+    const px = size || 32;
+    return `<span aria-hidden="true" class="shrink-0 inline-flex items-center justify-center rounded-full text-white font-bold"
+      style="width:${px}px;height:${px}px;font-size:${Math.round(px * 0.42)}px;background:${esc(colour)}">${esc(letter)}</span>`;
+  }
+
   function threadTitle(inst) {
     if (inst.mode !== 'page' || inst.thread.type === 'all') return inst.mode === 'page' ? 'Everything' : '';
     if (inst.thread.type === 'me') return 'Me';
@@ -120,8 +133,10 @@
       ? `<p class="text-xs text-gray-500 mt-2">You answered: <span class="font-bold text-gray-700">${esc(q.answer || '')}</span></p>`
       : `<div class="flex flex-wrap gap-2 mt-2">${q.choices.map((c) => `<button type="button" data-team-answer="${m.id}" data-value="${esc(c.value)}"
             class="btn-secondary border px-3 py-1 text-xs font-bold rounded-lg disabled:opacity-50">${esc(c.label)}</button>`).join('')}</div>`) : '';
+    const face = !mine && m.from.kind === 'assistant' && m.from.id ? avatarHtml(inst, m.from.id, 32) : '';
     return `
-      <div class="flex ${mine ? 'justify-end' : 'justify-start'}">
+      <div class="flex items-start gap-2 ${mine ? 'justify-end' : 'justify-start'}">
+        ${face}
         <div class="rounded-xl border px-3 py-2 ${mine ? 'bg-gray-50 border-gray-200' : 'bg-white border-gray-200'}" style="max-width:36rem">
           <p class="text-[11px] text-gray-500"><span class="font-bold text-gray-700">${esc(mine ? 'You' : m.from.name)}</span>${to} · ${esc(when(m.createdAt))}
             ${chip ? `<span class="inline-flex items-center px-2 py-0.5 ml-1 rounded-full text-[10px] font-bold border ${chipCls}">${esc(chip)}</span>` : ''}</p>
@@ -166,11 +181,11 @@
   }
 
   function threadListHtml(inst) {
-    const item = (type, id, label, sub) => {
+    const item = (type, id, label, sub, face) => {
       const active = inst.thread.type === type && Number(inst.thread.id || 0) === Number(id || 0);
       return `<button type="button" data-team-thread="${inst.id}" data-type="${type}" data-id="${id || ''}"
-        class="w-full text-left px-3 py-2 rounded-lg text-sm ${active ? 'bg-gray-100 font-bold text-gray-900' : 'text-gray-700 hover:bg-gray-50'}">
-        <span class="block truncate">${esc(label)}</span>${sub ? `<span class="block text-[11px] text-gray-500 truncate">${esc(sub)}</span>` : ''}</button>`;
+        class="w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 ${active ? 'bg-gray-100 font-bold text-gray-900' : 'text-gray-700 hover:bg-gray-50'}">
+        ${face || ''}<span class="min-w-0"><span class="block truncate">${esc(label)}</span>${sub ? `<span class="block text-[11px] text-gray-500 truncate">${esc(sub)}</span>` : ''}</span></button>`;
     };
     const live = inst.campaigns.filter((c) => c.status === 'active' || c.status === 'throttled' || c.status === 'draft' || c.status === 'paused');
     return `
@@ -178,7 +193,7 @@
         ${item('all', null, 'Everything', 'Every message')}
         ${item('me', null, 'Me', 'To you, and what you have sent')}
         ${live.length ? `<p class="px-3 pt-3 text-[11px] font-bold text-gray-500 uppercase tracking-wide">Campaigns</p>${live.map((c) => item('campaign', c.id, c.objective, c.status)).join('')}` : ''}
-        ${inst.assistants.length ? `<p class="px-3 pt-3 text-[11px] font-bold text-gray-500 uppercase tracking-wide">Assistants</p>${inst.assistants.map((a) => item('assistant', a.id, a.name, ROLE_LABELS[a.roleKey] || '')).join('')}` : ''}
+        ${inst.assistants.length ? `<p class="px-3 pt-3 text-[11px] font-bold text-gray-500 uppercase tracking-wide">Assistants</p>${inst.assistants.map((a) => item('assistant', a.id, a.name, ROLE_LABELS[a.roleKey] || '', avatarHtml(inst, a.id, 24))).join('')}` : ''}
       </div>`;
   }
 

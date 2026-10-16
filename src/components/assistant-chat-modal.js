@@ -66,15 +66,26 @@
     + '.bms-chat-headbtn.ac-on{background:#fce7f3;color:#9d174d;}'
     + '.bms-chat-state{position:absolute;inset:0;display:flex;flex-direction:column;'
     + 'align-items:center;justify-content:center;gap:8px;text-align:center;padding:32px;color:#6b7280;}'
+    // "This chat | Team" switch: the same assistant's Team Chat thread (team-feed.js) in place of
+    // the conversation, so a brief or a question from the team is one click from the chat.
+    + '.bms-chat-modes{display:inline-flex;background:#f3f4f6;border-radius:8px;padding:2px;flex-shrink:0;}'
+    + '.bms-chat-mode{background:transparent;border:0;border-radius:6px;height:28px;padding:0 10px;'
+    + 'font-size:12px;font-weight:700;color:#4b5563;cursor:pointer;}'
+    + '.bms-chat-mode[aria-pressed="true"]{background:#fff;color:#111827;box-shadow:0 1px 2px rgba(0,0,0,.08);}'
+    + '.bms-chat-team{position:absolute;inset:0;overflow-y:auto;padding:16px 20px;background:#fff;}'
     + '.ac-hidden{display:none !important;}';
 
   var MARKUP = ''
     + '<div class="bms-chat-panel" role="dialog" aria-modal="true" aria-label="Chat with your assistant">'
     +   '<div class="bms-chat-head">'
-    +     '<div class="bms-chat-avatar">💬</div>'
+    +     '<div class="bms-chat-avatar" id="bms-chat-avatar">💬</div>'
     +     '<div class="bms-chat-id">'
     +       '<div class="bms-chat-name" id="bms-chat-name"></div>'
     +       '<div class="bms-chat-role" id="bms-chat-role"></div>'
+    +     '</div>'
+    +     '<div class="bms-chat-modes" role="group" aria-label="Show">'
+    +       '<button type="button" class="bms-chat-mode" id="bms-chat-mode-chat" aria-pressed="true">Chat</button>'
+    +       '<button type="button" class="bms-chat-mode" id="bms-chat-mode-team" aria-pressed="false" title="What the team has said to and from this assistant">Team</button>'
     +     '</div>'
     +     '<button type="button" class="bms-chat-headbtn" id="bms-chat-history-btn" aria-expanded="false" '
     +       'title="Past conversations">History</button>'
@@ -87,6 +98,10 @@
     +   '<div class="bms-chat-body">'
     +     '<div class="bms-chat-mount" id="bms-chat-mount"></div>'
     +     '<div class="bms-chat-history" id="bms-chat-history"></div>'
+    +     '<div class="bms-chat-team ac-hidden" id="bms-chat-team">'
+    +       '<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button type="button" class="bms-chat-headbtn" id="bms-chat-team-open">Open Team Chat</button></div>'
+    +       '<div id="bms-chat-team-host"></div>'
+    +     '</div>'
     +     '<div class="bms-chat-state" id="bms-chat-loading">Loading your assistant…</div>'
     +     '<div class="bms-chat-state ac-hidden" id="bms-chat-errstate">'
     +       '<div style="width:48px;height:48px;border-radius:9999px;background:#fef3c7;display:flex;align-items:center;justify-content:center;font-size:24px">🤔</div>'
@@ -109,6 +124,12 @@
     document.body.appendChild(backdrop);
 
     el('bms-chat-close').addEventListener('click', closeAssistantChat);
+    el('bms-chat-mode-chat').addEventListener('click', function () { setMode('chat'); });
+    el('bms-chat-mode-team').addEventListener('click', function () { setMode('team'); });
+    el('bms-chat-team-open').addEventListener('click', function () {
+      closeAssistantChat();
+      if (typeof window.loadView === 'function') window.loadView('team');
+    });
     el('bms-chat-history-btn').addEventListener('click', function () {
       setHistoryOpen(!el('bms-chat-history').classList.contains('ac-open'));
     });
@@ -214,6 +235,7 @@
         }
         el('bms-chat-name').textContent = info.assistantName || 'Your assistant';
         el('bms-chat-role').textContent = info.assistantRole || 'Digital Assistant';
+        paintAvatar(info);
         showState('chat');
         state.chat = window.ChatSession.mount({
           container: el('bms-chat-mount'),
@@ -230,6 +252,32 @@
         if (state.history) state.history.setCurrentSession(info.sessionId);
         return info;
       });
+  }
+
+  // Chat or the Team thread. The conversation stays mounted underneath, so switching back loses nothing.
+  function setMode(mode) {
+    var team = mode === 'team' && !!state.assistantId;
+    el('bms-chat-mode-chat').setAttribute('aria-pressed', team ? 'false' : 'true');
+    el('bms-chat-mode-team').setAttribute('aria-pressed', team ? 'true' : 'false');
+    el('bms-chat-team').classList.toggle('ac-hidden', !team);
+    el('bms-chat-history-btn').classList.toggle('ac-hidden', team);
+    if (team) {
+      setHistoryOpen(false);
+      if (window.TeamFeed) window.TeamFeed.mount(el('bms-chat-team-host'), { mode: 'assistant', assistantId: state.assistantId });
+    }
+  }
+
+  // The assistant's own letter and colour (assistant-colors.js), as on its card and in Team Chat.
+  function paintAvatar(info) {
+    var av = el('bms-chat-avatar');
+    var AC = window.AssistantColors;
+    if (!av) return;
+    if (!AC || !info || !info.assistantId) { av.textContent = '💬'; av.style.background = ''; av.style.color = ''; return; }
+    av.textContent = AC.letterFor(info.assistantId, info.assistantName);
+    av.style.background = AC.colorFor(info.assistantId);
+    av.style.color = '#fff';
+    av.style.fontWeight = '700';
+    av.style.fontSize = '16px';
   }
 
   function setHistoryOpen(open) {
@@ -277,6 +325,9 @@
     inject();
     el('bms-chat-name').textContent = '';
     el('bms-chat-role').textContent = '';
+    paintAvatar(null);
+    state.assistantId = null;   // until this conversation resolves, Team has no one to show
+    setMode('chat');
     setHistoryOpen(false);
 
     el('bms-chat-backdrop').classList.add('ac-open');
@@ -322,6 +373,8 @@
     if (state.chat && state.chat.destroy) { state.chat.destroy(); state.chat = null; }
     if (state.history && state.history.destroy) { state.history.destroy(); state.history = null; }
     setHistoryOpen(false);
+    setMode('chat');
+    el('bms-chat-team-host').innerHTML = '';
     el('bms-chat-backdrop').classList.remove('ac-open');
     window.ScrollLock.release('assistant-chat');
     if (state.escHandler) { document.removeEventListener('keydown', state.escHandler); state.escHandler = null; }

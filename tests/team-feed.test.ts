@@ -101,13 +101,20 @@ check('Team is in the side menu with its own badge, and the bell adds it in', ()
     assert.ok(n.indexOf('setInboxNavBadge(count);') < n.indexOf('count += teamUnread;'), 'the Inbox item would count Team messages it cannot show');
 });
 
-check('the feed is on every assistant page and every campaign', () => {
-    const a = read('assistants.js');
-    const i = a.indexOf("window.TeamFeed?.mount(document.getElementById('team-panel-host')");
-    assert.ok(i > 0, 'not mounted');
-    assert.ok(i < a.indexOf("toggle('maintab-btn-briefs', !!briefsTab);"), 'mounted only for the Brand Designer');
-    assert.ok(read('assistant-detail.html').includes('id="team-panel-host"'));
+check('the feed is in every assistant\'s chat (Team switch) and every campaign; not on the assistant page', () => {
+    const m = read('src/components/assistant-chat-modal.js');
+    assert.ok(m.includes("window.TeamFeed.mount(el('bms-chat-team-host'), { mode: 'assistant', assistantId: state.assistantId })"));
+    assert.ok(m.includes('id="bms-chat-mode-team"') && m.includes("closeAssistantChat();\n      if (typeof window.loadView === 'function') window.loadView('team');"));
+    assert.ok(!read('assistant-detail.html').includes('id="team-panel-host"'), 'the duplicate card is back');
+    assert.ok(!read('assistants.js').includes("getElementById('team-panel-host')"));
     assert.ok(read('src/components/assistant-campaigns.js').includes("window.TeamFeed?.mount(el, { mode: 'campaign'"));
+});
+
+check('each assistant message and thread carries its avatar (own letter and colour)', () => {
+    const f = read('src/components/team-feed.js');
+    assert.ok(f.includes('AC?.colorFor(a.id, a.avatarColor)') && f.includes('AC?.letterFor(a.id, a.name, a.avatarLetter)'));
+    assert.ok(f.includes("avatarHtml(inst, m.from.id, 32)") && f.includes("avatarHtml(inst, a.id, 24)"));
+    assert.ok(read('netlify/functions/team.ts').includes("avatarColor: sql<string | null>`${aiAssistants.configuration} ->> 'avatarColor'`"));
 });
 
 // ── Usual posting ────────────────────────────────────────────────────────────

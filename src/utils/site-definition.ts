@@ -699,6 +699,8 @@ export type SiteOperation =
     | { op: 'set_structure'; structure: 'pages' | 'one_page' }
     /** Every page's sections onto the home page, in page order; links to those pages become jumps. */
     | { op: 'combine_pages' }
+    /** The reverse: the home page splits at each later section with a menu label, each part its own page. */
+    | { op: 'split_pages' }
     | { op: 'remove_section'; pageId: string; sectionId: string }
     | { op: 'move_section'; pageId: string; sectionId: string; toIndex: number }
     | { op: 'set_nav'; items: Array<{ label?: string; pageId: string }> }
@@ -832,6 +834,43 @@ export function applySiteOperation(def: SiteDefinition, op: SiteOperation, opts:
             next.pages = [home];
             next.nav = [];
             next.structure = 'one_page';
+            break;
+        }
+        case 'split_pages': {
+            const [home, ...rest] = next.pages;
+            // Home keeps everything up to the first LATER section with a menu label; each labelled
+            // section then starts a page named by its label (what combine_pages gave it).
+            const parts: Array<{ title: string; sections: Section[] }> = [];
+            const keep: Section[] = [];
+            home.sections.forEach((sec, i) => {
+                const label = i > 0 ? sec.look?.menuLabel : null;
+                if (label) parts.push({ title: label, sections: [sec] });
+                else (parts.length ? parts[parts.length - 1].sections : keep).push(sec);
+            });
+            if (!parts.length) return { ok: false, error: 'There is nothing to split: no section further down your home page has a menu label. Add pages from the Pages list instead.' };
+            if (1 + rest.length + parts.length > maxPages) return { ok: false, error: `That would make ${1 + rest.length + parts.length} pages, and your plan includes ${maxPages}. Remove a menu label from a section to keep it on the home page, or move to a plan with more pages.` };
+            const taken = new Set(next.pages.map((p) => p.slug));
+            const made = parts.map((part) => {
+                const base = slugify(part.title) || 'page';
+                let slug = RESERVED_SLUGS.has(base) ? `${base}-page` : base; let n = 2;
+                while (taken.has(slug)) slug = `${base}-${n++}`;
+                taken.add(slug);
+                const first = part.sections[0];
+                if (first.look?.menuLabel === part.title) first.look = { ...first.look, menuLabel: null };
+                return { id: '', slug, title: part.title.slice(0, LIMITS.pageTitle), seo: { title: null, description: null }, sections: part.sections, hideFromMenu: false } as SitePageDef;
+            });
+            // Jumps down the page to a section that now lives on another page go to that page instead.
+            const pageOf = new Map<string, string>();
+            for (const pg of made) for (const sec of pg.sections) pageOf.set(`#${sec.id}`, `/${pg.slug}`);
+            const fix = (l: Link | null): Link | null => (l && pageOf.has(l.href) ? { ...l, href: pageOf.get(l.href)! } : l);
+            home.sections = keep;
+            for (const pg of [home, ...made]) for (const sec of pg.sections) {
+                if (sec.type === 'hero') { sec.props.primaryCta = fix(sec.props.primaryCta); sec.props.secondaryCta = fix(sec.props.secondaryCta); }
+                if (sec.type === 'cta') sec.props.button = fix(sec.props.button) ?? sec.props.button;
+            }
+            next.pages = [home, ...made, ...rest];
+            next.nav = [];
+            next.structure = 'pages';
             break;
         }
         default:
