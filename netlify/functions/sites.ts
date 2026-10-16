@@ -46,7 +46,7 @@ import { aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
-import { applySiteOperation, assetIdsIn, SECTION_TYPES, type SiteOperation } from '../../src/utils/site-definition';
+import { applySiteOperation, assetIdsIn, planSplit, SECTION_TYPES, type SiteOperation } from '../../src/utils/site-definition';
 import { placeholdersIn } from '../../src/utils/site-draft';
 import { cleanSiteSlugInput, siteAssetUrl, siteOrigin, sitesDomain, siteVisibleText, suggestSiteSlug } from '../../src/utils/site-hosting';
 import { listSignupForms } from '../../src/utils/site-forms';
@@ -122,6 +122,8 @@ export default withLambda(async (event) => {
                 suggestedSlug: s.slug ? null : suggestSiteSlug(definition.settings.siteName),
                 publishedVersion: s.publishedVersion, publishedAt: s.publishedAt,
                 unpublishedChanges: s.status === 'published' ? await hasUnpublishedChanges(db, s, maxPages) : false,
+                // Home holds sections that would sit better on their own pages (the "Spread across pages" offer).
+                canSplit: planSplit(definition.pages[0]?.sections ?? []).parts.length > 0,
                 suspendedReason: s.status === 'suspended' ? (s.suspendedReason || 'Taken offline by Be More Swan.') : null,
                 publishBlocker: publishBlocker(s, definition),
             },

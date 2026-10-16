@@ -8,7 +8,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { applySiteOperation, normaliseSiteDefinition, type SiteDefinition } from '../src/utils/site-definition';
+import { applySiteOperation, normaliseSiteDefinition, planSplit, type Section, type SiteDefinition } from '../src/utils/site-definition';
 
 let passed = 0;
 let total = 0;
@@ -55,14 +55,35 @@ check('nothing labelled further down: refused with what to do; the plan\'s page 
     assert.ok(!capped.ok && /your plan includes 2/.test(capped.error));
 });
 
+check('no menu labels (sections added straight onto Home): pages by what each section is', () => {
+    const sec = (type: string, props: Record<string, unknown> = {}) => ({ id: type + Math.random(), type, props }) as unknown as Section;
+    const plan = planSplit([sec('hero'), sec('text'), sec('hours'), sec('booking', { kind: 'appointment' }), sec('booking', { kind: 'class' }),
+        sec('products'), sec('menu'), sec('reviews'), sec('signup'), sec('contact'), sec('faq'), sec('gallery')]);
+    assert.strictEqual(plan.byLabel, false);
+    assert.deepStrictEqual(plan.home.map((x) => x.type), ['hero', 'text', 'reviews', 'signup']);
+    assert.deepStrictEqual(plan.parts.map((p) => [p.title, p.sections.map((x) => x.type).join('+')]),
+        [['Contact', 'hours+contact'], ['Book', 'booking'], ['Classes', 'booking'], ['Shop', 'products'], ['Menu', 'menu'], ['Questions', 'faq'], ['Gallery', 'gallery']]);
+});
+check('a Contact page that already exists takes the contact sections instead of a second one', () => {
+    const def = normaliseSiteDefinition({ settings: { siteName: 'B' }, pages: [
+        { title: 'Home', slug: '', sections: [{ type: 'hero', props: { headline: 'Hi' } }, { type: 'faq', props: { items: [{ q: 'Parking?', a: 'Yes' }] } }, { type: 'contact', props: {} }] },
+        { title: 'Contact', slug: 'contact', sections: [{ type: 'text', props: { body: 'Call us' } }] },
+    ] }).definition;
+    const out = ok(applySiteOperation(def, { op: 'split_pages' }));
+    assert.deepStrictEqual(out.pages.map((p) => [p.slug, p.sections.map((x) => x.type).join('+')]), [['', 'hero'], ['questions', 'faq'], ['contact', 'text+contact']]);
+});
+
 console.log('\nWiring');
 
 check('the editor proposes first; the server previews without saving; the chat knows the op', () => {
     const ed = read('src/components/assistant-site-editor.js');
     assert.ok(ed.includes("if (structure.value === 'pages') { await backToPages(); return; }"));
+    assert.ok(ed.includes("if (t('[data-site-split]')) { await backToPages(); return; }") && ed.includes('state.data.site.canSplit'), 'offered when already on several pages');
+    assert.ok(!ed.includes("if (def().pages.length > 1) { await apply([{ op: 'set_structure', structure: 'pages' }]); return; }"), 'never switches silently');
     assert.ok(ed.includes("post({ action: 'split_preview', assistantId: state.assistantId })") && ed.includes("await apply([{ op: 'split_pages' }]"));
     const api = read('netlify/functions/sites.ts');
     assert.ok(api.includes("'combine_pages', 'split_pages'];") && api.includes("if (action === 'split_preview') {"));
+    assert.ok(api.includes('canSplit: planSplit(definition.pages[0]?.sections ?? []).parts.length > 0,'));
     assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('- {"op":"split_pages"}'));
     assert.ok(read('src/components/disruptive-ui-registry.js').includes('split_pages: () =>'));
 });
