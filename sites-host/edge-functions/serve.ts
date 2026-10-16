@@ -28,7 +28,9 @@ export default async (request: Request, context?: { ip?: string }): Promise<Resp
         body = await request.text();
         if (body.length > MAX_FORM_BYTES) return new Response('That form was too large to send.', { status: 413 });
     }
-    const target = `${app}/.netlify/functions/site-serve?path=${encodeURIComponent(url.pathname)}${url.search ? `&q=${encodeURIComponent(url.search.slice(1))}` : ''}`;
+    // ⚠️ The host is in the URL as well as the header, so no cache between here and the app can ever
+    // hand one site's page to another site's address (site-serve also sends Netlify-Vary on X-Site-Host).
+    const target = `${app}/.netlify/functions/site-serve?host=${encodeURIComponent(url.host)}&path=${encodeURIComponent(url.pathname)}${url.search ? `&q=${encodeURIComponent(url.search.slice(1))}` : ''}`;
     const upstream = await fetch(target, {
         method: request.method,
         headers: {
