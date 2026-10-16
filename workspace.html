@@ -50,12 +50,17 @@
   :root { --sidebar-w: 16rem; }
   /* Display set here, not by md:inline-flex — the prebuilt style.css has no such utility. */
   #sidebar-collapse-btn, #sidebar-collapse-row { display: none; }
+  /* The row sits above the menu panel (z-index) so the focus ring isn't painted over at the bottom;
+     the ring shows for keyboard focus only, not after a mouse click. */
+  #sidebar-collapse-btn:focus { outline: none; }
+  #sidebar-collapse-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px #D6006B; }
   @media (min-width: 768px) {
     #sidebar-collapse-btn { display: inline-flex; }
     /* The toggle sits in the menu's top-right corner, above Dashboard (centred once collapsed).
        The container becomes a column so the row and the injected menu share its height. */
     #sidebar-container { display: flex; flex-direction: column; }
-    #sidebar-collapse-row { display: flex; justify-content: flex-end; flex-shrink: 0; padding: .75rem .75rem 0; }
+    #sidebar-collapse-row { display: flex; justify-content: flex-end; flex-shrink: 0; padding: .75rem .75rem 0;
+      position: relative; z-index: 1; }
     html.sb-collapsed #sidebar-collapse-row { justify-content: center; padding-left: 0; padding-right: 0; }
     #sidebar-placeholder { flex: 1 1 0; min-height: 0; height: auto; }
     #sidebar-placeholder > aside { padding-top: .25rem; }
@@ -2358,7 +2363,7 @@ window.showComplianceModals = function showComplianceModals(force) {
        Dashboard and below the header. Wired in the "Side menu collapse" script. -->
   <div id="sidebar-collapse-row">
       <button id="sidebar-collapse-btn" type="button" aria-controls="sidebar-container" aria-expanded="true" aria-label="Collapse menu" title="Collapse menu"
-        class="text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg p-1.5 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-400">
+        class="text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg p-1.5 transition-colors cursor-pointer">
         <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" stroke-width="2"/><path stroke-linecap="round" stroke-width="2" d="M9 4v16"/><path id="sidebar-collapse-chevron" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l-2 2 2 2"/></svg>
       </button>
   </div>

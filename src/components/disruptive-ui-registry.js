@@ -1770,6 +1770,7 @@
     },
     set_structure: (o) => (o.structure === 'one_page' ? 'Make it a one-page site (the menu jumps down the page)' : 'Make it a site of several pages'),
     combine_pages: () => 'Combine every page into one page',
+    split_pages: () => 'Split the home page back into separate pages, one per menu entry',
     remove_section: () => 'Remove a section',
     move_section: () => 'Move a section',
     set_theme: () => 'Change the design (colours, lettering or corners)',

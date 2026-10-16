@@ -582,6 +582,25 @@
       ${d.pages.length > 1 ? `<div class="mt-3">${btn('data-site-combine', 'Combine everything into one page')}<p class="text-xs text-gray-500 mt-1">Moves every page's sections onto the home page, in order, and puts each page in the menu. Earlier versions are kept if you change your mind.</p></div>` : ''}`);
   }
 
+  // One page → several: switching the menu style alone changes nothing a visitor sees once the pages
+  // were combined, so propose the pages split_pages would make and apply them only on approval.
+  async function backToPages() {
+    let plan;
+    try { plan = await post({ action: 'split_preview', assistantId: state.assistantId }); }
+    catch (err) { state.note = { text: err.message, tone: 'error' }; rerender(); return; }
+    if (!plan.pages) {
+      if (def().pages.length > 1) { await apply([{ op: 'set_structure', structure: 'pages' }]); return; }
+      await window.alertModal(esc(plan.reason || 'There is nothing to split.'), { title: 'Your site is still one page' });
+      rerender();   // the radio goes back to "One page"
+      return;
+    }
+    const list = plan.pages.map((p) => `• <strong>${esc(p.title)}</strong> <span style="color:#6b7280">${esc(p.path)} · ${p.sections} section${p.sections === 1 ? '' : 's'}</span>`).join('<br>');
+    const ok = await window.confirmModal(`Your home page would be split at each section that's in the menu:<br><br>${list}<br><br>Buttons that jumped down the page go to the new pages. Nothing changes on your live site until you publish.`,
+      { title: `Split into ${plan.pages.length} pages?`, confirmLabel: 'Split into these pages', cancelLabel: 'Keep one page' });
+    if (!ok) { rerender(); return; }
+    await apply([{ op: 'split_pages' }], () => { state.pageId = def().pages[0].id; state.previewPath = '/'; });
+  }
+
   function designPanel() {
     const t = def().theme;
     const colour = (k, label) => `<div><label class="block text-xs font-bold text-gray-700">${esc(label)}</label><input type="color" data-theme="${k}" value="${esc(t[k])}" class="w-full h-10 border border-gray-300 rounded-lg"></div>`;
@@ -1149,7 +1168,12 @@
       return;
     }
     const structure = t('[data-site-structure]');
-    if (structure) { if (structure.value !== def().structure) await apply([{ op: 'set_structure', structure: structure.value }]); return; }
+    if (structure) {
+      if (structure.value === def().structure) return;
+      if (structure.value === 'pages') { await backToPages(); return; }
+      await apply([{ op: 'set_structure', structure: structure.value }]);
+      return;
+    }
     if (t('[data-site-combine]')) {
       const n = def().pages.length;
       const ok = await window.confirmModal(`All ${n} pages become one: their sections are moved onto the home page in order, the other pages are removed, and the menu jumps down the page. Buttons that linked to those pages now jump to their part of the page. If your site is live, publish again to show it — earlier published versions are kept.`, { title: 'Combine into one page?', confirmLabel: 'Combine', cancelLabel: 'Keep my pages' });

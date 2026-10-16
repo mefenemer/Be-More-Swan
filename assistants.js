@@ -5817,9 +5817,6 @@ function _applyDashboardRegistry(data) {
     // Briefs tab — Brand Designer only (briefsTab: brand_designer). init() loads eagerly: the count
     // of briefs waiting for a decision is the tab badge, visible from every tab.
     const briefsTab = cfg.briefsTab;
-    // "From your team" — briefs this assistant received, what it said, and its questions to you.
-    // Every role: any assistant can be briefed by a campaign or written to on the Team page.
-    window.TeamFeed?.mount(document.getElementById('team-panel-host'), { mode: 'assistant', assistantId: data.id });
     toggle('maintab-btn-briefs', !!briefsTab);
     if (briefsTab) {
         setText('briefs-tab-label', briefsTab.label || 'Briefs');

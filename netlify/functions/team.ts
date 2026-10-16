@@ -51,6 +51,9 @@ export default withLambda(async (event) => {
         // show an assistant with no messages yet, and name a campaign thread by its objective.
         const assistants = await db.select({
             id: aiAssistants.id, name: aiAssistants.name, roleKey: sql<string | null>`${aiAssistants.configuration} ->> 'type'`,
+            // The assistant's chosen avatar (assistant-colors.js), so each message carries its face.
+            avatarColor: sql<string | null>`${aiAssistants.configuration} ->> 'avatarColor'`,
+            avatarLetter: sql<string | null>`${aiAssistants.configuration} ->> 'avatarLetter'`,
         }).from(aiAssistants).where(eq(aiAssistants.organisationId, orgId)).orderBy(aiAssistants.id);
         const campaignIds = [...new Set(messages.map((m) => m.campaignId).filter((x): x is number => !!x))];
         const live = await db.select({ id: campaigns.id, objective: campaigns.objective, status: campaigns.status })
