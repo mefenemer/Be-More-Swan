@@ -112,6 +112,9 @@ export interface SiteProduct {
     imageAssetId: number | null;
     /** Minutes, for a service with a length (shown on a menu / price list when asked). */
     durationMinutes?: number | null;
+    /** Dietary markers and allergen words (product-dietary.ts), for a menu. */
+    dietary?: unknown;
+    allergens?: string | null;
 }
 
 /** The active products a site's products sections name, keyed by id — only this workspace's. */
@@ -122,11 +125,11 @@ export async function loadSiteProducts(db: Db, orgId: number, def: SiteDefinitio
     const rows = await db.select({
         id: orgProducts.id, name: orgProducts.name, description: orgProducts.description, price: orgProducts.price,
         priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, imageAssetId: orgProducts.imageAssetId,
-        durationMinutes: orgProducts.durationMinutes,
+        durationMinutes: orgProducts.durationMinutes, dietary: orgProducts.dietary, allergens: orgProducts.allergens,
     }).from(orgProducts).where(and(inArray(orgProducts.id, ids), eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active')));
     return Object.fromEntries(rows.map((r) => [r.id, {
         id: r.id, name: r.name, description: r.description, price: r.price, buyPence: buyablePence(r), imageAssetId: r.imageAssetId,
-        durationMinutes: r.durationMinutes ?? null,
+        durationMinutes: r.durationMinutes ?? null, dietary: r.dietary ?? null, allergens: r.allergens ?? null,
     }]));
 }
 

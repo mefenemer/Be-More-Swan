@@ -5,6 +5,7 @@
 // in normaliseSiteDefinition — there is no other writer. The editor (assistant-site-editor.js) and
 // the chat cards call the same API actions (netlify/functions/sites.ts), so they cannot disagree.
 
+import { dietaryWords } from './product-dietary';
 import { depositLabel } from './product-price';
 import { bookableSessions } from './class-sessions';
 import { reviewsForPrompt } from './reviews';
@@ -398,10 +399,10 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
         ? 'Payments: their Stripe account is connected — Buy buttons on a products section work on the live site.'
         : acct ? 'Payments: they started connecting Stripe but it is not finished — Buy buttons do not show yet. Point them to the Orders tab.'
             : 'Payments: not connected. Buy buttons on a products section only appear once they connect Stripe on the Orders tab (owner or admin).');
-    const catalogue = await db.select({ id: orgProducts.id, name: orgProducts.name, price: orgProducts.price, priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount })
+    const catalogue = await db.select({ id: orgProducts.id, name: orgProducts.name, price: orgProducts.price, priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, dietary: orgProducts.dietary })
         .from(orgProducts).where(and(eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active'))).orderBy(orgProducts.sortOrder, orgProducts.id).catch(() => []);
     lines.push(catalogue.length
-        ? `Their Business Information products (for productIds in a products or menu section): ${catalogue.slice(0, 40).map((p) => `${p.name} (productId ${p.id}, ${p.price ?? 'no price shown'}${buyablePence(p) !== null ? ', can be bought online' : ''})`).join('; ')}.`
+        ? `Their Business Information products (for productIds in a products or menu section): ${catalogue.slice(0, 40).map((p) => `${p.name} (productId ${p.id}, ${p.price ?? 'no price shown'}${buyablePence(p) !== null ? ', can be bought online' : ''}${dietaryWords(p.dietary) ? `, ${dietaryWords(p.dietary)}` : ''})`).join('; ')}.`
         : 'They have no products in Business Information yet — a products section needs them (Business Information ▸ Products & Services).');
     const bk = await loadBookingSetup(db, orgId).catch(() => null);
     if (bk) {

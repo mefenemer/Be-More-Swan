@@ -5386,6 +5386,9 @@ export const orgProducts = pgTable("org_products", {
   priceUnit: text("price_unit"),
   durationMinutes: integer("duration_minutes"),
   // Deposit when booked from the website (db/z-booking-deposits.sql): 'fixed' pence | 'percent' of a fixed price.
+  // Dietary markers + the owner's allergen words, for menus (db/z-product-dietary.sql; product-dietary.ts).
+  dietary: jsonb(),
+  allergens: text(),
   depositType: text("deposit_type"),
   depositAmount: integer("deposit_amount"),
   imageAssetId: integer("image_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),

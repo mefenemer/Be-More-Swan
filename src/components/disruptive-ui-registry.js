@@ -2064,6 +2064,50 @@
   }
   register('class_sessions', renderClassSessionsCard);
 
+  // { type: 'review_decisions', summary, decisions: [{ reviewId, decision: approve|decline, reason }] }
+  // Approve / decline reviews customers sent in — org-reviews.ts PATCH { id, decision }, the same as
+  // Business Information ▸ Reviews. Decline is only for a review that isn't genuine, is offensive or
+  // isn't about the business; the server refuses one already dealt with.
+  const RD_REASON = { not_genuine: 'not genuine', offensive: 'offensive', not_about_us: 'not about you' };
+  function renderReviewDecisionsCard(ui, esc) {
+    const decisions = (Array.isArray(ui.decisions) ? ui.decisions : [])
+      .map((d) => ({ reviewId: Number(d && d.reviewId), decision: d && d.decision === 'decline' ? 'decline' : d && d.decision === 'approve' ? 'approve' : null, reason: d && RD_REASON[d.reason] ? d.reason : null }))
+      .filter((d) => Number.isInteger(d.reviewId) && d.reviewId > 0 && d.decision && (d.decision === 'approve' || d.reason)).slice(0, 20);
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Waiting reviews · Approval needed</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <ul class="text-xs text-gray-700 mt-2 space-y-0.5">${decisions.map((d) => `<li>Review ${esc(d.reviewId)}: <strong>${d.decision === 'approve' ? 'show it on your website' : `decline — ${esc(RD_REASON[d.reason])}`}</strong></li>`).join('')}</ul>
+      <p class="text-xs text-gray-600 mt-2">Declined reviews aren't shown or counted. A genuine bad review should be approved — you can hide it later, and it still counts in your average.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-rd-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${decisions.length ? '' : 'disabled'}>Do it</button>
+        <button type="button" data-rd-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-rd-status></p>`;
+    const status = el.querySelector('[data-rd-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-rd-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-rd-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('site:reviewDecisions', {
+        bubbles: true,
+        detail: {
+          decisions,
+          respond({ ok, error, done }) {
+            if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved.', 'error'); return; }
+            say(`Done — ${done} review${done === 1 ? '' : 's'} updated in Business Information ▸ Reviews.`);
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('review_decisions', renderReviewDecisionsCard);
+
   // ── Built-in: Visual Option Review Card (Brand Designer) ───────────────────
   // { type: 'visual_option_review', briefId, decisions: [{ optionId, decision, reason?, note? }], remake? }
   //

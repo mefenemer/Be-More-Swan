@@ -23,6 +23,7 @@ import { orgProducts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { PRODUCT_LIMITS } from '../../src/utils/org-products';
 import { cleanDeposit, cleanPrice, priceFromText } from '../../src/utils/product-price';
+import { cleanAllergens, cleanDietary } from '../../src/utils/product-dietary';
 import { siteAssetUrl } from '../../src/utils/site-hosting';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { contentAssets } from '../../db/schema';
@@ -86,6 +87,9 @@ export function productFields(body: Record<string, unknown>, partial: boolean, c
         if ('error' in dep) return dep;
         Object.assign(values, dep);
     }
+    // Dietary markers (a closed set) and the owner's allergen words — for menus (product-dietary.ts).
+    if (!partial || has('dietary')) values.dietary = cleanDietary(body.dietary);
+    if (!partial || has('allergens')) values.allergens = cleanAllergens(body.allergens);
     if (!partial || has('durationMinutes')) {
         const d = body.durationMinutes === null || body.durationMinutes === '' || body.durationMinutes === undefined ? null : Number(body.durationMinutes);
         if (d !== null && (!Number.isInteger(d) || d <= 0 || d > 1440)) return { error: 'The length must be in whole minutes, up to 24 hours.' };
@@ -119,6 +123,7 @@ const COLUMNS = {
     priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, priceUnit: orgProducts.priceUnit,
     durationMinutes: orgProducts.durationMinutes, imageAssetId: orgProducts.imageAssetId,
     depositType: orgProducts.depositType, depositAmount: orgProducts.depositAmount,
+    dietary: orgProducts.dietary, allergens: orgProducts.allergens,
     status: orgProducts.status, sortOrder: orgProducts.sortOrder, updatedAt: orgProducts.updatedAt,
 };
 

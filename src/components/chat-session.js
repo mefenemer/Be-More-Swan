@@ -836,6 +836,23 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // "Do it" on a review_decisions card — org-reviews.ts PATCH { id, decision }, one by one; stops at the first refusal.
+    async function onReviewDecisions(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      let done = 0;
+      try {
+        for (const x of (Array.isArray(d.decisions) ? d.decisions : [])) {
+          const r = await fetch('/.netlify/functions/org-reviews', { method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: x.reviewId, decision: x.decision }) });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(`Review ${x.reviewId}: ${j.error || 'couldn\'t be saved.'}`);
+          done++;
+        }
+        respond({ ok: true, done });
+        siteChanged();
+      } catch (err) { respond({ ok: false, error: `${done ? `${done} saved, then: ` : ''}${err.message}` }); }
+    }
+
     // "Add N reviews" on a reviews_add card — org-reviews.ts, the same checks as Business Information ▸ Reviews.
     function onReviewsAdd(e) {
       const d = e.detail || {};
@@ -1158,6 +1175,7 @@
     container.addEventListener('site:bookingSetup', onBookingSetup);
     container.addEventListener('site:reviewsAdd', onReviewsAdd);
     container.addEventListener('site:classSessions', onClassSessions);
+    container.addEventListener('site:reviewDecisions', onReviewDecisions);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
     container.addEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
@@ -1213,6 +1231,7 @@
         container.removeEventListener('site:bookingSetup', onBookingSetup);
         container.removeEventListener('site:reviewsAdd', onReviewsAdd);
         container.removeEventListener('site:classSessions', onClassSessions);
+        container.removeEventListener('site:reviewDecisions', onReviewDecisions);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
         container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);

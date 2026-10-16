@@ -16,6 +16,7 @@
 // ⚠️ Never throws. A missing table (code deployed before db/z-org-products.sql) or a failed read
 // yields no block, and every caller carries on exactly as it did before products existed.
 
+import { ALLERGENS_MAX, dietaryWords } from './product-dietary';
 import { and, asc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { orgProducts } from '../../db/schema';
@@ -31,6 +32,9 @@ export interface OrgProduct {
     price?: string | null;
     audience?: string | null;
     url?: string | null;
+    /** Dietary markers and allergen words (product-dietary.ts) — the owner's statement, for food. */
+    dietary?: unknown;
+    allergens?: string | null;
 }
 
 /** Field limits — shared with the endpoint so what can be saved is what can be shown. */
@@ -54,6 +58,8 @@ function renderOne(p: OrgProduct): string {
     add('Price', p.price, PRODUCT_LIMITS.price);
     add('Who it is for', p.audience, PRODUCT_LIMITS.audience);
     add('Link', p.url, PRODUCT_LIMITS.url);
+    add('Dietary (as the business states it)', dietaryWords(p.dietary), 200);
+    add('Allergens (as the business states it)', p.allergens, ALLERGENS_MAX);
     return lines.join('\n');
 }
 
@@ -111,6 +117,7 @@ export async function loadOrgProducts(db: Db, organisationId: number): Promise<O
             .select({
                 kind: orgProducts.kind, name: orgProducts.name, description: orgProducts.description,
                 benefits: orgProducts.benefits, price: orgProducts.price, audience: orgProducts.audience, url: orgProducts.url,
+                dietary: orgProducts.dietary, allergens: orgProducts.allergens,
             })
             .from(orgProducts)
             .where(and(eq(orgProducts.organisationId, organisationId), eq(orgProducts.status, 'active')))
