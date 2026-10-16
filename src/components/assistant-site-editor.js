@@ -579,6 +579,7 @@
         <label class="flex items-center gap-2"><input type="radio" name="site-structure" value="one_page" data-site-structure ${one ? 'checked' : ''}> <span><strong>One page</strong> — everything on one page; the menu jumps down it</span></label>
       </div>
       ${one ? '<p class="text-xs text-gray-500 mt-2">Give a section a <strong>Menu label</strong> (Edit ▸ Look &amp; menu) to put it in the menu. Other pages stay reachable by their address.</p>' : ''}
+      ${!one && state.data.site.canSplit ? `<div class="mt-3">${btn('data-site-split', 'Spread your home page across pages')}<p class="text-xs text-gray-500 mt-1">Your home page holds things visitors usually find on their own page — the shop, bookings, contact. See which pages it would make before anything changes.</p></div>` : ''}
       ${d.pages.length > 1 ? `<div class="mt-3">${btn('data-site-combine', 'Combine everything into one page')}<p class="text-xs text-gray-500 mt-1">Moves every page's sections onto the home page, in order, and puts each page in the menu. Earlier versions are kept if you change your mind.</p></div>` : ''}`);
   }
 
@@ -589,14 +590,20 @@
     try { plan = await post({ action: 'split_preview', assistantId: state.assistantId }); }
     catch (err) { state.note = { text: err.message, tone: 'error' }; rerender(); return; }
     if (!plan.pages) {
-      if (def().pages.length > 1) { await apply([{ op: 'set_structure', structure: 'pages' }]); return; }
-      await window.alertModal(esc(plan.reason || 'There is nothing to split.'), { title: 'Your site is still one page' });
+      // Nothing on the home page belongs elsewhere: say so, and switch only if there ARE other pages
+      // for the menu to list — never silently.
+      const others = def().pages.length > 1;
+      const ok = others
+        ? await window.confirmModal(`${esc(plan.reason || 'There is nothing to split.')}<br><br>Your menu will list the pages you already have.`, { title: 'Show your pages in the menu?', confirmLabel: 'Use several pages', cancelLabel: 'Keep one page' })
+        : (await window.alertModal(esc(plan.reason || 'There is nothing to split.'), { title: 'Your site is still one page' }), false);
+      if (ok) { await apply([{ op: 'set_structure', structure: 'pages' }]); return; }
       rerender();   // the radio goes back to "One page"
       return;
     }
-    const list = plan.pages.map((p) => `• <strong>${esc(p.title)}</strong> <span style="color:#6b7280">${esc(p.path)} · ${p.sections} section${p.sections === 1 ? '' : 's'}</span>`).join('<br>');
-    const ok = await window.confirmModal(`Your home page would be split at each section that's in the menu:<br><br>${list}<br><br>Buttons that jumped down the page go to the new pages. Nothing changes on your live site until you publish.`,
-      { title: `Split into ${plan.pages.length} pages?`, confirmLabel: 'Split into these pages', cancelLabel: 'Keep one page' });
+    const had = new Set(def().pages.map((p) => (p.slug ? `/${p.slug}` : '/')));
+    const list = plan.pages.map((p) => `• <strong>${esc(p.title)}</strong> <span style="color:#6b7280">${esc(p.path)} · ${p.sections} section${p.sections === 1 ? '' : 's'}${had.has(p.path) ? '' : ' · new'}</span>`).join('<br>');
+    const ok = await window.confirmModal(`These are the pages your site would have, with what's on your home page moved to where visitors look for it:<br><br>${list}<br><br>Buttons that jumped down the page go to the new pages. You can move sections between pages afterwards. Nothing changes on your live site until you publish.`,
+      { title: `Split into ${plan.pages.length} pages?`, confirmLabel: 'Use these pages', cancelLabel: 'Keep one page' });
     if (!ok) { rerender(); return; }
     await apply([{ op: 'split_pages' }], () => { state.pageId = def().pages[0].id; state.previewPath = '/'; });
   }
@@ -1174,6 +1181,7 @@
       await apply([{ op: 'set_structure', structure: structure.value }]);
       return;
     }
+    if (t('[data-site-split]')) { await backToPages(); return; }
     if (t('[data-site-combine]')) {
       const n = def().pages.length;
       const ok = await window.confirmModal(`All ${n} pages become one: their sections are moved onto the home page in order, the other pages are removed, and the menu jumps down the page. Buttons that linked to those pages now jump to their part of the page. If your site is live, publish again to show it — earlier published versions are kept.`, { title: 'Combine into one page?', confirmLabel: 'Combine', cancelLabel: 'Keep my pages' });
