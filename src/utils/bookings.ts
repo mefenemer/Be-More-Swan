@@ -207,7 +207,7 @@ export async function announceCustomerChange(db: Db, change: 'cancelled' | 'move
     if (!owner) return;
     const next = change === 'cancelled'
         ? 'The time is free again.'
-        : b.status === 'pending' ? 'Confirm or decline the new time on the Website tab, under Bookings.' : 'The new time is confirmed — the old one is free again.';
+        : b.status === 'pending' ? 'Confirm or decline the new time on the Bookings tab.' : 'The new time is confirmed — the old one is free again.';
     await createNotification(db, 'site_booking_changed', {
         userId: owner.userId, assistantId: ctx.assistantId ?? undefined, category: change === 'moved' && b.status === 'pending' ? 'suggested_action' : 'state_change',
         context: { assistant: { name: owner.name }, booking: { who: b.customerName, what, when, change: change === 'cancelled' ? `cancelled their booking for ${when}` : `moved their booking${was ? ` from ${was}` : ''} to ${when}`, next } },
@@ -285,7 +285,7 @@ export async function announceNewBooking(db: Db, b: BookingRow, ctx: BookingNoti
     if (owner) {
         await createNotification(db, 'site_booking_received', {
             userId: owner.userId, assistantId: ctx.assistantId ?? undefined, category: pending ? 'suggested_action' : 'state_change',
-            context: { assistant: { name: owner.name }, booking: { who: b.customerName, what, when, next: pending ? 'Confirm or decline it on the Website tab, under Bookings.' : 'It is confirmed — it is on the Website tab, under Bookings.' } },
+            context: { assistant: { name: owner.name }, booking: { who: b.customerName, what, when, next: pending ? 'Confirm or decline it on the Bookings tab.' : 'It is confirmed — it is on the Bookings tab.' } },
             metadata: { assistantId: ctx.assistantId, bookingId: b.id },
         }).catch((err) => console.error('[bookings] notification failed', err));
         if (owner.email) {
@@ -295,7 +295,7 @@ export async function announceNewBooking(db: Db, b: BookingRow, ctx: BookingNoti
                 html: `<p><strong>${esc(b.customerName)}</strong> ${pending ? 'asked to book' : 'booked'} <strong>${esc(what)}</strong> on <strong>${esc(when)}</strong>.</p>
 <p>Email: ${esc(b.customerEmail)}${b.customerPhone ? `<br>Phone: ${esc(b.customerPhone)}` : ''}</p>
 ${b.notes ? `<p style="white-space:pre-wrap">${esc(b.notes)}</p>` : ''}
-<p>${pending ? 'Confirm or decline it on your Website Assistant\'s Website tab, under Bookings — the time is held until you do.' : 'It is confirmed and on your Website tab, under Bookings.'} Reply to this email to write to them.</p>`,
+<p>${pending ? 'Confirm or decline it on your Website Assistant\'s Bookings tab — the time is held until you do.' : 'It is confirmed and on your Bookings tab.'} Reply to this email to write to them.</p>`,
             }).catch((err: unknown) => console.error('[bookings] owner email failed', err instanceof Error ? err.message : err));
         }
     }

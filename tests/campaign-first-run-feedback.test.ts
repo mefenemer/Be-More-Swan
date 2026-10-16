@@ -90,7 +90,9 @@ check('7. the round button names the assistant; the cost is its own line', () =>
 check('8. each brief can be talked through with the Brand Designer', () => {
     assert.ok(briefs.includes('data-brief-chat=') && briefs.includes('openAssistantChat?.({ assistantId: state.assistantId, draft:'), 'no chat from the brief');
     const modal = read('src/components/assistant-chat-modal.js');
-    assert.ok(modal.includes('if (opts.draft)') && !/sendMessage\(opts\.draft/.test(modal), 'the draft must be typed in, never sent');
+    // Only `send` (a request the user already wrote, e.g. the website editor's swan) is sent; a draft never is.
+    assert.ok(modal.includes('var text = opts.send || opts.draft;') && modal.includes("var sendBtn = opts.send && el('bms-chat-mount').querySelector('[data-chat-send]');")
+        && !/sendMessage\(opts\.draft/.test(modal), 'the draft must be typed in, never sent');
 });
 
 console.log(`\n${passed} passed`);

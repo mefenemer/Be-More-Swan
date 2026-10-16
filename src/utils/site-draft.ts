@@ -15,7 +15,7 @@ import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import type { BrandKit } from './brand-kit';
 import { currentDatePromptBlock } from './current-date-prompt';
 import {
-    applySiteOperation, cleanHref, DEFAULT_THEME, LIMITS, normaliseSiteDefinition, type BusinessType, type SiteDefinition, type SiteTheme,
+    applySiteOperation, cleanHref, DEFAULT_THEME, LIMITS, normaliseSiteDefinition, sectionAllowed, type BusinessType, type SectionType, type SiteDefinition, type SiteTheme,
 } from './site-definition';
 
 export interface BusinessFacts {
@@ -159,13 +159,18 @@ export function siteFromDraftReply(raw: unknown, current: SiteDefinition, maxPag
     // The email and phone are facts the model must not change; they come from the current site.
     settings.email = current.settings.email;
     settings.phone = current.settings.phone;
+    // What the website does is the owner's choice (Details ▸ What your website does), never the draft's.
+    settings.features = current.settings.features;
     // Prices are the owner's alone: a draft never puts things up for sale (step 3c), nor lists them;
     // and the pictures in a gallery, or the reviews quoted, are the owner's choice, never a draft's.
     const DRAFT_NEVER = ['products', 'menu', 'gallery', 'reviews'];
     const pages = (r.pages as unknown[]).map((pg) => {
         if (!pg || typeof pg !== 'object') return pg;
         const o = pg as { sections?: unknown };
-        return Array.isArray(o.sections) ? { ...o, sections: o.sections.filter((x) => !(x && typeof x === 'object' && DRAFT_NEVER.includes(String((x as { type?: unknown }).type)))) } : pg;
+        // …and a kind of section whose feature they switched off is never drafted.
+        const keep = (x: unknown) => !!x && typeof x === 'object' && !DRAFT_NEVER.includes(String((x as { type?: unknown }).type))
+            && sectionAllowed(current.settings, String((x as { type?: unknown }).type) as SectionType);
+        return Array.isArray(o.sections) ? { ...o, sections: o.sections.filter(keep) } : pg;
     });
     const result = normaliseSiteDefinition({ theme: current.theme, settings, nav: [], pages, footer: current.footer, structure: current.structure }, { maxPages });
     if (!result.definition.pages.some((p) => p.sections.length)) return null;

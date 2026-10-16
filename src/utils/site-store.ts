@@ -25,7 +25,7 @@ import { createNotification } from './notify';
 import { loadProductsBlock } from './org-products';
 import { getActiveFeaturesByOrg } from './plan-features';
 import {
-    applySiteOperation, assetIdsIn, DEFAULT_MAX_PAGES, normaliseSiteDefinition, withoutAssets, type SiteDefinition, type SiteOperation,
+    applySiteOperation, assetIdsIn, DEFAULT_MAX_PAGES, FEATURE_LABELS, normaliseSiteDefinition, SITE_FEATURES, withoutAssets, type SiteDefinition, type SiteOperation,
 } from './site-definition';
 import { buildDraftPrompt, placeholdersIn, siteFromDraftReply, starterSite, themeFromBrandKit, type BusinessFacts } from './site-draft';
 import { KEEP_VERSIONS, sameDefinition, siteOrigin, siteSlugProblem, slugFromHost } from './site-hosting';
@@ -380,6 +380,9 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
         'Publishing, taking the site offline and choosing its address are buttons on the Website tab only — you cannot do them from chat; point them to the Publish card there.',
         `Pages: ${d.pages.length} of ${maxPages} on their plan. Layout: ${d.structure === 'one_page' ? 'ONE PAGE — the menu jumps down the home page to sections with a menu label' : 'several pages — the menu lists the pages not hidden'}.`,
         `Business: ${d.settings.siteName}${d.settings.locality ? `, ${d.settings.locality}` : ''} · email ${d.settings.email ?? 'none'} · phone ${d.settings.phone ?? 'none'} · type ${d.settings.businessType}`,
+        d.settings.features
+            ? `What this website does (their choice): ${d.settings.features.map((f) => FEATURE_LABELS[f]).join('; ') || 'only the basics'}. Switched OFF — never propose these kinds of section: ${SITE_FEATURES.filter((f) => !d.settings.features!.includes(f)).map((f) => FEATURE_LABELS[f]).join('; ') || 'nothing'}. To switch one on or off, propose set_settings with the full "features" list (${SITE_FEATURES.join(', ')}).`
+            : `What this website does: not chosen yet — every kind of section is offered. When you discuss the site, help them choose and propose set_settings {"features":[…]} from ${SITE_FEATURES.join(', ')}, so what they don't need is hidden.`,
         `Theme: main colour ${d.theme.primaryColor}, text ${d.theme.textColor}, background ${d.theme.backgroundColor}, lettering ${d.theme.font}, corners ${d.theme.radius}${d.theme.logoUrl ? ', has a logo' : ', no logo'}.`,
     ];
     for (const p of d.pages) {

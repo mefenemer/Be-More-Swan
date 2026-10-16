@@ -959,7 +959,11 @@ window._activateMainTab = function(name) {
     // Website (Mystery Shopper) likewise — init() already fetched for the badge.
     if (name === 'website') window.AssistantSiteAudit?.activate();
     // Website (Website Assistant) — the editor and preview; init() already fetched the site.
-    if (name === 'sitebuilder') window.AssistantSiteEditor?.activate();
+    if (name === 'sitebuilder') window.AssistantSiteEditor?.activate('website');
+    // …and what the site brings in, each its own tab, rendered by the same editor.
+    if (name === 'siteenquiries') window.AssistantSiteEditor?.activate('enquiries');
+    if (name === 'siteorders') window.AssistantSiteEditor?.activate('orders');
+    if (name === 'sitebookings') window.AssistantSiteEditor?.activate('bookings');
     // Conversations already fetched at init() — its thread total feeds the tab's own count, so it
     // cannot wait for the tab to be opened. activate() repaints from that result rather than
     // refetching. (This comment used to say the opposite and was stale: the prefetch landed when
@@ -5832,6 +5836,10 @@ function _applyDashboardRegistry(data) {
     // Website tab — Website Assistant only (siteEditorTab: website_assistant).
     const siteEditorTab = cfg.siteEditorTab;
     toggle('maintab-btn-sitebuilder', !!siteEditorTab);
+    // Enquiries always; Orders and Bookings once the editor knows the site's features (it re-toggles).
+    toggle('maintab-btn-siteenquiries', !!siteEditorTab);
+    toggle('maintab-btn-siteorders', !!siteEditorTab);
+    toggle('maintab-btn-sitebookings', !!siteEditorTab);
     if (siteEditorTab) {
         setText('sitebuilder-tab-label', siteEditorTab.label || 'Website');
         window.AssistantSiteEditor?.init({ assistantId: data.id, assistantName: data.name });

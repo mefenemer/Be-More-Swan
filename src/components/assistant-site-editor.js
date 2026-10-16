@@ -128,7 +128,7 @@
 
   const state = {
     assistantId: null, assistantName: null, data: null, loaded: false, loadError: null, rendered: false,
-    panel: 'pages', pageId: null, editing: null, device: 'desktop', previewPath: '/', note: null, pollTimer: null, version: 0,
+    surface: 'website', panel: 'pages', pageId: null, editing: null, device: 'desktop', previewPath: '/', note: null, pollTimer: null, version: 0,
     editingAddress: false, slugTyped: null, versions: null, publishNote: null,
     enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false,
     thumbs: {}, bookings: null, timetable: null,
@@ -140,6 +140,13 @@
   const def = () => state.data && state.data.definition;
   const page = () => (def() ? def().pages.find((p) => p.id === state.pageId) || def().pages[0] : null);
   const pathOf = (p) => (p && p.slug ? `/${p.slug}` : '/');
+  // What the website does (Details ▸ What your website does): null = never chosen, everything offered.
+  const featuresOn = () => (def() && def().settings.features) || null;
+  const featureOn = (key) => !featuresOn() || featuresOn().includes(key);
+  const typeAllowed = (type) => {
+    const f = ((state.data && state.data.vocab.features) || []).find((x) => x.sections.includes(type));
+    return !f || featureOn(f.key);
+  };
 
   // ── Server ─────────────────────────────────────────────────────────────────
   async function post(payload) {
@@ -162,8 +169,7 @@
         try { state.data = await post({ action: 'payments_refresh', assistantId: state.assistantId }); } catch { /* shown as not finished */ }
       }
       if (backFromStripe) {
-        // Say how it went, where they'll look: the Orders card.
-        state.panel = 'orders';
+        // Say how it went, where they'll look: the Orders tab (the deep link opens it).
         const ok = state.data.payments && state.data.payments.chargesEnabled;
         state.paymentsNotice = ok
           ? { tone: 'ok', text: 'Stripe is connected. Buy buttons and any booking deposits are now live on your website.' }
@@ -275,7 +281,7 @@
         ${list.length ? `<div class="space-y-1 mt-1">${list.map((x) => `<label class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 text-xs cursor-pointer">
           <input type="checkbox" data-service-pick value="${esc(x.id)}" ${chosen.has(x.id) ? 'checked' : ''}> <span class="font-bold text-gray-900">${esc(x.name)}</span>${x.price ? `<span class="text-gray-500">${esc(x.price)}</span>` : ''}</label>`).join('')}</div>
           <p class="text-xs text-gray-500 mt-1">Tick none to show them all.</p>` : ''}
-        <p class="text-xs text-gray-500 mt-2">Add the dates and places on the Website tab, under Bookings ▸ Timetable. ${btn('data-site-panel="bookings"', 'Open the timetable')}</p>`;
+        <p class="text-xs text-gray-500 mt-2">Add the dates and places on the Bookings tab, under Timetable. ${btn('data-site-panel="bookings"', 'Open the timetable')}</p>`;
     }
     if (f.kind === 'servicePick') {
       const b = state.data.booking || {};
@@ -470,6 +476,47 @@
       </form>`);
   }
 
+  // "Ask for a change": the swan beside every section (and on it, in the preview). The request goes
+  // to the assistant's chat as the user's own message; the chat proposes the change as a card they
+  // approve — the same path as asking there, so nothing changes without a click (owner, 2026-10-16).
+  const SWAN = '/images/BeMoreSwan_SwanAI.png';
+  function swanBtn(pageId, sectionId) {
+    return `<button type="button" data-site-ask="${esc(sectionId)}" data-page="${esc(pageId)}" title="Ask ${esc(state.assistantName || 'your assistant')} to change this" aria-label="Ask for a change to this section"
+      class="btn-secondary border px-2 py-1 rounded-lg inline-flex items-center"><img src="${SWAN}" alt="" style="width:18px;height:18px;object-fit:contain"></button>`;
+  }
+  async function askForChange(pageId, sectionId) {
+    const pg = def().pages.find((x) => x.id === pageId);
+    const sec = pg && pg.sections.find((x) => x.id === sectionId);
+    if (!sec) return;
+    const label = TYPE_LABEL[sec.type] || sec.type;
+    const text = await window.promptModal(`What would you like to change in the <strong>${esc(label)}</strong> section${def().pages.length > 1 ? ` on ${esc(pg.title)}` : ''}?<br><span style="color:#6b7280">“${esc(String(sectionSummary(sec)).slice(0, 120))}”</span>`,
+      { title: `Ask ${esc(state.assistantName || 'your assistant')}`, multiline: true, required: true, confirmLabel: 'Ask', placeholder: 'e.g. make the heading warmer, add our free delivery, use a darker background' });
+    if (!text || !text.trim()) return;
+    window.openAssistantChat?.({ assistantId: state.assistantId,
+      send: `Please change the "${label}" section on the ${pg.title} page (section ${sectionId}): ${text.trim()}` });
+  }
+  // The same swan on each section of the preview — same-origin, so the frame's own sections get one.
+  function swanThePreview(frame) {
+    let doc;
+    try { doc = frame.contentDocument; } catch { return; }
+    // The page the preview is showing, which may not be the one open in the list.
+    const pg = def() && (def().pages.find((x) => pathOf(x) === state.previewPath.split('#')[0]) || page());
+    if (!doc || !pg) return;
+    for (const sec of pg.sections) {
+      const el = doc.getElementById(sec.id);
+      if (!el || el.querySelector('[data-bms-ask]')) continue;
+      if (doc.defaultView.getComputedStyle(el).position === 'static') el.style.position = 'relative';
+      const b = doc.createElement('button');
+      b.type = 'button';
+      b.setAttribute('data-bms-ask', sec.id);
+      b.title = `Ask ${state.assistantName || 'your assistant'} to change this`;
+      b.style.cssText = 'position:absolute;top:8px;right:8px;z-index:50;width:34px;height:34px;border-radius:9999px;border:1px solid #e5e7eb;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.15);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0';
+      b.innerHTML = `<img src="${SWAN}" alt="Ask for a change" style="width:22px;height:22px;object-fit:contain">`;
+      b.addEventListener('click', (ev) => { ev.preventDefault(); ev.stopPropagation(); askForChange(pg.id, sec.id); });
+      el.appendChild(b);
+    }
+  }
+
   function pagesPanel() {
     const d = def();
     const p = page();
@@ -478,6 +525,7 @@
       <li class="border border-gray-200 rounded-lg p-3 flex flex-wrap items-center justify-between gap-2">
         <div class="min-w-0"><p class="text-xs font-bold text-gray-900">${esc(TYPE_LABEL[s.type])}${s.look && s.look.menuLabel && d.structure === 'one_page' ? ` <span class="font-semibold text-indigo-700">· In the menu as “${esc(s.look.menuLabel)}”</span>` : ''}</p><p class="text-xs text-gray-500 truncate">${esc(sectionSummary(s))}</p></div>
         <div class="flex flex-wrap gap-1">
+          ${swanBtn(p.id, s.id)}
           ${btn(`data-site-edit="${esc(s.id)}"`, 'Edit')}
           ${i > 0 ? btn(`data-site-move="${esc(s.id)}" data-to="${i - 1}" aria-label="Move up"`, '↑') : ''}
           ${i < p.sections.length - 1 ? btn(`data-site-move="${esc(s.id)}" data-to="${i + 1}" aria-label="Move down"`, '↓') : ''}
@@ -496,13 +544,15 @@
         </div>
         ${p.slug ? `<label class="flex items-center gap-2 text-xs font-bold text-gray-700 mt-3"><input type="checkbox" data-site-page-hidden ${p.hideFromMenu ? 'checked' : ''}> Hide from the menu <span class="font-normal text-gray-500">— still there for anyone with its address, e.g. a page for an ad or an offer</span></label>` : ''}
         <div class="flex flex-wrap gap-2 mt-3">${btn('data-site-page-save', 'Save page details', true)}${p.slug ? btn('data-site-remove-page', 'Remove this page') : ''}</div>`)}
+      ${featuresOn() ? '' : featuresCard(true)}
+      ${isFresh() || state.data.site.drafting ? draftCard('start') : ''}
       ${structureCard()}
       ${wordsCard(p)}
       ${state.editing ? editorHtml() : ''}
       ${card(`
         <p class="text-sm font-black text-gray-900 mb-3">Sections on this page</p>
         <ul class="space-y-2">${sections || '<li class="text-xs text-gray-500">No sections yet.</li>'}</ul>
-        <div class="flex flex-wrap gap-2 items-center mt-4"><select data-site-new-type class="${inputCls}" style="max-width:220px">${state.data.vocab.sectionTypes.map((t) => `<option value="${esc(t)}">${esc(TYPE_LABEL[t] || t)}</option>`).join('')}</select>${btn('data-site-new-section', 'Add a section')}</div>`)}`;
+        <div class="flex flex-wrap gap-2 items-center mt-4"><select data-site-new-type class="${inputCls}" style="max-width:220px">${state.data.vocab.sectionTypes.filter(typeAllowed).map((t) => `<option value="${esc(t)}">${esc(TYPE_LABEL[t] || t)}</option>`).join('')}</select>${btn('data-site-new-section', 'Add a section')}</div>`)}`;
   }
 
   // ── "Add your own words" (site-words.ts — the owner's wording is used unchanged) ──────────
@@ -625,10 +675,19 @@
       <div class="mt-4">${btn('data-site-theme-save', 'Save design', true)}</div>`);
   }
 
+  function featuresCard(first) {
+    const list = (state.data.vocab.features || []);
+    return card(`
+      <p class="text-sm font-black text-gray-900">${first ? 'First, choose what your website does' : 'What your website does'}</p>
+      <p class="text-xs text-gray-500 mt-1">Untick what you don't need: it's hidden here, ${esc(state.assistantName || 'your assistant')} won't suggest it, and its tab disappears. You can switch it back on any time.</p>
+      <div class="grid gap-2 sm:grid-cols-2 mt-3">${list.map((f) => `<label class="flex items-center gap-2 text-xs text-gray-800"><input type="checkbox" data-site-feature="${esc(f.key)}" ${featureOn(f.key) ? 'checked' : ''}> ${esc(f.label)}</label>`).join('')}</div>
+      <div class="mt-3">${btn('data-site-features-save', first ? 'Use these' : 'Save', true)}</div>`, first ? 'border-indigo-200' : '');
+  }
+
   function detailsPanel() {
     const s = def().settings;
     const f = (k, label, v) => `<div><label class="block text-xs font-bold text-gray-700">${esc(label)}</label><input data-setting="${k}" class="${inputCls}" value="${esc(v || '')}"></div>`;
-    return card(`
+    return featuresCard(false) + card(`
       <p class="text-sm font-black text-gray-900 mb-3">Business details</p>
       <p class="text-xs text-gray-500 mb-3">Shown in your footer and given to search engines and AI assistants so they know who you are and where you work.</p>
       <div class="grid gap-3 md:grid-cols-2">${f('siteName', 'Business name', s.siteName)}${f('locality', 'Town or city', s.locality)}${f('email', 'Email', s.email)}${f('phone', 'Phone', s.phone)}
@@ -814,18 +873,35 @@
         <p class="text-sm font-black text-gray-900">Preview <span class="text-xs font-semibold text-gray-500">— ${state.data.site.status === 'published' ? 'your draft' : 'not live yet'}</span></p>
         <div class="flex gap-1">${btn(`data-site-device="desktop"`, 'Desktop', state.device === 'desktop')}${btn(`data-site-device="mobile"`, 'Phone', state.device === 'mobile')}</div>
       </div>
-      <div class="bg-gray-100 rounded-lg p-2" style="overflow:auto"><iframe title="Preview of your website" src="${esc(src)}" style="display:block;margin:0 auto;width:${width};height:720px;border:0;background:#fff;border-radius:8px"></iframe></div>`);
+      <div class="bg-gray-100 rounded-lg p-2" style="overflow:auto"> <iframe data-site-preview title="Preview of your website" src="${esc(src)}" style="display:block;margin:0 auto;width:${width};height:720px;border:0;background:#fff;border-radius:8px"></iframe></div>`);
   }
 
-  function draftCard() {
+  // A new site: nothing written yet beyond the starter (never published, two sections at most).
+  const isFresh = () => !state.data.site.publishedVersion && def().pages.reduce((n, p) => n + p.sections.length, 0) <= 2;
+
+  // The AI writing every page from the business's details. Up front on a new site (Pages); on a site
+  // that has been worked on it is "Start again", folded away at the end of Details — it replaces the
+  // whole draft, so it should never sit under every panel looking like a next step (owner, 2026-10-16).
+  function draftCard(where) {
     const s = state.data.site;
     if (s.drafting) return card('<p class="text-sm font-semibold text-indigo-700">Drafting your whole site — this takes a minute or two. You can leave this page; you\'ll be notified when it\'s ready.</p>');
-    return card(`
-      <p class="text-sm font-black text-gray-900">Draft my whole site</p>
-      <p class="text-xs text-gray-500 mt-1">${esc(state.assistantName || 'Your Website Assistant')} writes every page from your business details, products and set-up answers. It replaces the current draft (${s.status === 'published' ? 'your live site doesn\'t change until you publish' : 'nothing is live yet'}) and uses 1 task.</p>
+    const who = esc(state.assistantName || 'Your Website Assistant');
+    const form = `
       <textarea data-site-draft-request rows="2" class="${inputCls} mt-3" placeholder="Anything to include? e.g. a page for each service, a friendly tone, mention free delivery"></textarea>
-      <div class="mt-3">${btn('data-site-draft', 'Draft my whole site', true)}</div>
-      ${s.draftNote ? `<p class="text-xs font-semibold text-amber-800 mt-2">${esc(s.draftNote)}</p>` : ''}`);
+      ${s.draftNote ? `<p class="text-xs font-semibold text-amber-800 mt-2">${esc(s.draftNote)}</p>` : ''}`;
+    if (where === 'start') {
+      return card(`
+        <p class="text-sm font-black text-gray-900">Let ${who} write your site</p>
+        <p class="text-xs text-gray-500 mt-1">It writes every page from your business details, products and set-up answers, using only the things you ticked above. You then change anything you like. Uses 1 task.</p>
+        ${form}
+        <div class="mt-3">${btn('data-site-draft', 'Write my site', true)}</div>`, 'border-indigo-200');
+    }
+    return `<details class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+      <summary class="text-sm font-black text-gray-900 cursor-pointer">Start again from scratch</summary>
+      <p class="text-xs text-gray-500 mt-2">${who} rewrites every page from your business details. <strong>It replaces everything in your draft</strong>, including your own changes (${s.status === 'published' ? 'your live site doesn\'t change until you publish' : 'nothing is live yet'}). Earlier published versions are kept. Uses 1 task.</p>
+      ${form}
+      <div class="mt-3">${btn('data-site-draft', 'Replace my draft', false)}</div>
+    </details>`;
   }
 
   // ── Publish ────────────────────────────────────────────────────────────────
@@ -877,14 +953,17 @@
   }
 
   function render() {
-    const host = document.getElementById('site-editor-host');
+    const host = document.querySelector(`[data-site-host="${state.surface}"]`);
     if (!host) return;
     if (!state.loaded) { host.innerHTML = card('<p class="text-sm text-gray-400 text-center">Loading your website…</p>'); return; }
     if (state.loadError && !state.data) { host.innerHTML = card(`<p class="text-sm font-bold text-gray-700 text-center">Could not load your website</p><p class="text-xs text-gray-500 mt-2 text-center">${esc(state.loadError)}</p>`); return; }
-    const newCount = state.data.newEnquiries || 0;
-    const newOrders = state.data.newOrders || 0;
-    const waiting = (state.data.booking && state.data.booking.waiting) || 0;
-    const tabs = [['pages', 'Pages'], ['design', 'Design'], ['details', 'Details'], ['enquiries', newCount ? `Enquiries (${newCount} new)` : 'Enquiries'], ['orders', newOrders ? `Orders (${newOrders} new)` : 'Orders'], ['bookings', waiting ? `Bookings (${waiting} waiting)` : 'Bookings']].map(([k, l]) => btn(`data-site-panel="${k}"`, esc(l), state.panel === k)).join(' ');
+    paintTabBadges();
+    if (state.surface !== 'website') {
+      const body = state.surface === 'enquiries' ? enquiriesPanel() : state.surface === 'orders' ? ordersPanel() : bookingsPanel();
+      host.innerHTML = `<div class="max-w-4xl space-y-4">${noteHtml()}${body}</div>`;
+      return;
+    }
+    const tabs = [['pages', 'Pages'], ['design', 'Design'], ['details', 'Details']].map(([k, l]) => btn(`data-site-panel="${k}"`, esc(l), state.panel === k)).join(' ');
     host.innerHTML = `
       <div class="grid gap-4 lg:grid-cols-2">
         <div class="space-y-4 min-w-0">
@@ -892,18 +971,39 @@
           ${placeholdersCard()}
           <div class="flex flex-wrap gap-2">${tabs}</div>
           ${noteHtml()}
-          ${state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : state.panel === 'enquiries' ? enquiriesPanel() : state.panel === 'orders' ? ordersPanel() : state.panel === 'bookings' ? bookingsPanel() : detailsPanel()}
-          ${draftCard()}
+          ${state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : detailsPanel() + draftCard('again')}
         </div>
         <div class="min-w-0">${previewHtml()}</div>
       </div>`;
   }
 
+  // The counts on the Enquiries / Orders / Bookings tabs — visible from every tab.
+  function paintTabBadges() {
+    const set = (id, n) => {
+      const b = document.getElementById(id);
+      if (!b) return;
+      b.textContent = n ? String(n) : '';
+      b.style.display = n ? '' : 'none';
+      b.classList.toggle('hidden', !n);
+    };
+    const d = state.data || {};
+    // Orders and Bookings tabs follow what the website does.
+    const show = (id, on) => { const b = document.getElementById(id); if (b) { b.classList.toggle('hidden', !on); b.style.display = on ? '' : 'none'; } };
+    if (state.data) { show('maintab-btn-siteorders', featureOn('shop')); show('maintab-btn-sitebookings', featureOn('bookings')); }
+    set('site-enquiries-badge', d.newEnquiries || 0);
+    set('site-orders-badge', d.newOrders || 0);
+    set('site-bookings-badge', (d.booking && d.booking.waiting) || 0);
+  }
+
   function rerender() { if (state.rendered) render(); }
   const say = (text, tone) => { state.note = text ? { text, tone } : null; rerender(); };
-  const hostOf = (e) => e.target.closest && e.target.closest('#site-editor-host');
+  const hostOf = (e) => e.target.closest && e.target.closest('[data-site-host]');
 
   // ── Events (bound once) ────────────────────────────────────────────────────
+  // The preview's swans: `load` does not bubble, so listen in the capture phase.
+  document.addEventListener('load', (e) => {
+    if (e.target && e.target.matches && e.target.matches('iframe[data-site-preview]')) swanThePreview(e.target);
+  }, true);
   document.addEventListener('submit', async (e) => {
     const form = e.target.closest && e.target.closest('[data-site-section-form]');
     if (!form || !state.assistantId) return;
@@ -924,10 +1024,10 @@
 
     const panel = t('[data-site-panel]');
     if (panel) {
-      state.panel = panel.dataset.sitePanel; state.editing = null;
-      if (state.panel === 'enquiries') { state.enquiries = null; state.enquiryShown = 20; loadEnquiries(); }
-      if (state.panel === 'orders') { state.orders = null; state.orderShown = 20; loadOrders(); }
-      if (state.panel === 'bookings') { state.bookings = null; loadBookings(); }
+      const want = panel.dataset.sitePanel;
+      // Enquiries, Orders and Bookings are tabs of their own now.
+      if (want === 'enquiries' || want === 'orders' || want === 'bookings') { window._activateMainTab?.(`site${want}`); return; }
+      state.panel = want; state.editing = null;
       render();
       return;
     }
@@ -1181,7 +1281,22 @@
       await apply([{ op: 'set_structure', structure: structure.value }]);
       return;
     }
+    const ask = t('[data-site-ask]');
+    if (ask) { await askForChange(ask.dataset.page, ask.dataset.siteAsk); return; }
     if (t('[data-site-split]')) { await backToPages(); return; }
+    if (t('[data-site-features-save]')) {
+      const host = hostOf(e);
+      const features = [...host.querySelectorAll('[data-site-feature]:checked')].map((x) => x.dataset.siteFeature);
+      // Switching off something already on the site: say what stays, rather than deleting their work.
+      const off = (state.data.vocab.features || []).filter((f) => !features.includes(f.key));
+      const inUse = off.filter((f) => def().pages.some((pg) => pg.sections.some((x) => f.sections.includes(x.type))));
+      if (inUse.length) {
+        const ok = await window.confirmModal(`Your site already has: ${inUse.map((f) => `<strong>${esc(f.label)}</strong>`).join(', ')}. Those sections stay where they are until you remove them — switching off only stops new ones being added or suggested.`, { title: 'Switch these off?', confirmLabel: 'Switch off', cancelLabel: 'Keep them on' });
+        if (!ok) { rerender(); return; }
+      }
+      await apply([{ op: 'set_settings', settings: { features } }]);
+      return;
+    }
     if (t('[data-site-combine]')) {
       const n = def().pages.length;
       const ok = await window.confirmModal(`All ${n} pages become one: their sections are moved onto the home page in order, the other pages are removed, and the menu jumps down the page. Buttons that linked to those pages now jump to their part of the page. If your site is live, publish again to show it — earlier published versions are kept.`, { title: 'Combine into one page?', confirmLabel: 'Combine', cancelLabel: 'Keep my pages' });
@@ -1300,9 +1415,17 @@
         words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' } });
       load();
     },
-    activate() {
-      if (state.rendered) return;
+    // surface: 'website' (pages, design, details, preview) or 'enquiries' | 'orders' | 'bookings',
+    // each its own tab. A list re-reads every time its tab is opened.
+    activate(surface) {
+      // A note ("Saved.") belongs to the tab it was said on.
+      if ((surface || 'website') !== state.surface) state.note = null;
+      state.surface = surface || 'website';
       state.rendered = true;
+      state.editing = null;
+      if (state.surface === 'enquiries') { state.enquiries = null; state.enquiryShown = 20; loadEnquiries(); }
+      if (state.surface === 'orders') { state.orders = null; state.orderShown = 20; loadOrders(); }
+      if (state.surface === 'bookings') { state.bookings = null; loadBookings(); }
       render();
     },
   };
