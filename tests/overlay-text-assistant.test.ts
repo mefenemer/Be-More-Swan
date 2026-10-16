@@ -28,16 +28,19 @@ console.log('\noverlay wording from the assistant\n');
 check('the model call is metered as a task', () => {
     // A button that can be pressed indefinitely, each press costing a model call. Unmetered, the
     // plan's cap quietly stops being a cap.
-    assert.match(fn, /consumeTaskCredit\(db, ctx\.organisationId\)/, 'every model call on the user\'s behalf is a task');
+    assert.match(fn, /meterInteraction\(db, ctx\.organisationId, 'helpers'\)/, 'every model call on the user\'s behalf is metered');
     // ...and a cap that could not be EVALUATED must not be reported as a plan limit.
     assert.match(fn, /if \(credit\.failed\) return json\(503/, 'a server fault must not tell the user to upgrade');
     assert.match(fn, /return json\(403, \{ error: credit\.limitMessage/, 'a real limit still gets the paywall answer');
+    // Fair use is "come back tomorrow" — answered BEFORE the paywall line, never with it.
+    assert.ok(fn.indexOf('if (credit.fairUse)') > -1 && fn.indexOf('if (credit.fairUse)') < fn.indexOf('return json(403, { error: credit.limitMessage'),
+        'a fair-use refusal must not be shown as an upgrade prompt');
 });
 
 check('the post is tenant-guarded before anything is spent', () => {
     const guardAt = fn.indexOf('eq(scheduledPosts.organisationId, ctx.organisationId)');
     // The CALL, not the import at the top of the file.
-    const spendAt = landmark(fn, 'await consumeTaskCredit(');
+    const spendAt = landmark(fn, 'await meterInteraction(');
     assert.ok(guardAt > 0, 'the post must be scoped to the caller\'s org');
     assert.ok(guardAt < spendAt, 'spending a credit before proving ownership bills the wrong workspace');
 });

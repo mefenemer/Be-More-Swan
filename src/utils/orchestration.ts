@@ -28,6 +28,8 @@ import {
 } from '../../db/schema';
 import { createNotification } from './notify';
 import { draftIssueFromPost } from './newsletter-from-post';
+import { hasTaskCapacity, recordCompletedWork } from './work-metering';
+import { isUnifiedTaskMetering } from './task-metering-flag';
 import { getActiveTierKeyByOrg } from './plan-features';
 
 type Db = ReturnType<typeof getDb>;
@@ -182,6 +184,17 @@ export async function fireOrchestrations(db: Db, opts: FireOrchestrationsOpts): 
                     firedToday--;
                     continue;
                 }
+                // Single task allowance: an email issue drafted by a hand-off is the same finished
+                // work as one drafted by the cron or the button, so it costs the same task. Out of
+                // tasks → skip this hand-off, like the not-yet-published case above.
+                const metered = await isUnifiedTaskMetering(orgId);
+                if (metered && !(await hasTaskCapacity(db, orgId))) {
+                    await db.update(orchestrationRuns)
+                        .set({ status: 'skipped' })
+                        .where(eq(orchestrationRuns.id, run.id));
+                    firedToday--;
+                    continue;
+                }
                 const drafted = await draftIssueFromPost(db, {
                     organisationId: orgId,
                     userId,
@@ -192,6 +205,9 @@ export async function fireOrchestrations(db: Db, opts: FireOrchestrationsOpts): 
                     targetAction: link.targetAction,
                 });
                 issueId = drafted.issueId;
+                if (metered && issueId) {
+                    await recordCompletedWork(db, orgId, 'email_issue', { ref: issueId, assistantId: link.targetAssistantId });
+                }
                 const targetName = nameById.get(link.targetAssistantId) ?? 'another assistant';
                 // No issue means an expected no-op: this post already has one (a rebuilt link
                 // firing for a post the previous link covered), the hand-off carried nothing to

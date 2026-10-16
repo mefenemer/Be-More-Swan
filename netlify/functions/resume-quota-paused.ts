@@ -20,9 +20,9 @@
 // Runs daily rather than monthly on purpose: a mid-month upgrade raises the limit, which can put
 // the org back under cap before the 1st, and the next run picks that up with no extra plumbing.
 
-import { and, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
-import { plans, masterPlans, aiAssistants, usageCounters } from '../../db/schema';
+import { plans, masterPlans, aiAssistants, usageCounters, taskBonus } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { effectiveLimit, type FeatureOverrides } from '../../src/utils/plan-features';
 import { getPeriodStart } from '../../src/utils/atomic-cap-check';
@@ -85,6 +85,8 @@ export default withLambda(async (event) => {
                     eq(plans.organisationId, organisationId),
                     inArray(plans.status, ['active', 'past_due']),
                 ))
+                // 'active' sorts before 'past_due' — same preference as resolveTaskLimit.
+                .orderBy(asc(plans.status), asc(plans.startedAt))
                 .limit(1);
 
             // No active plan → the org is paywalled for reasons this job must not paper over.
@@ -109,7 +111,11 @@ export default withLambda(async (event) => {
 
             // limit === null means the plan is uncapped (e.g. frozen as unlimited, or an upgrade to
             // an unlimited tier) — always resume. Otherwise resume only once back under the cap.
-            if (limit != null && used >= limit) continue;
+            // Bonus tasks (non-expiring) also count as room: an admin grant or a converted balance
+            // should bring the assistants back without waiting for the 1st.
+            const [bonusRow] = await db.select({ bonusTasks: taskBonus.bonusTasks })
+                .from(taskBonus).where(eq(taskBonus.organisationId, organisationId)).limit(1);
+            if (limit != null && used >= limit && (bonusRow?.bonusTasks ?? 0) <= 0) continue;
 
             const ids = assistants.map(a => a.id);
             const resumed = await db

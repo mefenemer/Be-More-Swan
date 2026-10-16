@@ -3616,7 +3616,7 @@ function formatCurrency(amount, currency) {
       const iconClass  = isAt100 ? '🔴' : '⚠️';
       const usedLabel  = `${taskPct}%`;
       const message    = isAt100
-        ? `Monthly task limit reached. New tasks are paused until your next billing cycle or you upgrade.`
+        ? `Monthly task limit reached. New work is paused until the 1st of next month or you upgrade — you are never charged extra.`
         : `You've used ${usedLabel} of your monthly tasks. Upgrade to avoid interruptions.`;
 
       // SC4: 100% banner has no dismiss button
@@ -6347,7 +6347,7 @@ const RQ_STATE_CHIP = {
     // reason 'failed' got one: without one the chip renders empty and the card states nothing.
     publishing:       { cls: 'bg-blue-50 border-blue-200 text-blue-700',          label: 'Publishing…' },
     paused:           { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Paused · reconnect' },
-    paused_credits:   { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Paused · X credits' },
+    paused_credits:   { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Paused · X limit' },
     published:        { cls: 'bg-emerald-50 border-emerald-200 text-emerald-700', label: 'Posted' },
     // Alongside the 'Needs attention' and widened 'Archived' columns. Without an entry the chip
     // renders empty, so a failed post would show a card with no state on it at all.
@@ -15734,6 +15734,8 @@ function _pceGenResetShare() {
     if (el) el.checked = true;
 }
 const _pceGenCost = (shared) => shared ? (_pceGen.sharedCost || 3) : (_pceGen.cost || 5);
+// Single task allowance (docs/task-metering.md): get-ai-credit-balance answers in tasks.
+const _pceGenUnit = () => _pceGen.unit === 'tasks' ? 'tasks' : 'credits';
 
 /**
  * The name a track gets unless the user gives one: the mood, then the gist of their description,
@@ -15805,7 +15807,7 @@ async function _pceOpenGenMusic() {
     // The balance is a courtesy line, not a gate — the server decides. A failed read just leaves it out.
     try {
         const r = await fetch('/.netlify/functions/get-ai-credit-balance');
-        if (r.ok) { const d = await r.json(); _pceGen.balance = d.balance; _pceGen.cost = d.musicCost; _pceGen.sharedCost = d.musicSharedCost; }
+        if (r.ok) { const d = await r.json(); _pceGen.balance = d.balance; _pceGen.cost = d.musicCost; _pceGen.sharedCost = d.musicSharedCost; _pceGen.unit = d.unit || 'credits'; }
     } catch { /* leave the line without a balance */ }
     _pceRenderGenMusic();
 }
@@ -15848,19 +15850,19 @@ function _pceRenderGenMusic() {
         const t = _pceAudioTarget && _pceAudioTarget.postId === _rqReviewPostId ? _pceAudioTarget : null;
         const cost = _pceGenCost(_pceGenShared());
         meta.textContent = `${_pceFmtS(len)} long${t ? `, starting on clip ${t.i + 1}` : ''} \u2014 to the end of the `
-            + `${_pcePostIsVideo(post) ? 'video' : 'post'}. Uses ${cost} AI credits`
-            + (_pceGen.balance != null ? ` (you have ${_pceGen.balance}).` : '.');
+            + `${_pcePostIsVideo(post) ? 'video' : 'post'}. Uses ${cost} ${_pceGenUnit() === 'tasks' ? 'tasks' : 'AI credits'}`
+            + (_pceGen.balance != null ? ` (you have ${_pceGen.balance}${_pceGenUnit() === 'tasks' ? ' left' : ''}).` : '.');
     }
     const sc = document.getElementById('insp-genmusic-cost-shared');
-    if (sc) sc.textContent = `\u00B7 ${_pceGenCost(true)} credits`;
+    if (sc) sc.textContent = `\u00B7 ${_pceGenCost(true)} ${_pceGenUnit()}`;
     const pc = document.getElementById('insp-genmusic-cost-private');
-    if (pc) pc.textContent = `\u00B7 ${_pceGenCost(false)} credits`;
+    if (pc) pc.textContent = `\u00B7 ${_pceGenCost(false)} ${_pceGenUnit()}`;
     _pceSyncGenName();
     const go = document.getElementById('insp-genmusic-go');
     if (go) {
         go.disabled = _pceGen.busy;
         go.textContent = _pceGen.busy ? 'Composing\u2026'
-            : `Generate \u00B7 ${_pceGenCost(_pceGenShared())} credits${_pceGenShared() ? ' (shared)' : ' (private)'}`;
+            : `Generate \u00B7 ${_pceGenCost(_pceGenShared())} ${_pceGenUnit()}${_pceGenShared() ? ' (shared)' : ' (private)'}`;
     }
 }
 
@@ -15892,7 +15894,7 @@ async function _pceGenerateMusic() {
         const d = await res.json().catch(() => ({}));
         if (!res.ok) {
             if (res.status === 402) {
-                throw new Error(`Not enough AI credits \u2014 this needs ${d.cost || _pceGenCost(share)} and you have ${d.balance ?? 0}.`
+                throw new Error(`Not enough ${_pceGenUnit() === 'tasks' ? 'tasks left this month' : 'AI credits'} \u2014 this needs ${d.cost || _pceGenCost(share)} and you have ${d.balance ?? 0}.`
                     + (share ? '' : ` Sharing it with the community costs ${_pceGenCost(true)}.`));
             }
             throw new Error(d.message || d.error || 'Music generation could not be started.');
@@ -18719,12 +18721,14 @@ function gpBackToChooser() {
 function gpChooseMode(mode) {
     if (mode === 'ai') {
         const cap = _gpCap;
-        if (cap && cap.taskLimit != null && cap.taskCount >= cap.taskLimit) {
-            const resetDate = 'the start of your next billing cycle';
+        // tasksRemaining counts bonus tasks too (check-capacity.ts), so an org past its allowance
+        // with bonus left is not blocked. The counter resets on the 1st (UTC), not the billing date.
+        const outOfTasks = cap && cap.taskLimit != null && (cap.tasksRemaining != null ? cap.tasksRemaining <= 0 : cap.taskCount >= cap.taskLimit);
+        if (outOfTasks) {
             window.openUpgradeModal(
-                'Monthly generation limit reached',
-                `You've used all ${cap.taskLimit} generations this month.`,
-                `Your limit resets on ${resetDate}. Upgrade your plan to generate more posts now.`,
+                'Monthly task allowance used up',
+                `You've used all your tasks this month.`,
+                `Your allowance resets on the 1st of next month — you are never charged extra. Upgrade your plan to keep going now.`,
                 { nextPlan: cap.nextPlan }
             );
             return;
@@ -20883,7 +20887,7 @@ async function _gpAiGenerateAfterIntent() {
             body: JSON.stringify({ postId: _gpCurrentPostId, prompt: _gpAiMediaPrompt || undefined, applyToGroup: gpApplyToGroup() }),
         });
         const d = await res.json().catch(() => ({}));
-        if (res.status === 402) { gpAiMediaStatus("You're out of image credits — upgrade to generate more.", 'error'); gpAiMediaBusy(false); return; }
+        if (res.status === 402) { gpAiMediaStatus(_gpCap && _gpCap.unifiedTaskMetering ? "Your monthly tasks are used up — they reset on the 1st, or upgrade for more." : "You're out of image credits — upgrade to generate more.", 'error'); gpAiMediaBusy(false); return; }
         if (res.status === 422) { gpAiMediaStatus(d.error || 'That description was flagged. Try different wording.', 'error'); gpAiMediaBusy(false); return; }
         if (!res.ok) { gpAiMediaStatus(d.error || 'Could not generate an image.', 'error'); gpAiMediaBusy(false); return; }
         gpAiMirrorToSiblings(d.postIds, d.thumbnailUrl, 'image');
@@ -20909,7 +20913,7 @@ async function gpAiGenerateVideo() {
         });
         const d = await res.json().catch(() => ({}));
         if (res.status === 403 && d.error === 'video_requires_upgrade') { gpAiMediaStatus(d.message || 'AI video is available on the Busywork Buster and Digital Employee plans.', 'error'); gpAiMediaBusy(false); return; }
-        if (res.status === 402) { gpAiMediaStatus("You're out of video credits — upgrade to generate more.", 'error'); gpAiMediaBusy(false); return; }
+        if (res.status === 402) { gpAiMediaStatus(_gpCap && _gpCap.unifiedTaskMetering ? "An AI video uses 20 tasks and you don't have enough left this month — they reset on the 1st, or upgrade for more." : "You're out of video credits — upgrade to generate more.", 'error'); gpAiMediaBusy(false); return; }
         if (res.status === 422) { gpAiMediaStatus(d.error || 'That description was flagged. Try different wording.', 'error'); gpAiMediaBusy(false); return; }
         if (!res.ok || !d.jobId) { gpAiMediaStatus(d.error || d.message || 'Could not start video generation.', 'error'); gpAiMediaBusy(false); return; }
         gpAiPollVideo(d.jobId);

@@ -78,6 +78,9 @@
 
   /** The credit refusal is a code, not a sentence — say it in words, with the numbers. */
   function errorText(data, status) {
+    if (data && data.code === 'insufficient_credits' && data.unit === 'tasks') {
+      return `Not enough tasks left this month: a round needs ${data.cost}, and ${data.balance} ${data.balance === 1 ? 'is' : 'are'} left. Edit the brief and untick AI images and video to use stock photos and branded cards, which use no extra tasks.`;
+    }
     if (data && data.code === 'insufficient_credits') {
       return `Not enough AI credits: a round needs ${data.cost}, and ${data.balance} ${data.balance === 1 ? 'is' : 'are'} left this month. Edit the brief and untick AI images to use stock photos and branded cards, which are free.`;
     }

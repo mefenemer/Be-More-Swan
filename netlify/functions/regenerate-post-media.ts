@@ -50,7 +50,7 @@ export default withLambda(async (event) => {
     if (blocked) return blocked;
 
     const hold = await holdCredits(db, { orgId, amount: IMAGE_CREDIT_COST });
-    if (!hold.ok) return { statusCode: 402, body: JSON.stringify({ error: 'insufficient_credits', cost: IMAGE_CREDIT_COST, balance: hold.balance }) };
+    if (!hold.ok) return { statusCode: 402, body: JSON.stringify({ error: 'insufficient_credits', cost: hold.cost, balance: hold.balance, unit: hold.unit }) };
 
     let assetId: number;
     try {

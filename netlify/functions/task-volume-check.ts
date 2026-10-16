@@ -10,9 +10,9 @@
 //   [functions.task-volume-check]
 //   schedule = "0 8 * * *"   # 08:00 UTC every day
 
-import { eq, and, gte, isNotNull } from 'drizzle-orm';
+import { eq, and, gte, isNotNull, inArray, asc } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
-import { plans, masterPlans, notifications, aiAssistants, usageCounters } from '../../db/schema';
+import { plans, masterPlans, notifications, aiAssistants, usageCounters, taskBonus, userOrganisations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { effectiveLimit, type FeatureOverrides } from '../../src/utils/plan-features';
 import { getPeriodStart } from '../../src/utils/atomic-cap-check';
@@ -41,7 +41,9 @@ export default withLambda(async (event) => {
             .from(plans)
             .innerJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
             .where(and(
-                eq(plans.status, 'active'),
+                // past_due keeps its limits through the grace window (task-credit.ts resolveTaskLimit),
+                // so it gets the same warnings and pause. One active/past_due plan per org (unique index).
+                inArray(plans.status, ['active', 'past_due']),
                 isNotNull(masterPlans.monthlyTaskLimit),
             ));
 
@@ -61,8 +63,9 @@ export default withLambda(async (event) => {
             // Plan Features: prefer a "new subscribers only" frozen snapshot over the live master limit.
             const limit = effectiveLimit(plan.featureOverrides as FeatureOverrides | null, 'monthlyTaskLimit', plan.monthlyTaskLimit);
             if (limit == null) continue;      // frozen as unlimited → no volume warnings
-            if (plan.userId == null) continue; // plans.userId is nullable; skip org-only plans
-            const userId = plan.userId;
+            // plans.userId is nullable. The pause below is per ORGANISATION and must happen either
+            // way; the notification goes to the purchaser, else the org's owner.
+            const userId = plan.userId ?? await orgOwnerId(db, plan.organisationId);
 
             // Read the SAME counter enforcement decrements, for the same UTC period. A missing row
             // just means no task has run yet this month (atomicCapCheck upserts it on first use).
@@ -76,11 +79,17 @@ export default withLambda(async (event) => {
                 .limit(1);
             const taskCount = counter?.taskCount ?? 0;
 
-            const pct = Math.round((taskCount / limit) * 100);
+            // Bonus tasks (non-expiring) are spent after the allowance, so an org with bonus left
+            // is not at its limit. pct is of everything available this month.
+            const [bonusRow] = await db.select({ bonusTasks: taskBonus.bonusTasks })
+                .from(taskBonus).where(eq(taskBonus.organisationId, plan.organisationId)).limit(1);
+            const bonus = bonusRow?.bonusTasks ?? 0;
+            const remaining = Math.max(limit - taskCount, 0) + bonus;
+            const pct = Math.round((taskCount / Math.max(taskCount + remaining, 1)) * 100);
 
             if (pct >= 100) {
                 // ── 100%: pause automated tasks + deduplicated notification ──
-                const existingPause = await db
+                const existingPause = userId == null ? [] : await db
                     .select({ id: notifications.id, metadata: notifications.metadata })
                     .from(notifications)
                     .where(and(
@@ -111,13 +120,16 @@ export default withLambda(async (event) => {
                         .update(aiAssistants)
                         .set(withUpdatedAt({ isActive: false, provisioningStatus: 'paused_quota' }))
                         .where(and(
-                            eq(aiAssistants.userId, userId),
+                            // Per organisation, matching enforcement (usage_counters is per org) and
+                            // resume-quota-paused.ts. It was per purchaser, which left assistants
+                            // hired by a teammate running at the cap.
+                            eq(aiAssistants.organisationId, plan.organisationId),
                             eq(aiAssistants.provisioningStatus, 'complete'),
                             eq(aiAssistants.isActive, true),
                         ))
                         .catch(err => console.warn('[task-volume-check] Pause assistants failed:', err.message));
 
-                    await createNotification(db, 'task_limit_reached', {
+                    if (userId != null) await createNotification(db, 'task_limit_reached', {
                         userId,
                         context: { usage: { limit: limit.toLocaleString(), month: monthLabel }, plan: { tier_name: plan.tierName } },
                         metadata: { month: monthLabel, taskCount, limit, tierKey: plan.tierKey },
@@ -128,6 +140,7 @@ export default withLambda(async (event) => {
 
             } else if (pct >= 80) {
                 // ── 80%: warn user — deduplicated ──────────────────────────
+                if (userId == null) continue;
                 const existingWarn = await db
                     .select({ id: notifications.id, metadata: notifications.metadata })
                     .from(notifications)
@@ -144,7 +157,6 @@ export default withLambda(async (event) => {
                 });
 
                 if (!alreadyWarned) {
-                    const remaining = limit - taskCount;
                     await createNotification(db, 'task_limit_warning', {
                         userId,
                         context: { usage: {
@@ -170,3 +182,13 @@ export default withLambda(async (event) => {
         return { statusCode: 500, body: JSON.stringify({ error: 'Task volume check failed.' }) };
     }
 });
+
+/** The org's owner (earliest-joined), for an org-only plan with no purchaser userId. */
+async function orgOwnerId(db: ReturnType<typeof getDb>, organisationId: number): Promise<number | null> {
+    const [row] = await db.select({ userId: userOrganisations.userId })
+        .from(userOrganisations)
+        .where(and(eq(userOrganisations.organisationId, organisationId), eq(userOrganisations.role, 'owner')))
+        .orderBy(asc(userOrganisations.joinedAt))
+        .limit(1);
+    return row?.userId ?? null;
+}

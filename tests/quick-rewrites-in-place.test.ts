@@ -61,7 +61,7 @@ check('an over-limit rewrite warns instead of truncating mid-word', () => {
 check('it is metered, tenant-guarded, and refuses an empty caption first', () => {
     const guardAt = fn.indexOf('eq(scheduledPosts.organisationId, ctx.organisationId)');
     const emptyAt = fn.indexOf("if (!caption.trim())");
-    const spendAt = landmark(fn, 'await consumeTaskCredit(');
+    const spendAt = landmark(fn, 'await meterInteraction(');
     assert.ok(guardAt > 0 && guardAt < spendAt, 'prove ownership before billing a workspace');
     assert.ok(emptyAt > 0 && emptyAt < spendAt, 'refuse an empty caption before spending a credit on an apology');
     assert.match(fn, /if \(credit\.failed\) return json\(503/, 'an outage must not be reported as a plan limit');

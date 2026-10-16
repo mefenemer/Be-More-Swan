@@ -2,7 +2,7 @@
 // Autonomous Content Engine — US 5.2 AC1: generate 3 H1/intro hook variants during drafting.
 //
 // Stores them on blog_posts.hook_variants and flips ab_state → 'testing' so the widget begins
-// serving variants and the beacon/resolver loop can pick a winner. Org-scoped, credit-metered.
+// serving variants and the beacon/resolver loop can pick a winner. Org-scoped; an editing helper, so it costs no task — only the daily fair-use count.
 //
 // POST { blogPostId }  →  { hookVariants: [{ id:'A', h1, intro }, ...] }
 
@@ -10,6 +10,7 @@ import { HandlerEvent } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
+import { checkFairUse, fairUseResponse } from '../../src/utils/fair-use';
 import { blogPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
@@ -44,6 +45,10 @@ export default withLambda(async (event: HandlerEvent) => {
         .where(and(eq(blogPosts.id, id), eq(blogPosts.organisationId, ctx.organisationId)))
         .limit(1);
     if (!post) return { statusCode: 404, body: JSON.stringify({ error: 'Blog post not found.' }) };
+
+    // An editing helper: free, but counted against the daily fair-use limit (src/utils/fair-use.ts).
+    const fair = await checkFairUse(db, ctx.organisationId, 'helpers');
+    if (!fair.allowed) return fairUseResponse(fair);
 
     try {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });

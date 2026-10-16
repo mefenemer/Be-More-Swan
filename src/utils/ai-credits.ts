@@ -12,11 +12,21 @@
 // so unused credits carry forward. (Decided 2026-06-24.)
 //
 // All mutating ops are atomic single-statement UPDATEs (race-free, mirrors atomic-cap-check.ts).
+//
+// ⚠️ RETIRING (docs/task-metering.md). With 'unified_task_metering' on for an org, these functions
+// keep their signatures but spend weighted TASKS instead (src/config/task-weights.ts): a hold is a
+// capacity check, a successful settle records the work, a failed one costs nothing, and no monthly
+// credits are granted. `amount` stays in credits so the callers don't change; it is converted with
+// tasksForCredits (image ×1, video and music ×4 — a 5-credit video is 20 tasks). getBalance then
+// reports tasks left, with `unit: 'tasks'`. Delete the credit branches after the cutover period.
 
 import { getDb } from '../../db/client';
 import { sql } from 'drizzle-orm';
 import { getPeriodStart } from './atomic-cap-check';
 import { featureTierKey } from '../config/beta-plan';
+import { MEDIA_KINDS, TASK_WEIGHTS, type WorkKind } from '../config/task-weights';
+import { getTaskUsage, hasTaskCapacity, recordCompletedWork, grantBonusTasks } from './work-metering';
+import { isUnifiedTaskMetering } from './task-metering-flag';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -55,6 +65,36 @@ export function creditCostFor(mediaType: 'image' | 'video' | 'audio'): number {
 export interface CreditBalance {
     balance: number;   // spendable
     held: number;      // reserved by in-flight jobs
+    /** What `balance` counts: AI credits, or (single task allowance) tasks left. */
+    unit: 'credits' | 'tasks';
+}
+
+/** The WorkKind a credit charge becomes under the single task allowance. */
+export function workKindForMedia(mediaType: 'image' | 'video' | 'audio', amount: number): WorkKind {
+    if (mediaType === 'video') return 'ai_video';
+    if (mediaType === 'audio') return amount === MUSIC_SHARED_CREDIT_COST ? 'ai_music_shared' : 'ai_music';
+    return 'ai_image';
+}
+
+/**
+ * Convert a credit amount to tasks. Images are 1:1; video and music are ×4 (5 credits → 20 tasks,
+ * a shared 3-credit track → 12). A combined hold (Brand Designer: image + video) passes the split.
+ */
+export function tasksForCredits(mediaType: 'image' | 'video' | 'audio', amount: number): number {
+    if (amount <= 0) return 0;
+    const kind = workKindForMedia(mediaType, amount);
+    const perCredit = TASK_WEIGHTS[kind] / (mediaType === 'audio' ? (kind === 'ai_music_shared' ? MUSIC_SHARED_CREDIT_COST : MUSIC_CREDIT_COST) : creditCostFor(mediaType));
+    return Math.round(amount * perCredit);
+}
+
+/** AI media this assistant has generated this month (the autonomous cap counts items). */
+async function assistantMediaCount(db: Db, orgId: number, assistantId: number): Promise<number> {
+    const rows = await db.execute<{ n: number }>(sql`
+        SELECT COUNT(*)::int AS n FROM task_ledger
+         WHERE organisation_id = ${orgId} AND assistant_id = ${assistantId}
+           AND period_start = ${getPeriodStart().toISOString()}
+           AND source = 'work' AND kind IN (${sql.join(MEDIA_KINDS.map(k => sql`${k}`), sql`, `)})`);
+    return Number((rows as unknown as Array<{ n: number }>)[0]?.n ?? 0);
 }
 
 function ymd(d: Date): string {
@@ -63,6 +103,8 @@ function ymd(d: Date): string {
 
 /** The active plan's monthly AI credit allowance for an org (0 if none / not configured). */
 export async function monthlyAllowance(db: Db, orgId: number): Promise<number> {
+    // Single task allowance: no monthly media credits exist any more.
+    if (await isUnifiedTaskMetering(orgId)) return 0;
     // Plan Features: a "new subscribers only" change freezes existing subscribers in
     // plans.feature_overrides — when that snapshot exists its features map is authoritative,
     // otherwise read the live master_plans.features (matches effectiveFeatures() in plan-features.ts).
@@ -87,6 +129,8 @@ export async function monthlyAllowance(db: Db, orgId: number): Promise<number> {
  * the current UTC month. Resets autonomous_used at the same time. Returns nothing.
  */
 export async function ensureMonthlyGrant(db: Db, orgId: number): Promise<void> {
+    // Single task allowance: media credits are no longer granted (their balance became bonus tasks).
+    if (await isUnifiedTaskMetering(orgId)) return;
     const period = ymd(getPeriodStart());
 
     // Create the row if missing (no grant yet — grant happens in the UPDATE below).
@@ -131,11 +175,16 @@ export async function ensureMonthlyGrant(db: Db, orgId: number): Promise<void> {
 
 /** Current spendable balance + held credits for an org (applies the monthly grant first). */
 export async function getBalance(db: Db, orgId: number): Promise<CreditBalance> {
+    if (await isUnifiedTaskMetering(orgId)) {
+        const usage = await getTaskUsage(db, orgId);
+        // An uncapped tier has no "left"; report a large number rather than null to old callers.
+        return { balance: usage.remaining ?? 1_000_000, held: usage.inFlight, unit: 'tasks' };
+    }
     await ensureMonthlyGrant(db, orgId);
     const rows = await db.execute<{ balance: number; held: number }>(sql`
         SELECT balance, held FROM ai_credit_balance WHERE organisation_id = ${orgId}
     `);
-    return { balance: rows[0]?.balance ?? 0, held: rows[0]?.held ?? 0 };
+    return { balance: rows[0]?.balance ?? 0, held: rows[0]?.held ?? 0, unit: 'credits' };
 }
 
 /**
@@ -145,7 +194,17 @@ export async function getBalance(db: Db, orgId: number): Promise<CreditBalance> 
 export async function holdCredits(db: Db, params: {
     orgId: number;
     amount: number;
-}): Promise<{ ok: boolean; balance: number }> {
+    /** Single task allowance: what the credits buy, so they convert to the right number of tasks. */
+    mediaType?: 'image' | 'video' | 'audio';
+    /** Single task allowance: the task cost when the hold mixes media (overrides mediaType). */
+    tasks?: number;
+}): Promise<{ ok: boolean; balance: number; unit: 'credits' | 'tasks'; cost: number }> {
+    if (await isUnifiedTaskMetering(params.orgId)) {
+        const units = params.tasks ?? tasksForCredits(params.mediaType ?? 'image', params.amount);
+        const ok = await hasTaskCapacity(db, params.orgId, units);
+        const cur = await getBalance(db, params.orgId);
+        return { ok, balance: ok ? Math.max(cur.balance - units, 0) : cur.balance, unit: 'tasks', cost: units };
+    }
     await ensureMonthlyGrant(db, params.orgId);
     const rows = await db.execute<{ balance: number }>(sql`
         UPDATE ai_credit_balance
@@ -153,9 +212,9 @@ export async function holdCredits(db: Db, params: {
         WHERE organisation_id = ${params.orgId} AND balance >= ${params.amount}
         RETURNING balance
     `);
-    if (rows[0]) return { ok: true, balance: rows[0].balance };
+    if (rows[0]) return { ok: true, balance: rows[0].balance, unit: 'credits', cost: params.amount };
     const cur = await getBalance(db, params.orgId);
-    return { ok: false, balance: cur.balance };
+    return { ok: false, balance: cur.balance, unit: 'credits', cost: params.amount };
 }
 
 /**
@@ -167,7 +226,18 @@ export async function holdAutonomousCredits(db: Db, params: {
     orgId: number;
     amount: number;
     monthlyCap: number;
+    mediaType?: 'image' | 'video' | 'audio';
+    /** Single task allowance: the cap is per assistant and counts media items, not credits. */
+    assistantId?: number | null;
 }): Promise<{ ok: boolean; balance: number; reason?: 'insufficient_balance' | 'cap_reached' }> {
+    if (await isUnifiedTaskMetering(params.orgId)) {
+        if (params.assistantId != null && await assistantMediaCount(db, params.orgId, params.assistantId) >= params.monthlyCap) {
+            const cur = await getBalance(db, params.orgId);
+            return { ok: false, balance: cur.balance, reason: 'cap_reached' };
+        }
+        const held = await holdCredits(db, { orgId: params.orgId, amount: params.amount, mediaType: params.mediaType });
+        return held.ok ? held : { ...held, reason: 'insufficient_balance' };
+    }
     await ensureMonthlyGrant(db, params.orgId);
     const rows = await db.execute<{ balance: number }>(sql`
         UPDATE ai_credit_balance
@@ -202,7 +272,20 @@ export async function settleHold(db: Db, params: {
     userId?: number | null;
     jobId?: number | null;
     isAutonomous?: boolean;
+    /** Single task allowance: credit the work to this assistant in the task ledger. */
+    assistantId?: number | null;
 }): Promise<void> {
+    if (await isUnifiedTaskMetering(params.orgId)) {
+        // A hold reserved nothing, so a failure has nothing to give back; success records the work.
+        if (params.success && params.amount > 0) {
+            await recordCompletedWork(db, params.orgId, workKindForMedia(params.mediaType, params.amount), {
+                units: tasksForCredits(params.mediaType, params.amount),
+                ref: params.jobId ?? undefined,
+                assistantId: params.assistantId ?? null,
+            });
+        }
+        return;
+    }
     if (params.success) {
         const rows = await db.execute<{ balance: number }>(sql`
             UPDATE ai_credit_balance
@@ -311,7 +394,15 @@ export async function getXUsage(db: Db, orgId: number): Promise<XUsage> {
  * (x_used += amount, capped at allowance + x_bonus). Returns { ok:false } when the combined cap
  * would be exceeded — the caller PAUSES the post (no API request, no spend). Race-safe single UPDATE.
  */
-export async function holdXCredits(db: Db, params: { orgId: number; amount: number }): Promise<{ ok: boolean; used: number; allowance: number }> {
+export async function holdXCredits(db: Db, params: { orgId: number; amount: number }): Promise<{ ok: boolean; used: number; allowance: number; tasks?: boolean }> {
+    if (await isUnifiedTaskMetering(params.orgId)) {
+        // Single task allowance: a text post is part of the post's own task; a link post costs
+        // TASK_WEIGHTS.x_link_post. Nothing is reserved — settleXHold records it on success.
+        // `tasks: true` tells the publisher a refusal is the task allowance, not an X allowance.
+        if (params.amount !== X_LINK_COST) return { ok: true, used: 0, allowance: 0, tasks: true };
+        const ok = await hasTaskCapacity(db, params.orgId, TASK_WEIGHTS.x_link_post);
+        return { ok, used: 0, allowance: 0, tasks: true };
+    }
     const allowance = await monthlyXAllowance(db, params.orgId);
     await ensureXPeriod(db, params.orgId, allowance);
     const rows = await db.execute<{ x_used: number }>(sql`
@@ -333,8 +424,14 @@ export async function holdXCredits(db: Db, params: { orgId: number; amount: numb
  */
 export async function settleXHold(db: Db, params: {
     orgId: number; amount: number; success: boolean; hasLink: boolean;
-    userId?: number | null; assistantId?: number | null;
+    userId?: number | null; assistantId?: number | null; ref?: string | number;
 }): Promise<void> {
+    if (await isUnifiedTaskMetering(params.orgId)) {
+        if (params.success && params.hasLink) {
+            await recordCompletedWork(db, params.orgId, 'x_link_post', { ref: params.ref, assistantId: params.assistantId ?? null });
+        }
+        return;
+    }
     if (params.success) {
         // balance_after / job_id are image/video concepts — leave them null for X debits so the
         // ledger column semantics stay clean; the reason + delta + timestamp are the X audit trail.
@@ -386,6 +483,12 @@ export function xPackPrice(pack: XCreditPack, currency: string): { currency: str
  * caller dedupes on the Stripe event; this itself always applies the grant.
  */
 export async function grantXCredits(db: Db, params: { orgId: number; credits: number; userId?: number | null }): Promise<void> {
+    // Single task allowance: a pack bought before the cutover (a late webhook) lands as bonus tasks,
+    // 1 X credit = 1 task, matching db/z-task-credit-conversion.sql.
+    if (await isUnifiedTaskMetering(params.orgId)) {
+        await grantBonusTasks(db, params.orgId, params.credits, 'purchase', { userId: params.userId ?? null, note: 'X credit pack (converted)' });
+        return;
+    }
     const allowance = await monthlyXAllowance(db, params.orgId);
     await ensureXPeriod(db, params.orgId, allowance); // ensure the row exists + period is current
     // Balance bump + ledger entry in ONE atomic statement (data-modifying CTE), so a mid-grant

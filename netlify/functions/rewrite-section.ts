@@ -12,6 +12,7 @@ import { HandlerEvent } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
+import { checkFairUse, fairUseResponse } from '../../src/utils/fair-use';
 import { blogPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
@@ -75,6 +76,10 @@ export default withLambda(async (event: HandlerEvent) => {
         .where(and(eq(blogPosts.id, Number(blogPostId)), eq(blogPosts.organisationId, ctx.organisationId)))
         .limit(1);
     if (!post) return { statusCode: 404, body: JSON.stringify({ error: 'Blog post not found.' }) };
+
+    // An editing helper: free, but counted against the daily fair-use limit (src/utils/fair-use.ts).
+    const fair = await checkFairUse(db, ctx.organisationId, 'helpers');
+    if (!fair.allowed) return fairUseResponse(fair);
 
     const directive = buildInstruction(action, tone, instruction);
 

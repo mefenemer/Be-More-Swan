@@ -21,13 +21,11 @@
 // only as a GATE ("is this workspace able to run anything at all right now?") and must never be
 // rendered as the campaign's budget.
 
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import {
-    campaignOrders, campaignSpendEvents, masterPlans, plans, usageCounters,
-} from '../../db/schema';
-import { getPeriodStart } from './atomic-cap-check';
+import { campaignOrders, campaignSpendEvents } from '../../db/schema';
 import { TERMINAL_ORDER_STATUSES } from '../config/campaign-vocab';
+import { getTaskUsage } from './work-metering';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -164,39 +162,21 @@ export interface PlanTaskGate {
  * Read the org's billing task allowance. READ ONLY — this consumes nothing.
  *
  * ⚠️ This is NOT the campaign's budget and must never be rendered as one. It is a different unit
- * (a billing task, moved by chat turns and a few on-demand buttons) and campaigns do not spend it.
- * It is read for exactly one purpose: to refuse to start a campaign in a workspace that has hit
- * its plan cap, because the assistant it would give orders to cannot answer a chat turn either.
+ * (a billing task: one finished piece of work, src/config/task-weights.ts) and the campaign's own
+ * budget is separate. It is read for exactly one purpose: to refuse to start a campaign in a
+ * workspace that has hit its plan cap, because the assistants it would give orders to cannot do
+ * any metered work either.
  *
- * Plan resolution mirrors consumeTaskCredit (active preferred, then past_due, so a lapsed plan
- * keeps its limits through the grace window). Kept as a separate read rather than a call into
- * task-credit.ts because that module's whole job is to INCREMENT, and this must not.
+ * Delegates to getTaskUsage (work-metering.ts), which resolves the plan exactly as enforcement does
+ * — active preferred, then past_due, a frozen featureOverrides limit winning — and counts bonus
+ * tasks and media jobs still running. This used to read the raw master limit and ignored both.
  */
 export async function readPlanTaskGate(db: Db, organisationId: number): Promise<PlanTaskGate> {
-    const [plan] = await db
-        .select({ monthlyTaskLimit: masterPlans.monthlyTaskLimit })
-        .from(plans)
-        .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
-        .where(and(eq(plans.organisationId, organisationId), inArray(plans.status, ['active', 'past_due'])))
-        .orderBy(plans.status, plans.startedAt)
-        .limit(1);
-
-    if (!plan) return { limit: null, used: 0, remaining: null, atCap: true, noPlan: true };
-
-    // Counter of record: usage_counters, by ORGANISATION, on a UTC calendar month. Never
-    // re-derived from task_runs — that read is by userId on a local-time month and disagrees
-    // with enforcement.
-    const [counter] = await db
-        .select({ taskCount: usageCounters.taskCount })
-        .from(usageCounters)
-        .where(and(
-            eq(usageCounters.organisationId, organisationId),
-            eq(usageCounters.periodStart, getPeriodStart()),
-        ))
-        .limit(1);
-
-    const used = counter?.taskCount ?? 0;
-    const limit = plan.monthlyTaskLimit ?? null;
-    if (limit === null) return { limit: null, used, remaining: null, atCap: false, noPlan: false };
-    return { limit, used, remaining: Math.max(0, limit - used), atCap: used >= limit, noPlan: false };
+    const usage = await getTaskUsage(db, organisationId);
+    if (!usage.hasPlan) return { limit: null, used: 0, remaining: null, atCap: true, noPlan: true };
+    if (usage.limit === null || usage.remaining === null) {
+        return { limit: null, used: usage.used, remaining: null, atCap: false, noPlan: false };
+    }
+    const remaining = Math.max(0, usage.remaining);
+    return { limit: usage.limit, used: usage.used, remaining, atCap: remaining <= 0, noPlan: false };
 }

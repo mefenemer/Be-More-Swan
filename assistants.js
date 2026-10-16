@@ -3174,6 +3174,10 @@ async function _rqSendLeadOutreach(recordId, opts) {
             // about their own setup, and a bare "nothing sent" would read as a bug.
             return say(`nothing sent. ${sdata.detail || 'Add your business postal address in Business Information.'}`);
         }
+        if (sdata.reason === 'task_limit') {
+            // Single task allowance: an outreach email is a task, and the month's are used up.
+            return say(`nothing sent. ${sdata.detail || 'Your monthly task allowance is used up. It resets on the 1st of the month.'}`);
+        }
         // ⚠️ A non-send we have no sentence for. Reached only if send_outreach gains a reason and
         // this list is not updated — which is exactly how suppression_check_failed stayed invisible.
         // Report the reason verbatim rather than the bare "Lead approved.": an unfamiliar word the
@@ -11243,9 +11247,11 @@ function _applyAutonomousMediaUi() {
     if (capRow) capRow.classList.toggle('hidden', !_autonomousMediaEnabled);
     if (capInput) capInput.value = _autonomousMediaCap;
     if (capHint) {
-        capHint.textContent = `This assistant's cap is currently ${_autonomousMediaCap} credits/month. ` +
-            `Your plan includes ${_planMonthlyCredits} credits/month — raising the cap above that will ` +
-            `need your confirmation, as extra usage is charged.`;
+        capHint.textContent = _planMonthlyCredits > 0
+            ? `This assistant can make up to ${_autonomousMediaCap} AI media items a month on its own. ` +
+              `Your plan includes ${_planMonthlyCredits} AI credits a month; when they run out it simply stops — you are never charged extra.`
+            : `This assistant can make up to ${_autonomousMediaCap} AI images or videos a month on its own, ` +
+              `using your monthly tasks. When your tasks run out it simply stops — you are never charged extra.`;
     }
 }
 
@@ -11275,45 +11281,20 @@ window._toggleAutonomousMedia = async function () {
     } catch (e) { window.showToast?.('Could not update the setting: ' + e.message, { icon: '⚠️' }); }
 };
 
-// issue #64: the cap is meant to be bounded by the plan's included monthly credits. Raising it
-// above that means the assistant could spend credits the plan doesn't cover, so the user must
-// explicitly confirm they accept being charged for the extra credits before it's saved.
+// The cap only limits how much AI media this assistant makes on its own each month. There is no
+// overage: generation simply stops when the plan's allowance runs out, so there is nothing to
+// confirm. (It used to warn "extra usage will be charged" — nothing ever billed it.)
 window._saveAutonomousMediaCap = async function () {
     const input = document.getElementById('autonomous-media-cap');
     const cap = parseInt(input?.value, 10);
     if (!Number.isFinite(cap) || cap < 0) { input.value = _autonomousMediaCap; return; }
-
-    const commit = async (confirmOverage) => {
-        try {
-            const data = await _setAutonomousMedia({ monthlyCap: cap, confirmOverage });
-            _autonomousMediaCap = data.autonomousMediaMonthlyCap ?? cap;
-            _applyAutonomousMediaUi();
-            // issue #67: saving succeeds silently — the input already shows the value the user just
-            // typed, so with no confirmation the click on "OK" in the dialog above looks like a no-op.
-            window.showToast?.(
-                confirmOverage ? 'Monthly credit cap updated — extra usage above your plan allowance will be billed.'
-                                : 'Monthly credit cap updated.'
-            );
-        } catch (e) { window.showToast?.('Could not update the cap: ' + e.message, { icon: '⚠️' }); input.value = _autonomousMediaCap; }
-    };
-
-    if (cap > _planMonthlyCredits) {
-        const message = `Your plan includes ${_planMonthlyCredits} AI credits per month. Setting this assistant's ` +
-            `cap to ${cap} means it may use up to ${cap - _planMonthlyCredits} credits beyond your plan's ` +
-            `allowance, which will be charged as additional usage. Continue?`;
-        const opts = {
-            title: 'Extra usage will be charged',
-            confirmLabel: 'Yes, continue',
-            cancelLabel: 'Cancel',
-            confirmColor: '#ff007f',
-            onCancel: () => { input.value = _autonomousMediaCap; },
-        };
-        // opts.onCancel already restores the input, so the modal covers both answers.
-        window.showConfirmModal(message, () => commit(true), opts);
-        return;
-    }
-
-    await commit(false);
+    try {
+        const data = await _setAutonomousMedia({ monthlyCap: cap });
+        _autonomousMediaCap = data.autonomousMediaMonthlyCap ?? cap;
+        _applyAutonomousMediaUi();
+        // issue #67: confirm the save — the input already shows the value, so silence looks like a no-op.
+        window.showToast?.('Monthly AI media cap updated.');
+    } catch (e) { window.showToast?.('Could not update the cap: ' + e.message, { icon: '⚠️' }); input.value = _autonomousMediaCap; }
 };
 
 // ── Media Source Selection ──────────────────────────────────────────

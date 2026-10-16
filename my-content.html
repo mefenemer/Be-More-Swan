@@ -12,8 +12,8 @@
     <div class="shrink-0 flex items-center gap-3">
       <span id="mc-credit-pill" title="AI generation credits" class="hidden items-center gap-2 px-3 py-2 bg-pink-50 border border-pink-200 text-pink-700 text-sm font-bold rounded-xl">
         <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
-        <span id="mc-credit-count">—</span> credits
-        <span class="inline-flex items-center justify-center w-4 h-4 rounded-full border border-pink-300 text-pink-500 text-[10px] font-black cursor-help shrink-0"
+        <span id="mc-credit-count">—</span> <span id="mc-credit-unit">credits</span>
+        <span id="mc-credit-info" class="inline-flex items-center justify-center w-4 h-4 rounded-full border border-pink-300 text-pink-500 text-[10px] font-black cursor-help shrink-0"
               tabindex="0" role="img" aria-label="Credits are used only when generating AI images (1) or videos (5) — uploads, stock and brand cards are free."
               title="Credits are used only when generating AI images (1) or videos (5) — uploads, stock and brand cards are free.">i</span>
       </span>
@@ -155,7 +155,7 @@
 
         <!-- Balance + cost line -->
         <div class="flex items-center justify-between text-xs bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
-          <span class="text-gray-600">Generating this image will use <strong class="text-emerald-700">1 credit</strong></span>
+          <span class="text-gray-600">Generating this image will use <strong id="ai-cost-label" class="text-emerald-700">1 credit</strong></span>
           <span class="text-gray-500">Balance: <strong id="ai-balance" class="text-gray-800">—</strong></span>
         </div>
 
@@ -223,7 +223,7 @@
           </div>
 
           <div class="flex items-center justify-between text-xs bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
-            <span class="text-gray-600">Generating this video will use <strong class="text-emerald-700">5 credits</strong></span>
+            <span class="text-gray-600">Generating this video will use <strong id="vid-cost-label" class="text-emerald-700">5 credits</strong></span>
             <span class="text-gray-500">Balance: <strong id="vid-balance" class="text-gray-800">—</strong></span>
           </div>
 
@@ -234,7 +234,7 @@
           </button>
 
           <div id="vid-insufficient" class="hidden text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-            You don't have enough credits to generate a video.
+            You don't have enough <span id="vid-insufficient-unit">credits</span> to generate a video.
             <a href="/billing.html" class="font-bold text-emerald-700 underline">Upgrade your plan →</a>
           </div>
         </div>

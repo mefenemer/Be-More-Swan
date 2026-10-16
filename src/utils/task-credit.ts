@@ -14,6 +14,8 @@ import type { getDb } from '../../db/client';
 import { masterPlans, plans } from '../../db/schema';
 import { atomicCapCheck } from './atomic-cap-check';
 import { effectiveLimit, type FeatureOverrides } from './plan-features';
+import { checkFairUse, type FairUseKind } from './fair-use';
+import { isUnifiedTaskMetering } from './task-metering-flag';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -47,7 +49,7 @@ export async function consumeTaskCredit(
     // No plan at all → paywall. Without this, a no-plan org resolves to limit=null and
     // atomicCapCheck would wave every task through as "unlimited".
     if (!plan.hasPlan) {
-        return { allowed: false, limitMessage: 'Choose a plan to activate your assistant and start running tasks.' };
+        return { allowed: false, limitMessage: NO_PLAN_MESSAGE };
     }
 
     return atomicCapCheck({
@@ -56,6 +58,44 @@ export async function consumeTaskCredit(
         limit: plan.limit,
         increment,
     });
+}
+
+export interface InteractionResult extends TaskCreditResult {
+    /** Refused by the daily fair-use limit — NOT a plan limit. Never answer this with a paywall. */
+    fairUse?: boolean;
+}
+
+const NO_PLAN_MESSAGE = 'Choose a plan to activate your assistant and start running tasks.';
+
+/**
+ * Meter a chat message or an editing-helper click.
+ *
+ * Under the single task allowance ('unified_task_metering', docs/task-metering.md) these cost no
+ * tasks: the org needs a paid plan, and the click counts against a daily fair-use limit. With the
+ * flag off this is exactly consumeTaskCredit — one task, up front, fails closed.
+ *
+ * Callers branch on three outcomes: `failed` (503, try again), `fairUse` (429 with `limitMessage`,
+ * "come back tomorrow"), anything else not allowed (the upgrade/paywall response).
+ */
+export async function meterInteraction(
+    db: Db,
+    organisationId: number,
+    kind: FairUseKind,
+): Promise<InteractionResult> {
+    if (!(await isUnifiedTaskMetering(organisationId))) return consumeTaskCredit(db, organisationId);
+
+    let hasPlan: boolean;
+    try {
+        hasPlan = (await resolveTaskLimit(db, organisationId)).hasPlan;
+    } catch (err) {
+        console.error('[task-credit] plan lookup failed', { organisationId, message: err instanceof Error ? err.message : String(err) });
+        return { allowed: false, failed: true, limitMessage: 'We could not check your plan just now. Please try again.' };
+    }
+    if (!hasPlan) return { allowed: false, limitMessage: NO_PLAN_MESSAGE };
+
+    const fair = await checkFairUse(db, organisationId, kind);
+    if (!fair.allowed) return { allowed: false, fairUse: true, limitMessage: fair.message };
+    return { allowed: true };
 }
 
 /**

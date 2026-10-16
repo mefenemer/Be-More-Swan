@@ -2354,8 +2354,9 @@
             // 402 carries the machine code 'insufficient_credits' in `error` — showing that verbatim
             // is the same fault in a different branch. Wording mirrors my-content.html's warning.
             if (res.body && res.body.error === 'insufficient_credits') {
-              setStatus('bs-media-status', 'You don\u2019t have enough credits to generate an image. '
-                + 'Upgrade your plan for more.');
+              setStatus('bs-media-status', res.body.unit === 'tasks'
+                ? 'Your monthly tasks are used up \u2014 they reset on the 1st. Upgrade your plan for more.'
+                : 'You don\u2019t have enough credits to generate an image. Upgrade your plan for more.');
               return;
             }
             setStatus('bs-media-status', (res.body && res.body.error) || 'Generation failed');

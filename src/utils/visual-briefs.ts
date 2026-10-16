@@ -31,7 +31,7 @@ import { renderBrandCard, type CardVariant } from '../lib/brand-card';
 import { deleteR2Object, persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured } from '../lib/media-persist';
 import { normalizeBrandKit, type BrandKit } from './brand-kit';
 import { guidelinesPromptLines, hasGuidelines, normaliseGuidelines, readBrandGuidelines, type BrandGuidelines } from './brand-guidelines';
-import { holdCredits, settleHold, getBalance, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, tierCanGenerateVideo } from './ai-credits';
+import { holdCredits, settleHold, getBalance, tasksForCredits, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, tierCanGenerateVideo } from './ai-credits';
 import { getActiveTierKeyByOrg } from './plan-features';
 import { orgHasAssistantFeature } from './assistant-capabilities';
 import { loadAssistantRulesBlock } from './assistant-rules-prompt';
@@ -255,7 +255,7 @@ export async function writeArtDirection(db: Db, brief: BriefRow, ctx: BriefConte
 
 export type StartRoundResult =
     | { ok: true; round: number; aiIncluded: boolean; videoIncluded: boolean; credits: number }
-    | { ok: false; status: number; error: string; code?: string; cost?: number; balance?: number };
+    | { ok: false; status: number; error: string; code?: string; cost?: number; balance?: number; unit?: 'credits' | 'tasks' };
 
 /**
  * The click. Holds the round's credit, marks the brief generating, and returns; the caller wakes
@@ -296,8 +296,12 @@ export async function startRound(db: Db, args: { orgId: number; brief: BriefRow 
     const videoCredits = videoIncluded ? VIDEO_CREDIT_COST : 0;
     const credits = (aiIncluded ? IMAGE_CREDIT_COST : 0) + videoCredits;
     if (credits > 0) {
-        const hold = await holdCredits(db, { orgId, amount: credits });
-        if (!hold.ok) return { ok: false, status: 402, error: 'insufficient_credits', code: 'insufficient_credits', cost: credits, balance: hold.balance };
+        const hold = await holdCredits(db, {
+            orgId, amount: credits,
+            // Single task allowance: an image round is 1 task, a video 20 (tasksForCredits).
+            tasks: (aiIncluded ? tasksForCredits('image', IMAGE_CREDIT_COST) : 0) + (videoIncluded ? tasksForCredits('video', VIDEO_CREDIT_COST) : 0),
+        });
+        if (!hold.ok) return { ok: false, status: 402, error: 'insufficient_credits', code: 'insufficient_credits', cost: hold.cost, balance: hold.balance, unit: hold.unit };
     }
 
     const rows = await db.update(visualBriefs).set({

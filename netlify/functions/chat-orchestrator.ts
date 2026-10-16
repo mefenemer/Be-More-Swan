@@ -26,7 +26,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { appendFooter } from '../../src/utils/disclosure-footer';
 import { resolvePostFooter } from '../../src/utils/post-disclosure';
 import { logAiUsage } from '../../src/utils/ai-usage';
-import { consumeTaskCredit } from '../../src/utils/task-credit';
+import { meterInteraction } from '../../src/utils/task-credit';
 import { embedTexts } from '../../src/utils/kb-embeddings';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
@@ -2296,11 +2296,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // What the transcript shows: their words, then what they attached.
     const message = [typed, attachmentLine(attached)].filter(Boolean).join('\n\n');
 
-    // ── Foreground cap check — consume this turn's task credit before any state is
-    // created or the LLM is called. Over-limit turns get the 403 paywall payload, not
-    // a generic error; the client renders it inline and logs the conversion event.
-    const capacity = await consumeTaskCredit(db, orgId);
+    // ── Foreground cap check — meter this turn before any state is created or the LLM is
+    // called. Under the single task allowance a chat message costs no task, only a daily fair-use
+    // count (meterInteraction); with the flag off it is still one task credit. Over-limit turns get
+    // the 403 paywall payload, not a generic error; the client renders it inline and logs the
+    // conversion event.
+    const capacity = await meterInteraction(db, orgId, 'chat');
     if (!capacity.allowed) {
+        // Fair use is "come back tomorrow", never an upgrade prompt.
+        if (capacity.fairUse) return json(429, { code: 'FAIR_USE_LIMIT', error: capacity.limitMessage });
         // A cap that could not be EVALUATED is a server fault, and answering it with the upgrade
         // card would tell the user to buy a bigger plan to fix our outage. 503 says "try again",
         // which is the true and actionable thing; the cause is in the [atomicCapCheck] log line.
@@ -2619,11 +2623,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         if (handoff) {
             const targetRoute = ROUTES[handoff.targetRoleKey];
 
-            // ── Shadow cap check — the background call burns a task credit of its own.
+            // ── Shadow cap check — the background call is metered as a chat turn of its own.
             // The user's turn is already persisted, so return the session/message ids the
             // same way the 502 path does; the paywall card replaces the assistant reply.
-            const shadowCapacity = await consumeTaskCredit(db, orgId);
+            const shadowCapacity = await meterInteraction(db, orgId, 'chat');
             if (!shadowCapacity.allowed) {
+                if (shadowCapacity.failed) {
+                    return json(503, { code: 'cap_check_failed', error: shadowCapacity.limitMessage, chatSessionId: session.id, userMessageId: userMessage.id });
+                }
+                if (shadowCapacity.fairUse) {
+                    return json(429, { code: 'FAIR_USE_LIMIT', error: shadowCapacity.limitMessage, chatSessionId: session.id, userMessageId: userMessage.id });
+                }
                 console.warn(`[chat-orchestrator] paywall hit (shadow handoff) org=${orgId} user=${userId}`);
                 return upgradeRequired(shadowCapacity.limitMessage, {
                     chatSessionId: session.id,

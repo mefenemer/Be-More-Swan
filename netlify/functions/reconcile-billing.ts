@@ -23,6 +23,10 @@ import { BETA_PLAN_TYPE } from '../../src/utils/beta-testers';
 import { createNotifications } from '../../src/utils/notify';
 import { getPeriodStart } from '../../src/utils/atomic-cap-check';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
+
+// The single task allowance's cutover (docs/task-metering.md): the first month every task has a ledger row.
+const LEDGER_COMPLETE_FROM = new Date(Date.UTC(2026, 11, 1));
 
 // A Stripe subscription's tier is resolved from its price PRODUCT (master_plans.stripe_product_id),
 // built at request time below — not a hardcoded price-id map. The product is stable across price
@@ -207,42 +211,45 @@ async function runReconciliation(): Promise<void> {
             }
         }
 
-        // ── 4a. US-DB-1.4.1: Cross-check usageCounters.taskCount vs live task_runs count ──
+        // ── 4a. Cross-check usageCounters.taskCount against the itemised task_ledger ──
+        // Under the single task allowance every task is a task_ledger 'work' row (work-metering.ts
+        // writes both in one statement), so the two must agree exactly. This used to compare with
+        // task_runs, which background work never writes — so almost every org showed as drifting.
+        // Only orgs on the new metering, from the first full period after the cutover: before it,
+        // chat turns spent tasks without a ledger row and the comparison means nothing.
         const periodStart  = getPeriodStart();
-        const ucRows = await db
-            .select({ organisationId: usageCounters.organisationId, taskCount: usageCounters.taskCount })
-            .from(usageCounters)
-            .where(eq(usageCounters.periodStart, periodStart));
-
-        // See the warning in src/utils/atomic-cap-check.ts: a raw Date interpolated into a
-        // db.execute(sql`...`) template throws inside postgres-js's Bind step before the statement
-        // is ever sent, and drizzle rethrows it looking like a database fault. The query builder
-        // above is safe because the column maps the value; this hand-written template is not.
         const periodStartParam = periodStart.toISOString();
-        for (const uc of ucRows) {
-            const [live] = await db.execute(sql`
-                SELECT COUNT(*) AS live_count
-                FROM task_runs
-                WHERE organisation_id = ${uc.organisationId}
-                  AND created_at >= ${periodStartParam}
-            `);
-            const liveCount = Number((live as any).live_count ?? 0);
-            const counterCount = uc.taskCount ?? 0;
-            const drift = Math.abs(liveCount - counterCount);
-            const driftPct = liveCount > 0 ? drift / liveCount : 0;
+        if (periodStart >= LEDGER_COMPLETE_FROM) {
+            const ucRows = await db
+                .select({ organisationId: usageCounters.organisationId, taskCount: usageCounters.taskCount })
+                .from(usageCounters)
+                .where(eq(usageCounters.periodStart, periodStart));
 
-            if (driftPct > 0.01) {
-                // >1% drift — flag it
-                mismatches.push({
-                    type:           'usage_counter_drift',
-                    organisationId: uc.organisationId,
-                    counterValue:   counterCount,
-                    liveValue:      liveCount,
-                    delta:          counterCount - liveCount,
-                    driftPct:       Math.round(driftPct * 10000) / 100,
-                    period:         periodStart.toISOString(),
-                });
-                console.warn(`[reconcile-billing] Usage counter drift >1% for org ${uc.organisationId}: counter=${counterCount}, live=${liveCount}`);
+            for (const uc of ucRows) {
+                if (!(await isUnifiedTaskMetering(uc.organisationId))) continue;
+                // See the warning in src/utils/atomic-cap-check.ts: never interpolate a raw Date here.
+                const [live] = await db.execute(sql`
+                    SELECT COALESCE(SUM(units), 0) AS live_count
+                    FROM task_ledger
+                    WHERE organisation_id = ${uc.organisationId}
+                      AND period_start = ${periodStartParam}
+                      AND source = 'work'
+                `);
+                const liveCount = Number((live as any).live_count ?? 0);
+                const counterCount = uc.taskCount ?? 0;
+                if (liveCount !== counterCount) {
+                    const drift = Math.abs(liveCount - counterCount);
+                    mismatches.push({
+                        type:           'usage_counter_drift',
+                        organisationId: uc.organisationId,
+                        counterValue:   counterCount,
+                        liveValue:      liveCount,
+                        delta:          counterCount - liveCount,
+                        driftPct:       liveCount > 0 ? Math.round((drift / liveCount) * 10000) / 100 : 100,
+                        period:         periodStartParam,
+                    });
+                    console.warn(`[reconcile-billing] task counter ≠ ledger for org ${uc.organisationId}: counter=${counterCount}, ledger=${liveCount}`);
+                }
             }
         }
 

@@ -32,6 +32,8 @@ import { and, eq, lte, sql } from 'drizzle-orm';
 import Anthropic from '@anthropic-ai/sdk';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
+import { hasTaskCapacity, recordCompletedWork } from '../../src/utils/work-metering';
+import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { aiAssistants, assistantRecords, leadMessages, leadThreads, organisations, sequenceEnrolments } from '../../db/schema';
 import { appendOutreachFooter, buildOutreachFooter, isUsablePostalAddress } from '../../src/config/outreach-footer';
 import { appendSignature } from '../../src/utils/outreach-signature';
@@ -410,6 +412,15 @@ async function processEnrolment(
         .limit(1);
     const sender = await loadSenderIdentity(db, row.organisation_id, row.ai_assistant_id);
 
+    // Single task allowance: a follow-up email is one finished piece of work. Out of tasks →
+    // SKIP (not halt), exactly like the postal-address gate below: the cadence resumes by itself
+    // once the allowance resets on the 1st. Asked before the draft so a refused step costs nothing.
+    const metered = await isUnifiedTaskMetering(row.organisation_id);
+    if (metered && !(await hasTaskCapacity(db, row.organisation_id))) {
+        console.warn(`[process-sequence-sends] deferring enrolment ${ref.id}: org ${row.organisation_id} is out of tasks`);
+        return 'skipped';
+    }
+
     let draft: { subject: string; body: string } | null;
     try {
         draft = await draftFollowUp(db, row, assistant, sender, step, opener?.subject ?? null);
@@ -474,6 +485,9 @@ async function processEnrolment(
     // Past this point the email is delivered. Everything below is bookkeeping and must not be
     // allowed to surface as a failure — the same contract as the opening send in lead-generation.ts.
     const sentAt = new Date();
+    if (metered) {
+        await recordCompletedWork(db, row.organisation_id, 'outreach_email', { ref: `enrolment:${ref.id}:step${step.stepNumber}`, assistantId: row.ai_assistant_id });
+    }
     await recordOutboundMessage(db, row.lead_thread_id, {
         organisationId: row.organisation_id,
         subject: draft.subject,

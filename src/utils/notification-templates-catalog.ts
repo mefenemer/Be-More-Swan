@@ -674,6 +674,16 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [ASSISTANT_NAME, PLATFORM_LABEL],
     },
     {
+        // Single task allowance (docs/task-metering.md): the same situation, in its new words.
+        templateKey: 'draft_ready_no_tasks',
+        name: 'Draft ready — no tasks left for AI media',
+        category: 'Content',
+        type: 'ai_review',
+        title: '{{assistant.name}}: draft ready — media needed',
+        message: 'Your {{platform.label}} post draft is ready to review, but there weren\'t enough tasks left this month to generate an AI image for it. Add media in Review, or switch on stock photos or branded cards in the assistant\'s Media Sources — they use no extra tasks. Your tasks reset on the 1st.',
+        variables: [ASSISTANT_NAME, PLATFORM_LABEL],
+    },
+    {
         templateKey: 'post_revised',
         name: 'Revised post ready',
         category: 'Content',
@@ -1085,6 +1095,26 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         title: 'X credits added',
         message: '{{x.credits}} X posting credits have been added to your account. Any paused X posts will resume on the next publish run.',
         variables: [v('x.credits', 'Number of X credits purchased', '1500')],
+    },
+    {
+        templateKey: 'bonus_tasks_added',
+        name: 'Bonus tasks added',
+        category: 'Billing',
+        type: 'bonus_tasks_added',
+        title: '{{tasks.count}} bonus tasks added',
+        message: '{{tasks.count}} bonus tasks have been added to your account. Bonus tasks never expire — they are used only after your monthly allowance runs out.',
+        variables: [v('tasks.count', 'Bonus tasks added', '1500')],
+    },
+    {
+        // The advance notice for the 1 December 2026 move to one task allowance. Sent once by an
+        // admin broadcast; worded so it is true whatever balance the reader holds.
+        templateKey: 'tasks_model_change_notice',
+        name: 'Usage is becoming one task allowance',
+        category: 'Billing',
+        type: 'tasks_model_change_notice',
+        title: 'From 1 December, everything runs on one monthly task allowance',
+        message: 'From 1 December 2026, AI media credits and X posting credits are replaced by your monthly task allowance. A task is one finished piece of work — a post, an email, an article, a lead search. An AI image counts as 1 task, an AI video or music track as 20, and an X post with a link as 10. Chatting with your assistants and using the editing helpers no longer uses tasks at all. Any AI credits you have left become 4 bonus tasks each, and unused purchased X credits become 1 bonus task each — bonus tasks never expire. As always, work pauses if you run out and you are never charged extra. The updated terms are on our website.',
+        variables: [],
     },
     {
         templateKey: 'social_disconnected',

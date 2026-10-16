@@ -22,7 +22,7 @@ import { scheduledPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
-import { consumeTaskCredit } from '../../src/utils/task-credit';
+import { meterInteraction } from '../../src/utils/task-credit';
 import { displayCaption } from '../../src/utils/model-json';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
@@ -99,10 +99,11 @@ export default withLambda(async (event: HandlerEvent) => {
     // caption returns an apology, which would then be pasted into the caption box.
     if (!caption.trim()) return json(400, { error: 'Write or draft a caption first — there is nothing to rewrite yet.' });
 
-    const credit = await consumeTaskCredit(db, ctx.organisationId);
+    const credit = await meterInteraction(db, ctx.organisationId, 'helpers');
     if (!credit.allowed) {
         // A cap that could not be EVALUATED is a server fault, not a plan limit.
         if (credit.failed) return json(503, { error: credit.limitMessage });
+        if (credit.fairUse) return json(429, { error: credit.limitMessage, code: 'FAIR_USE_LIMIT' });
         return json(403, { error: credit.limitMessage, upgradeRequired: true });
     }
 

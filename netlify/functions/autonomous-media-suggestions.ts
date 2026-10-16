@@ -155,7 +155,7 @@ export default withLambda(async (event) => {
         // ledger, so the resolver only pays for AI when it actually reaches that source. A reached cap
         // throws → the resolver treats AI as unavailable and falls through (or reports exhausted).
         const generateAi = async (): Promise<number> => {
-            const hold = await holdAutonomousCredits(db, { orgId: a.organisationId, amount: IMAGE_CREDIT_COST, monthlyCap: a.cap ?? 20 });
+            const hold = await holdAutonomousCredits(db, { orgId: a.organisationId, amount: IMAGE_CREDIT_COST, monthlyCap: a.cap ?? 20, assistantId: a.id });
             if (!hold.ok) throw new Error('autonomous_cap_reached');
 
             const [job] = await db.insert(mediaGenerationJobs).values({
@@ -169,7 +169,7 @@ export default withLambda(async (event) => {
                     orgId: a.organisationId, userId: a.userId,
                     prompt: copy.imagePrompt, aspectRatio: fmt.aspectRatio, generationJobId: job.id,
                 });
-                await settleHold(db, { orgId: a.organisationId, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId: a.userId, jobId: job.id, isAutonomous: true });
+                await settleHold(db, { orgId: a.organisationId, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId: a.userId, jobId: job.id, isAutonomous: true, assistantId: a.id });
                 await db.update(mediaGenerationJobs).set({ status: 'completed', resultAssetIds: [assetId], updatedAt: new Date() }).where(eq(mediaGenerationJobs.id, job.id));
                 return assetId;
             } catch (err) {

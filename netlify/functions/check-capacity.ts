@@ -24,7 +24,7 @@
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
-import { eq, and, gte, gt, count, sum, asc, or, inArray } from 'drizzle-orm';
+import { eq, and, gte, gt, count, sum, asc, or, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { plans, masterPlans, planPrices, aiAssistants, taskRuns, usageCounters, userOrganisations, users, systemConnections, organisations } from '../../db/schema';
 import { getPeriodStart } from '../../src/utils/atomic-cap-check';
@@ -33,6 +33,8 @@ import { SOCIAL_PLATFORMS } from '../../src/config/platform-formats';
 import { resolveLiveSocialPlatforms } from '../../src/utils/live-social-connections';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { BETA_TIER_KEY, featureTierKey } from '../../src/config/beta-plan';
+import { TASK_WEIGHTS } from '../../src/config/task-weights';
+import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 
 const stripe = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
@@ -183,6 +185,9 @@ export default withLambda(async (event) => {
         const periodStart = getPeriodStart();
         let taskCount  = 0;
         let tokenUsage = 0;
+        let bonusTasks = 0;
+        let tasksInFlight = 0;
+        let unifiedTaskMetering = false;
 
         if (orgId) {
             const [ucRow] = await db
@@ -194,21 +199,21 @@ export default withLambda(async (event) => {
                 ))
                 .limit(1);
 
-            if (ucRow) {
-                taskCount  = ucRow.taskCount  ?? 0;
-                tokenUsage = ucRow.tokenCount ?? 0;
-            } else {
-                // No counter row yet — fall back to live aggregate (pre-migration orgs)
-                const [taskStats] = await db
-                    .select({ taskCount: count(), tokenUsage: sum(taskRuns.tokensUsed) })
-                    .from(taskRuns)
-                    .where(and(
-                        eq(taskRuns.organisationId, orgId),
-                        gte(taskRuns.createdAt, periodStart),
-                    ));
-                taskCount  = taskStats?.taskCount  ?? 0;
-                tokenUsage = Number(taskStats?.tokenUsage ?? 0);
-            }
+            // No counter row = nothing recorded this month. (The old fallback counted task_runs, which
+            // background work never writes, so it disagreed with what the cap check enforces.)
+            taskCount  = ucRow?.taskCount  ?? 0;
+            tokenUsage = ucRow?.tokenCount ?? 0;
+
+            // Bonus tasks (non-expiring, spent after the allowance) and media jobs still running.
+            const [extra] = await db.execute<{ bonus: number; in_flight: number }>(sql`
+                SELECT COALESCE((SELECT bonus_tasks FROM task_bonus WHERE organisation_id = ${orgId}), 0) AS bonus,
+                       COALESCE((SELECT SUM(CASE media_type WHEN 'video' THEN ${TASK_WEIGHTS.ai_video} WHEN 'audio' THEN ${TASK_WEIGHTS.ai_music} ELSE ${TASK_WEIGHTS.ai_image} END)
+                                   FROM media_generation_jobs
+                                  WHERE organisation_id = ${orgId} AND status IN ('queued', 'processing')
+                                    AND created_at > now() - interval '2 hours'), 0) AS in_flight`) as unknown as Array<{ bonus: number; in_flight: number }>;
+            bonusTasks = Number(extra?.bonus ?? 0);
+            tasksInFlight = Number(extra?.in_flight ?? 0);
+            unifiedTaskMetering = await isUnifiedTaskMetering(orgId);
         } else {
             // Solo user with no org — live aggregate keyed on userId
             const [taskStats] = await db
@@ -274,8 +279,14 @@ export default withLambda(async (event) => {
         const assistantPct = assistantLimit
             ? Math.min(100, Math.round((assistantCount / assistantLimit) * 100))
             : 0;
-        const taskPct = monthlyTaskLimit
-            ? Math.min(100, Math.round((taskCount / monthlyTaskLimit) * 100))
+        // What can still be started: allowance left + bonus tasks − media jobs still running. The
+        // percentage is of everything available this month, so it only reads 100 when work would
+        // actually be refused (bonus tasks keep an org going past its allowance).
+        const tasksRemaining = monthlyTaskLimit === null
+            ? null
+            : Math.max(Math.max(monthlyTaskLimit - taskCount, 0) + bonusTasks - tasksInFlight, 0);
+        const taskPct = monthlyTaskLimit && tasksRemaining !== null
+            ? Math.min(100, Math.round((taskCount / Math.max(taskCount + tasksRemaining, 1)) * 100))
             : 0;
         const tokenPct = monthlyTokenLimit
             ? Math.min(100, Math.round((tokenUsage / monthlyTokenLimit) * 100))
@@ -365,6 +376,9 @@ export default withLambda(async (event) => {
                 features: effectiveFeatures(overrides, (plan as any)?.features), // AC3.2.4: active plan's feature unlocks (snapshot-aware)
                 taskCount,
                 taskLimit: monthlyTaskLimit,
+                bonusTasks,
+                tasksRemaining,
+                unifiedTaskMetering,         // single task allowance on (docs/task-metering.md) — UI copy switches on this
                 tokenUsage,
                 monthlyTokenLimit,
                 appConnectionLimit,

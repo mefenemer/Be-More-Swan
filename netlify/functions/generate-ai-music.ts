@@ -133,8 +133,8 @@ export default withLambda(async (event) => {
     const shared = body.share === true;
     const cost = musicCreditCost(shared);
 
-    const hold = await holdCredits(db, { orgId, amount: cost });
-    if (!hold.ok) return json(402, { error: 'insufficient_credits', cost, balance: hold.balance });
+    const hold = await holdCredits(db, { orgId, amount: cost, mediaType: 'audio' });
+    if (!hold.ok) return json(402, { error: 'insufficient_credits', cost: hold.cost, balance: hold.balance, unit: hold.unit });
 
     // ⚠️ The job row BEFORE the Stability call. The other way round, a failed insert (the CHECK not yet
     // widened on this database, say) would leave a generation running at Stability — billed to us on
