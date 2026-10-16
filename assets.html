@@ -601,6 +601,43 @@
       <div id="bh-res-list" class="space-y-2 mt-4"></div>
       <p id="bh-res-error" class="hidden text-sm text-red-600 mt-2"></p>
     </div>
+
+    <!-- Your calendar (docs/booking-plan.md phase 3; calendar-sync.ts, booking-calendar-feed.ts) — no sign-in. -->
+    <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
+      <h2 class="text-lg font-bold text-gray-900">Your calendar</h2>
+      <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">Works with Google, Outlook and Apple calendars — no signing in.</p>
+
+      <h3 class="text-sm font-bold text-gray-900 mt-5">1. See your bookings in your calendar</h3>
+      <p class="text-xs text-gray-500 mt-1">Add this private link to your calendar app as a subscribed calendar. Bookings, class dates and who's coming appear there. Google updates it every few hours (sometimes up to a day); Apple and Outlook more often — your booking emails stay the instant notice.</p>
+      <input id="cal-feed" readonly class="w-full mt-2 px-3 py-2 rounded-lg border border-gray-300 text-xs bg-gray-50" aria-label="Your private calendar link">
+      <div class="flex flex-wrap items-center gap-2 mt-2">
+        <button type="button" id="cal-copy" class="btn-secondary border text-xs font-bold px-3 py-2 rounded-md">Copy link</button>
+        <a id="cal-open" class="btn-utility text-xs font-bold px-3 py-2 rounded-md" href="#">Open in Apple / Outlook</a>
+      </div>
+      <details class="mt-2"><summary class="text-xs text-gray-600 cursor-pointer">How to add it</summary>
+        <ul class="text-xs text-gray-600 mt-1 space-y-1 list-disc pl-5">
+          <li><strong>Google Calendar</strong> (on a computer): Other calendars ▸ + ▸ From URL ▸ paste the link ▸ Add calendar.</li>
+          <li><strong>Outlook</strong>: Add calendar ▸ Subscribe from web ▸ paste the link.</li>
+          <li><strong>Apple Calendar</strong>: click "Open in Apple / Outlook", or File ▸ New Calendar Subscription.</li>
+        </ul></details>
+      <p class="text-xs text-gray-500 mt-2">Keep it private — anyone with the link can see your bookings. <button type="button" id="cal-reset" class="link font-bold">Make a new link</button> (the old one stops working).</p>
+
+      <h3 class="text-sm font-bold text-gray-900 mt-6">2. Don't take bookings when you're busy</h3>
+      <p class="text-xs text-gray-500 mt-1">Paste your calendar's <strong>private address in iCal format</strong>. Times you're busy there can't be booked; we check every 15 minutes. Only the start and end of each event are read — never titles or who's invited. Events marked "free" are ignored.</p>
+      <details class="mt-1"><summary class="text-xs text-gray-600 cursor-pointer">Where to find it</summary>
+        <ul class="text-xs text-gray-600 mt-1 space-y-1 list-disc pl-5">
+          <li><strong>Google Calendar</strong>: Settings ▸ your calendar ▸ Integrate calendar ▸ <em>Secret address in iCal format</em>.</li>
+          <li><strong>Outlook</strong>: Settings ▸ Calendar ▸ Shared calendars ▸ Publish a calendar ▸ <em>ICS</em> link.</li>
+          <li><strong>Apple / iCloud</strong>: the calendar's ⓘ ▸ Public Calendar ▸ copy the link.</li>
+        </ul></details>
+      <input id="cal-busy" type="url" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" class="w-full mt-2 px-3 py-2 rounded-lg border border-gray-300 text-xs">
+      <div class="flex flex-wrap items-center gap-2 mt-2">
+        <button type="button" id="cal-busy-save" class="btn-primary text-xs font-bold px-3 py-2 rounded-md">Save and check</button>
+        <button type="button" id="cal-busy-remove" class="btn-utility text-xs font-bold px-3 py-2 rounded-md hidden">Remove</button>
+      </div>
+      <p id="cal-busy-status" class="text-xs mt-2"></p>
+      <p class="text-xs text-gray-500 mt-1">Each person in "Who or what can be booked" can have their own calendar too — it then blocks only their bookings.</p>
+    </div>
   </section>
 
   <script>
@@ -659,6 +696,30 @@
       $('bh-address').value = st.visitAddress || '';
       $('bh-whatsapp').value = st.whatsapp || '';
     }
+    // "Checked 5 minutes ago · 14 busy times" / the problem, in words.
+    function busyLine(b) {
+      if (!b.busyCalendarHost && !b.host) return '';
+      const host = b.busyCalendarHost || b.host;
+      const err = b.busySyncError || b.error;
+      const at = b.busySyncedAt || b.syncedAt;
+      const count = b.busyCount ?? b.count;
+      if (err) return `${host} — ${err}`;
+      if (!at) return `${host} — checking…`;
+      const mins = Math.max(0, Math.round((Date.now() - new Date(at).getTime()) / 60000));
+      return `${host} — checked ${mins < 1 ? 'just now' : mins < 60 ? `${mins} min ago` : `${Math.round(mins / 60)} h ago`} · ${count ?? 0} busy time${count === 1 ? '' : 's'} ahead`;
+    }
+    function renderCalendar() {
+      const c = data.calendar;
+      if (!c) return;
+      $('cal-feed').value = c.feedUrl;
+      $('cal-open').href = c.webcalUrl;
+      $('cal-busy').value = '';
+      $('cal-busy').placeholder = c.busy.host ? 'Paste a new private iCal address to replace it' : 'https://calendar.google.com/calendar/ical/…/basic.ics';
+      $('cal-busy-remove').classList.toggle('hidden', !c.busy.host);
+      const st = $('cal-busy-status');
+      st.textContent = c.busy.host ? busyLine(c.busy) : 'Not linked yet.';
+      st.className = `text-xs mt-2 ${c.busy.error ? 'text-red-600 font-semibold' : c.busy.host ? 'text-gray-700' : 'text-gray-500'}`;
+    }
     function renderResources() {
       const list = data.resources;
       const svc = data.services;
@@ -672,6 +733,11 @@
           </div>
           ${svc.length && r.kind !== 'table' ? `<details class="mt-2"><summary class="text-xs text-gray-600 cursor-pointer">Services they do: ${ids ? esc(ids.length) + ' chosen' : 'all'}</summary>
             <div class="flex flex-wrap gap-2 mt-1">${svc.map(x => `<label class="inline-flex items-center gap-1 text-xs"><input type="checkbox" data-rsvc value="${x.id}" ${!ids || ids.includes(x.id) ? 'checked' : ''}> ${esc(x.name)}</label>`).join('')}</div></details>` : ''}
+          ${r.kind !== 'table' && r.status === 'active' ? `<details class="mt-2" ${r.busyCalendarHost ? '' : ''}><summary class="text-xs text-gray-600 cursor-pointer">Their calendar: ${r.busyCalendarHost ? esc(busyLine(r)) : 'not linked'}</summary>
+            <input data-rcal type="url" placeholder="${r.busyCalendarHost ? 'Paste a new private iCal address to replace it' : 'Their private iCal address'}" class="w-full mt-1 px-2 py-1 border border-gray-300 rounded text-xs">
+            <div class="flex flex-wrap items-center gap-2 mt-1">
+              <button type="button" data-rcal-save="${r.id}" class="btn-secondary border text-xs font-bold px-2 py-1 rounded">Save and check</button>
+              ${r.busyCalendarHost ? `<button type="button" data-rcal-remove="${r.id}" class="btn-utility text-xs font-bold px-2 py-1 rounded">Remove</button>` : ''}</div></details>` : ''}
           <div class="flex gap-2 mt-2">
             <button type="button" data-rsave="${r.id}" class="btn-secondary border text-xs font-bold px-2.5 py-1 rounded">Save</button>
             <button type="button" data-rstatus="${r.id}" class="btn-utility text-xs font-bold px-2.5 py-1 rounded">${r.status === 'active' ? 'Archive' : 'Restore'}</button>
@@ -699,7 +765,7 @@
       try {
         data = await call('GET');
         closures = (data.settings.closures || []).slice();
-        renderDays(); renderClosures(); renderRules(); renderResources();
+        renderDays(); renderClosures(); renderRules(); renderResources(); renderCalendar();
       } catch (e) { $('bh-error').textContent = 'Your opening hours could not be loaded. Please refresh and try again.'; $('bh-error').classList.remove('hidden'); }
     }
 
@@ -739,6 +805,37 @@
       const t = e.target.closest('button');
       if (!t) return;
       if (t.id === 'bh-save') return save();
+      // ── Your calendar ──
+      if (t.id === 'cal-copy') {
+        const v = $('cal-feed').value;
+        try { await navigator.clipboard.writeText(v); window.showToast ? window.showToast('Link copied.') : null; }
+        catch (_) { window.promptModal && window.promptModal('Copy this link:', { title: 'Your private calendar link', value: v, confirmLabel: 'Done' }); }
+        return;
+      }
+      if (t.id === 'cal-reset') {
+        const ok = window.confirmModal ? await window.confirmModal('Calendars using the old link stop updating. Add the new link to your calendar app afterwards.', { title: 'Make a new private link?', confirmLabel: 'Make a new link', cancelLabel: 'Keep this one' }) : true;
+        if (!ok) return;
+        try { data.calendar = (await call('PUT', { feedReset: true })).calendar; renderCalendar(); } catch (err) { window.alertModal && window.alertModal(err.message); }
+        return;
+      }
+      if (t.id === 'cal-busy-save' || t.id === 'cal-busy-remove') {
+        const url = t.id === 'cal-busy-remove' ? '' : $('cal-busy').value.trim();
+        if (t.id === 'cal-busy-save' && !url) { $('cal-busy-status').textContent = 'Paste the address first.'; return; }
+        t.disabled = true; $('cal-busy-status').textContent = t.id === 'cal-busy-remove' ? 'Removing…' : 'Checking your calendar…';
+        try { data.calendar = (await call('PUT', { busyCalendarUrl: url })).calendar; renderCalendar(); }
+        catch (err) { $('cal-busy-status').textContent = err.message; $('cal-busy-status').className = 'text-xs mt-2 text-red-600 font-semibold'; }
+        finally { t.disabled = false; }
+        return;
+      }
+      if (t.dataset.rcalSave || t.dataset.rcalRemove) {
+        const id = Number(t.dataset.rcalSave || t.dataset.rcalRemove);
+        const url = t.dataset.rcalRemove ? '' : (t.closest('[data-res]').querySelector('[data-rcal]').value || '').trim();
+        if (t.dataset.rcalSave && !url) return;
+        t.disabled = true;
+        try { const { resource } = await call('PATCH', { id, busyCalendarUrl: url }); data.resources = data.resources.map(r => r.id === id ? resource : r); renderResources(); $('bh-res-error').classList.add('hidden'); }
+        catch (err) { $('bh-res-error').textContent = err.message; $('bh-res-error').classList.remove('hidden'); t.disabled = false; }
+        return;
+      }
       if (t.id === 'bh-closure-add') { closures = collectClosures(); closures.push({ date: '', note: '' }); renderClosures(); return; }
       if (t.dataset.cremove !== undefined) { closures = collectClosures().filter((_, i) => i !== Number(t.dataset.cremove)); renderClosures(); return; }
       if (t.id === 'bh-res-add') {

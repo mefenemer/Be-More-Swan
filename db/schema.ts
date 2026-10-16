@@ -5651,6 +5651,12 @@ export const bookingSettings = pgTable("booking_settings", {
   // Where customers find the business (db/z-business-location.sql) — published on the website.
   visitAddress: text("visit_address"),
   whatsapp: text(),
+  // Phase 3 (db/z-calendar-sync.sql): the private subscribe link's secret, and the business calendar's busy-time status.
+  calendarFeedToken: text("calendar_feed_token"),
+  busyCalendarHost: text("busy_calendar_host"),
+  busySyncedAt: timestamp("busy_synced_at"),
+  busySyncError: text("busy_sync_error"),
+  busyCount: integer("busy_count"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [
   uniqueIndex("booking_settings_org_uq").on(t.organisationId),
@@ -5666,6 +5672,11 @@ export const bookableResources = pgTable("bookable_resources", {
   capacity: integer().notNull().default(1),
   weeklyHours: jsonb("weekly_hours"),
   serviceIds: jsonb("service_ids"),
+  // Phase 3: this person's own calendar (the address is in the vault), and its status.
+  busyCalendarHost: text("busy_calendar_host"),
+  busySyncedAt: timestamp("busy_synced_at"),
+  busySyncError: text("busy_sync_error"),
+  busyCount: integer("busy_count"),
   status: text().notNull().default("active"),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -5712,6 +5723,15 @@ export const bookings = pgTable("bookings", {
   check("bookings_kind_check", sql`${t.kind} IN ('appointment','consultation','table','class')`),
   check("bookings_status_check", sql`${t.status} IN ('pending','confirmed','declined','cancelled','awaiting_payment')`),
 ]);
+
+// Busy times read from the owner's (or a person's) own calendar (db/z-calendar-sync.sql). Start and end only.
+export const calendarBusy = pgTable("calendar_busy", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  resourceId: integer("resource_id").references(() => bookableResources.id, { onDelete: "cascade" }),
+  startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+  endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+}, (t) => [index("calendar_busy_org_time_idx").on(t.organisationId, t.startsAt)]);
 
 // Classes and events (db/z-classes.sql): dated sessions with places, and their waitlist.
 export const classSessions = pgTable("class_sessions", {
