@@ -51,7 +51,10 @@ import {
     deleteIntegration,
     providerLabel,
     SALESFORCE_SYNTHETIC_TTL_SEC,
+    OUTLOOK_CALENDAR_SCOPE,
+    envVarPrefix,
 } from '../../src/utils/workspace-integrations';
+import { forgetMicrosoft, syncMicrosoft } from '../../src/utils/calendar-microsoft';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const CSRF_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -80,6 +83,8 @@ const SCOPES: Record<IntegrationProvider, string> = {
     // signed-in user), never application permissions — those would allow sending as any
     // mailbox in a customer tenant. Single source of truth so authorize/exchange/refresh agree.
     outlook: OUTLOOK_SCOPE,
+    // The booking calendar (calendar-microsoft.ts): read busy times, write bookings. Same Azure app.
+    outlook_calendar: OUTLOOK_CALENDAR_SCOPE,
     // Phase 4 actions: Threads post publishing, TikTok video uploads, YouTube video uploads.
     threads: 'threads_basic,threads_content_publish',
     tiktok: 'user.info.basic,video.upload',
@@ -172,6 +177,8 @@ const RETURN_DESTINATIONS: Record<string, { tab: string; rqStatus?: string }> = 
 const STANDALONE_RETURNS: Record<string, string> = {
     integrations: '/integrations.html',
     blogstudio: '/blog-studio.html',
+    // Business Information ▸ Hours, Location & Bookings ▸ Your calendar (the Outlook calendar connect).
+    bookings: '/workspace.html?view=assets&tab=hours',
 };
 
 function buildState(payload: object): string {
@@ -252,6 +259,8 @@ export default withLambda(async (event) => {
         const ctx = await requireTenant(event, db, { roles: ['owner', 'admin'] });
         if ('error' in ctx) return ctx.error;
         await deleteIntegration(db, ctx.organisationId, provider);
+        // The booking calendar: its busy times stop counting (events already written stay theirs).
+        if (provider === 'outlook_calendar') await forgetMicrosoft(db, ctx.organisationId);
         return json(200, { success: true });
     }
 
@@ -261,7 +270,7 @@ export default withLambda(async (event) => {
         if ('error' in ctx) return redirect('/integrations.html?oauth_error=invalid_session');
         const { userId, organisationId } = ctx;
 
-        const clientId = process.env[`${provider.toUpperCase()}_CLIENT_ID`];
+        const clientId = process.env[`${envVarPrefix(provider)}_CLIENT_ID`];
         if (!clientId) return redirect(`/integrations.html?oauth_error=not_configured&provider=${provider}`);
 
         // Zendesk's authorize endpoint lives on the customer's subdomain, so the connect
@@ -344,7 +353,7 @@ export default withLambda(async (event) => {
             // `prompt` as a space-delimited list, so both apply.
             const gmailPrompt = encodeURIComponent('consent select_account');
             authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.gmail)}&access_type=offline&prompt=${gmailPrompt}&state=${state}`;
-        } else if (provider === 'outlook') {
+        } else if (provider === 'outlook' || provider === 'outlook_calendar') {
             // /common serves work, school AND personal Microsoft accounts — matches the app's
             // "any Entra tenant + personal accounts" registration. offline_access lives in the
             // scope string (unlike Google, Microsoft has no access_type param).
@@ -354,7 +363,7 @@ export default withLambda(async (event) => {
             // rejects a space-delimited list with AADSTS70011 — and nothing is lost by dropping
             // `consent`: the refresh token comes from offline_access in the scope string, and Entra
             // raises the consent screen by itself whenever the requested scopes are not yet granted.
-            authUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.outlook)}&response_mode=query&prompt=select_account&state=${state}`;
+            authUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES[provider])}&response_mode=query&prompt=select_account&state=${state}`;
         } else if (provider === 'threads') {
             // `redirectUri` (= ${baseUrl}/api/oauth/threads/callback) must be whitelisted under the
             // Threads use case → Settings → Redirect Callback URLs, or Meta blocks with error 1349168
@@ -693,7 +702,7 @@ export default withLambda(async (event) => {
                     externalAccountName: null,
                     scopes: grantedScopes(tokenData.scope),
                 });
-            } else if (provider === 'outlook') {
+            } else if (provider === 'outlook' || provider === 'outlook_calendar') {
                 const tokenRes = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -702,12 +711,12 @@ export default withLambda(async (event) => {
                         client_id: process.env.OUTLOOK_CLIENT_ID ?? '',
                         client_secret: process.env.OUTLOOK_CLIENT_SECRET ?? '',
                         redirect_uri: redirectUri,
-                        scope: SCOPES.outlook,
+                        scope: SCOPES[provider],
                         code,
                     }),
                 });
                 const tokenData: { access_token?: string; refresh_token?: string; expires_in?: number; scope?: string } = await tokenRes.json().catch(() => ({}));
-                if (!tokenData.access_token) return redirect(`/integrations.html?oauth_error=token_exchange&provider=outlook`);
+                if (!tokenData.access_token) return redirect(`/integrations.html?oauth_error=token_exchange&provider=${provider}`);
 
                 // Graph /me gives the mailbox address for the card label. userPrincipalName is
                 // the reliable one — `mail` is null on many personal and unlicensed accounts.
@@ -721,7 +730,7 @@ export default withLambda(async (event) => {
                 } catch { /* label only — connection still succeeds */ }
 
                 await saveIntegration(db, {
-                    organisationId, userId, provider: 'outlook',
+                    organisationId, userId, provider,
                     accessToken: tokenData.access_token,
                     refreshToken: tokenData.refresh_token ?? null,
                     expiresInSec: tokenData.expires_in ?? null,
@@ -729,6 +738,8 @@ export default withLambda(async (event) => {
                     externalAccountName: emailAddress,
                     scopes: grantedScopes(tokenData.scope),
                 });
+                // The booking calendar: first sync now, so the owner lands on a working card (never fails the connect).
+                if (provider === 'outlook_calendar') await syncMicrosoft(db, Number(organisationId), new Date()).catch(() => undefined);
             } else if (provider === 'threads') {
                 // Step 1: code → short-lived (1h) token.
                 const tokenRes = await fetch('https://graph.threads.net/oauth/access_token', {
@@ -1088,7 +1099,7 @@ export default withLambda(async (event) => {
         // A flow that named where it started goes back there; otherwise fall back to the
         // provider-based default (Blog Studio owns the two blog-side connectors).
         const standalone = state.returnTo ? STANDALONE_RETURNS[state.returnTo] : null;
-        if (standalone) return redirect(`${standalone}?connected=${provider}`);
+        if (standalone) return redirect(`${standalone}${standalone.includes('?') ? '&' : '?'}connected=${provider}`);
         const blogProvider = provider === 'wordpresscom' || provider === 'searchconsole';
         return redirect(blogProvider ? `/blog-studio.html?connected=${provider}` : `/integrations.html?connected=${provider}`);
     }

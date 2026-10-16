@@ -200,6 +200,7 @@ export async function customerCancel(db: Db, orgId: number, id: number): Promise
 
 /** The owner hears about a customer's cancel or move: a card, and an email with the details. */
 export async function announceCustomerChange(db: Db, change: 'cancelled' | 'moved', b: BookingRow, ctx: BookingNoticeContext, before?: BookingRow): Promise<void> {
+    await calendarSoon(db, b.organisationId);
     const { when, what } = describeBooking(b, ctx.timezone);
     const was = before ? describeBooking(before, ctx.timezone).when : null;
     const owner = await ownerOf(db, ctx.assistantId);
@@ -271,7 +272,13 @@ export interface BookingNoticeContext {
 }
 
 /** After a booking is made: the owner is told (card + email); the customer gets a receipt. */
+/** Their signed-in Outlook calendar, brought up to date now (calendar-microsoft.ts). Never throws. */
+async function calendarSoon(db: Db, orgId: number): Promise<void> {
+    try { await (await import('./calendar-microsoft')).reconcileSoon(db, orgId); } catch { /* the 15-minute sync catches up */ }
+}
+
 export async function announceNewBooking(db: Db, b: BookingRow, ctx: BookingNoticeContext): Promise<void> {
+    await calendarSoon(db, b.organisationId);
     const { when, what } = describeBooking(b, ctx.timezone);
     const owner = await ownerOf(db, ctx.assistantId);
     const pending = b.status === 'pending';
@@ -336,6 +343,7 @@ export async function decideBooking(db: Db, orgId: number, id: number, action: '
     if (action !== 'confirm' && row.paymentStatus === 'paid') row.paymentStatus = await refundDeposit(db, row) === 'refunded' ? 'refunded' : 'refund_failed';
     const [owner] = ctx.assistantId ? await db.select({ email: users.email }).from(aiAssistants).leftJoin(users, eq(users.id, aiAssistants.userId)).where(eq(aiAssistants.id, ctx.assistantId)).limit(1) : [];
     await emailCustomer(row, ({ confirm: 'confirmed', decline: 'declined', cancel: 'cancelled' } as const)[action], ctx, owner?.email ?? null);
+    await calendarSoon(db, orgId);
     return { ok: true, booking: row };
 }
 

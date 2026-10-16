@@ -48,8 +48,15 @@ restaurants, hairdressers, consultants and more, configured through the website 
    everyone) or a person (blocks only them) — read every 15 minutes through the SSRF fence, start
    and end only (`calendar_busy`); free / cancelled / our own events ignored; tables and classes
    never blocked. The address is a secret: vault only. SQL: `db/z-calendar-sync.sql`
-   (`ical-busy.ts`, `calendar-sync.ts`, `booking-calendar-feed.ts`). Live sign-in sync (Google /
-   Microsoft APIs) can come later as a faster upgrade.
+   (`ical-busy.ts`, `calendar-sync.ts`, `booking-calendar-feed.ts`).
+   ✅ (built 2026-10-16) The faster upgrade, Microsoft first: "Connect Outlook calendar" signs in
+   (workspace integration `outlook_calendar`, Calendars.ReadWrite on the Outlook email Azure app,
+   its own grant). Busy times via Graph calendarView (busy / tentative / away; not free / working
+   elsewhere) replace the business's iCal address; bookings and class dates are written as events by
+   a reconciler (`calendar_events`, transactionId `bms-…`) within moments of a change and every 15
+   minutes. SQL: `db/z-calendar-microsoft.sql` (`calendar-microsoft.ts`). ⚠️ Customers outside our
+   Microsoft tenant need Microsoft PUBLISHER VERIFICATION before they can consent; the Azure app
+   needs the redirect URI /api/oauth/outlook_calendar/callback (prod + staging). Google sign-in later.
 4. ✅ (built 2026-10-15) Deposits through Stripe Connect (the shop's connected account, no platform
    fee). Per product: a fixed £ or a % of its fixed price (per place for a class); tables never.
    The booking is made 'awaiting_payment', holding its time / places for 35 minutes while they pay

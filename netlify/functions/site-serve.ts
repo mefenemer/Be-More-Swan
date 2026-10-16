@@ -88,7 +88,22 @@ async function subscribeInProcess(payload: Record<string, unknown>, meta: { orig
     return { status: res.status, body: await res.json().catch(() => ({})) };
 }
 
+/**
+ * ⚠️ EVERY response varies by the site's address. The sites host asks for site-serve?path=/… with the
+ * site in the X-Site-Host header; the CDN would otherwise cache by URL alone and serve one site's page
+ * at every other site's address (found the day wildcard routing went live, before any site was public).
+ * Netlify-Vary splits the cache per header value; plain Vary covers any other cache on the way.
+ */
+export const SITE_VARY = { 'Netlify-Vary': 'header=X-Site-Host', Vary: 'X-Site-Host' } as const;
+
+type ServeResult = { statusCode: number; headers?: Record<string, string>; body?: string; isBase64Encoded?: boolean };
+
 export default withLambda(async (event) => {
+    const res = (await serve(event)) as ServeResult;
+    return { ...res, headers: { ...(res.headers || {}), ...SITE_VARY } };
+});
+
+async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0]) {
     const h = event.headers as Record<string, string | undefined>;
     if (!keyMatches(h['x-site-serve-key'], process.env.SITE_SERVE_SECRET)) return { statusCode: 404, body: 'Not found' };
     const isPost = event.httpMethod === 'POST';
@@ -187,4 +202,4 @@ export default withLambda(async (event) => {
         reviews: await loadSiteReviews(db, site.organisationId, definition),
     });
     return { statusCode: page.status, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : page.html };
-});
+}

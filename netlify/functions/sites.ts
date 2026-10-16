@@ -56,6 +56,7 @@ import { decideBooking, describeBooking, emailCustomer, listBookings, loadBookin
 import { cleanBookingSettings, describeHours } from '../../src/utils/booking-settings';
 import { reviewSummary } from '../../src/utils/reviews';
 import { depositNote, refundDeposit } from '../../src/utils/booking-deposits';
+import { reconcileSoon } from '../../src/utils/calendar-microsoft';
 import { addSessions, cancelSessions, cleanNewSessions, offerFreedPlaces, ownerTimetable } from '../../src/utils/class-sessions';
 import { utcToZoned } from '../../src/utils/booking-time';
 import { sessionLink } from '../../src/utils/site-render';
@@ -312,6 +313,7 @@ export default withLambda(async (event) => {
         if (!cleaned.ok) return json(400, { error: cleaned.error });
         const r = await addSessions(db, orgId, cleaned.value);
         if (!r.ok) return json(400, { error: r.error });
+        await reconcileSoon(db, orgId);
         return json(200, { added: r.value.length, sessions: await ownerTimetable(db, orgId, new Date()) });
     }
     if (action === 'session_cancel') {
@@ -327,6 +329,7 @@ export default withLambda(async (event) => {
             if (b.paymentStatus === 'unpaid') continue;
             await emailCustomer(b, 'cancelled', ctx, owner?.email ?? null);
         }
+        await reconcileSoon(db, orgId);
         return json(200, { cancelled: r.sessions.length, told: r.bookings.length, sessions: await ownerTimetable(db, orgId, new Date()) });
     }
 
