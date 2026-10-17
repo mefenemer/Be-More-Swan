@@ -307,6 +307,7 @@ ${formOpen(s.id, 'contact')}
 <label>Email<input type="email" name="email" required maxlength="254" autocomplete="email"></label>
 ${p.askPhone ? '<label>Phone <span class="help">(optional)</span><input type="tel" name="phone" maxlength="30" autocomplete="tel"></label>' : ''}
 <label>Message<textarea name="message" rows="5" required maxlength="4000"></textarea></label>
+${p.offerUpdates ? '<label class="opt"><input type="checkbox" name="_updates" value="yes"> Send me news and offers by email. I can unsubscribe at any time.</label>' : ''}
 ${formButton(p.buttonLabel)}
 <p class="fine">Your details are used only to reply to you.</p>
 </form></div></section>`;
@@ -411,7 +412,7 @@ ${closed.length ? `<p class="fine">${closed.map((c) => `Closed ${esc(formatDate(
                 const body = shown.length
                     ? `${timetableHtml(shown, s.id, { preview: formState.preview })}${formState.preview ? '<p class="fine">Booking works on your live site, not in this preview.</p>' : all}`
                     : formState.preview
-                        ? '<p class="fine">Classes &amp; events section: add dates on the Bookings tab, under Timetable. Until then it says there\'s nothing to book yet.</p>'
+                        ? '<p class="fine">Classes &amp; events section: add dates on the Bookings tab, under Availability. Until then it says there\'s nothing to book yet.</p>'
                         : '<p>There\'s nothing to book just now — new dates are added regularly.</p>';
                 return `<section${cls} id="${esc(s.id)}"><div class="w n">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? paragraphs(p.intro) : ''}${body}</div></section>`;
             }

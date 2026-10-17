@@ -2042,7 +2042,7 @@
         <li>${weeks ? `Then weekly for ${weeks} more week${weeks === 1 ? '' : 's'} (${weeks + 1} dates)` : 'Just this date'}</li>
         ${s.notes ? `<li>${esc(String(s.notes).slice(0, 300))}</li>` : ''}
       </ul>
-      <p class="text-xs text-gray-600 mt-2">You can see and cancel dates on the Website tab, under Bookings ▸ Timetable. Uses no tasks.</p>
+      <p class="text-xs text-gray-600 mt-2">You can see and cancel dates on the Bookings tab, under Availability. Uses no tasks.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-cs-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Add ${weeks ? `${weeks + 1} dates` : 'it'}</button>
         <button type="button" data-cs-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>

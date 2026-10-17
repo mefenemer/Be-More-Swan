@@ -58,7 +58,7 @@ async function main() {
         assert.ok(SECTION_TYPES.includes('contact') && SECTION_TYPES.includes('signup'));
         const d = site([{ type: 'contact', props: { heading: 'Get in touch', askPhone: 'yes', buttonLabel: '' } }, { type: 'signup', props: { formId: '42' } }, { type: 'signup', props: { formId: -3 } }]);
         const [c, s1, s2] = d.pages[1].sections;
-        assert.deepStrictEqual(c.props, { heading: 'Get in touch', intro: null, askPhone: false, buttonLabel: 'Send message' }, 'askPhone must be literally true');
+        assert.deepStrictEqual(c.props, { heading: 'Get in touch', intro: null, askPhone: false, buttonLabel: 'Send message', offerUpdates: true }, 'askPhone must be literally true; the news-and-offers box is offered unless switched off');
         assert.strictEqual((s1.props as { formId: number }).formId, 42);
         assert.strictEqual((s2.props as { formId: number | null }).formId, null);
     });

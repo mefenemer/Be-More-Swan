@@ -32,6 +32,8 @@
 //                                               to Business Information, and a booking section added
 //   orders    { assistantId }                 → paid orders from the site's Buy buttons
 //   order_done { assistantId, id, done }      → mark one dealt with (or not)
+//   enquiry_to_audience { assistantId, id, agreed: true } → the owner adds an enquirer who agreed
+//   calendar  { assistantId, from, to }       → the Calendar tab: hours, free times, classes, bookings
 //   split_preview { assistantId }             → the pages split_pages WOULD make (nothing saved), for
 //                                               the "Several pages" approval; or why it can't
 //
@@ -39,6 +41,7 @@
 // chat cards never send them (chat-session.js sends only apply and draft), so the owner always
 // decides what goes live. Publishing refuses [placeholders] and runs the safety check on every word.
 
+import { bookingCalendar, cleanRange, MAX_CALENDAR_DAYS } from '../../src/utils/booking-calendar';
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
@@ -53,7 +56,8 @@ import { listSignupForms } from '../../src/utils/site-forms';
 import { readWordsFile } from '../../src/utils/site-words';
 import { attachmentText, quoteFromChat } from '../../src/utils/chat-attachments';
 import { connectAccountFor, connectOnboardingLink, markOrderDone, refreshConnectAccount } from '../../src/utils/site-shop';
-import { bookings, bookingSettings, orgProducts, orgReviews, siteEnquiries, siteOrders, users } from '../../db/schema';
+import { audienceContacts, bookings, bookingSettings, orgProducts, orgReviews, siteEnquiries, siteOrders, users } from '../../db/schema';
+import { addEnquirerToAudience } from '../../src/utils/enquiry-audience';
 import { decideBooking, describeBooking, emailCustomer, listBookings, loadBookingSetup } from '../../src/utils/bookings';
 import { cleanBookingSettings, describeHours } from '../../src/utils/booking-settings';
 import { purgeCache } from '@netlify/functions';
@@ -238,8 +242,24 @@ export default withLambda(async (event) => {
         const rows = await db.select({
             id: siteEnquiries.id, name: siteEnquiries.name, email: siteEnquiries.email, phone: siteEnquiries.phone,
             message: siteEnquiries.message, pagePath: siteEnquiries.pagePath, status: siteEnquiries.status, createdAt: siteEnquiries.createdAt,
-        }).from(siteEnquiries).where(and(eq(siteEnquiries.siteId, site.id), eq(siteEnquiries.organisationId, orgId))).orderBy(desc(siteEnquiries.createdAt));
+            // Whether they are in the Audience, and as what (enquiry-audience.ts) — null when not.
+            audienceStatus: audienceContacts.status,
+        }).from(siteEnquiries)
+            .leftJoin(audienceContacts, and(eq(audienceContacts.organisationId, orgId), sql`${audienceContacts.email} = lower(trim(${siteEnquiries.email}))`))
+            .where(and(eq(siteEnquiries.siteId, site.id), eq(siteEnquiries.organisationId, orgId))).orderBy(desc(siteEnquiries.createdAt));
         return json(200, { enquiries: rows });
+    }
+
+    // The owner adds an enquirer to the Audience, saying they agreed (enquiry-audience.ts: manual_entry).
+    if (action === 'enquiry_to_audience') {
+        if (body.agreed !== true) return json(400, { error: 'Only add someone who has agreed to receive your emails.' });
+        const [q] = await db.select({ id: siteEnquiries.id, name: siteEnquiries.name, email: siteEnquiries.email }).from(siteEnquiries)
+            .where(and(eq(siteEnquiries.id, Number(body.id)), eq(siteEnquiries.siteId, site.id), eq(siteEnquiries.organisationId, orgId))).limit(1);
+        if (!q) return json(404, { error: 'Enquiry not found.' });
+        const r = await addEnquirerToAudience(db, { organisationId: orgId, email: q.email, name: q.name, enquiryId: q.id, by: { userId } });
+        if (r.result === 'no_email') return json(400, { error: 'That email address can\'t be used.' });
+        if (r.result === 'already' && r.status !== 'subscribed') return json(200, { ok: true, note: `They're already in your Audience, and stay ${r.status} — someone who said stop is never re-subscribed.` });
+        return json(200, { ok: true, note: r.result === 'added' ? 'Added to your Audience.' : 'They were already in your Audience.' });
     }
 
     if (action === 'enquiry_done') {
@@ -325,6 +345,13 @@ export default withLambda(async (event) => {
         const r = await applySiteOperations(db, site, [{ op: 'update_section', pageId: page.id, sectionId, props: { productIds: created.map((c) => c.id), items: [] } }], maxPages);
         if (!r.ok) return json(400, { error: r.error });
         return json(200, await view(r.site, [`${created.length} item${created.length === 1 ? '' : 's'} moved into Business Information ▸ Products & Services. Change prices there from now on.`]));
+    }
+
+    // The Calendar tab: hours, free times, classes (n of N) and bookings for a month (booking-calendar.ts).
+    if (action === 'calendar') {
+        const range = cleanRange(body.from, body.to);
+        if (!range) return json(400, { error: `Choose up to ${MAX_CALENDAR_DAYS} days.` });
+        return json(200, await bookingCalendar(db, orgId, range, new Date()));
     }
 
     if (action === 'bookings') {

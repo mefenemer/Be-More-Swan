@@ -115,7 +115,8 @@ export interface TestimonialsProps { heading: string | null; items: Array<{ quot
  * An enquiry form (step 3b). Name, email, message (and phone when asked). Messages are kept for the
  * site's owner (site_enquiries) — they are NOT a sign-up: nobody joins the Audience by asking a question.
  */
-export interface ContactProps { heading: string | null; intro: string | null; askPhone: boolean; buttonLabel: string; }
+/** `offerUpdates`: an unticked "Send me news and offers by email" box — ticked, the enquirer joins the Audience (enquiry-audience.ts). */
+export interface ContactProps { heading: string | null; intro: string | null; askPhone: boolean; buttonLabel: string; offerUpdates: boolean; }
 /**
  * One of the workspace's Form Builder sign-up forms, drawn on the site (step 3b). `formId` is an
  * audience_forms id; whether it belongs to this workspace and is active is checked when the page is
@@ -392,6 +393,7 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
                 intro: textOrNull(p.intro, LIMITS.intro, true),
                 askPhone: p.askPhone === true,
                 buttonLabel: cleanText(p.buttonLabel, LIMITS.buttonLabel) || 'Send message',
+                offerUpdates: p.offerUpdates !== false,
             } };
         }
         case 'products': {
