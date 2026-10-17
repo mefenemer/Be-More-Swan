@@ -27,6 +27,8 @@ import { sendEmail } from './email';
 import { checkRateLimit } from './rate-limit';
 import { normaliseEmail, looksLikeEmail } from './audience-contacts';
 import { DEFAULT_SUCCESS_MESSAGE, SINGLE_OPT_IN_SUCCESS_MESSAGE } from './audience-forms';
+import { addEnquirerToAudience } from './enquiry-audience';
+import { pseudonymiseIp } from './ip-pseudonymise';
 import { legacyToDefinition, normaliseFormDefinition, publicDefinition, type FormDefinition } from './form-definition';
 import { cleanText, type Section, type SiteDefinition } from './site-definition';
 import { esc, FORM_SENT_PATH, type SiteSignupForm } from './site-render';
@@ -187,6 +189,21 @@ async function handleEnquiry(db: Db, req: SiteFormRequest, section: Extract<Sect
         siteId: req.site.id, organisationId: req.site.organisationId, name, email, phone, message, pagePath: back,
     }).returning({ id: siteEnquiries.id });
 
+    // Ticked "Send me news and offers": into the Audience, with that tick as the consent
+    // (enquiry-audience.ts). The enquiry itself never depends on it.
+    let joined = false;
+    if (section.props.offerUpdates && req.body.get('_updates') === 'yes') {
+        try {
+            const r = await addEnquirerToAudience(db, {
+                organisationId: req.site.organisationId, email, name, enquiryId: row.id, by: 'form',
+                sourceUrl: `${req.origin}${back}`, ipHash: pseudonymiseIp(req.ip), userAgent: req.userAgent,
+            });
+            joined = r.result === 'added' || (r.result === 'already' && r.status === 'subscribed');
+        } catch (err) {
+            console.error('[site-forms] could not add the enquirer to the Audience — enquiry kept', { enquiryId: row.id }, err);
+        }
+    }
+
     // Tell the owner: a card, and the message itself by email to the ACCOUNT's own address (never
     // the address typed on the site — that would let anyone use the form to email a stranger).
     const [owner] = await db.select({ userId: aiAssistants.userId, name: aiAssistants.name, email: users.email })
@@ -207,6 +224,7 @@ async function handleEnquiry(db: Db, req: SiteFormRequest, section: Extract<Sect
             html: `<p><strong>${esc(name)}</strong> sent a message from ${esc(req.origin.replace('https://', ''))}${esc(back === '/' ? '' : back)}.</p>
 <p><strong>Email:</strong> ${esc(email)}${phone ? `<br><strong>Phone:</strong> ${esc(phone)}` : ''}</p>
 <p style="white-space:pre-wrap">${esc(message)}</p>
+${joined ? '<p>They asked to receive your news and offers, so they are now in your Audience.</p>' : ''}
 <p>Reply to this email to answer them. It is also on your Website Assistant's Enquiries tab.</p>`,
         }).catch((err: unknown) => console.error('[site-forms] owner email failed', err instanceof Error ? err.message : err));
     }
