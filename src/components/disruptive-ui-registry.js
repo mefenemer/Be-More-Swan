@@ -1774,7 +1774,13 @@
     remove_section: () => 'Remove a section',
     move_section: () => 'Move a section',
     set_theme: () => 'Change the design (colours, lettering or corners)',
-    set_settings: () => 'Update the business details',
+    set_settings: (o) => {
+      const f = o.settings && Array.isArray(o.settings.features) ? o.settings.features : null;
+      if (!f) return 'Update the business details';
+      const WORDS = { shop: 'selling', bookings: 'bookings', menu: 'a menu', hours: 'opening hours', gallery: 'a gallery', reviews: 'reviews', signup: 'email sign-up', faq: 'questions & answers' };
+      const on = f.map((k) => WORDS[k]).filter(Boolean);
+      return `Set what your website does: ${on.length ? on.join(', ') : 'just the basics'} (everything else hidden)`;
+    },
     set_footer: () => 'Change the footer text',
     set_nav: () => 'Change the menu',
   };

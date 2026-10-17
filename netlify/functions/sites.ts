@@ -46,7 +46,7 @@ import { aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
-import { applySiteOperation, assetIdsIn, planSplit, SECTION_TYPES, type SiteOperation } from '../../src/utils/site-definition';
+import { applySiteOperation, assetIdsIn, FEATURE_LABELS, FEATURE_SECTIONS, planSplit, SECTION_TYPES, SITE_FEATURES, type SiteOperation } from '../../src/utils/site-definition';
 import { placeholdersIn } from '../../src/utils/site-draft';
 import { cleanSiteSlugInput, siteAssetUrl, siteOrigin, sitesDomain, siteVisibleText, suggestSiteSlug } from '../../src/utils/site-hosting';
 import { listSignupForms } from '../../src/utils/site-forms';
@@ -165,7 +165,7 @@ export default withLambda(async (event) => {
                 .where(and(eq(siteOrders.siteId, s.id), eq(siteOrders.status, 'paid'))))[0]?.n ?? 0),
             newEnquiries: Number((await db.select({ n: sql<number>`count(*)::int` }).from(siteEnquiries)
                 .where(and(eq(siteEnquiries.siteId, s.id), eq(siteEnquiries.status, 'new'))))[0]?.n ?? 0),
-            vocab: { sectionTypes: SECTION_TYPES },
+            vocab: { sectionTypes: SECTION_TYPES, features: SITE_FEATURES.map((key) => ({ key, label: FEATURE_LABELS[key], sections: FEATURE_SECTIONS[key] })) },
         };
     };
 
@@ -253,7 +253,7 @@ export default withLambda(async (event) => {
     if (action === 'payments_connect') {
         if (role !== 'owner' && role !== 'admin') return json(403, { error: 'Only the workspace owner or an admin can connect a Stripe account.' });
         const base = resolveBaseUrl(event.headers as Record<string, string | undefined>) || 'https://bemoreswan.com';
-        const back = `${base}/workspace.html?view=assistant-detail&assistantId=${assistant.id}&tab=sitebuilder&payments=return`;
+        const back = `${base}/workspace.html?view=assistant-detail&assistantId=${assistant.id}&tab=siteorders&payments=return`;
         const [u] = await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
         try {
             const url = await connectOnboardingLink(db, { orgId, userId, email: u?.email ?? null, returnUrl: back, refreshUrl: back });

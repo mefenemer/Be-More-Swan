@@ -296,7 +296,7 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
             v('booking.who', 'Who booked', 'Sam Patel'),
             v('booking.what', 'What they booked', 'Cut & blow-dry with Elena'),
             v('booking.when', 'When', 'Friday 16 October, 10am–10:45am'),
-            v('booking.next', 'What happens next (sentence)', 'Confirm or decline it on the Website tab, under Bookings.'),
+            v('booking.next', 'What happens next (sentence)', 'Confirm or decline it on the Bookings tab.'),
         ],
     },
     {

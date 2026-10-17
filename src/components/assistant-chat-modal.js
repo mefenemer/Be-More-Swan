@@ -10,7 +10,7 @@
  * dialog it injects on first open.
  *
  * Public API (attached to window):
- *   openAssistantChat({ assistantId?, sessionId?, forceNew? })
+ *   openAssistantChat({ assistantId?, sessionId?, forceNew?, draft?, send? })
  *       assistantId  — resume that assistant's newest active thread, or start one if it has none.
  *       sessionId    — continue this exact thread (wins over assistantId).
  *       forceNew     — with assistantId, skip the resume and start a fresh thread.
@@ -352,17 +352,22 @@
       sessionId: sessionId,
       // A conversation opened ABOUT something (a brief, from the Brand Designer's Briefs tab) starts
       // fresh, so the question is not buried under an unrelated thread.
-      forceNew: opts.forceNew || !!opts.draft,
+      forceNew: opts.forceNew || !!opts.draft || !!opts.send,
     }).then(function (info) {
       // The drawer needs the resolved assistant id — a caller may have passed only a sessionId.
       if (info) mountHistory(info.assistantId);
       // `draft` is typed into the composer, never sent: the user reads it, edits it, sends it.
-      if (opts.draft) {
+      // `send` is a message the user has ALREADY written somewhere else (the website editor's swan
+      // button, "ask for a change to this section") — it is sent as theirs, as if typed here.
+      var text = opts.send || opts.draft;
+      if (text) {
         var input = el('bms-chat-mount') && el('bms-chat-mount').querySelector('[data-chat-input]');
         if (input) {
-          input.value = String(opts.draft);
+          input.value = String(text);
           input.dispatchEvent(new Event('input', { bubbles: true }));
           input.focus();
+          var sendBtn = opts.send && el('bms-chat-mount').querySelector('[data-chat-send]');
+          if (sendBtn) sendBtn.click();
         }
       }
     });

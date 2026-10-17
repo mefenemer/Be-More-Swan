@@ -75,7 +75,7 @@ export function eventForBooking(b: { id: number; status: string; startsAt: Date;
         key: `b:${b.id}`, start: new Date(b.startsAt), end: new Date(b.endsAt), tentative: pending,
         subject: `${what} — ${b.customerName}${pending ? ' (to confirm)' : ''}`,
         body: [b.customerName, b.customerEmail, b.customerPhone, b.kind === 'table' ? `Party of ${b.partySize}` : '', money, b.notes ? `Notes: ${b.notes}` : '',
-            pending ? 'Confirm or decline it on the Website tab, under Bookings.' : '', 'Booked on your website (Be More Swan).'].filter(Boolean).join('\n'),
+            pending ? 'Confirm or decline it on the Bookings tab.' : '', 'Booked on your website (Be More Swan).'].filter(Boolean).join('\n'),
     };
 }
 
