@@ -178,7 +178,7 @@ async function main() {
         const api = read('netlify/functions/sites.ts');
         const connect = api.slice(api.indexOf("if (action === 'payments_connect')"), api.indexOf("if (action === 'payments_refresh')"));
         assert.ok(connect.indexOf("role !== 'owner' && role !== 'admin'") < connect.indexOf('connectOnboardingLink('));
-        assert.ok(connect.includes('tab=sitebuilder'));
+        assert.ok(connect.includes('tab=siteorders'), 'back from Stripe on the Orders tab');
     });
 
     await check('serving: /_buy is the only other thing that may be posted; the page may post only to itself and Stripe Checkout', () => {

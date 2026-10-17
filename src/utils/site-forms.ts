@@ -207,7 +207,7 @@ async function handleEnquiry(db: Db, req: SiteFormRequest, section: Extract<Sect
             html: `<p><strong>${esc(name)}</strong> sent a message from ${esc(req.origin.replace('https://', ''))}${esc(back === '/' ? '' : back)}.</p>
 <p><strong>Email:</strong> ${esc(email)}${phone ? `<br><strong>Phone:</strong> ${esc(phone)}` : ''}</p>
 <p style="white-space:pre-wrap">${esc(message)}</p>
-<p>Reply to this email to answer them. It is also on your Website Assistant's Website tab, under Enquiries.</p>`,
+<p>Reply to this email to answer them. It is also on your Website Assistant's Enquiries tab.</p>`,
         }).catch((err: unknown) => console.error('[site-forms] owner email failed', err instanceof Error ? err.message : err));
     }
     return { kind: 'sent', location: sentLocation('contact', sectionId, back) };

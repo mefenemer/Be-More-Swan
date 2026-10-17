@@ -61,7 +61,7 @@ export function buildOwnerFeed(p: { business: string; bookings: FeedBooking[]; s
         event(`owner-booking-${b.id}@bemoreswan.com`, b.startsAt, b.endsAt,
             `${b.status === 'cancelled' ? 'Cancelled: ' : ''}${b.what} — ${b.customerName}${pending ? ' (to confirm)' : ''}`,
             [b.customerName, b.customerEmail, b.customerPhone, b.kind === 'table' ? `Party of ${b.partySize}` : '', money, b.notes ? `Notes: ${b.notes}` : '',
-                pending ? 'Confirm or decline it on the Website tab, under Bookings.' : ''].filter(Boolean).join('\n'),
+                pending ? 'Confirm or decline it on the Bookings tab.' : ''].filter(Boolean).join('\n'),
             b.status === 'cancelled' ? 'CANCELLED' : pending ? 'TENTATIVE' : 'CONFIRMED');
     }
     for (const s of p.sessions) {

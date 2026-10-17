@@ -726,6 +726,19 @@
       <button type="button" id="maintab-btn-sitebuilder" data-maintab="sitebuilder" class="main-tab-btn hidden">
         <span id="sitebuilder-tab-label">Website</span>
       </button>
+      <!-- What the website brings in — Website Assistant only, each its own tab (owner, 2026-10-16):
+           enquiries, orders and bookings are checked daily; editing the site is occasional. Shown by
+           assistants.js with the Website tab; Orders/Bookings follow the site's chosen features.
+           Rendered by assistant-site-editor.js into its own host (data-site-host). -->
+      <button type="button" id="maintab-btn-siteenquiries" data-maintab="siteenquiries" class="main-tab-btn hidden">
+        <span>Enquiries</span><span id="site-enquiries-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
+      </button>
+      <button type="button" id="maintab-btn-siteorders" data-maintab="siteorders" class="main-tab-btn hidden">
+        <span>Orders</span><span id="site-orders-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
+      </button>
+      <button type="button" id="maintab-btn-sitebookings" data-maintab="sitebookings" class="main-tab-btn hidden">
+        <span>Bookings</span><span id="site-bookings-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
+      </button>
       <button type="button" id="maintab-btn-signals" data-maintab="signals" class="main-tab-btn hidden">
         <span id="signals-tab-label">Searches</span>
         <!-- `hidden` loses to `inline-flex` (equal specificity, emitted later in style.css), so the
@@ -1030,8 +1043,11 @@
 
   <!-- Website — Website Assistant only. Rendered lazily by assistant-site-editor.js on first activation. -->
   <div id="maintab-sitebuilder" class="main-tab-content hidden">
-    <div id="site-editor-host"></div>
+    <div id="site-editor-host" data-site-host="website"></div>
   </div><!-- /maintab-sitebuilder -->
+  <div id="maintab-siteenquiries" class="main-tab-content hidden"><div id="site-enquiries-host" data-site-host="enquiries"></div></div>
+  <div id="maintab-siteorders" class="main-tab-content hidden"><div id="site-orders-host" data-site-host="orders"></div></div>
+  <div id="maintab-sitebookings" class="main-tab-content hidden"><div id="site-bookings-host" data-site-host="bookings"></div></div>
 
   <div id="maintab-email-campaigns" class="main-tab-content hidden">
     <div id="email-campaigns-host"></div>

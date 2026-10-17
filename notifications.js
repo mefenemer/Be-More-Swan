@@ -260,6 +260,19 @@ window.NotifKit = (function () {
                 window.routeToAssistantDetail?.(meta.assistantId);
             } };
         }
+        // What a website brought in opens on its own tab of the Website Assistant (owner, 2026-10-16).
+        const SITE_TABS = {
+            site_enquiry_received: ['Open enquiries', 'siteenquiries'], site_order_received: ['Open orders', 'siteorders'],
+            site_payments_ready: ['Open orders', 'siteorders'],
+            site_booking_received: ['Open bookings', 'sitebookings'], site_booking_changed: ['Open bookings', 'sitebookings'],
+        };
+        if (SITE_TABS[notif.type] && meta.assistantId) {
+            const [label, tab] = SITE_TABS[notif.type];
+            return { label, run: () => {
+                window._assistantDetailInitialTab = tab;
+                window.routeToAssistantDetail?.(meta.assistantId);
+            } };
+        }
         if (notif.type === 'post_publish_failed' && meta.postId && meta.assistantId) {
             return { label: 'View failed post', run: () => {
                 window._assistantDetailInitialTab = 'datahub';

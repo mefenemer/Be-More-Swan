@@ -44,6 +44,37 @@ export interface SiteSettings {
     locality: string | null;
     email: string | null;
     phone: string | null;
+    /**
+     * What this website does (owner, 2026-10-16): the optional features switched ON. null = never
+     * chosen, everything offered. A feature switched off hides its kinds of section from the editor,
+     * the chat and the AI draft, and its tab (Orders, Bookings) from the assistant.
+     */
+    features: SiteFeature[] | null;
+}
+
+export const SITE_FEATURES = ['shop', 'bookings', 'menu', 'hours', 'gallery', 'reviews', 'signup', 'faq'] as const;
+export type SiteFeature = typeof SITE_FEATURES[number];
+/** The kinds of section each feature brings. Everything not listed is always offered. */
+export const FEATURE_SECTIONS: Record<SiteFeature, SectionType[]> = {
+    shop: ['products'], bookings: ['booking'], menu: ['menu'], hours: ['hours'],
+    gallery: ['gallery'], reviews: ['reviews'], signup: ['signup'], faq: ['faq'],
+};
+export const FEATURE_LABELS: Record<SiteFeature, string> = {
+    shop: 'Sell things (shop and Buy buttons)', bookings: 'Take bookings (appointments, tables, classes)', menu: 'A food or drinks menu',
+    hours: 'Opening hours', gallery: 'A picture gallery', reviews: 'Customer reviews', signup: 'Email sign-up and free downloads', faq: 'Questions and answers',
+};
+/** The feature a kind of section belongs to, or null when it is always offered. */
+export function featureOf(type: SectionType): SiteFeature | null {
+    return (SITE_FEATURES.find((f) => FEATURE_SECTIONS[f].includes(type)) as SiteFeature | undefined) ?? null;
+}
+/** Whether this site offers a kind of section. */
+export function sectionAllowed(settings: Pick<SiteSettings, 'features'>, type: SectionType): boolean {
+    const f = featureOf(type);
+    return !f || !settings.features || settings.features.includes(f);
+}
+function cleanFeatures(v: unknown): SiteFeature[] | null {
+    if (!Array.isArray(v)) return null;
+    return SITE_FEATURES.filter((f) => v.includes(f));
 }
 
 export interface Link { label: string; href: string; }
@@ -550,6 +581,7 @@ function cleanSettings(raw: unknown, base?: SiteSettings): SiteSettings {
         locality: has('locality') ? textOrNull(s.locality, LIMITS.locality) : base?.locality ?? null,
         email: has('email') ? (/^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(email) ? email : null) : base?.email ?? null,
         phone: has('phone') ? (/^\+?[0-9 ()-]{5,30}$/.test(phone) ? phone : null) : base?.phone ?? null,
+        features: has('features') ? cleanFeatures(s.features) : base?.features ?? null,
     };
 }
 
@@ -798,6 +830,10 @@ export function applySiteOperation(def: SiteDefinition, op: SiteOperation, opts:
             if (page!.sections.length >= LIMITS.sectionsPerPage) return { ok: false, error: `A page can have up to ${LIMITS.sectionsPerPage} sections.` };
             const why: string[] = [];
             const cleaned = cleanSection(op.section?.type, op.section?.props, (m) => why.push(m));
+            if (cleaned && !sectionAllowed(next.settings, cleaned.type)) {
+                const f = featureOf(cleaned.type)!;
+                return { ok: false, error: `"${FEATURE_LABELS[f]}" is switched off for this website. Switch it on under Website ▸ Details ▸ What your website does, then add it.` };
+            }
             if (!cleaned) return { ok: false, error: refusalFrom(why[0], 'That section isn\'t complete yet.') };
             const at = Number.isInteger(op.index) ? Math.max(0, Math.min(op.index!, page!.sections.length)) : page!.sections.length;
             page!.sections.splice(at, 0, { id: '', ...cleaned, look: cleanLook(op.section?.look, cleaned.type) } as Section);
