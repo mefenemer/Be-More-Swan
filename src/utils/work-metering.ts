@@ -42,8 +42,10 @@ type Db = ReturnType<typeof getDb>;
 /** The message stored on a job refused at the cap, and shown wherever the job's error is. */
 export const TASK_LIMIT_MESSAGE = 'Your monthly task allowance is used up, so this was not started. It resets on the 1st of the month.';
 
-/** Tasks a running media job will cost once it finishes, by media_generation_jobs.media_type. */
-const IN_FLIGHT_WEIGHT_SQL = sql`CASE media_type WHEN 'video' THEN ${TASK_WEIGHTS.ai_video} WHEN 'audio' THEN ${TASK_WEIGHTS.ai_music} ELSE ${TASK_WEIGHTS.ai_image} END`;
+/** Tasks a running media job will cost once it finishes, by media_generation_jobs.media_type.
+ *  ⚠️ Every weight is CAST: a bound parameter inside SUM(CASE …) has no type of its own, Postgres
+ *  reads it as text, and SUM(text) does not exist (42883) — which made every capacity read throw. */
+const IN_FLIGHT_WEIGHT_SQL = sql`CASE media_type WHEN 'video' THEN ${TASK_WEIGHTS.ai_video}::int WHEN 'audio' THEN ${TASK_WEIGHTS.ai_music}::int ELSE ${TASK_WEIGHTS.ai_image}::int END`;
 
 export interface TaskUsage {
     hasPlan: boolean;
