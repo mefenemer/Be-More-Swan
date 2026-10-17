@@ -14,6 +14,17 @@ export const BETA_TIER_KEY = 'beta';
 /** The tier whose features a beta tester gets. Keep in step with db/beta-tester-plan.sql's source row. */
 export const BETA_FEATURES_AS = 'employee';
 
-export function featureTierKey<T extends string | null | undefined>(tierKey: T): T | typeof BETA_FEATURES_AS {
-    return tierKey === BETA_TIER_KEY ? BETA_FEATURES_AS : tierKey;
+// The free 14-day trial (src/utils/trial.ts, db/z-trial-plan.sql), owner decision 2026-10-17: the
+// £79 Busywork Buster's features — every assistant — with a small task allowance. Same problem as
+// beta: code that gates on the tier KEY must read it as 'buster'.
+export const TRIAL_TIER_KEY = 'trial';
+export const TRIAL_FEATURES_AS = 'buster';
+
+/** plans.plan_type values for the free, card-less plans. A paid plan REPLACES either of them. */
+export const FREE_PLAN_TYPES = ['beta', 'trial'] as const;
+
+export function featureTierKey<T extends string | null | undefined>(tierKey: T): T | typeof BETA_FEATURES_AS | typeof TRIAL_FEATURES_AS {
+    if (tierKey === BETA_TIER_KEY) return BETA_FEATURES_AS;
+    if (tierKey === TRIAL_TIER_KEY) return TRIAL_FEATURES_AS;
+    return tierKey;
 }

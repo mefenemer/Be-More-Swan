@@ -704,6 +704,27 @@
     }
 
     function _subscriptionCard(sub) {
+        // The free 14-day trial (src/utils/trial.ts): no Stripe, no price — say when it ends and
+        // offer the plans, rather than a "£0.00 per month" subscription card.
+        if (sub.planType === 'trial') {
+            const ends = sub.expiresAt ? new Date(sub.expiresAt) : null;
+            const daysLeft = ends ? Math.max(0, Math.ceil((ends.getTime() - Date.now()) / 86400000)) : null;
+            return `
+            <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+              <div class="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                  <p class="text-lg font-extrabold text-gray-900">Free trial</p>
+                  <p class="text-sm text-gray-500 mt-1">Every assistant, no card needed.${ends ? ` Ends ${_esc(_fmtDate(sub.expiresAt))}${daysLeft != null ? ` — ${daysLeft} day${daysLeft === 1 ? '' : 's'} left` : ''}.` : ''}</p>
+                  <p class="text-xs text-gray-400 mt-2">Nothing is charged when it ends: your assistants pause and your work is kept until you choose a plan.</p>
+                </div>
+                <span class="inline-flex items-center text-xs font-bold px-3 py-1 rounded-full border bg-blue-50 text-blue-700 border-blue-200">Trial</span>
+              </div>
+              <div class="mt-5 flex gap-3 flex-wrap">
+                <a href="/checkout.html?tier=saver" class="btn-secondary px-4 py-2 text-sm font-bold rounded-xl border">Workflow Saver · £29/mo</a>
+                <a href="/checkout.html?tier=buster" class="btn-primary px-4 py-2 text-sm font-bold rounded-xl">Busywork Buster · £79/mo</a>
+              </div>
+            </div>`;
+        }
         const statusMeta = {
             active:       { label: 'Active',            cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
             trialing:     { label: 'Trial',              cls: 'bg-blue-50 text-blue-700 border-blue-200' },

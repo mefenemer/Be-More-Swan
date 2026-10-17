@@ -1182,7 +1182,8 @@ export default withLambda(async (event) => {
                     if (!p.orgId) return;
                     // A beta plan copies the top tier's row, price included, but pays nothing — counting
                     // £349 of revenue against a free workspace would show a healthy margin that isn't.
-                    if (p.planType === 'beta') { planMrrMap[p.orgId] = { amount: 0, currency: 'GBP', source: 'beta', discount: null }; return; }
+                    // The free 14-day trial pays nothing either.
+                    if (p.planType === 'beta' || p.planType === 'trial') { planMrrMap[p.orgId] = { amount: 0, currency: 'GBP', source: 'beta', discount: null }; return; }
                     const b = p.stripeSubscriptionId ? billed.get(p.stripeSubscriptionId) : undefined;
                     planMrrMap[p.orgId] = b
                         ? { amount: b.monthlyGbp, currency: 'GBP', source: 'stripe', discount: b.discount }

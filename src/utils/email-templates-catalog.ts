@@ -289,6 +289,33 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             button('Choose a plan', 'link.action_url') + signoff,
     },
 
+    // ── Free 14-day trial (src/utils/trial.ts; sent by trial-sweep.ts) ─────────────────────────
+    {
+        triggerKey: 'trial_ending_soon',
+        name: 'Free Trial — Ending Soon',
+        category: 'Billing',
+        transactional: true,
+        subject: 'Your Be More Swan free trial ends on {{trial.ends_on}}',
+        preheader: 'Choose a plan to keep your assistants running.',
+        bodyHtml: greet +
+            p('Your free trial for <strong>{{workspace.name | "your workspace"}}</strong> ends on <strong>{{trial.ends_on}}</strong>.') +
+            p('To keep your assistants working, choose a plan: <strong>The Workflow Saver</strong> (£29 a month, one assistant) or <strong>The Busywork Buster</strong> (£79 a month, every assistant). Cancel any time.') +
+            button('Choose a plan', 'link.action_url') +
+            p('If you don’t, nothing is charged — there is no card on file. Your assistants simply pause and anything scheduled is held. Nothing is deleted, and you can pick up where you left off whenever you subscribe.') +
+            p('Questions? Just reply to this email.') + signoff,
+    },
+    {
+        triggerKey: 'trial_ended',
+        name: 'Free Trial — Ended',
+        category: 'Billing',
+        transactional: true,
+        subject: 'Your Be More Swan free trial has ended — your work is safe',
+        bodyHtml: greet +
+            p('Your free trial for <strong>{{workspace.name | "your workspace"}}</strong> has ended, so your assistants are paused and anything scheduled is on hold. Nothing has been charged.') +
+            p('Nothing has been deleted either. Choose a plan and they start again straight away — anything that fell due while they were paused comes back to you to review rather than going out late.') +
+            button('Choose a plan', 'link.action_url') + signoff,
+    },
+
     // ── Engagement & lifecycle ───────────────────────────────────────────────
     {
         triggerKey: 'win_back',

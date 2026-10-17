@@ -382,6 +382,7 @@ async function submitDpaAcceptance(btn) {
         <li>One monthly task allowance (clause 5): AI media credits and X posting credits are gone. A task is one finished piece of work; an AI image counts as 1, an AI video or music track as 20, and an X post with a link as 10.</li>
         <li>Chatting with your assistants and using the editing helpers no longer uses tasks — they have a generous daily fair-use limit instead.</li>
         <li>Any credits you had left became bonus tasks that never expire, and plan allowances were raised. Work still pauses at the limit and you are never charged extra.</li>
+        <li>A free 14-day trial for new workspaces, with no card (clause 6.10).</li>
       </ul>
       <p class="mt-3">Full terms available at <a href="/terms_of_service.html" target="_blank" class="text-emerald-700 underline">bemoreswan.com/terms</a>.</p>
     </div>
@@ -2290,7 +2291,7 @@ window.showComplianceModals = function showComplianceModals(force) {
       <!-- SC2d / SC4: secondary links -->
       <p class="text-center text-xs text-gray-400">
         <a id="upgrade-modal-view-all" href="/pricing.html" class="underline hover:text-gray-600">View all plans</a>
-        <span id="upgrade-modal-enterprise-link" class="hidden"> · <a href="mailto:hello@bemoreswan.com?subject=Enterprise%20Plan%20Enquiry" class="underline hover:text-gray-600">Contact us about Enterprise</a></span>
+        <span id="upgrade-modal-enterprise-link" class="hidden"> · <a href="/pricing.html#enterprise" class="underline hover:text-gray-600">Ask about a Bespoke Assistant</a></span>
       </p>
     </div>
   </div>
@@ -2434,6 +2435,8 @@ window.showComplianceModals = function showComplianceModals(force) {
     </div>
   </div>
 
+  <!-- Free 14-day trial countdown (src/utils/trial.ts) — rendered by renderTrialBanner(). -->
+  <div id="trial-banner" class="hidden w-full px-4 pt-3"></div>
   <div id="task-volume-banner" class="hidden w-full px-4 pt-3"></div>
 
   <main id="workspace-content" class="flex-1 w-full"></main>
@@ -2980,9 +2983,9 @@ function formatCurrency(amount, currency) {
             // the plans were re-ordered, so £99 customers were shown a downgrade as their upgrade.
             const TIER_DELTA = {
               // What the NEXT plan adds. Two self-serve plans since 17 Oct 2026: saver → buster, and
-              // buster (and the retired employee) → Enterprise, the contact-sales path.
+              // buster (and the retired employee) → a Bespoke Assistant, the contact-sales path.
               saver:    ['Every Digital Assistant', '2,750 tasks per month', 'Connect up to 10 standard apps', 'Autonomous goal tracking'],
-              buster:   ['More than 2,750 tasks a month', 'Dedicated account manager', 'Custom integrations, SSO & API access'],
+              buster:   ['An assistant built around your business', 'Your own workflows and systems connected', 'Scope and terms agreed with you'],
               employee: ['Unlimited tasks to order', 'Dedicated account manager', 'Custom SLA & priority support'],
             };
             const delta = TIER_DELTA[cap.tierKey] || ['More active assistants', 'Higher monthly task volume'];
@@ -3008,7 +3011,7 @@ function formatCurrency(amount, currency) {
               'Assistant Limit Reached',
               `You've reached your ${cap.tierName || 'current'} plan limit of ${cap.assistantLimit} assistant${cap.assistantLimit === 1 ? '' : 's'}.`,
               isHighestPlan
-                ? `You're on our highest plan. Contact us to discuss a custom Enterprise arrangement with unlimited capacity.`
+                ? `You're on our highest plan. If you need more, we can build a Bespoke Assistant around your business — get in touch and we'll agree the terms with you.`
                 : `To hire a new assistant, upgrade to ${cap.nextPlan.name} or remove one you no longer need.`,
               {
                 nextPlan:   cap.nextPlan ?? undefined,           // SC2b: next tier card
@@ -3228,8 +3231,8 @@ function formatCurrency(amount, currency) {
       const enterpriseLink = document.getElementById('upgrade-modal-enterprise-link');
       if (opts.enterprise) {
         // SC4: already on highest plan — CTA becomes enterprise contact
-        cta.href        = 'mailto:hello@bemoreswan.com?subject=Enterprise%20Plan%20Enquiry';
-        cta.textContent = 'Contact us about Enterprise →';
+        cta.href        = '/pricing.html#enterprise';
+        cta.textContent = 'Ask about a Bespoke Assistant →';
         enterpriseLink.classList.add('hidden');
       } else {
         cta.href        = opts.ctaHref || '/pricing.html';
@@ -3345,12 +3348,29 @@ function formatCurrency(amount, currency) {
 
     // Pre-fetch capacity once on workspace boot (non-blocking)
     // After loading, render the task-volume banner if applicable (US-GAP-9.2.1).
-    // (Free trial removed — no trial countdown badge or trial-expired gate. A no-plan user
-    // is hard-gated by initPlanGate below via cap.noPlan.)
+    // Free 14-day trial (17 Oct 2026): a countdown banner while it runs; once it has ended the
+    // workspace has no plan and initPlanGate below shows the plan picker (cap.trialEnded).
     window.checkCapacity().then(cap => {
       renderPaymentRequiredGate(cap);
+      renderTrialBanner(cap);
       renderTaskVolumeBanner(cap);
     });
+
+    function renderTrialBanner(cap) {
+      const banner = document.getElementById('trial-banner');
+      if (!banner || !cap || !cap.isTrial || !cap.trialEndsAt) { if (banner) banner.classList.add('hidden'); return; }
+      const ends = new Date(cap.trialEndsAt);
+      const daysLeft = Math.max(0, Math.ceil((ends.getTime() - Date.now()) / 86400000));
+      const endDate = ends.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
+      const urgent = daysLeft <= 3;
+      const left = daysLeft <= 0 ? 'Your free trial ends today' : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left in your free trial`;
+      banner.innerHTML = `
+        <div class="flex items-center gap-3 rounded-xl px-4 py-3 text-sm ${urgent ? 'bg-amber-50 border border-amber-300 text-amber-900' : 'bg-blue-50 border border-blue-200 text-blue-900'}">
+          <span class="flex-1"><strong>${left}</strong> — every assistant until ${endDate}, no card needed. Choose a plan any time to keep them running; if you don't, they pause and your work is kept.</span>
+          <a href="/workspace.html?view=billing" class="shrink-0 font-semibold underline hover:opacity-80 whitespace-nowrap">Choose a plan →</a>
+        </div>`;
+      banner.classList.remove('hidden');
+    }
 
     // US-AUD-4.3.1 SC5: Show the AI disclaimer modal if the user hasn't acknowledged it.
     // No longer auto-run on login — surfaced on demand from the Setup Wizard's
@@ -4040,7 +4060,15 @@ function formatCurrency(amount, currency) {
       // assistants visible (server-side gates still block hiring/tasks) rather than being
       // locked out of viewing their data, so we don't hard-gate when assistants exist.
       const cap = await window.checkCapacity();
-      if (!planActivated && cap?.noPlan && (selectPlanRequested || (cap?.assistantCount ?? 0) === 0)) {
+      if (!planActivated && cap?.noPlan && (selectPlanRequested || (cap?.assistantCount ?? 0) === 0 || cap?.trialEnded)) {
+        // A workspace whose free trial ran out keeps its assistants (paused) but is asked to choose
+        // a plan — say why, rather than greeting them as if they had never been here.
+        if (cap?.trialEnded) {
+          const h = gateModal.querySelector('h2');
+          const sub = gateModal.querySelector('h2 + p');
+          if (h) h.textContent = 'Your free trial has ended';
+          if (sub) sub.textContent = 'Your assistants are paused and nothing has been deleted. Choose a plan and they start again straight away.';
+        }
         showGate(refParam || null, { hard: true });
       }
 
