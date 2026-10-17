@@ -5636,6 +5636,29 @@ export const sites = pgTable("sites", {
   check("sites_status_check", sql`${t.status} IN ('draft','published','suspended')`),
 ]);
 
+// A business's own domain for its site (db/z-site-domains.sql, src/utils/site-domains.ts).
+export const siteDomains = pgTable("site_domains", {
+  id: serial().primaryKey(),
+  siteId: integer("site_id").notNull().references(() => sites.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  domain: text().notNull(),
+  altDomain: text("alt_domain"),
+  altLive: boolean("alt_live").notNull().default(false),
+  status: text().notNull().default("pending_dns"),
+  statusDetail: text("status_detail"),
+  checkedAt: timestamp("checked_at", { withTimezone: true }),
+  provisionRequestedAt: timestamp("provision_requested_at", { withTimezone: true }),
+  liveAt: timestamp("live_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("site_domains_domain_uq").on(t.domain).where(sql`status <> 'removed'`),
+  uniqueIndex("site_domains_alt_uq").on(t.altDomain).where(sql`status <> 'removed' AND alt_domain IS NOT NULL`),
+  uniqueIndex("site_domains_site_uq").on(t.siteId).where(sql`status <> 'removed'`),
+  index("site_domains_org_idx").on(t.organisationId),
+  check("site_domains_status_check", sql`${t.status} IN ('pending_dns','securing','live','removed')`),
+]);
+
 // Every publish, frozen (db/z-website-hosting.sql). The newest 20 per site are kept.
 export const siteVersions = pgTable("site_versions", {
   id: serial().primaryKey(),

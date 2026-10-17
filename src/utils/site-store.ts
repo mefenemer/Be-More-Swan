@@ -380,7 +380,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
             : site.status === 'suspended'
                 ? `TAKEN OFFLINE by Be More Swan${site.suspendedReason ? ` (${site.suspendedReason})` : ''} — they cannot publish; tell them to contact Be More Swan`
                 : `private draft — not published${site.slug ? ` (address chosen: ${siteOrigin(site.slug)})` : ''}`}${drafting ? '; an AI draft of the whole site is being written right now' : ''}.`,
-        'Publishing, taking the site offline and choosing its address are buttons on the Website tab only — you cannot do them from chat; point them to the Publish card there.',
+        'Publishing, taking the site offline, choosing its address and connecting a domain they own (like yourbusiness.co.uk — they add one or two DNS settings where they bought it, and the card shows exactly what) are buttons on the Website tab only — you cannot do them from chat; point them to the Publish card there.',
         `Pages: ${d.pages.length} of ${maxPages} on their plan. Layout: ${d.structure === 'one_page' ? 'ONE PAGE — the menu jumps down the home page to sections with a menu label' : 'several pages — the menu lists the pages not hidden'}.`,
         `Business: ${d.settings.siteName}${d.settings.locality ? `, ${d.settings.locality}` : ''} · email ${d.settings.email ?? 'none'} · phone ${d.settings.phone ?? 'none'} · type ${d.settings.businessType}`,
         d.settings.features
