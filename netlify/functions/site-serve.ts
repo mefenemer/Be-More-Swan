@@ -38,7 +38,7 @@ import { maxPagesFor, publishedDefinition } from '../../src/utils/site-store';
 // else — a script-free page cannot be made to post a visitor's details to another site. Stripe
 // Checkout is listed because /_buy answers with a redirect there, and browsers apply form-action to
 // the redirect too.
-const CSP = "default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://checkout.stripe.com";
+const CSP = "default-src 'none'; img-src https: data:; media-src https:; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://checkout.stripe.com";
 
 /** The app's own address — where "Report this site" and "Made with Be More Swan" lead. */
 export function appOrigin(env: Record<string, string | undefined> = process.env): string {

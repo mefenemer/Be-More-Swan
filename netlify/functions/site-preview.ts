@@ -23,7 +23,7 @@ import { bookingSummary, businessSummary } from '../../src/utils/bookings';
 import { siteAssetUrl } from '../../src/utils/site-hosting';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 
-const CSP = "default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'";
+const CSP = "default-src 'none'; img-src https: data:; media-src https:; style-src 'unsafe-inline'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'";
 
 function page(status: number, html: string) {
     return {

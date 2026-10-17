@@ -84,7 +84,16 @@ export interface Link { label: string; href: string; }
  * through a signed, permanent link (newsletter-media-url.ts), and is checked to belong to the
  * workspace whenever it is saved (site-store.ts verifySiteAssets).
  */
-export interface Image { url: string; alt: string; assetId?: number | null; }
+export interface Image {
+    url: string; alt: string; assetId?: number | null;
+    /**
+     * A library VIDEO rather than a picture (owner, 2026-10-17): drawn as a silent, looping video.
+     * Only ever true for a library asset, and set from the asset itself when the site is saved
+     * (markVideos) — never trusted from the editor or the model. Allowed in a hero, a text section
+     * and a gallery; a logo, a sign-up picture or a product picture stays a picture.
+     */
+    video?: boolean;
+}
 
 export interface HeroProps {
     layout: 'centered' | 'split' | 'banner';
@@ -303,7 +312,7 @@ function cleanImage(v: unknown, warn: (m: string) => void): Image | null {
     const assetId = Number(o.assetId);
     if (Number.isInteger(assetId) && assetId > 0) {
         if (!alt) { warn('A picture was left out: every picture needs a short description of what it shows.'); return null; }
-        return { url: '', alt, assetId };
+        return o.video === true ? { url: '', alt, assetId, video: true } : { url: '', alt, assetId };
     }
     const url = cleanHref(o.url);
     if (!url || !url.startsWith('https://')) { if (o.url) warn('An image was left out: it needs an https address.'); return null; }
@@ -562,6 +571,38 @@ export function withoutAssets(def: SiteDefinition, drop: Set<number>): SiteDefin
             // A gallery left with no pictures is no gallery.
             .map((p) => ({ ...p, sections: p.sections.filter((s) => s.type !== 'gallery' || s.props.images.length) })),
     };
+}
+
+/**
+ * Set every library picture's `video` flag from what the asset really is, and take a video out of a
+ * place that only shows pictures (the logo, a sign-up section, a product). `videos` is the set of
+ * this workspace's library assets that are videos. Returns how many were taken out.
+ */
+export function markVideos(def: SiteDefinition, videos: Set<number>): { definition: SiteDefinition; removed: number } {
+    let removed = 0;
+    const flag = <T extends Image | null>(img: T): T => {
+        if (!img || !img.assetId) return img;
+        const { video: _drop, ...rest } = img;
+        return (videos.has(img.assetId) ? { ...rest, video: true } : rest) as T;
+    };
+    const pictureOnly = <T extends Image | null>(img: T): T | null => {
+        if (img && img.assetId && videos.has(img.assetId)) { removed++; return null; }
+        return img ? flag(img) : img;
+    };
+    const logoIsVideo = !!def.theme.logoAssetId && videos.has(def.theme.logoAssetId);
+    if (logoIsVideo) removed++;
+    const definition: SiteDefinition = {
+        ...def,
+        theme: logoIsVideo ? { ...def.theme, logoAssetId: null } : def.theme,
+        pages: def.pages.map((p) => ({ ...p, sections: p.sections.map((sec) => {
+            if (sec.type === 'hero' || sec.type === 'text') return { ...sec, props: { ...sec.props, image: flag(sec.props.image) } };
+            if (sec.type === 'gallery') return { ...sec, props: { ...sec.props, images: sec.props.images.map((im) => flag(im)) } };
+            if (sec.type === 'signup') return { ...sec, props: { ...sec.props, image: pictureOnly(sec.props.image) } };
+            if (sec.type === 'products') return { ...sec, props: { ...sec.props, items: sec.props.items.map((it) => ({ ...it, image: pictureOnly(it.image) })) } };
+            return sec;
+        }) })),
+    } as SiteDefinition;
+    return { definition, removed };
 }
 
 /** The colour a button's label must be on the primary colour — dark or light, whichever reads. */
