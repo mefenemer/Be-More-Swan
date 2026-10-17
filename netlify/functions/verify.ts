@@ -9,6 +9,7 @@ import { sendEmail } from '../../src/utils/email';
 import { getEmailStrings } from '../../src/utils/email-i18n';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { resolveActiveOrg } from '../../src/utils/tenant';
+import { findReferralOffer } from '../../src/utils/referral-offer';
 import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -280,10 +281,14 @@ export default withLambda(async (event) => {
             // Case 6: No plan, no assistants → send to the workspace and open the (non-dismissible)
             // plan-selection gate via ?action=select-plan (workspace.html shows it immediately), rather
             // than the standalone pricing page. Honour an explicit post-login redirect if present.
+            // A referred friend's code rides along so the gate shows the "first month free" banner
+            // (the discount itself is applied server-side at checkout either way).
+            const referralOffer = await findReferralOffer(db, user.id).catch(() => null);
+            const refSuffix = referralOffer ? `&ref=${encodeURIComponent(referralOffer.referralCode)}` : '';
             return {
                 statusCode: 200,
                 headers: getHeaders(sessionCookie),
-                body: JSON.stringify({ success: true, redirect: postLoginRedirect ? `${baseUrl}${postLoginRedirect}` : `${baseUrl}/workspace.html?action=select-plan` })
+                body: JSON.stringify({ success: true, redirect: postLoginRedirect ? `${baseUrl}${postLoginRedirect}` : `${baseUrl}/workspace.html?action=select-plan${refSuffix}` })
             };
         }
 
