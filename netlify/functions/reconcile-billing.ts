@@ -25,8 +25,9 @@ import { getPeriodStart } from '../../src/utils/atomic-cap-check';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 
-// The single task allowance's cutover (docs/task-metering.md): the first month every task has a ledger row.
-const LEDGER_COMPLETE_FROM = new Date(Date.UTC(2026, 11, 1));
+// The single task allowance went live mid-month on 17 Oct 2026 (docs/task-metering.md); November is the
+// first whole month in which every task has a ledger row.
+const LEDGER_COMPLETE_FROM = new Date(Date.UTC(2026, 10, 1));
 
 // A Stripe subscription's tier is resolved from its price PRODUCT (master_plans.stripe_product_id),
 // built at request time below — not a hardcoded price-id map. The product is stable across price
@@ -215,7 +216,7 @@ async function runReconciliation(): Promise<void> {
         // Under the single task allowance every task is a task_ledger 'work' row (work-metering.ts
         // writes both in one statement), so the two must agree exactly. This used to compare with
         // task_runs, which background work never writes — so almost every org showed as drifting.
-        // Only orgs on the new metering, from the first full period after the cutover: before it,
+        // Only orgs on the new metering, from the first full month after the cutover: before it,
         // chat turns spent tasks without a ledger row and the comparison means nothing.
         const periodStart  = getPeriodStart();
         const periodStartParam = periodStart.toISOString();

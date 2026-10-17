@@ -73,15 +73,17 @@ check('every generator passes the stored voice; social re-asks once on a never-s
     assert.match(read('assistant-detail.html'), /<input type="hidden" id="edit_voice_json" value="">/);
 });
 
-check('Terms 2.1: a version bump that users can actually accept', () => {
-    assert.match(read('netlify/functions/accept-tos.ts'), /export const CURRENT_TOS_VERSION = '2\.1';/);
+check('Terms 2.2: a version bump that users can actually accept', () => {
+    // 2.2 (2026-10-17) superseded 2.1: one task allowance (clauses 5 and 6.5). The 2.1 Swan Index
+    // clause is unchanged and still asserted below.
+    assert.match(read('netlify/functions/accept-tos.ts'), /export const CURRENT_TOS_VERSION = '2\.2';/);
     assert.match(read('netlify/functions/accept-tos.ts'), /const version = CURRENT_TOS_VERSION;/);
     assert.doesNotMatch(read('workspace.html'), /version: '2\.0'/);
-    assert.match(read('terms_of_service.html'), /Version 2\.1 &middot;/);
+    assert.match(read('terms_of_service.html'), /Version 2\.2 &middot;/);
     assert.match(read('terms_of_service.html'), /Within 5 working days of receiving your request/);
     // A version bump must reach people who accepted an older version — at login, not only in setup.
     assert.match(read('workspace.html'), /if \(d && d\.version && !d\.upToDate\) checkTosAcceptance\(true\);/);
-    assert.match(read('workspace.html'), /What changed in Terms v2\.1/);
+    assert.match(read('workspace.html'), /What changed in Terms v2\.2/);
     assert.match(read('netlify/functions/check-tos.ts'), /\.orderBy\(desc\(tosAcceptances\.acceptedAt\)\)/);
 });
 

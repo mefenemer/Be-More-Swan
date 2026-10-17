@@ -484,7 +484,7 @@ export function xPackPrice(pack: XCreditPack, currency: string): { currency: str
  */
 export async function grantXCredits(db: Db, params: { orgId: number; credits: number; userId?: number | null }): Promise<void> {
     // Single task allowance: a pack bought before the cutover (a late webhook) lands as bonus tasks,
-    // 1 X credit = 1 task, matching db/z-task-credit-conversion.sql.
+    // 1 X credit = 1 task, matching db/ops/task-allowance-cutover.sql.
     if (await isUnifiedTaskMetering(params.orgId)) {
         await grantBonusTasks(db, params.orgId, params.credits, 'purchase', { userId: params.userId ?? null, note: 'X credit pack (converted)' });
         return;

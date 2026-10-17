@@ -298,7 +298,8 @@
             </div>
         </div>
 
-        <!-- Tasks & Capacity -->
+        <!-- Tasks & Capacity — single task allowance from 17 October 2026. Weights MUST match
+             src/config/task-weights.ts, fair-use limits src/utils/fair-use.ts (defaults; platform_config). -->
         <div id="section-tasks" class="mb-12">
             <h2 class="text-xs font-bold uppercase tracking-widest text-gray-400 mb-5">Tasks &amp; Capacity</h2>
             <div class="space-y-3">
@@ -308,7 +309,25 @@
                         <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                     </summary>
                     <div class="px-6 pb-5 text-gray-500 text-sm leading-relaxed border-t border-gray-100 pt-4">
-                        One task is one finished piece of work your assistant does for you: drafting a post (once, even when it goes out to several platforms), writing a blog article, running a lead search (once per search, however many leads it finds), drafting an email or an email campaign, reviewing a draft for quality, or rewriting something you rejected. Work is only counted once it's delivered — if something fails and retries, you aren't charged for the attempt. <strong class="text-gray-700">Messages you send your assistant in chat also count</strong> — each one puts it to work, so each one draws from your monthly allowance. What doesn't count: browsing your dashboard, approving or scheduling something that's already drafted, changing settings, or connecting an app. AI-generated images, videos and music use your separate <strong class="text-gray-700">AI media credits</strong>, not tasks. There's no daily cap and no per-message limit; the only ceiling is your plan's monthly allowance, and your live usage is always visible in your workspace.
+                        One task is one finished piece of work your assistant does for you: a social post (once, even when it goes out to several platforms), a blog article, a lead search (once per search, however many leads it finds), an email or an email campaign, an outreach email to a lead, or a website audit or draft. Work is only counted once it's delivered — if something fails and retries, you aren't charged for the attempt. Every plan has <strong class="text-gray-700">one monthly task allowance</strong> that covers all of this, including AI media — there are no separate credits. What doesn't count: browsing your dashboard, approving or scheduling something that's already drafted, editing a draft yourself, changing settings, connecting an app, uploading your own photos, or using stock photos and branded cards. Your live usage is always visible on your billing page.
+                    </div>
+                </details>
+                <details class="bg-white border border-gray-200 rounded-xl shadow-sm group open:border-emerald-200 transition-all">
+                    <summary class="flex justify-between items-center font-semibold cursor-pointer list-none px-6 py-5 text-gray-900 hover:text-emerald-700 transition-colors">
+                        <span>Do chat messages use tasks?</span>
+                        <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </summary>
+                    <div class="px-6 pb-5 text-gray-500 text-sm leading-relaxed border-t border-gray-100 pt-4">
+                        No. <strong class="text-gray-700">Chatting with your assistants is free</strong>, and so are the editing helpers — rewriting a post, suggesting hooks or overlay text, a quality review, applying suggestions, and compliance checks. To keep the service fast for everyone, each workspace has a daily fair-use limit: 300 chat messages and 200 helper actions in any 24 hours. Almost nobody gets near it. If you do, chat and the helpers pause for a while and free up again within a day — you are never charged for them, and your task allowance isn't touched.
+                    </div>
+                </details>
+                <details class="bg-white border border-gray-200 rounded-xl shadow-sm group open:border-emerald-200 transition-all">
+                    <summary class="flex justify-between items-center font-semibold cursor-pointer list-none px-6 py-5 text-gray-900 hover:text-emerald-700 transition-colors">
+                        <span>Why do some things count as more than one task?</span>
+                        <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </summary>
+                    <div class="px-6 pb-5 text-gray-500 text-sm leading-relaxed border-t border-gray-100 pt-4">
+                        A few outputs cost far more to make than words, so they count as several tasks out of the same allowance: an <strong class="text-gray-700">AI image is 1 task</strong>, an <strong class="text-gray-700">AI video is 20</strong> (on the Busywork Buster and Digital Employee plans), an <strong class="text-gray-700">AI music track is 20</strong> (12 if you share the track with the Be More Swan community), and a <strong class="text-gray-700">post to X with a link is 10</strong>. A text-only X post costs nothing beyond the post's own task. Your billing page breaks down what your tasks were used on.
                     </div>
                 </details>
                 <details class="bg-white border border-gray-200 rounded-xl shadow-sm group open:border-emerald-200 transition-all">
@@ -317,7 +336,7 @@
                         <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                     </summary>
                     <div class="px-6 pb-5 text-gray-500 text-sm leading-relaxed border-t border-gray-100 pt-4">
-                        You'll receive a notification at <strong class="text-gray-700">80%</strong> of your monthly allowance, telling you how many tasks you have left. At <strong class="text-gray-700">100%</strong> your assistants pause until the allowance resets — you'll be prompted to upgrade or wait for the reset. The limit is a hard ceiling, not a meter: <strong class="text-gray-700">we never charge you for going over it</strong>, so the bill you agreed to is the bill you get. Work already drafted and waiting in your review queue stays there. Upgrading raises your allowance straight away, and paused assistants start working again overnight (by about 1am UK time).
+                        You'll receive a notification at <strong class="text-gray-700">80%</strong> of your monthly allowance, telling you how many tasks you have left. If you have bonus tasks, your assistants carry on using those once the monthly allowance is spent. When both run out your assistants pause until the allowance resets — you'll be prompted to upgrade or wait for the reset. The limit is a hard ceiling: <strong class="text-gray-700">we never charge you for going over it</strong>, so the bill you agreed to is the bill you get. Work already drafted and waiting in your review queue stays there. Upgrading raises your allowance straight away, and paused assistants start working again overnight (by about 1am UK time).
                     </div>
                 </details>
                 <details class="bg-white border border-gray-200 rounded-xl shadow-sm group open:border-emerald-200 transition-all">
@@ -326,16 +345,25 @@
                         <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                     </summary>
                     <div class="px-6 pb-5 text-gray-500 text-sm leading-relaxed border-t border-gray-100 pt-4">
-                        No — task allowances do not roll over. Your allowance resets on the <strong class="text-gray-700">1st of each calendar month</strong> (this is separate from your billing date, so a mid-month subscriber gets a full allowance straight away). AI media credits are different: those <em>do</em> roll over.
+                        No — the monthly allowance does not roll over. It resets on the <strong class="text-gray-700">1st of each calendar month</strong> (UTC), separately from your billing date, so a mid-month subscriber gets a full allowance straight away. Bonus tasks are different: those never expire.
                     </div>
                 </details>
                 <details class="bg-white border border-gray-200 rounded-xl shadow-sm group open:border-emerald-200 transition-all">
                     <summary class="flex justify-between items-center font-semibold cursor-pointer list-none px-6 py-5 text-gray-900 hover:text-emerald-700 transition-colors">
-                        <span>What are AI Media Credits, and how are they different from tasks?</span>
+                        <span>What are bonus tasks?</span>
                         <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                     </summary>
                     <div class="px-6 pb-5 text-gray-500 text-sm leading-relaxed border-t border-gray-100 pt-4">
-                        Tasks cover the thinking and writing work. Media credits cover generated images, video and music, which cost considerably more to produce — 1 credit per AI image, 5 per AI video clip, and 5 per AI music track (3 if you share the track with the Be More Swan community). Every plan includes a monthly allocation of credits (the amount is on the <a href="pricing.html" class="text-emerald-600 hover:underline font-medium">pricing page</a>), AI video generation unlocks from Tier 2 (the Busywork Buster), and unlike tasks, <strong class="text-gray-700">unused credits roll over</strong> rather than expiring at month end. Not every image needs a credit, either — your assistant can also pull from stock libraries or from photos you've uploaded yourself.
+                        Bonus tasks are extra tasks held on your workspace that <strong class="text-gray-700">never expire</strong>. They're only used after your monthly allowance runs out, so a busy month dips into them and a quiet month leaves them untouched. When we moved to a single task allowance on 1 December 2026, any AI media credits you had left became bonus tasks (each credit became 4 tasks), and any X posting credits you'd bought and not used became bonus tasks one for one. Your bonus balance is shown on your billing page.
+                    </div>
+                </details>
+                <details class="bg-white border border-gray-200 rounded-xl shadow-sm group open:border-emerald-200 transition-all">
+                    <summary class="flex justify-between items-center font-semibold cursor-pointer list-none px-6 py-5 text-gray-900 hover:text-emerald-700 transition-colors">
+                        <span>What happened to AI media credits and X credits?</span>
+                        <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </summary>
+                    <div class="px-6 pb-5 text-gray-500 text-sm leading-relaxed border-t border-gray-100 pt-4">
+                        Since <strong class="text-gray-700">17 October 2026</strong> they're gone — everything now comes out of one monthly task allowance, and plan allowances were raised to cover the media they used to include. Nothing you'd already paid for was lost: remaining balances were converted into bonus tasks that never expire (see above).
                     </div>
                 </details>
             </div>

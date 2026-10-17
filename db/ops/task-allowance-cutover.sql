@@ -1,7 +1,7 @@
 -- db/ops/task-allowance-cutover.sql
--- ONE-OFF OPERATIONAL SCRIPT — the 1 December 2026 move to a single task allowance
+-- ONE-OFF OPERATIONAL SCRIPT — the 17 October 2026 move to a single task allowance
 -- (docs/task-metering.md). Not a migration: it lives in db/ops/ so scripts/db-migrate.mjs never
--- picks it up and runs it early. Run it by hand, staging first, at 00:05 UTC on 1 Dec, as the owner.
+-- picks it up and runs it early. Run it by hand, staging first, as the owner (run on 17 Oct 2026, mid-month).
 --
 -- Prerequisites (check before running):
 --   • db/task-ledger.sql applied (task_ledger, task_bonus, the 'unified_task_metering' flag)
@@ -81,7 +81,7 @@ UPDATE plans p
    SET feature_overrides = jsonb_set(p.feature_overrides, '{monthlyTaskLimit}',
            to_jsonb((p.feature_overrides ->> 'monthlyTaskLimit')::int
                     + CASE mp.tier_key WHEN 'saver' THEN 100 WHEN 'buster' THEN 250 ELSE 500 END))
-           || '{"taskAllowanceCutover": "2026-12-01"}'::jsonb,
+           || '{"taskAllowanceCutover": "2026-10-17"}'::jsonb,
        updated_at = now()
   FROM master_plans mp
  WHERE mp.id = p.master_plan_id

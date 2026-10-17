@@ -6,7 +6,7 @@
 // helpers are free under fair use, and media and X link posts spend weighted tasks.
 //
 // The flag ships whitelisted for test workspaces only and is switched on for everyone at the
-// 1 December 2026 cutover, together with db/z-task-credit-conversion.sql. Fails closed (old meters)
+// 17 October 2026 cutover, together with db/ops/task-allowance-cutover.sql. Fails closed (old meters)
 // on a lookup error, like every feature flag.
 
 import { isFeatureEnabled } from './feature-flags';
