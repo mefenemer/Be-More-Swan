@@ -550,7 +550,11 @@
     + '            <label class="bs-status">Embed snippet</label>'
     + '            <button id="bs-snippet-copy" class="bs-linkbtn" type="button">Copy</button></div>'
     + '          <div id="bs-snippet" class="bs-snippet">Create a widget to get your embed code.</div>'
-    + '          <span class="bs-status" style="font-size:11px;">Paste this into any page on your site, alongside a &lt;div id="bms-blog"&gt;&lt;/div&gt; for it to render into.</span></div>'
+    + '          <span class="bs-status" style="font-size:11px;">Paste this into any page on your site, where you want the blog to appear.</span>'
+    // Wix (and some Squarespace / Webflow blocks) put pasted code in a fixed-size frame. The widget
+    // copes (posts open full-page in a new tab, see widget.js `framed`) but the list is only as
+    // tall as the box, so say how to size it.
+    + '          <span class="bs-status" style="font-size:11px;display:block;margin-top:4px;"><strong>On Wix:</strong> Add \u2192 Embed Code \u2192 Embed HTML, paste the code, then drag the box tall (around 1,200px) and full width. Wix shows embedded code in a fixed-size box, so posts open full-page in a new tab.</span></div>'
     // The RSS feed of published posts. Anything that reads a feed (Mailchimp, Zapier, an aggregator,
     // a reader) can pull the blog without a dedicated connector — see widget-rss.ts.
     + '        <div style="margin-top:12px;">'
@@ -999,8 +1003,12 @@
 
   // ── Widget config / theming ────────────────────────────────────────────────────────────────────
   function renderSnippet(key) {
+    // The mount <div> is part of the snippet. It used to be a separate instruction in the small
+    // print, and a script pasted without it renders nothing (widget.js logs "mount element not
+    // found" to a console the site owner never opens).
     el('bs-snippet').textContent =
-      '<script async src="' + location.origin + '/widget.js"\n        data-bms-key="' + key + '" data-bms-mount="#bms-blog"><\/script>';
+      '<div id="bms-blog"></div>\n'
+      + '<script async src="' + location.origin + '/widget.js"\n        data-bms-key="' + key + '" data-bms-mount="#bms-blog"><\/script>';
     el('bs-rss').textContent = location.origin + '/api/widget/' + key + '/rss';
   }
   // Where the customer publishes. Both fields were left blank until someone typed them in, which

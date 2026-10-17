@@ -24,7 +24,7 @@
 
   // OPTIONAL, opt-in: data-bms-post-url="/blog/{slug}".
   //
-  // Without it the widget behaves exactly as it always has — cards open the post in place and route
+  // Without it (and outside a frame: see `framed` below) the widget behaves exactly as it always has — cards open the post in place and route
   // on location.hash. That default must not change: for most customers the widget IS the blog, and
   // silently turning every card into a link off their own site would be a regression they never
   // asked for.
@@ -44,15 +44,36 @@
     postUrlTemplate = '';
   }
 
-  function postHref(slug) {
-    if (!postUrlTemplate || !slug) return null;
-    return postUrlTemplate.replace('{slug}', encodeURIComponent(slug));
-  }
-
   // Resolve API origin from the script src so the widget works on any host.
   var apiBase;
   try { apiBase = new URL(script.src).origin; } catch (e) { apiBase = ''; }
   var API = apiBase + '/api/widget/' + encodeURIComponent(key);
+
+  // Are we running inside a frame? Wix (Embed HTML), and some Squarespace and Webflow embed
+  // blocks, never put pasted code on the page itself: they wrap it in an iframe of a FIXED size
+  // that the site owner drags in their editor. Read in place, the whole blog (list, then the full
+  // article on click) was squeezed into that box and scrolled inside it, and because the frame is
+  // narrow the cards dropped to their phone layout. That was the "tiny posts in a small
+  // container" report (2026-10-17).
+  //
+  // So when framed, a card opens the post's full-page permalink (/b/:key/:slug: themed,
+  // crawlable, and it sends its own engagement beacon) in a new tab rather than inside the box.
+  // A new tab, not target=_top: these embed frames are sandboxed, and top-navigation is the
+  // permission most often withheld, while popups are allowed. A cross-origin parent throws on
+  // window.top access in some browsers, and that also means "framed".
+  var framed = (function () {
+    try { return window.self !== window.top; } catch (e) { return true; }
+  })();
+
+  function postHref(slug) {
+    if (!slug) return null;
+    // A rooted template ("/blog/{slug}") would resolve against the FRAME's origin (Wix serves embeds
+    // from its own sandbox domain), so inside a frame only an absolute template is usable.
+    var usable = postUrlTemplate && (!framed || /^https?:\/\//.test(postUrlTemplate));
+    if (usable) return postUrlTemplate.replace('{slug}', encodeURIComponent(slug));
+    if (framed) return apiBase + '/b/' + encodeURIComponent(key) + '/' + encodeURIComponent(slug);
+    return null;
+  }
 
   function ready(fn) {
     if (document.readyState !== 'loading') fn();
@@ -335,7 +356,8 @@
       // A real anchor, not a div with a click handler: middle-click, ctrl-click, "copy link
       // address" and a crawler following the list all need an href to exist.
       return href
-        ? '<a class="bms-card" href="' + esc(href) + '">' + body + '</a>'
+        ? '<a class="bms-card" href="' + esc(href) + '"'
+          + (framed ? ' target="_blank" rel="noopener"' : '') + '>' + body + '</a>'
         : '<div class="bms-card" data-slug="' + esc(p.slug) + '">' + body + '</div>';
     }
 
