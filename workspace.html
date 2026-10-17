@@ -2979,9 +2979,11 @@ function formatCurrency(amount, currency) {
             // saver (£29) → buster, buster (£99) → employee. These were the other way round before
             // the plans were re-ordered, so £99 customers were shown a downgrade as their upgrade.
             const TIER_DELTA = {
-              saver:    ['Up to 3 active assistants', '2,500 tasks per month', 'Connect up to 10 standard apps', 'Autonomous goal tracking'],
-              buster:   ['Up to 10 active assistants', '10,000 tasks per month', 'Connect up to 15 apps', 'Workspace collaboration for your team'],
-              employee: ['Unlimited assistants', 'Dedicated account manager', 'Custom SLA & priority support'],
+              // What the NEXT plan adds. Two self-serve plans since 17 Oct 2026: saver → buster, and
+              // buster (and the retired employee) → Enterprise, the contact-sales path.
+              saver:    ['Every Digital Assistant', '2,750 tasks per month', 'Connect up to 10 standard apps', 'Autonomous goal tracking'],
+              buster:   ['More than 2,750 tasks a month', 'Dedicated account manager', 'Custom integrations, SSO & API access'],
+              employee: ['Unlimited tasks to order', 'Dedicated account manager', 'Custom SLA & priority support'],
             };
             const delta = TIER_DELTA[cap.tierKey] || ['More active assistants', 'Higher monthly task volume'];
 

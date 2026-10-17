@@ -50,12 +50,10 @@
         .pk-divider    { border-color: #fce7f3; }
         .pk-ent-label  { color: #f9a8d4; }
         .pk-ent-check  { color: #f9a8d4; }
-        /* Force 3-column grid at 1024px — overrides any compiled Tailwind cascade issues.
-           Enterprise is NOT a 4th card: it sits in the contact-sales bar below the grid, so the
-           three purchasable plans get the full width and the buyer has three options, not four. */
-        @media (min-width: 1024px) {
-            .pricing-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
-        }
+        /* Two purchasable plans since 17 Oct 2026 (The Digital Employee is no longer sold; its
+           subscribers keep it). Enterprise is NOT a card: it sits in the contact-sales bar below.
+           Two columns, held to a readable width and centred. */
+        .pricing-grid { max-width: 56rem; margin-left: auto; margin-right: auto; }
         /* Billing cycle toggle */
         .billing-toggle-track {
             display: inline-flex; align-items: center; background: #f3f4f6;
@@ -219,7 +217,7 @@
                 <div class="p-6 flex-grow flex flex-col">
                     <div class="grid grid-cols-3 gap-2 mb-6">
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div id="stat-asst-t2" class="text-xl font-extrabold pk-stat-num">3</div>
+                            <div id="stat-asst-t2" class="text-xl font-extrabold pk-stat-num">All</div>
                             <div id="stat-asst-lbl-t2" class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistants</div>
                         </div>
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
@@ -235,7 +233,7 @@
                     <p class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Everything in Tier 1, plus:</p>
                     <ul class="feat-list space-y-2.5 text-sm text-gray-700 flex-grow">
                         <li class="flex gap-3" title="Adds AI video to AI images and music, all from the same monthly allowance. An AI video counts as 20 tasks."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>AI Video</strong> from your tasks</span></li>
-                        <li class="flex gap-3" title="Run multiple specialised roles at the same time — social media, emails, calendar, and more."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>3 Distinct Digital Assistants</strong></span></li>
+                        <li class="flex gap-3" title="Hire every assistant in the library and run them side by side — social media, email, leads, website, and more. New roles are included as they launch."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Every Digital Assistant</strong></span></li>
                         <li class="flex gap-3" title="Connect your digital department to up to 10 standard everyday business tools, like Gmail, Slack, and Google Calendar."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Connect Standard Apps You Use</span></li>
                         <li class="flex gap-3" title="Set a SMART target and your assistants track progress against it. If a goal falls off track, they can tune their content strategy to recover — every change logged, and you&#39;re notified."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Autonomous Goal Tracking</span></li>
                         <li class="flex gap-3" title="A dedicated assistant that proofreads and perfects the work of your other assistants before it reaches your desk."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>The In-House Editor</span></li>
@@ -246,57 +244,6 @@
                     <a href="#" onclick="event.preventDefault(); choosePlan('pro_team');"
                        class="pk-btn w-full block text-center px-6 py-3.5 font-bold rounded-xl shadow-sm transition">
                         Automate My Workflow
-                    </a>
-                    <p class="text-center text-xs text-gray-400 mt-2.5">Cancel any time · no setup fee</p>
-                </div>
-            </div>
-
-            <!-- ── Tier 3: The Digital Employee ───────────────────── -->
-            <div class="flex flex-col bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200 overflow-hidden relative">
-                <div class="p-6 pb-5 border-b border-gray-100">
-                    <div class="flex items-center justify-between gap-2 mb-1.5">
-                        <p class="text-[10px] font-bold uppercase tracking-widest min-w-0">
-                            <span class="text-gray-400">Tier 3</span>
-                            <span class="text-gray-300 mx-1">·</span>
-                            <span id="card-name-t3" class="pk-text">The Digital Employee</span>
-                        </p>
-                        <div id="card-pill-t3" class="flex-shrink-0"></div>
-                    </div>
-                    <h2 id="card-tier-t3" class="text-xl font-extrabold text-gray-900 mb-3 leading-snug">Best for Teams</h2>
-                    <p id="card-desc-t3" class="text-sm text-gray-500 leading-relaxed mb-4 italic">A complete digital workforce built for growing businesses and collaborative teams.</p>
-                    <div class="flex items-end gap-1 mb-1">
-                        <span id="card-price-t3" class="text-4xl font-extrabold text-gray-900 leading-none">£349</span>
-                        <span class="text-gray-400 text-base font-medium mb-1">/month</span>
-                    </div>
-                    <p id="card-note-t3" class="text-xs text-gray-400 mt-1">Billed monthly · cancel any time</p>
-                    <p id="card-save-t3" class="text-xs font-bold pk-text-dark mt-1.5" style="display:none;"></p>
-                </div>
-                <div class="p-6 flex-grow flex flex-col">
-                    <div class="grid grid-cols-3 gap-2 mb-6">
-                        <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div id="stat-asst-t3" class="text-xl font-extrabold pk-stat-num">10</div>
-                            <div id="stat-asst-lbl-t3" class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistants</div>
-                        </div>
-                        <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div id="stat-task-t3" class="text-xl font-extrabold pk-stat-num">10.5k</div>
-                            <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Tasks/mo</div>
-                        </div>
-                        <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div id="stat-app-t3" class="text-xl font-extrabold pk-stat-num">15</div>
-                            <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Apps</div>
-                        </div>
-                    </div>
-                    <hr class="pk-divider border-t mb-5">
-                    <p class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Everything in Tier 2, plus:</p>
-                    <ul class="feat-list space-y-2.5 text-sm text-gray-700 flex-grow">
-                        <li class="flex gap-3" title="Invite partners, team members, or clients to log in, review drafts, and collaborate on approvals together."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Shared Virtual Workspace</span></li>
-                        <li class="flex gap-3" title="A personal session with a Be More Swan expert to build out your digital department and map your automation goals."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>1-on-1 Kick-off Strategy Call</span></li>
-                    </ul>
-                </div>
-                <div class="px-6 pb-6">
-                    <a href="#" onclick="event.preventDefault(); choosePlan('business');"
-                       class="pk-btn w-full block text-center px-6 py-3.5 font-bold rounded-xl shadow-sm transition">
-                        Scale My Business
                     </a>
                     <p class="text-center text-xs text-gray-400 mt-2.5">Cancel any time · no setup fee</p>
                 </div>
@@ -346,9 +293,9 @@
                     <p class="text-[10px] font-bold uppercase tracking-widest pk-ent-label mb-1.5">
                         Tier 4 · <span id="card-name-t4">Custom Enterprise</span>
                     </p>
-                    <!-- The number is the top purchasable tier's assistant limit — filled by
+                    <!-- The number is the top purchasable tier's task allowance — filled by
                          renderPlanCards() so it tracks master_plans instead of drifting. -->
-                    <h2 class="text-lg font-extrabold text-white mb-1.5">Need more than <span id="ent-bar-limit">10</span> assistants?</h2>
+                    <h2 class="text-lg font-extrabold text-white mb-1.5">Need more than <span id="ent-bar-limit">2,750</span> tasks a month?</h2>
                     <p id="card-desc-t4" class="text-sm text-gray-400 leading-relaxed max-w-xl">Bespoke digital architecture for complex corporate environments — unlimited assistants and tasks, a dedicated account manager, and integrations, single sign-on and API access built to order.</p>
                 </div>
                 <div class="flex-shrink-0 md:text-right">
@@ -399,7 +346,7 @@
                     <div class="flex items-center justify-between gap-4 px-6 py-5 pk-stat-box">
                         <div>
                             <p class="font-extrabold pk-stat-num text-sm">Be More Swan — <span id="anchor-plan-name">The Busywork Buster</span></p>
-                            <p class="text-xs pk-stat-lbl mt-0.5">3 assistants working around the clock, no holiday, no sick pay, no notice period</p>
+                            <p class="text-xs pk-stat-lbl mt-0.5">Every assistant working around the clock, no holiday, no sick pay, no notice period</p>
                         </div>
                         <p class="text-xl font-extrabold pk-stat-num whitespace-nowrap"><span id="anchor-price">£79</span><span class="text-xs font-medium pk-stat-lbl">/mo</span></p>
                     </div>
@@ -439,7 +386,7 @@
                         </p>
                         <ul class="text-sm text-gray-600 leading-relaxed mb-3 space-y-1">
                             <li>• An AI image — <strong>1 task</strong></li>
-                            <li>• An AI video — <strong>20 tasks</strong> (Busywork Buster and Digital Employee)</li>
+                            <li>• An AI video — <strong>20 tasks</strong> (Busywork Buster)</li>
                             <li>• An AI music track — <strong>20 tasks</strong>, or 12 if you share it with the community</li>
                             <li>• A post to X with a link — <strong>10 tasks</strong> (a text-only X post costs nothing extra)</li>
                         </ul>
@@ -506,13 +453,6 @@
                             </th>
                             <th class="text-center px-4 py-5 bg-gray-50 w-[15%]" style="vertical-align:top">
                                 <div class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-0.5">Tier 3</div>
-                                <div id="tbl-name-t3" class="font-extrabold text-gray-900 text-sm leading-snug">The Digital<br>Employee</div>
-                                <div id="tbl-price-t3" class="font-extrabold text-gray-900 text-base mt-1.5">£349</div>
-                                <div class="text-[10px] text-gray-400 mt-0.5">/ month</div>
-                                <div class="mt-2" id="tbl-pill-t3"></div>
-                            </th>
-                            <th class="text-center px-4 py-5 bg-gray-50 w-[15%]" style="vertical-align:top">
-                                <div class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-0.5">Tier 4</div>
                                 <div id="tbl-name-t4" class="font-extrabold text-gray-900 text-sm leading-snug">Custom<br>Enterprise</div>
                                 <div class="font-extrabold text-gray-900 text-base mt-1.5">£1,199+</div>
                                 <div class="text-[10px] text-gray-400 mt-0.5">/ month</div>
@@ -526,46 +466,41 @@
 
                         <!-- CAPACITY -->
                         <tr class="bg-gray-50/70 border-t border-gray-200">
-                            <td colspan="5" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">Capacity</td>
+                            <td colspan="4" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">Capacity</td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">Digital Assistants<br><span class="text-xs text-gray-400 font-normal">The number of distinct AI roles you can deploy in your account</span></td>
                             <td class="px-4 py-3.5 text-center font-bold text-gray-900 align-middle">1</td>
-                            <td class="px-4 py-3.5 text-center font-bold pk-text-dark pk-col-tint align-middle">3</td>
-                            <td class="px-4 py-3.5 text-center font-bold text-gray-900 align-middle">10</td>
+                            <td class="px-4 py-3.5 text-center font-bold pk-text-dark pk-col-tint align-middle">All</td>
                             <td class="px-4 py-3.5 text-center font-bold text-gray-900 align-middle">Custom</td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">Completed Tasks / Month<br><span class="text-xs text-gray-400 font-normal">Each finished piece of work — a post, article, lead search or email — counts as one task. AI video and music count as 20. Chat is free</span></td>
                             <td class="px-4 py-3.5 text-center text-gray-700 align-middle">600</td>
                             <td class="px-4 py-3.5 text-center font-semibold pk-text-dark pk-col-tint align-middle">2,750</td>
-                            <td class="px-4 py-3.5 text-center text-gray-700 align-middle">10,500</td>
                             <td class="px-4 py-3.5 text-center text-gray-700 align-middle">Custom</td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">App Connections<br><span class="text-xs text-gray-400 font-normal">The tools and platforms your assistants can connect to and work within</span></td>
                             <td class="px-4 py-3.5 text-center text-gray-700 align-middle text-xs">Connect up to 4 everyday apps</td>
                             <td class="px-4 py-3.5 text-center font-semibold pk-text-dark pk-col-tint align-middle text-xs">Connect up to 10 standard apps to power your digital department</td>
-                            <td class="px-4 py-3.5 text-center text-gray-700 align-middle text-xs">Connect up to 15 apps to power your whole digital department</td>
                             <td class="px-4 py-3.5 text-center text-gray-700 align-middle text-xs">Bespoke app limits &amp; custom internal system integrations</td>
                         </tr>
 
                         <!-- AI MEDIA GENERATION -->
                         <tr class="bg-gray-50/70 border-t border-gray-200">
-                            <td colspan="5" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">AI Media Generation</td>
+                            <td colspan="4" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">AI Media Generation</td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">AI Image Generation<br><span class="text-xs text-gray-400 font-normal">Generate on-brand images from a prompt — 1 task each</span></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center pk-col-tint"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
-                            <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">AI Video Generation<br><span class="text-xs text-gray-400 font-normal">Generate short-form videos from a prompt — 20 tasks each</span></td>
                             <td class="px-4 py-3.5 text-center text-gray-300">—</td>
                             <td class="px-4 py-3.5 text-center pk-col-tint"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
-                            <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
 <!-- "AI Media Credits / Month" and "Unused Credits Roll Over" removed for the 17 October 2026 single task
@@ -576,13 +511,12 @@
 
                         <!-- CORE FEATURES -->
                         <tr class="bg-gray-50/70 border-t border-gray-200">
-                            <td colspan="5" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">Core Features — included on every plan</td>
+                            <td colspan="4" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">Core Features — included on every plan</td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">Be More Swan Safe Content Benchmark<br><span class="text-xs text-gray-400 font-normal">Brand-safety rules placed ahead of your own instructions in every assistant</span></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center pk-col-tint"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
-                            <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
@@ -590,13 +524,11 @@
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center pk-col-tint"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
-                            <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">Around-the-Clock Workflows<br><span class="text-xs text-gray-400 font-normal">Scheduled tasks run automatically, even while you're offline or asleep</span></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center pk-col-tint"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
-                            <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
@@ -604,13 +536,11 @@
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center pk-col-tint"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
-                            <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">Content Calendar<br><span class="text-xs text-gray-400 font-normal">Plan, schedule, and review your assistant's upcoming work in one view</span></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center pk-col-tint"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
-                            <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
@@ -618,37 +548,33 @@
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center pk-col-tint"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
-                            <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">Brand Protection<br><span class="text-xs text-gray-400 font-normal">Your assistants are governed by our Safe Content Benchmark on every plan</span></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center pk-col-tint"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
-                            <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
 
                         <!-- REPORTING -->
                         <tr class="bg-gray-50/70 border-t border-gray-200">
-                            <td colspan="5" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">Reporting</td>
+                            <td colspan="4" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">Reporting</td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">Time-Saved Dashboard<br><span class="text-xs text-gray-400 font-normal">See what your assistants completed and the hours they saved you</span></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center pk-col-tint"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
-                            <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
 
                         <!-- TEAM & ADVANCED -->
                         <tr class="bg-gray-50/70 border-t border-gray-200">
-                            <td colspan="5" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">Team &amp; Advanced Features</td>
+                            <td colspan="4" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">Team &amp; Advanced Features</td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">The Quality Reviewer<br><span class="text-xs text-gray-400 font-normal">A dedicated assistant that checks and critiques the work of your other assistants</span></td>
                             <td class="px-4 py-3.5 text-center text-gray-300">—</td>
                             <td class="px-4 py-3.5 text-center pk-col-tint"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
-                            <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
@@ -656,53 +582,46 @@
                             <td class="px-4 py-3.5 text-center text-gray-300">—</td>
                             <td class="px-4 py-3.5 text-center text-gray-300 pk-col-tint">—</td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
-                            <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">Custom Systems Integration<br><span class="text-xs text-gray-400 font-normal">Built to order: we connect your assistants to your private databases and legacy business software</span></td>
                             <td class="px-4 py-3.5 text-center text-gray-300">—</td>
                             <td class="px-4 py-3.5 text-center text-gray-300 pk-col-tint">—</td>
-                            <td class="px-4 py-3.5 text-center text-gray-300">—</td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">Single Sign-On (On Request)<br><span class="text-xs text-gray-400 font-normal">Built to order: single sign-on set up for your identity provider as part of your Enterprise agreement</span></td>
                             <td class="px-4 py-3.5 text-center text-gray-300">—</td>
                             <td class="px-4 py-3.5 text-center text-gray-300 pk-col-tint">—</td>
-                            <td class="px-4 py-3.5 text-center text-gray-300">—</td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">SMS &amp; WhatsApp Alerts (On Request)<br><span class="text-xs text-gray-400 font-normal">Built to order: urgent approval alerts sent to you by SMS or WhatsApp</span></td>
                             <td class="px-4 py-3.5 text-center text-gray-300">—</td>
                             <td class="px-4 py-3.5 text-center text-gray-300 pk-col-tint">—</td>
-                            <td class="px-4 py-3.5 text-center text-gray-300">—</td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">Assistants Tailored to Your Playbooks<br><span class="text-xs text-gray-400 font-normal">Built to order: assistants set up around your proprietary data, processes, and brand playbooks</span></td>
                             <td class="px-4 py-3.5 text-center text-gray-300">—</td>
                             <td class="px-4 py-3.5 text-center text-gray-300 pk-col-tint">—</td>
-                            <td class="px-4 py-3.5 text-center text-gray-300">—</td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">Custom API Access<br><span class="text-xs text-gray-400 font-normal">Built to order: programmatic access scoped to what your own systems need</span></td>
                             <td class="px-4 py-3.5 text-center text-gray-300">—</td>
                             <td class="px-4 py-3.5 text-center text-gray-300 pk-col-tint">—</td>
-                            <td class="px-4 py-3.5 text-center text-gray-300">—</td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
 
                         <!-- SUPPORT -->
                         <tr class="bg-gray-50/70 border-t border-gray-200">
-                            <td colspan="5" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">Support</td>
+                            <td colspan="4" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">Support</td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">Support Channel<br><span class="text-xs text-gray-400 font-normal">How you can reach our team when you need help</span></td>
                             <td class="px-4 py-3.5 text-center text-xs text-gray-500">Email &amp; Help Centre</td>
                             <td class="px-4 py-3.5 text-center text-xs font-semibold pk-text-dark pk-col-tint">Priority Email</td>
-                            <td class="px-4 py-3.5 text-center text-xs text-gray-500">Priority + Strategy Call</td>
                             <td class="px-4 py-3.5 text-center text-xs text-gray-500">Dedicated Account Manager</td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
@@ -710,25 +629,22 @@
                             <td class="px-4 py-3.5 text-center text-gray-300">—</td>
                             <td class="px-4 py-3.5 text-center text-gray-300 pk-col-tint">—</td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
-                            <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
 
                         <!-- CONTINUOUS EVOLUTION -->
                         <tr class="bg-gray-50/70 border-t border-gray-200">
-                            <td colspan="5" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">Continuous Evolution</td>
+                            <td colspan="4" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">Continuous Evolution</td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">Free Capability Upgrades<br><span class="text-xs text-gray-400 font-normal">Your assistants automatically improve as we release new capabilities — no extra cost ever</span></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center pk-col-tint"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
-                            <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">Roadmap Influence &amp; Voting<br><span class="text-xs text-gray-400 font-normal">Vote on which features and assistant types we prioritise building next</span></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center pk-col-tint"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
-                            <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
@@ -738,7 +654,6 @@
                             </td>
                             <td class="px-4 py-3.5 text-center text-gray-300">—</td>
                             <td class="px-4 py-3.5 text-center text-gray-300 pk-col-tint">—</td>
-                            <td class="px-4 py-3.5 text-center text-gray-300">—</td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
 
@@ -752,10 +667,6 @@
                             <td class="px-4 py-5 text-center pk-col-tint">
                                 <a href="#" onclick="event.preventDefault(); choosePlan('pro_team');"
                                    class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Automate My Workflow</a>
-                            </td>
-                            <td class="px-4 py-5 text-center">
-                                <a href="#" onclick="event.preventDefault(); choosePlan('business');"
-                                   class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Scale My Business</a>
                             </td>
                             <td class="px-4 py-5 text-center">
                                 <button onclick="openEnterpriseModal()"
@@ -852,11 +763,11 @@
 
     // ── US-I18N-2.1: Multi-currency support ───────────────────────
     const CURRENCY_CONFIG = {
-        GBP: { symbol: '£', locale: 'en-GB', monthly: [29,  79,  349],  annual: [23,  63,  279],  annualTotal: [276,  756,  3348] },
-        USD: { symbol: '$', locale: 'en-US', monthly: [35,  95,  419],  annual: [28,  76,  335],  annualTotal: [336,  912,  4020] },
-        EUR: { symbol: '€', locale: 'de-DE', monthly: [29,  79,  349],  annual: [23,  63,  279],  annualTotal: [276,  756,  3348] },
-        AUD: { symbol: 'A$', locale: 'en-AU', monthly: [55,  143, 629],  annual: [44,  114, 503],  annualTotal: [528,  1368, 6036] },
-        CAD: { symbol: 'C$', locale: 'en-CA', monthly: [49,  127, 559],  annual: [39,  102, 447],  annualTotal: [468,  1224, 5364] },
+        GBP: { symbol: '£', locale: 'en-GB', monthly: [29,  79],  annual: [23,  63],  annualTotal: [276,  756] },
+        USD: { symbol: '$', locale: 'en-US', monthly: [35,  95],  annual: [28,  76],  annualTotal: [336,  912] },
+        EUR: { symbol: '€', locale: 'de-DE', monthly: [29,  79],  annual: [23,  63],  annualTotal: [276,  756] },
+        AUD: { symbol: 'A$', locale: 'en-AU', monthly: [55,  143], annual: [44,  114], annualTotal: [528,  1368] },
+        CAD: { symbol: 'C$', locale: 'en-CA', monthly: [49,  127], annual: [39,  102], annualTotal: [468,  1224] },
     };
     const SUPPORTED_CURRENCIES = Object.keys(CURRENCY_CONFIG);
     let _currency = localStorage.getItem('aura_currency') || 'GBP';
@@ -884,7 +795,7 @@
         const cfg = CURRENCY_CONFIG[_currency] || CURRENCY_CONFIG.GBP;
         const isAnnual = _billingCycle === 'annual';
         const prices = isAnnual ? cfg.annual : cfg.monthly;
-        const tiers = ['t1', 't2', 't3'];
+        const tiers = ['t1', 't2'];
         tiers.forEach((t, i) => {
             const priceEl = document.getElementById('card-price-' + t);
             const noteEl  = document.getElementById('card-note-' + t);
@@ -933,8 +844,9 @@
     // managed centrally today; the hardcoded values below stay as pre-fetch fallbacks and for
     // the other display currencies. Annual = round(monthly × 0.8), matching checkout.
     // Card slot → master_plans.tierKey. Fixed by product identity (NOT price order, which the
-    // Admin can change): t1 = The Workflow Saver, t2 = The Busywork Buster, t3 = The Digital Employee.
-    const GBP_TIER_ORDER = ['saver', 'buster', 'employee'];
+    // Admin can change): t1 = The Workflow Saver, t2 = The Busywork Buster. The Digital Employee
+    // ('employee') is no longer sold (17 Oct 2026); get-plans omits it as an inactive plan.
+    const GBP_TIER_ORDER = ['saver', 'buster'];
     async function syncLivePricesGBP() {
         try {
             const r = await fetch('/.netlify/functions/get-plans');
@@ -967,7 +879,7 @@
     // ── Plan Features: DB-driven comparison table ────────────────────────────
     // Builds the whole comparison tbody from the catalog returned by get-plans, so an admin edit
     // in the Portal (Master Data → Plan Features) shows here with no code change. Columns are the
-    // 3 purchasable tiers (saver/buster/employee) + the contact-sales "Custom Enterprise" column
+    // 2 purchasable tiers (saver/buster) + the contact-sales "Custom Enterprise" column
     // (feature.enterpriseValue). If the catalog is missing (pre-seed), the static fallback stays.
     const CMP_CHECK = '<svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>';
     const CMP_DASH  = '<span class="text-gray-300">—</span>';
@@ -989,7 +901,10 @@
     function cmpCellInner(def, value, emphasise) {
         if (def.valueType === 'boolean') return cmpTruthy(value) ? CMP_CHECK : CMP_DASH;
         let text;
-        if (value === null || value === undefined || value === '') text = def.unlimitedLabel || '—';
+        // No assistant cap on a purchasable plan = every role in the library. The catalog's
+        // unlimitedLabel ("Custom") is the Enterprise wording and would misdescribe the £79 plan.
+        if ((value === null || value === undefined || value === '') && def.key === 'assistant_limit') text = 'All';
+        else if (value === null || value === undefined || value === '') text = def.unlimitedLabel || '—';
         else if (def.valueType === 'number') text = Number(value).toLocaleString('en-GB');
         else text = value;
         const cls = emphasise ? 'font-semibold pk-text-dark' : (def.valueType === 'number' ? 'font-bold text-gray-900' : 'text-gray-600');
@@ -1005,7 +920,7 @@
         if (!tbody || !Array.isArray(featureCatalog) || !featureCatalog.length) return; // keep static fallback
         const byTier = {};
         plans.forEach(p => { if (p.tierKey) byTier[p.tierKey] = p; });
-        // Fixed column order mirrors the pricing cards; enterprise is a static 4th column.
+        // Fixed column order mirrors the pricing cards; enterprise is a static 3rd column.
         const cols = GBP_TIER_ORDER.map(tk => byTier[tk]);
         const defs = featureCatalog.slice().sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
 
@@ -1013,7 +928,7 @@
         let lastCategory = null;
         for (const def of defs) {
             if (def.category !== lastCategory) {
-                html += `<tr class="bg-gray-50/70 border-t border-gray-200"><td colspan="5" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">${cmpEsc(def.category)}</td></tr>`;
+                html += `<tr class="bg-gray-50/70 border-t border-gray-200"><td colspan="4" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">${cmpEsc(def.category)}</td></tr>`;
                 lastCategory = def.category;
             }
             html += '<tr class="border-t border-gray-100 hover:bg-gray-50/40">';
@@ -1034,7 +949,6 @@
             '<td class="px-6 py-5"></td>' +
             '<td class="px-4 py-5 text-center"><a href="#" onclick="event.preventDefault(); choosePlan(\'starter\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Get Started</a></td>' +
             '<td class="px-4 py-5 text-center pk-col-tint"><a href="#" onclick="event.preventDefault(); choosePlan(\'pro_team\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Automate My Workflow</a></td>' +
-            '<td class="px-4 py-5 text-center"><a href="#" onclick="event.preventDefault(); choosePlan(\'business\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Scale My Business</a></td>' +
             '<td class="px-4 py-5 text-center"><button onclick="openEnterpriseModal()" class="btn-primary inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Book a Call</button></td>' +
             '</tr>';
 
@@ -1043,9 +957,9 @@
 
     // ── Plan cards: DB-driven tier line / name / description / Most-Popular pill ──────────────
     // Card slot ↔ master_plans.tierKey. Fixed by product identity (NOT price order): t1 = saver,
-    // t2 = buster, t3 = employee, t4 = enterprise (contact-sales). An admin edit in the Portal
+    // t2 = buster, t4 = enterprise (contact-sales; the t3 slot was the retired Digital Employee). An admin edit in the Portal
     // (Master Data → Plans) shows here with no code change; missing DB values keep the static copy.
-    const CARD_SLOT_BY_TIER = { saver: 't1', buster: 't2', employee: 't3', enterprise: 't4' };
+    const CARD_SLOT_BY_TIER = { saver: 't1', buster: 't2', enterprise: 't4' };
     const CARD_PILL_HTML = '<span class="pk-pill text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full">Most Popular</span>';
     const TBL_PILL_HTML  = '<span class="pk-pill inline-block text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full">Popular</span>';
 
@@ -1098,16 +1012,17 @@
                 setCardText('anchor-plan-name', plan.name);
                 setCardText('final-cta-name', plan.name);
             }
-            // "Need more than N assistants?" on the enterprise bar = the top purchasable tier's limit.
-            if (plan.tierKey === 'employee') setCardText('ent-bar-limit', plan.assistantLimit);
+            // "Need more than N tasks a month?" on the enterprise bar = the top purchasable tier's allowance.
+            if (plan.tierKey === 'buster' && plan.monthlyTaskLimit) setCardText('ent-bar-limit', Number(plan.monthlyTaskLimit).toLocaleString('en-GB'));
             // Capacity stat boxes — straight from the master_plans capacity columns, so an admin
             // edit in Master Data → Plan Features moves the pink boxes with no code change.
             // Contact-sales (Enterprise) has no numeric limits: apps read "Bespoke", the rest "∞".
             const unlimitedApps = plan.isContactSales ? 'Bespoke' : '∞';
-            setStatBox('stat-asst-' + slot, plan.assistantLimit, '∞', false);
+            // No assistant cap = every role in the library ("All"), the £79 plan's headline.
+            setStatBox('stat-asst-' + slot, plan.assistantLimit, plan.isContactSales ? '∞' : 'All', false);
             setStatBox('stat-task-' + slot, plan.monthlyTaskLimit, '∞', true);
             setStatBox('stat-app-'  + slot, plan.appConnectionLimit, unlimitedApps, false);
-            // "1 Assistant" vs "3 Assistants".
+            // "1 Assistant" vs "All Assistants".
             const asstLbl = document.getElementById('stat-asst-lbl-' + slot);
             if (asstLbl) asstLbl.textContent = Number(plan.assistantLimit) === 1 ? 'Assistant' : 'Assistants';
             // Most-Popular pill (card + comparison-table header). The DB guarantees at most one plan
@@ -1123,13 +1038,11 @@
         monthly: {
             t1: { price: '£29',  note: 'Billed monthly · cancel any time' },
             t2: { price: '£79',  note: 'Billed monthly · cancel any time' },
-            t3: { price: '£349', note: 'Billed monthly · cancel any time' },
         },
         annual: {
             // Monthly equivalent shown on cards; actual charge is the annual total below.
             t1: { price: '£23',  note: 'Billed £276 annually · cancel any time' },
             t2: { price: '£63',  note: 'Billed £756 annually · cancel any time' },
-            t3: { price: '£279', note: 'Billed £3,348 annually · cancel any time' },
         },
     };
 
@@ -1146,7 +1059,7 @@
 
         // Update card prices
         const cfg = BILLING_CONFIG[cycle];
-        ['t1', 't2', 't3'].forEach(t => {
+        ['t1', 't2'].forEach(t => {
             const priceEl = document.getElementById('card-price-' + t);
             const noteEl  = document.getElementById('card-note-' + t);
             const tblEl   = document.getElementById('tbl-price-' + t);
@@ -1178,8 +1091,9 @@
 
     // Card CTA identifiers → canonical master_plans tier keys. The cards use legacy labels
     // (starter/pro_team/business); the system + Stripe speak saver/buster/employee. Anchored on
-    // the advertised price: starter £29 = saver, pro_team £79 = buster, business £349 = employee.
-    const CARD_TIER = { starter: 'saver', pro_team: 'buster', business: 'employee' };
+    // the advertised price: starter £29 = saver, pro_team £79 = buster. ('business' was the
+    // retired £349 Digital Employee; no card offers it any more.)
+    const CARD_TIER = { starter: 'saver', pro_team: 'buster' };
     window.choosePlan = function (tier) {
         if (tier === 'enterprise') { openEnterpriseModal(); return; }
         const planTier = CARD_TIER[tier] || tier; // normalise to the canonical system tier
