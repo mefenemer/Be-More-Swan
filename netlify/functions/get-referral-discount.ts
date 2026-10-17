@@ -10,9 +10,12 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { REFERRAL_OFFER_DISPLAY } from '../../src/utils/referral-offer';
 
-const DISCOUNT_PCT    = parseInt(process.env.REFERRAL_DISCOUNT_PCT    || '20', 10);
-const DISCOUNT_MONTHS = parseInt(process.env.REFERRAL_DISCOUNT_MONTHS || '3',  10);
+// The offer is fixed: the referred friend's first month is free (src/utils/referral-offer.ts holds
+// the coupons). The old REFERRAL_DISCOUNT_PCT / _MONTHS env vars advertised a discount nothing applied.
+const DISCOUNT_PCT    = 100;
+const DISCOUNT_MONTHS = 1;
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -40,7 +43,7 @@ export default withLambda(async (event) => {
                 valid:          true,
                 discountPct:    DISCOUNT_PCT,
                 discountMonths: DISCOUNT_MONTHS,
-                display:        `${DISCOUNT_PCT}% off your first ${DISCOUNT_MONTHS} month${DISCOUNT_MONTHS !== 1 ? 's' : ''}`,
+                display:        REFERRAL_OFFER_DISPLAY,
             }),
         };
     } catch (err) {
