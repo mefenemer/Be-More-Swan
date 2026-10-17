@@ -18,6 +18,24 @@
 # 4. Ask Netlify support to enable wildcard subdomains (*.bemoreswan.site) for this project.
 #    Until they do, only www/bare respond, and they redirect to the Website Assistant's page.
 
+#
+# ── A THIRD project: businesses' own domains (decision D2, src/utils/site-domains.ts) ────────────
+# The wildcard project above cannot also carry domain aliases, so customer domains (www.example.com)
+# live on a second copy of this same project. One-time setup:
+# 1. New project from this same GitHub repo, production branch `main`, Base directory `sites-host`
+#    (same as above). Name it e.g. `bms-domains` → it is reachable at bms-domains.netlify.app.
+# 2. Environment variables on it: SITE_SERVE_SECRET and APP_ORIGIN — the SAME values as above.
+# 3. Domain management: set the primary domain to domains.bemoreswan.site (the bemoreswan.site zone
+#    is on Netlify DNS, so its record and certificate are automatic). Aliases are then added by code.
+# 4. On the APP project (bemoreswan), add:
+#      NETLIFY_API_TOKEN        a Netlify personal access token (User settings ▸ Applications)
+#      CUSTOM_DOMAINS_SITE_ID   the new project's Project ID (Project configuration ▸ General)
+#      CUSTOM_DOMAINS_TARGET    its netlify.app name, e.g. bms-domains.netlify.app
+#    Until all three are set, the Website tab says "coming soon" and nothing is attempted.
+# A customer points www at CUSTOM_DOMAINS_TARGET (CNAME) and the bare domain at 75.2.60.5 (A). The
+# code adds the alias only once that DNS points here, then asks Netlify for the certificate.
+# ~90 aliases fit on one project: move to Cloudflare for SaaS at about 40 domains (plan D2).
+
 [build]
   base = "sites-host"
   publish = "public"

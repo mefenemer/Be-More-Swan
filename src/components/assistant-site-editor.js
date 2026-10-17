@@ -187,6 +187,12 @@
         if (ok && typeof window.showToast === 'function') window.showToast('Stripe connected — your website can take payments.');
       }
       if (!state.pageId || !def().pages.some((p) => p.id === state.pageId)) state.pageId = def().pages[0].id;
+      // A domain still connecting: check it once on opening, so "Check now" is rarely needed.
+      const cd = state.data.site.customDomain;
+      if (cd && (cd.status === 'pending_dns' || cd.status === 'securing') && !state.domainChecked && (state.data.payments || {}).canConnect) {
+        state.domainChecked = true;
+        post({ action: 'domain_check', assistantId: state.assistantId }).then((d) => { state.data = d; rerender(); }).catch(() => {});
+      }
     } catch (err) {
       state.loadError = err.message;
     }
@@ -953,7 +959,39 @@
           ${btn(`data-site-restore="${esc(v.version)}"`, 'Copy into my draft')}
         </li>`).join('') : '<li class="text-xs text-gray-500">No earlier versions.</li>'}</ul>
         <p class="text-xs text-gray-500 mt-1">Copying a version replaces your draft with it. Your live site only changes when you publish.</p>` : '';
-    return card(`${status}${address}${actions}${versions}${pnote}`, live ? 'border-green-200' : '');
+    return card(`${status}${address}${actions}${versions}${pnote}${s.slug ? domainBlock() : ''}`, live ? 'border-green-200' : '');
+  }
+
+  // ── Their own domain (site-domains.ts) ─────────────────────────────────────────────────────
+  // Owners and admins connect it (sites.ts gates it too); the steps are the records to add where
+  // the domain was bought, then "Check now" until it is live.
+  function domainBlock() {
+    const d = state.data.site.customDomain || {};
+    const canEdit = (state.data.payments || {}).canConnect !== false;
+    const head = '<p class="text-sm font-black text-gray-900 mt-5 pt-4 border-t border-gray-100">Your own domain</p>';
+    if (!d.available && !d.domain) return `${head}<p class="text-xs text-gray-500 mt-1">Using a domain you own (like yourbusiness.co.uk) is coming soon.</p>`;
+    if (!d.domain) {
+      if (!canEdit) return `${head}<p class="text-xs text-gray-500 mt-1">The workspace owner or an admin can connect a domain you own.</p>`;
+      return `${head}
+        <p class="text-xs text-gray-500 mt-1">Already own a domain, like yourbusiness.co.uk? Use it for this site. You'll add one or two settings where you bought it (GoDaddy, 123 Reg, IONOS, Namecheap…) — we show you exactly what. Your ${esc(state.data.site.domain)} address keeps working and sends visitors to it.</p>
+        <div class="flex flex-wrap items-center gap-2 mt-2"><input data-site-domain-input class="${inputCls}" style="max-width:260px" placeholder="yourbusiness.co.uk" value="${esc(state.domainTyped || '')}" autocomplete="off" spellcheck="false">${btn('data-site-domain-add', 'Connect', true)}</div>`;
+    }
+    const tone = d.status === 'live' ? 'text-green-700' : 'text-amber-800';
+    const label = d.status === 'live' ? 'Live' : d.status === 'securing' ? 'Securing (https)' : 'Waiting for your DNS settings';
+    const records = d.status === 'pending_dns' || (d.status === 'live' && d.altDomain && /without www/.test(d.detail || ''))
+      ? `<p class="text-xs text-gray-700 mt-3">Where you bought <strong>${esc(d.altDomain || d.domain)}</strong>, open its <strong>DNS</strong> settings and add:</p>
+         <div class="overflow-x-auto mt-1"><table class="text-xs w-full border border-gray-200 rounded-lg" style="border-collapse:separate">
+           <tr class="bg-gray-50 text-gray-600"><th class="text-left px-2 py-1">Type</th><th class="text-left px-2 py-1">Name / Host</th><th class="text-left px-2 py-1">Value / Points to</th></tr>
+           ${(d.records || []).map((r) => `<tr><td class="px-2 py-1 font-bold">${esc(r.type)}</td><td class="px-2 py-1 font-mono">${esc(r.name)}</td><td class="px-2 py-1 font-mono">${esc(r.value)} <button type="button" data-site-copy="${esc(r.value)}" class="underline text-gray-500 ml-1">Copy</button></td></tr>
+             <tr><td></td><td colspan="2" class="px-2 pb-1 text-gray-500">${esc(r.note)}</td></tr>`).join('')}
+         </table></div>
+         <p class="text-xs text-gray-500 mt-1">Some providers call Name "Host" and want it left blank or "@" for the bare domain. Changes can take from a few minutes to a few hours.</p>`
+      : '';
+    return `${head}
+      <p class="text-xs mt-1"><strong>${esc(d.domain)}</strong>${d.altDomain ? ` <span class="text-gray-500">(and ${esc(d.altDomain)})</span>` : ''} · <span class="font-bold ${tone}">${esc(label)}</span></p>
+      ${d.detail ? `<p class="text-xs text-gray-600 mt-1">${esc(d.detail)}</p>` : ''}
+      ${records}
+      ${canEdit ? `<div class="flex flex-wrap gap-2 mt-3">${d.status !== 'live' ? btn('data-site-domain-check', 'Check now', true) : ''}${btn('data-site-domain-remove', 'Remove domain')}</div>` : ''}`;
   }
 
   function placeholdersCard() {
@@ -1335,12 +1373,34 @@
     }
     if (t('[data-site-address-edit]')) { state.editingAddress = true; state.publishNote = null; render(); return; }
     if (t('[data-site-address-cancel]')) { state.editingAddress = false; state.slugTyped = null; render(); return; }
+    if (t('[data-site-domain-add]')) {
+      const v = hostOf(e).querySelector('[data-site-domain-input]').value;
+      state.domainTyped = v;
+      await publishAction({ action: 'domain_add', domain: v }, 'Saved. Now add the settings below where you bought your domain.', () => { state.domainTyped = null; });
+      return;
+    }
+    if (t('[data-site-domain-check]')) {
+      await publishAction({ action: 'domain_check' }, 'Checked.');
+      return;
+    }
+    if (t('[data-site-domain-remove]')) {
+      const d = state.data.site.customDomain || {};
+      const ok = await window.confirmModal(`${esc(d.domain)} stops showing your site${d.status === 'live' ? ` straight away, and visitors go back to ${esc((state.data.site.freeUrl || '').replace('https://', ''))}` : ''}. You can connect it again later.`, { title: 'Remove your domain?', confirmLabel: 'Remove', cancelLabel: 'Keep it' });
+      if (!ok) return;
+      await publishAction({ action: 'domain_remove' }, 'Domain removed.');
+      return;
+    }
+    const copy = t('[data-site-copy]');
+    if (copy) {
+      try { await navigator.clipboard.writeText(copy.dataset.siteCopy); window.showToast?.('Copied.'); } catch { /* the value is on screen to copy by hand */ }
+      return;
+    }
     if (t('[data-site-address-save]')) {
       const slug = hostOf(e).querySelector('[data-site-slug]').value;
       state.slugTyped = slug;   // kept if the address is refused, so what they typed isn't lost
       const s = state.data.site;
       if (s.status === 'published' && s.slug && slug.trim().toLowerCase() !== s.slug) {
-        const ok = await window.confirmModal(`${s.url.replace('https://', '')} stops working straight away and your site moves to the new address. Anyone with the old link will not find it.`, { title: 'Change your site\'s address?', confirmLabel: 'Change address', cancelLabel: 'Keep it' });
+        const ok = await window.confirmModal(`${(s.freeUrl || s.url).replace('https://', '')} stops working straight away and your site moves to the new address. Anyone with the old link will not find it.`, { title: 'Change your site\'s address?', confirmLabel: 'Change address', cancelLabel: 'Keep it' });
         if (!ok) return;
       }
       await publishAction({ action: 'address', slug }, 'Address saved.', () => { state.editingAddress = false; state.slugTyped = null; });
@@ -1427,7 +1487,7 @@
   window.AssistantSiteEditor = {
     init({ assistantId, assistantName }) {
       clearTimeout(state.pollTimer);
-      Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false,
+      Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false, domainChecked: false, domainTyped: null,
         words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' } });
       load();
     },

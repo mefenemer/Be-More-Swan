@@ -32,7 +32,7 @@ export const RESERVED_SITE_SLUGS = new Set([
     'pay', 'payment', 'payments', 'checkout', 'account', 'accounts', 'register', 'secure', 'security', 'auth',
     'oauth', 'sso', 'reset', 'wallet', 'bank', 'banking', 'invoice', 'refund', 'test', 'staging', 'dev',
     'preview', 'demo', 'example', 'root', 'system', 'official', 'abuse', 'postmaster', 'hostmaster',
-    'webmaster', 'report', 'legal', 'swan', 'apple', 'stripe', 'outlook', 'meta',
+    'webmaster', 'report', 'legal', 'swan', 'apple', 'stripe', 'outlook', 'meta', 'domains',
 ]);
 
 /**

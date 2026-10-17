@@ -32,6 +32,7 @@
 //                                               to Business Information, and a booking section added
 //   orders    { assistantId }                 → paid orders from the site's Buy buttons
 //   order_done { assistantId, id, done }      → mark one dealt with (or not)
+//   domain_add { assistantId, domain } · domain_check · domain_remove → their own domain (site-domains.ts)
 //   split_preview { assistantId }             → the pages split_pages WOULD make (nothing saved), for
 //                                               the "Several pages" approval; or why it can't
 //
@@ -49,6 +50,7 @@ import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
 import { applySiteOperation, assetIdsIn, FEATURE_LABELS, FEATURE_SECTIONS, planSplit, SECTION_TYPES, SITE_FEATURES, type SiteOperation } from '../../src/utils/site-definition';
 import { placeholdersIn } from '../../src/utils/site-draft';
 import { cleanSiteSlugInput, siteAssetUrl, siteOrigin, sitesDomain, siteVisibleText, suggestSiteSlug } from '../../src/utils/site-hosting';
+import { checkDomain, claimDomain, currentDomain, domainView, removeDomain } from '../../src/utils/site-domains';
 import { listSignupForms } from '../../src/utils/site-forms';
 import { readWordsFile } from '../../src/utils/site-words';
 import { attachmentText, quoteFromChat } from '../../src/utils/chat-attachments';
@@ -114,15 +116,20 @@ export default withLambda(async (event) => {
 
     const view = async (s: SiteRow, extraWarnings: string[] = []) => {
         const { definition, warnings } = definitionOf(s, maxPages);
+        const ownDomain = await currentDomain(db, s.id);
         const drafting = !!s.draftingAt && Date.now() - new Date(s.draftingAt).getTime() < DRAFT_TIMEOUT_MS;
         return {
             site: {
                 id: s.id, status: s.status, credit: s.credit, drafting, draftNote: s.draftNote, updatedAt: s.updatedAt,
-                slug: s.slug, url: s.slug ? siteOrigin(s.slug) : null, domain: sitesDomain(),
+                // Their own domain once it's live; the bemoreswan.site address redirects there.
+                slug: s.slug, url: ownDomain?.status === 'live' ? `https://${ownDomain.domain}` : s.slug ? siteOrigin(s.slug) : null, domain: sitesDomain(),
+                freeUrl: s.slug ? siteOrigin(s.slug) : null,
                 suggestedSlug: s.slug ? null : suggestSiteSlug(definition.settings.siteName),
                 publishedVersion: s.publishedVersion, publishedAt: s.publishedAt,
                 unpublishedChanges: s.status === 'published' ? await hasUnpublishedChanges(db, s, maxPages) : false,
                 // Home holds sections that would sit better on their own pages (the "Spread across pages" offer).
+                // Their own domain (site-domains.ts): status, what to add at their registrar.
+                customDomain: domainView(ownDomain),
                 canSplit: planSplit(definition.pages[0]?.sections ?? []).parts.length > 0,
                 suspendedReason: s.status === 'suspended' ? (s.suspendedReason || 'Taken offline by Be More Swan.') : null,
                 publishBlocker: publishBlocker(s, definition),
@@ -210,6 +217,29 @@ export default withLambda(async (event) => {
         if (!r.ok) return json(400, { error: r.error });
         await purgeSitePages(old);   // the old address must stop showing the site at once
         return json(200, await view(r.site));
+    }
+
+    // ── Their own domain (site-domains.ts) — owner or admin, like connecting Stripe ──
+    if (action === 'domain_add' || action === 'domain_check' || action === 'domain_remove') {
+        if (role !== 'owner' && role !== 'admin') return json(403, { error: 'Only the workspace owner or an admin can connect a domain.' });
+        if (site.status === 'suspended') return json(409, { error: 'This site has been taken offline by Be More Swan.' });
+        if (action === 'domain_add') {
+            const r = await claimDomain(db, site, body.domain);
+            if (!r.ok) return json(400, { error: r.error });
+            await checkDomain(db, r.row);   // DNS may already be right (a domain moved from elsewhere)
+            return json(200, await view(site));
+        }
+        const row = await currentDomain(db, site.id);
+        if (!row) return json(404, { error: 'No domain is connected.' });
+        if (action === 'domain_remove') {
+            try { await removeDomain(db, row); } catch (err) { console.error('[sites] domain remove failed', err); return json(502, { error: 'It couldn\'t be removed just now. Please try again.' }); }
+            if (site.slug) await purgeSitePages(site.slug);   // the bemoreswan.site address stops redirecting at once
+            return json(200, await view(site));
+        }
+        const before = row.status;
+        const after = await checkDomain(db, row);
+        if (before !== 'live' && after.status === 'live' && site.slug) await purgeSitePages(site.slug);   // start redirecting now
+        return json(200, await view(site));
     }
 
     if (action === 'publish') {
