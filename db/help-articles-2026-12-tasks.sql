@@ -1,9 +1,9 @@
--- db/help-articles-2026-12-tasks.sql — Help Centre: one monthly task allowance (cutover 2026-12-01)
+-- db/help-articles-2026-12-tasks.sql — Help Centre: one monthly task allowance (cutover 2026-10-17)
 --
 -- Named "2026-12-tasks" so it sorts AFTER db/help-articles-2026-10c.sql (the runner sorts "-" before
 -- ".", and "12" after "10").
 --
--- ⚠️ APPLY AT CUTOVER ONLY (1 December 2026, with db/z-task-credit-conversion.sql and the
+-- ⚠️ APPLY AT CUTOVER ONLY (17 October 2026, with db/ops/task-allowance-cutover.sql and the
 -- unified_task_metering flag). Before then these articles describe rules the product doesn't run yet.
 --
 -- What changed, and why:
@@ -15,7 +15,7 @@
 --     sliding 24-hour window via checkRateLimit).
 --   • Leftover media credits (×4) and unused purchased X credits (1:1) became non-expiring bonus
 --     tasks, spent only after the monthly allowance.
---   • Billing & Your Plan (from December 2026) — NEW title. The old "Billing & Your Plan" is
+--   • Billing & Your Plan (from October 2026) — NEW title. The old "Billing & Your Plan" is
 --     unpublished below (ON CONFLICT (title) cannot rename). Upgrade/payment/cancel sections are
 --     carried over from db/help-articles-2026-10b.sql unchanged.
 --   • What Counts as a Task — NEW, replaces "Tasks and AI Media Credits: What Uses What".
@@ -40,7 +40,7 @@ BEGIN;
 
 INSERT INTO help_articles (category, sort_order, title, content_md, is_published) VALUES
 
-('Billing & Your Plan', 10, 'Billing & Your Plan (from December 2026)', $$
+('Billing & Your Plan', 10, 'Billing & Your Plan (from October 2026)', $$
 # Billing & Your Plan
 
 Be More Swan is a monthly subscription. Every plan includes the same assistants. Plans differ in how many can work at once and how many tasks they can do each month.
@@ -57,7 +57,7 @@ The pricing page lists everything else each plan includes — app connections, A
 
 ## One task allowance
 
-Since **1 December 2026** there is just one allowance. A task is **one finished piece of work** — a social post, a blog article, a lead search, an email or email campaign, an outreach email, or a website audit or draft. A post that goes out to several platforms counts once. Work is counted only once it's delivered, so a failure or a retry never costs you a task.
+Since **17 October 2026** there is just one allowance. A task is **one finished piece of work** — a social post, a blog article, a lead search, an email or email campaign, an outreach email, or a website audit or draft. A post that goes out to several platforms counts once. Work is counted only once it's delivered, so a failure or a retry never costs you a task.
 
 AI media comes out of the same allowance. An AI image is 1 task, an AI video or music track is 20, and a post to X with a link is 10. See [What Counts as a Task](#what-counts-as-a-task) for the full list.
 
@@ -143,7 +143,7 @@ Nothing is counted until the work is delivered. A draft or an AI image that fail
 
 ## Bonus tasks
 
-Bonus tasks never expire and are used only after your monthly allowance runs out. See [Billing & Your Plan (from December 2026)](#billing-your-plan-from-december-2026).
+Bonus tasks never expire and are used only after your monthly allowance runs out. See [Billing & Your Plan (from October 2026)](#billing-your-plan-from-october-2026).
 
 ## Seeing your usage
 
@@ -163,7 +163,7 @@ UPDATE help_articles SET is_published = FALSE, updated_at = NOW() WHERE title = 
 
 -- In-article links to the old billing article ("What is Be More Swan?" and any other) follow the new title.
 UPDATE help_articles
-   SET content_md = REPLACE(content_md, '(#billing-your-plan)', '(#billing-your-plan-from-december-2026)'),
+   SET content_md = REPLACE(content_md, '(#billing-your-plan)', '(#billing-your-plan-from-october-2026)'),
        updated_at = NOW()
  WHERE content_md LIKE '%(#billing-your-plan)%';
 

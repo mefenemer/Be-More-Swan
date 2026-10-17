@@ -1,6 +1,6 @@
 # Task metering — one monthly task allowance
 
-From the 1 December 2026 cutover, customers have **one** usage number: a monthly task allowance.
+Since the 17 October 2026 cutover, customers have **one** usage number: a monthly task allowance.
 AI media credits and X posting credits are retired.
 
 ## The rules
@@ -51,9 +51,9 @@ the cap is still recorded. That keeps the count honest, and every later request 
    - the "extra usage will be charged" autonomous-media dialog is gone (there was never an overage)
    - the task-limit cron now pauses per organisation and includes past-due plans
 3. Test on your own workspaces: add their ids to `feature_flags.allowed_workspace_ids`.
-4. **By about 31 October**: send `tasks_model_change_notice` and publish the updated terms, which
-   take effect on 1 December.
-5. **1 December, 00:05 UTC**: run `db/ops/task-allowance-cutover.sql` by hand, staging first.
+4. **Customer notice**: with five paying customers at the time, the owner emailed each one directly
+   rather than waiting 30 days; Terms v2.2 took effect the same day.
+5. **17 October 2026 (mid-month)**: run `db/ops/task-allowance-cutover.sql` by hand, staging first.
    - In one transaction it converts balances to bonus tasks, raises the limits (600 / 2,750 /
      10,500, a placeholder until there is a month of data), hides the retired pricing rows and
      turns the flag on.
@@ -66,10 +66,10 @@ the cap is still recorded. That keeps the count honest, and every later request 
 
 ## Copy that must switch at cutover (not flag-aware)
 
-These are static, so they must not ship before 1 December:
+These are static, so they shipped with the cutover:
 
-- `pricing.html`, `faq.html`, `index.html`, `terms_of_service.html`, `checkout.html` and the new
-  help-article migration
+- `pricing.html`, `faq.html`, `index.html`, `terms_of_service.html` (v2.2, with `CURRENT_TOS_VERSION`),
+  `checkout.html` and the help-article migration `db/help-articles-2026-12-tasks.sql`
 - `explainers.js` (the media-source and brand-brief cost lines)
 - `assistant-detail.html` "What are AI credits?"
 
@@ -82,3 +82,10 @@ dashboard, My Content, the workspace generation gates, Blog Studio, Brand Design
   20 / buster 50. Check the live database before relying on either. It matters only for the
   cutover's conversion, which reads actual balances.
 - The seed has Busywork Buster at £99, while page fallbacks say £79. Check against Stripe.
+
+## Mid-month cutover note
+
+The switch happened on 16 October, not at a month boundary. October's `usage_counters.task_count`
+therefore includes chat messages and helper clicks charged under the old rules before the switch,
+with no ledger rows behind them. That is why `reconcile-billing` only compares counter and ledger from
+1 November. Nobody is worse off: the limits were raised in the same transaction.

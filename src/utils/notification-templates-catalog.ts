@@ -1106,14 +1106,14 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [v('tasks.count', 'Bonus tasks added', '1500')],
     },
     {
-        // The advance notice for the 1 December 2026 move to one task allowance. Sent once by an
+        // The notice for the 17 October 2026 move to one task allowance. Sent once by an
         // admin broadcast; worded so it is true whatever balance the reader holds.
         templateKey: 'tasks_model_change_notice',
         name: 'Usage is becoming one task allowance',
         category: 'Billing',
         type: 'tasks_model_change_notice',
-        title: 'From 1 December, everything runs on one monthly task allowance',
-        message: 'From 1 December 2026, AI media credits and X posting credits are replaced by your monthly task allowance. A task is one finished piece of work — a post, an email, an article, a lead search. An AI image counts as 1 task, an AI video or music track as 20, and an X post with a link as 10. Chatting with your assistants and using the editing helpers no longer uses tasks at all. Any AI credits you have left become 4 bonus tasks each, and unused purchased X credits become 1 bonus task each — bonus tasks never expire. As always, work pauses if you run out and you are never charged extra. The updated terms are on our website.',
+        title: 'Everything now runs on one monthly task allowance',
+        message: 'From 17 October 2026, AI media credits and X posting credits are replaced by your monthly task allowance. A task is one finished piece of work — a post, an email, an article, a lead search. An AI image counts as 1 task, an AI video or music track as 20, and an X post with a link as 10. Chatting with your assistants and using the editing helpers no longer uses tasks at all. Any AI credits you had left have become 4 bonus tasks each, and unused purchased X credits 1 bonus task each — bonus tasks never expire. As always, work pauses if you run out and you are never charged extra. Your plan\'s monthly allowance has been raised to cover the media it used to include. The updated terms are on our website.',
         variables: [],
     },
     {

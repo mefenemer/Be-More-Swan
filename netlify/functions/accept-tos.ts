@@ -13,8 +13,11 @@ import { retryBlockedAssistants } from '../../src/utils/retry-provisioning';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 // 2.1 (2026-10-06): clause 11.9 — published blog posts go to The Swan Index by default; opt out by
-// email. Bumping this asks every signed-in user to accept again (workspace check-tos modal).
-export const CURRENT_TOS_VERSION = '2.1';
+// email.
+// 2.2 (2026-10-17): clauses 5 and 6.5 — one monthly task allowance replaces AI media and X credits
+// (docs/task-metering.md). Bumping this asks every signed-in user to accept again (workspace
+// check-tos modal) — update the modal's "What changed" copy in workspace.html with every bump.
+export const CURRENT_TOS_VERSION = '2.2';
 
 const jwtSecret = process.env.JWT_SECRET;
 
