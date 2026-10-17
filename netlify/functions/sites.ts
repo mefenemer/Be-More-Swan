@@ -32,9 +32,11 @@
 //                                               to Business Information, and a booking section added
 //   orders    { assistantId }                 → paid orders from the site's Buy buttons
 //   order_done { assistantId, id, done }      → mark one dealt with (or not)
-//   domain_add { assistantId, domain } · domain_check · domain_remove → their own domain (site-domains.ts)
 //   split_preview { assistantId }             → the pages split_pages WOULD make (nothing saved), for
 //                                               the "Several pages" approval; or why it can't
+//
+// domain_add { assistantId, domain } · domain_check · domain_remove → their own domain (site-domains.ts),
+// owner or admin only.
 //
 // address / publish / unpublish / restore are buttons on the Website tab's Publish card ONLY — the
 // chat cards never send them (chat-session.js sends only apply and draft), so the owner always
