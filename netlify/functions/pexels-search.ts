@@ -3,6 +3,7 @@
 // POST { topic?, postId?, keywords?, exclude? }   → top-5 unique candidates for the picker.
 //                                                     "Show different photos" resends the returned
 //                                                     `keywords` plus every id already shown in `exclude`.
+// POST { action:'save', candidate, mediaType? }     → into the library only (no post) → { assetId }
 // POST { action:'select', postId, candidate }      → attach the chosen image to the post draft,
 //                                                     appending a Pexels credit line iff the org opts in.
 //
@@ -19,6 +20,14 @@ import {
 } from '../../src/utils/pexels';
 import { mediaTargetPostIds } from '../../src/utils/crosspost-media';
 import { withLambda } from '@netlify/aws-lambda-compat';
+
+/** A Pexels CDN address (photos: images.pexels.com; video files: videos.pexels.com). */
+export function isPexelsMediaUrl(v: unknown): boolean {
+    try {
+        const u = new URL(String(v));
+        return u.protocol === 'https:' && (u.hostname === 'images.pexels.com' || u.hostname === 'videos.pexels.com');
+    } catch { return false; }
+}
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -59,6 +68,20 @@ export default withLambda(async (event) => {
     const dedup = body.dedup !== false;
 
     try {
+        // ── SAVE: a chosen candidate into the library only, for a surface with no post (the Website
+        // Assistant's picture picker). The candidate comes from the client, so its address must be
+        // Pexels' own: a site shows it publicly, and an arbitrary URL here would be a hotlink to anything.
+        if (body.action === 'save') {
+            const c = body.candidate;
+            if (!orgId) return { statusCode: 403, body: JSON.stringify({ error: 'No workspace.' }) };
+            if (!c?.providerAssetId || !isPexelsMediaUrl(c?.url)) {
+                return { statusCode: 400, body: JSON.stringify({ error: 'Choose one of the results shown.' }) };
+            }
+            const clean = { ...c, title: String(c.title || '').slice(0, 200), photographer: String(c.photographer || '').slice(0, 120), photographerUrl: String(c.photographerUrl || '').slice(0, 300) };
+            const assetId = await createPexelsAsset(db, { userId, orgId, candidate: clean, assetType: mediaType });
+            return { statusCode: 200, body: JSON.stringify({ assetId }) };
+        }
+
         // ── SELECT: attach a chosen candidate to the post draft ───────────────
         if (body.action === 'select') {
             const { postId, candidate } = body;

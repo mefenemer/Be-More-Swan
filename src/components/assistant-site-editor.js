@@ -36,14 +36,14 @@
       { k: 'subheadline', kind: 'textarea', label: 'Line under the headline' },
       { k: 'primaryCta', kind: 'link', label: 'Main button' },
       { k: 'secondaryCta', kind: 'link', label: 'Second button' },
-      { k: 'image', kind: 'image', label: 'Picture' },
+      { k: 'image', kind: 'image', label: 'Picture or video', video: true },
     ],
     features: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
       { k: 'items', kind: 'items', label: 'Features', fields: [['title', 'text', 'Title'], ['body', 'textarea', 'Text']] }],
     steps: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
       { k: 'items', kind: 'items', label: 'Steps', fields: [['title', 'text', 'Step'], ['body', 'textarea', 'Text']] }],
     text: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'body', kind: 'textarea', label: 'Text (a blank line starts a new paragraph)', rows: 8, required: true },
-      { k: 'image', kind: 'image', label: 'Picture beside the text (optional)' },
+      { k: 'image', kind: 'image', label: 'Picture or video beside the text (optional)', video: true },
       { k: 'imageSide', kind: 'select', label: 'Picture on the', options: [['right', 'Right'], ['left', 'Left']] }],
     faq: [{ k: 'heading', kind: 'text', label: 'Heading' },
       { k: 'items', kind: 'items', label: 'Questions', fields: [['q', 'text', 'Question'], ['a', 'textarea', 'Answer']] }],
@@ -79,7 +79,7 @@
     // Gallery: the owner's own pictures, each with what it shows (needed) and an optional caption.
     gallery: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
       { k: 'layout', kind: 'select', label: 'Layout', options: [['square', 'Even squares (pictures are cropped to fit)'], ['natural', 'Each picture at its own shape']] },
-      { k: 'images', kind: 'gallery', label: 'Pictures' }],
+      { k: 'images', kind: 'gallery', label: 'Pictures and videos' }],
     // Menu / price list: groups the owner names, filled with Business Information products. Names,
     // prices, descriptions and lengths are read from there — never typed here.
     menu: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
@@ -114,16 +114,26 @@
     if (!base || /^(img|dsc|dscn|pxl|photo|image|screenshot)[\s\d]/i.test(base) || /^\d[\d\s]*$/.test(base)) return '';
     return base.charAt(0).toUpperCase() + base.slice(1);
   };
+  /** A small preview of a picture, or of a video (silent, its first frame). */
+  const thumbHtml = (src, video, w, h) => (video
+    ? `<video src="${esc(src)}" muted playsinline preload="metadata" style="width:${w}px;height:${h}px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb;background:#111;flex-shrink:0"></video>`
+    : `<img src="${esc(src)}" alt="" style="width:${w}px;height:${h}px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb;flex-shrink:0">`);
   /** Picture field: thumbnail, Choose/Change, Remove — the web address tucked away behind a link. */
-  function pictureHtml(img, attrs) {
+  function pictureHtml(img, attrs, allowVideo) {
     const v = img || {};
     const src = v.assetId ? thumbOf(v.assetId) : (v.url || '');
+    const what = v.video ? 'video' : 'picture';
     return `<div class="flex flex-wrap items-center gap-3 mt-1">
-        ${src ? `<img src="${esc(src)}" alt="" style="width:96px;height:64px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">`
-          : '<span class="inline-flex items-center justify-center text-xs text-gray-400 border border-dashed border-gray-300 rounded-lg" style="width:96px;height:64px">No picture</span>'}
-        ${btn(`${attrs.pick}`, src ? 'Change picture' : 'Choose picture', !src)}
+        ${src ? thumbHtml(src, v.video, 96, 64)
+          : `<span class="inline-flex items-center justify-center text-xs text-gray-400 border border-dashed border-gray-300 rounded-lg" style="width:96px;height:64px">No ${allowVideo ? 'picture or video' : 'picture'}</span>`}
+        ${btn(`${attrs.pick}`, src ? `Change ${what}` : (allowVideo ? 'Choose picture or video' : 'Choose picture'), !src)}
         ${src ? btn(`${attrs.clear}`, 'Remove') : ''}
       </div>`;
+  }
+  /** What a picture is for, to start a stock search or an AI prompt from: its section's heading. */
+  function topicOf(props) {
+    const p = props || {};
+    return String(p.headline || p.heading || (def() && def().settings.siteName) || '').slice(0, 120);
   }
 
   const state = {
@@ -257,8 +267,8 @@
       const v = value || {};
       const has = !!(v.assetId || v.url);
       return `<p class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
-        ${pictureHtml(v, { pick: `data-site-pick="${esc(f.k)}"`, clear: `data-site-pick-clear="${esc(f.k)}"` })}
-        <input type="hidden" name="${name}-asset" value="${esc(v.assetId || '')}">
+        ${pictureHtml(v, { pick: `data-site-pick="${esc(f.k)}"`, clear: `data-site-pick-clear="${esc(f.k)}"` }, !!f.video)}
+        <input type="hidden" name="${name}-asset" value="${esc(v.assetId || '')}"><input type="hidden" name="${name}-video" value="${v.video ? '1' : ''}">
         <input name="${name}-alt" class="${inputCls} mt-2 ${has && !v.alt ? 'border-amber-500' : ''}" placeholder="What the picture shows — e.g. Our roastery in Leeds (needed)" value="${esc(v.alt || '')}">
         <details class="mt-1" ${!v.assetId && v.url ? 'open' : ''}><summary class="text-xs text-gray-500 cursor-pointer">Use a web address instead</summary>
           <input name="${name}-url" class="${inputCls} mt-1" placeholder="https://… picture address" value="${esc(v.assetId ? '' : (v.url || ''))}"></details>`;
@@ -336,8 +346,8 @@
         <div data-gallery class="space-y-2 mt-1">${list.map((im, i) => {
           const src = im.assetId ? thumbOf(im.assetId) : (im.url || '');
           return `<div class="flex gap-3 border border-gray-200 rounded-lg p-2" data-gallery-item>
-            <input type="hidden" data-g-asset value="${esc(im.assetId || '')}"><input type="hidden" data-g-url value="${esc(im.assetId ? '' : (im.url || ''))}">
-            ${src ? `<img src="${esc(src)}" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:8px;flex-shrink:0">` : '<span style="width:72px;height:72px;flex-shrink:0" class="bg-gray-100 rounded-lg"></span>'}
+            <input type="hidden" data-g-asset value="${esc(im.assetId || '')}"><input type="hidden" data-g-url value="${esc(im.assetId ? '' : (im.url || ''))}"><input type="hidden" data-g-video value="${im.video ? '1' : ''}">
+            ${src ? thumbHtml(src, im.video, 72, 72) : '<span style="width:72px;height:72px;flex-shrink:0" class="bg-gray-100 rounded-lg"></span>'}
             <div class="flex-1 min-w-0">
               <input data-g-alt class="${inputCls} ${im.alt ? '' : 'border-amber-500'}" placeholder="What the picture shows (needed)" value="${esc(im.alt || '')}">
               <input data-g-caption class="${inputCls} mt-1" placeholder="Caption under it (optional)" value="${esc(im.caption || '')}">
@@ -406,7 +416,8 @@
         const assetId = Number(form.querySelector(`[name="${n}-asset"]`).value) || null;
         const url = form.querySelector(`[name="${n}-url"]`).value.trim();
         const alt = form.querySelector(`[name="${n}-alt"]`).value.trim();
-        props[f.k] = assetId ? { assetId, url: '', alt } : url ? { url, alt } : null;
+        const video = form.querySelector(`[name="${n}-video"]`)?.value === '1';
+        props[f.k] = assetId ? { assetId, url: '', alt, ...(video ? { video: true } : {}) } : url ? { url, alt } : null;
       } else if (f.kind === 'servicePick') {
         props[f.k] = [...form.querySelectorAll('[data-service-pick]:checked')].map((el) => Number(el.value));
       } else if (f.kind === 'reviewPick') {
@@ -415,7 +426,8 @@
         props[f.k] = [...form.querySelectorAll('[data-gallery-item]')].map((row) => {
           const assetId = Number(row.querySelector('[data-g-asset]').value) || null;
           const base = { alt: row.querySelector('[data-g-alt]').value.trim(), caption: row.querySelector('[data-g-caption]').value.trim() };
-          return assetId ? { ...base, assetId, url: '' } : { ...base, url: row.querySelector('[data-g-url]').value };
+          const video = row.querySelector('[data-g-video]')?.value === '1';
+          return assetId ? { ...base, assetId, url: '', ...(video ? { video: true } : {}) } : { ...base, url: row.querySelector('[data-g-url]').value };
         });
       } else if (f.kind === 'menuGroups') {
         props[f.k] = [...form.querySelectorAll('[data-menu-group]')].map((g) => ({
@@ -1105,14 +1117,17 @@
     const pickField = t('[data-site-pick]');
     if (pickField && window.MediaPicker) {
       const form = pickField.closest('form');
+      const k = pickField.dataset.sitePick;
+      const field = (FORMS[state.editing.type] || []).find((x) => x.k === k) || {};
+      syncEditing(form);
       window.MediaPicker.open({
-        title: 'Choose a picture',
+        title: field.video ? 'Choose a picture or video' : 'Choose a picture',
+        video: !!field.video, topic: topicOf(state.editing.props), assistantName: state.assistantName,
         onPick: (asset) => {
           state.thumbs[asset.id] = asset.url;
           syncEditing(form);
-          const k = pickField.dataset.sitePick;
           const prev = state.editing.props[k] || {};
-          state.editing.props[k] = { assetId: asset.id, url: '', alt: prev.alt || altFromName(asset.name) };
+          state.editing.props[k] = { assetId: asset.id, url: '', alt: prev.alt || altFromName(asset.name), ...(asset.video ? { video: true } : {}) };
           render();
         },
       });
@@ -1174,7 +1189,7 @@
       return;
     }
     if (t('[data-site-logo-pick]') && window.MediaPicker) {
-      window.MediaPicker.open({ title: 'Choose your logo', onPick: (asset) => { state.thumbs[asset.id] = asset.url; apply([{ op: 'set_theme', theme: { logoAssetId: asset.id } }]); } });
+      window.MediaPicker.open({ title: 'Choose your logo', assistantName: state.assistantName, topic: `${def().settings.siteName} logo`, onPick: (asset) => { state.thumbs[asset.id] = asset.url; apply([{ op: 'set_theme', theme: { logoAssetId: asset.id } }]); } });
       return;
     }
     if (t('[data-site-logo-clear]')) { await apply([{ op: 'set_theme', theme: { logoAssetId: null, logoUrl: null } }]); return; }
@@ -1183,13 +1198,14 @@
     if (gAdd && window.MediaPicker) {
       const form = gAdd.closest('form');
       window.MediaPicker.open({
-        title: 'Choose pictures for your gallery', multiple: true,
+        title: 'Choose pictures and videos for your gallery', multiple: true, video: true,
+        topic: topicOf(state.editing.props), assistantName: state.assistantName,
         onPickMany: (assets) => {
           syncEditing(form);
           const have = state.editing.props.images || [];
           const fresh = assets.filter((a) => !have.some((im) => im.assetId === a.id));
           fresh.forEach((a) => { state.thumbs[a.id] = a.url; });
-          state.editing.props.images = [...have, ...fresh.map((a) => ({ assetId: a.id, url: '', alt: altFromName(a.name), caption: '' }))].slice(0, 24);
+          state.editing.props.images = [...have, ...fresh.map((a) => ({ assetId: a.id, url: '', alt: altFromName(a.name), caption: '', ...(a.video ? { video: true } : {}) }))].slice(0, 24);
           render();
         },
       });

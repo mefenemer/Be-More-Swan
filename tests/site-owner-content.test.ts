@@ -111,7 +111,7 @@ async function main() {
     await check('the picker: upload by button, drag or paste, or choose from the library; flagged pictures refused', () => {
         const mp = read('src/components/media-picker.js');
         assert.ok(mp.includes('window.MediaPicker = { open, upload }'));
-        assert.ok(mp.includes("addEventListener('drop'") && mp.includes("addEventListener('paste'") && mp.includes('type="file" accept="image/*"'));
+        assert.ok(mp.includes("addEventListener('drop'") && mp.includes("addEventListener('paste'") && mp.includes(`type="file" accept="\${allowVideo ? 'image/*,video/mp4,video/webm,video/quicktime' : 'image/*'}"`));
         assert.ok(mp.includes("a.status !== 'rejected'") && mp.includes('window.gpUploadContentAsset'));
         assert.ok(mp.includes("document.removeEventListener('paste', onPaste)"), 'listeners go when the window closes');
         const ws = read('workspace.html');
