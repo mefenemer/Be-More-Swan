@@ -46,7 +46,7 @@
     "tierKey": "buster",
     "name": "The Busywork Buster",
     "monthlyPriceGbp": "99.00",
-    "assistantLimit": 3,
+    "assistantLimit": null,
     "monthlyTaskLimit": 2750,
     "monthlyTokenLimit": null,
     "appConnectionLimit": 10,
@@ -126,6 +126,6 @@
       "internal_systems_access": false,
       "workspace_collaboration": true
     },
-    "isActive": true
+    "isActive": false
   }
 ]

@@ -29,7 +29,9 @@ type Db = ReturnType<typeof getDb>;
 export const BETA_ENDED_PAUSE = 'paused_beta_ended';
 
 /** The tiers a beta workspace can be offered, cheapest first. Not trial/beta/enterprise. */
-export const OFFERABLE_TIERS = ['saver', 'buster', 'employee'] as const;
+// 'employee' (The Digital Employee, £349) stopped being sold on 17 Oct 2026 — its subscribers keep it,
+// but nobody is offered it. The £79 Busywork Buster has every assistant, so it is the top offer.
+export const OFFERABLE_TIERS = ['saver', 'buster'] as const;
 
 export interface TierLimits {
     tierKey: string; name: string; monthlyPriceGbp: number;

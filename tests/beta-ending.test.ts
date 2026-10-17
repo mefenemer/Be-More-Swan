@@ -38,7 +38,9 @@ console.log('\nThe offer');
 check('the smallest plan that covers what they used, not the beta tier', () => {
     assert.deepStrictEqual(suggestTier({ assistants: 1, peakMonthlyTasks: 120 }, TIERS), { tierKey: 'saver', fits: true });
     assert.deepStrictEqual(suggestTier({ assistants: 2, peakMonthlyTasks: 120 }, TIERS), { tierKey: 'buster', fits: true });
-    assert.deepStrictEqual(suggestTier({ assistants: 1, peakMonthlyTasks: 1500 }, TIERS), { tierKey: 'employee', fits: true });
+    // The Digital Employee is no longer offered (17 Oct 2026): past the top plan's tasks → the top
+    // plan, flagged as not fitting, so the admin sees it.
+    assert.deepStrictEqual(suggestTier({ assistants: 1, peakMonthlyTasks: 1500 }, TIERS), { tierKey: 'buster', fits: false });
 });
 
 check('30% off £29 is £20.30; an amount-off never goes below zero', () => {

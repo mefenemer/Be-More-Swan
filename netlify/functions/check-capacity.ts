@@ -311,6 +311,10 @@ export default withLambda(async (event) => {
                 .from(masterPlans)
                 .where(and(
                     eq(masterPlans.isActive, true),
+                    // Contact-sales Enterprise is never a self-serve upgrade: with the Digital Employee
+                    // retired (17 Oct 2026) it is the only priced plan above £79, and offering it here
+                    // sent buyers to a checkout with no Stripe price. null → the enterprise contact path.
+                    eq(masterPlans.isContactSales, false),
                     gt(masterPlans.monthlyPriceGbp, plan.monthlyPriceGbp as any),
                 ))
                 .orderBy(asc(masterPlans.monthlyPriceGbp))
