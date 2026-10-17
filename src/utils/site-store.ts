@@ -25,7 +25,7 @@ import { createNotification } from './notify';
 import { loadProductsBlock } from './org-products';
 import { getActiveFeaturesByOrg } from './plan-features';
 import {
-    applySiteOperation, assetIdsIn, DEFAULT_MAX_PAGES, FEATURE_LABELS, normaliseSiteDefinition, SITE_FEATURES, withoutAssets, type SiteDefinition, type SiteOperation,
+    applySiteOperation, assetIdsIn, DEFAULT_MAX_PAGES, FEATURE_LABELS, markVideos, normaliseSiteDefinition, SITE_FEATURES, withoutAssets, type SiteDefinition, type SiteOperation,
 } from './site-definition';
 import { buildDraftPrompt, placeholdersIn, siteFromDraftReply, starterSite, themeFromBrandKit, type BusinessFacts } from './site-draft';
 import { KEEP_VERSIONS, sameDefinition, siteOrigin, siteSlugProblem, slugFromHost } from './site-hosting';
@@ -121,12 +121,15 @@ export async function verifySiteAssets(db: Db, orgId: number, def: SiteDefinitio
     if (!ids.length) return { definition: def, warnings: [] };
     const rows = await db.select({ id: contentAssets.id, assetType: contentAssets.assetType, status: contentAssets.status })
         .from(contentAssets).where(and(inArray(contentAssets.id, ids), eq(contentAssets.organisationId, orgId)));
-    const ok = new Set(rows.filter((r) => r.assetType === 'image' && r.status !== 'rejected').map((r) => r.id));
+    const usable = rows.filter((r) => (r.assetType === 'image' || r.assetType === 'video') && r.status !== 'rejected');
+    const ok = new Set(usable.map((r) => r.id));
     const drop = new Set(ids.filter((id) => !ok.has(id)));
-    return {
-        definition: withoutAssets(def, drop),
-        warnings: drop.size ? [`${drop.size === 1 ? 'A picture was' : `${drop.size} pictures were`} left out: only pictures from your own library can be used.`] : [],
-    };
+    // Videos are drawn as videos where a site can show one, and taken out where it can't (markVideos).
+    const marked = markVideos(withoutAssets(def, drop), new Set(usable.filter((r) => r.assetType === 'video').map((r) => r.id)));
+    const warnings: string[] = [];
+    if (drop.size) warnings.push(`${drop.size === 1 ? 'A picture was' : `${drop.size} pictures were`} left out: only pictures from your own library can be used.`);
+    if (marked.removed) warnings.push('A video was left out: a logo, a sign-up section and a product show pictures only.');
+    return { definition: marked.definition, warnings };
 }
 
 /**

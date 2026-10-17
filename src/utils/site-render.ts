@@ -181,6 +181,7 @@ html{scroll-behavior:smooth}section[id]{scroll-margin-top:12px}
 .band{background:var(--p);color:var(--ink)}.band a:not(.btn){color:var(--ink)}.band .card,.band details{color:var(--t)}.band .btn{background:var(--ink);color:var(--p)}
 @media(min-width:700px){.grid.c2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid.c3{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .tx{display:grid;gap:28px;align-items:center}.tx img{border-radius:var(--r)}@media(min-width:800px){.tx{grid-template-columns:1fr 1fr}.tx.left img{order:0}.tx.right img{order:2}}
+video{display:block;width:100%;height:auto;max-width:100%;border-radius:var(--r);background:#000}.hero video{margin:24px auto 0}.hero.split video{margin:0}.gal.sq video{aspect-ratio:1/1;object-fit:cover}@media(min-width:800px){.tx.left video{order:0}.tx.right video{order:2}}
 .fm{display:grid;gap:14px;margin-top:20px;max-width:560px}.fm label{display:grid;gap:4px;font-weight:600;font-size:.95rem}.fm .opt{display:flex;gap:8px;align-items:flex-start;font-weight:400}
 .fm input:not([type=checkbox]):not([type=radio]),.fm textarea,.fm select{font:inherit;color:var(--t);background:var(--b);border:1px solid rgba(0,0,0,.25);border-radius:var(--r);padding:10px 12px;width:100%}
 .fm fieldset{border:0;padding:0;margin:0;display:grid;gap:6px}.fm legend{font-weight:600;font-size:.95rem;margin-bottom:4px}.fm .help,.fm .fine{font-size:.85rem;opacity:.8;font-weight:400;margin:0}
@@ -198,6 +199,15 @@ export function imageSrc(img: { url: string; assetId?: number | null } | null | 
     if (!img) return '';
     if (img.assetId) return assetUrlOf(img.assetId) || '';
     return img.url || '';
+}
+/**
+ * A library picture, or a library video (Image.video, set from the asset by markVideos): silent and
+ * looping, as a picture would sit there, but with the browser's own controls so a visitor can pause
+ * it — moving content that can't be stopped fails WCAG 2.2.2, and the site runs no script of its own.
+ */
+function mediaHtml(img: { alt: string; video?: boolean }, src: string, loading: 'eager' | 'lazy'): string {
+    if (img.video) return `<video src="${esc(src)}" autoplay muted loop playsinline controls controlslist="nodownload noplaybackrate" disablepictureinpicture preload="${loading === 'eager' ? 'auto' : 'metadata'}" aria-label="${esc(img.alt)}" title="${esc(img.alt)}"></video>`;
+    return `<img src="${esc(src)}" alt="${esc(img.alt)}" loading="${loading}">`;
 }
 function logoSrc(theme: SiteTheme): string {
     return theme.logoAssetId ? (assetUrlOf(theme.logoAssetId) || theme.logoUrl || '') : (theme.logoUrl || '');
@@ -257,7 +267,7 @@ function sectionHtml(s: Section, h1: boolean, bg: SectionBg): string {
             const buttons = [p.primaryCta && linkHtml(p.primaryCta), p.secondaryCta && linkHtml(p.secondaryCta, true)].filter(Boolean).join('');
             const copy = `${p.eyebrow ? `<p class="eb">${esc(p.eyebrow)}</p>` : ''}<${H}>${esc(p.headline)}</${H}>${p.subheadline ? `<p class="sub">${esc(p.subheadline)}</p>` : ''}${buttons ? `<p>${buttons}</p>` : ''}`;
             const src = imageSrc(p.image);
-            const img = p.image && src ? `<img src="${esc(src)}" alt="${esc(p.image.alt)}" loading="eager">` : '';
+            const img = p.image && src ? mediaHtml(p.image, src, 'eager') : '';
             return `<section class="hero ${p.layout}" id="${esc(s.id)}"><div class="w">${p.layout === 'split' ? `<div>${copy}</div>${img}` : `${copy}${img}`}</div></section>`;
         }
         case 'features':
@@ -273,7 +283,7 @@ function sectionHtml(s: Section, h1: boolean, bg: SectionBg): string {
             const src = imageSrc(p.image);
             if (p.image && src) {
                 // Beside the words on a wide screen (left or right), above them on a phone.
-                return `<section${cls} id="${esc(s.id)}"><div class="w tx ${p.imageSide}"><img src="${esc(src)}" alt="${esc(p.image.alt)}" loading="lazy"><div>${words}</div></div></section>`;
+                return `<section${cls} id="${esc(s.id)}"><div class="w tx ${p.imageSide}">${mediaHtml(p.image, src, 'lazy')}<div>${words}</div></div></section>`;
             }
             return `<section${cls} id="${esc(s.id)}"><div class="w n">${words}</div></section>`;
         }
@@ -343,7 +353,7 @@ ${formButton(p.buttonLabel)}
             const tiles = p.images.map((im) => {
                 const src = imageSrc(im);
                 if (!src) return '';
-                return `<figure class="gi"><a href="${esc(src)}"><img src="${esc(src)}" alt="${esc(im.alt)}" loading="lazy"></a>${im.caption ? `<figcaption>${esc(im.caption)}</figcaption>` : ''}</figure>`;
+                return `<figure class="gi">${im.video ? mediaHtml(im, src, 'lazy') : `<a href="${esc(src)}">${mediaHtml(im, src, 'lazy')}</a>`}${im.caption ? `<figcaption>${esc(im.caption)}</figcaption>` : ''}</figure>`;
             }).filter(Boolean);
             if (!tiles.length) return '';
             return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}<div class="grid gal ${p.layout === 'natural' ? 'nat' : 'sq'}">${tiles.join('')}</div></div></section>`;
