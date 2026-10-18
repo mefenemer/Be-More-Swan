@@ -159,9 +159,9 @@
     },
     {
       view: 'help',
-      targets: ['#tab-btn-issues'],
-      title: 'Spotted Something Off?',
-      copy: 'Report an Issue sends what you found straight to the team — say where it happened, add a screenshot, and follow it here until it is fixed.',
+      targets: ['#tab-btn-contact'],
+      title: 'Need a Hand?',
+      copy: 'Contact us is the one place to tell the team anything — something broken (add a screenshot), a question, or billing — and follow every reply here.',
       placement: 'bottom',
     },
     {

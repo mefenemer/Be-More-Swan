@@ -70,7 +70,8 @@ check('"Availability", not "Timetable"; the Website tab leads with a new site\'s
     assert.ok(ed.includes('<p class="text-sm font-black text-gray-900">Availability</p>') && !ed.includes('Timetable — classes'));
     const r = ed.slice(ed.indexOf("${featuresOn() ? '' : featuresCard(true)}"));
     assert.ok(r.indexOf('${publishCard()}') > 0, 'what the website does comes before Publish');
-    assert.ok(ed.includes('return templatesCard(false) + structureCard() + designCard();'), 'templates, then the layout, then the design');
+    assert.ok(ed.includes('return structureCard() + designCard();'), 'the layout, then the design — templates have their own tab (2026-10-18)');
+    assert.ok(ed.includes("state.panel === 'templates' ? templatesCard(false)"));
     const pages = ed.slice(ed.indexOf('  function pagesPanel() {'), ed.indexOf('  // ── "Add your own words"'));
     assert.ok(!pages.includes('structureCard()') && pages.indexOf('Sections on ${esc(p.title)}') < pages.indexOf('Page details'));
 });

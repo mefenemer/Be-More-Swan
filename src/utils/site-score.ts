@@ -315,6 +315,22 @@ export interface SuggestedFix {
     suggestedText: string;
 }
 
+// The names pageForPrompt (site-audit-prompts.ts) gives the page's parts. A model asked for "where
+// on the page" sometimes answers with one — "pricingAndGuarantees / Proof section" reached a customer.
+const FIELD_WORDS: Record<string, string> = {
+    url: 'Page address', title: 'Page title', searchDescription: 'Search description',
+    structuredDataTypes: 'Search data', headline: 'Headline', subheadline: 'Subheadline',
+    topButtons: 'Top button', sectionHeadings: 'Section heading', subHeadings: 'Subheading',
+    otherButtons: 'Button', pricingAndGuarantees: 'Pricing', proof: 'Testimonials',
+    questionsAnswered: 'FAQ', forms: 'Form', text: 'Page text',
+};
+/** "pricingAndGuarantees / Proof section" → "Pricing / Proof section": field names become words. */
+export function plainLocation(location: string): string {
+    return location.replace(/\b[a-z]+(?:[A-Z][a-z]*)+\b|\b(?:proof|text|forms|url|title|headline|subheadline)\b(?=\s*(?:\/|$))/g,
+        (w) => FIELD_WORDS[w] ?? w.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()).replace(/ (\w)/g, (_, c) => ` ${c.toLowerCase()}`))
+        .replace(/\s+/g, ' ').trim();
+}
+
 /** Keep only fixes that quote real page text and actually propose something different. */
 export function groundFixes(raw: unknown, lens: Lens, page: SitePage): { fixes: SuggestedFix[]; dropped: number } {
     const list = Array.isArray(raw) ? raw : [];
@@ -325,7 +341,7 @@ export function groundFixes(raw: unknown, lens: Lens, page: SitePage): { fixes: 
         const str = (k: string) => (typeof f[k] === 'string' ? (f[k] as string).trim() : '');
         const fix: SuggestedFix = {
             lens,
-            location: str('location').slice(0, 80),
+            location: plainLocation(str('location')).slice(0, 80),
             problem: str('problem').slice(0, 400),
             currentText: str('currentText').slice(0, 400),
             suggestedText: str('suggestedText').slice(0, 600),

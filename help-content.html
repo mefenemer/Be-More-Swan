@@ -60,14 +60,14 @@
   </div>
 
   <div class="border-b border-gray-200 mb-8">
-    <!-- Four ways in, one page (2026-10-03): the workspace's separate "Report an issue" icon and its
-         pop-up were folded in here as their own tab. Each tab still writes where it always did —
-         issues → issue_reports (Admin → Issue Reports, the developer workflow), tickets →
-         support_tickets (Admin → Support Tickets), ideas → feature_requests (Admin → Feature Requests). -->
+    <!-- Three ways in (2026-10-18). "Report an Issue" and "Support Tickets" were two tabs asking the same
+         question — "something's wrong, help" — so they are one "Contact us" tab now: one form, one list
+         of everything you've sent. Behind it nothing moved: "Something isn't working" still writes to
+         issue_reports (Admin → Issue Reports, the fix workflow, with the screenshot), every other
+         topic to support_tickets (Admin → Support Tickets). Ideas → feature_requests. -->
     <nav class="-mb-px flex space-x-8 overflow-x-auto" aria-label="Tabs">
       <button id="tab-btn-docs" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-bold text-sm border-emerald-500 text-emerald-600">Knowledge Base</button>
-      <button id="tab-btn-issues" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">Report an Issue</button>
-      <button id="tab-btn-tickets" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">Support Tickets</button>
+      <button id="tab-btn-contact" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">Contact us</button>
       <button id="tab-btn-features" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">Feature Requests</button>
     </nav>
   </div>
@@ -108,142 +108,76 @@
         </div>
       </div>
       <div class="mt-6 flex items-center justify-end text-sm text-gray-500">
-        <button type="button" class="hover:text-gray-700" onclick="window.helpShowTab && window.helpShowTab('tickets')">Still stuck? Open a support ticket &rarr;</button>
+        <button type="button" class="hover:text-gray-700" onclick="window.helpShowTab && window.helpShowTab('contact')">Still stuck? Contact us &rarr;</button>
       </div>
     </article>
   </div>
 
-  <!-- ── Report an Issue (was the workspace header icon + modal) ─────────────────────────────── -->
-  <div id="tab-content-issues" class="tab-content hidden">
+  <!-- ── Contact us: one form, one list (help.js) ─────────────────────────────────────────────── -->
+  <div id="tab-content-contact" class="tab-content hidden">
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
       <div class="lg:col-span-1">
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-          <h3 class="text-lg font-bold text-gray-900 mb-1">Something not working?</h3>
-          <p class="text-xs text-gray-500 mb-4">Tell us what went wrong. It goes straight to the team fixing things, and you can follow it here until it is fixed.</p>
-          <label for="ri-area" class="block text-sm font-bold text-gray-700 mb-1">Where did it happen?</label>
-          <select id="ri-area" class="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm bg-white mb-4">
-            <option value="dashboard">Workspace Overview (dashboard)</option>
-            <option value="assistants">My Assistants</option>
-            <option value="assistant-detail">An assistant's page</option>
-            <option value="post-editor">The post editor</option>
-            <option value="blog-studio">Blog Studio</option>
-            <option value="newsletter">Email Studio</option>
-            <option value="calendar">Content Calendar</option>
-            <option value="review-queue">Review</option>
-            <option value="audience">Audience</option>
-            <option value="my-content">My Content</option>
-            <option value="assets">Business Information</option>
-            <option value="catalog">Hire Assistant</option>
-            <option value="notifications">Notifications</option>
-            <option value="settings">Account Settings</option>
-            <option value="billing">Subscription &amp; Billing</option>
-            <option value="integrations">Connections &amp; integrations</option>
-            <option value="other">Somewhere else</option>
+          <h3 class="text-lg font-bold text-gray-900 mb-1">How can we help?</h3>
+          <p class="text-xs text-gray-500 mb-4">It goes straight to the team, we email you a copy, and you can follow it here.</p>
+          <label for="cu-topic" class="block text-sm font-bold text-gray-700 mb-1">What's this about?</label>
+          <select id="cu-topic" class="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm bg-white mb-4">
+            <option value="broken">Something isn't working</option>
+            <option value="technical">How do I…? / Account help</option>
+            <option value="assistant">An assistant isn't doing what I expect</option>
+            <option value="billing">Billing / Subscription</option>
+            <option value="other">Something else</option>
           </select>
-          <label for="ri-description" class="block text-sm font-bold text-gray-700 mb-1">Describe the issue</label>
-          <textarea id="ri-description" rows="5" placeholder="What went wrong? What did you expect to happen?"
+          <div id="cu-broken-fields">
+            <label for="ri-area" class="block text-sm font-bold text-gray-700 mb-1">Where did it happen?</label>
+            <select id="ri-area" class="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm bg-white mb-4">
+              <option value="dashboard">Workspace Overview (dashboard)</option>
+              <option value="assistants">My Assistants</option>
+              <option value="assistant-detail">An assistant's page</option>
+              <option value="post-editor">The post editor</option>
+              <option value="blog-studio">Blog Studio</option>
+              <option value="newsletter">Email Studio</option>
+              <option value="calendar">Content Calendar</option>
+              <option value="review-queue">Review</option>
+              <option value="audience">Audience</option>
+              <option value="my-content">My Content</option>
+              <option value="assets">Business Information</option>
+              <option value="catalog">Hire Assistant</option>
+              <option value="notifications">Notifications</option>
+              <option value="settings">Account Settings</option>
+              <option value="billing">Subscription &amp; Billing</option>
+              <option value="integrations">Connections &amp; integrations</option>
+              <option value="other">Somewhere else</option>
+            </select>
+          </div>
+          <label for="ri-description" class="block text-sm font-bold text-gray-700 mb-1">Tell us more</label>
+          <textarea id="ri-description" rows="5" placeholder="What happened, and what did you expect?"
             class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-600 focus:outline-none resize-none"></textarea>
-          <label for="ri-image" class="block text-sm font-bold text-gray-700 mt-4 mb-1">Attach a screenshot <span class="text-gray-400 font-normal">(optional)</span></label>
-          <input id="ri-image" type="file" accept="image/png,image/jpeg,image/gif,image/webp"
-            class="block w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gray-100 file:text-gray-700">
-          <div id="ri-image-preview" class="hidden mt-3">
-            <img id="ri-image-thumb" alt="Screenshot preview" class="max-h-40 rounded-lg border border-gray-200">
-            <button type="button" onclick="window.riClearImage()" class="block mt-1 text-xs text-red-600 hover:underline">Remove image</button>
+          <div id="cu-image-fields">
+            <label for="ri-image" class="block text-sm font-bold text-gray-700 mt-4 mb-1">Attach a screenshot <span class="text-gray-400 font-normal">(optional)</span></label>
+            <input id="ri-image" type="file" accept="image/png,image/jpeg,image/gif,image/webp"
+              class="block w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gray-100 file:text-gray-700">
+            <div id="ri-image-preview" class="hidden mt-3">
+              <img id="ri-image-thumb" alt="Screenshot preview" class="max-h-40 rounded-lg border border-gray-200">
+              <button type="button" onclick="window.riClearImage()" class="block mt-1 text-xs text-red-600 hover:underline">Remove image</button>
+            </div>
           </div>
           <p id="ri-error" class="hidden mt-3 text-sm text-red-600"></p>
-          <button type="button" id="ri-submit" onclick="window.submitReportIssue()" class="btn-primary w-full mt-5 px-4 py-3 text-sm font-bold rounded-xl shadow-sm">Submit issue</button>
-          <p class="text-xs text-gray-500 mt-3">A question rather than a fault? <button type="button" class="font-semibold text-emerald-700 hover:underline" onclick="window.helpShowTab && window.helpShowTab('tickets')">Open a support ticket</button>. An idea? <button type="button" class="font-semibold text-emerald-700 hover:underline" onclick="window.helpShowTab && window.helpShowTab('features')">Suggest a feature</button>.</p>
+          <button type="button" id="ri-submit" onclick="window.submitContact()" class="btn-primary w-full mt-5 px-4 py-3 text-sm font-bold rounded-xl shadow-sm">Send</button>
+          <p class="text-xs text-gray-500 mt-3">An idea for something new? <button type="button" class="font-semibold text-emerald-700 hover:underline" onclick="window.helpShowTab && window.helpShowTab('features')">Suggest a feature</button>.</p>
         </div>
       </div>
       <div class="lg:col-span-2">
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
           <div class="flex items-center justify-between gap-3 mb-4 flex-wrap">
-            <h3 class="text-lg font-bold text-gray-900">Your reported issues</h3>
-            <div class="flex items-center gap-2">
-              <label for="ri-status-filter" class="text-xs font-semibold text-gray-500">Show</label>
-              <select id="ri-status-filter" onchange="window.riFilterReports(this.value)"
-                class="border border-gray-300 rounded-lg px-2 py-1 text-xs font-semibold text-gray-700">
-                <option value="all">All statuses</option>
-                <option value="fixed_ready_to_test">Fixed &amp; Ready to Test</option>
-                <option value="reported">Reported</option>
-                <option value="backlog">Backlog</option>
-                <option value="on_hold">On Hold</option>
-                <option value="fix_in_progress">Fix In Progress</option>
-                <option value="merge">Merge</option>
-                <option value="more_info_required">More Info Required</option>
-                <option value="roadmap">On Roadmap</option>
-                <option value="closed">Closed</option>
-              </select>
-            </div>
+            <h3 class="text-lg font-bold text-gray-900">Your requests</h3>
+            <span class="text-xs text-gray-500">Anything waiting on you is at the top</span>
           </div>
           <div id="ri-my-list" class="space-y-3 text-sm text-gray-500">Loading…</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div id="tab-content-tickets" class="tab-content hidden">
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-
-      <div class="lg:col-span-1 space-y-6">
-        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-          <h3 class="text-lg font-bold text-gray-900 mb-4">Submit a Request</h3>
-          <form id="support-ticket-form" class="space-y-4">
-            <div>
-              <label class="block text-sm font-bold text-gray-700 mb-1">Subject</label>
-              <input type="text" id="ticket-subject" required placeholder="Brief summary of the issue" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
-            </div>
-            <div>
-              <label class="block text-sm font-bold text-gray-700 mb-1">Category</label>
-              <select id="ticket-category" required class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm bg-white cursor-pointer">
-                <option value="" disabled selected>Select an issue type...</option>
-                <option value="technical">How do I…? / Account help</option>
-                <option value="assistant">An assistant isn't doing what I expect</option>
-                <option value="billing">Billing / Subscription</option>
-                <option value="other">Something else</option>
-              </select>
-            </div>
-            <div>
-              <label class="block text-sm font-bold text-gray-700 mb-1">Description</label>
-              <textarea id="ticket-description" required rows="5" placeholder="Please provide as much detail as possible..." class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm resize-none"></textarea>
-            </div>
-            <button type="submit" id="btn-submit-ticket" class="btn-primary w-full px-4 py-3 text-sm font-bold rounded-xl transition-colors shadow-sm">
-              Submit Ticket
-            </button>
-            <p id="ticket-form-msg" class="hidden text-sm font-semibold"></p>
-          </form>
-          <p class="text-xs text-gray-500 mt-4">Something broken? <button type="button" class="font-semibold text-emerald-700 hover:underline" onclick="window.helpShowTab && window.helpShowTab('issues')">Report an issue</button> instead — you can attach a screenshot. An idea? <button type="button" class="font-semibold text-emerald-700 hover:underline" onclick="window.helpShowTab && window.helpShowTab('features')">Suggest a feature</button>.</p>
-        </div>
-      </div>
-
-      <div class="lg:col-span-2">
-        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col h-full">
-          <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
-            <h3 class="text-lg font-bold text-gray-900">Your Ticket History</h3>
-            <span class="text-xs text-gray-500">Select a ticket to read replies and respond</span>
-          </div>
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm text-left">
-              <thead class="bg-gray-50 text-gray-500 font-medium border-b border-gray-200">
-              <tr>
-                <th class="px-6 py-3">Ticket ID</th>
-                <th class="px-6 py-3">Subject / Category</th>
-                <th class="px-6 py-3">Date Submitted</th>
-                <th class="px-6 py-3">Status</th>
-              </tr>
-              </thead>
-              <tbody id="ticket-history-body" class="divide-y divide-gray-100 bg-white">
-              <tr>
-                <td colspan="4" class="p-8 text-center text-gray-500">Loading history...</td>
-              </tr>
-              </tbody>
-            </table>
-          </div>
           <!-- One ticket's conversation: the description, every public reply, and a reply box. -->
-          <div id="ticket-thread" class="hidden border-t border-gray-100 p-6"></div>
+          <div id="ticket-thread" class="hidden mt-4 border-t border-gray-100 pt-4"></div>
         </div>
       </div>
-
     </div>
   </div>
 

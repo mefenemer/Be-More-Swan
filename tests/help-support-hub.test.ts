@@ -28,19 +28,32 @@ check('the header icon, its modal and its old script are gone from the workspace
     assert.doesNotMatch(W, /window\.openReportIssue = function/);
 });
 
-check('Help & Support has the four tabs, issues included', () => {
-    for (const t of ['docs', 'issues', 'tickets', 'features']) {
+check('Help & Support has three tabs: issues and tickets are ONE "Contact us" (2026-10-18)', () => {
+    for (const t of ['docs', 'contact', 'features']) {
         assert.match(HC, new RegExp(`id="tab-btn-${t}"`));
         assert.match(HC, new RegExp(`id="tab-content-${t}"`));
     }
-    for (const id of ['ri-area', 'ri-description', 'ri-image', 'ri-submit', 'ri-my-list', 'ri-status-filter']) assert.match(HC, new RegExp(`id="${id}"`));
+    for (const t of ['issues', 'tickets']) assert.doesNotMatch(HC, new RegExp(`id="tab-btn-${t}"`), 'two tabs for one question is what the owner asked to remove');
+    for (const id of ['cu-topic', 'ri-area', 'ri-description', 'ri-image', 'ri-submit', 'ri-my-list', 'ticket-thread']) assert.match(HC, new RegExp(`id="${id}"`));
+});
+
+check('one form, two queues: a fault goes to issue_reports, every other topic to support_tickets', () => {
+    assert.match(HJ, /return topic === 'broken' \? window\.submitReportIssue\(\) : submitTicket\(topic\);/);
+    assert.match(HJ, /fetch\('\/\.netlify\/functions\/support-tickets', \{\s*method: 'POST'[\s\S]{0,120}JSON\.stringify\(\{ subject, category, description: desc \}\)/);
+    for (const v of ['technical', 'assistant', 'billing', 'other']) assert.match(HC, new RegExp(`<option value="${v}">`));
+});
+
+check('one list merges both, and the old tab names still land on Contact us', () => {
+    assert.match(HJ, /\.\.\._myReports\.map\([\s\S]{0,200}\.\.\._myTickets\.map\(/);
+    assert.match(HJ, /const TAB_ALIAS = \{ issues: 'contact', tickets: 'contact' \};/);
+    assert.match(HJ, /tab = tabName\(tab\);\s*if \(!TABS\.includes\(tab\)\) tab = 'docs';/);
 });
 
 check('the old entry points still work, and land on the tab', () => {
     assert.match(HJ, /window\.openReportIssue = function/);
     assert.match(HJ, /window\.routeToIssueReport = function \(issueId\)/);
     assert.match(HJ, /window\.routeToSupportTicket = function \(ticketId\)/);
-    assert.match(read('tour.js'), /targets: \['#tab-btn-issues'\]/);
+    assert.match(read('tour.js'), /targets: \['#tab-btn-contact'\]/);
     assert.doesNotMatch(read('notifications.js'), /ticketTab\.click\(\)/, 'a timed tab click races the view load');
 });
 
@@ -75,7 +88,7 @@ check('the business inbox hears about new tickets, replies and feature ideas', (
 
 check('every status has a label, and user text is escaped', () => {
     for (const s of ['new', 'open', 'pending_customer', 'resolved', 'closed']) assert.match(HJ, new RegExp(`${s}: +\\[`));
-    assert.match(HJ, /\$\{esc\(ticket\.subject\)\}/);
+    assert.match(HJ, /\$\{esc\(t\.subject\)\}/);
 });
 
 check('the ticket button keeps its button-system class after submitting', () => {

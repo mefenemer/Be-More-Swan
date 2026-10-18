@@ -1,10 +1,14 @@
 // help.js — Help & Support (the workspace's `help` view, help-content.html).
 //
-// Four tabs, each writing where it always has:
+// Three tabs:
 //   Knowledge Base   → help_articles (read-only here; edited in Admin → Master Data → Help articles)
-//   Report an Issue  → issue_reports  (Admin → Issue Reports — the developer/fix workflow)
-//   Support Tickets  → support_tickets + ticket_replies (Admin → Support Tickets / helpdesk)
+//   Contact us       → ONE form and ONE list for the customer (2026-10-18), two queues behind it:
+//                        "Something isn't working" → issue_reports (Admin → Issue Reports, the fix
+//                        workflow, with area + screenshot); every other topic → support_tickets +
+//                        ticket_replies (Admin → Support Tickets / helpdesk). The list merges both.
 //   Feature Requests → feature_requests (Admin → Feature Requests; UI + logic in help-content.html)
+// 'issues' and 'tickets' were tabs until 2026-10-18; they are aliases of 'contact' so notifications,
+// the command bar and ?help=issues email links still land in the right place.
 //
 // "Report an Issue" used to be a header icon and a pop-up of its own (until 2026-10-03). It lives
 // here now; window.openReportIssue / window.routeToIssueReport still exist so the command bar, the
@@ -13,7 +17,9 @@
 (function () {
     const esc = (s) => String(s == null ? '' : s)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    const TABS = ['docs', 'issues', 'tickets', 'features'];
+    const TABS = ['docs', 'contact', 'features'];
+    const TAB_ALIAS = { issues: 'contact', tickets: 'contact' };
+    const tabName = (t) => TAB_ALIAS[t] || t;
     const TAB_ON = 'tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-bold text-sm border-emerald-500 text-emerald-600';
     const TAB_OFF = 'tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300';
 
@@ -26,6 +32,7 @@
     let featureRequestsInitialized = false;
     let onTab = {};
     window.helpShowTab = function (tab) {
+        tab = tabName(tab);
         if (!TABS.includes(tab)) tab = 'docs';
         let present = false;
         TABS.forEach((t) => {
@@ -45,6 +52,7 @@
 
     /** Go to Help & Support on a given tab, from anywhere in the workspace. */
     window.openHelpTab = function (tab, after) {
+        tab = tabName(tab);
         window._helpInitialTab = tab;
         window._helpAfterOpen = typeof after === 'function' ? after : null;
         if (window._currentViewKey === 'help' && document.getElementById('tab-btn-docs')) {
@@ -59,7 +67,6 @@
     // ── Report an Issue ──────────────────────────────────────────────────────────────────────────
     let _pendingImage = null;          // data URL of the attached screenshot
     let _myReports = [];
-    let _myReportsFilter = 'all';
     const STATUS_BADGE = {
         reported:            ['Reported', 'bg-gray-100 text-gray-700'],
         backlog:             ['Backlog', 'bg-slate-100 text-slate-700'],
@@ -85,7 +92,7 @@
 
     // Kept for callers elsewhere (the command bar, notifications): both land on this tab now.
     window.openReportIssue = function (tab) {
-        window.openHelpTab('issues', tab === 'mine' ? () => document.getElementById('ri-my-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) : null);
+        window.openHelpTab('contact', tab === 'mine' ? () => document.getElementById('ri-my-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) : null);
     };
     window.closeReportIssue = function () {};
 
@@ -110,6 +117,49 @@
         };
         reader.readAsDataURL(file);
     });
+
+    // The topic decides the queue: a fault goes to the fix workflow, everything else is a ticket.
+    window.submitContact = function () {
+        const topic = document.getElementById('cu-topic')?.value || 'broken';
+        return topic === 'broken' ? window.submitReportIssue() : submitTicket(topic);
+    };
+    // Area and screenshot only mean something for a fault — the helpdesk takes neither.
+    function syncContactFields() {
+        const broken = (document.getElementById('cu-topic')?.value || 'broken') === 'broken';
+        document.getElementById('cu-broken-fields')?.classList.toggle('hidden', !broken);
+        document.getElementById('cu-image-fields')?.classList.toggle('hidden', !broken);
+        const desc = document.getElementById('ri-description');
+        if (desc) desc.placeholder = broken ? 'What happened, and what did you expect?' : 'Tell us as much as you can — we usually reply within 1–2 business days.';
+    }
+    document.addEventListener('change', (e) => { if (e.target && e.target.id === 'cu-topic') syncContactFields(); });
+
+    async function submitTicket(category) {
+        const descEl = document.getElementById('ri-description');
+        const desc = (descEl?.value || '').trim();
+        riError('');
+        if (!desc) { riError('Please tell us a little more.'); return; }
+        // The helpdesk wants a subject; the first line of the message is it, so the form asks once.
+        const first = desc.split('\n')[0].trim();
+        const subject = first.length > 80 ? `${first.slice(0, 79).replace(/\s+\S*$/, '')}…` : first;
+        const btn = document.getElementById('ri-submit');
+        if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+        try {
+            const res = await fetch('/.netlify/functions/support-tickets', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ subject, category, description: desc }),
+            });
+            const d = await res.json().catch(() => ({}));
+            if (!res.ok) { riError(d.error || 'Could not send — please try again.'); return; }
+            if (descEl) descEl.value = '';
+            window.showToast?.(`Sent — request #TK-${d.ticket?.id ?? ''}. We've emailed you a copy.`, { icon: '✉️' });
+            window.updateNotificationBadge?.();
+            loadMyReports();
+        } catch {
+            riError('Network error — please try again.');
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
+        }
+    }
 
     window.submitReportIssue = async function () {
         const desc = (document.getElementById('ri-description')?.value || '').trim();
@@ -136,57 +186,56 @@
             document.getElementById('ri-description').value = '';
             window.riClearImage();
             window.showToast?.('Thanks — your issue has been reported. You can follow it here.', { icon: '🐞' });
-            _myReportsFilter = 'all';
             loadMyReports();
         } catch {
             riError('Network error — please try again.');
         } finally {
-            if (btn) { btn.disabled = false; btn.textContent = 'Submit issue'; }
+            if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
         }
     };
 
+    // "Your requests": issues and tickets in one list, whatever is waiting on the user first, then
+    // newest first. Each half loads on its own — one queue being down still shows the other.
+    let _myTickets = [];
+    let _listErrors = [];
     async function loadMyReports() {
         const list = document.getElementById('ri-my-list');
         if (!list) return;
         list.innerHTML = 'Loading…';
-        const select = document.getElementById('ri-status-filter');
-        if (select) select.value = _myReportsFilter;
-        try {
-            const res = await fetch('/.netlify/functions/issue-reports');
-            const d = await res.json().catch(() => ({}));
-            if (!res.ok) { list.innerHTML = `<p class="text-red-600">${esc(d.error || 'Could not load your reports.')}</p>`; return; }
-            _myReports = d.issues || [];
-            // Something waiting on the user is what they came to see — open on it when there is one.
-            if (_myReportsFilter === 'all' && _myReports.some((i) => i.status === 'fixed_ready_to_test' || i.status === 'more_info_required')) {
-                // stays 'all', but those float to the top (below)
-            }
-            renderMyReportsList();
-        } catch {
-            list.innerHTML = '<p class="text-red-600">Network error — please try again.</p>';
-        }
+        _listErrors = [];
+        const [issues, tickets] = await Promise.all([
+            fetch('/.netlify/functions/issue-reports').then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error); return d.issues || []; })
+                .catch(() => { _listErrors.push('reported problems'); return []; }),
+            fetch('/.netlify/functions/support-tickets').then(async (r) => { const d = await r.json().catch(() => ([])); if (!r.ok) throw new Error(); return Array.isArray(d) ? d : []; })
+                .catch(() => { _listErrors.push('questions'); return []; }),
+        ]);
+        _myReports = issues;
+        _myTickets = tickets;
+        renderMyReportsList();
     }
 
     function renderMyReportsList() {
         const list = document.getElementById('ri-my-list');
         if (!list) return;
-        if (!_myReports.length) { list.innerHTML = '<p class="text-gray-400">You haven\'t reported any issues yet.</p>'; return; }
-        const waiting = (i) => (i.status === 'fixed_ready_to_test' || i.status === 'more_info_required') ? 0 : 1;
-        const issues = (_myReportsFilter === 'all' ? _myReports.slice() : _myReports.filter((i) => i.status === _myReportsFilter))
-            .sort((a, b) => waiting(a) - waiting(b));
-        if (!issues.length) {
-            const [label] = STATUS_BADGE[_myReportsFilter] || [];
-            list.innerHTML = `<p class="text-gray-400">No reports with status "${esc(label || _myReportsFilter)}".</p>`;
-            return;
-        }
-        list.innerHTML = issues.map(renderIssueCard).join('');
+        const items = [
+            ..._myReports.map((i) => ({ kind: 'issue', at: i.createdAt, waiting: i.status === 'fixed_ready_to_test' || i.status === 'more_info_required', html: renderIssueCard(i) })),
+            ..._myTickets.map((t) => ({ kind: 'ticket', at: t.createdAt, waiting: t.status === 'pending_customer' || t.status === 'pending', html: renderTicketCard(t) })),
+        ].sort((a, b) => (Number(b.waiting) - Number(a.waiting)) || (new Date(b.at || 0) - new Date(a.at || 0)));
+        const err = _listErrors.length ? `<p class="text-red-600 text-xs">Couldn't load your ${esc(_listErrors.join(' or '))} — try again in a moment.</p>` : '';
+        list.innerHTML = err + (items.length ? items.map((x) => x.html).join('') : '<p class="text-gray-400">Nothing yet — anything you send appears here, with our replies.</p>');
     }
 
-    window.riFilterReports = function (status) {
-        _myReportsFilter = status;
-        const select = document.getElementById('ri-status-filter');
-        if (select) select.value = status;
-        renderMyReportsList();
-    };
+    function renderTicketCard(t) {
+        const date = t.createdAt ? new Date(t.createdAt).toLocaleDateString() : '';
+        return `
+          <div class="border border-gray-200 rounded-xl p-3 cursor-pointer hover:bg-gray-50" data-ticket-id="${esc(t.id)}" tabindex="0" role="button" aria-label="Open request ${esc(t.id)}">
+            <div class="flex items-start justify-between gap-2">
+              <p class="text-sm font-semibold text-gray-800">${esc(t.subject)}</p>
+              <span class="shrink-0">${ticketBadge(t.status)}</span>
+            </div>
+            <p class="text-[11px] text-gray-400 mt-1">#TK-${esc(t.id)} · ${esc(CATEGORY_LABEL[t.category] || t.category)} · ${esc(date)} · <span class="text-emerald-700 font-semibold">Open conversation</span></p>
+          </div>`;
+    }
 
     function renderIssueCard(i) {
         const [label, cls] = STATUS_BADGE[i.status] || [i.statusLabel || i.status, 'bg-gray-100 text-gray-700'];
@@ -258,7 +307,7 @@
 
     // The issue-update notification ("View issue") and the ?issue=N email link.
     window.routeToIssueReport = function (issueId) {
-        window.openHelpTab('issues', () => {
+        window.openHelpTab('contact', () => {
             if (issueId == null) return;
             const focusCard = () => {
                 const card = document.querySelector(`[data-issue-id="${issueId}"]`);
@@ -279,7 +328,7 @@
         // ?help=<tab> — a direct link to one Help & Support tab, e.g. the beta testers' welcome
         // email's "share feedback" link (?help=issues / ?help=features). Same timing as ?issue.
         const helpTab = qs.get('help');
-        if (helpTab && TABS.includes(helpTab)) {
+        if (helpTab && TABS.includes(tabName(helpTab))) {
             window.addEventListener('load', () => setTimeout(() => window.openHelpTab(helpTab), 600));
         }
     } catch { /* noop */ }
@@ -303,40 +352,6 @@
         technical: 'How do I…? / Account help', assistant: 'Assistant behaviour', billing: 'Billing / Subscription',
         feature: 'Feature request', other: 'Something else',
     };
-
-    async function fetchTicketHistory() {
-        const historyBody = document.getElementById('ticket-history-body');
-        if (!historyBody) return;
-        try {
-            const res = await fetch('/.netlify/functions/support-tickets');
-            if (!res.ok) throw new Error();
-            renderTicketHistory(await res.json());
-        } catch {
-            historyBody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-red-500">Couldn't load your tickets — try again.</td></tr>`;
-        }
-    }
-
-    function renderTicketHistory(tickets) {
-        const historyBody = document.getElementById('ticket-history-body');
-        if (!historyBody) return;
-        if (!Array.isArray(tickets) || tickets.length === 0) {
-            historyBody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-gray-500">You haven't submitted any support tickets yet.</td></tr>`;
-            return;
-        }
-        historyBody.innerHTML = tickets.map((ticket) => {
-            const dateStr = new Date(ticket.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-            return `
-              <tr class="hover:bg-gray-50 transition-colors cursor-pointer" data-ticket-id="${ticket.id}" tabindex="0" role="button" aria-label="Open ticket ${ticket.id}">
-                <td class="px-6 py-4 font-mono text-xs text-gray-500">#TK-${ticket.id}</td>
-                <td class="px-6 py-4">
-                  <p class="font-bold text-gray-900">${esc(ticket.subject)}</p>
-                  <p class="text-xs text-gray-500">${esc(CATEGORY_LABEL[ticket.category] || ticket.category)}</p>
-                </td>
-                <td class="px-6 py-4 text-gray-500">${esc(dateStr)}</td>
-                <td class="px-6 py-4">${ticketBadge(ticket.status)}</td>
-              </tr>`;
-        }).join('');
-    }
 
     async function openTicket(id) {
         const box = document.getElementById('ticket-thread');
@@ -400,7 +415,7 @@
             const d = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(d.error || 'Could not send your reply.');
             window.showToast?.('Reply sent.', { icon: '✉️' });
-            await fetchTicketHistory();
+            await loadMyReports();
             await openTicket(id);
         } catch (e) {
             if (msg) { msg.className = 'text-xs font-semibold text-red-600'; msg.textContent = e.message; }
@@ -410,7 +425,7 @@
 
     // Delegated once on document — the view's DOM is replaced on every visit.
     document.addEventListener('click', (e) => {
-        const row = e.target.closest && e.target.closest('#ticket-history-body [data-ticket-id]');
+        const row = e.target.closest && e.target.closest('#ri-my-list [data-ticket-id]');
         if (row) { openTicket(row.getAttribute('data-ticket-id')); return; }
         if (e.target.closest && e.target.closest('[data-ticket-close]')) { document.getElementById('ticket-thread')?.classList.add('hidden'); return; }
         const r = e.target.closest && e.target.closest('[data-ticket-reply]');
@@ -418,13 +433,13 @@
     });
     document.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter') return;
-        const row = e.target.closest && e.target.closest('#ticket-history-body [data-ticket-id]');
+        const row = e.target.closest && e.target.closest('#ri-my-list [data-ticket-id]');
         if (row) openTicket(row.getAttribute('data-ticket-id'));
     });
 
     // Notifications' "View ticket".
     window.routeToSupportTicket = function (ticketId) {
-        window.openHelpTab('tickets', ticketId != null ? () => openTicket(ticketId) : null);
+        window.openHelpTab('contact', ticketId != null ? () => openTicket(ticketId) : null);
     };
 
     // ── Knowledge base ───────────────────────────────────────────────────────────────────────────
@@ -448,7 +463,7 @@
 
         function renderArticles(articles) {
             if (!articles.length) {
-                grid.innerHTML = `<div class="col-span-full py-12 text-center text-gray-500 font-medium">No articles match — try another word, or <button type="button" class="font-semibold text-emerald-700 hover:underline" onclick="window.helpShowTab('tickets')">ask the team</button>.</div>`;
+                grid.innerHTML = `<div class="col-span-full py-12 text-center text-gray-500 font-medium">No articles match — try another word, or <button type="button" class="font-semibold text-emerald-700 hover:underline" onclick="window.helpShowTab('contact')">ask the team</button>.</div>`;
                 return;
             }
             // Cards, not buttons-as-actions: a white card with the button system's focus ring only.
@@ -545,49 +560,11 @@
         window.openHelpTab('docs');
     };
 
-    // ── Ticket form ──────────────────────────────────────────────────────────────────────────────
-    function initTicketForm() {
-        const ticketForm = document.getElementById('support-ticket-form');
-        if (!ticketForm) return;
-        ticketForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const btn = document.getElementById('btn-submit-ticket');
-            const msg = document.getElementById('ticket-form-msg');
-            const say = (text, ok) => { if (!msg) return; msg.textContent = text; msg.className = `text-sm font-semibold ${ok ? 'text-emerald-700' : 'text-red-600'}`; };
-            const payload = {
-                subject: document.getElementById('ticket-subject').value.trim(),
-                category: document.getElementById('ticket-category').value,
-                description: document.getElementById('ticket-description').value.trim(),
-            };
-            if (!payload.subject || !payload.category || !payload.description) { say('Fill in the subject, category and description.', false); return; }
-            btn.disabled = true;
-            btn.textContent = 'Submitting…';
-            try {
-                const res = await fetch('/.netlify/functions/support-tickets', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-                });
-                const d = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(d.error || 'Could not submit your ticket — try again.');
-                ticketForm.reset();
-                say(`Ticket #TK-${d.ticket?.id ?? ''} submitted — we've emailed you a copy.`, true);
-                fetchTicketHistory();
-                window.updateNotificationBadge?.();
-            } catch (err) {
-                say(err.message, false);
-            } finally {
-                // The button keeps its button-system class; only the label changes.
-                btn.disabled = false;
-                btn.textContent = 'Submit Ticket';
-            }
-        });
-    }
-
     // ── Entry point (loadView('help') → initHelpCenter) ──────────────────────────────────────────
     window.initHelpCenter = async function () {
         featureRequestsInitialized = false;
         onTab = {
-            issues: () => loadMyReports(),
-            tickets: () => fetchTicketHistory(),
+            contact: () => { syncContactFields(); loadMyReports(); },
             features: () => {
                 if (!featureRequestsInitialized && typeof window.initFeatureRequests === 'function') {
                     featureRequestsInitialized = true;
@@ -598,7 +575,6 @@
         TABS.forEach((t) => {
             document.getElementById(`tab-btn-${t}`)?.addEventListener('click', () => window.helpShowTab(t));
         });
-        initTicketForm();
 
         // Pre-select the area the user came from in the issue form.
         const prev = window._previousView && window._previousView.key;
