@@ -163,4 +163,14 @@ check('a failed cap check is distinguishable from a plan limit', () => {
     assert.match(chat, /if \(capacity\.failed\)/, 'and the caller must branch on it before the paywall');
 });
 
+check('a weight inside SUM(CASE …) is cast — an untyped parameter is text, and SUM(text) does not exist', () => {
+    // 2026-10-17: check-capacity and getTaskUsage threw 42883 on every call for a day, because the
+    // task weights were bound as bare parameters inside SUM(CASE …).
+    for (const f of ['src/utils/work-metering.ts', 'netlify/functions/check-capacity.ts']) {
+        const src = readFileSync(path.join(ROOT, f), 'utf8');
+        assert.ok(!/THEN \$\{TASK_WEIGHTS\.\w+\}(?!::int)/.test(src), `${f} binds a task weight without ::int`);
+    }
+});
+
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);
+

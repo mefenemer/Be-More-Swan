@@ -205,9 +205,10 @@ export default withLambda(async (event) => {
             tokenUsage = ucRow?.tokenCount ?? 0;
 
             // Bonus tasks (non-expiring, spent after the allowance) and media jobs still running.
+            // The weights are cast to int: an untyped parameter in SUM(CASE …) is text → 42883.
             const [extra] = await db.execute<{ bonus: number; in_flight: number }>(sql`
                 SELECT COALESCE((SELECT bonus_tasks FROM task_bonus WHERE organisation_id = ${orgId}), 0) AS bonus,
-                       COALESCE((SELECT SUM(CASE media_type WHEN 'video' THEN ${TASK_WEIGHTS.ai_video} WHEN 'audio' THEN ${TASK_WEIGHTS.ai_music} ELSE ${TASK_WEIGHTS.ai_image} END)
+                       COALESCE((SELECT SUM(CASE media_type WHEN 'video' THEN ${TASK_WEIGHTS.ai_video}::int WHEN 'audio' THEN ${TASK_WEIGHTS.ai_music}::int ELSE ${TASK_WEIGHTS.ai_image}::int END)
                                    FROM media_generation_jobs
                                   WHERE organisation_id = ${orgId} AND status IN ('queued', 'processing')
                                     AND created_at > now() - interval '2 hours'), 0) AS in_flight`) as unknown as Array<{ bonus: number; in_flight: number }>;
