@@ -46,6 +46,8 @@ export type AdminAction =
     | 'notification_template_restore'
     | 'notification_sent'
     | 'session_timeout_config_update'
+    // Admin ▸ Inbox: a support request moved between the helpdesk and the fix pipeline (support-inbox.ts).
+    | 'support_request_reroute'
     // The Swan Index: an editorial decision published under a customer's byline on our masthead.
     // Auditable for the same reason a tier change is — the author can ask why, and "an editor
     // rejected it" is only an answer if we can say which editor, when, and on what note.
