@@ -14,6 +14,7 @@ import { aiAssistants, sites } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
 import { renderSitePage } from '../../src/utils/site-render';
+import { applySiteOperation } from '../../src/utils/site-definition';
 import { definitionOf, maxPagesFor } from '../../src/utils/site-store';
 import { loadSiteForms } from '../../src/utils/site-forms';
 import { loadSiteProducts } from '../../src/utils/site-shop';
@@ -23,7 +24,7 @@ import { bookingSummary, businessSummary } from '../../src/utils/bookings';
 import { siteAssetUrl } from '../../src/utils/site-hosting';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 
-const CSP = "default-src 'none'; img-src https: data:; media-src https:; style-src 'unsafe-inline'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'";
+const CSP = "default-src 'none'; img-src https: data:; media-src https:; font-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'";
 
 function page(status: number, html: string) {
     return {
@@ -50,9 +51,18 @@ export default withLambda(async (event) => {
         )).limit(1);
     if (!row) return page(404, '<p>No site yet.</p>');
 
-    const { definition } = definitionOf(row.site, await maxPagesFor(db, ctx.organisationId));
+    const maxPages = await maxPagesFor(db, ctx.organisationId);
+    let { definition } = definitionOf(row.site, maxPages);
+    // The template gallery: this site AS IF the template were applied — with the business's own name,
+    // town, logo and switched-on features — never saved (site-templates.ts, the editor's gallery).
+    const templateId = typeof q.template === 'string' ? q.template : null;
+    if (templateId) {
+        const tried = applySiteOperation(definition, { op: 'apply_template', templateId, mode: q.mode === 'design' ? 'design' : 'full', keepColours: q.keepColours === '1' }, { maxPages });
+        if (!tried.ok) return page(404, '<p>That template isn\'t available.</p>');
+        definition = tried.definition;
+    }
     const path = typeof q.path === 'string' && q.path.startsWith('/') ? q.path : '/';
-    const self = (p: string) => `/.netlify/functions/site-preview?assistantId=${id}&path=${encodeURIComponent(p)}`;
+    const self = (p: string) => `/.netlify/functions/site-preview?assistantId=${id}${templateId ? `&template=${encodeURIComponent(templateId)}${q.mode === 'design' ? '&mode=design' : ''}${q.keepColours === '1' ? '&keepColours=1' : ''}` : ''}&path=${encodeURIComponent(p)}`;
     const rendered = renderSitePage(definition, path, {
         origin: 'https://preview.invalid',
         preview: true,

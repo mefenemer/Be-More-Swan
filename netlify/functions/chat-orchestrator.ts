@@ -53,6 +53,7 @@ import { buildBriefsSnapshot } from '../../src/utils/visual-briefs';
 import { buildSiteAuditSnapshot } from '../../src/utils/site-audit-snapshot';
 import { buildSiteSnapshot } from '../../src/utils/site-store';
 import { LIMITS as SITE_LIMITS, SECTION_TYPES } from '../../src/utils/site-definition';
+import { SITE_TEMPLATES } from '../../src/config/site-templates';
 import { CONVERSION_GOALS, WEEKDAYS } from '../../src/utils/site-audit-setup';
 import { HANDOFF_TARGETS } from '../../src/utils/site-audit-prompts';
 
@@ -1435,6 +1436,7 @@ CHANGING THE SITE. When they ask for a change, emit a site_changes card: a short
 - {"op":"set_structure","structure":"pages|one_page"}   (one_page: everything on the home page, the menu jumps down it to sections with a menuLabel)
 - {"op":"combine_pages"}   (moves every page's sections onto the home page in order, each page's first section labelled with its title, links to those pages become jumps; sets one_page; refused above 20 sections — tell them which to remove)
 - {"op":"split_pages"}   (spreads the home page across pages: at each later section with a menu label if there are any (the reverse of combine_pages), otherwise by kind — shop, bookings, classes, menu, gallery, questions, contact + hours — joining a page that already exists; the rest stay on Home; links follow; sets pages. Use it when they want several pages, or Home holds everything — set_structure "pages" alone changes nothing visible. Refused above the plan's pages)
+- {"op":"apply_template","templateId":"<id>","mode":"design"|"full","keepColours":true|false}   (a template from the gallery: "design" changes only the look — lettering, colours, corners, spacing, header and the opening section's style — keeping every word and picture; "full" REPLACES all pages with the template's layout as a fresh start, so only propose "full" for a new site or when they ask to start again. keepColours keeps their own colours. Templates: ${SITE_TEMPLATES.map((t) => `${t.id} (${t.name} — ${t.bestFor.join(", ")})`).join("; ")}. Their gallery is on the Website tab, which shows each with their own name — point them there to compare)
 - {"op":"remove_section","pageId":"...","sectionId":"..."}
 - {"op":"move_section","pageId":"...","sectionId":"...","toIndex":<number>}
 - {"op":"set_theme","theme":{"primaryColor":"#rrggbb","textColor":"#rrggbb","backgroundColor":"#rrggbb","font":"sans|serif|rounded|system","radius":"none|small|medium|large"}}   (any subset)

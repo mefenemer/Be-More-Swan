@@ -82,7 +82,7 @@ check('the editor proposes first; the server previews without saving; the chat k
     assert.ok(!ed.includes("if (def().pages.length > 1) { await apply([{ op: 'set_structure', structure: 'pages' }]); return; }"), 'never switches silently');
     assert.ok(ed.includes("post({ action: 'split_preview', assistantId: state.assistantId })") && ed.includes("await apply([{ op: 'split_pages' }]"));
     const api = read('netlify/functions/sites.ts');
-    assert.ok(api.includes("'combine_pages', 'split_pages'];") && api.includes("if (action === 'split_preview') {"));
+    assert.ok(api.includes("'combine_pages', 'split_pages'") && api.includes("if (action === 'split_preview') {"));
     assert.ok(api.includes('canSplit: planSplit(definition.pages[0]?.sections ?? []).parts.length > 0,'));
     assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('- {"op":"split_pages"}'));
     assert.ok(read('src/components/disruptive-ui-registry.js').includes('split_pages: () =>'));

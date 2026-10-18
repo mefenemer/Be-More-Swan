@@ -157,18 +157,26 @@ check('the cursor never travels as a date', () => {
 console.log('\nThe endpoint\n');
 
 const api = readFileSync(join(root, 'netlify/functions/widget-api.ts'), 'utf8');
+// The query itself lives in blog-list-query.ts, shared with the hosted index (/b/:key).
+const queryMod = readFileSync(join(root, 'src/utils/blog-list-query.ts'), 'utf8');
+const query = queryMod.slice(landmark(queryMod, 'export async function listPublishedPosts('));
+
+check('the widget list AND the hosted index both run the one shared query', () => {
+    const list = api.slice(landmark(api, "if (resource === 'posts' && !slug)"), landmark(api, "if (resource === 'posts' && slug)"));
+    assert.match(list, /listPublishedPosts\(db, orgId, \{ size, cursorId \}\)/);
+    const page = readFileSync(join(root, 'netlify/functions/blog-page.ts'), 'utf8');
+    assert.match(page, /listPublishedPosts\(db, cfg\.organisationId,/);
+});
 
 check('the list query orders by the sort key AND the id', () => {
     // Two posts published in the same second come back in whatever order the planner picks, and a
     // keyset cursor over an ambiguous order skips or repeats rows at exactly that boundary.
-    const list = api.slice(landmark(api, "if (resource === 'posts' && !slug)"), landmark(api, "if (resource === 'posts' && slug)"));
-    assert.match(list, /\.orderBy\(desc\(listSortKey\), desc\(blogPosts\.id\)\)/);
+    assert.match(query, /\.orderBy\(desc\(listSortKey\), desc\(blogPosts\.id\)\)/);
 });
 
 check('it fetches one more row than it serves', () => {
-    const list = api.slice(landmark(api, "if (resource === 'posts' && !slug)"), landmark(api, "if (resource === 'posts' && slug)"));
-    assert.match(list, /\.limit\(size \+ 1\)/, 'the peeked row is how nextCursor is decided');
-    assert.match(list, /takePage\(rows, size\)/, 'and it must be split through takePage, not by hand');
+    assert.match(query, /\.limit\(size \+ 1\)/, 'the peeked row is how nextCursor is decided');
+    assert.match(query, /takePage\(rows, size\)/, 'and it must be split through takePage, not by hand');
 });
 
 check('⚠️ the internal row id is never serialised into the response', () => {
@@ -178,11 +186,12 @@ check('⚠️ the internal row id is never serialised into the response', () => 
     const list = api.slice(landmark(api, "if (resource === 'posts' && !slug)"), landmark(api, "if (resource === 'posts' && slug)"));
     const shape = list.slice(landmark(list, 'const posts = page.map'), landmark(list, 'return json('));
     assert.ok(!/\bid:/.test(shape), `the response shape must not carry the row id: ${shape}`);
+    const shared = query.slice(landmark(query, 'const posts = page.map'), landmark(query, 'return { posts, nextCursor }'));
+    assert.ok(!/\bid:/.test(shared), `the shared summary must not carry the row id: ${shared}`);
 });
 
 check('the cursor is only applied when one was actually supplied', () => {
-    const list = api.slice(landmark(api, "if (resource === 'posts' && !slug)"), landmark(api, "if (resource === 'posts' && slug)"));
-    assert.match(list, /\.\.\.\(cursorId \? \[afterCursor\(cursorId, orgId\)\] : \[\]\)/);
+    assert.match(query, /\.\.\.\(cursorId \? \[afterCursor\(cursorId, orgId\)\] : \[\]\)/);
 });
 
 // ── the widget ──────────────────────────────────────────────────────────────

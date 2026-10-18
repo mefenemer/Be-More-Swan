@@ -550,7 +550,11 @@
     + '            <label class="bs-status">Embed snippet</label>'
     + '            <button id="bs-snippet-copy" class="bs-linkbtn" type="button">Copy</button></div>'
     + '          <div id="bs-snippet" class="bs-snippet">Create a widget to get your embed code.</div>'
-    + '          <span class="bs-status" style="font-size:11px;">Paste this into any page on your site, alongside a &lt;div id="bms-blog"&gt;&lt;/div&gt; for it to render into.</span></div>'
+    + '          <span class="bs-status" style="font-size:11px;">Paste this into any page on your site, where you want the blog to appear.</span>'
+    // Wix (and some Squarespace / Webflow blocks) put pasted code in a fixed-size frame. The widget
+    // copes (posts open full-page in a new tab, see widget.js `framed`) but the list is only as
+    // tall as the box, so say how to size it.
+    + '          <span class="bs-status" style="font-size:11px;display:block;margin-top:4px;"><strong>On Wix:</strong> Add \u2192 Embed Code \u2192 Embed HTML, paste the code, then drag the box tall (around 1,200px) and full width. Wix shows embedded code in a fixed-size box, so posts open full-page in a new tab.</span></div>'
     // The RSS feed of published posts. Anything that reads a feed (Mailchimp, Zapier, an aggregator,
     // a reader) can pull the blog without a dedicated connector — see widget-rss.ts.
     + '        <div style="margin-top:12px;">'
@@ -559,6 +563,14 @@
     + '            <button id="bs-rss-copy" class="bs-linkbtn" type="button">Copy</button></div>'
     + '          <div id="bs-rss" class="bs-snippet">Create a widget to get your feed URL.</div>'
     + '          <span class="bs-status" style="font-size:11px;">Published posts only. Media is left out and AI-assisted posts carry the disclosure notice.</span></div>'
+    // The hosted, full-page index (/b/:key, blog-page.ts). On Wix pasted code lives in a fixed-size
+    // Embed HTML box, so the list is only as tall as the box — a menu link to this page needs no box.
+    + '        <div style="margin-top:12px;">'
+    + '          <div class="bs-row" style="justify-content:space-between;">'
+    + '            <label class="bs-status">Blog page link</label>'
+    + '            <button id="bs-index-copy" class="bs-linkbtn" type="button">Copy</button></div>'
+    + '          <div id="bs-index-url" class="bs-snippet">Create a widget to get your blog page link.</div>'
+    + '          <span class="bs-status" style="font-size:11px;">A full page of your posts that we host. <strong>On Wix</strong> (or any site builder), point your site\u2019s Blog menu item at this link instead of using an embed box.</span></div>'
     + '        </div>'
     + '      </details>'
     + '    </div>'
@@ -999,8 +1011,12 @@
 
   // ── Widget config / theming ────────────────────────────────────────────────────────────────────
   function renderSnippet(key) {
+    // The mount <div> is part of the snippet. It used to be a separate instruction in the small
+    // print, and a script pasted without it renders nothing (widget.js logs "mount element not
+    // found" to a console the site owner never opens).
     el('bs-snippet').textContent =
-      '<script async src="' + location.origin + '/widget.js"\n        data-bms-key="' + key + '" data-bms-mount="#bms-blog"><\/script>';
+      '<div id="bms-blog"></div>\n'
+      + '<script async src="' + location.origin + '/widget.js"\n        data-bms-key="' + key + '" data-bms-mount="#bms-blog"><\/script>';
     el('bs-rss').textContent = location.origin + '/api/widget/' + key + '/rss';
   }
   // Where the customer publishes. Both fields were left blank until someone typed them in, which
@@ -1134,6 +1150,8 @@
   function applyWidget(cfg, opts) {
     var suggest = !!(opts && opts.suggest);
     renderSnippet(cfg.publicKey);
+    // The hosted full-page index — what a Wix site's Blog menu item should link to.
+    el('bs-index-url').textContent = location.origin + '/b/' + cfg.publicKey;
     populateFontPicker();
     var theme = cfg.theme || {};
     // ⚠️ An unset accent is NOT neutral. widget.js and the /b/:key/:slug permalink both fall back
@@ -2101,6 +2119,7 @@
     }
     wireCopy('bs-snippet-copy', 'bs-snippet');
     wireCopy('bs-rss-copy', 'bs-rss');
+    wireCopy('bs-index-copy', 'bs-index-url');
 
     // Preview as soon as a family is picked — otherwise the author is choosing from a list of
     // names rendered in a font they cannot see.

@@ -78,7 +78,7 @@ check('a swan on every section (list and preview) sends the request to the chat,
 });
 check('"Draft my whole site": up front on a new site, otherwise "Start again" folded into Details', () => {
     const ed = read('src/components/assistant-site-editor.js');
-    assert.ok(ed.includes("${isFresh() || state.data.site.drafting ? draftCard('start') : ''}"));
+    assert.ok(ed.includes("${isFresh() || state.data.site.drafting || (def().settings.template && !state.data.site.publishedVersion) ? draftCard('start') : ''}"), 'up front on a new site, or one started from a template');
     assert.ok(ed.includes("detailsPanel() + draftCard('again')") && ed.includes('Start again from scratch'));
     assert.ok(!ed.includes('          ${draftCard()}'), 'no longer under every panel');
 });

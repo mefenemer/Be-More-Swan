@@ -596,6 +596,13 @@ node_bundler = "esbuild"
   [headers.values]
     Cache-Control = "no-cache"
 
+# Fonts for Website Assistant sites, served here for the editor's preview (site-preview.ts). The live
+# sites serve the same files from sites-host/public/site-fonts. They never change once published.
+[[headers]]
+  for = "/site-fonts/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
 # ── Search-engine indexing policy ───────────────────────────────────────────────
 # robots.txt deliberately carries no Disallow prefix list, because public and private page
 # names collide on their prefixes (assistants.html is public marketing; assistant-chat.html

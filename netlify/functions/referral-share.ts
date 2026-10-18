@@ -73,7 +73,7 @@ export default withLambda(async (event) => {
             subject: `${fromName} invited you to try Be More Swan`,
             html: `<p>Hi there,</p>
                    <p><strong>${fromName}</strong> thinks you'd love Be More Swan — your own AI team members that handle the work you don't have time for.</p>
-                   <p>Sign up using their referral link to get started:</p>
+                   <p>Sign up using their referral link and your first month is free:</p>
                    <p style="margin:24px 0;">
                      <a href="${shareLink}" style="background:#059669;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">
                        Get started with Be More Swan →

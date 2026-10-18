@@ -3,7 +3,7 @@ import Stripe from 'stripe';
 import { eq, and, inArray, desc, isNull, sql } from 'drizzle-orm';
 import { retireBetaPlanBeforePaid, afterPaidPlanStarted } from '../../src/utils/beta-ending';
 import { getDb, withUpdatedAt } from '../../db/client';
-import { payments, plans, aiAssistants, onboardingDrafts, notifications, users, masterPlans, invoices, processedWebhookEvents, userReferrals, platformConfig, stripeDisputes, userOrganisations, userProfiles } from '../../db/schema';
+import { payments, plans, aiAssistants, onboardingDrafts, notifications, users, masterPlans, invoices, processedWebhookEvents, platformConfig, stripeDisputes, userOrganisations, userProfiles } from '../../db/schema';
 import { createNotification, createNotifications } from '../../src/utils/notify';
 import { sendEmail, buildAnnualRenewalEmail, buildDunningEmail } from '../../src/utils/email';
 import { resolveActionNotifications, PAYMENT_RESTORED_TYPES } from '../../src/utils/notification-actions';
@@ -14,6 +14,7 @@ import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { releasePausedLimit, resolveAssistantLimit } from '../../src/utils/release-paused-limit';
 import { backfillLivePlanForOrg } from '../../src/utils/plan-stripe-refs';
+import { qualifyPendingReferral } from '../../src/utils/referral-offer';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
@@ -256,25 +257,14 @@ export default withLambda(async (event) => {
         // Referral Program Expansion: earn a referral TOKEN (not an instant £10 credit).
         // The token matures after the 14-day refund window and is then spendable in the
         // Reward Vault for £10 credit or a free assistant.
-        try {
-            const [pendingReferral] = await db
-                .select({ id: userReferrals.id, referrerId: userReferrals.referrerId })
-                .from(userReferrals)
-                .where(and(eq(userReferrals.referredUserId, userIdInt), eq(userReferrals.status, 'pending')))
-                .limit(1);
-
-            if (pendingReferral) {
-                await db.update(userReferrals)
-                    .set({ status: 'qualified', qualifiedAt: new Date() })
-                    .where(eq(userReferrals.id, pendingReferral.id));
-
-                await createNotification(db, 'referral_reward', {
-                    userId: pendingReferral.referrerId,
-                    metadata: { referralId: pendingReferral.id },
-                });
+        // Only when money was taken: a referred friend's first month is free (£0 session), and
+        // their referral then qualifies on the first PAID invoice instead (invoice.paid below).
+        if ((session.amount_total ?? 0) > 0) {
+            try {
+                await qualifyPendingReferral(db, userIdInt);
+            } catch (refErr) {
+                console.warn('[stripe-webhook] checkout.session referral token grant failed (non-blocking):', refErr);
             }
-        } catch (refErr) {
-            console.warn('[stripe-webhook] checkout.session referral token grant failed (non-blocking):', refErr);
         }
 
         // ── Founder alert — a new subscriber just paid ────────────────
@@ -457,22 +447,7 @@ export default withLambda(async (event) => {
         // an instant £10 credit — the referrer gets a token (matures after the 14-day
         // refund window) to spend in the Reward Vault for £10 credit or a free assistant.
         try {
-            const [pendingReferral] = await db
-                .select({ id: userReferrals.id, referrerId: userReferrals.referrerId })
-                .from(userReferrals)
-                .where(and(eq(userReferrals.referredUserId, userIdInt), eq(userReferrals.status, 'pending')))
-                .limit(1);
-
-            if (pendingReferral) {
-                await db.update(userReferrals)
-                    .set({ status: 'qualified', qualifiedAt: new Date() })
-                    .where(eq(userReferrals.id, pendingReferral.id));
-
-                await createNotification(db, 'referral_reward', {
-                    userId: pendingReferral.referrerId,
-                    metadata: { referralId: pendingReferral.id },
-                });
-            }
+            await qualifyPendingReferral(db, userIdInt);
         } catch (refErr) {
             console.warn('[stripe-webhook] Referral token grant failed (non-blocking):', refErr);
         }
@@ -587,6 +562,16 @@ export default withLambda(async (event) => {
         }
 
         if (userId) {
+            // A referred friend whose first month was free qualifies their referral here, on the
+            // first invoice that actually takes money (no-op if already qualified).
+            if (invoice.amount_paid > 0) {
+                try {
+                    await qualifyPendingReferral(db, userId);
+                } catch (refErr) {
+                    console.warn('[stripe-webhook] invoice.paid referral token grant failed (non-blocking):', refErr);
+                }
+            }
+
             const amount     = invoice.amount_paid ? `£${(invoice.amount_paid / 100).toFixed(2)}` : '';
             const paidThrough = getInvoicePaidThrough(invoice);
             const periodEnd  = paidThrough

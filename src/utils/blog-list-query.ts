@@ -1,0 +1,92 @@
+// src/utils/blog-list-query.ts
+// One page of a workspace's PUBLISHED posts, newest first — the query behind every public list.
+//
+// Two callers render this list: widget-api.ts (the JSON the embedded widget pages through) and
+// blog-page.ts (the hosted, server-rendered index at /b/:key). They used to be one caller; the query
+// moved here so the second one could not drift into a different filter, order or thumbnail rule —
+// a post visible in the widget and missing from the hosted index is exactly the bug two copies grow.
+//
+// The paging RULES (sort key, keyset cursor, size caps) live in blog-list-paging.ts; this module
+// only runs them.
+
+import { and, desc, eq } from 'drizzle-orm';
+import { blogPosts } from '../../db/schema';
+import { listSortKey, afterCursor, takePage } from './blog-list-paging';
+import { resolveCardImageUrls } from './blog-media-resolve';
+import { cardImageRef } from './blog-card-image';
+import { isAiAssisted } from './blog-ai-assisted';
+
+export interface PublishedPostSummary {
+    title: string;
+    slug: string;
+    /** meta_description, or '' — the card excerpt. */
+    excerpt: string;
+    tags: unknown;
+    publishedAt: Date | string | null;
+    aiAssisted: boolean;
+    /** Fresh display URL for the card thumbnail, or null for a text-only card. */
+    imageUrl: string | null;
+    imageAlt: string;
+}
+
+export async function listPublishedPosts(
+    db: any,
+    orgId: number,
+    opts: { size: number; cursorId: number | null },
+): Promise<{ posts: PublishedPostSummary[]; nextCursor: string | null }> {
+    const { size, cursorId } = opts;
+    // `db` is untyped here (as in blog-media-resolve), so name the row shape takePage passes through.
+    const rows: any[] = await db
+        .select({
+            // Selected for the cursor, not for the response — the id stays server-side, and
+            // nextCursor is the only form of it a caller ever sees.
+            id: blogPosts.id,
+            title: blogPosts.title,
+            slug: blogPosts.slug,
+            metaDescription: blogPosts.metaDescription,
+            tags: blogPosts.tags,
+            publishedAt: blogPosts.publishedAt,
+            jobId: blogPosts.jobId,
+            blueprintId: blogPosts.blueprintId,
+            isAutonomous: blogPosts.isAutonomous,
+            generationReason: blogPosts.generationReason,
+            // The list thumbnail, denormalised at publish time. Three small columns instead of
+            // published_payload — pulling 50 full article bodies to find 50 <img> tags is the
+            // reason this is a column and not a read-time parse.
+            cardImageAssetId: blogPosts.cardImageAssetId,
+            cardImageUrl: blogPosts.cardImageUrl,
+            cardImageAlt: blogPosts.cardImageAlt,
+        })
+        .from(blogPosts)
+        .where(and(
+            eq(blogPosts.organisationId, orgId),
+            eq(blogPosts.status, 'published'),
+            ...(cursorId ? [afterCursor(cursorId, orgId)] : []),
+        ))
+        // id DESC is not decoration: two posts published in the same second would otherwise
+        // come back in whatever order the planner chose, and a keyset cursor built on an
+        // ambiguous order skips or repeats rows at exactly that boundary.
+        .orderBy(desc(listSortKey), desc(blogPosts.id))
+        // One more than asked for, purely to answer "is there another page?" without a
+        // second COUNT query over the whole table.
+        .limit(size + 1);
+
+    const { page, nextCursor } = takePage(rows, size);
+    // One batched query for the whole page's images, not one per post. Every row here belongs to
+    // the same org, but the resolver is org-scoped per item regardless, so an asset id pointing
+    // outside the org resolves to null rather than to somebody else's picture.
+    const imageUrls = await resolveCardImageUrls(db, page.map((r) => ({ orgId, ref: cardImageRef(r) })));
+    const posts = page.map((r, i) => ({
+        title: r.title,
+        slug: r.slug,
+        excerpt: r.metaDescription || '',
+        tags: r.tags,
+        publishedAt: r.publishedAt,
+        aiAssisted: isAiAssisted(r),
+        // null when the post has no usable image — a text-only card is the right look for an
+        // essay, not a gap where a picture failed to load.
+        imageUrl: imageUrls[i],
+        imageAlt: r.cardImageAlt || r.title,
+    }));
+    return { posts, nextCursor };
+}

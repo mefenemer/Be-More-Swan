@@ -1770,6 +1770,7 @@
     },
     set_structure: (o) => (o.structure === 'one_page' ? 'Make it a one-page site (the menu jumps down the page)' : 'Make it a site of several pages'),
     combine_pages: () => 'Combine every page into one page',
+    apply_template: (o) => (o.mode === 'full' ? `Start again with the ${o.templateId} template (replaces your pages)` : `Use the ${o.templateId} template's design (your words and pictures stay)`),
     split_pages: () => 'Split the home page back into separate pages, one per menu entry',
     remove_section: () => 'Remove a section',
     move_section: () => 'Move a section',
