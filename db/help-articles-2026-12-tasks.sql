@@ -65,7 +65,7 @@ AI media comes out of the same allowance. An AI image is 1 task, an AI video or 
 
 ## Bonus tasks
 
-Bonus tasks are extra tasks that **never expire**. They're used only after your monthly allowance runs out. If you had AI media credits or unused X posting credits on 1 December 2026, they became bonus tasks — 4 tasks for each media credit and 1 for each X credit. Your bonus balance is on the billing page.
+Bonus tasks are extra tasks that **never expire**. They're used only after your monthly allowance runs out. If you had AI media credits or unused X posting credits on 17 October 2026, they became bonus tasks — 4 tasks for each media credit and 1 for each X credit. Your bonus balance is on the billing page.
 
 ## What happens at the limit
 
