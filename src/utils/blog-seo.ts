@@ -204,6 +204,13 @@ export interface BlogPageData extends BlogHeadData {
      * the markup entirely rather than present-and-disabled.
      */
     engagement?: { publicKey: string; slug: string } | null;
+
+    /**
+     * Where "← All posts" points: the hosted index (/b/:key) or, for our own blog, /blog. Without it
+     * a reader who arrived from a Wix menu link reached a post and had no way back to the list.
+     * Omit for no link.
+     */
+    indexUrl?: string | null;
 }
 
 /** CSS `font-family` value, or null. Re-validated against the catalogue rather than trusted. */
@@ -312,6 +319,7 @@ export function renderBlogPage(d: BlogPageData): string {
     const tagList = d.tags?.length
         ? `<ul class="tags">${d.tags.map((t) => `<li>${escHtml(t)}</li>`).join('')}</ul>`
         : '';
+    const back = d.indexUrl ? `<p class="back"><a href="${escHtml(d.indexUrl)}">← All posts</a></p>` : '';
 
     return `<!doctype html>
 <html lang="en">
@@ -337,8 +345,11 @@ export function renderBlogPage(d: BlogPageData): string {
       .ai-badge { font-size: .9rem; color: #666; border: 1px solid #eee; border-radius: 8px; padding: .6rem .9rem; background: #fafafa; }
       .tags { list-style: none; padding: 0; margin: 2.5rem 0 0; display: flex; gap: .5rem; flex-wrap: wrap; }
       .tags li { font-size: .8rem; color: #666; background: #f2f2f2; border-radius: 999px; padding: .25rem .75rem; }
+      .back { margin: 0 0 1.5rem; font-size: .95rem; }
+      .back a { color: #d6006e; text-decoration: none; }
       @media (prefers-color-scheme: dark) {
         body { color: #e8e8e8; background: #131313; }
+        .back a { color: #ff5aa8; }
         .meta, .ai-badge, .tags li, article figure figcaption { color: #9a9a9a; }
         .ai-badge { background: #1c1c1c; border-color: #2a2a2a; }
         .tags li { background: #222; }
@@ -348,6 +359,7 @@ export function renderBlogPage(d: BlogPageData): string {
   </head>
   <body>
     <main>
+      ${back}
       <h1>${escHtml(heading)}</h1>
       <div class="meta">${[byline, dateLine].filter(Boolean).join('')}</div>
       ${hero}
@@ -356,6 +368,160 @@ export function renderBlogPage(d: BlogPageData): string {
       ${tagList}
     </main>
     ${beacon}
+  </body>
+</html>`;
+}
+
+// ── hosted blog index (/b/:key) ──────────────────────────────────────────────────────────────
+export interface BlogIndexPost {
+    title: string;
+    slug: string;
+    excerpt: string;
+    publishedAt: string | null; // ISO 8601
+    imageUrl: string | null;
+    imageAlt: string | null;
+}
+
+export interface BlogIndexPageData {
+    siteName: string;
+    /** The URL this page is served at (og:url). Includes ?cursor= on later pages. */
+    pageUrl: string;
+    /** Page 1 is its own canonical; a later page canonicalises to itself (it is noindex anyway). */
+    canonicalUrl: string;
+    /** Page 1 is 'index,follow'; cursor pages are 'noindex,follow' — see blog-page.ts. */
+    robots: string;
+    posts: BlogIndexPost[];
+    /** Builds the href for one post — /b/:key/:slug for a tenant. */
+    postHref: (slug: string) => string;
+    /** Href for "Older posts", or null on the last page. */
+    olderHref: string | null;
+    /** Href back to page 1 when this is a later page, else null. */
+    firstHref: string | null;
+    /** The customer's own site (http/https only), shown as "← Back to <site>". */
+    homeUrl?: string | null;
+    theme?: BlogPageData['theme'];
+}
+
+/** Only http(s) URLs become links — a stored "javascript:" value must never reach an href. */
+function safeHttpUrl(v: string | null | undefined): string | null {
+    if (!v) return null;
+    try {
+        const u = new URL(v);
+        return u.protocol === 'http:' || u.protocol === 'https:' ? u.toString() : null;
+    } catch { return null; }
+}
+
+/**
+ * The full-page, server-rendered list of a widget's published posts.
+ *
+ * WHY: on Wix the widget can only sit in an "Embed HTML" box, a fixed-size iframe, so the list is as
+ * tall as that box. This page needs no box — the site owner points their Blog menu item at it — and,
+ * unlike the hash-routed widget, it is crawlable: every card is a real <a href> to the permalink.
+ */
+export function renderBlogIndexPage(d: BlogIndexPageData): string {
+    const title = `Blog | ${d.siteName}`;
+    const description = `The latest posts from ${d.siteName}.`;
+    const fontLinks = themeFontLinks(d.theme);
+    const fontStack = themeFontStack(d.theme);
+    const homeUrl = safeHttpUrl(d.homeUrl);
+
+    const head = [
+        `<title>${escHtml(title)}</title>`,
+        `<meta name="description" content="${escHtml(description)}">`,
+        `<meta name="robots" content="${escHtml(d.robots)}">`,
+        `<link rel="canonical" href="${escHtml(d.canonicalUrl)}">`,
+        `<meta property="og:type" content="website">`,
+        `<meta property="og:title" content="${escHtml(title)}">`,
+        `<meta property="og:description" content="${escHtml(description)}">`,
+        `<meta property="og:url" content="${escHtml(d.pageUrl)}">`,
+        `<meta property="og:site_name" content="${escHtml(d.siteName)}">`,
+        `<meta name="twitter:card" content="summary">`,
+        `<script type="application/ld+json">${jsonLdSafe({
+            '@context': 'https://schema.org',
+            '@type': 'Blog',
+            name: title,
+            url: d.canonicalUrl,
+            publisher: { '@type': 'Organization', name: d.siteName },
+            blogPost: d.posts.map((p) => ({
+                '@type': 'BlogPosting',
+                headline: p.title,
+                url: d.postHref(p.slug),
+                ...(p.publishedAt ? { datePublished: p.publishedAt } : {}),
+            })),
+        })}</script>`,
+    ].join('\n    ');
+
+    const cards = d.posts.map((p) => {
+        const href = escHtml(d.postHref(p.slug));
+        const img = p.imageUrl
+            ? `<a class="thumb" href="${href}" tabindex="-1" aria-hidden="true"><img src="${escHtml(p.imageUrl)}" alt="${escHtml(p.imageAlt || p.title)}" loading="lazy"></a>`
+            : '';
+        const date = p.publishedAt
+            ? `<time datetime="${escHtml(p.publishedAt)}">${escHtml(new Date(p.publishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }))}</time>`
+            : '';
+        const excerptP = p.excerpt ? `<p class="excerpt">${escHtml(p.excerpt)}</p>` : '';
+        return `<li class="card${p.imageUrl ? '' : ' text-only'}">${img}<div class="body">${date}<h2><a href="${href}">${escHtml(p.title)}</a></h2>${excerptP}</div></li>`;
+    }).join('\n        ');
+
+    const list = d.posts.length
+        ? `<ul class="posts">\n        ${cards}\n      </ul>`
+        : `<p class="empty">No posts yet. Check back soon.</p>`;
+    const nav = [
+        d.firstHref ? `<a href="${escHtml(d.firstHref)}">← Latest posts</a>` : '',
+        d.olderHref ? `<a rel="next" href="${escHtml(d.olderHref)}">Older posts →</a>` : '',
+    ].filter(Boolean);
+    const pager = nav.length ? `<nav class="pager" aria-label="More posts">${nav.join('')}</nav>` : '';
+    // With no site URL on file the reader still needs to know whose blog this is.
+    const home = homeUrl
+        ? `<p class="back"><a href="${escHtml(homeUrl)}">← Back to ${escHtml(d.siteName)}</a></p>`
+        : `<p class="back">${escHtml(d.siteName)}</p>`;
+
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    ${head}
+    ${fontLinks}
+    <style>
+      :root { color-scheme: light dark; }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: ${fontStack || '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'}; line-height: 1.6; color: #1a1a1a; background: #fff; }
+      main { max-width: 960px; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
+      h1 { font-size: 2.25rem; line-height: 1.2; margin: 0 0 2rem; letter-spacing: -.02em; }
+      .back { margin: 0 0 1.5rem; font-size: .95rem; }
+      a { color: #d6006e; }
+      .back a, .pager a { text-decoration: none; }
+      .posts { list-style: none; padding: 0; margin: 0; display: grid; gap: 2rem; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); }
+      .card { display: flex; flex-direction: column; border: 1px solid #eee; border-radius: 12px; overflow: hidden; background: #fff; }
+      .thumb { display: block; aspect-ratio: 16 / 9; background: #f2f2f2; }
+      .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .card .body { padding: 1.1rem 1.25rem 1.4rem; }
+      .card time { font-size: .85rem; color: #666; }
+      .card h2 { font-size: 1.25rem; line-height: 1.3; margin: .35rem 0 .5rem; }
+      .card h2 a { color: inherit; text-decoration: none; }
+      .card h2 a:hover { text-decoration: underline; }
+      .excerpt { margin: 0; color: #444; font-size: .975rem; }
+      .empty { color: #666; }
+      .pager { display: flex; justify-content: space-between; gap: 1rem; margin: 3rem 0 0; font-size: 1rem; }
+      .pager a[rel="next"] { margin-left: auto; }
+      @media (prefers-color-scheme: dark) {
+        body { color: #e8e8e8; background: #131313; }
+        a { color: #ff5aa8; }
+        .card { background: #1a1a1a; border-color: #2a2a2a; }
+        .thumb { background: #222; }
+        .card time, .empty { color: #9a9a9a; }
+        .excerpt { color: #c4c4c4; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      ${home}
+      <h1>Blog</h1>
+      ${list}
+      ${pager}
+    </main>
   </body>
 </html>`;
 }

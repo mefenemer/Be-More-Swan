@@ -559,6 +559,14 @@
     + '            <button id="bs-rss-copy" class="bs-linkbtn" type="button">Copy</button></div>'
     + '          <div id="bs-rss" class="bs-snippet">Create a widget to get your feed URL.</div>'
     + '          <span class="bs-status" style="font-size:11px;">Published posts only. Media is left out and AI-assisted posts carry the disclosure notice.</span></div>'
+    // The hosted, full-page index (/b/:key, blog-page.ts). On Wix pasted code lives in a fixed-size
+    // Embed HTML box, so the list is only as tall as the box — a menu link to this page needs no box.
+    + '        <div style="margin-top:12px;">'
+    + '          <div class="bs-row" style="justify-content:space-between;">'
+    + '            <label class="bs-status">Blog page link</label>'
+    + '            <button id="bs-index-copy" class="bs-linkbtn" type="button">Copy</button></div>'
+    + '          <div id="bs-index-url" class="bs-snippet">Create a widget to get your blog page link.</div>'
+    + '          <span class="bs-status" style="font-size:11px;">A full page of your posts that we host. <strong>On Wix</strong> (or any site builder), point your site\u2019s Blog menu item at this link instead of using an embed box.</span></div>'
     + '        </div>'
     + '      </details>'
     + '    </div>'
@@ -1134,6 +1142,8 @@
   function applyWidget(cfg, opts) {
     var suggest = !!(opts && opts.suggest);
     renderSnippet(cfg.publicKey);
+    // The hosted full-page index — what a Wix site's Blog menu item should link to.
+    el('bs-index-url').textContent = location.origin + '/b/' + cfg.publicKey;
     populateFontPicker();
     var theme = cfg.theme || {};
     // ⚠️ An unset accent is NOT neutral. widget.js and the /b/:key/:slug permalink both fall back
@@ -2101,6 +2111,7 @@
     }
     wireCopy('bs-snippet-copy', 'bs-snippet');
     wireCopy('bs-rss-copy', 'bs-rss');
+    wireCopy('bs-index-copy', 'bs-index-url');
 
     // Preview as soon as a family is picked — otherwise the author is choosing from a list of
     // names rendered in a font they cannot see.

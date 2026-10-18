@@ -103,8 +103,11 @@ check('the byline costs no extra query', () => {
 });
 
 check('date and tags are served on every card', () => {
-    assert.match(list, /publishedAt: r\.publishedAt/);
-    assert.match(list, /tags: r\.tags/);
+    // The row → card mapping is shared with the hosted index; widget-api spreads it unchanged.
+    const query = readFileSync(join(root, 'src/utils/blog-list-query.ts'), 'utf8');
+    assert.match(list, /\.\.\.p,/);
+    assert.match(query, /publishedAt: r\.publishedAt/);
+    assert.match(query, /tags: r\.tags/);
 });
 
 // ── the widget's formatting, executed ───────────────────────────────────────

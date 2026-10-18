@@ -69,3 +69,29 @@ export function parseBlogRoute(path: string): BlogRoute | null {
 
     return null;
 }
+
+export interface BlogIndexRoute {
+    /** widget_configs.public_key this request resolves to. */
+    publicKey: string;
+    /** The path the index is served at, re-encoded, with no trailing slash — og:url and canonical. */
+    pathname: string;
+}
+
+/**
+ * Resolve /b/:key (optionally with a trailing slash) to the hosted blog INDEX for that widget.
+ *
+ * WHY this exists: on Wix the widget can only live inside an "Embed HTML" box, which is a fixed-size
+ * iframe — the list is as tall as the box, however many posts there are. A full page we host needs
+ * no box at all: the site owner points their "Blog" menu item at this URL.
+ *
+ * Checked BEFORE parseBlogRoute by the caller. The two cannot overlap — this pattern allows nothing
+ * after the key but one optional slash, and parseBlogRoute needs a non-empty second segment — but
+ * keeping them separate functions keeps BlogRoute.slug non-nullable for every post-page caller.
+ */
+export function parseBlogIndexRoute(path: string): BlogIndexRoute | null {
+    const m = path.match(/^\/b\/([^/?#]+)\/?$/);
+    if (!m) return null;
+    const publicKey = safeDecode(m[1]);
+    if (!publicKey) return null;
+    return { publicKey, pathname: `/b/${encodeURIComponent(publicKey)}` };
+}

@@ -12,17 +12,13 @@
 //   GET /api/widget/:key/posts/:slug     → { post: {...payload, aiAssisted, hookVariants, abState} }
 
 import { HandlerEvent } from '@netlify/functions';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { widgetConfigs, blogPosts, organisations } from '../../db/schema';
-import {
-    resolveInlineMedia, resolveFeatureImageUrl, resolveCardImageUrls,
-} from '../../src/utils/blog-media-resolve';
-import { cardImageRef } from '../../src/utils/blog-card-image';
+import { resolveInlineMedia, resolveFeatureImageUrl } from '../../src/utils/blog-media-resolve';
 import { isAiAssisted } from '../../src/utils/blog-ai-assisted';
-import {
-    listSortKey, afterCursor, pageSize, parseCursor, takePage,
-} from '../../src/utils/blog-list-paging';
+import { pageSize, parseCursor } from '../../src/utils/blog-list-paging';
+import { listPublishedPosts } from '../../src/utils/blog-list-query';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const CORS = {
@@ -81,58 +77,11 @@ export default withLambda(async (event: HandlerEvent) => {
         const size = pageSize(qs.limit);
         const cursorId = parseCursor(qs.cursor);
 
-        const rows = await db
-            .select({
-                // Selected for the cursor, not for the response — the id stays server-side, and
-                // nextCursor is the only form of it a caller ever sees.
-                id: blogPosts.id,
-                title: blogPosts.title,
-                slug: blogPosts.slug,
-                metaDescription: blogPosts.metaDescription,
-                tags: blogPosts.tags,
-                publishedAt: blogPosts.publishedAt,
-                jobId: blogPosts.jobId,
-                blueprintId: blogPosts.blueprintId,
-                isAutonomous: blogPosts.isAutonomous,
-                generationReason: blogPosts.generationReason,
-                // The list thumbnail, denormalised at publish time. Three small columns instead of
-                // published_payload — pulling 50 full article bodies to find 50 <img> tags is the
-                // reason this is a column and not a read-time parse.
-                cardImageAssetId: blogPosts.cardImageAssetId,
-                cardImageUrl: blogPosts.cardImageUrl,
-                cardImageAlt: blogPosts.cardImageAlt,
-            })
-            .from(blogPosts)
-            .where(and(
-                eq(blogPosts.organisationId, orgId),
-                eq(blogPosts.status, 'published'),
-                ...(cursorId ? [afterCursor(cursorId, orgId)] : []),
-            ))
-            // id DESC is not decoration: two posts published in the same second would otherwise
-            // come back in whatever order the planner chose, and a keyset cursor built on an
-            // ambiguous order skips or repeats rows at exactly that boundary.
-            .orderBy(desc(listSortKey), desc(blogPosts.id))
-            // One more than asked for, purely to answer "is there another page?" without a
-            // second COUNT query over the whole table.
-            .limit(size + 1);
-
-        const { page, nextCursor } = takePage(rows, size);
-        // One batched query for the whole page's images, not one per post. Every row here belongs
-        // to the same org — this endpoint is keyed by a single widget — but the resolver is
-        // org-scoped per item regardless, so an asset id pointing outside the org resolves to null
-        // rather than to somebody else's picture.
-        const imageUrls = await resolveCardImageUrls(db, page.map((r) => ({ orgId, ref: cardImageRef(r) })));
-        const posts = page.map((r, i) => ({
-            title: r.title,
-            slug: r.slug,
-            excerpt: r.metaDescription || '',
-            tags: r.tags,
-            publishedAt: r.publishedAt,
-            aiAssisted: isAiAssisted(r),
-            // null when the post has no usable image. The widget then renders a text-only card,
-            // which is the right look for an essay — not a gap where a picture failed to load.
-            imageUrl: imageUrls[i],
-            imageAlt: r.cardImageAlt || r.title,
+        // The query is shared with the hosted index (/b/:key, blog-page.ts) so the two lists
+        // cannot disagree about which posts exist or in what order — see blog-list-query.ts.
+        const { posts: page, nextCursor } = await listPublishedPosts(db, orgId, { size, cursorId });
+        const posts = page.map((p) => ({
+            ...p,
             // The byline. Already selected above with the config, so it costs no extra query —
             // and it is the same string blog-page.ts prints on the post itself, so the card and
             // the page it opens cannot disagree about who published it.
