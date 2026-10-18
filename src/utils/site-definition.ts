@@ -14,6 +14,7 @@
 
 import { fillTemplateWords, templateById } from '../config/site-templates';
 import { contrastRatio, normalizeHex, readableInkOn } from './brand-kit';
+import { clampText, stripLoneSurrogates } from './text-safe';
 
 // ── Shapes ──────────────────────────────────────────────────────────────────────────────────
 
@@ -263,6 +264,19 @@ export const LIMITS = {
     minPrice: 30, maxPrice: 1_000_000,
 } as const;
 
+/**
+ * What the editor counts each text box against, so an owner sees "too long" while typing rather
+ * than a shortened sentence afterwards. Mirrors cleanSection (tests/site-text-clamp.test.ts holds
+ * the two together): `fields` by prop name, `sectionFields` where a section's own limit differs,
+ * `itemFields` inside lists, `linkLabel` for button text.
+ */
+export const EDITOR_LIMITS = {
+    fields: { eyebrow: LIMITS.eyebrow, headline: LIMITS.headline, subheadline: LIMITS.subheadline, heading: LIMITS.headline, intro: LIMITS.intro, buttonLabel: LIMITS.buttonLabel, buyLabel: LIMITS.buttonLabel, note: LIMITS.menuNote },
+    sectionFields: { text: { body: LIMITS.textBody }, cta: { body: LIMITS.subheadline } } as Partial<Record<SectionType, Record<string, number>>>,
+    itemFields: { title: LIMITS.itemTitle, body: LIMITS.itemBody, q: LIMITS.q, a: LIMITS.a, quote: LIMITS.quote, name: LIMITS.personName, detail: LIMITS.personDetail },
+    linkLabel: LIMITS.ctaLabel,
+} as const;
+
 /** Pages a site may have when the plan sets no number (decision D1: 5 on £29). */
 export const DEFAULT_MAX_PAGES = 5;
 /** Below this, body text on the background is hard to read (WCAG AA for body text). */
@@ -283,7 +297,23 @@ export function cleanText(v: unknown, max: number, multiline = false): string {
     s = multiline
         ? s.replace(/\r\n?/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').split('\n').map((l) => l.trim()).join('\n').trim()
         : s.replace(/\s+/g, ' ').trim();
-    return s.length > max ? s.slice(0, max).trimEnd() : s;
+    if (s.length <= max) return s;
+    const cut = clampText(s, max);
+    onShortened?.(cut);
+    return cut;
+}
+
+/**
+ * Told about every text cleanText had to shorten while normaliseSiteDefinition runs, so the owner
+ * hears about it instead of finding a sentence cut short on their live site. Normalising is
+ * synchronous, so one module-level listener is enough.
+ */
+let onShortened: ((kept: string) => void) | null = null;
+
+/** The warning for one shortened text: where it now ends, so the owner can find it. */
+export function shortenedWarning(kept: string): string {
+    const tail = kept.length > 50 ? `…${stripLoneSurrogates(kept.slice(-50)).replace(/^\S*\s/, '')}` : kept;
+    return `Some text was too long for its place and was shortened. It now ends "${tail}" — check it reads well.`;
 }
 const textOrNull = (v: unknown, max: number, multiline = false) => cleanText(v, max, multiline) || null;
 
@@ -665,6 +695,12 @@ export interface NormaliseResult { definition: SiteDefinition; warnings: string[
 export function normaliseSiteDefinition(raw: unknown, opts: NormaliseOptions = {}): NormaliseResult {
     const warnings: string[] = [];
     const warn = (m: string) => { if (!warnings.includes(m)) warnings.push(m); };
+    const outer = onShortened;
+    onShortened = (kept) => warn(shortenedWarning(kept));
+    try { return normalise(raw, opts, warn, warnings); } finally { onShortened = outer; }
+}
+
+function normalise(raw: unknown, opts: NormaliseOptions, warn: (m: string) => void, warnings: string[]): NormaliseResult {
     const maxPages = Math.max(1, opts.maxPages ?? DEFAULT_MAX_PAGES);
     const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
 
@@ -758,7 +794,7 @@ export function normaliseSiteDefinition(raw: unknown, opts: NormaliseOptions = {
         const page = pages.find((p) => p.id === pageId);
         if (!page || navSeen.has(pageId)) return [];
         navSeen.add(pageId);
-        return [{ label: cleanText(o.label, LIMITS.navLabel) || page.title.slice(0, LIMITS.navLabel), pageId }];
+        return [{ label: cleanText(o.label, LIMITS.navLabel) || clampText(page.title, LIMITS.navLabel), pageId }];
     }).slice(0, LIMITS.navItems);
 
     const footer = { text: textOrNull((r.footer as Record<string, unknown> | undefined)?.text, LIMITS.footer, true) };
@@ -773,14 +809,14 @@ export function normaliseSiteDefinition(raw: unknown, opts: NormaliseOptions = {
  * page not hidden. `pageId` is the page the entry belongs to; `sectionId` when it is a jump.
  */
 export function menuOf(def: SiteDefinition): Array<{ label: string; path: string; pageId: string; sectionId?: string }> {
-    const toPage = (p: SitePageDef, label?: string) => ({ label: (label || p.title).slice(0, LIMITS.navLabel), path: p.slug ? `/${p.slug}` : '/', pageId: p.id });
+    const toPage = (p: SitePageDef, label?: string) => ({ label: clampText(label || p.title, LIMITS.navLabel), path: p.slug ? `/${p.slug}` : '/', pageId: p.id });
     if (def.structure === 'one_page') {
         const home = def.pages[0];
         const jumps = home ? home.sections.filter((s) => s.look?.menuLabel).map((s) => ({ label: s.look!.menuLabel!, path: `#${s.id}`, pageId: home.id, sectionId: s.id })) : [];
         const others = def.pages.slice(1).filter((p) => !p.hideFromMenu).map((p) => toPage(p));
         return [...jumps, ...others].slice(0, LIMITS.navItems);
     }
-    const entries = def.nav.length ? def.nav : def.pages.filter((p) => !p.hideFromMenu).slice(0, LIMITS.navItems).map((p) => ({ label: p.title.slice(0, LIMITS.navLabel), pageId: p.id }));
+    const entries = def.nav.length ? def.nav : def.pages.filter((p) => !p.hideFromMenu).slice(0, LIMITS.navItems).map((p) => ({ label: clampText(p.title, LIMITS.navLabel), pageId: p.id }));
     return entries.flatMap((n) => {
         const page = def.pages.find((p) => p.id === n.pageId);
         return page ? [toPage(page, n.label)] : [];
@@ -859,6 +895,17 @@ export function planSplit(sections: Section[]): { home: Section[]; parts: Array<
  * cap, an id that doesn't exist, a section that would be dropped as invalid.
  */
 export function applySiteOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseOptions = {}): OperationResult {
+    // An edit cleans its section before the gate runs, so the gate would see text already short:
+    // hear about cuts for the whole operation.
+    const cuts: string[] = [];
+    const outer = onShortened;
+    onShortened = (kept) => cuts.push(shortenedWarning(kept));
+    let r: OperationResult;
+    try { r = applyOperation(def, op, opts); } finally { onShortened = outer; }
+    return r.ok && cuts.length ? { ...r, warnings: [...new Set([...cuts, ...r.warnings])] } : r;
+}
+
+function applyOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseOptions): OperationResult {
     const maxPages = Math.max(1, opts.maxPages ?? DEFAULT_MAX_PAGES);
     const next: SiteDefinition = JSON.parse(JSON.stringify(def));
     const page = 'pageId' in op ? next.pages.find((p) => p.id === op.pageId) : undefined;
@@ -958,7 +1005,7 @@ export function applySiteOperation(def: SiteDefinition, op: SiteOperation, opts:
             for (const p of rest) {
                 if (!p.sections.length) continue;
                 const first = p.sections[0];
-                first.look = { ...(first.look ?? DEFAULT_LOOK), menuLabel: first.look?.menuLabel || p.title.slice(0, LIMITS.navLabel) };
+                first.look = { ...(first.look ?? DEFAULT_LOOK), menuLabel: first.look?.menuLabel || clampText(p.title, LIMITS.navLabel) };
                 jumpTo.set(`/${p.slug}`, `#${first.id}`);
                 home.sections.push(...p.sections);
             }
@@ -1016,7 +1063,7 @@ export function applySiteOperation(def: SiteDefinition, op: SiteOperation, opts:
                 taken.add(slug);
                 const first = part.sections[0];
                 if (first.look?.menuLabel === part.title) first.look = { ...first.look, menuLabel: null };
-                const pg = { id: '', slug, title: part.title.slice(0, LIMITS.pageTitle), seo: { title: null, description: null }, sections: part.sections, hideFromMenu: false } as SitePageDef;
+                const pg = { id: '', slug, title: clampText(part.title, LIMITS.pageTitle), seo: { title: null, description: null }, sections: part.sections, hideFromMenu: false } as SitePageDef;
                 made.push(pg);
                 part.sections.forEach((x) => target.set(x, pg));
             }

@@ -25,6 +25,30 @@ export function safeSlice(s: string, max: number): string {
 }
 
 /**
+ * Text a reader will see, shortened to at most `max` units without looking broken: never a
+ * half-emoji, never half a word. It ends at a sentence when one ends late enough, otherwise at a
+ * word with "…" so nobody mistakes the cut for the author's own ending.
+ *
+ * Found on prod 2026-10-18: a website's hero line ended "…connect to the tools y" because the
+ * starter site and the site gate both cut with .slice().
+ */
+export function clampText(s: string, max: number): string {
+    if (s.length <= max) return s;
+    if (max < 2) return safeSlice(s, max);
+    // A sentence that ends in the second half of the room is the cleanest place to stop. The probe
+    // takes one unit more, so a full stop right at the limit still counts as followed by a space.
+    const probe = s.slice(0, safeSlice(s, max).length + 1);
+    let sentenceEnd = 0;
+    for (const m of probe.matchAll(/[.!?]["'”’)]?(?=\s)/g)) sentenceEnd = m.index + m[0].length;
+    if (sentenceEnd >= max / 2) return s.slice(0, sentenceEnd);
+    // Otherwise the last whole word, leaving room for the ellipsis. One very long word is cut.
+    const room = safeSlice(s, max - 1);
+    const lastSpace = /\s/.test(s[room.length] ?? '') ? room.length : room.search(/\s\S*$/);
+    const words = lastSpace >= max / 2 ? room.slice(0, lastSpace) : room;
+    return `${words.trimEnd().replace(/[\s,;:–—-]+$/, '')}…`;
+}
+
+/**
  * Deep-clean a value bound for a model (system prompt, messages, tool input): every string has its
  * half-emoji removed. The last line of defence for prompts assembled from many sources, any of
  * which may have cut something carelessly.

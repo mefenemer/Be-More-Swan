@@ -52,7 +52,7 @@ import { aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
-import { applySiteOperation, assetIdsIn, FEATURE_LABELS, FONTS, FEATURE_SECTIONS, planSplit, SECTION_TYPES, SITE_FEATURES, type SiteOperation } from '../../src/utils/site-definition';
+import { applySiteOperation, assetIdsIn, EDITOR_LIMITS, FEATURE_LABELS, FONTS, FEATURE_SECTIONS, planSplit, SECTION_TYPES, SITE_FEATURES, type SiteOperation } from '../../src/utils/site-definition';
 import { placeholdersIn } from '../../src/utils/site-draft';
 import { cleanSiteSlugInput, siteAssetUrl, siteOrigin, sitesDomain, siteVisibleText, suggestSiteSlug } from '../../src/utils/site-hosting';
 import { checkDomain, claimDomain, currentDomain, domainView, removeDomain } from '../../src/utils/site-domains';
@@ -183,7 +183,7 @@ export default withLambda(async (event) => {
             // The template gallery (src/config/site-templates.ts): enough for a card; previews come from site-preview.
             templates: SITE_TEMPLATES.map((t) => ({ id: t.id, name: t.name, tagline: t.tagline, bestFor: t.bestFor, lettering: FONT_PAIRS[t.theme.font].label,
                 colours: [t.theme.backgroundColor, t.theme.primaryColor, t.theme.accentColor].filter(Boolean), pages: t.pages.length, onePage: t.structure === 'one_page' })),
-            vocab: { sectionTypes: SECTION_TYPES, fonts: FONTS.map((k) => ({ key: k, label: FONT_PAIRS[k].label })), features: SITE_FEATURES.map((key) => ({ key, label: FEATURE_LABELS[key], sections: FEATURE_SECTIONS[key] })) },
+            vocab: { sectionTypes: SECTION_TYPES, fonts: FONTS.map((k) => ({ key: k, label: FONT_PAIRS[k].label })), features: SITE_FEATURES.map((key) => ({ key, label: FEATURE_LABELS[key], sections: FEATURE_SECTIONS[key] })), limits: EDITOR_LIMITS },
         };
     };
 

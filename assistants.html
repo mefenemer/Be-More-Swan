@@ -78,6 +78,7 @@
       <button class="pill-tab px-4 py-2 rounded-full text-sm font-semibold" data-cat="Customer Success &amp; Support">Customer Success</button>
       <button class="pill-tab px-4 py-2 rounded-full text-sm font-semibold" data-cat="Project Management">Project Management</button>
       <button class="pill-tab px-4 py-2 rounded-full text-sm font-semibold" data-cat="Finance &amp; Bookkeeping">Finance &amp; Bookkeeping</button>
+      <button class="pill-tab px-4 py-2 rounded-full text-sm font-semibold" data-cat="Education">Education</button>
     </div>
   </div>
 </div>
@@ -252,6 +253,7 @@
 
 <script src="./mobileMenu.js"></script>
 <script src="/src/public/assistant-content.js"></script>
+<script src="/src/public/assistant-sectors.js"></script>
 <script src="/src/components/scroll-lock.js"></script>
 <script>
 // ── Icons ────────────────────────────────────────────────────────────────────
@@ -470,7 +472,10 @@ function renderGrid() {
   let list = _all;
 
   if (_activeCategory !== 'All Roles') {
-    list = list.filter(a => a.category === _activeCategory);
+    // Education is a sector, not a function category — cross-listed in assistant-sectors.js.
+    list = window.AssistantSectors.SECTORS[_activeCategory]
+      ? list.filter(a => window.AssistantSectors.matches(a, _activeCategory))
+      : list.filter(a => a.category === _activeCategory);
   }
   if (_searchQ) {
     const q = _searchQ.toLowerCase();
