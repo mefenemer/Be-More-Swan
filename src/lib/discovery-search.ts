@@ -99,18 +99,22 @@ export function normaliseDomain(input: string | null | undefined): string | null
  * @param opts.page 1-based result page. Page 2+ is how a run reads PAST the first screen of
  *                  results — the single biggest lever on coverage, and previously unused: nothing
  *                  in discovery paginated, so a market of 4,500 was only ever seen ten at a time.
+ * @param opts.country ISO 3166-1 alpha-2 country to search FROM (Serper's `gl`), e.g. 'gb'. Without
+ *                  it Serper answers as US Google, so a UK search came back full of US businesses
+ *                  — the word "UK" in a query is a keyword, not a location. See
+ *                  src/lib/discovery-search-area.ts.
  * @throws SearchNotConfiguredError when no provider is wired
  */
 export async function search(
     query: string,
-    opts: { limit?: number; recency?: 'year' | 'month'; page?: number; usage?: { workspaceId?: number | null; assistantId?: number | null; userId?: number | null } } = {},
+    opts: { limit?: number; recency?: 'year' | 'month'; page?: number; country?: string | null; usage?: { workspaceId?: number | null; assistantId?: number | null; userId?: number | null } } = {},
 ): Promise<SearchResponse> {
     if (!isSearchConfigured()) throw new SearchNotConfiguredError();
     const limit = Math.max(1, Math.min(opts.limit ?? 10, MAX_RESULTS_PER_CALL));
     const page = Math.max(1, Math.floor(opts.page ?? 1));
 
     if (PROVIDER === 'serper') {
-        const res = await searchSerper(query, limit, opts.recency, page);
+        const res = await searchSerper(query, limit, opts.recency, page, opts.country);
         // One billed query per call (each page is its own query). Recorded only once it answered.
         logServiceCost('serper-search', 1, { ...opts.usage, sessionId: 'serper' });
         return res;
@@ -196,7 +200,7 @@ export async function fetchPageText(url: string): Promise<string> {
 
 // ── Serper.dev provider ──────────────────────────────────────────────────────
 
-async function searchSerper(query: string, limit: number, recency?: 'year' | 'month', page = 1): Promise<SearchResponse> {
+async function searchSerper(query: string, limit: number, recency?: 'year' | 'month', page = 1, country?: string | null): Promise<SearchResponse> {
     // `tbs` is Google's own date restriction, passed through by Serper. Used by the buying-signal
     // sweep, where a funding round from 2019 is not a buying signal — it is history, and feeding it
     // to the re-scorer as though it were news is how a lead gets promoted for nothing.
@@ -207,7 +211,9 @@ async function searchSerper(query: string, limit: number, recency?: 'year' | 'mo
         // ⚠️ `page` is sent ONLY when past the first — an explicit page:1 is equivalent to omitting
         // it, and not sending it keeps every existing call byte-identical to what has been running
         // in production, so pagination cannot regress the un-paginated path.
-        body: JSON.stringify({ q: query, num: limit, ...(page > 1 ? { page } : {}), ...(tbs ? { tbs } : {}) }),
+        // `gl` follows the same rule: sent only when the search named a country, so a search that
+        // names none is answered exactly as it always was.
+        body: JSON.stringify(serperBody(query, limit, page, tbs, country)),
     });
     if (!res.ok) {
         const detail = await res.text().catch(() => '');
@@ -226,4 +232,16 @@ async function searchSerper(query: string, limit: number, recency?: 'year' | 'mo
         };
     });
     return { results, costGbp: COST_GBP_PER_CALL };
+}
+
+/** A two-letter country code Serper will accept as `gl`, or undefined. Anything else is dropped. */
+function serperCountry(country: string | null | undefined): string | undefined {
+    const c = (country ?? '').trim().toLowerCase();
+    return /^[a-z]{2}$/.test(c) ? c : undefined;
+}
+
+/** The Serper request body. Exported for tests: what is SENT is the contract, not what we meant. */
+export function serperBody(query: string, limit: number, page = 1, tbs?: string, gl?: string | null): Record<string, unknown> {
+    const country = serperCountry(gl);
+    return { q: query, num: limit, ...(page > 1 ? { page } : {}), ...(tbs ? { tbs } : {}), ...(country ? { gl: country } : {}) };
 }

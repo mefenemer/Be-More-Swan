@@ -23,7 +23,8 @@ import {
     aiAssistants, assistantRecords,
 } from '../../db/schema';
 import { generateQueries, type DiscoveryStrategy } from '../../src/lib/discovery-query-gen';
-import { scoreCandidates, type ScoreCandidate } from '../../src/lib/discovery-scoring';
+import { scoreCandidates, discardReason, type LeadScoringCard, type ScoreCandidate, type ScoringSearchContext } from '../../src/lib/discovery-scoring';
+import { resolveSearchArea } from '../../src/lib/discovery-search-area';
 import { loadSenderIdentity } from '../../src/utils/sender-identity';
 import { search, isSearchConfigured, normaliseDomain, fetchSiteIdentity, SearchNotConfiguredError } from '../../src/lib/discovery-search';
 import { enrichLeadContact } from '../../src/lib/discovery-enrich';
@@ -513,6 +514,13 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
         // immediately so one database write still covers the whole slice.
         const extraPages: PlannedQuery[] = [];
 
+        // Where the search asked for businesses. Sent to the search provider as its country, and to
+        // the scorer with the search's own words — before this, neither knew, so a UK search was
+        // answered by US Google and scored on fit alone. Derived per slice from what the user
+        // approved (the idea, plus a territory sweep's area); never stored, so it cannot go stale.
+        const searchArea = resolveSearchArea([campaign.idea, readTerritoryPlan(campaign.approvedBrief)?.area]);
+        const searchContext: ScoringSearchContext = { idea: campaign.idea, area: searchArea };
+
         for (const { query, strategy, page: plannedPage } of slice) {
             // Enforce per-run caps BEFORE spending anything.
             if (searchCallsMade >= guardrails.maxSearchCallsPerRun) { stopReason = 'search_cap'; break; }
@@ -523,7 +531,7 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
             if (!isSearchConfigured()) throw new SearchNotConfiguredError();
 
             const page = Math.max(1, plannedPage ?? 1);
-            const { results, costGbp: callCost } = await search(query, { limit: RESULTS_PER_QUERY, page, usage: { workspaceId: job.organisation_id, assistantId: campaign.aiAssistantId } });
+            const { results, costGbp: callCost } = await search(query, { limit: RESULTS_PER_QUERY, page, country: searchArea?.country, usage: { workspaceId: job.organisation_id, assistantId: campaign.aiAssistantId } });
             searchCallsMade += 1;
             costGbp += callCost;
             coverage.queriesRun += 1;
@@ -620,7 +628,7 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
             const rulesBlock = campaign.aiAssistantId
                 ? await loadAssistantRulesBlock(db, { assistantId: campaign.aiAssistantId, organisationId: job.organisation_id })
                 : null;
-            const scored = await scoreCandidates(toScore, icp, sender, rulesBlock);
+            const scored = await scoreCandidates(toScore, icp, sender, rulesBlock, searchContext);
             tokensUsed += scored.inputTokens + scored.outputTokens;
             void logAiUsage({
                 workspaceId: job.organisation_id, assistantId: campaign.aiAssistantId,
@@ -635,6 +643,22 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
                 // whereas 'cold' is a VERDICT, and writing one nobody made is the whole defect this
                 // section closes. The card carries `scoringFailed` so every surface can tell.
                 const unscored = card.scoringFailed === true;
+
+                // ⚠️ Not a lead: a blog post, directory, publisher or supplier, or a business outside
+                // the search's area. Kept at 'discarded' with its card — so the (campaign, domain)
+                // index stops the same search re-finding it, and the verdict stays auditable — but
+                // never mirrored into the Leads tab and never counted against the lead cap. These
+                // used to arrive as cold leads, which is how a customer came to report "blog posts"
+                // and "US leads on a UK search".
+                const discard = discardReason(card);
+                if (discard) {
+                    await db.update(discoveredLeads)
+                        .set({ score: card.score, rating: card.rating, scoringCard: card, status: 'discarded', updatedAt: new Date() })
+                        .where(eq(discoveredLeads.id, inserted[i].id));
+                    console.log(`[discovery] job ${job.job_id} discarded ${inserted[i].domain}: ${discard}`);
+                    continue;
+                }
+
                 await db.update(discoveredLeads)
                     .set({
                         score: unscored ? null : card.score,
@@ -670,8 +694,8 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
                     ...ledgerBase,
                     payload: { score: card.score, rating: card.rating },
                 });
+                leadsFound += 1;
             }
-            leadsFound += inserted.length;
         }
 
         const nextIndex = cursor.queryIndex + slice.length;
@@ -760,6 +784,17 @@ async function promoteBatch(db: Db, job: JobRow, assistantId: number, guardrails
 
     const approvalStatus = guardrails.requireHumanApproval ? 'pending_approval' : 'approved';
     for (const lead of batch) {
+        // The same gate as the inline path. A row left at 'qualified' by an earlier run (or by a
+        // deploy that predates the gate) must not reach the Leads tab through the safety net.
+        const card = lead.scoringCard as LeadScoringCard | null;
+        const discard = card ? discardReason(card) : null;
+        if (discard) {
+            await db.update(discoveredLeads)
+                .set({ status: 'discarded', updatedAt: new Date() })
+                .where(eq(discoveredLeads.id, lead.id));
+            console.log(`[discovery] job ${job.job_id} discarded lead ${lead.id} at promotion: ${discard}`);
+            continue;
+        }
         await promoteOne(db, job.organisation_id, assistantId, lead, approvalStatus);
     }
 
