@@ -250,11 +250,32 @@
     return p.headline || p.heading || (p.items && p.items[0] && (p.items[0].title || p.items[0].q || p.items[0].name)) || (p.body || '').slice(0, 60) || '';
   }
 
+  /** The longest a text box may be (sites.ts sends EDITOR_LIMITS), as attributes plus the note it fills. */
+  function limitAttr(max) { return max ? ` data-max="${max}"` : ''; }
+  function limitNote(max) { return max ? '<p data-len-note class="text-xs mt-1" hidden></p>' : ''; }
+  function fieldLimit(k) {
+    const l = (state.data && state.data.vocab.limits) || null;
+    if (!l) return 0;
+    const type = state.editing && state.editing.type;
+    return ((l.sectionFields || {})[type] || {})[k] || (l.fields || {})[k] || 0;
+  }
+  /** "250 / 300" near the limit; over it, a plain warning — the server would shorten it on save. */
+  function updateLenNote(input) {
+    const max = Number(input.dataset.max);
+    const note = input.nextElementSibling;
+    if (!max || !note || !note.hasAttribute('data-len-note')) return;
+    const n = input.value.trim().length;
+    note.hidden = n < max * 0.85;
+    note.className = `text-xs mt-1 ${n > max ? 'text-amber-800 font-bold' : 'text-gray-500'}`;
+    note.textContent = n > max ? `Too long by ${n - max} character${n - max === 1 ? '' : 's'} — it would be shortened to fit. Trim it here so it ends where you want.` : `${n} / ${max} characters`;
+  }
+
   function fieldHtml(f, value) {
     const name = `f-${f.k}`;
     const req = f.required ? ' <span class="text-red-500">*</span>' : '';
-    if (f.kind === 'text') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</label><input name="${name}" class="${inputCls}" value="${esc(value || '')}">`;
-    if (f.kind === 'textarea') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</label><textarea name="${name}" rows="${f.rows || 3}" class="${inputCls}">${esc(value || '')}</textarea>`;
+    const max = fieldLimit(f.k);
+    if (f.kind === 'text') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</label><input name="${name}" class="${inputCls}"${limitAttr(max)} value="${esc(value || '')}">${limitNote(max)}`;
+    if (f.kind === 'textarea') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</label><textarea name="${name}" rows="${f.rows || 3}" class="${inputCls}"${limitAttr(max)}>${esc(value || '')}</textarea>${limitNote(max)}`;
     if (f.kind === 'select') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</label><select name="${name}" class="${inputCls}">${f.options.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(value) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
     if (f.kind === 'checkbox') return `<label class="flex items-center gap-2 text-xs font-bold text-gray-700 mt-3"><input type="checkbox" name="${name}" ${value ? 'checked' : ''}> ${esc(f.label)}</label>`;
     if (f.kind === 'formpick') {
@@ -266,8 +287,9 @@
     if (f.kind === 'link') {
       const v = value || {};
       const pages = def().pages.map((p) => [pathOf(p), p.title]);
+      const lmax = ((state.data && state.data.vocab.limits) || {}).linkLabel || 0;
       return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</label>
-        <div class="grid gap-2 md:grid-cols-2"><input name="${name}-label" class="${inputCls}" placeholder="Button text" value="${esc(v.label || '')}">
+        <div class="grid gap-2 md:grid-cols-2"><div><input name="${name}-label" class="${inputCls}" placeholder="Button text"${limitAttr(lmax)} value="${esc(v.label || '')}">${limitNote(lmax)}</div>
         <input name="${name}-href" class="${inputCls}" list="site-pages-list" placeholder="/contact or https://…" value="${esc(v.href || '')}"></div>
         <datalist id="site-pages-list">${pages.map(([path, t]) => `<option value="${esc(path)}">${esc(t)}</option>`).join('')}</datalist>`;
     }
@@ -396,12 +418,13 @@
     }
     if (f.kind === 'items') {
       const list = Array.isArray(value) && value.length ? value : [{}];
+      const itemMax = (k) => (((state.data && state.data.vocab.limits) || {}).itemFields || {})[k] || 0;
       return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
         <div data-items="${esc(f.k)}" class="space-y-2">${list.map((it, i) => `
           <div class="border border-gray-200 rounded-lg p-3" data-item>
             ${f.fields.map(([k, kind, label]) => kind === 'textarea'
-              ? `<textarea data-item-field="${esc(k)}" rows="2" class="${inputCls} mt-1" placeholder="${esc(label)}">${esc(it[k] || '')}</textarea>`
-              : `<input data-item-field="${esc(k)}" class="${inputCls} mt-1" placeholder="${esc(label)}" value="${esc(it[k] || '')}">`).join('')}
+              ? `<textarea data-item-field="${esc(k)}" rows="2" class="${inputCls} mt-1" placeholder="${esc(label)}"${limitAttr(itemMax(k))}>${esc(it[k] || '')}</textarea>${limitNote(itemMax(k))}`
+              : `<input data-item-field="${esc(k)}" class="${inputCls} mt-1" placeholder="${esc(label)}"${limitAttr(itemMax(k))} value="${esc(it[k] || '')}">${limitNote(itemMax(k))}`).join('')}
             <button type="button" data-item-remove="${i}" class="text-xs text-gray-500 underline mt-1">Remove</button>
           </div>`).join('')}</div>
         <button type="button" data-item-add="${esc(f.k)}" class="text-xs text-gray-600 underline mt-2">+ Add another</button>`;
@@ -1629,6 +1652,9 @@
     if (!pick || !state.editing) return;
     syncEditing(pick.closest('form'));
     render();
+  });
+  document.addEventListener('input', (e) => {
+    if (e.target.matches && e.target.matches('[data-max]')) updateLenNote(e.target);
   });
   document.addEventListener('dragover', (e) => { if (e.target.closest && e.target.closest('[data-site-words-drop]')) e.preventDefault(); });
   document.addEventListener('drop', (e) => {

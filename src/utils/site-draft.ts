@@ -17,6 +17,7 @@ import { currentDatePromptBlock } from './current-date-prompt';
 import {
     applySiteOperation, cleanHref, DEFAULT_THEME, LIMITS, normaliseSiteDefinition, sectionAllowed, type BusinessType, type SectionType, type SiteDefinition, type SiteTheme,
 } from './site-definition';
+import { clampText } from './text-safe';
 
 export interface BusinessFacts {
     name: string;
@@ -62,10 +63,10 @@ export function starterSite(business: BusinessFacts, theme: SiteTheme): SiteDefi
         : 'Tell us how to reach you and we will get back to you. [Add your email address or phone number]';
     return normaliseSiteDefinition({
         theme,
-        settings: { siteName: business.name, description: business.description?.slice(0, LIMITS.description) ?? null, businessType: 'Organization', email: business.email },
+        settings: { siteName: business.name, description: (business.description ? clampText(business.description, LIMITS.description) : null), businessType: 'Organization', email: business.email },
         pages: [
             { title: 'Home', slug: '', sections: [
-                { type: 'hero', props: { layout: 'centered', headline: business.name, subheadline: business.description?.slice(0, LIMITS.subheadline) ?? '[One sentence on who you help and how]',
+                { type: 'hero', props: { layout: 'centered', headline: business.name, subheadline: business.description ? clampText(business.description, LIMITS.subheadline) : '[One sentence on who you help and how]',
                     primaryCta: { label: 'Get in touch', href: '/contact' } } },
             ] },
             { title: 'Contact', slug: 'contact', sections: [{ type: 'text', props: { heading: 'Get in touch', body: contactBody } }] },
