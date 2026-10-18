@@ -315,12 +315,12 @@
     'media-source-manual': {
       term: 'Manual Upload',
       emoji: '📤',
-      plain: "Free — pulls from photos and videos you've already uploaded to your content library. This never uses your AI credits.",
+      plain: "Free — pulls from photos and videos you've already uploaded to your content library. It never uses extra tasks.",
     },
     'media-source-stock': {
       term: 'AI Stock Search',
       emoji: '🔍',
-      plain: "Free — searches Pexels for a ready-made stock photo or video that fits the post. This never uses your AI credits.",
+      plain: "Free — searches Pexels for a ready-made stock photo or video that fits the post. It never uses extra tasks.",
     },
     'media-source-brand_card': {
       term: 'Branded Text Card',
@@ -330,7 +330,7 @@
     'media-source-ai': {
       term: 'AI Generation',
       emoji: '🎨',
-      plain: "Uses your AI credits — a generated image typically costs 1 credit and a generated video costs 5 credits. You'll be notified of how many credits you have left, and unused credits roll over month to month.",
+      plain: "Comes out of your monthly task allowance — a generated image counts as 1 task and a generated video as 20. If your tasks run out, your assistant falls back to the free sources and nothing is charged.",
     },
     // ── Sign-up form builder (src/components/form-builder.js) ──────────────────────────────────
     'form-live': { term: 'Live', emoji: '🟢', plain: "Whether this form is taking sign-ups. Switched off, it shows nothing — on your website and on its own page — so you can build it in peace and switch it on when it's ready." },
@@ -405,7 +405,7 @@
     'campaign-orders': { term: 'Orders', emoji: '📦', plain: "Every piece of work your Campaign Assistant has asked your other assistants (or your team) to do — what it asked for, who got it, how many tasks it used, and what came back." },
     'campaign-decisions': { term: 'Decisions', emoji: '⚖️', plain: "Plans and changes your Campaign Assistant wants to make, each with the evidence behind it. Approving one briefs your assistants; turning one down asks why, so it doesn't suggest the same thing again." },
     'brand-briefs': { term: 'Briefs', emoji: '🎨', plain: "A brief says what a picture is for — what it should show, the mood, what to avoid. Your Brand Designer turns it into options from stock photos, AI images and branded cards, and nothing is used anywhere until you approve one." },
-    'brand-brief-sources': { term: 'Where options come from', emoji: '🧺', plain: "Stock photos and videos come free from Pexels, and branded cards are drawn free in your own colours, font and logo. AI images use one AI credit for a round of four; an AI video uses five for one short clip, on the Busywork Buster and Digital Employee plans. Untick a source and that brief never uses it." },
+    'brand-brief-sources': { term: 'Where options come from', emoji: '🧺', plain: "Stock photos and videos come free from Pexels, and branded cards are drawn free in your own colours, font and logo. AI images use 1 task for a round of four; an AI video uses 20 tasks for one short clip, on the Busywork Buster plan. Untick a source and that brief never uses it." },
     'brand-brief-own': { term: 'Your own pictures', emoji: '📎', plain: "Put your own picture or video in as an option: upload one, or choose from your library — designs you've imported from Canva are there too. If someone on your team is making it, name them on the brief; nothing is sent to them, so let them know yourself." },
     'brand-guidelines': { term: 'Picture guidelines', emoji: '📐', plain: "Your house rules for pictures: the style, what to include, what never to show and any extra colours. Every AI image your assistants make reads them. Stock photo search can't filter by them, so check stock picks yourself." },
     'brand-art-direction': { term: 'How the designer read your brief', emoji: '🔍', plain: "The words your Brand Designer actually used: the description given to the AI, the stock search, and the words put on the cards. If a round missed, this shows why — then turn options down with a reason and the next round reads it." },

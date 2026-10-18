@@ -8,6 +8,7 @@
 // these lists: brand-briefs.ts sends them with every `list` response.
 
 import { IMAGE_CREDIT_COST, VIDEO_CREDIT_COST } from '../utils/ai-credits';
+import { TASK_WEIGHTS } from './task-weights';
 
 export const BRIEF_PURPOSES = ['social_post', 'blog_header', 'ad', 'email_header', 'story', 'other'] as const;
 export type BriefPurpose = typeof BRIEF_PURPOSES[number];
@@ -46,12 +47,14 @@ export type BriefSource = typeof BRIEF_SOURCES[number];
 
 export const SOURCE_SPECS: Record<BriefSource, { label: string; cost: string; optionsPerRound: number; credits: number }> = {
     stock:      { label: 'Stock photos',  cost: 'Free (Pexels)',                                         optionsPerRound: 4, credits: 0 },
-    ai_image:   { label: 'AI images',     cost: `${IMAGE_CREDIT_COST} AI credit for 4 images`,          optionsPerRound: 4, credits: IMAGE_CREDIT_COST },
+    // `cost` is what the brief form shows. Since the single task allowance (docs/task-metering.md) it is
+    // in tasks; `credits` stays the internal hold amount that ai-credits.ts converts (tasksForCredits).
+    ai_image:   { label: 'AI images',     cost: `${TASK_WEIGHTS.ai_image} task for 4 images`,           optionsPerRound: 4, credits: IMAGE_CREDIT_COST },
     brand_card: { label: 'Branded cards', cost: 'Free — your colours, font and logo',                   optionsPerRound: 2, credits: 0 },
     stock_video: { label: 'Stock videos', cost: 'Free (Pexels)',                                         optionsPerRound: 2, credits: 0 },
-    // One clip per round: four clips would be 20 credits for one brief. Busywork Buster and Digital Employee plans only
+    // One clip per round: four clips would be 80 tasks for one brief. Busywork Buster (and Digital Employee) only
     // (tierCanGenerateVideo) — the same lock as AI video everywhere else.
-    ai_video:   { label: 'AI video',      cost: `${VIDEO_CREDIT_COST} AI credits for one 6-second clip (Busywork Buster and Digital Employee plans)`, optionsPerRound: 1, credits: VIDEO_CREDIT_COST },
+    ai_video:   { label: 'AI video',      cost: `${TASK_WEIGHTS.ai_video} tasks for one 6-second clip (Busywork Buster plan)`, optionsPerRound: 1, credits: VIDEO_CREDIT_COST },
 };
 
 /** The sources whose options are VIDEOS. */

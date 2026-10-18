@@ -3074,6 +3074,8 @@ export const taskLedger = pgTable("task_ledger", {
 }, (t) => [
   index("task_ledger_org_period_idx").on(t.organisationId, t.periodStart),
   index("task_ledger_assistant_idx").on(t.organisationId, t.assistantId, t.periodStart),
+  // One conversion row per org — what makes db/ops/task-allowance-cutover.sql safe to re-run.
+  uniqueIndex("task_ledger_one_conversion_idx").on(t.organisationId).where(sql`source = 'conversion'`),
 ]);
 
 // The free 14-day trial, one row per workspace (db/z-trial-plan.sql, src/utils/trial.ts).

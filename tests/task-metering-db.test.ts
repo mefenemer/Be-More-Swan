@@ -54,7 +54,7 @@ async function main() {
         const ORG = 1;
         const [mp] = await sql.unsafe(`INSERT INTO master_plans (tier_key, name, monthly_price_gbp, monthly_task_limit, features, is_active)
                                        VALUES ('saver', 'Saver', 29, 30, '{}'::jsonb, true) RETURNING id`);
-        await sql.unsafe(`INSERT INTO plans (organisation_id, master_plan_id, status) VALUES (${ORG}, ${mp.id}, 'active')`);
+        await sql.unsafe(`INSERT INTO plans (organisation_id, master_plan_id, plan_name, status) VALUES (${ORG}, ${mp.id}, 'Saver', 'active')`);
         const counter = async () => Number((await sql.unsafe(`SELECT COALESCE(SUM(task_count),0) AS n FROM usage_counters WHERE organisation_id = ${ORG}`))[0].n);
         const bonus = async () => Number((await sql.unsafe(`SELECT COALESCE(SUM(bonus_tasks),0) AS n FROM task_bonus WHERE organisation_id = ${ORG}`))[0].n);
 

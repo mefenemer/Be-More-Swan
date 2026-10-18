@@ -25,7 +25,7 @@ import {
 } from '../src/config/visual-brief-vocab';
 import { defaultSourcesFor, fallbackArtDirection, parseArtDirection, setupAnswer } from '../src/utils/visual-briefs';
 import { DEFAULT_BRAND_KIT } from '../src/utils/brand-kit';
-import { IMAGE_CREDIT_COST } from '../src/utils/ai-credits';
+import { IMAGE_CREDIT_COST, tasksForCredits, VIDEO_CREDIT_COST } from '../src/utils/ai-credits';
 import { ROLE_CONNECTIONS } from '../src/utils/connection-map';
 
 let passed = 0;
@@ -79,8 +79,10 @@ check('only AI costs, and it costs what generate-ai-image charges for a grid', (
     assert.strictEqual(roundCreditCost(['stock', 'brand_card']), 0);
     assert.strictEqual(roundCreditCost(['stock', 'ai_image', 'brand_card']), IMAGE_CREDIT_COST);
     assert.strictEqual(SOURCE_SPECS.ai_image.credits, IMAGE_CREDIT_COST);
-    assert.match(SOURCE_SPECS.ai_image.cost, new RegExp(`^${IMAGE_CREDIT_COST} AI credit for ${SOURCE_SPECS.ai_image.optionsPerRound} images$`),
+    // Shown in tasks since the single task allowance; tasksForCredits is what the hold actually takes.
+    assert.match(SOURCE_SPECS.ai_image.cost, new RegExp(`^${tasksForCredits('image', IMAGE_CREDIT_COST)} task for ${SOURCE_SPECS.ai_image.optionsPerRound} images$`),
         'the cost line printed before the click must match what a round makes');
+    assert.match(SOURCE_SPECS.ai_video.cost, new RegExp(`^${tasksForCredits('video', VIDEO_CREDIT_COST)} tasks for one`));
 });
 
 check('the migration\'s CHECKs accept exactly the vocabulary', () => {

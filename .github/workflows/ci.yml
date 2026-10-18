@@ -67,3 +67,8 @@ jobs:
       # The Brand Designer's settle-once credit SQL (src/utils/visual-briefs.ts endRound), same schema.
       - name: Brand Designer credit settlement
         run: npx tsx tests/visual-briefs-db.test.ts
+      # The single task allowance's money SQL (src/utils/work-metering.ts): weighted charges, bonus
+      # tasks spent only past the allowance, in-flight media reserved. A bare parameter in one of these
+      # statements took production capacity checks down on 2026-10-17 — only Postgres can catch that.
+      - name: Task metering
+        run: npx tsx tests/task-metering-db.test.ts
