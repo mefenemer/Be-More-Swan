@@ -30,7 +30,7 @@
   /** The edit form for each section type — the props the gate accepts (site-definition.ts cleanSection). */
   const FORMS = {
     hero: [
-      { k: 'layout', kind: 'select', label: 'Layout', options: [['centered', 'Centred'], ['split', 'Text beside picture'], ['banner', 'Coloured banner']] },
+      { k: 'layout', kind: 'select', label: 'Layout', options: [['centered', 'Centred'], ['split', 'Text beside picture'], ['banner', 'Coloured banner'], ['cover', 'Picture behind the words (full width)']] },
       { k: 'eyebrow', kind: 'text', label: 'Small label above the headline' },
       { k: 'headline', kind: 'text', label: 'Headline', required: true },
       { k: 'subheadline', kind: 'textarea', label: 'Line under the headline' },
@@ -186,7 +186,7 @@
         state.paymentsNotice = ok
           ? { tone: 'ok', text: 'Stripe is connected. Buy buttons and any booking deposits are now live on your website.' }
           : { tone: 'warn', text: 'Stripe still needs a few details before you can take payments. Click "Finish setting up Stripe" to carry on.' };
-        if (ok && typeof window.showToast === 'function') window.showToast('Stripe connected — your website can take payments.');
+        if (ok && typeof window.showToast === 'function') window.showToast('Stripe connected — your website can take payments.', { icon: '✅' });
       }
       if (!state.pageId || !def().pages.some((p) => p.id === state.pageId)) state.pageId = def().pages[0].id;
       // A domain still connecting: check it once on opening, so "Check now" is rarely needed.
@@ -681,7 +681,130 @@
   }
 
   function designPanel() {
-    return structureCard() + designCard();
+    return templatesCard(false) + structureCard() + designCard();
+  }
+
+  // ── Templates (src/config/site-templates.ts) ───────────────────────────────────────────────
+  // A gallery of real previews — this site's own name, town and features, rendered by site-preview
+  // with ?template= — never a screenshot that could drift from what the template really does.
+  const TPL_W = 1280;
+  const TPL_H = 860;
+  function tplSrc(id, opts = {}) {
+    return `/.netlify/functions/site-preview?assistantId=${encodeURIComponent(state.assistantId)}&template=${encodeURIComponent(id)}${opts.mode === 'design' ? '&mode=design' : ''}${opts.keepColours ? '&keepColours=1' : ''}&path=${encodeURIComponent(opts.path || '/')}`;
+  }
+  function tplCard(t, width) {
+    const scale = width / TPL_W;
+    return `<button type="button" data-tpl-open="${esc(t.id)}" class="text-left bg-white border border-gray-200 rounded-xl overflow-hidden hover:shadow-md" style="width:${width}px;max-width:100%">
+      <span style="display:block;position:relative;width:100%;height:${Math.round(TPL_H * scale)}px;overflow:hidden;background:#f3f4f6">
+        <iframe src="${esc(tplSrc(t.id))}" loading="lazy" tabindex="-1" aria-hidden="true" title="" style="position:absolute;top:0;left:0;width:${TPL_W}px;height:${TPL_H}px;border:0;transform:scale(${scale});transform-origin:0 0;pointer-events:none"></iframe></span>
+      <span class="block p-3">
+        <span class="flex items-center justify-between gap-2"><span class="text-sm font-black text-gray-900">${esc(t.name)}</span>
+          <span class="flex gap-1">${t.colours.map((c) => `<span style="width:12px;height:12px;border-radius:9999px;background:${esc(c)};border:1px solid rgba(0,0,0,.15)"></span>`).join('')}</span></span>
+        <span class="block text-xs text-gray-600 mt-1">${esc(t.tagline)}</span>
+        <span class="block text-[11px] text-gray-500 mt-1">${esc(t.bestFor.join(' · '))}</span>
+      </span></button>`;
+  }
+  function templatesCard(first) {
+    const list = state.data.templates || [];
+    if (!list.length) return '';
+    const current = def().settings.template;
+    if (!first) {
+      const cur = list.find((x) => x.id === current);
+      return card(`<div class="flex flex-wrap items-center justify-between gap-2"><div><p class="text-sm font-black text-gray-900">Templates</p>
+        <p class="text-xs text-gray-500 mt-1">${cur ? `Started from <strong>${esc(cur.name)}</strong>. ` : ''}Try another look — keep your words and pictures, or start again from a template.</p></div>
+        ${btn('data-tpl-browse', 'Browse templates', true)}</div>`);
+    }
+    return card(`<p class="text-sm font-black text-gray-900">Choose a template</p>
+      <p class="text-xs text-gray-500 mt-1">Each one is shown with your name. Pick one to start from — you can change everything afterwards, or try another later.</p>
+      <div class="flex flex-wrap gap-3 mt-3">${list.map((t) => tplCard(t, 260)).join('')}</div>`, 'border-indigo-200');
+  }
+
+  /** The full-size look at one template, and the choice to use it. Built per open; its handlers live on it. */
+  function openTemplate(id) {
+    const list = state.data.templates || [];
+    const t = list.find((x) => x.id === id);
+    if (!t) return;
+    const fresh = isFresh();
+    const view = { device: 'desktop', mode: fresh ? 'full' : 'design', keepColours: false };
+    document.getElementById('bms-tpl')?.remove();
+    const back = document.createElement('div');
+    back.id = 'bms-tpl';
+    back.setAttribute('role', 'dialog');
+    back.setAttribute('aria-modal', 'true');
+    back.setAttribute('aria-label', `${t.name} template`);
+    back.style.cssText = 'position:fixed;inset:0;z-index:11000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);padding:1rem;';
+    const paint = () => {
+      back.innerHTML = `<div class="bg-white rounded-2xl shadow-xl w-full" style="max-width:1200px;height:92vh;display:flex;flex-direction:column">
+        <div class="flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-b border-gray-100">
+          <div><p class="text-sm font-black text-gray-900">${esc(t.name)}</p><p class="text-xs text-gray-500">${esc(t.tagline)} · Lettering: ${esc(t.lettering)}</p></div>
+          <div class="flex flex-wrap items-center gap-2">
+            ${list.map((x) => `<button type="button" data-tpl-switch="${esc(x.id)}" class="px-2 py-1 text-xs font-bold rounded-lg border ${x.id === t.id ? 'btn-primary' : 'btn-secondary'}">${esc(x.name)}</button>`).join('')}
+            <button type="button" data-tpl-close class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Close</button></div>
+        </div>
+        <div class="flex flex-wrap items-center justify-between gap-2 px-5 py-2 bg-gray-50 border-b border-gray-100 text-xs">
+          <div class="flex flex-wrap items-center gap-3">
+            ${fresh ? '' : `<label class="flex items-center gap-1"><input type="radio" name="tpl-mode" value="design" ${view.mode === 'design' ? 'checked' : ''}> My words and pictures, this design</label>
+              <label class="flex items-center gap-1"><input type="radio" name="tpl-mode" value="full" ${view.mode === 'full' ? 'checked' : ''}> Start again from this template</label>`}
+            <label class="flex items-center gap-1"><input type="checkbox" data-tpl-keep ${view.keepColours ? 'checked' : ''}> Keep my own colours</label>
+          </div>
+          <div class="flex gap-1">${['desktop', 'mobile'].map((d) => `<button type="button" data-tpl-device="${d}" class="px-2 py-1 text-xs font-bold rounded-lg border ${view.device === d ? 'btn-primary' : 'btn-secondary'}">${d === 'desktop' ? 'Desktop' : 'Phone'}</button>`).join('')}</div>
+        </div>
+        <div class="flex-1 bg-gray-100 p-3" style="min-height:0;overflow:auto"><iframe title="Preview of the ${esc(t.name)} template" src="${esc(tplSrc(t.id, view))}" style="display:block;margin:0 auto;width:${view.device === 'mobile' ? '390px' : '100%'};height:100%;border:0;background:#fff;border-radius:8px"></iframe></div>
+        <div class="flex flex-wrap items-center justify-end gap-2 px-5 py-3 border-t border-gray-100">
+          <p class="text-xs text-gray-500 mr-auto">${view.mode === 'full' ? 'Pictures are free stock photos to swap for your own. Words in [square brackets] are for you to fill in before you publish.' : 'Your pages, words and pictures stay exactly as they are; only the look changes.'}</p>
+          <button type="button" data-tpl-use class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">${view.mode === 'full' ? `Use ${esc(t.name)}` : `Use this design`}</button>
+        </div></div>`;
+    };
+    paint();
+    document.body.appendChild(back);
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    const close = () => { back.remove(); document.removeEventListener('keydown', onKey); };
+    document.addEventListener('keydown', onKey);
+    back.addEventListener('click', async (e) => {
+      if (e.target === back || e.target.closest('[data-tpl-close]')) { close(); return; }
+      const sw = e.target.closest('[data-tpl-switch]');
+      if (sw) { close(); openTemplate(sw.dataset.tplSwitch); return; }
+      const dv = e.target.closest('[data-tpl-device]');
+      if (dv) { view.device = dv.dataset.tplDevice; paint(); return; }
+      if (e.target.closest('[data-tpl-use]')) {
+        if (view.mode === 'full' && !fresh) {
+          const ok = await window.confirmModal(`Your pages are replaced with the <strong>${esc(t.name)}</strong> template's layout. Your live site doesn't change until you publish, and earlier published versions are kept.`, { title: 'Start again from this template?', confirmLabel: 'Start again', cancelLabel: 'Keep my pages' });
+          if (!ok) return;
+        }
+        close();
+        await apply([{ op: 'apply_template', templateId: t.id, mode: view.mode, keepColours: view.keepColours }], () => {
+          state.panel = 'pages'; state.pageId = def().pages[0].id; state.previewPath = '/';
+          state.note = { text: view.mode === 'full' ? `${t.name} is in place. Now let ${state.assistantName || 'your assistant'} write the words for your business — or edit any section yourself.` : `${t.name}'s design is in place.`, tone: 'ok' };
+        });
+      }
+    });
+    back.addEventListener('change', (e) => {
+      if (e.target.name === 'tpl-mode') { view.mode = e.target.value; paint(); }
+      if (e.target.matches('[data-tpl-keep]')) { view.keepColours = e.target.checked; paint(); }
+    });
+  }
+  function openTemplateGallery() {
+    const list = state.data.templates || [];
+    document.getElementById('bms-tpl')?.remove();
+    const back = document.createElement('div');
+    back.id = 'bms-tpl';
+    back.setAttribute('role', 'dialog');
+    back.setAttribute('aria-modal', 'true');
+    back.setAttribute('aria-label', 'Templates');
+    back.style.cssText = 'position:fixed;inset:0;z-index:11000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);padding:1rem;';
+    back.innerHTML = `<div class="bg-white rounded-2xl shadow-xl w-full" style="max-width:1200px;max-height:92vh;display:flex;flex-direction:column">
+      <div class="flex items-center justify-between gap-2 px-5 py-3 border-b border-gray-100"><div><p class="text-sm font-black text-gray-900">Templates</p><p class="text-xs text-gray-500">Shown with your name. Open one to see it full size.</p></div>
+        <button type="button" data-tpl-close class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Close</button></div>
+      <div class="p-5 overflow-y-auto" style="min-height:0"><div class="flex flex-wrap gap-4 justify-center">${list.map((t) => tplCard(t, 270)).join('')}</div></div></div>`;
+    document.body.appendChild(back);
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    const close = () => { back.remove(); document.removeEventListener('keydown', onKey); };
+    document.addEventListener('keydown', onKey);
+    back.addEventListener('click', (e) => {
+      if (e.target === back || e.target.closest('[data-tpl-close]')) { close(); return; }
+      const o = e.target.closest('[data-tpl-open]');
+      if (o) { close(); openTemplate(o.dataset.tplOpen); }
+    });
   }
   function designCard() {
     const t = def().theme;
@@ -690,7 +813,11 @@
       <p class="text-sm font-black text-gray-900">Design</p>
       <p class="text-xs text-gray-500 mb-3">Started from your brand kit. Text that would be hard to read on the background is refused.</p>
       <div class="grid gap-3 md:grid-cols-2">${colour('primaryColor', 'Main colour (buttons, links)')}${colour('textColor', 'Text colour')}${colour('backgroundColor', 'Background colour')}
-        <div><label class="block text-xs font-bold text-gray-700">Lettering</label><select data-theme="font" class="${inputCls}">${[['sans', 'Clean (sans-serif)'], ['serif', 'Classic (serif)'], ['rounded', 'Friendly (rounded)'], ['system', 'Device default']].map(([v, l]) => `<option value="${v}" ${t.font === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <div><label class="block text-xs font-bold text-gray-700">Lettering</label><select data-theme="font" class="${inputCls}">${(state.data.vocab.fonts || []).map(({ key, label }) => `<option value="${esc(key)}" ${t.font === key ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></div>
+        <div><label class="block text-xs font-bold text-gray-700">Spacing</label><select data-theme="spacing" class="${inputCls}">${[['compact', 'Compact'], ['regular', 'Regular'], ['airy', 'Airy — lots of room']].map(([v, l]) => `<option value="${v}" ${(t.spacing || 'regular') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <div><label class="block text-xs font-bold text-gray-700">Header</label><select data-theme="header" class="${inputCls}">${[['standard', 'Name on the left, menu on the right'], ['centered', 'Name centred above the menu']].map(([v, l]) => `<option value="${v}" ${(t.header || 'standard') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <div><label class="block text-xs font-bold text-gray-700">Tint for alternate sections</label><div class="flex items-center gap-2"><input type="color" data-theme="accentColor" value="${esc(t.accentColor || '#e5e7eb')}" class="h-10 border border-gray-300 rounded-lg" style="width:64px">
+          <label class="flex items-center gap-1 text-xs text-gray-600"><input type="checkbox" data-theme-accent-off ${t.accentColor ? '' : 'checked'}> Plain grey</label></div></div>
         <div><label class="block text-xs font-bold text-gray-700">Corners</label><select data-theme="radius" class="${inputCls}">${[['none', 'Square'], ['small', 'Slightly rounded'], ['medium', 'Rounded'], ['large', 'Very rounded']].map(([v, l]) => `<option value="${v}" ${t.radius === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div class="md:col-span-2"><p class="block text-xs font-bold text-gray-700">Logo</p>
           ${pictureHtml(t.logoAssetId ? { assetId: t.logoAssetId, url: '' } : (t.logoUrl ? { url: t.logoUrl } : null), { pick: 'data-site-logo-pick', clear: 'data-site-logo-clear' })}
@@ -919,10 +1046,12 @@
       ${s.draftNote ? `<p class="text-xs font-semibold text-amber-800 mt-2">${esc(s.draftNote)}</p>` : ''}`;
     if (where === 'start') {
       return card(`
-        <p class="text-sm font-black text-gray-900">Let ${who} write your site</p>
-        <p class="text-xs text-gray-500 mt-1">It writes every page from your business details, products and set-up answers, using only the things you ticked above. You then change anything you like. Uses 1 task.</p>
+        ${def().settings.template ? `<p class="text-sm font-black text-gray-900">Let ${who} write the words</p>
+        <p class="text-xs text-gray-500 mt-1">It rewrites every section of your template for your business, from your details, products and set-up answers — the layout, pictures and design stay as they are. Anything it doesn't know stays in [square brackets] for you. Uses 1 task.</p>`
+        : `<p class="text-sm font-black text-gray-900">Let ${who} write your site</p>
+        <p class="text-xs text-gray-500 mt-1">It writes every page from your business details, products and set-up answers, using only the things you ticked above. You then change anything you like. Uses 1 task.</p>`}
         ${form}
-        <div class="mt-3">${btn('data-site-draft', 'Write my site', true)}</div>`, 'border-indigo-200');
+        <div class="mt-3">${btn('data-site-draft', def().settings.template ? 'Write the words' : 'Write my site', true)}</div>`, 'border-indigo-200');
     }
     return `<details class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
       <summary class="text-sm font-black text-gray-900 cursor-pointer">Start again from scratch</summary>
@@ -1028,7 +1157,8 @@
       <div class="grid gap-4 lg:grid-cols-2">
         <div class="space-y-4 min-w-0">
           ${featuresOn() ? '' : featuresCard(true)}
-          ${isFresh() || state.data.site.drafting ? draftCard('start') : ''}
+          ${isFresh() && !def().settings.template ? templatesCard(true) : ''}
+          ${isFresh() || state.data.site.drafting || (def().settings.template && !state.data.site.publishedVersion) ? draftCard('start') : ''}
           ${publishCard()}
           ${placeholdersCard()}
           <div class="flex flex-wrap gap-2">${tabs}</div>
@@ -1362,6 +1492,9 @@
     }
     const ask = t('[data-site-ask]');
     if (ask) { await askForChange(ask.dataset.page, ask.dataset.siteAsk); return; }
+    if (t('[data-tpl-browse]')) { openTemplateGallery(); return; }
+    const tplOpen = t('[data-tpl-open]');
+    if (tplOpen) { openTemplate(tplOpen.dataset.tplOpen); return; }
     if (t('[data-site-split]')) { await backToPages(); return; }
     if (t('[data-site-features-save]')) {
       const host = hostOf(e);
@@ -1387,6 +1520,7 @@
       hostOf(e).querySelectorAll('[data-theme]').forEach((el) => { theme[el.dataset.theme] = el.value || (el.dataset.theme === 'logoUrl' ? null : el.value); });
       // A web address typed for the logo replaces a library logo; left empty, the library logo stays.
       if (theme.logoUrl) theme.logoAssetId = null; else delete theme.logoUrl;
+      if (hostOf(e).querySelector('[data-theme-accent-off]')?.checked) theme.accentColor = null;
       await apply([{ op: 'set_theme', theme }]);
       return;
     }
@@ -1417,7 +1551,7 @@
     }
     const copy = t('[data-site-copy]');
     if (copy) {
-      try { await navigator.clipboard.writeText(copy.dataset.siteCopy); window.showToast?.('Copied.'); } catch { /* the value is on screen to copy by hand */ }
+      try { await navigator.clipboard.writeText(copy.dataset.siteCopy); window.showToast?.('Copied.', { icon: '✅' }); } catch { /* the value is on screen to copy by hand */ }
       return;
     }
     if (t('[data-site-address-save]')) {
@@ -1462,7 +1596,10 @@
     }
     if (t('[data-site-draft]')) {
       const ok = typeof window.confirmModal === 'function'
-        ? await window.confirmModal(`Your Website Assistant writes every page again, replacing your current draft. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing is live yet.'} This uses 1 task.`, { title: 'Draft your whole site?', confirmLabel: 'Draft my site', cancelLabel: 'Not now' })
+        ? await window.confirmModal(def().settings.template
+            ? `Your Website Assistant rewrites the words in every section for your business. The layout, pictures and design stay. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing is live yet.'} This uses 1 task.`
+            : `Your Website Assistant writes every page again, replacing your current draft. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing is live yet.'} This uses 1 task.`,
+          { title: def().settings.template ? 'Write the words?' : 'Draft your whole site?', confirmLabel: def().settings.template ? 'Write the words' : 'Draft my site', cancelLabel: 'Not now' })
         : true;
       if (!ok) return;
       try {

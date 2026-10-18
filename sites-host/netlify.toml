@@ -45,3 +45,6 @@
 [[edge_functions]]
   function = "serve"
   path = "/*"
+  # Fonts are plain files in public/site-fonts (copied from /site-fonts at the repo root — keep the two
+  # the same); everything else is a site page from the app.
+  excludedPath = ["/site-fonts/*"]

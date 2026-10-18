@@ -140,30 +140,74 @@ export function jsonLd(value: unknown): string {
     return JSON.stringify(value).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
 }
 
-const FONT_STACK: Record<SiteTheme['font'], string> = {
-    sans: 'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-    system: 'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-    serif: 'Georgia, Cambria, "Times New Roman", Times, serif',
-    rounded: 'ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", sans-serif',
+const SYSTEM_SANS = 'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+const SYSTEM_SERIF = 'Georgia, Cambria, "Times New Roman", Times, serif';
+/**
+ * Lettering: a heading face and a body face. The device-font four draw exactly as before; the
+ * pairings use open-licence fonts we host ourselves at /site-fonts (the app serves them for the
+ * preview, sites-host/public for live sites) — never Google's servers, so no visitor's address
+ * goes to a third party. `faces` are the files to load; variable fonts, one file each.
+ */
+export interface FontPair { label: string; heading: string; body: string; weight: number; upper?: boolean; tracking?: string; faces: string[]; }
+const face = (name: string, fallback: string) => `"${name}", ${fallback}`;
+export const FONT_PAIRS: Record<SiteTheme['font'], FontPair> = {
+    sans: { label: 'Clean (sans-serif)', heading: SYSTEM_SANS, body: SYSTEM_SANS, weight: 700, faces: [] },
+    system: { label: 'Device default', heading: SYSTEM_SANS, body: SYSTEM_SANS, weight: 700, faces: [] },
+    serif: { label: 'Classic (serif)', heading: SYSTEM_SERIF, body: SYSTEM_SERIF, weight: 700, faces: [] },
+    rounded: { label: 'Friendly (rounded)', heading: 'ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", sans-serif', body: 'ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", sans-serif', weight: 700, faces: [] },
+    editorial: { label: 'Editorial — Fraunces & Inter', heading: face('Fraunces', SYSTEM_SERIF), body: face('Inter', SYSTEM_SANS), weight: 600, tracking: '-0.01em', faces: ['fraunces', 'inter'] },
+    classic: { label: 'Timeless — Playfair Display & Lora', heading: face('Playfair Display', SYSTEM_SERIF), body: face('Lora', SYSTEM_SERIF), weight: 600, faces: ['playfair-display', 'lora'] },
+    elegant: { label: 'Elegant — Cormorant Garamond & Work Sans', heading: face('Cormorant Garamond', SYSTEM_SERIF), body: face('Work Sans', SYSTEM_SANS), weight: 500, tracking: '0.005em', faces: ['cormorant-garamond', 'work-sans'] },
+    modern: { label: 'Modern — Manrope', heading: face('Manrope', SYSTEM_SANS), body: face('Manrope', SYSTEM_SANS), weight: 800, tracking: '-0.02em', faces: ['manrope'] },
+    bold: { label: 'Bold — Oswald & Inter', heading: face('Oswald', SYSTEM_SANS), body: face('Inter', SYSTEM_SANS), weight: 600, upper: true, tracking: '0.02em', faces: ['oswald', 'inter'] },
+    friendly: { label: 'Warm & friendly — Nunito', heading: face('Nunito', SYSTEM_SANS), body: face('Nunito', SYSTEM_SANS), weight: 800, faces: ['nunito'] },
+    tech: { label: 'Crisp — Space Grotesk & Inter', heading: face('Space Grotesk', SYSTEM_SANS), body: face('Inter', SYSTEM_SANS), weight: 600, tracking: '-0.02em', faces: ['space-grotesk', 'inter'] },
+    warm: { label: 'Boutique — DM Serif Display & Work Sans', heading: face('DM Serif Display', SYSTEM_SERIF), body: face('Work Sans', SYSTEM_SANS), weight: 400, faces: ['dm-serif-display', 'work-sans'] },
 };
+const FACE_NAMES: Record<string, { family: string; weights: string }> = {
+    fraunces: { family: 'Fraunces', weights: '100 900' }, inter: { family: 'Inter', weights: '100 900' },
+    'playfair-display': { family: 'Playfair Display', weights: '400 900' }, lora: { family: 'Lora', weights: '400 700' },
+    'cormorant-garamond': { family: 'Cormorant Garamond', weights: '300 700' }, 'work-sans': { family: 'Work Sans', weights: '100 900' },
+    manrope: { family: 'Manrope', weights: '200 800' }, oswald: { family: 'Oswald', weights: '200 700' },
+    nunito: { family: 'Nunito', weights: '200 1000' }, 'space-grotesk': { family: 'Space Grotesk', weights: '300 700' },
+    'dm-serif-display': { family: 'DM Serif Display', weights: '400' },
+};
+/** Where the font files are: the same path on the app (preview) and on every site's own address. */
+export const SITE_FONTS_PATH = '/site-fonts';
+const SPACING: Record<NonNullable<SiteTheme['spacing']>, string> = { compact: '44px', regular: '64px', airy: '104px' };
+/** a blended with b: t = 0 is a, 1 is b. Hex in, hex out. */
+function mixHex(a: string, b: string, t: number): string {
+    const n = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+    const [x, y] = [n(a), n(b)];
+    return `#${x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, '0')).join('')}`;
+}
 const RADIUS: Record<SiteTheme['radius'], string> = { none: '0', small: '4px', medium: '10px', large: '18px' };
 
 /** The stylesheet: tokens from the theme, nothing else. Hex colours only (the gate made sure). */
 export function themeCss(theme: SiteTheme): string {
     const ink = buttonInk(theme);
-    return `:root{--p:${theme.primaryColor};--t:${theme.textColor};--b:${theme.backgroundColor};--ink:${ink};--r:${RADIUS[theme.radius]};--f:${FONT_STACK[theme.font]}}
+    const pair = FONT_PAIRS[theme.font] || FONT_PAIRS.sans;
+    const faces = pair.faces.map((f) => `@font-face{font-family:"${FACE_NAMES[f].family}";src:url(${SITE_FONTS_PATH}/${f}.woff2) format("woff2");font-weight:${FACE_NAMES[f].weights};font-style:normal;font-display:swap}`).join('');
+    const tint = theme.accentColor ? mixHex(theme.backgroundColor, theme.accentColor, 0.14) : null;
+    return `${faces}:root{--p:${theme.primaryColor};--t:${theme.textColor};--b:${theme.backgroundColor};--ink:${ink};--r:${RADIUS[theme.radius]};--f:${pair.body};--hf:${pair.heading};--hw:${pair.weight};--sp:${SPACING[theme.spacing ?? 'regular']}}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}body{margin:0;font-family:var(--f);color:var(--t);background:var(--b);line-height:1.6;font-size:17px}
-img{max-width:100%;height:auto;display:block}a{color:var(--p)}h1,h2,h3{line-height:1.2;margin:0 0 .5em}h1{font-size:clamp(2rem,5vw,3.2rem)}h2{font-size:clamp(1.5rem,3.5vw,2.2rem)}h3{font-size:1.15rem}
+img{max-width:100%;height:auto;display:block}a{color:var(--p)}h1,h2,h3{line-height:1.2;margin:0 0 .5em;font-family:var(--hf);font-weight:var(--hw)${pair.upper ? ';text-transform:uppercase' : ''}${pair.tracking ? `;letter-spacing:${pair.tracking}` : ''}}.brand{font-family:var(--hf)}h1{font-size:clamp(2rem,5vw,3.2rem)}h2{font-size:clamp(1.5rem,3.5vw,2.2rem)}h3{font-size:1.15rem}
 p{margin:0 0 1em}.w{max-width:1080px;margin:0 auto;padding:0 20px}.n{max-width:760px}
 .hd{border-bottom:1px solid rgba(0,0,0,.08)}.hd .w{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding-top:14px;padding-bottom:14px}
 .brand{font-weight:800;font-size:1.15rem;text-decoration:none;color:var(--t)}.brand img{max-height:40px;width:auto}
 .nav{display:flex;flex-wrap:wrap;gap:4px 18px;margin:0;padding:0;list-style:none}.nav a{text-decoration:none;color:var(--t);font-weight:600;font-size:.95rem}.nav a[aria-current=page]{color:var(--p)}
-section{padding:64px 0}.alt{background:rgba(0,0,0,.035)}
+section{padding:var(--sp) 0}.alt{background:${tint ?? 'rgba(0,0,0,.035)'}}
+.hd.ctr .w{flex-direction:column;justify-content:center;gap:10px;padding-top:22px}.hd.ctr .brand{font-size:1.5rem}.hd.ctr .nav{justify-content:center}
 .btn{display:inline-block;padding:12px 22px;border-radius:var(--r);background:var(--p);color:var(--ink);font-weight:700;text-decoration:none;margin:4px 8px 4px 0}.btn.s{background:transparent;color:var(--p);border:2px solid var(--p)}
 .hero{text-align:center}.hero .eb{text-transform:uppercase;letter-spacing:.08em;font-weight:700;font-size:.8rem;color:var(--p);margin-bottom:.8em}.hero .sub{font-size:1.2rem;max-width:680px;margin:0 auto 1.4em;opacity:.85}
 .hero.split .w{display:grid;gap:32px;align-items:center;text-align:left}@media(min-width:800px){.hero.split .w{grid-template-columns:1.1fr 1fr}}.hero.split .sub{margin-left:0}
 .hero.banner{background:var(--p);color:var(--ink)}.hero.banner .eb,.hero.banner a.btn.s{color:var(--ink);border-color:var(--ink)}.hero.banner .btn:not(.s){background:var(--ink);color:var(--p)}
 .hero img{border-radius:var(--r);margin:24px auto 0}.hero.split img{margin:0}
+.hero.cover{position:relative;overflow:hidden;color:#fff;background:#1a1a1a;min-height:min(78vh,720px);display:flex;align-items:center;padding:calc(var(--sp) + 40px) 0}
+.hero.cover .bg{position:absolute;inset:0;width:100%;height:100%;max-width:none;object-fit:cover;margin:0;border-radius:0}
+.hero.cover::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.28),rgba(0,0,0,.58))}
+.hero.cover .w{position:relative;z-index:1;width:100%}.hero.cover h1{font-size:clamp(2.4rem,6.2vw,4.6rem);color:#fff}.hero.cover .eb{color:#fff;opacity:.9}.hero.cover .sub{opacity:.95}
+.hero.cover a.btn.s{color:#fff;border-color:#fff}.hero.cover video.bg{background:transparent}
 .grid{display:grid;gap:24px;margin-top:28px}@media(min-width:700px){.grid{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}}
 .card{border:1px solid rgba(0,0,0,.08);border-radius:var(--r);padding:22px;background:var(--b)}.num{display:inline-flex;width:34px;height:34px;border-radius:50%;background:var(--p);color:var(--ink);align-items:center;justify-content:center;font-weight:800;margin-bottom:10px}
 .intro{max-width:680px;opacity:.85}details{border:1px solid rgba(0,0,0,.1);border-radius:var(--r);padding:14px 18px;margin:10px 0;background:var(--b)}summary{cursor:pointer;font-weight:700}details p{margin:.6em 0 0}
@@ -205,9 +249,10 @@ export function imageSrc(img: { url: string; assetId?: number | null } | null | 
  * looping, as a picture would sit there, but with the browser's own controls so a visitor can pause
  * it — moving content that can't be stopped fails WCAG 2.2.2, and the site runs no script of its own.
  */
-function mediaHtml(img: { alt: string; video?: boolean }, src: string, loading: 'eager' | 'lazy'): string {
-    if (img.video) return `<video src="${esc(src)}" autoplay muted loop playsinline controls controlslist="nodownload noplaybackrate" disablepictureinpicture preload="${loading === 'eager' ? 'auto' : 'metadata'}" aria-label="${esc(img.alt)}" title="${esc(img.alt)}"></video>`;
-    return `<img src="${esc(src)}" alt="${esc(img.alt)}" loading="${loading}">`;
+function mediaHtml(img: { alt: string; video?: boolean }, src: string, loading: 'eager' | 'lazy', cls = ''): string {
+    const c = cls ? ` class="${cls}"` : '';
+    if (img.video) return `<video${c} src="${esc(src)}" autoplay muted loop playsinline controls controlslist="nodownload noplaybackrate" disablepictureinpicture preload="${loading === 'eager' ? 'auto' : 'metadata'}" aria-label="${esc(img.alt)}" title="${esc(img.alt)}"></video>`;
+    return `<img${c} src="${esc(src)}" alt="${esc(img.alt)}" loading="${loading}">`;
 }
 function logoSrc(theme: SiteTheme): string {
     return theme.logoAssetId ? (assetUrlOf(theme.logoAssetId) || theme.logoUrl || '') : (theme.logoUrl || '');
@@ -267,6 +312,11 @@ function sectionHtml(s: Section, h1: boolean, bg: SectionBg): string {
             const buttons = [p.primaryCta && linkHtml(p.primaryCta), p.secondaryCta && linkHtml(p.secondaryCta, true)].filter(Boolean).join('');
             const copy = `${p.eyebrow ? `<p class="eb">${esc(p.eyebrow)}</p>` : ''}<${H}>${esc(p.headline)}</${H}>${p.subheadline ? `<p class="sub">${esc(p.subheadline)}</p>` : ''}${buttons ? `<p>${buttons}</p>` : ''}`;
             const src = imageSrc(p.image);
+            // A cover hero puts the picture behind the words; without a picture it is a coloured banner.
+            if (p.layout === 'cover') {
+                if (!(p.image && src)) return `<section class="hero banner" id="${esc(s.id)}"><div class="w">${copy}</div></section>`;
+                return `<section class="hero cover" id="${esc(s.id)}">${mediaHtml(p.image, src, 'eager', 'bg')}<div class="w">${copy}</div></section>`;
+            }
             const img = p.image && src ? mediaHtml(p.image, src, 'eager') : '';
             return `<section class="hero ${p.layout}" id="${esc(s.id)}"><div class="w">${p.layout === 'split' ? `<div>${copy}</div>${img}` : `${copy}${img}`}</div></section>`;
         }
@@ -544,7 +594,7 @@ ${ld.map((x) => `<script type="application/ld+json">${jsonLd(x)}</script>`).join
 </head>
 <body>
 ${ctx.preview ? '<div class="pv">Preview — this version is not live yet.</div>' : ''}
-<header class="hd"><div class="w">
+<header class="hd${def.theme.header === 'centered' ? ' ctr' : ''}"><div class="w">
 <a class="brand" href="${esc(href('/'))}">${logoSrc(def.theme) ? `<img src="${esc(logoSrc(def.theme))}" alt="${esc(s.siteName)}">` : esc(s.siteName)}</a>
 ${menu.length > (def.structure === 'one_page' ? 0 : 1) ? `<nav aria-label="Main"><ul class="nav">${menu.map((m) => `<li><a href="${esc(m.sectionId && page && page.slug !== '' ? `${href('/')}${m.path}` : href(m.path))}"${page && m.pageId === page.id && !m.sectionId ? ' aria-current="page"' : ''}>${esc(m.label)}</a></li>`).join('')}</ul></nav>` : ''}
 </div></header>

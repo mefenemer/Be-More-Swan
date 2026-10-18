@@ -52,10 +52,12 @@ import { aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
-import { applySiteOperation, assetIdsIn, FEATURE_LABELS, FEATURE_SECTIONS, planSplit, SECTION_TYPES, SITE_FEATURES, type SiteOperation } from '../../src/utils/site-definition';
+import { applySiteOperation, assetIdsIn, FEATURE_LABELS, FONTS, FEATURE_SECTIONS, planSplit, SECTION_TYPES, SITE_FEATURES, type SiteOperation } from '../../src/utils/site-definition';
 import { placeholdersIn } from '../../src/utils/site-draft';
 import { cleanSiteSlugInput, siteAssetUrl, siteOrigin, sitesDomain, siteVisibleText, suggestSiteSlug } from '../../src/utils/site-hosting';
 import { checkDomain, claimDomain, currentDomain, domainView, removeDomain } from '../../src/utils/site-domains';
+import { SITE_TEMPLATES } from '../../src/config/site-templates';
+import { FONT_PAIRS } from '../../src/utils/site-render';
 import { listSignupForms } from '../../src/utils/site-forms';
 import { readWordsFile } from '../../src/utils/site-words';
 import { attachmentText, quoteFromChat } from '../../src/utils/chat-attachments';
@@ -95,7 +97,7 @@ function json(statusCode: number, body: unknown) {
 }
 
 const MAX_OPS = 25;
-const OP_NAMES = ['add_page', 'update_page', 'remove_page', 'add_section', 'update_section', 'remove_section', 'move_section', 'set_nav', 'set_theme', 'set_settings', 'set_footer', 'set_structure', 'combine_pages', 'split_pages'];
+const OP_NAMES = ['add_page', 'update_page', 'remove_page', 'add_section', 'update_section', 'remove_section', 'move_section', 'set_nav', 'set_theme', 'set_settings', 'set_footer', 'set_structure', 'combine_pages', 'split_pages', 'apply_template'];
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -178,7 +180,10 @@ export default withLambda(async (event) => {
                 .where(and(eq(siteOrders.siteId, s.id), eq(siteOrders.status, 'paid'))))[0]?.n ?? 0),
             newEnquiries: Number((await db.select({ n: sql<number>`count(*)::int` }).from(siteEnquiries)
                 .where(and(eq(siteEnquiries.siteId, s.id), eq(siteEnquiries.status, 'new'))))[0]?.n ?? 0),
-            vocab: { sectionTypes: SECTION_TYPES, features: SITE_FEATURES.map((key) => ({ key, label: FEATURE_LABELS[key], sections: FEATURE_SECTIONS[key] })) },
+            // The template gallery (src/config/site-templates.ts): enough for a card; previews come from site-preview.
+            templates: SITE_TEMPLATES.map((t) => ({ id: t.id, name: t.name, tagline: t.tagline, bestFor: t.bestFor, lettering: FONT_PAIRS[t.theme.font].label,
+                colours: [t.theme.backgroundColor, t.theme.primaryColor, t.theme.accentColor].filter(Boolean), pages: t.pages.length, onePage: t.structure === 'one_page' })),
+            vocab: { sectionTypes: SECTION_TYPES, fonts: FONTS.map((k) => ({ key: k, label: FONT_PAIRS[k].label })), features: SITE_FEATURES.map((key) => ({ key, label: FEATURE_LABELS[key], sections: FEATURE_SECTIONS[key] })) },
         };
     };
 

@@ -134,7 +134,7 @@
     }
     try {
       await post({ action: 'booking_decide', assistantId: cal.assistantId, id: b.id, decision });
-      window.showToast?.(decision === 'confirm' ? 'Confirmed — they have been emailed.' : decision === 'decline' ? 'Declined — they have been told.' : 'Cancelled — they have been told.');
+      window.showToast?.(decision === 'confirm' ? 'Confirmed — they have been emailed.' : decision === 'decline' ? 'Declined — they have been told.' : 'Cancelled — they have been told.', { icon: '✅' });
     } catch (err) { window.alertModal?.(esc(err.message)); }
     load(cal);
   }
