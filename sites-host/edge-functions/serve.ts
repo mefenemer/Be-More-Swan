@@ -49,4 +49,5 @@ export default async (request: Request, context?: { ip?: string }): Promise<Resp
     return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers });
 };
 
-export const config = { path: '/*' };
+// Fonts are served as plain files from public/site-fonts (site-render.ts), not forwarded.
+export const config = { path: '/*', excludedPath: ['/site-fonts/*'] };

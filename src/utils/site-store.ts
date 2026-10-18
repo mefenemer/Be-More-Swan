@@ -28,6 +28,7 @@ import {
     applySiteOperation, assetIdsIn, DEFAULT_MAX_PAGES, FEATURE_LABELS, markVideos, normaliseSiteDefinition, SITE_FEATURES, withoutAssets, type SiteDefinition, type SiteOperation,
 } from './site-definition';
 import { buildDraftPrompt, placeholdersIn, siteFromDraftReply, starterSite, themeFromBrandKit, type BusinessFacts } from './site-draft';
+import { buildFillPrompt, siteFromFillReply } from './site-template-fill';
 import { KEEP_VERSIONS, sameDefinition, siteOrigin, siteSlugProblem, slugFromHost } from './site-hosting';
 import { assemblePlacement, buildPlacementPrompt, MAX_WORDS_CHARS, readPlan, tidyWords, wordsToBlocks, type WordsPlan, type WordsProposal } from './site-words';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
@@ -168,17 +169,27 @@ export async function runSiteDraft(db: Db, siteId: number, request: string | nul
         try { rulesBlock = await loadAssistantRulesBlock(db, { assistantId: site.aiAssistantId, organisationId: site.organisationId }); } catch { /* none */ }
 
         const current = definitionOf(site, maxPages).definition;
-        const prompt = buildDraftPrompt({
+        const brief = {
             business: { ...facts, email: current.settings.email ?? facts.email },
             productsBlock, rulesBlock, maxPages,
             goal: str(SITE_SETUP_KEYS.goal), pagesWanted: str(SITE_SETUP_KEYS.pages), style: str(SITE_SETUP_KEYS.style),
             request: request?.trim().slice(0, 2000) || null,
-        });
+        };
+        // Started from a template: write the words INTO its layout (site-template-fill.ts) — the
+        // pages, sections, pictures and design stay as they are. Otherwise, a whole new site.
+        const fromTemplate = !!current.settings.template;
+        const prompt = fromTemplate ? buildFillPrompt(brief, current) : buildDraftPrompt(brief);
         const res = await gatewayGenerate({
             system: prompt.system, messages: [{ role: 'user', content: prompt.user }], maxTokens: 8000,
             usage: { workspaceId: site.organisationId, assistantId: site.aiAssistantId },
         });
-        const drafted = siteFromDraftReply(parseModelJson(res.text), current, maxPages);
+        let drafted: { definition: SiteDefinition } | null;
+        if (fromTemplate) {
+            const filled = siteFromFillReply(parseModelJson(res.text), current, maxPages);
+            drafted = filled.changed ? { definition: filled.definition } : null;
+        } else {
+            drafted = siteFromDraftReply(parseModelJson(res.text), current, maxPages);
+        }
         if (!drafted) { await endDraft(db, site.id, 'The draft couldn\'t be completed this time — your site is unchanged and nothing was charged. Try again in a few minutes.'); return; }
 
         // The success latch: saved only if this draft still holds the claim.

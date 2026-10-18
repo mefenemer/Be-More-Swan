@@ -101,9 +101,10 @@ const SECTION_SCHEMA = `Section types and their props (use ONLY these; any other
 - "contact": { "heading", "intro", "askPhone": true | false, "buttonLabel" }  (an enquiry form — put one on the contact page)
 Links ("href") may only be "/" (home), "/<slug>" of a page in this site, "#<section-id>", "mailto:…", "tel:…" or an https address.`;
 
-export function buildDraftPrompt(brief: DraftBrief): { system: string; user: string } {
+/** The business facts every draft is written from (what they told us, and nothing else). */
+export function draftFacts(brief: DraftBrief): string {
     const b = brief.business;
-    const facts = [
+    return [
         `Business name: ${b.name}`,
         b.industry ? `Industry: ${b.industry}` : '',
         b.description ? `What they do (their words): ${b.description}` : '',
@@ -114,6 +115,10 @@ export function buildDraftPrompt(brief: DraftBrief): { system: string; user: str
         brief.pagesWanted ? `Pages they want: ${brief.pagesWanted}` : '',
         brief.style ? `How the site should feel: ${brief.style}` : '',
     ].filter(Boolean).join('\n');
+}
+
+export function buildDraftPrompt(brief: DraftBrief): { system: string; user: string } {
+    const facts = draftFacts(brief);
 
     const system = [
         'You are the Website Assistant: you write a small business\'s website as structured content that a renderer turns into pages. You never write HTML, CSS or code.',

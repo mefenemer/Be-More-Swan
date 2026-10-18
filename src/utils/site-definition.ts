@@ -12,11 +12,19 @@
 //
 // PURE: no database, no network. tests/site-definition.test.ts.
 
+import { fillTemplateWords, templateById } from '../config/site-templates';
 import { contrastRatio, normalizeHex, readableInkOn } from './brand-kit';
 
 // ── Shapes ──────────────────────────────────────────────────────────────────────────────────
 
-export type FontKey = 'sans' | 'serif' | 'rounded' | 'system';
+/**
+ * Lettering. The first four are the device's own fonts; the rest are pairings of open-licence fonts
+ * we host ourselves (/site-fonts — no visitor is sent to Google), drawn by site-render.ts FONT_PAIRS.
+ */
+export type FontKey = 'sans' | 'serif' | 'rounded' | 'system'
+    | 'editorial' | 'classic' | 'elegant' | 'modern' | 'bold' | 'friendly' | 'tech' | 'warm';
+export type SpacingKey = 'compact' | 'regular' | 'airy';
+export type HeaderKey = 'standard' | 'centered';
 export type RadiusKey = 'none' | 'small' | 'medium' | 'large';
 export type BusinessType = 'Organization' | 'LocalBusiness' | 'ProfessionalService' | 'Store';
 
@@ -26,6 +34,12 @@ export interface SiteTheme {
     backgroundColor: string;
     font: FontKey;
     radius: RadiusKey;
+    /** Room around sections (templates, owner, 2026-10-18). Optional: absent = 'regular', today's look. */
+    spacing?: SpacingKey;
+    /** A soft tint for alternating sections; null = the grey of today. */
+    accentColor?: string | null;
+    /** The logo and menu side by side ('standard'), or the logo centred above the menu. */
+    header?: HeaderKey;
     /** https URL of the logo; null = the site name in text. */
     logoUrl: string | null;
     /**
@@ -50,6 +64,9 @@ export interface SiteSettings {
      * the chat and the AI draft, and its tab (Orders, Bookings) from the assistant.
      */
     features: SiteFeature[] | null;
+    /** The template this site was started from (src/config/site-templates.ts) — the AI draft then
+     *  writes the words INTO that layout rather than a new one. Null = none. */
+    template?: string | null;
 }
 
 export const SITE_FEATURES = ['shop', 'bookings', 'menu', 'hours', 'gallery', 'reviews', 'signup', 'faq'] as const;
@@ -96,7 +113,8 @@ export interface Image {
 }
 
 export interface HeroProps {
-    layout: 'centered' | 'split' | 'banner';
+    /** 'cover': the picture fills the section behind the words (templates, 2026-10-18). */
+    layout: 'centered' | 'split' | 'banner' | 'cover';
     eyebrow: string | null;
     headline: string;
     subheadline: string | null;
@@ -340,7 +358,7 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
         case 'hero': {
             const headline = cleanText(p.headline, LIMITS.headline);
             if (!headline) { warn('A hero section was left out: it needs a headline.'); return null; }
-            const layout = p.layout === 'split' || p.layout === 'banner' ? p.layout : 'centered';
+            const layout = p.layout === 'split' || p.layout === 'banner' || p.layout === 'cover' ? p.layout : 'centered';
             return { type: 'hero', props: {
                 layout, headline,
                 eyebrow: textOrNull(p.eyebrow, LIMITS.eyebrow),
@@ -514,7 +532,9 @@ export function cleanLook(raw: unknown, type: SectionType): SectionLook {
 
 // ── Theme and settings ──────────────────────────────────────────────────────────────────────
 
-const FONTS: readonly FontKey[] = ['sans', 'serif', 'rounded', 'system'];
+export const FONTS: readonly FontKey[] = ['sans', 'serif', 'rounded', 'system', 'editorial', 'classic', 'elegant', 'modern', 'bold', 'friendly', 'tech', 'warm'];
+const SPACINGS: readonly SpacingKey[] = ['compact', 'regular', 'airy'];
+const HEADERS: readonly HeaderKey[] = ['standard', 'centered'];
 const RADII: readonly RadiusKey[] = ['none', 'small', 'medium', 'large'];
 const BUSINESS_TYPES: readonly BusinessType[] = ['Organization', 'LocalBusiness', 'ProfessionalService', 'Store'];
 
@@ -538,6 +558,9 @@ export function cleanTheme(raw: unknown, warn: (m: string) => void, base: SiteTh
         logoUrl: logo && logo.startsWith('https://') ? logo : (t.logoUrl === null ? null : base.logoUrl),
         logoAssetId: t.logoAssetId === null ? null
             : Number.isInteger(Number(t.logoAssetId)) && Number(t.logoAssetId) > 0 ? Number(t.logoAssetId) : (base.logoAssetId ?? null),
+        spacing: SPACINGS.includes(t.spacing as SpacingKey) ? (t.spacing as SpacingKey) : (base.spacing ?? 'regular'),
+        accentColor: t.accentColor === null ? null : (normalizeHex(typeof t.accentColor === 'string' ? t.accentColor : '') ?? base.accentColor ?? null),
+        header: HEADERS.includes(t.header as HeaderKey) ? (t.header as HeaderKey) : (base.header ?? 'standard'),
     };
 }
 
@@ -625,6 +648,7 @@ function cleanSettings(raw: unknown, base?: SiteSettings): SiteSettings {
         email: has('email') ? (/^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(email) ? email : null) : base?.email ?? null,
         phone: has('phone') ? (/^\+?[0-9 ()-]{5,30}$/.test(phone) ? phone : null) : base?.phone ?? null,
         features: has('features') ? cleanFeatures(s.features) : base?.features ?? null,
+        template: has('template') ? (templateById(s.template) ? String(s.template) : null) : base?.template ?? null,
     };
 }
 
@@ -774,6 +798,8 @@ export type SiteOperation =
     | { op: 'set_structure'; structure: 'pages' | 'one_page' }
     /** Every page's sections onto the home page, in page order; links to those pages become jumps. */
     | { op: 'combine_pages' }
+    /** A template (site-templates.ts): its design only, or its design AND its pages as a fresh start. */
+    | { op: 'apply_template'; templateId: string; mode: 'design' | 'full'; keepColours?: boolean }
     /** The reverse: the home page's sections go to their own pages (planSplit) — by menu label, else by kind. */
     | { op: 'split_pages' }
     | { op: 'remove_section'; pageId: string; sectionId: string }
@@ -944,6 +970,30 @@ export function applySiteOperation(def: SiteDefinition, op: SiteOperation, opts:
             next.pages = [home];
             next.nav = [];
             next.structure = 'one_page';
+            break;
+        }
+        case 'apply_template': {
+            const t = templateById(op.templateId);
+            if (!t) return { ok: false, error: 'That template isn\'t available.' };
+            const { primaryColor, textColor, backgroundColor, ...design } = t.theme;
+            next.theme = { ...next.theme, ...design, ...(op.keepColours ? {} : { primaryColor, textColor, backgroundColor }) };
+            const templateHero = t.pages[0].sections.find((x) => x.type === 'hero');
+            if (op.mode === 'design') {
+                // The look of the opening section is part of the design; the words and pictures stay.
+                const layout = templateHero ? String(templateHero.props.layout) as HeroProps['layout'] : null;
+                if (layout) for (const pg of next.pages) for (const sec of pg.sections) if (sec.type === 'hero') sec.props.layout = layout;
+                break;
+            }
+            // A fresh start from the template: its pages, in their words with the business's name,
+            // leaving out anything the site has switched off (What your website does).
+            const words = fillTemplateWords(t.pages, { name: next.settings.siteName, town: next.settings.locality });
+            next.pages = words.slice(0, maxPages).map((pg, i) => ({
+                id: '', slug: i === 0 ? '' : pg.slug, title: pg.title, seo: { title: null, description: null }, hideFromMenu: false,
+                sections: pg.sections.filter((sec) => sectionAllowed(next.settings, sec.type as SectionType)) as unknown as Section[],
+            }));
+            next.nav = [];
+            next.structure = t.structure;
+            next.settings = { ...next.settings, template: t.id };
             break;
         }
         case 'split_pages': {
