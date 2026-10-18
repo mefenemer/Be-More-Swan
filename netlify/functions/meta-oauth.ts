@@ -37,7 +37,9 @@ const metaSecret  = process.env.META_APP_SECRET!;
 // portfolio is invisible there and its Instagram account can never be found without this scope.
 // NOTE: business_management is an advanced permission — it works immediately for app admins/testers
 // and in Development mode, but requires Meta App Review before general (Live-mode) users can grant it.
-const SCOPES      = 'instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,pages_manage_posts,business_management';
+// instagram_manage_insights is what ingest-instagram-insights.ts needs for /{media-id}/insights.
+// Accounts connected before it was added lack it until they reconnect.
+const SCOPES      = 'instagram_basic,instagram_content_publish,instagram_manage_insights,pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,pages_manage_posts,business_management';
 const TOKEN_TTL_DAYS = 60;
 
 function csrfToken(): string {
