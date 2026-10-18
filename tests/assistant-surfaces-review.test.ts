@@ -119,7 +119,7 @@ check('every Rules tab tells the truth about what reads its rules', () => {
     assert.strictEqual(REG.lead_qualifier.rulesScope, 'outreach');
     for (const r of ['brand_designer', 'campaign_orchestrator', 'crm_enricher', 'lead_qualifier']) assert.ok(RULE_READING_ROLES.has(r), `${r}'s tab says rules reach its chat`);
     assert.match(code(read('src/utils/visual-briefs.ts')), /loadAssistantRulesBlock\(db, \{ assistantId: brief\.aiAssistantId/, 'the designer\'s art direction reads them');
-    assert.match(code(read('netlify/functions/process-discovery-jobs.ts')), /scoreCandidates\(toScore, icp, sender, rulesBlock\)/, 'outreach drafting reads them');
+    assert.match(code(read('netlify/functions/process-discovery-jobs.ts')), /scoreCandidates\(toScore, icp, sender, rulesBlock[,)]/, 'outreach drafting reads them');
     assert.match(read('src/lib/discovery-scoring.ts'), /They never change a score\./);
 });
 
