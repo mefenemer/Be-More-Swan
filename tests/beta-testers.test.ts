@@ -55,7 +55,8 @@ check('register.html: beta mode drops any pending plan and explains a non-applic
 });
 
 check('reconcile-billing: beta plans are not flagged as missing a Stripe subscription', () => {
-    assert.match(RECONCILE, /ne\(plans\.planType, BETA_PLAN_TYPE\)/);
+    // FREE_PLAN_TYPES = beta and the free 14-day trial: neither has a Stripe subscription.
+    assert.match(RECONCILE, /notInArray\(plans\.planType, \[\.\.\.FREE_PLAN_TYPES\]\)/);
 });
 
 check('the beta master plan is hidden from the picker and costs nothing', () => {

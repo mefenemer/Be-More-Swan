@@ -66,6 +66,14 @@
     if (host.dataset.ready === '1') return;
     host.dataset.ready = '1';
 
+    // The Website Assistant's calendar is its bookings: hours, free times, classes (n of N) and each
+    // booking, decided in place (site-booking-calendar.js). It publishes nothing, so the content
+    // calendar would always be empty for it.
+    if (state.roleKey === 'website_assistant' && window.SiteBookingCalendar) {
+      window.SiteBookingCalendar.mount(host, { assistantId: state.assistantId });
+      return;
+    }
+
     host.innerHTML = '<div class="flex items-center justify-center py-20 text-gray-400 text-sm">Loading calendar…</div>';
     try {
       const res = await fetch(FRAGMENT_URL);

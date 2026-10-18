@@ -3076,6 +3076,23 @@ export const taskLedger = pgTable("task_ledger", {
   index("task_ledger_assistant_idx").on(t.organisationId, t.assistantId, t.periodStart),
 ]);
 
+// The free 14-day trial, one row per workspace (db/z-trial-plan.sql, src/utils/trial.ts).
+export const trials = pgTable("trials", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().unique().references(() => organisations.id, { onDelete: "cascade" }),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  startedAt: timestamp("started_at").notNull(),
+  endsAt: timestamp("ends_at").notNull(),
+  reminderSentAt: timestamp("reminder_sent_at"),
+  endedAt: timestamp("ended_at"),
+  convertedAt: timestamp("converted_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("trials_due_idx").on(t.endsAt),
+  index("trials_user_idx").on(t.userId),
+]);
+
 // Non-expiring bonus tasks, spent only after the monthly allowance (db/task-ledger.sql).
 export const taskBonus = pgTable("task_bonus", {
   organisationId: integer("organisation_id").primaryKey().references(() => organisations.id, { onDelete: "cascade" }),
@@ -5634,6 +5651,29 @@ export const sites = pgTable("sites", {
   uniqueIndex("sites_slug_uq").on(t.slug).where(sql`slug IS NOT NULL`),
   index("sites_org_idx").on(t.organisationId),
   check("sites_status_check", sql`${t.status} IN ('draft','published','suspended')`),
+]);
+
+// A business's own domain for its site (db/z-site-domains.sql, src/utils/site-domains.ts).
+export const siteDomains = pgTable("site_domains", {
+  id: serial().primaryKey(),
+  siteId: integer("site_id").notNull().references(() => sites.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  domain: text().notNull(),
+  altDomain: text("alt_domain"),
+  altLive: boolean("alt_live").notNull().default(false),
+  status: text().notNull().default("pending_dns"),
+  statusDetail: text("status_detail"),
+  checkedAt: timestamp("checked_at", { withTimezone: true }),
+  provisionRequestedAt: timestamp("provision_requested_at", { withTimezone: true }),
+  liveAt: timestamp("live_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("site_domains_domain_uq").on(t.domain).where(sql`status <> 'removed'`),
+  uniqueIndex("site_domains_alt_uq").on(t.altDomain).where(sql`status <> 'removed' AND alt_domain IS NOT NULL`),
+  uniqueIndex("site_domains_site_uq").on(t.siteId).where(sql`status <> 'removed'`),
+  index("site_domains_org_idx").on(t.organisationId),
+  check("site_domains_status_check", sql`${t.status} IN ('pending_dns','securing','live','removed')`),
 ]);
 
 // Every publish, frozen (db/z-website-hosting.sql). The newest 20 per site are kept.

@@ -120,8 +120,9 @@ export async function computeAssistantReadiness(db: Db, orgId: number, assistant
         // OAuth connection. The client renders the red "Attention Required" panel + targeted CTA.
         let attention: { kind: string; services: string[] } | null = null;
         if (assistant.lifecycleStatus === 'system_paused') {
-            if (assistant.provisioningStatus === 'paused_payment' || assistant.provisioningStatus === 'paused_beta_ended') {
-                // Beta ended without a plan: the fix is the same as for billing — choose a plan.
+            if (assistant.provisioningStatus === 'paused_payment' || assistant.provisioningStatus === 'paused_beta_ended'
+                || assistant.provisioningStatus === 'paused_trial_ended') {
+                // Beta or free trial ended without a plan: the fix is the same as for billing — choose a plan.
                 attention = { kind: 'billing', services: [] };
             } else if (assistant.provisioningStatus === 'paused_limit') {
                 attention = { kind: 'limit', services: [] };

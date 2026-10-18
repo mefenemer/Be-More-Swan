@@ -52,7 +52,9 @@
     cta: [{ k: 'heading', kind: 'text', label: 'Heading', required: true }, { k: 'body', kind: 'textarea', label: 'Text' }, { k: 'button', kind: 'link', label: 'Button', required: true }],
     // Enquiries land on the Enquiries tab and in the owner's email — never in the Audience.
     contact: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
-      { k: 'askPhone', kind: 'checkbox', label: 'Ask for a phone number (optional for the visitor)' }, { k: 'buttonLabel', kind: 'text', label: 'Button text' }],
+      { k: 'askPhone', kind: 'checkbox', label: 'Ask for a phone number (optional for the visitor)' },
+      { k: 'offerUpdates', kind: 'checkbox', label: 'Offer "Send me news and offers by email" (unticked) — if they tick it, they join your Audience' },
+      { k: 'buttonLabel', kind: 'text', label: 'Button text' }],
     // One of the workspace's Form Builder forms; its questions, consent and double opt-in come from it.
     signup: [{ k: 'formId', kind: 'formpick', label: 'Sign-up form', required: true }, { k: 'heading', kind: 'text', label: 'Heading (leave empty to use the form\'s own)' },
       { k: 'intro', kind: 'textarea', label: 'Introduction (leave empty to use the form\'s own)' },
@@ -98,7 +100,7 @@
   const BLANK = {
     hero: { layout: 'centered', headline: '' }, features: { items: [{ title: '', body: '' }] }, steps: { items: [{ title: '', body: '' }, { title: '', body: '' }] },
     text: { body: '' }, faq: { items: [{ q: '', a: '' }] }, testimonials: { items: [{ quote: '', name: '', detail: '' }] }, cta: { heading: '', button: { label: '', href: '/' } },
-    contact: { heading: 'Get in touch', intro: '', askPhone: false, buttonLabel: 'Send message' }, signup: { formId: null },
+    contact: { heading: 'Get in touch', intro: '', askPhone: false, buttonLabel: 'Send message', offerUpdates: true }, signup: { formId: null },
     products: { heading: 'Shop', productIds: [], collectAddress: false, buyLabel: 'Buy now' },
     booking: { kind: 'appointment', heading: 'Book an appointment', serviceIds: [], askStaff: false, buttonLabel: '' },
     hours: { heading: 'Opening hours', intro: '', showHours: true, showAddress: true, showContact: true },
@@ -187,6 +189,12 @@
         if (ok && typeof window.showToast === 'function') window.showToast('Stripe connected — your website can take payments.');
       }
       if (!state.pageId || !def().pages.some((p) => p.id === state.pageId)) state.pageId = def().pages[0].id;
+      // A domain still connecting: check it once on opening, so "Check now" is rarely needed.
+      const cd = state.data.site.customDomain;
+      if (cd && (cd.status === 'pending_dns' || cd.status === 'securing') && !state.domainChecked && (state.data.payments || {}).canConnect) {
+        state.domainChecked = true;
+        post({ action: 'domain_check', assistantId: state.assistantId }).then((d) => { state.data = d; rerender(); }).catch(() => {});
+      }
     } catch (err) {
       state.loadError = err.message;
     }
@@ -291,7 +299,7 @@
         ${list.length ? `<div class="space-y-1 mt-1">${list.map((x) => `<label class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 text-xs cursor-pointer">
           <input type="checkbox" data-service-pick value="${esc(x.id)}" ${chosen.has(x.id) ? 'checked' : ''}> <span class="font-bold text-gray-900">${esc(x.name)}</span>${x.price ? `<span class="text-gray-500">${esc(x.price)}</span>` : ''}</label>`).join('')}</div>
           <p class="text-xs text-gray-500 mt-1">Tick none to show them all.</p>` : ''}
-        <p class="text-xs text-gray-500 mt-2">Add the dates and places on the Bookings tab, under Timetable. ${btn('data-site-panel="bookings"', 'Open the timetable')}</p>`;
+        <p class="text-xs text-gray-500 mt-2">Add the dates and places on the Bookings tab, under Availability. ${btn('data-site-panel="bookings"', 'Open availability')}</p>`;
     }
     if (f.kind === 'servicePick') {
       const b = state.data.booking || {};
@@ -544,27 +552,29 @@
           ${btn(`data-site-remove-section="${esc(s.id)}"`, 'Remove')}
         </div>
       </li>`).join('');
+    // Order (owner, 2026-10-17): which page, and what is on it, first — that is what you came to
+    // change. The page's own title, address and search details below. What the website does, the
+    // first draft and the layout are not here: the first two lead the tab on a new site (render),
+    // the layout is part of Design.
     return `
       ${card(`
         <div class="flex flex-wrap gap-2 items-center">${pageTabs}
           ${d.pages.length < state.data.maxPages ? btn('data-site-add-page', '+ Page') : `<span class="text-xs text-gray-500">${esc(state.data.maxPages)} of ${esc(state.data.maxPages)} pages on your plan</span>`}</div>
-        <div class="grid gap-2 md:grid-cols-2 mt-4">
+        <p class="text-sm font-black text-gray-900 mt-4 mb-3">Sections on ${esc(p.title)}</p>
+        <ul class="space-y-2">${sections || '<li class="text-xs text-gray-500">No sections yet.</li>'}</ul>
+        <div class="flex flex-wrap gap-2 items-center mt-4"><select data-site-new-type class="${inputCls}" style="max-width:220px">${state.data.vocab.sectionTypes.filter(typeAllowed).map((t) => `<option value="${esc(t)}">${esc(TYPE_LABEL[t] || t)}</option>`).join('')}</select>${btn('data-site-new-section', 'Add a section')}</div>`)}
+      ${state.editing ? editorHtml() : ''}
+      ${wordsCard(p)}
+      ${card(`
+        <p class="text-sm font-black text-gray-900 mb-1">Page details</p>
+        <div class="grid gap-2 md:grid-cols-2 mt-2">
           <div><label class="block text-xs font-bold text-gray-700">Page title</label><input data-site-page-title class="${inputCls}" value="${esc(p.title)}"></div>
           <div><label class="block text-xs font-bold text-gray-700">Address</label><input data-site-page-slug class="${inputCls}" value="${p.slug ? '/' + esc(p.slug) : '/ (home page)'}" ${p.slug ? '' : 'disabled'}></div>
           <div><label class="block text-xs font-bold text-gray-700">Search title</label><input data-site-seo-title class="${inputCls}" value="${esc(p.seo.title || '')}" placeholder="Shown in search results"></div>
           <div><label class="block text-xs font-bold text-gray-700">Search description</label><input data-site-seo-desc class="${inputCls}" value="${esc(p.seo.description || '')}" placeholder="One or two sentences"></div>
         </div>
         ${p.slug ? `<label class="flex items-center gap-2 text-xs font-bold text-gray-700 mt-3"><input type="checkbox" data-site-page-hidden ${p.hideFromMenu ? 'checked' : ''}> Hide from the menu <span class="font-normal text-gray-500">— still there for anyone with its address, e.g. a page for an ad or an offer</span></label>` : ''}
-        <div class="flex flex-wrap gap-2 mt-3">${btn('data-site-page-save', 'Save page details', true)}${p.slug ? btn('data-site-remove-page', 'Remove this page') : ''}</div>`)}
-      ${featuresOn() ? '' : featuresCard(true)}
-      ${isFresh() || state.data.site.drafting ? draftCard('start') : ''}
-      ${structureCard()}
-      ${wordsCard(p)}
-      ${state.editing ? editorHtml() : ''}
-      ${card(`
-        <p class="text-sm font-black text-gray-900 mb-3">Sections on this page</p>
-        <ul class="space-y-2">${sections || '<li class="text-xs text-gray-500">No sections yet.</li>'}</ul>
-        <div class="flex flex-wrap gap-2 items-center mt-4"><select data-site-new-type class="${inputCls}" style="max-width:220px">${state.data.vocab.sectionTypes.filter(typeAllowed).map((t) => `<option value="${esc(t)}">${esc(TYPE_LABEL[t] || t)}</option>`).join('')}</select>${btn('data-site-new-section', 'Add a section')}</div>`)}`;
+        <div class="flex flex-wrap gap-2 mt-3">${btn('data-site-page-save', 'Save page details', true)}${p.slug ? btn('data-site-remove-page', 'Remove this page') : ''}</div>`)}`;
   }
 
   // ── "Add your own words" (site-words.ts — the owner's wording is used unchanged) ──────────
@@ -671,6 +681,9 @@
   }
 
   function designPanel() {
+    return structureCard() + designCard();
+  }
+  function designCard() {
     const t = def().theme;
     const colour = (k, label) => `<div><label class="block text-xs font-bold text-gray-700">${esc(label)}</label><input type="color" data-theme="${k}" value="${esc(t[k])}" class="w-full h-10 border border-gray-300 rounded-lg"></div>`;
     return card(`
@@ -717,7 +730,7 @@
     const shown = list.slice(0, state.enquiryShown);
     return card(`
       <p class="text-sm font-black text-gray-900">Enquiries</p>
-      <p class="text-xs text-gray-500 mt-1 mb-3">Sent from the contact forms on your site. Each one was also emailed to you — reply to them directly. They are not added to your Audience.</p>
+      <p class="text-xs text-gray-500 mt-1 mb-3">Sent from the contact forms on your site. Each one was also emailed to you — reply to them directly. Anyone who ticked "Send me news and offers" is added to your Audience; anyone else only if they tell you they'd like your emails.</p>
       <ul class="space-y-2">${shown.map((q) => `
         <li class="border ${q.status === 'new' ? 'border-indigo-200' : 'border-gray-200'} rounded-lg p-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
@@ -726,7 +739,10 @@
           </div>
           <p class="text-xs text-gray-600 mt-1"><a class="underline" href="mailto:${esc(q.email)}">${esc(q.email)}</a>${q.phone ? ` · <a class="underline" href="tel:${esc(q.phone)}">${esc(q.phone)}</a>` : ''}</p>
           <p class="text-xs text-gray-800 mt-2" style="white-space:pre-wrap">${esc(q.message)}</p>
-          <div class="mt-2">${btn(`data-site-enquiry="${esc(q.id)}" data-done="${q.status === 'new' ? '1' : '0'}"`, q.status === 'new' ? 'Mark as dealt with' : 'Mark as new')}</div>
+          <div class="mt-2 flex flex-wrap items-center gap-2">${btn(`data-site-enquiry="${esc(q.id)}" data-done="${q.status === 'new' ? '1' : '0'}"`, q.status === 'new' ? 'Mark as dealt with' : 'Mark as new')}
+            ${q.audienceStatus === 'subscribed' ? '<span class="text-xs font-bold text-green-700">In your Audience</span>'
+              : q.audienceStatus ? `<span class="text-xs text-gray-500">In your Audience · ${esc(q.audienceStatus)}</span>`
+              : btn(`data-site-enquiry-audience="${esc(q.id)}"`, 'Add to Audience')}</div>
         </li>`).join('')}</ul>
       ${list.length > shown.length ? `<div class="mt-3">${btn('data-site-enquiries-more', `Show more (${list.length - shown.length})`)}</div>` : ''}`);
   }
@@ -839,7 +855,7 @@
     const f = state.sessionDraft || {};
     const opt = (v, l, cur) => `<option value="${esc(v)}" ${String(v) === String(cur ?? '') ? 'selected' : ''}>${esc(l)}</option>`;
     const form = classes.length ? `<div class="grid gap-2 md:grid-cols-2 mt-3" data-session-form>
-        <label class="text-xs font-bold text-gray-700">Class or event<select data-sf="serviceId" class="${inputCls} mt-1">${classes.map((c) => opt(c.id, `${c.name}${c.price ? ` · ${c.price}` : ''}`, f.serviceId)).join('')}</select></label>
+        <label class="text-xs font-bold text-gray-700">What's on <span class="font-normal text-gray-500">(class, event, workshop, tour…)</span><select data-sf="serviceId" class="${inputCls} mt-1">${classes.map((c) => opt(c.id, `${c.name}${c.price ? ` · ${c.price}` : ''}`, f.serviceId)).join('')}</select></label>
         <label class="text-xs font-bold text-gray-700">Teacher or room <span class="font-normal text-gray-500">(optional)</span><select data-sf="resourceId" class="${inputCls} mt-1">${opt('', 'None', f.resourceId)}${people.map((r) => opt(r.id, r.name, f.resourceId)).join('')}</select></label>
         <label class="text-xs font-bold text-gray-700">Date<input type="date" data-sf="date" class="${inputCls} mt-1" value="${esc(f.date || '')}"></label>
         <div class="grid grid-cols-2 gap-2"><label class="text-xs font-bold text-gray-700">Starts<input type="time" data-sf="start" class="${inputCls} mt-1" value="${esc(f.start || '18:00')}"></label>
@@ -847,11 +863,11 @@
         <label class="text-xs font-bold text-gray-700">Places<input type="number" min="1" max="500" data-sf="capacity" class="${inputCls} mt-1" value="${esc(f.capacity || 12)}"></label>
         <label class="text-xs font-bold text-gray-700">Repeat<select data-sf="repeatWeeks" class="${inputCls} mt-1">${[[0, 'Just this date (an event)'], [3, 'Weekly for 4 weeks'], [7, 'Weekly for 8 weeks'], [11, 'Weekly for 12 weeks'], [25, 'Weekly for 26 weeks']].map(([v, l]) => opt(v, l, f.repeatWeeks ?? 0)).join('')}</select></label>
         <label class="text-xs font-bold text-gray-700 md:col-span-2">Note for customers <span class="font-normal text-gray-500">(optional — e.g. bring a mat)</span><input data-sf="notes" maxlength="300" class="${inputCls} mt-1" value="${esc(f.notes || '')}"></label>
-        <div class="md:col-span-2">${btn('data-session-add', 'Add to the timetable', true)}</div></div>`
+        <div class="md:col-span-2">${btn('data-session-add', 'Add these dates', true)}</div></div>`
       : `<p class="text-xs text-gray-500 mt-2">First add your classes or events (with their prices) in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')}.</p>`;
     const now = Date.now();
     const rows = !tt ? '<p class="text-xs text-gray-400 mt-3">Loading…</p>'
-      : !tt.length ? '<p class="text-xs text-gray-500 mt-3">Nothing on the timetable yet.</p>'
+      : !tt.length ? '<p class="text-xs text-gray-500 mt-3">No dates added yet.</p>'
         : `<ul class="space-y-2 mt-3">${tt.map((x) => {
           const past = new Date(x.endsAt).getTime() < now;
           const off = x.status === 'cancelled';
@@ -862,8 +878,8 @@
             ${!past && !off ? `<div class="flex flex-wrap gap-2 mt-2">${btn(`data-session-cancel="${esc(x.id)}"`, 'Cancel this date')}${x.seriesKey ? btn(`data-session-cancel="${esc(x.id)}" data-series="1"`, 'Cancel this and later dates') : ''}</div>` : ''}
           </li>`;
         }).join('')}</ul>`;
-    return card(`<p class="text-sm font-black text-gray-900">Timetable — classes &amp; events</p>
-      <p class="text-xs text-gray-500 mt-1">Dated sessions with a number of places. Show them on your site with a Bookings section set to "Classes and events"; people book places, and join a waitlist when it's full.</p>${form}${rows}`);
+    return card(`<p class="text-sm font-black text-gray-900">Availability</p>
+      <p class="text-xs text-gray-500 mt-1">Appointments and tables are booked within your opening hours (Business Information ▸ Hours, location &amp; bookings). Here, add dates with a number of places — classes, events, workshops, tours, open days. Show them with a Bookings section set to "Classes and events"; people book places, and join a waitlist when it's full. Your Calendar tab shows all of it together.</p>${form}${rows}`);
   }
   function readSessionForm(scope) {
     const o = {};
@@ -953,7 +969,39 @@
           ${btn(`data-site-restore="${esc(v.version)}"`, 'Copy into my draft')}
         </li>`).join('') : '<li class="text-xs text-gray-500">No earlier versions.</li>'}</ul>
         <p class="text-xs text-gray-500 mt-1">Copying a version replaces your draft with it. Your live site only changes when you publish.</p>` : '';
-    return card(`${status}${address}${actions}${versions}${pnote}`, live ? 'border-green-200' : '');
+    return card(`${status}${address}${actions}${versions}${pnote}${s.slug ? domainBlock() : ''}`, live ? 'border-green-200' : '');
+  }
+
+  // ── Their own domain (site-domains.ts) ─────────────────────────────────────────────────────
+  // Owners and admins connect it (sites.ts gates it too); the steps are the records to add where
+  // the domain was bought, then "Check now" until it is live.
+  function domainBlock() {
+    const d = state.data.site.customDomain || {};
+    const canEdit = (state.data.payments || {}).canConnect !== false;
+    const head = '<p class="text-sm font-black text-gray-900 mt-5 pt-4 border-t border-gray-100">Your own domain</p>';
+    if (!d.available && !d.domain) return `${head}<p class="text-xs text-gray-500 mt-1">Using a domain you own (like yourbusiness.co.uk) is coming soon.</p>`;
+    if (!d.domain) {
+      if (!canEdit) return `${head}<p class="text-xs text-gray-500 mt-1">The workspace owner or an admin can connect a domain you own.</p>`;
+      return `${head}
+        <p class="text-xs text-gray-500 mt-1">Already own a domain, like yourbusiness.co.uk? Use it for this site. You'll add one or two settings where you bought it (GoDaddy, 123 Reg, IONOS, Namecheap…) — we show you exactly what. Your ${esc(state.data.site.domain)} address keeps working and sends visitors to it.</p>
+        <div class="flex flex-wrap items-center gap-2 mt-2"><input data-site-domain-input class="${inputCls}" style="max-width:260px" placeholder="yourbusiness.co.uk" value="${esc(state.domainTyped || '')}" autocomplete="off" spellcheck="false">${btn('data-site-domain-add', 'Connect', true)}</div>`;
+    }
+    const tone = d.status === 'live' ? 'text-green-700' : 'text-amber-800';
+    const label = d.status === 'live' ? 'Live' : d.status === 'securing' ? 'Securing (https)' : 'Waiting for your DNS settings';
+    const records = d.status === 'pending_dns' || (d.status === 'live' && d.altDomain && /without www/.test(d.detail || ''))
+      ? `<p class="text-xs text-gray-700 mt-3">Where you bought <strong>${esc(d.altDomain || d.domain)}</strong>, open its <strong>DNS</strong> settings and add:</p>
+         <div class="overflow-x-auto mt-1"><table class="text-xs w-full border border-gray-200 rounded-lg" style="border-collapse:separate">
+           <tr class="bg-gray-50 text-gray-600"><th class="text-left px-2 py-1">Type</th><th class="text-left px-2 py-1">Name / Host</th><th class="text-left px-2 py-1">Value / Points to</th></tr>
+           ${(d.records || []).map((r) => `<tr><td class="px-2 py-1 font-bold">${esc(r.type)}</td><td class="px-2 py-1 font-mono">${esc(r.name)}</td><td class="px-2 py-1 font-mono">${esc(r.value)} <button type="button" data-site-copy="${esc(r.value)}" class="underline text-gray-500 ml-1">Copy</button></td></tr>
+             <tr><td></td><td colspan="2" class="px-2 pb-1 text-gray-500">${esc(r.note)}</td></tr>`).join('')}
+         </table></div>
+         <p class="text-xs text-gray-500 mt-1">Some providers call Name "Host" and want it left blank or "@" for the bare domain. Changes can take from a few minutes to a few hours.</p>`
+      : '';
+    return `${head}
+      <p class="text-xs mt-1"><strong>${esc(d.domain)}</strong>${d.altDomain ? ` <span class="text-gray-500">(and ${esc(d.altDomain)})</span>` : ''} · <span class="font-bold ${tone}">${esc(label)}</span></p>
+      ${d.detail ? `<p class="text-xs text-gray-600 mt-1">${esc(d.detail)}</p>` : ''}
+      ${records}
+      ${canEdit ? `<div class="flex flex-wrap gap-2 mt-3">${d.status !== 'live' ? btn('data-site-domain-check', 'Check now', true) : ''}${btn('data-site-domain-remove', 'Remove domain')}</div>` : ''}`;
   }
 
   function placeholdersCard() {
@@ -979,6 +1027,8 @@
     host.innerHTML = `
       <div class="grid gap-4 lg:grid-cols-2">
         <div class="space-y-4 min-w-0">
+          ${featuresOn() ? '' : featuresCard(true)}
+          ${isFresh() || state.data.site.drafting ? draftCard('start') : ''}
           ${publishCard()}
           ${placeholdersCard()}
           <div class="flex flex-wrap gap-2">${tabs}</div>
@@ -1048,6 +1098,19 @@
       try {
         await post({ action: 'enquiry_done', assistantId: state.assistantId, id: Number(enq.dataset.siteEnquiry), done: enq.dataset.done === '1' });
         state.data = await post({ action: 'get', assistantId: state.assistantId });
+      } catch (err) { state.note = { text: err.message, tone: 'error' }; }
+      await loadEnquiries();
+      return;
+    }
+    const toAud = t('[data-site-enquiry-audience]');
+    if (toAud) {
+      const q = (state.enquiries || []).find((x) => String(x.id) === toAud.dataset.siteEnquiryAudience);
+      if (!q) return;
+      const ok = await window.confirmModal(`Add <strong>${esc(q.name)}</strong> (${esc(q.email)}) to your Audience? Only do this if they've told you they'd like your emails — your Email Marketing Assistant will be able to send them news and offers.`, { title: 'Add to your Audience?', confirmLabel: 'They agreed — add them', cancelLabel: 'Not now' });
+      if (!ok) return;
+      try {
+        const r = await post({ action: 'enquiry_to_audience', assistantId: state.assistantId, id: q.id, agreed: true });
+        state.note = { text: r.note || 'Added to your Audience.', tone: 'ok' };
       } catch (err) { state.note = { text: err.message, tone: 'error' }; }
       await loadEnquiries();
       return;
@@ -1154,7 +1217,7 @@
         const r = await post({ action: 'session_add', assistantId: state.assistantId, session: { ...draft, serviceId: Number(draft.serviceId), capacity: Number(draft.capacity), repeatWeeks: Number(draft.repeatWeeks), resourceId: draft.resourceId ? Number(draft.resourceId) : null } });
         state.timetable = r.sessions || state.timetable;
         state.sessionDraft = { ...draft, date: '' };
-        state.note = { text: r.added === 1 ? 'Added to the timetable.' : `${r.added} dates added to the timetable.`, tone: 'ok' };
+        state.note = { text: r.added === 1 ? 'Date added.' : `${r.added} dates added.`, tone: 'ok' };
       } catch (err) { state.note = { text: err.message, tone: 'error' }; }
       rerender();
       return;
@@ -1335,12 +1398,34 @@
     }
     if (t('[data-site-address-edit]')) { state.editingAddress = true; state.publishNote = null; render(); return; }
     if (t('[data-site-address-cancel]')) { state.editingAddress = false; state.slugTyped = null; render(); return; }
+    if (t('[data-site-domain-add]')) {
+      const v = hostOf(e).querySelector('[data-site-domain-input]').value;
+      state.domainTyped = v;
+      await publishAction({ action: 'domain_add', domain: v }, 'Saved. Now add the settings below where you bought your domain.', () => { state.domainTyped = null; });
+      return;
+    }
+    if (t('[data-site-domain-check]')) {
+      await publishAction({ action: 'domain_check' }, 'Checked.');
+      return;
+    }
+    if (t('[data-site-domain-remove]')) {
+      const d = state.data.site.customDomain || {};
+      const ok = await window.confirmModal(`${esc(d.domain)} stops showing your site${d.status === 'live' ? ` straight away, and visitors go back to ${esc((state.data.site.freeUrl || '').replace('https://', ''))}` : ''}. You can connect it again later.`, { title: 'Remove your domain?', confirmLabel: 'Remove', cancelLabel: 'Keep it' });
+      if (!ok) return;
+      await publishAction({ action: 'domain_remove' }, 'Domain removed.');
+      return;
+    }
+    const copy = t('[data-site-copy]');
+    if (copy) {
+      try { await navigator.clipboard.writeText(copy.dataset.siteCopy); window.showToast?.('Copied.'); } catch { /* the value is on screen to copy by hand */ }
+      return;
+    }
     if (t('[data-site-address-save]')) {
       const slug = hostOf(e).querySelector('[data-site-slug]').value;
       state.slugTyped = slug;   // kept if the address is refused, so what they typed isn't lost
       const s = state.data.site;
       if (s.status === 'published' && s.slug && slug.trim().toLowerCase() !== s.slug) {
-        const ok = await window.confirmModal(`${s.url.replace('https://', '')} stops working straight away and your site moves to the new address. Anyone with the old link will not find it.`, { title: 'Change your site\'s address?', confirmLabel: 'Change address', cancelLabel: 'Keep it' });
+        const ok = await window.confirmModal(`${(s.freeUrl || s.url).replace('https://', '')} stops working straight away and your site moves to the new address. Anyone with the old link will not find it.`, { title: 'Change your site\'s address?', confirmLabel: 'Change address', cancelLabel: 'Keep it' });
         if (!ok) return;
       }
       await publishAction({ action: 'address', slug }, 'Address saved.', () => { state.editingAddress = false; state.slugTyped = null; });
@@ -1427,7 +1512,7 @@
   window.AssistantSiteEditor = {
     init({ assistantId, assistantName }) {
       clearTimeout(state.pollTimer);
-      Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false,
+      Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false, domainChecked: false, domainTyped: null,
         words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' } });
       load();
     },

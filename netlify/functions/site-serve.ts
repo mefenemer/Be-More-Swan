@@ -32,6 +32,7 @@ import { safeBackPath } from '../../src/utils/site-forms';
 import { handleSiteForm, loadSiteForms, sentMessage } from '../../src/utils/site-forms';
 import audiencePublic from './audience-public';
 import { siteAssetUrl, siteOrigin, sitesDomain, slugFromHost, siteCacheTag } from '../../src/utils/site-hosting';
+import { DOMAIN_CHECK_PATH, domainCheckBody, resolveSiteHost } from '../../src/utils/site-domains';
 import { maxPagesFor, publishedDefinition } from '../../src/utils/site-store';
 
 // form-action: the site's own forms post to its own /_form and /_buy (steps 3b, 3c), and nowhere
@@ -100,32 +101,51 @@ export const SITE_VARY = { 'Netlify-Vary': 'query, header=X-Site-Host', Vary: 'X
 
 type ServeResult = { statusCode: number; headers?: Record<string, string>; body?: string; isBase64Encoded?: boolean };
 
+type Resolved = Awaited<ReturnType<typeof resolveSiteHost>>;
+
 export default withLambda(async (event) => {
-    const res = (await serve(event)) as ServeResult;
-    // Tagged per site, so publishing clears that site's cached pages at once (sites.ts purgeSitePages).
-    const slug = slugFromHost((event.headers as Record<string, string | undefined>)['x-site-host']);
+    const h = event.headers as Record<string, string | undefined>;
+    if (!keyMatches(h['x-site-serve-key'], process.env.SITE_SERVE_SECRET)) return { statusCode: 404, body: 'Not found' };
+    // The site this address names — a *.bemoreswan.site address, or a business's own domain
+    // (site-domains.ts) — and where it should really be seen.
+    const resolved = await resolveSiteHost(getDb(), h['x-site-host']);
+    const res = (await serve(event, resolved)) as ServeResult;
+    // Tagged per SITE (not per address), so publishing clears every address's cached pages at once.
+    const slug = resolved?.slug ?? null;
     return { ...res, headers: { ...(res.headers || {}), ...SITE_VARY, ...(slug ? { 'Netlify-Cache-Tag': siteCacheTag(slug) } : {}) } };
 });
 
-async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0]) {
+async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], resolved: Resolved) {
     const h = event.headers as Record<string, string | undefined>;
-    if (!keyMatches(h['x-site-serve-key'], process.env.SITE_SERVE_SECRET)) return { statusCode: 404, body: 'Not found' };
     const isPost = event.httpMethod === 'POST';
     if (!isPost && event.httpMethod !== 'GET' && event.httpMethod !== 'HEAD') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const app = appOrigin();
-    const slug = slugFromHost(h['x-site-host']);
-    // The bare domain and www: there is no site there — send people to what builds them.
-    if (!slug) return { statusCode: 301, headers: { Location: `${app}/assistant.html?role=website_assistant`, 'Cache-Control': 'public, max-age=3600' }, body: '' };
-
     const rawPath = String(event.queryStringParameters?.path || '/');
     const path = rawPath.startsWith('/') ? rawPath.slice(0, 300) : '/';
+    const slug = resolved?.slug ?? null;
+    if (!slug) {
+        // The bare domain and www of bemoreswan.site: there is no site there — send people to what builds them.
+        const host = String(h['x-site-host'] || '').trim().toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
+        if (host === sitesDomain() || host === `www.${sitesDomain()}`) {
+            return { statusCode: 301, headers: { Location: `${app}/assistant.html?role=website_assistant`, 'Cache-Control': 'public, max-age=3600' }, body: '' };
+        }
+        return notice(404, 'There\'s no website here', 'This domain isn\'t connected to a website. If it\'s yours, connect it from your Website Assistant.', app);
+    }
+    // One address per site: the other form of its domain, or its bemoreswan.site address once its own
+    // domain is live, sends people to the main one (a page view only — forms and checks answer in place).
+    if (resolved?.redirectTo && !isPost && path !== DOMAIN_CHECK_PATH) {
+        const q = String(event.queryStringParameters?.q || '');
+        return { statusCode: 301, headers: { Location: `${resolved.redirectTo}${path}${q ? `?${q}` : ''}`, 'Cache-Control': 'public, max-age=300' }, body: '' };
+    }
     // Only a form or a Buy button may be posted, and only to their own addresses.
     if (isPost && path !== FORM_ACTION && path !== BUY_ACTION && path !== BOOK_PATH) return { statusCode: 405, headers: { Allow: 'GET, HEAD' } as Record<string, string>, body: 'Method Not Allowed' };
     if (path === '/favicon.ico') return { statusCode: 404, headers: headers('text/plain', 'public, max-age=300'), body: '' };
 
     const db = getDb();
     const [site] = await db.select().from(sites).where(eq(sites.slug, slug)).limit(1);
+    // "Is https://<their domain> really this site?" (site-domains.ts checkDomain) — answered for any status.
+    if (path === DOMAIN_CHECK_PATH) return { statusCode: site ? 200 : 404, headers: headers('text/plain; charset=utf-8', 'no-store'), body: site ? domainCheckBody(site.id) : '' };
     if (site?.status === 'suspended') {
         return notice(410, 'This site is unavailable', 'This website has been taken offline.', app);
     }
@@ -135,7 +155,7 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0]) {
         return notice(404, 'There\'s no website here yet', `Nothing has been published at ${esc(`${slug}.${sitesDomain()}`)} yet. <a href="${esc(app)}/assistant.html?role=website_assistant">Build your own website with Be More Swan</a>.`, app);
     }
 
-    const origin = siteOrigin(slug);
+    const origin = resolved?.origin ?? siteOrigin(slug);
     const ctx = {
         origin, preview: false,
         reportUrl: `${app}/report-site.html?site=${encodeURIComponent(slug)}`,

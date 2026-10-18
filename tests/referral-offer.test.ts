@@ -63,6 +63,12 @@ function fakeDb(rows: Map<unknown, unknown[]>) {
         assert.strictEqual(await findReferralOffer(db, 42), null);
     });
 
+    await check('⚠️ a free trial or beta plan does not count as "held a plan" (every new workspace gets a trial)', () => {
+        const src = read('src/utils/referral-offer.ts');
+        assert.ok(/notInArray\(plans\.planType, \[\.\.\.FREE_PLAN_TYPES\]\)/.test(src),
+            'findReferralOffer must ignore FREE_PLAN_TYPES, or no referred friend ever gets the free month');
+    });
+
     console.log('\nThe coupons');
 
     await check('missing coupons are created once: 100% off once (monthly), one month of twelve once (annual)', async () => {

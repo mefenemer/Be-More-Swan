@@ -884,6 +884,11 @@ node_bundler = "esbuild"
 [functions.end-beta-sweep]
   schedule = "5 7 * * *"
 
+# The free 14-day trial: reminder three days out, end on the day, resume backstop. 07:15 UTC, after
+# the beta sweep. See netlify/functions/trial-sweep.ts.
+[functions.trial-sweep]
+  schedule = "15 7 * * *"
+
 # US4 of the paid-ads brief: the daily pass over LIVE PAID campaigns — pause fatigued or
 # over-priced ads, and stop any campaign we can no longer watch or control.
 #

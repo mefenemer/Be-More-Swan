@@ -85,7 +85,7 @@
         </h1>
         <p class="text-lg md:text-xl text-gray-500 max-w-2xl mx-auto mb-8 fade-up-3">
             Hire a full digital workforce for less than the cost of a single day of agency time.<br>
-            One flat monthly fee. No hidden costs. No surprise bills.
+            Try every assistant <strong class="text-gray-700">free for 14 days — no card needed</strong>. Then one flat monthly fee, no surprise bills.
         </p>
         <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-gray-400 fade-up-3">
             <span class="flex items-center gap-1.5"><svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>Stripe-secured payments</span>
@@ -188,7 +188,7 @@
                        class="pk-btn w-full block text-center px-6 py-3.5 font-bold rounded-xl shadow-sm transition">
                         Get Started
                     </a>
-                    <p class="text-center text-xs text-gray-400 mt-2.5">Cancel any time · no setup fee</p>
+                    <p class="text-center text-xs text-gray-400 mt-2.5">14 days free · no card needed</p>
                 </div>
             </div>
 
@@ -245,16 +245,16 @@
                        class="pk-btn w-full block text-center px-6 py-3.5 font-bold rounded-xl shadow-sm transition">
                         Automate My Workflow
                     </a>
-                    <p class="text-center text-xs text-gray-400 mt-2.5">Cancel any time · no setup fee</p>
+                    <p class="text-center text-xs text-gray-400 mt-2.5">14 days free · no card needed</p>
                 </div>
             </div>
 
         </div><!-- /grid -->
 
         <!-- ── Risk reversal ─────────────────────────────────────────
-             There is no free trial (removed by product decision), so the card is asked for up
-             front. These four lines are the only thing standing between the buyer and that ask,
-             and each one is literally true of the billing code:
+             The free 14-day trial (17 Oct 2026, src/utils/trial.ts) asks for no card; these lines are
+             what stands between the buyer and the plan after it, and each is literally true of the code:
+               · trial.ts — no card on file, nothing charged at the end; assistants pause, work is kept
                · billing-cancel.ts sets cancel_at_period_end — access runs to the end of the period
                · billing-upgrade.ts uses proration_behavior:'create_prorations'
                · billing-downgrade.ts schedules at period end with proration_behavior:'none'
@@ -264,11 +264,11 @@
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
                     <div class="flex gap-3">
                         <svg class="w-5 h-5 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-                        <p class="text-sm text-gray-700"><strong class="text-gray-900">Cancel any time, in one click.</strong> No contract, no notice period, no cancellation call — and you keep full access until the end of the period you've already paid for.</p>
+                        <p class="text-sm text-gray-700"><strong class="text-gray-900">14 days free, no card.</strong> Every assistant from the moment you verify your email. Nothing is charged when the trial ends — if you don't choose a plan, your assistants simply pause and your work is kept.</p>
                     </div>
                     <div class="flex gap-3">
                         <svg class="w-5 h-5 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-                        <p class="text-sm text-gray-700"><strong class="text-gray-900">No setup fee, ever.</strong> The monthly price is the whole price. There is no onboarding charge, implementation fee, or minimum term.</p>
+                        <p class="text-sm text-gray-700"><strong class="text-gray-900">Cancel any time, in one click.</strong> No contract, no setup fee, no minimum term — and you keep full access until the end of the period you've already paid for.</p>
                     </div>
                     <div class="flex gap-3">
                         <svg class="w-5 h-5 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
@@ -282,7 +282,7 @@
             </div>
         </div>
 
-        <!-- ── Enterprise: contact-sales bar (NOT a 4th card) ────────
+        <!-- ── Bespoke Assistant (tier_key 'enterprise'): contact-sales bar, NOT a card ────────
              Demoted out of the grid so the buyer chooses between three options instead of four.
              Keeps the `card-name-t4` / `card-desc-t4` ids so renderPlanCards() still drives the
              copy from the DB; the stat boxes and pill are gone and renderPlanCards no-ops on the
@@ -291,20 +291,21 @@
             <div class="rounded-2xl bg-gray-900 shadow-sm px-6 py-6 sm:px-8 flex flex-col md:flex-row md:items-center gap-5">
                 <div class="flex-grow">
                     <p class="text-[10px] font-bold uppercase tracking-widest pk-ent-label mb-1.5">
-                        Tier 4 · <span id="card-name-t4">Custom Enterprise</span>
+                        Tier 3 · <span id="card-name-t4">Bespoke Assistant</span>
                     </p>
-                    <!-- The number is the top purchasable tier's task allowance — filled by
-                         renderPlanCards() so it tracks master_plans instead of drifting. -->
-                    <h2 class="text-lg font-extrabold text-white mb-1.5">Need more than <span id="ent-bar-limit">2,750</span> tasks a month?</h2>
-                    <p id="card-desc-t4" class="text-sm text-gray-400 leading-relaxed max-w-xl">Bespoke digital architecture for complex corporate environments — unlimited assistants and tasks, a dedicated account manager, and integrations, single sign-on and API access built to order.</p>
+                    <!-- Owner decision 2026-10-17: Tier 3 is a build, not a bigger plan — no price on the
+                         page; the enquiry is where scope and terms are agreed. Name and description come
+                         from master_plans 'enterprise' (db/z-bespoke-assistant-plan.sql). -->
+                    <h2 class="text-lg font-extrabold text-white mb-1.5">We build your bespoke assistant</h2>
+                    <p id="card-desc-t4" class="text-sm text-gray-400 leading-relaxed max-w-xl">Need something our library doesn't do? We design, build and run an assistant around your business — your workflows, your systems, your volume. Get in touch and we'll agree the scope and terms with you.</p>
                 </div>
                 <div class="flex-shrink-0 md:text-right">
-                    <p class="text-white mb-3"><span class="text-2xl font-extrabold">£1,199</span><span class="text-gray-400 text-sm font-medium">+/mo</span></p>
+                    <p class="text-white mb-3"><span class="text-lg font-extrabold">Price agreed with you</span></p>
                     <button onclick="openEnterpriseModal()"
                             class="pk-btn w-full md:w-auto inline-block text-center px-6 py-3 font-bold rounded-xl shadow-sm transition whitespace-nowrap">
-                        Book a Discovery Call
+                        Let's Talk
                     </button>
-                    <p class="text-xs text-gray-500 mt-2">Quote in 24 hrs</p>
+                    <p class="text-xs text-gray-500 mt-2">We reply within one working day</p>
                 </div>
             </div>
         </div>
@@ -453,9 +454,9 @@
                             </th>
                             <th class="text-center px-4 py-5 bg-gray-50 w-[15%]" style="vertical-align:top">
                                 <div class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-0.5">Tier 3</div>
-                                <div id="tbl-name-t4" class="font-extrabold text-gray-900 text-sm leading-snug">Custom<br>Enterprise</div>
-                                <div class="font-extrabold text-gray-900 text-base mt-1.5">£1,199+</div>
-                                <div class="text-[10px] text-gray-400 mt-0.5">/ month</div>
+                                <div id="tbl-name-t4" class="font-extrabold text-gray-900 text-sm leading-snug">Bespoke<br>Assistant</div>
+                                <div class="font-extrabold text-gray-900 text-base mt-1.5">Let's talk</div>
+                                <div class="text-[10px] text-gray-400 mt-0.5">terms agreed with you</div>
                             </th>
                         </tr>
                     </thead>
@@ -695,7 +696,7 @@
                 </a>
                 <button onclick="openEnterpriseModal()"
                         class="btn-secondary inline-flex items-center justify-center gap-2 px-8 py-4 border-2 font-bold rounded-xl transition text-base">
-                    Talk to Enterprise Sales
+                    Ask about a Bespoke Assistant
                 </button>
             </div>
         </div>
@@ -708,8 +709,8 @@
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
         <div class="bg-gray-900 px-8 py-6 flex items-start justify-between">
             <div>
-                <h2 id="ent-modal-title" class="text-xl font-bold text-white mb-1">Book a Discovery Call</h2>
-                <p class="text-gray-400 text-sm">Tell us about your organisation and we'll scope your custom build.</p>
+                <h2 id="ent-modal-title" class="text-xl font-bold text-white mb-1">Let's build your bespoke assistant</h2>
+                <p class="text-gray-400 text-sm">Tell us what you need it to do. We'll come back within one working day to agree the scope and terms with you.</p>
             </div>
             <button onclick="closeEnterpriseModal()" class="text-gray-500 hover:text-gray-300 transition text-2xl leading-none ml-4 mt-0.5">&times;</button>
         </div>
@@ -740,7 +741,7 @@
             <p id="ent-form-error" class="text-red-600 text-sm hidden bg-red-50 border border-red-200 rounded-lg px-4 py-2.5"></p>
             <div class="flex gap-3 pt-1">
                 <button type="button" onclick="closeEnterpriseModal()" class="btn-secondary flex-1 px-4 py-2.5 border rounded-xl text-sm font-semibold transition">Cancel</button>
-                <button type="submit" id="ent-submit-btn" class="btn-primary flex-1 px-4 py-2.5 rounded-xl text-sm font-bold transition">Request Discovery Call</button>
+                <button type="submit" id="ent-submit-btn" class="btn-primary flex-1 px-4 py-2.5 rounded-xl text-sm font-bold transition">Get in Touch</button>
             </div>
         </form>
         <div id="enterprise-success" class="px-8 py-12 text-center hidden">
@@ -879,7 +880,7 @@
     // ── Plan Features: DB-driven comparison table ────────────────────────────
     // Builds the whole comparison tbody from the catalog returned by get-plans, so an admin edit
     // in the Portal (Master Data → Plan Features) shows here with no code change. Columns are the
-    // 2 purchasable tiers (saver/buster) + the contact-sales "Custom Enterprise" column
+    // 2 purchasable tiers (saver/buster) + the contact-sales "Bespoke Assistant" column
     // (feature.enterpriseValue). If the catalog is missing (pre-seed), the static fallback stays.
     const CMP_CHECK = '<svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>';
     const CMP_DASH  = '<span class="text-gray-300">—</span>';
@@ -1012,8 +1013,6 @@
                 setCardText('anchor-plan-name', plan.name);
                 setCardText('final-cta-name', plan.name);
             }
-            // "Need more than N tasks a month?" on the enterprise bar = the top purchasable tier's allowance.
-            if (plan.tierKey === 'buster' && plan.monthlyTaskLimit) setCardText('ent-bar-limit', Number(plan.monthlyTaskLimit).toLocaleString('en-GB'));
             // Capacity stat boxes — straight from the master_plans capacity columns, so an admin
             // edit in Master Data → Plan Features moves the pink boxes with no code change.
             // Contact-sales (Enterprise) has no numeric limits: apps read "Bespoke", the rest "∞".
@@ -1094,6 +1093,19 @@
     // the advertised price: starter £29 = saver, pro_team £79 = buster. ('business' was the
     // retired £349 Digital Employee; no card offers it any more.)
     const CARD_TIER = { starter: 'saver', pro_team: 'buster' };
+    // Logged out, every plan button starts the free 14-day trial: sign up with NO plan choice, so
+    // verify.ts starts the trial instead of routing to a card checkout. The tier they clicked is kept
+    // only as a hint for later (nothing reads it as a purchase). Logged in, it is a real checkout.
+    function labelTrialButtons() {
+        if (isLoggedIn()) return;
+        document.querySelectorAll('[onclick*="choosePlan(\'starter\')"], [onclick*="choosePlan(\'pro_team\')"]').forEach((a) => {
+            a.textContent = 'Start 14-Day Free Trial';
+        });
+    }
+    labelTrialButtons();
+    // The comparison table's CTA row is rebuilt from get-plans; relabel after it renders.
+    new MutationObserver(labelTrialButtons).observe(document.getElementById('cmp-tbody'), { childList: true });
+
     window.choosePlan = function (tier) {
         if (tier === 'enterprise') { openEnterpriseModal(); return; }
         const planTier = CARD_TIER[tier] || tier; // normalise to the canonical system tier
@@ -1103,7 +1115,9 @@
         if (isLoggedIn()) {
             window.location.href = 'checkout.html?tier=' + planTier + '&cycle=' + cycle + '&currency=' + _currency;
         } else {
-            sessionStorage.setItem('pending_tier', planTier);
+            // Free trial first: no pending_tier, so no checkout after verification.
+            sessionStorage.removeItem('pending_tier');
+            sessionStorage.setItem('trial_interest_tier', planTier);
             window.location.href = 'register.html';
         }
     };
@@ -1146,7 +1160,7 @@
                     name:              document.getElementById('ent-first-name').value.trim(),
                     company:           document.getElementById('ent-company').value.trim(),
                     useCase:           document.getElementById('ent-use-case').value.trim(),
-                    opportunityReason: 'Enterprise pricing enquiry',
+                    opportunityReason: 'Bespoke Assistant enquiry',
                     leadType:          'enterprise_enquiry',
                     source:            'pricing_page',
                     priority:          'high',
@@ -1160,7 +1174,7 @@
             errEl.textContent = err.message || 'Something went wrong. Please try again.';
             errEl.classList.remove('hidden');
         } finally {
-            btn.disabled = false; btn.textContent = 'Request Discovery Call';
+            btn.disabled = false; btn.textContent = 'Get in Touch';
         }
     };
 

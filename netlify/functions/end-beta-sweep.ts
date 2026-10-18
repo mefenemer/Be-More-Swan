@@ -8,12 +8,12 @@
 // on by the plan-row writers (create-subscription / stripe-webhook) the moment it pays. If that hook
 // was ever missed, this catches it within a day.
 
-import { and, eq, inArray, isNotNull, isNull, lte, ne } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, lte, ne, notInArray } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { betaEndings, plans } from '../../db/schema';
 import { sendTemplatedEmail } from '../../src/utils/email';
-import { BETA_PLAN_TYPE } from '../../src/utils/beta-testers';
+import { FREE_PLAN_TYPES } from '../../src/config/beta-plan';
 import { betaOfferFor, endBetaFor, loadBetaWorkspaces, loadOfferableTiers, resumeAfterBetaConversion } from '../../src/utils/beta-ending';
 
 export default withLambda(async () => {
@@ -54,7 +54,7 @@ export default withLambda(async () => {
         if (waiting.length) {
             const paid = await db.select({ organisationId: plans.organisationId }).from(plans).where(and(
                 inArray(plans.organisationId, waiting.map((w) => w.organisationId)),
-                ne(plans.planType, BETA_PLAN_TYPE), inArray(plans.status, ['active', 'past_due']),
+                notInArray(plans.planType, [...FREE_PLAN_TYPES]), inArray(plans.status, ['active', 'past_due']),
             ));
             for (const { organisationId } of paid) if (await resumeAfterBetaConversion(db, organisationId)) result.resumed++;
         }

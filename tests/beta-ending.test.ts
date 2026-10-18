@@ -94,12 +94,15 @@ check('ending pauses only RUNNING assistants, stamped so only they come back; no
     assert.ok(/eq\(aiAssistants\.isActive, true\)/.test(end));
     assert.ok(/provisioningStatus: BETA_ENDED_PAUSE/.test(end));
     assert.ok(!/\.delete\(/.test(end));
+    // The release itself is shared with the free trial (src/utils/held-work.ts): it touches only
+    // assistants carrying the stamp it is given, and the beta passes BETA_ENDED_PAUSE.
     const resume = core.slice(core.indexOf('export async function resumeAfterBetaConversion'));
-    assert.ok(/eq\(aiAssistants\.provisioningStatus, BETA_ENDED_PAUSE\)/.test(resume), 'resume must touch only beta-paused assistants');
+    assert.ok(/releaseHeldWork\(db, organisationId, BETA_ENDED_PAUSE, now\)/.test(resume), 'resume must touch only beta-paused assistants');
+    assert.ok(/eq\(aiAssistants\.provisioningStatus, pauseStamp\)/.test(read('src/utils/held-work.ts')));
 });
 
 check('what fell due while paused goes back to Review instead of publishing late', () => {
-    const resume = core.slice(core.indexOf('export async function resumeAfterBetaConversion'));
+    const resume = read('src/utils/held-work.ts');
     assert.ok(/scheduledPosts\)\.set\(\{ status: 'pending_approval'/.test(resume));
     assert.ok(/blogPosts\)\.set\(\{ status: 'draft'/.test(resume));
     assert.ok(/newsletterIssues\)\.set\(\{ status: 'approved'/.test(resume));
@@ -127,7 +130,8 @@ console.log('\nA beta tester can actually pay');
 check('checkout does not treat the free beta plan as "already subscribed"', () => {
     const cs = read('netlify/functions/create-subscription.ts');
     const guard = cs.slice(cs.indexOf('Double-charge guard'), cs.indexOf('if (activePlan) {'));
-    assert.ok(/ne\(plans\.planType, BETA_PLAN_TYPE\)/.test(guard), 'a beta tester would be sent to the dashboard without paying');
+    // Beta and the free trial are both FREE_PLAN_TYPES — a paid plan replaces either.
+    assert.ok(/notInArray\(plans\.planType, \[\.\.\.FREE_PLAN_TYPES\]\)/.test(guard), 'a beta tester would be sent to the dashboard without paying');
 });
 
 check('every paid-plan insert retires the beta plan first and resumes after', () => {

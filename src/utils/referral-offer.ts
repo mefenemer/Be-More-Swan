@@ -18,9 +18,10 @@
 // called once real money has been taken — see stripe-webhook.ts.
 
 import type Stripe from 'stripe';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, notInArray } from 'drizzle-orm';
 import { plans, userReferrals } from '../../db/schema';
 import { createNotification } from './notify';
+import { FREE_PLAN_TYPES } from '../config/beta-plan';
 
 export const REFERRAL_OFFER_DISPLAY = 'your first month free';
 
@@ -36,8 +37,12 @@ type Db = any;
 
 /**
  * The referral the user signed up with, if the offer still applies: the referral is pending and
- * the user has never held a plan. A friend who subscribed, cancelled and came back does not get a
- * second free month.
+ * the user has never held a PAID plan. A friend who subscribed, cancelled and came back does not
+ * get a second free month.
+ *
+ * Free plans (the 14-day trial, beta) don't count: every new workspace gets a trial plan row the
+ * moment its owner verifies (trial.ts), so counting it would mean no referred friend ever got the
+ * offer. The free month applies to their first paid subscription, after the trial.
  */
 export async function findReferralOffer(db: Db, userId: number): Promise<{ referralId: number; referralCode: string } | null> {
     const [referral] = await db
@@ -47,8 +52,10 @@ export async function findReferralOffer(db: Db, userId: number): Promise<{ refer
         .limit(1);
     if (!referral) return null;
 
-    const [anyPlan] = await db.select({ id: plans.id }).from(plans).where(eq(plans.userId, userId)).limit(1);
-    if (anyPlan) return null;
+    const [paidPlan] = await db.select({ id: plans.id }).from(plans)
+        .where(and(eq(plans.userId, userId), notInArray(plans.planType, [...FREE_PLAN_TYPES])))
+        .limit(1);
+    if (paidPlan) return null;
 
     return { referralId: referral.id, referralCode: referral.referralCode };
 }

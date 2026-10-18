@@ -15,12 +15,15 @@
 // Table: beta_endings (db/z-beta-endings.sql). Pure helpers first; the DB functions never throw for a
 // missing table — every caller in a publish path must keep publishing if this migration is absent.
 
-import { and, desc, eq, inArray, isNotNull, isNull, lte, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, lte, ne, notInArray, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
     aiAssistants, betaEndings, billingCoupons, blogPosts, masterPlans, newsletterIssues, organisations, plans, scheduledPosts, usageCounters, users,
 } from '../../db/schema';
 import { BETA_PLAN_TYPE } from './beta-testers';
+import { FREE_PLAN_TYPES } from '../config/beta-plan';
+import { endedTrialOrganisationIds, resumeAfterTrialConversion } from './trial';
+import { releaseHeldWork } from './held-work';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -107,7 +110,7 @@ export async function loadBetaWorkspaces(db: Db): Promise<BetaWorkspace[]> {
             .where(inArray(usageCounters.organisationId, orgIds)).groupBy(usageCounters.organisationId),
         db.select().from(betaEndings).where(inArray(betaEndings.organisationId, orgIds)),
         db.select({ orgId: plans.organisationId }).from(plans)
-            .where(and(inArray(plans.organisationId, orgIds), ne(plans.planType, BETA_PLAN_TYPE), inArray(plans.status, ['active', 'past_due', 'cancelling']))),
+            .where(and(inArray(plans.organisationId, orgIds), notInArray(plans.planType, [...FREE_PLAN_TYPES]), inArray(plans.status, ['active', 'past_due', 'cancelling']))),
     ]);
 
     return orgIds.map((orgId) => {
@@ -144,7 +147,10 @@ export async function heldOrganisationIds(db: Db): Promise<Set<number>> {
     try {
         const rows = await db.select({ id: betaEndings.organisationId }).from(betaEndings)
             .where(and(isNotNull(betaEndings.endedAt), isNull(betaEndings.convertedAt)));
-        return new Set(rows.map((r) => r.id));
+        const held = new Set(rows.map((r) => r.id));
+        // …and workspaces whose free trial ended without a subscription (trial.ts).
+        for (const id of await endedTrialOrganisationIds(db)) held.add(id);
+        return held;
     } catch (err) {
         console.error('[beta-ending] could not read held workspaces — publishing is NOT held', err);
         return new Set();
@@ -162,7 +168,7 @@ export async function endBetaFor(db: Db, organisationId: number, now = new Date(
     if (!ending || ending.endedAt || !ending.noticeSentAt) return 'skipped';
 
     const [paid] = await db.select({ id: plans.id }).from(plans).where(and(
-        eq(plans.organisationId, organisationId), ne(plans.planType, BETA_PLAN_TYPE), inArray(plans.status, ['active', 'past_due', 'cancelling']),
+        eq(plans.organisationId, organisationId), notInArray(plans.planType, [...FREE_PLAN_TYPES]), inArray(plans.status, ['active', 'past_due', 'cancelling']),
     )).limit(1);
     if (paid) {
         await db.update(betaEndings).set({ convertedAt: now, updatedAt: now }).where(eq(betaEndings.id, ending.id));
@@ -188,15 +194,7 @@ export async function resumeAfterBetaConversion(db: Db, organisationId: number, 
         const [ending] = await db.select().from(betaEndings).where(eq(betaEndings.organisationId, organisationId)).limit(1);
         if (!ending || !ending.endedAt || ending.convertedAt) return false;
 
-        await db.update(aiAssistants).set({ isActive: true, provisioningStatus: 'complete', updatedAt: now })
-            .where(and(eq(aiAssistants.organisationId, organisationId), eq(aiAssistants.provisioningStatus, BETA_ENDED_PAUSE)));
-        // Due while paused → Review, so a month of held posts does not all go out in one tick.
-        await db.update(scheduledPosts).set({ status: 'pending_approval', updatedAt: now })
-            .where(and(eq(scheduledPosts.organisationId, organisationId), eq(scheduledPosts.status, 'scheduled'), lte(scheduledPosts.publishDate, now)));
-        await db.update(blogPosts).set({ status: 'draft', updatedAt: now })
-            .where(and(eq(blogPosts.organisationId, organisationId), eq(blogPosts.status, 'scheduled'), lte(blogPosts.publishDate, now)));
-        await db.update(newsletterIssues).set({ status: 'approved', scheduledFor: null, updatedAt: now })
-            .where(and(eq(newsletterIssues.organisationId, organisationId), eq(newsletterIssues.status, 'scheduled'), lte(newsletterIssues.scheduledFor, now)));
+        await releaseHeldWork(db, organisationId, BETA_ENDED_PAUSE, now);
         await db.update(betaEndings).set({ convertedAt: now, updatedAt: now }).where(eq(betaEndings.id, ending.id));
         return true;
     } catch (err) {
@@ -283,8 +281,9 @@ export const isBetaPlanRow = (p: { planType?: string | null } | null | undefined
  * index lets the paid one in. A no-op for a workspace that was never on the beta.
  */
 export async function retireBetaPlanBeforePaid(db: Db, organisationId: number, now = new Date()): Promise<void> {
+    // Beta AND the free trial: either is replaced by the paid plan (one active plan per org).
     await db.update(plans).set({ status: 'expired', expiresAt: now, updatedAt: now })
-        .where(and(eq(plans.organisationId, organisationId), eq(plans.planType, BETA_PLAN_TYPE), eq(plans.status, 'active')));
+        .where(and(eq(plans.organisationId, organisationId), inArray(plans.planType, [...FREE_PLAN_TYPES]), eq(plans.status, 'active')));
 }
 
 /**
@@ -293,6 +292,8 @@ export async function retireBetaPlanBeforePaid(db: Db, organisationId: number, n
  */
 export async function afterPaidPlanStarted(db: Db, organisationId: number, now = new Date()): Promise<void> {
     try {
+        // A workspace whose free trial ended comes back the same way (trial.ts).
+        await resumeAfterTrialConversion(db, organisationId, now);
         if (await resumeAfterBetaConversion(db, organisationId, now)) return;
         await db.update(betaEndings).set({ convertedAt: now, updatedAt: now })
             .where(and(eq(betaEndings.organisationId, organisationId), isNull(betaEndings.convertedAt)));

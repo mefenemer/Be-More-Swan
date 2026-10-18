@@ -81,7 +81,7 @@ export async function addSessions(db: Db, orgId: number, n: NewSessions): Promis
 // ── Reading the timetable ───────────────────────────────────────────────────────────────────────
 
 /** Places held per session (pending + confirmed bookings). */
-async function takenBySession(db: Db | Parameters<Parameters<Db['transaction']>[0]>[0], ids: number[]): Promise<Map<number, number>> {
+export async function takenBySession(db: Db | Parameters<Parameters<Db['transaction']>[0]>[0], ids: number[]): Promise<Map<number, number>> {
     if (!ids.length) return new Map();
     const rows = await db.select({ id: bookings.sessionId, n: sql<number>`coalesce(sum(${bookings.partySize}), 0)::int` })
         .from(bookings).where(and(inArray(bookings.sessionId, ids), holdsTime)).groupBy(bookings.sessionId);

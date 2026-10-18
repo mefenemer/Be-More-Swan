@@ -32,13 +32,19 @@
 //                                               to Business Information, and a booking section added
 //   orders    { assistantId }                 → paid orders from the site's Buy buttons
 //   order_done { assistantId, id, done }      → mark one dealt with (or not)
+//   enquiry_to_audience { assistantId, id, agreed: true } → the owner adds an enquirer who agreed
+//   calendar  { assistantId, from, to }       → the Calendar tab: hours, free times, classes, bookings
 //   split_preview { assistantId }             → the pages split_pages WOULD make (nothing saved), for
 //                                               the "Several pages" approval; or why it can't
+//
+// domain_add { assistantId, domain } · domain_check · domain_remove → their own domain (site-domains.ts),
+// owner or admin only.
 //
 // address / publish / unpublish / restore are buttons on the Website tab's Publish card ONLY — the
 // chat cards never send them (chat-session.js sends only apply and draft), so the owner always
 // decides what goes live. Publishing refuses [placeholders] and runs the safety check on every word.
 
+import { bookingCalendar, cleanRange, MAX_CALENDAR_DAYS } from '../../src/utils/booking-calendar';
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
@@ -49,11 +55,13 @@ import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
 import { applySiteOperation, assetIdsIn, FEATURE_LABELS, FEATURE_SECTIONS, planSplit, SECTION_TYPES, SITE_FEATURES, type SiteOperation } from '../../src/utils/site-definition';
 import { placeholdersIn } from '../../src/utils/site-draft';
 import { cleanSiteSlugInput, siteAssetUrl, siteOrigin, sitesDomain, siteVisibleText, suggestSiteSlug } from '../../src/utils/site-hosting';
+import { checkDomain, claimDomain, currentDomain, domainView, removeDomain } from '../../src/utils/site-domains';
 import { listSignupForms } from '../../src/utils/site-forms';
 import { readWordsFile } from '../../src/utils/site-words';
 import { attachmentText, quoteFromChat } from '../../src/utils/chat-attachments';
 import { connectAccountFor, connectOnboardingLink, markOrderDone, refreshConnectAccount } from '../../src/utils/site-shop';
-import { bookings, bookingSettings, orgProducts, orgReviews, siteEnquiries, siteOrders, users } from '../../db/schema';
+import { audienceContacts, bookings, bookingSettings, orgProducts, orgReviews, siteEnquiries, siteOrders, users } from '../../db/schema';
+import { addEnquirerToAudience } from '../../src/utils/enquiry-audience';
 import { decideBooking, describeBooking, emailCustomer, listBookings, loadBookingSetup } from '../../src/utils/bookings';
 import { cleanBookingSettings, describeHours } from '../../src/utils/booking-settings';
 import { purgeCache } from '@netlify/functions';
@@ -114,15 +122,20 @@ export default withLambda(async (event) => {
 
     const view = async (s: SiteRow, extraWarnings: string[] = []) => {
         const { definition, warnings } = definitionOf(s, maxPages);
+        const ownDomain = await currentDomain(db, s.id);
         const drafting = !!s.draftingAt && Date.now() - new Date(s.draftingAt).getTime() < DRAFT_TIMEOUT_MS;
         return {
             site: {
                 id: s.id, status: s.status, credit: s.credit, drafting, draftNote: s.draftNote, updatedAt: s.updatedAt,
-                slug: s.slug, url: s.slug ? siteOrigin(s.slug) : null, domain: sitesDomain(),
+                // Their own domain once it's live; the bemoreswan.site address redirects there.
+                slug: s.slug, url: ownDomain?.status === 'live' ? `https://${ownDomain.domain}` : s.slug ? siteOrigin(s.slug) : null, domain: sitesDomain(),
+                freeUrl: s.slug ? siteOrigin(s.slug) : null,
                 suggestedSlug: s.slug ? null : suggestSiteSlug(definition.settings.siteName),
                 publishedVersion: s.publishedVersion, publishedAt: s.publishedAt,
                 unpublishedChanges: s.status === 'published' ? await hasUnpublishedChanges(db, s, maxPages) : false,
                 // Home holds sections that would sit better on their own pages (the "Spread across pages" offer).
+                // Their own domain (site-domains.ts): status, what to add at their registrar.
+                customDomain: domainView(ownDomain),
                 canSplit: planSplit(definition.pages[0]?.sections ?? []).parts.length > 0,
                 suspendedReason: s.status === 'suspended' ? (s.suspendedReason || 'Taken offline by Be More Swan.') : null,
                 publishBlocker: publishBlocker(s, definition),
@@ -212,6 +225,29 @@ export default withLambda(async (event) => {
         return json(200, await view(r.site));
     }
 
+    // ── Their own domain (site-domains.ts) — owner or admin, like connecting Stripe ──
+    if (action === 'domain_add' || action === 'domain_check' || action === 'domain_remove') {
+        if (role !== 'owner' && role !== 'admin') return json(403, { error: 'Only the workspace owner or an admin can connect a domain.' });
+        if (site.status === 'suspended') return json(409, { error: 'This site has been taken offline by Be More Swan.' });
+        if (action === 'domain_add') {
+            const r = await claimDomain(db, site, body.domain);
+            if (!r.ok) return json(400, { error: r.error });
+            await checkDomain(db, r.row);   // DNS may already be right (a domain moved from elsewhere)
+            return json(200, await view(site));
+        }
+        const row = await currentDomain(db, site.id);
+        if (!row) return json(404, { error: 'No domain is connected.' });
+        if (action === 'domain_remove') {
+            try { await removeDomain(db, row); } catch (err) { console.error('[sites] domain remove failed', err); return json(502, { error: 'It couldn\'t be removed just now. Please try again.' }); }
+            if (site.slug) await purgeSitePages(site.slug);   // the bemoreswan.site address stops redirecting at once
+            return json(200, await view(site));
+        }
+        const before = row.status;
+        const after = await checkDomain(db, row);
+        if (before !== 'live' && after.status === 'live' && site.slug) await purgeSitePages(site.slug);   // start redirecting now
+        return json(200, await view(site));
+    }
+
     if (action === 'publish') {
         const { definition } = definitionOf(site, maxPages);
         const blocker = publishBlocker(site, definition);
@@ -238,8 +274,24 @@ export default withLambda(async (event) => {
         const rows = await db.select({
             id: siteEnquiries.id, name: siteEnquiries.name, email: siteEnquiries.email, phone: siteEnquiries.phone,
             message: siteEnquiries.message, pagePath: siteEnquiries.pagePath, status: siteEnquiries.status, createdAt: siteEnquiries.createdAt,
-        }).from(siteEnquiries).where(and(eq(siteEnquiries.siteId, site.id), eq(siteEnquiries.organisationId, orgId))).orderBy(desc(siteEnquiries.createdAt));
+            // Whether they are in the Audience, and as what (enquiry-audience.ts) — null when not.
+            audienceStatus: audienceContacts.status,
+        }).from(siteEnquiries)
+            .leftJoin(audienceContacts, and(eq(audienceContacts.organisationId, orgId), sql`${audienceContacts.email} = lower(trim(${siteEnquiries.email}))`))
+            .where(and(eq(siteEnquiries.siteId, site.id), eq(siteEnquiries.organisationId, orgId))).orderBy(desc(siteEnquiries.createdAt));
         return json(200, { enquiries: rows });
+    }
+
+    // The owner adds an enquirer to the Audience, saying they agreed (enquiry-audience.ts: manual_entry).
+    if (action === 'enquiry_to_audience') {
+        if (body.agreed !== true) return json(400, { error: 'Only add someone who has agreed to receive your emails.' });
+        const [q] = await db.select({ id: siteEnquiries.id, name: siteEnquiries.name, email: siteEnquiries.email }).from(siteEnquiries)
+            .where(and(eq(siteEnquiries.id, Number(body.id)), eq(siteEnquiries.siteId, site.id), eq(siteEnquiries.organisationId, orgId))).limit(1);
+        if (!q) return json(404, { error: 'Enquiry not found.' });
+        const r = await addEnquirerToAudience(db, { organisationId: orgId, email: q.email, name: q.name, enquiryId: q.id, by: { userId } });
+        if (r.result === 'no_email') return json(400, { error: 'That email address can\'t be used.' });
+        if (r.result === 'already' && r.status !== 'subscribed') return json(200, { ok: true, note: `They're already in your Audience, and stay ${r.status} — someone who said stop is never re-subscribed.` });
+        return json(200, { ok: true, note: r.result === 'added' ? 'Added to your Audience.' : 'They were already in your Audience.' });
     }
 
     if (action === 'enquiry_done') {
@@ -325,6 +377,13 @@ export default withLambda(async (event) => {
         const r = await applySiteOperations(db, site, [{ op: 'update_section', pageId: page.id, sectionId, props: { productIds: created.map((c) => c.id), items: [] } }], maxPages);
         if (!r.ok) return json(400, { error: r.error });
         return json(200, await view(r.site, [`${created.length} item${created.length === 1 ? '' : 's'} moved into Business Information ▸ Products & Services. Change prices there from now on.`]));
+    }
+
+    // The Calendar tab: hours, free times, classes (n of N) and bookings for a month (booking-calendar.ts).
+    if (action === 'calendar') {
+        const range = cleanRange(body.from, body.to);
+        if (!range) return json(400, { error: `Choose up to ${MAX_CALENDAR_DAYS} days.` });
+        return json(200, await bookingCalendar(db, orgId, range, new Date()));
     }
 
     if (action === 'bookings') {
