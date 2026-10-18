@@ -554,7 +554,7 @@
     // Wix (and some Squarespace / Webflow blocks) put pasted code in a fixed-size frame. The widget
     // copes (posts open full-page in a new tab, see widget.js `framed`) but the list is only as
     // tall as the box, so say how to size it.
-    + '          <span class="bs-status" style="font-size:11px;display:block;margin-top:4px;"><strong>On Wix:</strong> Add \u2192 Embed Code \u2192 Embed HTML, paste the code, then drag the box tall (around 1,200px) and full width. Wix shows embedded code in a fixed-size box, so posts open full-page in a new tab.</span></div>'
+    + '          <span class="bs-status" style="font-size:11px;display:block;margin-top:4px;"><strong>On Wix:</strong> Wix shows pasted code in a fixed-size box, so your posts get cut off. Use the <strong>Blog page link</strong> below for your site\u2019s Blog menu item instead.</span></div>'
     // The RSS feed of published posts. Anything that reads a feed (Mailchimp, Zapier, an aggregator,
     // a reader) can pull the blog without a dedicated connector — see widget-rss.ts.
     + '        <div style="margin-top:12px;">'
