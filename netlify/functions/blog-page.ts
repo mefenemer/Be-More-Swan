@@ -10,6 +10,9 @@
 //                        config stamps canonicals at bemoreswan.com/blog/<slug> — before this route
 //                        nothing served that path, so every canonical and sitemap entry 404'd.
 //                        See src/utils/blog-route.ts for the parsing.
+//   GET /b/:key        → the hosted blog INDEX: a full-page, paged list of that widget's published
+//                        posts (?cursor= for older pages). Exists for Wix, where pasted code lives
+//                        in a fixed-size iframe — the owner points their Blog menu item here instead.
 //
 // WHY this exists alongside widget-api.ts: the native widget renders client-side into a Shadow DOM
 // on the customer's domain and routes on location.hash. Social crawlers run no JavaScript, and
@@ -22,8 +25,10 @@ import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { widgetConfigs, blogPosts, organisations } from '../../db/schema';
 import { resolveInlineMedia, resolveFeatureImageUrl } from '../../src/utils/blog-media-resolve';
-import { resolveCanonical, renderBlogPage } from '../../src/utils/blog-seo';
-import { parseBlogRoute } from '../../src/utils/blog-route';
+import { resolveCanonical, renderBlogPage, renderBlogIndexPage } from '../../src/utils/blog-seo';
+import { parseBlogRoute, parseBlogIndexRoute, BlogIndexRoute } from '../../src/utils/blog-route';
+import { parseCursor } from '../../src/utils/blog-list-paging';
+import { listPublishedPosts } from '../../src/utils/blog-list-query';
 import { isAiAssisted } from '../../src/utils/blog-ai-assisted';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { excerpt } from '../../src/utils/markdown-render';
@@ -42,10 +47,75 @@ function htmlResponse(statusCode: number, body: string, cache = false) {
 
 // A minimal, indexable-but-empty page for the not-found case. noindex so a bad link never gets
 // crawled as thin content.
-function notFound(): { statusCode: number; headers: Record<string, string>; body: string } {
+function notFound(what: 'post' | 'blog' = 'post'): { statusCode: number; headers: Record<string, string>; body: string } {
+    const title = what === 'blog' ? 'Blog not found' : 'Post not found';
+    const text = what === 'blog' ? 'This blog is not available.' : 'This post is not available.';
     return htmlResponse(404,
         `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex">` +
-        `<title>Post not found</title></head><body><p>This post is not available.</p></body></html>`);
+        `<title>${title}</title></head><body><p>${text}</p></body></html>`);
+}
+
+/**
+ * Posts per page on the hosted index. Smaller than the widget's default 50: this is a page of image
+ * cards a human scrolls, and each card's thumbnail is a presigned URL resolved per request.
+ */
+const INDEX_PAGE_SIZE = 12;
+
+async function renderIndex(event: HandlerEvent, route: BlogIndexRoute) {
+    const { publicKey } = route;
+    const db = getDb();
+    const [cfg] = await db
+        .select({
+            organisationId: widgetConfigs.organisationId,
+            status: widgetConfigs.status,
+            siteBaseUrl: widgetConfigs.siteBaseUrl,
+            theme: widgetConfigs.theme,
+            orgName: organisations.name,
+            orgWebsiteUrl: organisations.websiteUrl,
+        })
+        .from(widgetConfigs)
+        .leftJoin(organisations, eq(organisations.id, widgetConfigs.organisationId))
+        .where(eq(widgetConfigs.publicKey, publicKey))
+        .limit(1);
+    if (!cfg || cfg.status !== 'active') return notFound('blog');
+
+    const cursorId = parseCursor(event.queryStringParameters?.cursor);
+    const { posts, nextCursor } = await listPublishedPosts(db, cfg.organisationId, { size: INDEX_PAGE_SIZE, cursorId });
+    // A cursor that lands on nothing (stale, foreign, or made up) is not a page — 404 rather than
+    // serve crawlers an empty, indexable-looking shell. Page 1 with no posts is a real, empty blog.
+    if (cursorId && !posts.length) return notFound('blog');
+
+    const origin = (resolveBaseUrl(event.headers as Record<string, string | undefined>) || '').replace(/\/+$/, '');
+    const indexPath = route.pathname;
+    const firstUrl = `${origin}${indexPath}`;
+    const pageUrl = cursorId ? `${firstUrl}?cursor=${cursorId}` : firstUrl;
+
+    const html = renderBlogIndexPage({
+        siteName: cfg.orgName || 'Blog',
+        pageUrl,
+        // Page 1 is THE index. A cursor page is self-canonical and noindex,follow: its contents shift
+        // every time a post is published (keyset pages are stable for a reader, not for an index),
+        // so crawlers should follow its links to the permalinks and not index the page itself.
+        canonicalUrl: pageUrl,
+        robots: cursorId ? 'noindex,follow' : 'index,follow',
+        posts: posts.map((p) => ({
+            title: p.title,
+            slug: p.slug,
+            excerpt: p.excerpt,
+            publishedAt: p.publishedAt ? new Date(p.publishedAt).toISOString() : null,
+            imageUrl: p.imageUrl,
+            imageAlt: p.imageAlt,
+        })),
+        // Always OUR permalink, not the customer's site_post_path: the reason this page exists is
+        // that the customer's site (Wix) has no per-post route of its own. The permalink still
+        // carries the post's real canonical in its <head>.
+        postHref: (slug) => `${indexPath}/${encodeURIComponent(slug)}`,
+        olderHref: nextCursor ? `${indexPath}?cursor=${encodeURIComponent(nextCursor)}` : null,
+        firstHref: cursorId ? indexPath : null,
+        homeUrl: cfg.siteBaseUrl || cfg.orgWebsiteUrl || null,
+        theme: (cfg.theme as { fontFamily?: string | null; fontUrl?: string | null } | null) || null,
+    });
+    return htmlResponse(200, html, true);
 }
 
 export default withLambda(async (event: HandlerEvent) => {
@@ -54,6 +124,8 @@ export default withLambda(async (event: HandlerEvent) => {
     // Parse the original (pre-rewrite) path — a rewrite is status 200, so rawUrl still carries the
     // URL the visitor actually requested, which is the only place the key and slug survive.
     const path = event.rawUrl ? new URL(event.rawUrl).pathname : event.path || '';
+    const indexRoute = parseBlogIndexRoute(path);
+    if (indexRoute) return renderIndex(event, indexRoute);
     const route = parseBlogRoute(path);
     if (!route) return notFound();
     const { publicKey, slug } = route;
@@ -169,6 +241,9 @@ export default withLambda(async (event: HandlerEvent) => {
         // inside a customer's embed. Keyed on the resolved public key + the STORED slug, so the
         // row it upserts is the same one the widget would have written.
         engagement: post.slug ? { publicKey, slug: post.slug } : null,
+        // Back to the list the reader came from: our own /blog page for the marketing-domain route,
+        // the hosted index for a tenant permalink.
+        indexUrl: route.pathname.startsWith('/blog/') ? '/blog' : `/b/${encodeURIComponent(publicKey)}`,
     });
 
     // Never cache a noindex post at the CDN as if indexable; still fine for the browser.

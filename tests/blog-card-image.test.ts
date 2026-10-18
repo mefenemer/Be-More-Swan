@@ -191,8 +191,8 @@ check('⚠️ The Swan Index COPIES the choice — it does not re-derive it', ()
 check('⚠️ no list surface re-reads published_payload to find an image', () => {
     // The whole reason these are columns. published_payload holds the entire article body; reading
     // it per card means dragging 50 full articles out of the heap to draw one page of a blog.
-    const api = readFileSync(join(root, 'netlify/functions/widget-api.ts'), 'utf8');
-    const list = api.slice(landmark(api, "if (resource === 'posts' && !slug)"), landmark(api, "if (resource === 'posts' && slug)"));
+    // The widget list and the hosted index (/b/:key) share one query, in blog-list-query.ts.
+    const list = readFileSync(join(root, 'src/utils/blog-list-query.ts'), 'utf8');
     assert.ok(!/publishedPayload/.test(list), 'the list query must not select the payload');
     assert.match(list, /cardImageAssetId: blogPosts\.cardImageAssetId/);
 
