@@ -35,6 +35,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { BETA_TIER_KEY, featureTierKey } from '../../src/config/beta-plan';
 import { TASK_WEIGHTS } from '../../src/config/task-weights';
 import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
+import { getTrial } from '../../src/utils/trial';
 
 const stripe = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
@@ -133,6 +134,8 @@ export default withLambda(async (event) => {
         // hard-gated. The frontend reads `noPlan` to show the non-dismissible plan picker,
         // and hire-assistant / chat-orchestrator enforce the same rule server-side.
         const noPlan = plan === null;
+        // A workspace on the plan picker because its free trial ran out (vs one that never had a plan).
+        const trialEnded = noPlan && orgId ? !!(await getTrial(db, orgId))?.endedAt : false;
         // Plan Features: a "new subscribers only" change freezes existing subscribers at their old
         // values in plans.featureOverrides — prefer that snapshot over the live master_plans column.
         const overrides = (plan as any)?.featureOverrides as FeatureOverrides | null;
@@ -398,6 +401,11 @@ export default withLambda(async (event) => {
                 // the setup wizards rank plans by key and an unknown key ranked below the entry plan.
                 tierKey: featureTierKey(plan?.tierKey ?? null),
                 isBetaPlan: plan?.tierKey === BETA_TIER_KEY,
+                // The free 14-day trial (src/utils/trial.ts): the workspace banner counts down to the
+                // end, and the plan picker says "your free trial has ended" once it has.
+                isTrial: plan?.planType === 'trial',
+                trialEndsAt: plan?.planType === 'trial' && plan?.expiresAt ? new Date(plan.expiresAt).toISOString() : null,
+                trialEnded,
                 tierName: plan?.tierName ?? null,
                 planStatus: plan?.planStatus ?? null,
                 planType: plan?.planType ?? null,

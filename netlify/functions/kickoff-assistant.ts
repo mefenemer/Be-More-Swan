@@ -112,6 +112,12 @@ export default withLambda(async (event) => {
             code: 'SYSTEM_PAUSED_BETA_ENDED',
         });
     }
+    if (state === 'system_paused' && a.provisioningStatus === 'paused_trial_ended') {
+        return json(409, {
+            error: 'Your free trial has ended, so this assistant is paused. Choose a plan and it starts again straight away — nothing has been deleted.',
+            code: 'SYSTEM_PAUSED_TRIAL_ENDED',
+        });
+    }
     // A quota pause is not user-fixable by kicking off either — every task would be refused by
     // atomicCapCheck anyway. It clears itself when the allowance resets (resume-quota-paused.ts),
     // so say so rather than letting the user start something that cannot run.

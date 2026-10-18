@@ -3076,6 +3076,23 @@ export const taskLedger = pgTable("task_ledger", {
   index("task_ledger_assistant_idx").on(t.organisationId, t.assistantId, t.periodStart),
 ]);
 
+// The free 14-day trial, one row per workspace (db/z-trial-plan.sql, src/utils/trial.ts).
+export const trials = pgTable("trials", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().unique().references(() => organisations.id, { onDelete: "cascade" }),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  startedAt: timestamp("started_at").notNull(),
+  endsAt: timestamp("ends_at").notNull(),
+  reminderSentAt: timestamp("reminder_sent_at"),
+  endedAt: timestamp("ended_at"),
+  convertedAt: timestamp("converted_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("trials_due_idx").on(t.endsAt),
+  index("trials_user_idx").on(t.userId),
+]);
+
 // Non-expiring bonus tasks, spent only after the monthly allowance (db/task-ledger.sql).
 export const taskBonus = pgTable("task_bonus", {
   organisationId: integer("organisation_id").primaryKey().references(() => organisations.id, { onDelete: "cascade" }),

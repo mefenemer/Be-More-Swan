@@ -7,8 +7,8 @@ config({ path: path.resolve(process.cwd(), '.env') });
 import { Handler } from '@netlify/functions';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { eq, and, ne } from 'drizzle-orm';
-import { BETA_PLAN_TYPE } from '../../src/utils/beta-testers';
+import { eq, and, ne, notInArray } from 'drizzle-orm';
+import { FREE_PLAN_TYPES } from '../../src/config/beta-plan';
 import { retireBetaPlanBeforePaid, afterPaidPlanStarted } from '../../src/utils/beta-ending';
 import { users, masterPlans, plans, payments } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
@@ -45,11 +45,11 @@ export default withLambda(async (event) => {
     // the webhook's plan insert would collide on plans_one_active_per_org_unique). Report
     // no-payment-due so the frontend routes the already-subscribed user to their dashboard,
     // matching the £0 already-provisioned response shape.
-    // A free BETA plan does not count: a beta tester taking a paid plan replaces it (beta-ending.ts).
+    // A free plan (beta or the 14-day trial) does not count: a paid plan replaces it (beta-ending.ts).
     const [activePlan] = await db
       .select({ id: plans.id, planName: plans.planName })
       .from(plans)
-      .where(and(eq(plans.organisationId, orgId), eq(plans.status, 'active'), ne(plans.planType, BETA_PLAN_TYPE)))
+      .where(and(eq(plans.organisationId, orgId), eq(plans.status, 'active'), notInArray(plans.planType, [...FREE_PLAN_TYPES])))
       .limit(1);
     if (activePlan) {
       return {
@@ -216,7 +216,7 @@ export default withLambda(async (event) => {
       const [existingPlan] = await db
         .select({ id: plans.id })
         .from(plans)
-        .where(and(eq(plans.organisationId, orgId), eq(plans.status, 'active'), ne(plans.planType, BETA_PLAN_TYPE)))
+        .where(and(eq(plans.organisationId, orgId), eq(plans.status, 'active'), notInArray(plans.planType, [...FREE_PLAN_TYPES])))
         .limit(1);
 
       // Track whether THIS subscription became the org's active plan. A £0 subscription

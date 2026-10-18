@@ -9,6 +9,7 @@ import { sendEmail } from '../../src/utils/email';
 import { getEmailStrings } from '../../src/utils/email-i18n';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { resolveActiveOrg } from '../../src/utils/tenant';
+import { startTrialIfEligible } from '../../src/utils/trial';
 import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -92,6 +93,20 @@ export default withLambda(async (event) => {
             .set({ status: 'active', verificationToken: null, tokenExpiresAt: null, updatedAt: new Date() })
             .where(eq(users.id, user.id));
 
+        // ── Free 14-day trial (src/utils/trial.ts): starts the moment a NEW workspace's owner verifies.
+        // No card. Ineligible (a workspace that has ever had a plan — beta, paid, anything — or a
+        // person who has had a trial) gets nothing and lands on the plan picker as before. Never
+        // blocks the login: a failure here just means no trial.
+        let trialEndsAt: Date | null = null;
+        if (isFirstLogin && user.organisationId) {
+            try {
+                const t = await startTrialIfEligible(db, { userId: user.id, organisationId: user.organisationId });
+                if (t.started && t.endsAt) trialEndsAt = t.endsAt;
+            } catch (err) {
+                console.error('[verify] could not start the free trial (non-blocking)', { userId: user.id, err });
+            }
+        }
+
         // ── US3 Sc3 + US2 Sc1: Welcome + onboard prompt on first login ───────
         if (isFirstLogin) {
             await createNotification(db, 'welcome_verified', { userId: user.id });
@@ -113,6 +128,7 @@ export default withLambda(async (event) => {
                 subject: emailStr.welcome_subject(user.firstName || 'there'),
                 html: `<p>Hi ${user.firstName || 'there'},</p>
                        <p>Your email is verified — welcome to Be More Swan! You're moments away from having your own AI team member handling the work you don't have time for.</p>
+                       ${trialEndsAt ? `<p><strong>Your 14-day free trial has started.</strong> Every assistant is yours to try until ${trialEndsAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', timeZone: 'Europe/London' })} — no card needed, and nothing is charged when it ends.</p>` : ''}
                        <h3 style="margin-top:24px;">Here's how to get started in 3 steps:</h3>
                        <ol style="padding-left:1.2rem;line-height:2">
                          <li><strong>Complete your business profile</strong> — tell us about your business so your assistant understands your brand</li>
@@ -146,7 +162,8 @@ export default withLambda(async (event) => {
 
         // Valid subscription tier keys (master_plans.tier_key). A new registration carries the
         // chosen tier straight through the magic link (?tier=…); a returning-user login carries none.
-        const VALID_TIERS = ['saver', 'buster', 'employee'];
+        // ('employee' — The Digital Employee — stopped being sold on 17 Oct 2026.)
+        const VALID_TIERS = ['saver', 'buster'];
 
         // Onboarding path → HTML page map (mirrors onboarding-reminder.ts)
         // custom / inventory / performance deliberately fall through (|| 'onboarding.html' below)
