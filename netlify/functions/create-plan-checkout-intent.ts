@@ -1,6 +1,7 @@
 // netlify/functions/create-plan-checkout-intent.ts
 // P0 BUG FIX: Dedicated Stripe Checkout Session endpoint for the plan gate modal.
-// Accepts only { planId, referralCode?, currency? } — no assistant payload required.
+// Accepts only { planId, currency?, billingCycle? } — no assistant payload required. A referralCode
+// in the body is ignored: the referral offer is decided server-side (src/utils/referral-offer.ts).
 // Returns { url } for redirect to Stripe Checkout.
 // AC3: No ai_assistants or payments rows created here; those happen post-webhook.
 
@@ -14,6 +15,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
 import { annualAmountGbp, resolveAnnualPriceId, resolveMonthlyPriceId } from '../../src/utils/stripe-price';
+import { findReferralOffer, resolveReferralCouponId } from '../../src/utils/referral-offer';
 
 const stripeSecret = process.env.STRIPE_SECRET_KEY!;
 
@@ -42,10 +44,10 @@ export default withLambda(async (event) => {
         return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured: base URL unavailable' }) };
     }
 
-    let planId: number; let referralCode: string | undefined; let requestedCurrency: string | undefined; let requestedCycle: string | undefined;
+    let planId: number; let requestedCurrency: string | undefined; let requestedCycle: string | undefined;
     try {
         const body = JSON.parse(event.body || '{}');
-        ({ planId, referralCode, currency: requestedCurrency, billingCycle: requestedCycle } = body);
+        ({ planId, currency: requestedCurrency, billingCycle: requestedCycle } = body);
     } catch {
         return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON body' }) };
     }
@@ -125,6 +127,11 @@ export default withLambda(async (event) => {
         };
     }
 
+    // Referred friend → first month free. Decided from the user_referrals row written at signup,
+    // never from a code the browser sends (see src/utils/referral-offer.ts).
+    const referralOffer = await findReferralOffer(db, user.id);
+    const referralCode = referralOffer?.referralCode;
+
     // Build Stripe Checkout Session
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
         mode: 'subscription',
@@ -150,16 +157,11 @@ export default withLambda(async (event) => {
         },
     };
 
-    // Apply referral discount coupon if present and a matching Stripe coupon exists.
+    // Referred friend → first month free (see the lookup above).
     let discountApplied = false;
-    if (referralCode) {
-        try {
-            await stripe.coupons.retrieve(referralCode);
-            sessionParams.discounts = [{ coupon: referralCode }];
-            discountApplied = true;
-        } catch {
-            // No matching coupon — proceed without discount
-        }
+    if (referralOffer) {
+        sessionParams.discounts = [{ coupon: await resolveReferralCouponId(stripe, billingCycle) }];
+        discountApplied = true;
     }
 
     // Let the customer enter a promo code on Stripe's hosted page (this is where 100%-off
