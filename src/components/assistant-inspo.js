@@ -11,13 +11,15 @@
  * signal than the material itself, so the composer asks for it every time.
  *
  *   • quick capture: type a note, or dictate one with the mic (AC4)
+ *   • add a link (AC2): the server reads the page's text in the background
+ *     (process-inspo-background.ts) and the card shows how that went
  *   • each item shows an indexing badge, mirroring the Knowledge Base tab
  *   • Active/Paused toggle + delete — both stop the assistant considering the
  *     item on its very next draft (AC6)
  *
- * PHASE 2 SCOPE: typed + dictated notes only. Adding links (AC2) and files (AC3)
- * needs the extraction worker — see docs/inspo-tab-plan.md phase 3. Nothing here
- * advertises those affordances yet; dead UI would just lie about what works.
+ * SCOPE: notes, dictation and links. Uploading files (AC3) is still outstanding —
+ * the worker reads them, but the composer has no R2 upload wiring yet (see
+ * docs/inspo-tab-plan.md phase 3). Nothing here advertises it; dead UI would lie.
  *
  * Usage (assistants.js → _applyDashboardRegistry):
  *   window.AssistantInspo.init({ inspo, assistantId });
@@ -57,6 +59,38 @@
   };
 
   const KIND_LABELS = { text: 'Note', voice: 'Voice note', url: 'Link', file: 'File' };
+
+  // A link is read in the background, so until the worker is done its embedding status says
+  // nothing useful: a page that could not be fetched would sit on "Pending" forever. Where the
+  // READ is the news, the badge says so.
+  const INGEST_BADGES = {
+    pending: { label: 'Reading link…', cls: 'bg-gray-50 text-gray-600 border-gray-200' },
+    failed: { label: "Couldn't read link", cls: 'bg-red-50 text-red-700 border-red-200' },
+    // Nothing to read (an image or a PDF link, or an empty page): the note carries the item.
+    unsupported: { label: 'Note only', cls: 'bg-amber-50 text-amber-800 border-amber-200' },
+  };
+
+  function itemBadge(item) {
+    if (item.kind === 'url' && INGEST_BADGES[item.ingestStatus]) return INGEST_BADGES[item.ingestStatus];
+    return STATUS_BADGES[item.embeddingStatus] || STATUS_BADGES.pending;
+  }
+
+  // The card links back to the source. The URL was validated on save (http/https only), but it is
+  // still user-supplied text going into an href, so it is re-checked here rather than trusted.
+  // People paste "example.com/post" without the scheme; the server requires one. Anything that
+  // still isn't http(s) after adding it is left for the server to reject with its own message.
+  function normaliseLink(raw) {
+    const v = String(raw || '').trim();
+    if (!v) return '';
+    return /^[a-z][a-z0-9+.-]*:/i.test(v) ? v : `https://${v}`;
+  }
+
+  function linkHref(url) {
+    try {
+      const u = new URL(String(url || ''));
+      return (u.protocol === 'http:' || u.protocol === 'https:') ? u.toString() : null;
+    } catch { return null; }
+  }
 
   const state = {
     inspo: null, assistantId: null, roleKey: null, assistantName: null, assistantRole: null,
@@ -113,6 +147,7 @@
       '',
       `Inspo: ${item.title || 'Untitled'}`,
     ];
+    if (item.kind === 'url' && linkHref(item.sourceUrl)) parts.push(`Link: ${linkHref(item.sourceUrl)}`);
     // The note is "what I like about this", and it is the strongest signal on the item — it is why
     // the composer asks for it every time. Only ever included when the user actually wrote one.
     if (item.userNote) parts.push('', `What I like about it: ${item.userNote}`);
@@ -155,6 +190,34 @@
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Something went wrong.');
     return data;
+  }
+
+  // A link is read in the background (process-inspo-background.ts), so a freshly added one lands
+  // as "Reading link…". Re-read the list a few times until nothing is pending, rather than leaving
+  // the badge stale until the user happens to reload. Bounded: a worker that never reports back
+  // must not poll for ever.
+  const POLL_MS = 4000;
+  const POLL_MAX = 15;
+  let pollTimer = null;
+  let pollCount = 0;
+  function schedulePoll(reset) {
+    if (reset) pollCount = 0;
+    clearTimeout(pollTimer);
+    pollTimer = null;
+    if (!state.items.some((i) => i.ingestStatus === 'pending' && (i.kind === 'url' || i.kind === 'file'))) return;
+    if (pollCount >= POLL_MAX) return;
+    const assistantId = state.assistantId;
+    pollTimer = setTimeout(async () => {
+      pollCount++;
+      // The tab was left, or another assistant's tab opened, while we waited.
+      if (state.assistantId !== assistantId || !document.getElementById('inspo-list-host')) return;
+      try {
+        await fetchItems();
+        // Only the list host is repainted; an open composer is a separate host and is left alone.
+        renderList();
+      } catch { /* keep the last good list; the next tick tries again */ }
+      schedulePoll(false);
+    }, POLL_MS);
   }
 
   async function fetchItems() {
@@ -236,16 +299,35 @@
     const host = document.getElementById('inspo-composer-host');
     if (!host) return;
     state.editingId = item ? item.id : null;
+    // A link item's text is whatever the page said, read by the worker. Editing it by hand would
+    // re-index typed text under the link's name, so a link is edited for its NOTE only.
+    const editingLink = !!(item && item.kind === 'url');
+    let mode = editingLink ? 'link' : 'note';
     const inputCls = 'w-full border border-gray-300 rounded-lg p-3 text-sm bg-white focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm';
 
     host.innerHTML = `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6">
         <div class="mb-4">
           <h4 class="font-bold text-gray-900">${item ? 'Edit inspo' : 'Add inspo'}</h4>
-          <p class="text-xs text-gray-500 mt-0.5">Anything that captures how you want to sound — a turn of phrase, an idea, a rule of thumb.</p>
+          <p class="text-xs text-gray-500 mt-0.5">Anything that captures how you want to sound — a turn of phrase, an idea, a rule of thumb, or a page you admire.</p>
         </div>
+        ${item ? '' : `
+        <div class="inline-flex rounded-lg border border-gray-200 p-0.5 mb-4" role="group" aria-label="What are you adding?">
+          <button type="button" data-inspo-mode="note" aria-pressed="true"
+            class="px-3 py-1.5 text-xs font-bold rounded-md transition bg-gray-900 text-white">Write a note</button>
+          <button type="button" data-inspo-mode="link" aria-pressed="false"
+            class="px-3 py-1.5 text-xs font-bold rounded-md transition text-gray-600">Add a link</button>
+        </div>`}
         <div class="space-y-4">
-          <div>
+          <div data-inspo-link-section class="${mode === 'link' ? '' : 'hidden'}">
+            <label class="block text-sm font-bold text-gray-700 mb-1" for="inspo-composer-url">Link</label>
+            ${editingLink ? `
+            <p class="text-sm text-gray-700 break-all">${esc(item.sourceUrl || '')}</p>` : `
+            <input id="inspo-composer-url" type="url" inputmode="url" autocomplete="off" class="${inputCls}"
+              placeholder="https://example.com/a-post-you-love">
+            <p class="text-xs text-gray-400 mt-1">A public web page — an article, a blog post, a competitor's About page. We read its text in the background. Pages behind a login (including Google Docs) can't be read.</p>`}
+          </div>
+          <div data-inspo-body-section class="${mode === 'link' ? 'hidden' : ''}">
             <div class="flex items-center justify-between gap-3 mb-1">
               <label class="block text-sm font-bold text-gray-700" for="inspo-composer-body">The inspo</label>
               ${speechSupported() ? `
@@ -280,7 +362,30 @@
       </div>`;
 
     const bodyEl = host.querySelector('#inspo-composer-body');
+    const urlEl = host.querySelector('#inspo-composer-url');
     const noteEl = host.querySelector('#inspo-composer-note');
+    const linkSection = host.querySelector('[data-inspo-link-section]');
+    const bodySection = host.querySelector('[data-inspo-body-section]');
+
+    // Note ⇄ link. Hidden sections are toggled with style.display as well as the class, because
+    // `hidden` loses to any display utility that lands on the same element.
+    host.querySelectorAll('[data-inspo-mode]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        mode = btn.getAttribute('data-inspo-mode');
+        session?.stop();
+        host.querySelectorAll('[data-inspo-mode]').forEach((b) => {
+          const on = b === btn;
+          b.setAttribute('aria-pressed', on ? 'true' : 'false');
+          b.className = `px-3 py-1.5 text-xs font-bold rounded-md transition ${on ? 'bg-gray-900 text-white' : 'text-gray-600'}`;
+        });
+        linkSection.classList.toggle('hidden', mode !== 'link');
+        linkSection.style.display = mode === 'link' ? '' : 'none';
+        bodySection.classList.toggle('hidden', mode === 'link');
+        bodySection.style.display = mode === 'link' ? 'none' : '';
+        status.className = 'hidden';
+        (mode === 'link' ? urlEl : bodyEl)?.focus();
+      });
+    });
     const status = host.querySelector('[data-inspo-composer-status]');
     const saveBtn = host.querySelector('[data-inspo-save]');
     const micBtn = host.querySelector('[data-inspo-mic]');
@@ -323,6 +428,27 @@
       session?.stop();
       const body = bodyEl.value.trim();
       const userNote = noteEl.value.trim();
+      if (mode === 'link') {
+        saveBtn.disabled = true;
+        try {
+          if (editingLink) {
+            await api('PUT', { id: state.editingId, userNote });
+          } else {
+            const sourceUrl = normaliseLink(urlEl.value);
+            if (!sourceUrl) { saveBtn.disabled = false; showStatus('Paste the link to a web page first.', false); return; }
+            showStatus('Adding…', true);
+            await api('POST', { assistantId: state.assistantId, kind: 'url', sourceUrl, userNote });
+          }
+          closeComposer();
+          await fetchItems();
+          renderList();
+          schedulePoll(true);
+        } catch (err) {
+          saveBtn.disabled = false;
+          showStatus(err.message, false);
+        }
+        return;
+      }
       if (!body) { showStatus('Add some text before saving.', false); return; }
       saveBtn.disabled = true;
       showStatus('Saving and indexing…', true);
@@ -375,15 +501,18 @@
     host.innerHTML = `
       <div class="space-y-3">
         ${state.items.map((i) => {
-          const badge = STATUS_BADGES[i.embeddingStatus] || STATUS_BADGES.pending;
+          const badge = itemBadge(i);
+          const href = i.kind === 'url' ? linkHref(i.sourceUrl) : null;
           const kind = KIND_LABELS[i.kind] || 'Note';
           return `
           <div class="bg-white rounded-2xl border shadow-sm p-5 ${i.isActive ? 'border-gray-200' : 'border-gray-200 bg-gray-50/60'}" data-inspo-item="${i.id}">
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
                 <p class="font-bold text-gray-900 truncate ${i.isActive ? '' : 'text-gray-500'}">${esc(i.title)}</p>
+                ${href ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer" class="block text-xs text-gray-500 underline break-all mt-0.5">${esc(href)}</a>` : ''}
                 ${i.notePreview ? `<p class="text-sm text-emerald-800 mt-1 italic">“${esc(i.notePreview)}”</p>` : ''}
-                <p class="text-sm text-gray-500 mt-1">${esc(i.bodyPreview)}</p>
+                ${i.bodyPreview ? `<p class="text-sm text-gray-500 mt-1">${esc(i.bodyPreview)}</p>` : ''}
+                ${i.kind === 'url' && i.ingestStatus === 'failed' ? `<p class="text-xs text-red-600 mt-1">We couldn't read that page — it may need a login, block automated visits, or be offline. Your note still counts; or delete this and paste the text as a note.</p>` : ''}
                 <p class="text-xs text-gray-400 mt-2">
                   ${esc(kind)}
                   · ${esc(String(i.chunkCount))} section${i.chunkCount === 1 ? '' : 's'} indexed
@@ -564,14 +693,15 @@
       await fetchItems();
       renderToolbar();
       renderList();
+      schedulePoll(true);
     } catch (err) {
       renderToolbar();
       if (host) host.innerHTML = `<div class="bg-red-50 border border-red-200 rounded-2xl p-6 text-sm font-semibold text-red-700">${esc(err.message)}</div>`;
     }
   }
 
-  // `_test` exposes the two pure functions behind the "Write a … from this" button.
+  // `_test` exposes the pure functions behind the "Write a … from this" button and the link card.
   // tests/inspo-draft-from-item.test.ts calls them directly: the wording is role-dependent, and a
   // Blog Writer being asked for a "social post" is a bug no source scan would catch.
-  window.AssistantInspo = { init, _test: { buildSeed, draftNoun } };
+  window.AssistantInspo = { init, _test: { buildSeed, draftNoun, itemBadge, linkHref, normaliseLink } };
 })();
