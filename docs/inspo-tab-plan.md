@@ -152,7 +152,7 @@ model treats it as data, not instructions — matching the existing RAG conventi
    Note `db:migrate:apply` with no `--only` would apply ALL pending files (8 others from
    unrelated in-flight work were pending at the time) — always scope it.
 2. ✅ **CRUD + text/voice items** (AC4, AC6) — `inspo-items.ts` + the tab UI.
-3. 🟡 **URL + file ingestion** (AC2, AC3) — **backend done, UI outstanding.**
+3. 🟡 **URL + file ingestion** (AC2, AC3) — **backend done; link UI shipped 2026-10-18 (Note / Link switch in the composer, read-status badges, bounded polling — `tests/inspo-links.test.ts`); file upload UI still outstanding.**
    Done: `src/utils/safe-fetch.ts` (SSRF-hardened fetcher, `tests/safe-fetch.test.ts`, 24
    assertions), `src/utils/prompt-injection.ts` (extracted so both ingest paths share one
    sanitiser), `netlify/functions/process-inspo-background.ts`, and `inspo-items.ts` widened
