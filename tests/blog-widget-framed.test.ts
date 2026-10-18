@@ -122,7 +122,10 @@ async function renderList(opts: { framed: boolean; crossOriginTop?: boolean; pos
     await check('the snippet the Blog Studio hands out includes its own mount <div>', async () => {
         const studio = readFileSync(join(root, 'src/components/blog-studio-modal.js'), 'utf8');
         assert.ok(/'<div id="bms-blog"><\/div>\\n'/.test(studio), 'the mount div must be part of the copied snippet');
-        assert.ok(studio.includes('<strong>On Wix:</strong>'), 'the Wix sizing note must be shown');
+        assert.ok(studio.includes('<strong>On Wix:</strong>'), 'the Wix note must be shown');
+        const wix = studio.slice(studio.indexOf('<strong>On Wix:</strong>'), studio.indexOf('<strong>On Wix:</strong>') + 300);
+        assert.ok(wix.includes('Blog page link'), 'the embed Wix note must send people to the Blog page link');
+        assert.ok(!wix.includes('drag the box tall'), 'the old drag-the-box advice must be gone');
     });
 
     console.log(`\n${passed} passed`);
