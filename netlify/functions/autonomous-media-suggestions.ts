@@ -15,7 +15,7 @@
 
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
-import { and, eq, gte, lte, sql, inArray } from 'drizzle-orm';
+import { and, eq, gte, lte, sql, inArray, isNotNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     aiAssistants, masterAssistants, scheduledPosts, scheduledPostAssets,
@@ -35,26 +35,31 @@ import { platformFormat } from '../../src/config/platform-formats';
 import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson, toCaptionText } from '../../src/utils/model-json';
+import { safeSlice } from '../../src/utils/text-safe';
+import {
+    pickAutonomousSlot, pickPillar, hasUsableBrief, buildAutonomousDraftSystem,
+} from '../../src/utils/autonomous-draft-brief';
 
 const IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
 
 interface DraftCopy { caption: string; hashtags: string; imagePrompt: string; }
 
 // Ask the LLM for caption + hashtags + a visual prompt in one call, tailored to the platform.
-async function draftCopy(orgName: string, assistantName: string, platform: AutonomousDraftPlatform): Promise<DraftCopy> {
-    const label = platformFormat(platform).label;
-    const system = `You are ${assistantName}, the social media manager for "${orgName}". Write one engaging, on-brand ${label} post. Respond ONLY with minified JSON: {"caption": string, "hashtags": string (space-separated, 3-6 tags), "imagePrompt": string (a vivid photographic description for an AI image generator, no text/words in image)}.`;
+// ⚠️ The system prompt used to be the business NAME and nothing else, so the model invented a
+// business to match it (prod org 43: 21 posts about a shop that does not exist) — the brief now
+// comes from src/utils/autonomous-draft-brief.ts.
+async function draftCopy(system: string): Promise<DraftCopy> {
     const res = await gatewayGenerate({
         system,
         messages: [{ role: 'user', content: 'Draft a post for an upcoming empty slot in the content calendar.' }],
-        maxTokens: 600,
+        maxTokens: 800,
     });
     const parsed = parseModelJson<Record<string, unknown>>(res.text);
     if (parsed) {
         return {
-            caption: String(parsed.caption || '').slice(0, 2000),
-            hashtags: String(parsed.hashtags || '').slice(0, 500),
-            imagePrompt: String(parsed.imagePrompt || parsed.caption || '').slice(0, 1000),
+            caption: safeSlice(String(parsed.caption || ''), 2000),
+            hashtags: safeSlice(String(parsed.hashtags || ''), 500),
+            imagePrompt: safeSlice(String(parsed.imagePrompt || parsed.caption || ''), 1000),
         };
     }
     // ⚠️ The old fallback here assigned the RAW reply straight to the caption — fences, braces, \n
@@ -63,16 +68,7 @@ async function draftCopy(orgName: string, assistantName: string, platform: Auton
     // never been converted. toCaptionText salvages the caption field from a broken reply and
     // returns '' rather than ever handing JSON scaffolding to a user.
     const salvaged = toCaptionText(res.text);
-    return { caption: salvaged.slice(0, 2000), hashtags: '', imagePrompt: salvaged.slice(0, 300) };
-}
-
-// First uncovered day (tomorrow..horizon) for the platform, or null if fully covered.
-function firstGapDay(coveredDates: Set<string>, horizonDays: number, now: Date): Date | null {
-    for (let i = 1; i <= horizonDays; i++) {
-        const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + i, 10, 0, 0));
-        if (!coveredDates.has(d.toISOString().slice(0, 10))) return d;
-    }
-    return null;
+    return { caption: safeSlice(salvaged, 2000), hashtags: '', imagePrompt: safeSlice(salvaged, 300) };
 }
 
 export default withLambda(async (event) => {
@@ -96,6 +92,10 @@ export default withLambda(async (event) => {
             // "Use for this assistant" selection (see assistant-platform-selection.ts).
             configuration: aiAssistants.configuration,
             orgName: organisations.name,
+            orgIndustry: organisations.industry,
+            orgDescription: organisations.businessDescription,
+            orgAudience: organisations.targetAudience,
+            orgWebsite: organisations.websiteUrl,
         })
         .from(aiAssistants)
         .innerJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
@@ -106,7 +106,7 @@ export default withLambda(async (event) => {
             inArray(masterAssistants.roleKey, SMM_ROLE_KEYS),
         ));
 
-    let drafted = 0, autoScheduled = 0, skippedNoGap = 0, failed = 0, exhausted = 0;
+    let drafted = 0, autoScheduled = 0, skippedNoGap = 0, skippedNoBrief = 0, failed = 0, exhausted = 0;
     // A scorer that times out or returns junk falls back to amber, which looks exactly like a
     // cautious verdict. Count it separately so a persistently broken scorer is visible in the
     // cron's own output instead of silently routing everything to review forever.
@@ -116,6 +116,13 @@ export default withLambda(async (event) => {
     const exhaustedByUser = new Map<number, number>();     // AC2.3: assistants that couldn't source any media
 
     for (const a of assistants) {
+        const org = {
+            name: a.orgName, industry: a.orgIndustry, businessDescription: a.orgDescription,
+            targetAudience: a.orgAudience, websiteUrl: a.orgWebsite,
+        };
+        // Nothing to write ABOUT: a post guessed from the business name is worse than no post.
+        if (!hasUsableBrief(org, a.onboardingContext)) { skippedNoBrief++; continue; }
+
         const horizonDays = a.horizonDays ?? 7;
         const windowEnd = new Date(now.getTime() + horizonDays * 24 * 60 * 60 * 1000);
 
@@ -133,8 +140,10 @@ export default withLambda(async (event) => {
         const representative = platforms[0];
         const fmt = platformFormat(representative);
 
-        // Coverage is per day now (one cross-post covers every platform that day): any planned post on
-        // a day means that day is already taken.
+        // Coverage is per day (one cross-post covers every platform that day): any planned post on a
+        // day means that day is already taken. Only the assistant's own posting slots are candidates
+        // — this used to take the first day with nothing on it, so days the owner chose NOT to post
+        // on (weekends, for a weekdays-only schedule) were filled too.
         const coveredRows = await db
             .select({ publishDate: scheduledPosts.publishDate })
             .from(scheduledPosts)
@@ -144,12 +153,35 @@ export default withLambda(async (event) => {
                 lte(scheduledPosts.publishDate, windowEnd),
                 sql`status IN ('draft','in_review','approved','scheduled','pending_approval')`,
             ));
-        const covered = new Set(coveredRows.map(r => new Date(r.publishDate).toISOString().slice(0, 10)));
-
-        const gapDay = firstGapDay(covered, horizonDays, now);
+        const gapDay = pickAutonomousSlot({
+            onboardingContext: a.onboardingContext,
+            horizonDays,
+            plannedDates: coveredRows.map(r => new Date(r.publishDate)),
+            now,
+        });
         if (!gapDay) { skippedNoGap++; continue; }
 
-        const copy = await draftCopy(a.orgName || 'our brand', a.name, representative);
+        // Least-used pillar over the last 60 days, the same balance the scheduled path keeps.
+        let pillarUsage: Record<string, number> = {};
+        try {
+            const used = await db
+                .select({ pillar: scheduledPosts.pillar, n: sql<number>`count(*)::int` })
+                .from(scheduledPosts)
+                .where(and(
+                    eq(scheduledPosts.assistantId, a.id),
+                    isNotNull(scheduledPosts.pillar),
+                    sql`${scheduledPosts.createdAt} > now() - interval '60 days'`,
+                ))
+                .groupBy(scheduledPosts.pillar);
+            pillarUsage = Object.fromEntries(used.map(u => [u.pillar as string, u.n]));
+        } catch { /* plain rotation */ }
+        const pillar = pickPillar(a.onboardingContext, pillarUsage, gapDay);
+
+        const copy = await draftCopy(buildAutonomousDraftSystem({
+            org, assistantName: a.name, platformLabel: fmt.label,
+            onboardingContext: a.onboardingContext, pillar, slot: gapDay,
+        }));
+        if (!copy.caption) { failed++; continue; }
 
         // AI generation source — encapsulates the autonomous credit hold/settle + the generation-job
         // ledger, so the resolver only pays for AI when it actually reaches that source. A reached cap
@@ -245,7 +277,7 @@ export default withLambda(async (event) => {
                 caption: copy.caption, hashtags: copy.hashtags || null,
                 contentAssetIds: [assetId],
                 connectionId: gate.connectionId,
-                status: gate.status, isAutonomous: true, triggerType: 'scheduled',
+                status: gate.status, isAutonomous: true, triggerType: 'scheduled', pillar,
                 // Marks the post unattended and counts toward the rolling weekly ceiling.
                 autoPublishedAt: gate.status === 'scheduled' ? new Date() : null,
                 ownerLabel: `AI: ${a.name}`,
@@ -319,6 +351,6 @@ export default withLambda(async (event) => {
     return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ran: true, assistantsChecked: assistants.length, drafted, autoScheduled, scoringUnavailable, skippedNoGap, failed, exhausted }),
+        body: JSON.stringify({ ran: true, assistantsChecked: assistants.length, drafted, autoScheduled, scoringUnavailable, skippedNoGap, skippedNoBrief, failed, exhausted }),
     };
 });
