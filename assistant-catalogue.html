@@ -39,6 +39,7 @@
       <button class="cat-tab whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm" data-cat="Customer Success &amp; Support">Customer Success</button>
       <button class="cat-tab whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm" data-cat="Project Management">Project Management</button>
       <button class="cat-tab whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm" data-cat="Finance &amp; Bookkeeping">Finance &amp; Bookkeeping</button>
+      <button class="cat-tab whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm" data-cat="Education">Education</button>
     </nav>
   </div>
 
@@ -265,7 +266,12 @@
     const empty = document.getElementById('cat-empty');
     let list = _catAll;
 
-    if (_catCategory !== 'All Roles') list = list.filter(a => a.category === _catCategory);
+    if (_catCategory !== 'All Roles') {
+      // Education is a sector, not a function category — cross-listed in assistant-sectors.js.
+      list = window.AssistantSectors.SECTORS[_catCategory]
+        ? list.filter(a => window.AssistantSectors.matches(a, _catCategory))
+        : list.filter(a => a.category === _catCategory);
+    }
     if (_catQ) {
       const q = _catQ.toLowerCase();
       list = list.filter(a => a.name.toLowerCase().includes(q) || (a.description||'').toLowerCase().includes(q));
