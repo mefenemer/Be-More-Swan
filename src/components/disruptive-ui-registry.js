@@ -1981,6 +1981,29 @@
   }
   register('booking_setup', renderBookingSetupCard);
 
+  // ── Request a call back (src/utils/callback-request.ts) ───────────────────────────────────────
+  // Shown when the customer asks the chat for a call or a person. It only OPENS the Help & Support
+  // form — the chat never books a call. No time is promised (owner, 2026-10-19).
+  function renderCallbackOfferCard() {
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-gray-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-gray-500 tracking-wider uppercase">📞 Talk to a person</p>
+      <p class="text-sm text-gray-800 mt-2">A person from the Be More Swan team can call you back. Leave your number and we'll be in touch.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-cb-open class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Request a call back</button>
+      </div>`;
+    el.addEventListener('click', (e) => {
+      if (!e.target.closest('[data-cb-open]')) return;
+      // In the workspace, help.js is loaded and opens the form in place; anywhere else (the
+      // stand-alone chat page) go to the workspace with ?help=contact&callback=1, which does the same.
+      if (typeof window.openCallbackForm === 'function') window.openCallbackForm();
+      else window.location.href = '/workspace.html?help=contact&callback=1';
+    });
+    return el;
+  }
+  register('callback_offer', renderCallbackOfferCard);
+
   // { type: 'reviews_add', summary, reviews: [{ authorName, authorDetail, rating, body, source, reviewedOn }] }
   // Reviews the owner pasted, set out for them to check WORD FOR WORD before they are saved to
   // Business Information ▸ Reviews (org-reviews.ts, the same checks as the form there).

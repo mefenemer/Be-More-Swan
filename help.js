@@ -121,15 +121,73 @@
     // The topic decides the queue: a fault goes to the fix workflow, everything else is a ticket.
     window.submitContact = function () {
         const topic = document.getElementById('cu-topic')?.value || 'broken';
+        if (topic === 'callback') return submitCallback();
         return topic === 'broken' ? window.submitReportIssue() : submitTicket(topic);
     };
+
+    // ── Request a call back (src/utils/callback-request.ts) ──────────────────────────────────────
+    // A ticket in category 'callback': a phone number and the customer's own timezone (so whoever
+    // rings does not call in their night). No time is offered or promised — owner's decision.
+    // Opened from the "Prefer to talk?" card, and from the assistant chat's card
+    // (window.openCallbackForm), which only opens this form.
+    const _tz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; } })();
+    window.openCallbackForm = function () {
+        const show = () => {
+            const topic = document.getElementById('cu-topic');
+            if (topic) topic.value = 'callback';
+            syncContactFields();
+            document.getElementById('cu-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            setTimeout(() => document.getElementById('cb-phone')?.focus(), 300);
+        };
+        window.openHelpTab('contact', show);
+    };
+
+    async function submitCallback() {
+        const phone = (document.getElementById('cb-phone')?.value || '').trim();
+        const descEl = document.getElementById('ri-description');
+        const notes = (descEl?.value || '').trim();
+        riError('');
+        const digits = phone.replace(/\D/g, '');
+        if (digits.length < 7 || digits.length > 15 || !/^\+?[\d\s().-]+$/.test(phone)) {
+            riError('Please give a phone number we can call, including the country code if you are outside the UK.');
+            return;
+        }
+        const btn = document.getElementById('ri-submit');
+        if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+        try {
+            const res = await fetch('/.netlify/functions/support-tickets', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ category: 'callback', callback: { phone, timezone: _tz, notes } }),
+            });
+            const d = await res.json().catch(() => ({}));
+            if (!res.ok) { riError(d.error || 'Could not send — please try again.'); return; }
+            if (descEl) descEl.value = '';
+            const phoneEl = document.getElementById('cb-phone'); if (phoneEl) phoneEl.value = '';
+            window.showToast?.(`Thanks — we'll call you back. Request #TK-${d.ticket?.id ?? ''}; we've emailed you a copy.`, { icon: '📞' });
+            window.updateNotificationBadge?.();
+            loadMyReports();
+        } catch {
+            riError('Network error — please try again.');
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
+        }
+    }
     // Area and screenshot only mean something for a fault — the helpdesk takes neither.
     function syncContactFields() {
-        const broken = (document.getElementById('cu-topic')?.value || 'broken') === 'broken';
+        const topic = document.getElementById('cu-topic')?.value || 'broken';
+        const broken = topic === 'broken';
+        const callback = topic === 'callback';
         document.getElementById('cu-broken-fields')?.classList.toggle('hidden', !broken);
         document.getElementById('cu-image-fields')?.classList.toggle('hidden', !broken);
+        document.getElementById('cu-callback-fields')?.classList.toggle('hidden', !callback);
+        const tzNote = document.getElementById('cb-tz-note');
+        if (tzNote) tzNote.textContent = _tz ? `We'll note your time zone (${_tz}) so we don't call at night.` : '';
+        const label = document.getElementById('ri-description-label');
+        if (label) label.innerHTML = callback ? 'What would you like to talk about? <span class="text-gray-400 font-normal">(optional)</span>' : 'Tell us more';
         const desc = document.getElementById('ri-description');
-        if (desc) desc.placeholder = broken ? 'What happened, and what did you expect?' : 'Tell us as much as you can — we usually reply within 1–2 business days.';
+        if (desc) desc.placeholder = broken ? 'What happened, and what did you expect?'
+            : callback ? 'A sentence or two helps us have the right person call you.'
+            : 'Tell us as much as you can — we usually reply within 1–2 business days.';
     }
     document.addEventListener('change', (e) => { if (e.target && e.target.id === 'cu-topic') syncContactFields(); });
 
@@ -328,7 +386,10 @@
         // ?help=<tab> — a direct link to one Help & Support tab, e.g. the beta testers' welcome
         // email's "share feedback" link (?help=issues / ?help=features). Same timing as ?issue.
         const helpTab = qs.get('help');
-        if (helpTab && TABS.includes(tabName(helpTab))) {
+        if (qs.get('callback') === '1') {
+            // From the chat's "Request a call back" card on a page without this panel.
+            window.addEventListener('load', () => setTimeout(() => window.openCallbackForm(), 600));
+        } else if (helpTab && TABS.includes(tabName(helpTab))) {
             window.addEventListener('load', () => setTimeout(() => window.openHelpTab(helpTab), 600));
         }
     } catch { /* noop */ }
@@ -350,7 +411,7 @@
     };
     const CATEGORY_LABEL = {
         technical: 'How do I…? / Account help', assistant: 'Assistant behaviour', billing: 'Billing / Subscription',
-        feature: 'Feature request', other: 'Something else',
+        feature: 'Feature request', other: 'Something else', callback: 'Call back',
     };
 
     async function openTicket(id) {

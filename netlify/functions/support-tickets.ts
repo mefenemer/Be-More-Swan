@@ -12,6 +12,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { sendEmail } from '../../src/utils/email';
 import { adminInbox } from '../../src/utils/admin-inbox';
+import { CALLBACK_CATEGORY, validateCallback, callbackTicket, type CallbackRequest } from '../../src/utils/callback-request';
 
 const escHtml = (s: string) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -108,7 +109,17 @@ export default withLambda(async (event: HandlerEvent) => {
             if (!user) return { statusCode: 403, body: JSON.stringify({ error: 'User not found.' }) };
 
             const body = JSON.parse(event.body || '{}');
-            const { subject, category, description } = body;
+            let { subject, category, description } = body;
+
+            // "Request a call back" (src/utils/callback-request.ts): the server words the ticket from
+            // the validated phone + time, so the Inbox always shows the number and when to ring.
+            let callback: CallbackRequest | null = null;
+            if (category === CALLBACK_CATEGORY) {
+                const v = validateCallback(body.callback || {});
+                if (!v.ok) return { statusCode: 400, body: JSON.stringify({ error: v.error }) };
+                callback = v.value;
+                ({ subject, description } = callbackTicket(callback));
+            }
 
             if (!subject || !category || !description) {
                 return { statusCode: 400, body: JSON.stringify({ error: 'All fields are required.' }) };
@@ -120,7 +131,9 @@ export default withLambda(async (event: HandlerEvent) => {
                 subject: subject.trim(),
                 category: category,
                 description: description.trim(),
-                status: 'open'
+                status: 'open',
+                // Someone asked to speak to a person: it goes to the top of the queue.
+                ...(callback ? { priority: 'high' } : {}),
             }).returning();
 
             // FIXED: Removed 'referenceId' to match your strict Drizzle schema
@@ -146,7 +159,9 @@ export default withLambda(async (event: HandlerEvent) => {
                     await resend.emails.send({
                         from: FROM_EMAIL,
                         to: user.email,
-                        subject: `[Ticket #${newTicket.id}] We received your request: ${newTicket.subject}`,
+                        subject: callback
+                            ? `[Ticket #${newTicket.id}] We'll call you back`
+                            : `[Ticket #${newTicket.id}] We received your request: ${newTicket.subject}`,
                         html: `
 <!DOCTYPE html>
 <html>
@@ -158,9 +173,11 @@ export default withLambda(async (event: HandlerEvent) => {
       <span style="color:#fff;font-size:28px;font-weight:800;letter-spacing:-1px">-Assist</span>
     </div>
     <div style="padding:32px">
-      <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827">We've got your message</h1>
+      <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827">${callback ? "We'll call you back" : "We've got your message"}</h1>
       <p style="margin:0 0 24px;color:#6b7280;font-size:15px;line-height:1.6">
-        Your support ticket has been created. Our team typically responds within <strong>1–2 business days</strong>.
+        ${callback
+            ? `A person from our team will call you back on <strong>${escHtml(callback.phone)}</strong>. If we can't reach you, we'll email you.`
+            : 'Your support ticket has been created. Our team typically responds within <strong>1–2 business days</strong>.'}
       </p>
 
       <div style="background:#f3f4f6;border-radius:8px;padding:20px;margin-bottom:24px">
@@ -179,8 +196,8 @@ export default withLambda(async (event: HandlerEvent) => {
       </div>
 
       <p style="margin:0 0 8px;color:#374151;font-size:14px;line-height:1.6">
-        <strong>What you reported:</strong><br>
-        <span style="color:#6b7280">${newTicket.description}</span>
+        <strong>${callback ? 'Your request:' : 'What you reported:'}</strong><br>
+        <span style="color:#6b7280;white-space:pre-wrap">${escHtml(newTicket.description)}</span>
       </p>
     </div>
     <div style="background:#f9fafb;padding:20px 32px;text-align:center;border-top:1px solid #e5e7eb">
@@ -198,7 +215,9 @@ export default withLambda(async (event: HandlerEvent) => {
             }
 
             // The business inbox hears about every new ticket — before this, only the admin portal did.
-            await alertInbox(`[Ticket #${newTicket.id}] New ${newTicket.category} ticket: ${newTicket.subject}`,
+            await alertInbox(callback
+                ? `[Ticket #${newTicket.id}] 📞 Call-back request from ${user.email || 'a customer'} — ${callback.phone}${callback.timezone ? ` (${callback.timezone})` : ''}`
+                : `[Ticket #${newTicket.id}] New ${newTicket.category} ticket: ${newTicket.subject}`,
                 `<p>New support ticket from <strong>${escHtml(user.email || '')}</strong>:</p>
                  <p><strong>${escHtml(newTicket.subject)}</strong> <span style="color:#787263">(${escHtml(newTicket.category)})</span></p>
                  <blockquote style="border-left:3px solid #eae4d7;padding-left:12px;color:#444036;white-space:pre-wrap">${escHtml(newTicket.description)}</blockquote>

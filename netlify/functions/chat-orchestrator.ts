@@ -65,6 +65,7 @@ import { attachmentLine, buildAttachmentsBlock, readAttachments, saveAttachments
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { BRIEF_PURPOSES, BRIEF_ASPECT_RATIOS, REJECT_REASONS, SOURCE_SPECS } from '../../src/config/visual-brief-vocab';
 import { FUNNEL_STAGES, FUNNEL_STAGE_DESCRIPTIONS, stageOutcomes } from '../../src/config/campaign-vocab';
+import { asksForACall, callbackOfferElement } from '../../src/utils/callback-request';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -221,6 +222,8 @@ function sharedContextBlock(rc: RouteContext): string {
         // The chat renders Markdown. A post quoted back inside ``` fences or indented four spaces
         // became a monospace code box with every paragraph on one unwrapped line.
         'When you show the user copy in your reply (a post, a revised draft, an email), write it as ordinary paragraphs, or as a > blockquote to set it apart. Never put it in a code block — no ``` fences and no lines indented with spaces.',
+        // Owner, 2026-10-19: customers felt there were no humans. There are; say so, never stonewall.
+        'If the user asks to speak to a person, a human or the Be More Swan team, or asks for a phone call, tell them warmly that a person from the Be More Swan team can call them back: they can request it with the "Request a call back" button shown with your reply, or under Help & Support → Contact us. Never promise a time, never say you have booked or made a call, and never claim to be a human.',
     ].filter(Boolean).join('\n\n');
 }
 
@@ -2882,6 +2885,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         if (hubLink && uiElement && typeof uiElement === 'object') {
             (uiElement as Record<string, unknown>).hubLink = hubLink;
         }
+
+        // "Request a call back" (src/utils/callback-request.ts). Decided from the CUSTOMER's words,
+        // not the model's, so it appears whatever the route: asking for a call or a person gets a
+        // card that opens the Help & Support form. The chat never books a call itself. A reply that
+        // already carries a card keeps it — the prompt line below has the model mention the option.
+        if (!uiElement && asksForACall(typed)) uiElement = callbackOfferElement();
 
         // One transaction: the shadow call's audit row (role 'system' — hidden from the
         // transcript and excluded from the LLM window, kept so the handoff's work is
