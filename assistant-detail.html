@@ -280,6 +280,20 @@
         </div>
       </div>
     </div>
+    <!-- This assistant's share of the month's task allowance, next to everyone else's (the dashboard's
+         "Tasks this month" card shows the total). Filled by _renderAssistantTaskShare (assistants.js)
+         from check-capacity + get-usage-summary; stays hidden when the plan has no task limit. -->
+    <div id="detail-task-share" class="hidden mt-4 pt-4 border-t border-gray-100 z-10 relative">
+      <div class="flex items-baseline justify-between gap-3">
+        <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Tasks this month</p>
+        <p class="text-sm font-black text-gray-900" id="task-share-pct">—</p>
+      </div>
+      <div class="flex h-2 mt-2 rounded-full bg-gray-100 overflow-hidden" role="img" id="task-share-bar">
+        <div id="task-share-mine" style="width:0%;background:#ec4899"></div>
+        <div id="task-share-others" style="width:0%;background:#fbcfe8"></div>
+      </div>
+      <p class="text-[11px] text-gray-500 mt-1.5" id="task-share-note"></p>
+    </div>
   </div>
 
   <!-- Kick Off Meeting — readiness checklist + activation gate, shown when the assistant

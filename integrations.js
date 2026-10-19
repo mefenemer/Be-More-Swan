@@ -1,13 +1,12 @@
 // integrations.js — Connections page controller
 
 // ── Meta app review ──────────────────────────────────────────────
-// ⚠️ TRUE while Meta business verification is pending (rejected 2026-09-02, D-U-N-S since
-// obtained). Until it clears, all 8 of our Meta permissions are at Standard access, so ONLY people
-// holding a role on our Meta app can connect Facebook or Instagram. Everyone else lands on Meta's
-// own error page. While true, the pre-connect modal for `metaApp` platforms offers to add the
-// customer as a Tester (request-meta-tester.ts) and demotes Continue to "already added?".
-// Set to false the day Meta grants Advanced Access, and the modal goes back to the plain checklist.
-const META_REVIEW_PENDING = true;
+// FALSE since 2026-10-18: Meta verified the app, so any customer can connect Facebook or Instagram
+// and the pre-connect modal shows the plain checklist. While it was true (verification pending, all
+// 8 permissions at Standard access, so only people holding a role on our Meta app could connect),
+// the modal offered to add the customer as a Tester (request-meta-tester.ts) and demoted Continue
+// to "already added?". Set it back to true only if Meta ever withdraws Advanced Access.
+const META_REVIEW_PENDING = false;
 
 // ── Platform catalogue ───────────────────────────────────────────
 const PLATFORMS = [

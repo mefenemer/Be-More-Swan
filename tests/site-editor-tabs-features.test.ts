@@ -61,7 +61,7 @@ check('Website, Enquiries, Orders, Bookings — each its own tab, in that order,
     const a = read('assistants.js');
     assert.ok(a.includes("if (name === 'siteorders') window.AssistantSiteEditor?.activate('orders');"));
     const ed = read('src/components/assistant-site-editor.js');
-    assert.ok(ed.includes("const tabs = [['pages', 'Pages'], ['design', 'Design'], ['details', 'Details']]"), 'the Website tab keeps only its own panels');
+    assert.ok(ed.includes("const tabs = [['pages', 'Pages'], ['design', 'Design'], ['templates', 'Templates'], ['details', 'Details']]"), 'the Website tab keeps only its own panels — Templates its own, or nobody with a site finds it');
     assert.ok(ed.includes("show('maintab-btn-siteorders', featureOn('shop')); show('maintab-btn-sitebookings', featureOn('bookings'));"));
     assert.ok(read('netlify/functions/sites.ts').includes('&tab=siteorders&payments=return'), 'back from Stripe on the Orders tab');
     assert.ok(read('notifications.js').includes("site_order_received: ['Open orders', 'siteorders']"));

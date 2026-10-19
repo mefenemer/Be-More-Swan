@@ -25,7 +25,7 @@ import {
 import { parseRobots, robotsAllowsPath, CRAWLERS } from '../src/lib/robots';
 import {
     scoreAudit, scoreTaster, sanitiseRubricAnswers, groundFixes, isGrounded, rubricFor, RUBRIC,
-    DETERMINISTIC_CHECKS, type RubricAnswer, type Lens,
+    DETERMINISTIC_CHECKS, plainLocation, type RubricAnswer, type Lens,
 } from '../src/utils/site-score';
 
 let passed = 0;
@@ -264,6 +264,32 @@ check('fixes must quote the page and change something', () => {
     assert.strictEqual(fixes.length, 1);
     assert.strictEqual(fixes[0].suggestedText, 'Operations consulting for 10–50 person firms');
     assert.strictEqual(dropped, 3);
+});
+
+check('a fix\'s location is words, never a page-data field name (bemoreswan.com, 2026-10-18)', () => {
+    assert.strictEqual(plainLocation('pricingAndGuarantees / Proof section'), 'Pricing / Proof section');
+    assert.strictEqual(plainLocation('proof'), 'Testimonials');
+    assert.strictEqual(plainLocation('Top button'), 'Top button');
+    const { fixes } = groundFixes([{ location: 'otherButtons', problem: 'Passive', currentText: 'Learn More', suggestedText: 'Book a call' }], 'clarity', weak);
+    assert.strictEqual(fixes[0].location, 'Button');
+});
+
+check('a long testimonial is shortened at a word, and still grounds', () => {
+    const quote = 'I knew that posting consistently on Facebook and Instagram was key to bringing in clients, but the constant loop of writing captions, sizing images, and struggling with scheduling tools was eating up all my energy. I would post heavily for a week, then go dark.';
+    const page = extractSitePage(`<body><h1>Hello there all</h1><blockquote>"${quote}"</blockquote><p>— Jane, salon owner</p></body>`, 'https://x.example/');
+    const snip = page.structure.proofSnippets.find((p) => p.includes('posting consistently'))!;
+    assert.ok(snip, 'the testimonial is a proof snippet');
+    assert.ok(snip.endsWith('…'));
+    assert.ok(quote.includes(snip.replace(/^"/, '').replace(/…$/, '')), 'cut at a whole word');
+    assert.ok(!/\beating u…$/.test(snip));
+    assert.ok(isGrounded(snip, page));
+});
+
+check('the lens prompt says our "…" is ours, and a rewrite keeps its place\'s job', () => {
+    const P = readFileSync(join(__dirname, '../src/utils/site-audit-prompts.ts'), 'utf8');
+    assert.match(P, /A quote ending in "…" was shortened by US/);
+    assert.match(P, /Never take a passage about one thing/);
+    assert.match(P, /Never a field name from the page data/);
 });
 
 console.log('\nScore');

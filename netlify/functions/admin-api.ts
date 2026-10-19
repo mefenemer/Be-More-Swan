@@ -40,6 +40,7 @@ import {
 } from '../../db/schema';
 import { createNotification, ADMIN_MESSAGE_TYPE } from '../../src/utils/notify';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
+import { loadInbox, ticketToIssue, issueToTicket } from '../../src/utils/support-inbox';
 import { resolveEnvironment, runWithEnvironment } from '../../src/utils/env-context';
 import { sendMagicLinkEmail } from '../../src/utils/email';
 import { isAdminRole, hasPermission, requirePermission, permissionsForRole } from '../../src/utils/rbac';
@@ -403,6 +404,45 @@ export default withLambda(async (event) => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ tickets: rows }),
             };
+        }
+
+        // ── Customers ▸ Inbox (src/utils/support-inbox.ts) ─────────────────────
+        // Every request a person is waiting on us for — tickets, reported problems and enquiries —
+        // each read only if this admin may see that queue on its own page.
+        if (event.httpMethod === 'GET' && resource === 'inbox') {
+            const scope = {
+                tickets: hasPermission(adminRole, 'view_tickets'),
+                issues: hasPermission(adminRole, 'view_issue_reports'),
+                enquiries: hasPermission(adminRole, 'view_billing_history'),   // the Contacts gate
+            };
+            if (!scope.tickets && !scope.issues && !scope.enquiries) return { statusCode: 403, body: JSON.stringify({ error: 'Forbidden.' }) };
+            const items = await loadInbox(db, scope);
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items, scope }) };
+        }
+
+        // POST ?resource=inbox-reroute { kind: 'ticket' | 'issue', id } — the customer picked the wrong
+        // topic: move it to the other queue, closing the original with a note saying where it went.
+        if (event.httpMethod === 'POST' && resource === 'inbox-reroute') {
+            const denied = requirePermission(adminRole, 'view_tickets') || requirePermission(adminRole, 'view_issue_reports');
+            if (denied) return denied;
+            const b = JSON.parse(event.body || '{}');
+            const id = Number(b.id);
+            if (!Number.isInteger(id) || id <= 0 || (b.kind !== 'ticket' && b.kind !== 'issue')) {
+                return { statusCode: 400, body: JSON.stringify({ error: 'kind (ticket|issue) and id required.' }) };
+            }
+            const r = b.kind === 'ticket' ? await ticketToIssue(db, id, adminId) : await issueToTicket(db, id, adminId);
+            if (!r.ok) return { statusCode: r.status, body: JSON.stringify({ error: r.error }) };
+            // Tell the customer on the side they will look at: the ticket's closing reply, or the new ticket.
+            const ticketId = r.from.kind === 'ticket' ? r.from.id : r.to.id;
+            try {
+                await createNotification(db, 'ticket_reply', { userId: r.userId, context: { ticket: { id: ticketId, subject: r.subject } }, metadata: { ticketId } });
+            } catch { /* non-blocking */ }
+            await insertAdminAuditLog({
+                adminId, action: 'support_request_reroute', targetType: r.from.kind, targetId: r.from.id,
+                previousState: { kind: r.from.kind, id: r.from.id }, newState: { kind: r.to.kind, id: r.to.id },
+                ipAddress: getAdminIp(event.headers),
+            });
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: true, from: r.from, to: r.to }) };
         }
 
         // ── GET: assistant catalog (admin view) ───────────────────────────────

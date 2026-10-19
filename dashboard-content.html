@@ -738,11 +738,11 @@
       'notifications': { title: 'Latest updates', icon: '🔔', desc: 'Your most recent activity', render: renderNotifications },
       'recent-work':   { title: 'Recent work', icon: '✅', desc: 'What every assistant did this week', render: renderRecentWork },
       'agenda':        { title: 'Next 7 days', icon: '📅', desc: 'Everything booked to go out', render: renderAgenda },
-      'capacity':      { title: 'This month', icon: '📊', desc: 'Tasks left this month', render: renderCapacity },
+      'capacity':      { title: 'Tasks this month', icon: '📊', desc: 'How much of your monthly task allowance is used', render: renderCapacity },
       'tips':          { title: 'Tip', icon: '💡', desc: 'Get more from your team', render: renderTips },
       'referral':      { title: 'Invite a teammate', icon: '🎁', desc: 'Share Be More Swan', render: renderReferral },
     };
-    const ORDER = ['roi-mini', 'team-status', 'recent-work', 'agenda', 'capacity', 'notifications', 'tips', 'referral'];
+    const ORDER = ['roi-mini', 'capacity', 'team-status', 'recent-work', 'agenda', 'notifications', 'tips', 'referral'];
     const DEFAULT_ON = { 'roi-mini': true, 'team-status': true, 'recent-work': true, 'agenda': true, 'capacity': true, 'notifications': true, 'tips': false, 'referral': false };
 
     let layout = [];
@@ -905,34 +905,41 @@
         el.querySelector('.dw-link').onclick = () => window.loadView && window.loadView('calendar');
       } catch { el.innerHTML = '<div class="dw-stat-sub">Unavailable right now.</div>'; }
     }
-    // Tasks are a hard monthly cap (never an overage charge). Before the single task allowance,
-    // credits paid for pictures, video and music separately — both limits shown before they bite.
+    // Tasks are a hard monthly cap (never an overage charge). The headline is the share of this
+    // month's allowance used across every assistant (usage_counters, by org); the lines under it are
+    // the assistants doing the most of it (get-usage-summary, task_ledger) — the same figures each
+    // assistant's own page shows as its share. Before the single task allowance, credits paid for
+    // pictures, video and music separately — that row stays for workspaces still on credits.
     async function renderCapacity(el) {
       try {
         const get = u => (window.bmsCachedFetch ? window.bmsCachedFetch(u) : fetch(u)).then(r => r.ok ? r.json() : null).catch(() => null);
-        const [cap, cr] = await Promise.all([get('/.netlify/functions/check-capacity'), get('/.netlify/functions/get-ai-credit-balance')]);
+        const [cap, cr, us] = await Promise.all([get('/.netlify/functions/check-capacity'), get('/.netlify/functions/get-ai-credit-balance'), get('/.netlify/functions/get-usage-summary')]);
         if (!cap && !cr) throw new Error('none');
-        const rows = [];
-        if (cap && cap.taskLimit != null && cap.unifiedTaskMetering) {
-          // Single task allowance: one number — allowance left plus bonus tasks (check-capacity's
-          // tasksRemaining), and taskPct is of everything available, so it only reads full when
-          // work would actually be refused. Media has no separate row any more.
-          const left = Math.max(0, cap.tasksRemaining ?? 0);
-          const bonusNote = cap.bonusTasks > 0 ? ` (incl. ${cap.bonusTasks.toLocaleString('en-GB')} bonus)` : '';
-          rows.push({ label: 'Tasks left', value: `${left.toLocaleString('en-GB')}${bonusNote}`, pct: cap.taskPct ?? 0 });
-        } else if (cap && cap.taskLimit != null) {
-          const left = Math.max(0, cap.taskLimit - (cap.taskCount || 0));
-          const pct = cap.taskLimit ? Math.min(100, Math.round(((cap.taskCount || 0) / cap.taskLimit) * 100)) : 0;
-          rows.push({ label: 'Tasks left', value: `${left.toLocaleString('en-GB')} of ${cap.taskLimit.toLocaleString('en-GB')}`, pct });
+        const n = v => Number(v || 0).toLocaleString('en-GB');
+        const tone = pct => pct >= 90 ? '#ef4444' : pct >= 75 ? '#f59e0b' : '#ec4899';
+        const bar = pct => `<div style="height:8px;background:#f1f5f9;border-radius:999px;margin-top:6px;overflow:hidden" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div style="height:100%;width:${pct}%;background:${tone(pct)}"></div></div>`;
+        // The allowance resets on the 1st, UTC (atomic-cap-check getPeriodStart).
+        const now = new Date();
+        const resets = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+        let html = '';
+        if (cap && cap.taskLimit != null) {
+          const used = Number(cap.taskCount || 0);
+          const pct = cap.taskLimit ? Math.min(100, Math.round((used / cap.taskLimit) * 100)) : 100;
+          const bonus = cap.unifiedTaskMetering && cap.bonusTasks > 0 ? ` · ${n(cap.bonusTasks)} bonus in reserve` : '';
+          html += `<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><span style="font-size:13px;color:#64748b">Tasks used, all assistants</span><strong style="font-size:20px;color:#0f172a">${pct}%</strong></div>${bar(pct)}
+            <div class="dw-stat-sub" style="margin-top:6px">${n(used)} of ${n(cap.taskLimit)} this month${bonus} · resets ${esc(resets)}</div></div>`;
+          const rows = (us && us.unit === 'tasks' && Array.isArray(us.byAssistant) ? us.byAssistant : []).filter(r => r.tasks > 0).slice(0, 3);
+          if (rows.length && cap.taskLimit) {
+            html += `<ul class="dw-list" style="margin-bottom:8px">${rows.map(r => `<li style="justify-content:space-between"><span class="t">${esc(r.name)}</span><span class="dw-stat-sub" style="margin:0;white-space:nowrap">${n(r.tasks)} · ${Math.round((r.tasks / cap.taskLimit) * 100)}%</span></li>`).join('')}</ul>`;
+          }
         } else if (cap) {
-          rows.push({ label: 'Tasks', value: 'Unlimited', pct: null });
+          html += `<div style="margin-bottom:10px;font-size:13px;display:flex;justify-content:space-between"><span style="color:#64748b">Tasks</span><strong style="color:#0f172a">No monthly limit</strong></div>`;
         }
         if (cr && cr.balance != null && cr.unit !== 'tasks') {
-          const pct = cr.monthlyCredits ? Math.min(100, Math.round(((cr.monthlyCredits - cr.balance) / cr.monthlyCredits) * 100)) : null;
-          rows.push({ label: 'AI credits left', value: cr.monthlyCredits ? `${cr.balance} of ${cr.monthlyCredits}` : String(cr.balance), pct: pct != null ? Math.max(0, pct) : null });
+          const pct = cr.monthlyCredits ? Math.max(0, Math.min(100, Math.round(((cr.monthlyCredits - cr.balance) / cr.monthlyCredits) * 100))) : null;
+          html += `<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#64748b">AI credits left</span><strong style="color:#0f172a">${esc(cr.monthlyCredits ? `${cr.balance} of ${cr.monthlyCredits}` : String(cr.balance))}</strong></div>${pct != null ? bar(pct) : ''}</div>`;
         }
-        el.innerHTML = rows.map(x => `<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#64748b">${esc(x.label)}</span><strong style="color:#0f172a">${esc(x.value)}</strong></div>${x.pct != null ? `<div style="height:6px;background:#f1f5f9;border-radius:999px;margin-top:4px;overflow:hidden"><div style="height:100%;width:${x.pct}%;background:${x.pct >= 90 ? '#ef4444' : x.pct >= 75 ? '#f59e0b' : '#ec4899'}"></div></div>` : ''}</div>`).join('')
-          + `<span class="dw-link">Plan &amp; billing →</span>`;
+        el.innerHTML = html + `<span class="dw-link">Plan &amp; billing →</span>`;
         el.querySelector('.dw-link').onclick = () => window.loadView && window.loadView('billing');
       } catch { el.innerHTML = '<div class="dw-stat-sub">Unavailable right now.</div>'; }
     }

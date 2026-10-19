@@ -86,7 +86,14 @@ export const EXTRACT_LIMITS = {
 export const THIN_WORDS = 60;
 
 const clean = (s: string | null | undefined): string => (s ?? '').replace(/\s+/g, ' ').trim();
-const cap = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
+// Shortened at a word, never mid-word: the model reads "eating u…" as the SITE cutting a quote off,
+// and the Mystery Shopper once told a customer their (complete) testimonials were truncated.
+const cap = (s: string, n: number): string => {
+    if (s.length <= n) return s;
+    const cut = s.slice(0, n - 1);
+    const atWord = cut.replace(/\s+\S*$/, '');
+    return `${(atWord.length >= n * 0.6 ? atWord : cut).trimEnd()}…`;
+};
 const orNull = (s: string): string | null => (s ? s : null);
 
 /** Lower-cased, whitespace-collapsed, curly quotes straightened — the form two strings are compared in. */

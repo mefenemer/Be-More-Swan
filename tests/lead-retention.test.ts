@@ -128,6 +128,17 @@ check('every reason the sweep can assign has a label AND a note', () => {
     }
 });
 
+check('not_a_business never claims the user did something, and the sweep never assigns it', () => {
+    // Set only by the 2026-10-18 cleanup of pre-fix non-company leads. Every other label says what
+    // the USER did; nobody turned these down, so "You …" here would be a lie on the screen.
+    assert.ok(RETENTION_REASONS.includes('not_a_business'));
+    assert.ok(!/^you\b/i.test(RETENTION_REASON_LABELS.not_a_business), 'the label must not say "You …"');
+    assert.ok(!/\byou (rejected|deleted|turned)\b/i.test(RETENTION_REASON_NOTES.not_a_business));
+    for (const [data, status, has] of [[{}, 'rejected', true], [{}, 'pending_approval', false], [{ enrichAttemptedAt: 'x' }, 'pending_approval', false]] as const) {
+        assert.notStrictEqual(retentionReasonFor(data, status, has), 'not_a_business', 'the sweep classifies stale leads, not non-businesses');
+    }
+});
+
 check('do_not_contact outranks every other reason', () => {
     // The one verdict that must survive a user later deciding to pursue the company anyway.
     assert.strictEqual(

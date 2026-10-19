@@ -149,7 +149,7 @@
           <div class="col-span-full text-center text-gray-400 py-8 animate-pulse">Loading KPIs…</div>
         </div>
         <div class="bg-white rounded-2xl border border-gray-200 p-6">
-          <h2 class="text-base font-bold text-gray-700 mb-4">Recent open support tickets</h2>
+          <div class="flex items-center justify-between mb-4"><h2 class="text-base font-bold text-gray-700">Waiting on us</h2><button type="button" onclick="adminNav('inbox')" class="text-xs text-emerald-600 font-semibold hover:underline">Open Inbox →</button></div>
           <div id="dashboard-recent-tickets" class="text-sm text-gray-500">Loading…</div>
         </div>
       </section>
@@ -199,6 +199,41 @@
         </div>
       </section>
 
+      <!-- ── Customers ▸ Inbox — every request a person is waiting on us for (support-inbox.ts) ──
+           Tickets, reported problems and enquiries in one list; each opens where it lives. The
+           old Support Tickets page below is no longer in the menu (Dashboard used to link to it). -->
+      <section id="view-inbox" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div class="flex items-start justify-between flex-wrap gap-3 mb-4">
+          <p class="text-sm text-gray-500 max-w-3xl">Everything customers and enquirers are waiting on — questions, reported problems and messages from the website. A request in the wrong place can be moved: a question that is really a fault goes to the <strong>Fix pipeline</strong>, and the other way round.</p>
+          <button onclick="loadInbox()" class="btn-utility px-3 py-2 text-sm font-semibold border rounded-lg transition">↻ Refresh</button>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 mb-4 bg-white rounded-2xl border border-gray-200 p-3">
+          <div id="inbox-chips" class="flex flex-wrap gap-1.5 text-xs"></div>
+          <select id="inbox-kind" onchange="inboxRender()" class="ml-auto border border-gray-200 rounded-lg px-2 py-1.5 text-xs">
+            <option value="">Every kind</option>
+            <option value="ticket">Questions</option>
+            <option value="issue">Reported problems</option>
+            <option value="enquiry">Enquiries</option>
+          </select>
+          <input id="inbox-search" type="search" placeholder="Search name, email or words" oninput="inboxRender()" class="border border-gray-200 rounded-lg px-3 py-1.5 text-xs w-56">
+        </div>
+        <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide">
+              <tr>
+                <th class="px-5 py-3 text-left">Kind</th>
+                <th class="px-5 py-3 text-left">From</th>
+                <th class="px-5 py-3 text-left">Request</th>
+                <th class="px-5 py-3 text-left">Status</th>
+                <th class="px-5 py-3 text-left">Last activity</th>
+                <th class="px-5 py-3 text-left"></th>
+              </tr>
+            </thead>
+            <tbody id="inbox-tbody"><tr><td colspan="6" class="px-5 py-8 text-center text-gray-400">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
       <!-- ── Support Tickets ────────────────────────────────────────── -->
       <section id="view-tickets" class="admin-view hidden">
         <div class="flex flex-wrap items-center gap-3 mb-6">
@@ -211,10 +246,11 @@
           </select>
           <select id="ticket-category-filter" onchange="loadTickets()" class="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none">
             <option value="">All Categories</option>
-            <option value="Billing">Billing</option>
-            <option value="Technical">Technical</option>
-            <option value="Onboarding">Onboarding</option>
-            <option value="General">General</option>
+            <!-- The values Help & Support ▸ Contact us saves (help-content.html #cu-topic). -->
+            <option value="technical">How do I…? / Account help</option>
+            <option value="assistant">Assistant behaviour</option>
+            <option value="billing">Billing</option>
+            <option value="other">Something else</option>
           </select>
         </div>
         <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
@@ -235,17 +271,6 @@
               <tr><td colspan="8" class="px-5 py-8 text-center text-gray-400">Loading…</td></tr>
             </tbody>
           </table>
-        </div>
-        <!-- Ticket detail slide-over -->
-        <div id="ticket-detail-panel" class="hidden fixed inset-0 z-40">
-          <div class="absolute inset-0 bg-black/40" onclick="closeTicketPanel()"></div>
-          <div class="absolute right-0 top-0 bottom-0 w-full max-w-lg bg-white shadow-2xl overflow-y-auto">
-            <div class="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between z-10">
-              <h2 id="ticket-panel-title" class="font-bold text-gray-900">Ticket Detail</h2>
-              <button onclick="closeTicketPanel()" class="text-gray-400 hover:text-gray-700 text-2xl">&times;</button>
-            </div>
-            <div id="ticket-detail-body" class="p-6 space-y-5"></div>
-          </div>
         </div>
       </section>
 
@@ -2018,8 +2043,8 @@
       <section id="view-issue-reports" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
         <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
           <div>
-            <h2 class="text-lg font-extrabold text-gray-900">Issue Reports</h2>
-            <p class="text-sm text-gray-500 mt-0.5">User-submitted issues from the testing phase. Update the status to notify the reporter.</p>
+            <h2 class="text-lg font-extrabold text-gray-900">Fix pipeline</h2>
+            <p class="text-sm text-gray-500 mt-0.5">Reported problems on their way to a fix — hand-offs, merges and status. Conversations with the customer are in the <button type="button" onclick="adminNav('inbox')" class="font-semibold text-emerald-700 hover:underline">Inbox</button>; a status change here still notifies the reporter.</p>
           </div>
           <div class="flex items-center gap-2">
             <button onclick="passAllToDeveloper()" id="ir-pass-all-btn" class="hidden btn-primary px-3 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">🤖 Pass all to Developer</button>
@@ -2052,17 +2077,6 @@
           </table>
         </div>
 
-        <!-- Issue detail slide-over -->
-        <div id="ir-detail-panel" class="hidden fixed inset-0 z-40">
-          <div class="absolute inset-0 bg-black/40" onclick="closeIssuePanel()"></div>
-          <div class="absolute right-0 top-0 bottom-0 w-full max-w-lg bg-white shadow-2xl overflow-y-auto">
-            <div class="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between">
-              <h2 id="ir-panel-title" class="font-bold text-gray-900">Issue</h2>
-              <button onclick="closeIssuePanel()" class="text-gray-400 hover:text-gray-700 text-2xl">&times;</button>
-            </div>
-            <div id="ir-detail-body" class="p-6 space-y-5"></div>
-          </div>
-        </div>
       </section>
 
       <!-- ── Feature Requests & Roadmap (Testing) — unified board ─────────── -->
@@ -2196,6 +2210,31 @@
      matter what — so `classList.remove('hidden')` on the modal itself did nothing and
      the buttons read as dead. They sat inside #view-audit-log until 2026-09-03. Keep any
      dialog reachable from more than one view at body level. ──────────────────────── -->
+<!-- Ticket and issue panels — opened from the Inbox, Fix pipeline, Dashboard, Contacts and Feature
+     Requests, so body level. They sat inside #view-tickets / #view-issue-reports until 2026-10-18,
+     and every button outside those two pages silently did nothing. -->
+<!-- Ticket detail slide-over -->
+<div id="ticket-detail-panel" class="hidden fixed inset-0 z-40">
+  <div class="absolute inset-0 bg-black/40" onclick="closeTicketPanel()"></div>
+  <div class="absolute right-0 top-0 bottom-0 w-full max-w-lg bg-white shadow-2xl overflow-y-auto">
+    <div class="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between z-10">
+      <h2 id="ticket-panel-title" class="font-bold text-gray-900">Ticket Detail</h2>
+      <button onclick="closeTicketPanel()" class="text-gray-400 hover:text-gray-700 text-2xl">&times;</button>
+    </div>
+    <div id="ticket-detail-body" class="p-6 space-y-5"></div>
+  </div>
+</div>
+<!-- Issue detail slide-over -->
+<div id="ir-detail-panel" class="hidden fixed inset-0 z-40">
+  <div class="absolute inset-0 bg-black/40" onclick="closeIssuePanel()"></div>
+  <div class="absolute right-0 top-0 bottom-0 w-full max-w-lg bg-white shadow-2xl overflow-y-auto">
+    <div class="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between">
+      <h2 id="ir-panel-title" class="font-bold text-gray-900">Issue</h2>
+      <button onclick="closeIssuePanel()" class="text-gray-400 hover:text-gray-700 text-2xl">&times;</button>
+    </div>
+    <div id="ir-detail-body" class="p-6 space-y-5"></div>
+  </div>
+</div>
 <!-- Assistant drawer — Admin ▸ Assistants. Body level, like the other cross-view dialogs. -->
 <div id="aa-drawer" class="hidden fixed inset-0 z-40 flex justify-end bg-gray-900/40" onclick="if (event.target === this) aaClose()">
   <div class="bg-white w-full max-w-3xl h-full overflow-y-auto shadow-2xl flex flex-col">
@@ -2790,7 +2829,7 @@ function debounce(fn, ms) {
 
 // ── Navigation — US-ADM-1.4.1 Two-tier nav ───────────────────────────────────
 const VIEW_LABELS = {
-  dashboard: 'Dashboard', users: 'All Users', tickets: 'Support Tickets',
+  dashboard: 'Dashboard', users: 'All Users', tickets: 'Support Tickets', inbox: 'Inbox',
   catalog: 'Assistants', analytics: 'Analytics', 'model-config': 'AI Model Config',
   logs: 'System Logs', 'audit-log': 'Audit Log', 'security-abuse': 'Security & Abuse', cogs: 'COGS Dashboard',
   reconciliation: 'Stripe Reconciliation', dunning: 'Dunning Queue', disputes: 'Disputes',
@@ -2805,7 +2844,7 @@ const VIEW_LABELS = {
   'send-notification': 'Send a Message',
   'product-updates': "What's New Emails",
   systems: 'Systems & Connections',
-  'issue-reports': 'Issue Reports', 'feature-roadmap': 'Feature Requests',
+  'issue-reports': 'Fix pipeline', 'feature-roadmap': 'Feature Requests',
   'swan-queue': 'Swan Index — Review Queue', 'swan-front-page': 'Swan Index — Front Page',
   'swan-contributors': 'Swan Index — Contributors', 'swan-optouts': 'Swan Index — Opt-outs',
   'music-library': 'Music Library',
@@ -2842,8 +2881,10 @@ const ADMIN_CATS = {
     { view: 'workspaces',     icon: '🏢', label: 'Workspaces',       perm: 'view_workspaces', group: 'Accounts' },
     { view: 'contacts',       icon: '👤', label: 'Contacts',         perm: 'view_users',      group: 'Accounts' },
     { view: 'beta-testers',   icon: '🧪', label: 'Beta testers',     perm: 'manage_beta',     group: 'Accounts' },
-    { view: 'tickets',        icon: '🎫', label: 'Support Tickets',  perm: 'view_tickets',            group: 'Inbound' },
-    { view: 'issue-reports',  icon: '🐞', label: 'Issue Reports',    perm: 'view_issue_reports',      group: 'Inbound' },
+    // One Inbox for everything people are waiting on us for (2026-10-18). Support Tickets left the
+    // menu; Issue Reports stays as the Fix pipeline — the developer's hand-off / merge tooling.
+    { view: 'inbox',          icon: '📥', label: 'Inbox',            perm: 'view_tickets',            group: 'Inbound' },
+    { view: 'issue-reports',  icon: '🐞', label: 'Fix pipeline',     perm: 'view_issue_reports',      group: 'Inbound' },
     { view: 'feature-roadmap',icon: '💡', label: 'Feature Requests', perm: 'manage_feature_requests', group: 'Inbound' },
   ]},
   revenue: { label: 'Revenue', children: [
@@ -3202,6 +3243,7 @@ function adminNav(view) {
   if (view === 'dashboard')    loadDashboard();
   if (view === 'users')        loadUsers();
   if (view === 'tickets')      loadTickets();
+  if (view === 'inbox')        loadInbox();
   if (view === 'catalog')      loadAssistantsAdmin();
   if (view === 'analytics')    { loadAnalytics(); loadChurnSignals(); }
   if (view === 'model-config') loadModelConfig();
@@ -5439,9 +5481,9 @@ async function loadIssueReports() {
     if (tbody) tbody.innerHTML = issues.map(i => `
       <tr class="border-t border-gray-50 hover:bg-gray-50 transition">
         <td class="px-5 py-3 font-mono text-xs text-gray-500">#${i.id}</td>
-        <td class="px-5 py-3 max-w-xs truncate" title="${(i.description||'').replace(/"/g,'&quot;')}">${i.description || ''}${i.hasImage ? ' 📎' : ''}</td>
-        <td class="px-5 py-3 text-xs text-gray-500">${i.reporterEmail || i.reporterName || ''}</td>
-        <td class="px-5 py-3 text-xs text-gray-500">${i.sourceLocation || '—'}</td>
+        <td class="px-5 py-3 max-w-xs truncate" title="${_escH(i.description)}">${_escH(i.description)}${i.hasImage ? ' 📎' : ''}</td>
+        <td class="px-5 py-3 text-xs text-gray-500">${_escH(i.reporterEmail || i.reporterName)}</td>
+        <td class="px-5 py-3 text-xs text-gray-500">${_escH(i.sourceLocation || '—')}</td>
         <td class="px-5 py-3"><div class="flex items-center gap-1.5 flex-wrap">${_irBadge(i.status)}${_irHandoffBadge(i)}${_irRunnerChip(i)}</div></td>
         <td class="px-5 py-3 text-xs text-gray-400">${_irFmt(i.createdAt)}</td>
         <td class="px-5 py-3"><button onclick="openIssuePanel(${i.id})" class="text-xs text-emerald-600 font-semibold hover:underline">Manage →</button></td>
@@ -5467,17 +5509,20 @@ async function openIssuePanel(id) {
           <span class="text-xs font-bold ${m.authorType === 'admin' ? 'text-blue-700' : 'text-gray-600'}">${m.authorType === 'admin' ? 'Admin' : 'Reporter'}${m.status ? ` · set to ${IR_STATUS_LABEL[m.status] || m.status}` : ''}</span>
           <span class="text-xs text-gray-400">${_irFmt(m.createdAt)}</span>
         </div>
-        <p class="text-gray-800 whitespace-pre-wrap">${m.body}</p>
+        <p class="text-gray-800 whitespace-pre-wrap">${_escH(m.body)}</p>
       </div>`).join('') || '<p class="text-xs text-gray-400">No messages yet.</p>';
+    // Only an http(s) page address is a link; a data: image is the only screenshot we draw.
+    const srcUrl = /^https?:\/\//i.test(i.sourceUrl || '') ? i.sourceUrl : '';
+    const shot = /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(i.imageData || '') ? i.imageData : '';
 
     body.innerHTML = `
       <div class="grid grid-cols-2 gap-3 text-sm">
-        <div><span class="text-gray-400 text-xs font-bold uppercase">Reporter</span><br><span class="font-medium">${i.reporterName || ''}</span><br><span class="text-xs text-gray-500">${i.reporterEmail || ''}</span></div>
+        <div><span class="text-gray-400 text-xs font-bold uppercase">Reporter</span><br><span class="font-medium">${_escH(i.reporterName)}</span><br><span class="text-xs text-gray-500">${_escH(i.reporterEmail)}</span></div>
         <div><span class="text-gray-400 text-xs font-bold uppercase">Reported</span><br><span class="text-xs">${_irFmt(i.createdAt)}</span></div>
         <div class="col-span-2"><span class="text-gray-400 text-xs font-bold uppercase">Location</span><br>
-          <span class="font-medium">${i.sourceLocation || '—'}</span>${i.sourceUrl ? `<br><a href="${i.sourceUrl}" target="_blank" rel="noopener" class="text-xs text-blue-600 hover:underline break-all">${i.sourceUrl}</a>` : ''}
+          <span class="font-medium">${_escH(i.sourceLocation || '—')}</span>${srcUrl ? `<br><a href="${_escH(srcUrl)}" target="_blank" rel="noopener" class="text-xs text-blue-600 hover:underline break-all">${_escH(srcUrl)}</a>` : ''}
         </div>
-        ${i.userAgent ? `<div class="col-span-2"><span class="text-gray-400 text-xs font-bold uppercase">User agent</span><br><span class="text-xs text-gray-500 break-all">${i.userAgent}</span></div>` : ''}
+        ${i.userAgent ? `<div class="col-span-2"><span class="text-gray-400 text-xs font-bold uppercase">User agent</span><br><span class="text-xs text-gray-500 break-all">${_escH(i.userAgent)}</span></div>` : ''}
       </div>
 
       <div class="border border-gray-200 rounded-xl p-4 space-y-2">
@@ -5485,10 +5530,13 @@ async function openIssuePanel(id) {
           <span class="text-xs font-bold uppercase text-gray-400">Description</span>
           <button onclick="submitIssueDescription(${i.id})" class="text-xs font-semibold text-emerald-600 hover:underline">Save description</button>
         </div>
-        <textarea id="ir-description" rows="4" class="w-full text-sm text-gray-700 leading-relaxed border border-gray-200 rounded-lg px-3 py-2 resize-y focus:ring-2 focus:ring-emerald-500 focus:outline-none">${i.description || ''}</textarea>
+        <textarea id="ir-description" rows="4" class="w-full text-sm text-gray-700 leading-relaxed border border-gray-200 rounded-lg px-3 py-2 resize-y focus:ring-2 focus:ring-emerald-500 focus:outline-none">${_escH(i.description)}</textarea>
       </div>
+      ${i.status !== 'closed' ? `<div class="flex items-center justify-between gap-3 border border-sky-100 bg-sky-50 rounded-xl px-4 py-3">
+        <p class="text-xs text-sky-800">Really a question, not a fault? Answer it as a support request — the customer is told where it went, and this report closes.</p>
+        <button type="button" onclick="inboxReroute('issue', ${i.id})" class="btn-secondary shrink-0 px-3 py-1.5 text-xs font-bold border rounded-lg">Answer as a question</button></div>` : ''}
 
-      ${i.imageData ? `<div><span class="text-gray-400 text-xs font-bold uppercase">Screenshot</span><br><a href="${i.imageData}" target="_blank" rel="noopener"><img src="${i.imageData}" alt="Screenshot" class="mt-2 max-h-72 rounded-lg border border-gray-200"></a></div>` : ''}
+      ${shot ? `<div><span class="text-gray-400 text-xs font-bold uppercase">Screenshot</span><br><a href="${shot}" target="_blank" rel="noopener"><img src="${shot}" alt="Screenshot" class="mt-2 max-h-72 rounded-lg border border-gray-200"></a></div>` : ''}
 
       <!-- AI auto-fix handoff -->
       ${_irHandoffCard(i)}
@@ -6602,7 +6650,7 @@ async function loadDashboard() {
       ['Pending Verification', d.pendingUsers, '⏳'],
       ['Active Assistants', d.activeAssistants, '🤖'],
       ['Active Plans', d.activePlans, '💳'],
-      ['Open Tickets', d.openTickets, '🎫'],
+      ['Waiting on us', '<span id="kpi-waiting-on-us">…</span>', '📥'],
       ['Paused Assistants', d.pausedAssistants, '⏸'],
     ].map(([label, val, icon]) => `
       <div class="bg-white rounded-2xl border border-gray-200 p-5">
@@ -6666,20 +6714,17 @@ async function loadDashboard() {
 
     document.getElementById('kpi-grid').innerHTML = kpiCards + tierCard + storageCard;
 
-    // Recent open tickets
-    const td = await api('/.netlify/functions/admin-api?resource=tickets&status=open');
-    const tbody = (td.tickets || []).slice(0, 5).map(t => `
-      <div class="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-        <div>
-          <span class="font-semibold text-gray-800">#${t.id} ${t.subject}</span>
-          <span class="ml-2 text-xs text-gray-400">${t.userEmail}</span>
-        </div>
-        <div class="flex items-center gap-2">
-          ${priorityBadge(t.priority)}
-          <button onclick="openTicketPanel(${t.id})" class="text-xs text-emerald-600 font-semibold hover:underline">View →</button>
-        </div>
-      </div>`).join('');
-    document.getElementById('dashboard-recent-tickets').innerHTML = tbody || '<p class="text-gray-400 text-sm">No open tickets.</p>';
+    // Waiting on us — the Inbox's count and its five most recent (questions, problems, enquiries).
+    try {
+      const ib = await api('/.netlify/functions/admin-api?resource=inbox');
+      const waiting = (ib.items || []).filter(x => x.waitingOn === 'us');
+      const kpi = document.getElementById('kpi-waiting-on-us'); if (kpi) kpi.textContent = String(waiting.length);
+      document.getElementById('dashboard-recent-tickets').innerHTML = waiting.slice(0, 5).map(inboxRowCompact).join('')
+        || '<p class="text-gray-400 text-sm">Nobody is waiting on us.</p>';
+    } catch (e) {
+      const kpi = document.getElementById('kpi-waiting-on-us'); if (kpi) kpi.textContent = '—';
+      document.getElementById('dashboard-recent-tickets').innerHTML = `<p class="text-gray-400 text-sm">${_escH(e.message)}</p>`;
+    }
   } catch(e) {
     document.getElementById('kpi-grid').innerHTML = `<div class="col-span-full text-red-500 text-sm">${e.message}</div>`;
   }
@@ -6788,6 +6833,104 @@ async function deleteUser(uid, email) {
 }
 
 // ── Support Tickets ───────────────────────────────────────────────────────────
+// ── Customers ▸ Inbox (src/utils/support-inbox.ts) ───────────────────────────
+// One list, one question per row — who is it waiting on? Rows open where the request lives: the
+// ticket panel, the issue panel, or the person's Contacts record. The list is paged in the browser.
+let _inboxItems = [];
+let _inboxScope = {};
+let _inboxWaiting = 'us';
+const INBOX_KIND = {
+  ticket:  { label: 'Question',         cls: 'bg-sky-100 text-sky-700' },
+  issue:   { label: 'Reported problem', cls: 'bg-violet-100 text-violet-700' },
+  enquiry: { label: 'Enquiry',          cls: 'bg-amber-100 text-amber-800' },
+};
+const INBOX_WAITING = [['us', 'Waiting on us'], ['customer', 'Waiting on them'], ['fixing', 'Being fixed'], ['done', 'Done'], ['', 'All']];
+const INBOX_WAITING_CLS = { us: 'bg-red-50 text-red-700 border-red-200', customer: 'bg-amber-50 text-amber-700 border-amber-200', fixing: 'bg-indigo-50 text-indigo-700 border-indigo-200', done: 'bg-gray-100 text-gray-500 border-gray-200' };
+const INBOX_WAITING_LABEL = { us: 'Waiting on us', customer: 'Waiting on them', fixing: 'Being fixed', done: 'Done' };
+
+function inboxOpen(kind, id, contactId) {
+  if (kind === 'ticket') return openTicketPanel(id);
+  if (kind === 'issue') return openIssuePanel(id);
+  return inboxOpenContact(contactId);
+}
+function inboxOpenContact(contactId) {
+  if (!contactId) return;
+  adminNav('contacts');
+  openContact(contactId);
+}
+function inboxRowCompact(x) {
+  const k = INBOX_KIND[x.kind] || INBOX_KIND.ticket;
+  return `<div class="flex items-center justify-between gap-3 py-2 border-b border-gray-50 last:border-0">
+      <div class="min-w-0">
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${k.cls}">${k.label}</span>
+        <span class="font-semibold text-gray-800 ml-1">${_escH(x.title || '(no text)')}</span>
+        <span class="ml-2 text-xs text-gray-400">${_escH(x.name || x.email || '')}</span>
+      </div>
+      <button onclick="inboxOpen('${x.kind}', ${Number(x.id)}, ${x.contactId == null ? 'null' : Number(x.contactId)})" class="shrink-0 text-xs text-emerald-600 font-semibold hover:underline">Open →</button>
+    </div>`;
+}
+async function loadInbox() {
+  const tbody = document.getElementById('inbox-tbody');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="px-5 py-8 text-center text-gray-400 animate-pulse">Loading…</td></tr>';
+  try {
+    const d = await api('/.netlify/functions/admin-api?resource=inbox');
+    _inboxItems = d.items || [];
+    _inboxScope = d.scope || {};
+    inboxRender();
+  } catch (e) {
+    if (tbody) tbody.innerHTML = `<tr><td colspan="6" class="px-5 py-5 text-red-500 text-sm">${_escH(e.message)}</td></tr>`;
+  }
+}
+function inboxSetWaiting(v) { _inboxWaiting = v; inboxRender(); }
+function inboxRender() {
+  const kind = document.getElementById('inbox-kind')?.value || '';
+  const q = (document.getElementById('inbox-search')?.value || '').trim().toLowerCase();
+  const base = _inboxItems.filter(x => (!kind || x.kind === kind)
+    && (!q || [x.title, x.name, x.email, x.detail].some(v => String(v || '').toLowerCase().includes(q))));
+  const chips = document.getElementById('inbox-chips');
+  if (chips) chips.innerHTML = INBOX_WAITING.map(([v, label]) => {
+    const n = v ? base.filter(x => x.waitingOn === v).length : base.length;
+    return `<button onclick="inboxSetWaiting('${v}')" class="px-3 py-1.5 rounded-full font-semibold border ${_inboxWaiting === v ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}">${label} (${n})</button>`;
+  }).join('');
+  const rows = _inboxWaiting ? base.filter(x => x.waitingOn === _inboxWaiting) : base;
+  const missing = ['tickets', 'issues', 'enquiries'].filter(k => _inboxScope[k] === false);
+  const note = missing.length ? `<tr><td colspan="6" class="px-5 py-2 text-xs text-gray-400">Your role doesn't include ${missing.join(' or ')}, so they aren't listed.</td></tr>` : '';
+  const tbody = document.getElementById('inbox-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = note + (rows.map(x => {
+    const k = INBOX_KIND[x.kind] || INBOX_KIND.ticket;
+    const ref = x.kind === 'ticket' ? `#TK-${x.id}` : x.kind === 'issue' ? `#${x.id}` : '';
+    return `<tr class="border-t border-gray-50 hover:bg-gray-50 transition">
+      <td class="px-5 py-3 whitespace-nowrap"><span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${k.cls}">${k.label}</span></td>
+      <td class="px-5 py-3 text-xs"><span class="font-semibold text-gray-800">${_escH(x.name || x.email || '—')}</span>${x.name && x.email ? `<br><span class="text-gray-400">${_escH(x.email)}</span>` : ''}</td>
+      <td class="px-5 py-3 max-w-md"><span class="font-medium text-gray-800">${_escH(x.title || '(no text)')}</span><br><span class="text-xs text-gray-400">${ref ? ref + ' · ' : ''}${_escH(x.detail || '')}</span></td>
+      <td class="px-5 py-3 whitespace-nowrap"><span class="text-[10px] font-bold px-2 py-0.5 rounded-full border ${INBOX_WAITING_CLS[x.waitingOn] || ''}">${INBOX_WAITING_LABEL[x.waitingOn] || x.waitingOn}</span><br><span class="text-[11px] text-gray-400">${_escH(String(x.status || '').replace(/_/g, ' '))}</span></td>
+      <td class="px-5 py-3 text-xs text-gray-400 whitespace-nowrap">${age(x.lastActivityAt)}</td>
+      <td class="px-5 py-3 whitespace-nowrap text-right">
+        <button onclick="inboxOpen('${x.kind}', ${Number(x.id)}, ${x.contactId == null ? 'null' : Number(x.contactId)})" class="text-xs text-emerald-600 font-semibold hover:underline">Open →</button>
+        ${x.kind !== 'enquiry' && x.contactId ? `<button onclick="inboxOpenContact(${Number(x.contactId)})" class="ml-3 text-xs text-gray-500 font-semibold hover:underline">Contact</button>` : ''}
+      </td></tr>`;
+  }).join('') || '<tr><td colspan="6" class="px-5 py-8 text-center text-gray-400">Nothing here.</td></tr>');
+}
+// Move a request to the other queue (support-inbox.ts ticketToIssue / issueToTicket).
+async function inboxReroute(kind, id) {
+  const toIssue = kind === 'ticket';
+  const ok = await window.confirmModal(toIssue
+      ? 'This creates a reported problem in the Fix pipeline with the whole conversation, replies to the customer saying where it went, and closes this request.'
+      : 'This creates a support request with the whole conversation so you can answer it, tells the customer where it went, and closes this report. The screenshot stays on the report.',
+    { title: toIssue ? 'Send to the Fix pipeline?' : 'Answer as a question?', confirmLabel: toIssue ? 'Send to Fix pipeline' : 'Move to support', cancelLabel: 'Cancel' });
+  if (!ok) return;
+  try {
+    const r = await api('/.netlify/functions/admin-api?resource=inbox-reroute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, id }) });
+    window.showToast?.(toIssue ? `Moved to the Fix pipeline as #${r.to.id}.` : `Moved to support as #TK-${r.to.id}.`, { icon: '✅' });
+    if (toIssue) { closeTicketPanel(); openIssuePanel(r.to.id); } else { closeIssuePanel(); openTicketPanel(r.to.id); }
+    if (document.getElementById('view-inbox') && !document.getElementById('view-inbox').classList.contains('hidden')) loadInbox();
+    if (document.getElementById('view-issue-reports') && !document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
+  } catch (e) {
+    window.showToast?.(e.message || 'Could not move it.', { icon: '⚠️' });
+  }
+}
+
 async function loadTickets() {
   const status = document.getElementById('ticket-status-filter')?.value || '';
   const category = document.getElementById('ticket-category-filter')?.value || '';
@@ -6803,9 +6946,9 @@ async function loadTickets() {
       return `
       <tr class="border-t border-gray-50 hover:bg-gray-50 transition ${t.slaBreachedAt?'bg-red-50/30':''}">
         <td class="px-5 py-3 font-mono text-xs text-gray-500">#${t.id}${slaBreach}</td>
-        <td class="px-5 py-3 font-medium max-w-xs truncate">${t.subject}</td>
-        <td class="px-5 py-3 text-xs text-gray-500">${t.userEmail}</td>
-        <td class="px-5 py-3 text-xs">${t.category}</td>
+        <td class="px-5 py-3 font-medium max-w-xs truncate">${_escH(t.subject)}</td>
+        <td class="px-5 py-3 text-xs text-gray-500">${_escH(t.userEmail)}</td>
+        <td class="px-5 py-3 text-xs">${_escH(t.category)}</td>
         <td class="px-5 py-3">${priorityBadge(t.priority)}</td>
         <td class="px-5 py-3">${statusBadge(t.status)}</td>
         <td class="px-5 py-3 text-xs text-gray-400">${age(t.createdAt)}</td>
@@ -6848,20 +6991,23 @@ async function openTicketPanel(tid) {
           </select>
         </div>
         <div class="col-span-2"><span class="text-gray-400 text-xs font-bold uppercase">Submitter</span><br>
-          <span class="font-medium">${d.submitter?.firstName||''} ${d.submitter?.email||''}</span>
+          <span class="font-medium">${_escH(d.submitter?.firstName)} ${_escH(d.submitter?.email)}</span>
         </div>
       </div>
-      <!-- Original description -->
-      <div class="bg-gray-50 rounded-xl p-4 text-sm text-gray-700 leading-relaxed">${t.description}</div>
+      <!-- Original description (customer text — escaped, as everywhere in this panel) -->
+      <div class="bg-gray-50 rounded-xl p-4 text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">${_escH(t.description)}</div>
+      ${t.status !== 'closed' ? `<div class="flex items-center justify-between gap-3 border border-violet-100 bg-violet-50 rounded-xl px-4 py-3">
+        <p class="text-xs text-violet-800">Really a fault? Move it to the Fix pipeline — the customer is told where it went, and this request closes.</p>
+        <button type="button" onclick="inboxReroute('ticket', ${t.id})" class="btn-secondary shrink-0 px-3 py-1.5 text-xs font-bold border rounded-lg">Send to Fix pipeline</button></div>` : ''}
       <!-- Reply thread -->
       <div id="reply-thread" class="space-y-3">
         ${replies.map(r => `
         <div class="rounded-xl p-3 text-sm ${r.isInternal ? 'bg-yellow-50 border border-yellow-200' : 'bg-blue-50 border border-blue-100'}">
           <div class="flex items-center justify-between mb-1">
-            <span class="text-xs font-bold ${r.isInternal?'text-yellow-700':'text-blue-700'}">${r.authorEmail} ${r.isInternal?'· Internal Note':''}</span>
+            <span class="text-xs font-bold ${r.isInternal?'text-yellow-700':'text-blue-700'}">${_escH(r.authorEmail)} ${r.isInternal?'· Internal Note':''}</span>
             <span class="text-xs text-gray-400">${fmt(r.createdAt)}</span>
           </div>
-          <p class="text-gray-800 whitespace-pre-wrap">${r.body}</p>
+          <p class="text-gray-800 whitespace-pre-wrap">${_escH(r.body)}</p>
         </div>`).join('')}
       </div>
       <!-- Reply composer -->

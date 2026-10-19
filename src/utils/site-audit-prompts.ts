@@ -94,6 +94,9 @@ const EVIDENCE_RULES = `<rules>
 - Answer every question with "yes": true or false. Do not skip any.
 - "evidence" must be copied EXACTLY, character for character, from the page data — a headline, a button, a sentence. If the answer rests on something being ABSENT, leave evidence as "". Never paraphrase inside evidence: anything not found on the page is discarded.
 - "currentText" in a fix must also be copied exactly from the page data. Fixes that quote text not on the page are discarded.
+- "location" names the place in words the business owner uses — "Headline", "Top button", "Testimonials", "Pricing", "Footer". Never a field name from the page data (not "pricingAndGuarantees", "proof", "otherButtons").
+- A quote ending in "…" was shortened by US to save space; the page shows it in full. Never say text is cut off, truncated or hidden because it ends in "…", and never suggest showing "the full quote".
+- "suggestedText" replaces "currentText" in the same place and must do the same job there. Never take a passage about one thing (a referral offer, a testimonial) and replace it with a message about something else — if the page is missing something, quote the nearest text it would sit beside and add to it, keeping what was there.
 - "suggestedText" is the replacement, written for the ideal customer in plain British English. Use only facts that are on the page or in the products list. Where a better line needs a fact you don't have (a number of clients, a guarantee period), put a clear placeholder in square brackets, e.g. "[number] agencies", rather than inventing one.
 - At most ${FIXES_PER_LENS} fixes, most important first. No fixes for things that are already fine.
 - Reply with the JSON object only.

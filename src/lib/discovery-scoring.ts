@@ -24,6 +24,7 @@ import {
     senderIdentityBlock,
     type SenderIdentity,
 } from '../config/sender-identity';
+import { isForeignDomain, type SearchArea } from './discovery-search-area';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -86,6 +87,17 @@ export interface LeadScoringCard {
      */
     prospectType?: ProspectType | null;
     /**
+     * Where the candidate is, when that is somewhere OTHER than the area the search asked for —
+     * "Ohio, United States" on a UK search — or null/absent when it is inside the area or the
+     * evidence does not say.
+     *
+     * Set by the model from the snippet, or in code from a foreign country-code web address
+     * (markOutsideArea). Like excludedBy, the model makes the judgement and code enforces it: a
+     * card with this set is capped, cold, and never promoted to the Leads tab (discardReason).
+     * Lives in the `scoring_card` jsonb, so no migration.
+     */
+    outsideArea?: string | null;
+    /**
      * TRUE when the model never judged this candidate — the reply did not parse, or was cut off
      * before reaching it — and the card below is a placeholder, not a verdict.
      *
@@ -123,6 +135,7 @@ export function isBlankCard(card: LeadScoringCard): boolean {
         && card.reasons.length === 0
         && !card.prospectType
         && !card.excludedBy
+        && !card.outsideArea
         && !card.doNotContact;
 }
 
@@ -193,6 +206,20 @@ export function normaliseLeadCard(raw: unknown, fallbackName: string): LeadScori
         rating = 'cold';
     }
 
+    // ── The location gate ────────────────────────────────────────────────────
+    // Same shape as the exclusion gate above, for the same reason: the model reads the snippet and
+    // says where the company is; code decides what that means. A search for UK businesses that
+    // returns a US one has not found a weak lead, it has found no lead.
+    const outsideArea = str(ui.outsideArea, 200);
+    if (outsideArea) {
+        if (score > EXCLUDED_MAX_SCORE) {
+            reasons.unshift(`Scored ${score} on profile fit, but is based in ${outsideArea} — outside the area this search asked for — so capped at ${EXCLUDED_MAX_SCORE}.`);
+            reasons.length = Math.min(reasons.length, 6);
+            score = EXCLUDED_MAX_SCORE;
+        }
+        rating = 'cold';
+    }
+
     let outreachDraft: LeadScoringCard['outreachDraft'] = null;
     if (ui.outreachDraft && typeof ui.outreachDraft === 'object') {
         const d = ui.outreachDraft as Record<string, unknown>;
@@ -215,12 +242,78 @@ export function normaliseLeadCard(raw: unknown, fallbackName: string): LeadScori
         // emailing" with "must never be emailed" would quietly poison the do-not-contact gate.
         // An excluded candidate loses its draft too: a polished email to a market the business
         // cannot serve is worse than no email, because it reads as ready to send.
-        outreachDraft: (doNotContact || disqualifiedAs || excludedBy) ? null : outreachDraft,
+        outreachDraft: (doNotContact || disqualifiedAs || excludedBy || outsideArea) ? null : outreachDraft,
         doNotContact,
         doNotContactReason: doNotContact ? str(ui.doNotContactReason, 300) : null,
         prospectType,
         excludedBy,
+        ...(outsideArea ? { outsideArea } : {}),
     };
+}
+
+/**
+ * Mark a card as outside the search's area, for a candidate whose DOMAIN already settles it
+ * (a .com.au on a UK search) — no model judgement needed, and none overrides it.
+ *
+ * Also replaces an unscored placeholder: "could not be scored" is no longer true once we know the
+ * company is in the wrong country, and that is the more useful thing for the card to say.
+ */
+export function markOutsideArea(card: LeadScoringCard, where: string): LeadScoringCard {
+    const { scoringFailed, ...rest } = card;
+    const prior = scoringFailed ? [] : card.reasons;
+    return {
+        ...rest,
+        score: Math.min(card.score, EXCLUDED_MAX_SCORE),
+        rating: 'cold',
+        outreachDraft: null,
+        outsideArea: where,
+        reasons: [`Its web address places it in ${where}, outside the area this search asked for.`, ...prior].slice(0, 6),
+        suggestedNextStep: scoringFailed ? '' : card.suggestedNextStep,
+    };
+}
+
+/**
+ * Why a scored candidate must NOT become a lead, or null when it should.
+ *
+ * ⚠️ Narrow on purpose. A real business that fits poorly is still a lead — cold, but the user's to
+ * judge, and hiding it would be the scorer overruling them. What this catches is the two cases
+ * where there is no lead to judge: the candidate is not a business we could sell to at all (a
+ * blog post, a directory, a publisher, a supplier — the prospect-type gate), or it is a business
+ * somewhere the search did not ask for. Those were landing in the Leads tab as cold rows, which is
+ * how "the Lead Generator returns blog posts" and "UK search, US leads" reached a customer.
+ *
+ * An unscored card (scoringFailed) is never discarded: nothing has judged it, and withholding it
+ * would be a verdict nobody made.
+ */
+export function discardReason(card: LeadScoringCard): string | null {
+    if (card.scoringFailed) return null;
+    if (isDisqualifyingProspectType(card.prospectType)) return `not a business we can sell to (${card.prospectType})`;
+    if (card.outsideArea) return `outside the search area (${card.outsideArea})`;
+    return null;
+}
+
+/** What the scorer is told about the search a batch of candidates came from. */
+export interface ScoringSearchContext {
+    /** The saved search, in the user's own words. */
+    idea: string;
+    /** The country it names, when it names exactly one (resolveSearchArea). */
+    area: SearchArea | null;
+}
+
+/**
+ * The prompt block that gives the scorer the search's location.
+ *
+ * ⚠️ Before this, the scorer saw only the profile — industries, headcount, exclusions — and never
+ * the search. A location typed into the search reached the query generator and then vanished, so
+ * a US company scored against a UK search was judged on fit alone and came back warm.
+ */
+export function searchAreaBlock(ctx: ScoringSearchContext | null): string {
+    if (!ctx || !ctx.idea.trim()) return '';
+    const where = ctx.area ? `\nThe search is for businesses in ${ctx.area.countryName}.` : '';
+    return `THE SEARCH THESE CANDIDATES CAME FROM:
+"${ctx.idea.trim().slice(0, 600)}"${where}
+
+LOCATION GATE — answer it as "outsideArea". If the search names a place (a country, region, county or city), decide whether the public info shows this candidate is based or operating SOMEWHERE ELSE: another country, a US state, a town outside the area. If so, return where it is ("Ohio, United States", "Sydney, Australia"); otherwise null. Use only evidence in the name, snippet or domain — a country-code domain such as .com.au or .ca counts. With no evidence either way, return null: never guess, and never treat a .com domain as foreign. If the search names no place, always return null. A candidate outside the area cannot score above ${EXCLUDED_MAX_SCORE}, and gets no outreachDraft.`;
 }
 
 
@@ -380,11 +473,17 @@ export async function scoreCandidates(
      * reached nothing. Null = none.
      */
     rulesBlock: string | null = null,
+    /**
+     * The search these candidates came from, and the country it names. Null = no location gate,
+     * which is how every call behaved before 2026-10-18.
+     */
+    searchContext: ScoringSearchContext | null = null,
     /** Recursion depth for the blank-card retry below. Callers never pass this. */
     depth = 0,
 ): Promise<ScoreResult> {
     if (candidates.length === 0) return { cards: [], inputTokens: 0, outputTokens: 0 };
 
+    const areaBlock = searchAreaBlock(searchContext);
     const system =
 `You qualify OUTBOUND leads discovered on the public web for ${senderPhrase(sender)}, and write the outreach email for the ones worth contacting. Score each candidate below against the ideal customer profile — strong fit + buying intent scores high; poor fit or no intent scores low. Your reasons must name which profile criteria each candidate met or missed. Only the public info provided is known — do not invent facts about a company.
 
@@ -399,7 +498,7 @@ Ideal customer profile (from setup):
 ${icpBlock(icp)}
 
 ${EXCLUDE_PROFILE_RULE} ${EXCLUDE_PROFILE_DNC_RULE}
-
+${areaBlock ? `\n${areaBlock}\n` : ''}
 ${SCORING_BANDS}
 
 Return STRICT JSON only (no markdown): an array with ONE object per candidate, in the SAME ORDER as given:
@@ -412,7 +511,8 @@ Return STRICT JSON only (no markdown): an array with ONE object per candidate, i
     "reasons": ["<reason tied to a profile criterion>", ...],
     "suggestedNextStep": "<one concrete next action>",
     "outreachDraft": { "to": null, "subject": "<subject>", "body": "<personalised outreach in the sales tone>" } | null,
-    "excludedBy": "<the exclusion-list entry this matches, quoted from the profile>" | null,
+    "excludedBy": "<the exclusion-list entry this matches, quoted from the profile>" | null,${areaBlock ? `
+    "outsideArea": "<where it is, when outside the search's area>" | null,` : ''}
     "doNotContact": <true|false>,
     "doNotContactReason": "<short reason, or null>"
   }
@@ -487,7 +587,7 @@ ${OUTREACH_SUBJECT_RULES}`;
         const half = Math.ceil(blanks.length / 2);
         for (const group of [blanks.slice(0, half), blanks.slice(half)]) {
             if (group.length === 0) continue;
-            const retry = await scoreCandidates(group.map(({ i }) => candidates[i]), icp, sender, rulesBlock, depth + 1);
+            const retry = await scoreCandidates(group.map(({ i }) => candidates[i]), icp, sender, rulesBlock, searchContext, depth + 1);
             inputTokens += retry.inputTokens;
             outputTokens += retry.outputTokens;
             group.forEach(({ i }, k) => { cards[i] = retry.cards[k]; });
@@ -498,6 +598,15 @@ ${OUTREACH_SUBJECT_RULES}`;
     // placeholder pass for a cold verdict.
     for (let i = 0; i < cards.length; i++) {
         if (isBlankCard(cards[i])) cards[i] = unscoredCard(candidates[i].companyName);
+    }
+
+    // A foreign country-code domain settles location without the model. Applied last, and only at
+    // the top level, so it also covers a card the model left blank or did not mark.
+    if (depth === 0 && searchContext?.area) {
+        for (let i = 0; i < cards.length; i++) {
+            const where = isForeignDomain(candidates[i].domain, searchContext.area);
+            if (where && !cards[i].outsideArea) cards[i] = markOutsideArea(cards[i], where);
+        }
     }
 
     return { cards, inputTokens, outputTokens };
@@ -681,6 +790,9 @@ ${OUTREACH_SUBJECT_RULES}`;
         ...parsed,
         leadName: current.leadName,
         prospectType: current.prospectType ?? null,
+        // Carried forward for the same reason as prospectType: new evidence about a company does
+        // not move it to another country.
+        outsideArea: current.outsideArea ?? null,
         doNotContact: current.doNotContact,
         doNotContactReason: current.doNotContactReason,
     }, current.leadName);
