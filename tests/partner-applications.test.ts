@@ -115,7 +115,13 @@ check('no cookies or storage on the invite page; the code rides the URL into sig
 check('partners.html never hard-codes a rate — it reads the live programme terms', () => {
     assert.ok(!/\d+\s?%/.test(partnersPage.replace(/<script[\s\S]*?<\/script>/g, '')), 'a percentage is written into the page');
     assert.ok(partnersPage.includes("fetch('/.netlify/functions/partner-programme-public')"));
-    assert.ok(partnersPage.includes('name="robots" content="noindex,follow"'), 'not launched — keep it out of the index');
+    assert.ok(!partnersPage.includes('noindex'), 'the programme is public — keep the page indexable');
+    assert.ok(partnersPage.includes('<link rel="canonical" href="https://bemoreswan.com/partners">'));
+    const sitemap = read('sitemap.xml');
+    assert.ok(sitemap.includes('<loc>https://bemoreswan.com/partners</loc>'));
+    assert.ok(sitemap.includes('<loc>https://bemoreswan.com/partner-terms</loc>'));
+    const footer = read('components/footer.html');
+    assert.ok(footer.includes('href="partners.html"') && footer.includes('href="partner-terms.html"'), 'linked from the footer');
 });
 
 check('invite-lookup reveals only a first name and counts visits for approved partners only', () => {
