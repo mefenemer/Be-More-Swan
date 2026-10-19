@@ -39,7 +39,10 @@ const metaSecret  = process.env.META_APP_SECRET!;
 // and in Development mode, but requires Meta App Review before general (Live-mode) users can grant it.
 // instagram_manage_insights is what ingest-instagram-insights.ts needs for /{media-id}/insights.
 // Accounts connected before it was added lack it until they reconnect.
-const SCOPES      = 'instagram_basic,instagram_content_publish,instagram_manage_insights,pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,pages_manage_posts,business_management';
+// pages_messaging deliberately NOT requested: there is no Messenger webhook or reply flow for App
+// Review to demonstrate, so it was dropped from the review submission. Re-add it only alongside a
+// working receive/reply path (see docs/meta-app-review-submission.md).
+const SCOPES      = 'instagram_basic,instagram_content_publish,instagram_manage_insights,pages_show_list,pages_read_engagement,pages_manage_metadata,pages_manage_posts,business_management';
 const TOKEN_TTL_DAYS = 60;
 
 function csrfToken(): string {
