@@ -17,6 +17,7 @@ import { getDb } from '../../db/client';
 import { plans, userReferrals, users } from '../../db/schema';
 import { FREE_PLAN_TYPES } from '../../src/config/beta-plan';
 import { claimLateReferral } from '../../src/utils/invite-codes';
+import { checkImpersonationBlock, resolveImpersonation } from '../../src/utils/impersonation';
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import { findReferralOffer } from '../../src/utils/referral-offer';
 
@@ -27,14 +28,16 @@ export default withLambda(async (event) => {
     const secret = process.env.JWT_SECRET;
     const m = (event.headers.cookie || '').match(/aura_session=([^;]+)/);
     if (!secret || !m) return json(401, { error: 'Not authenticated.' });
-    let userId: number; let impersonating = false;
+    let userId: number;
     try {
-        const tok = jwt.verify(m[1], secret) as { userId: number; scope?: string };
-        userId = tok.userId; impersonating = tok.scope === 'impersonate';
+        userId = (jwt.verify(m[1], secret) as { userId: number }).userId;
     } catch { return json(401, { error: 'Invalid session.' }); }
     const db = getDb();
 
     if (event.httpMethod === 'GET') {
+        // Impersonating: answer for the customer being viewed, not the admin's own account.
+        const imp = await resolveImpersonation(db, event.headers.cookie, userId);
+        if (imp) userId = imp.impersonatingUserId;
         const offer = await findReferralOffer(db, userId);
         let applied: { firstName: string | null } | null = null;
         if (offer) {
@@ -49,7 +52,10 @@ export default withLambda(async (event) => {
     }
 
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed.' });
-    if (impersonating) return json(403, { error: 'Action blocked during impersonation session.' });
+    // aura_session is always the admin's own while impersonating, so without this a code typed in
+    // the impersonated view would be claimed onto the ADMIN's account.
+    const blocked = checkImpersonationBlock(event, 'referral_claim');
+    if (blocked) return { ...blocked, headers: { 'Content-Type': 'application/json' } };
     const { allowed } = await checkRateLimit(db, 'referral_claim', `user:${userId}`, CLAIM_LIMIT);
     if (!allowed) return json(429, { error: 'Too many tries — please wait a while and try again.' });
     let body: { code?: unknown };

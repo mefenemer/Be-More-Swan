@@ -174,6 +174,19 @@ const TARGET_ORG = 37;
         });
     }
 
+    // The workspace boots from these two. Read as the admin, the impersonated view was hard-gated
+    // behind the plan picker (the admin has no plan) and an invite code could be claimed onto the admin.
+    await check('check-capacity answers for the impersonated customer', () => {
+        const src = read('netlify/functions/check-capacity.ts');
+        assert.match(src, /resolveImpersonation\(db, [^)]+, userId\);\s*if \(imp\) userId = imp\.impersonatingUserId;/);
+        assert.match(src, /if \(!imp\) \{\s*const portal = await stripe\.billingPortal/);
+    });
+    await check('referral-claim reads the customer and blocks a claim during impersonation', () => {
+        const src = read('netlify/functions/referral-claim.ts');
+        assert.match(src, /if \(imp\) userId = imp\.impersonatingUserId;/);
+        assert.match(src, /checkImpersonationBlock\(event, 'referral_claim'\)/);
+    });
+
     for (const fn of ['meta-oauth', 'social-oauth-init', 'linkedin-ads-oauth-init']) {
         await check(`${fn}: the connect start is declared \`mutates\``, () => {
             assert.match(read(`netlify/functions/${fn}.ts`), /requireTenant\(event, (db|getDb\(\)), \{ mutates: true \}\)/);
