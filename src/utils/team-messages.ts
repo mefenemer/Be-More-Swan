@@ -23,11 +23,13 @@ import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, campaignOrders, campaigns, contentGenerationJobs, teamMessages, teamReads, visualBriefs } from '../../db/schema';
 import { ORDER_ACTION_SPECS, isOrderAction } from '../config/campaign-vocab';
+import { asksForACall } from './callback-request';
 
 type Db = ReturnType<typeof getDb>;
 
 export type TeamKind = 'brief' | 'started' | 'waiting' | 'ready' | 'done' | 'cancelled' | 'question' | 'message' | 'reply';
-export interface TeamLink { assistantId: number; tab?: string; chat?: boolean; label: string }
+/** `callback`: open Help & Support's "Request a call back" form (src/utils/callback-request.ts). */
+export interface TeamLink { assistantId: number; tab?: string; chat?: boolean; callback?: boolean; label: string }
 export interface TeamQuestion { key: QuestionKey; ref: number; choices: Array<{ value: string; label: string }> }
 export type QuestionKey = 'start_now' | 'brief_video';
 
@@ -378,12 +380,19 @@ export async function sendFromUser(db: Db, args: {
             console.warn('[team-messages] recompile after a note failed — the next scheduled recompile picks it up', err instanceof Error ? err.message : err);
         }
     }
+    // Asking for a call or a person gets the call-back form, never "Noted" (owner, 2026-10-19: a
+    // "request a call back" here was answered with the Rules-tab reply). Same check as the chat.
+    const wantsACall = asksForACall(body);
     await postTeamMessage(db, {
         organisationId: args.orgId, campaignId, fromAssistantId: a.id, toUser: true, kind: 'reply',
-        body: campaignId
-            ? 'Noted. I will follow this in everything I draft for this campaign from now on. To talk it through, open my chat.'
-            : 'Noted — I will see this when we talk in chat. For a rule I follow in everything I draft, add it to my Rules tab.',
-        link: { assistantId: a.id, chat: true, label: 'Open chat' },
+        body: wantsACall
+            ? 'A person from the Be More Swan team can call you back. Leave your number with the button below and we will be in touch.'
+            : campaignId
+                ? 'Noted. I will follow this in everything I draft for this campaign from now on. To talk it through, open my chat.'
+                : 'Noted — I will see this when we talk in chat. For a rule I follow in everything I draft, add it to my Rules tab.',
+        link: wantsACall
+            ? { assistantId: a.id, callback: true, label: 'Request a call back' }
+            : { assistantId: a.id, chat: true, label: 'Open chat' },
     });
     return { ok: true, id };
 }

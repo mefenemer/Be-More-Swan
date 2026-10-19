@@ -274,6 +274,12 @@
       let l = null;
       try { l = JSON.parse(link.getAttribute('data-team-link')); } catch { return; }
       if (!l || !l.assistantId) return;
+      if (l.callback) {
+        // Help & Support's call-back form, in place when help.js is loaded; else via the URL it reads.
+        if (typeof window.openCallbackForm === 'function') window.openCallbackForm();
+        else window.location.href = '/workspace.html?help=contact&callback=1';
+        return;
+      }
       if (l.chat) { window.openAssistantChat?.({ assistantId: l.assistantId }); return; }
       window._assistantDetailInitialTab = l.tab || null;
       window.routeToAssistantDetail?.(String(l.assistantId));
