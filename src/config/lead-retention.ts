@@ -110,6 +110,13 @@ export const RETENTION_REASONS = [
     // lead go?" answerable at all. It ranks second because an explicit human "get rid of this" is
     // the strongest argument against the company short of a compliance flag.
     'deleted_by_user',
+    // Not a business at all — a blog post, directory, publisher or supplier that the search
+    // promoted before 2026-10-18, when every scored result reached the Leads tab whatever it was.
+    // Set only by the one-off cleanup (docs/ops/2026-10-18-discard-non-company-leads.sql); the
+    // worker now discards these before they become records (discardReason in
+    // src/lib/discovery-scoring.ts). Its own reason because every other one describes something
+    // the USER did, and nobody turned these down — the system should never have offered them.
+    'not_a_business',
     'rejected',
     'enrichment_failed',
     'not_contactable',
@@ -137,6 +144,7 @@ export const RETENTION_REASON_USER_DELETE: RetentionReason = 'deleted_by_user';
 export const RETENTION_REASON_LABELS: Record<RetentionReason, string> = {
     do_not_contact: 'Must not be contacted',
     deleted_by_user: 'You deleted this lead',
+    not_a_business: 'Not a business you could sell to',
     rejected: 'You turned this lead down',
     enrichment_failed: 'No contact address could be found',
     not_contactable: 'Never had a contact address',
@@ -151,6 +159,10 @@ export const RETENTION_REASON_NOTES: Record<RetentionReason, string> = {
     deleted_by_user:
         'You deleted this lead from your list. It is kept here, marked rejected, so a later search '
         + 'that finds the same company again leaves it rejected instead of putting it back in front of you. '
+        + 'Sending it back for enrichment returns it to the pipeline.',
+    not_a_business:
+        'This was an article, directory, publisher or supplier rather than a business you could sell to. '
+        + 'Searches used to add these to your leads; they no longer do, so it was moved here. '
         + 'Sending it back for enrichment returns it to the pipeline.',
     rejected:
         'You rejected this lead, and 30 days passed without it being picked back up. '
