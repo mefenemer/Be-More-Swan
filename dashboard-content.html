@@ -925,12 +925,14 @@
         if (cap && cap.taskLimit != null) {
           const used = Number(cap.taskCount || 0);
           const pct = cap.taskLimit ? Math.min(100, Math.round((used / cap.taskLimit) * 100)) : 100;
+          // Some use that rounds to 0 reads as "under 1%", never as nothing used (38 of 10,500 on prod).
+          const pctLabel = v => (v > 0 && Math.round((v / cap.taskLimit) * 100) === 0) ? '<1%' : `${Math.min(100, Math.round((v / cap.taskLimit) * 100))}%`;
           const bonus = cap.unifiedTaskMetering && cap.bonusTasks > 0 ? ` · ${n(cap.bonusTasks)} bonus in reserve` : '';
-          html += `<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><span style="font-size:13px;color:#64748b">Tasks used, all assistants</span><strong style="font-size:20px;color:#0f172a">${pct}%</strong></div>${bar(pct)}
+          html += `<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><span style="font-size:13px;color:#64748b">Tasks used, all assistants</span><strong style="font-size:20px;color:#0f172a">${pctLabel(used)}</strong></div>${bar(pct)}
             <div class="dw-stat-sub" style="margin-top:6px">${n(used)} of ${n(cap.taskLimit)} this month${bonus} · resets ${esc(resets)}</div></div>`;
-          const rows = (us && us.unit === 'tasks' && Array.isArray(us.byAssistant) ? us.byAssistant : []).filter(r => r.tasks > 0).slice(0, 3);
+          const rows = (us && us.unit === 'tasks' && Array.isArray(us.byAssistant) ? us.byAssistant : []).filter(r => r.tasks > 0 && r.assistantId != null).slice(0, 3);   // "Unattributed" is not an assistant
           if (rows.length && cap.taskLimit) {
-            html += `<ul class="dw-list" style="margin-bottom:8px">${rows.map(r => `<li style="justify-content:space-between"><span class="t">${esc(r.name)}</span><span class="dw-stat-sub" style="margin:0;white-space:nowrap">${n(r.tasks)} · ${Math.round((r.tasks / cap.taskLimit) * 100)}%</span></li>`).join('')}</ul>`;
+            html += `<ul class="dw-list" style="margin-bottom:8px">${rows.map(r => `<li style="justify-content:space-between"><span class="t">${esc(r.name)}</span><span class="dw-stat-sub" style="margin:0;white-space:nowrap">${n(r.tasks)} · ${pctLabel(r.tasks)}</span></li>`).join('')}</ul>`;
           }
         } else if (cap && cap.noPlan) {
           // No plan (never chosen, or the trial ended): there is no allowance to show — saying
