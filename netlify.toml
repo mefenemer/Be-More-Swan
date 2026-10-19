@@ -1193,6 +1193,13 @@ node_bundler = "esbuild"
 [functions.refresh-meta-tokens]
   schedule = "0 2 * * *"
 
+# Connection expiry + disconnection alerts, daily 08:30 UTC (09:30 BST — the working day, after the
+# 02:00 Meta renewal has had its chance). ⚠️ This entry was MISSING until October 2026: the
+# function's header claimed the schedule, nothing ran it, and no expiry alert ever went out.
+# One alert per connection per cycle, never daily — see SC6 in integration-health-check.ts.
+[functions.integration-health-check]
+  schedule = "30 8 * * *"
+
 # Task 4: Silent X (Twitter) + LinkedIn token refresh — every 30 min (X tokens last ~2h)
 #
 # At :07/:37 rather than :00/:30, and this one is worth NOT batching with the drainers below.
