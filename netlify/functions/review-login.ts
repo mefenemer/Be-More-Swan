@@ -13,8 +13,10 @@
 // ── The safety model, in order of what an attacker would have to beat ────────
 //  1. DARK BY DEFAULT. With no slot's password set (REVIEW_LOGIN_PASSWORD for Google,
 //     META_REVIEW_LOGIN_PASSWORD for Meta), every request gets a plain 404 — the same response a
-//     nonexistent function gives. Deleting a slot's password in Netlify switches that reviewer off
-//     with no deploy. That is the intended off switch.
+//     nonexistent function gives. Deleting a slot's password in Netlify switches that reviewer off.
+//     That is the intended off switch.
+//     ⚠️ Netlify only hands env changes to functions on the NEXT DEPLOY — setting OR deleting a
+//     password does nothing until you trigger one (Deploys → Trigger deploy → Deploy site).
 //     ⚠️ It is the ONLY off switch per slot. The addresses default in code (DEFAULT_REVIEW_EMAIL,
 //     DEFAULT_META_REVIEW_EMAIL), so there is no second env var to clear.
 //  2. FAILS CLOSED ON A DATE. Each slot's *_EXPIRES (an ISO date) turns it off by itself once
