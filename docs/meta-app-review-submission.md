@@ -29,6 +29,19 @@ webhook, a `subscribed_apps` subscription and a real reply flow, then submit it 
 
 ---
 
+## Not submitted: `pages_manage_metadata`
+
+Removed from this submission and from `SCOPES`. Its only use was the Meta branch of Sync Profile
+(`social-profile-sync.ts`), which is now disabled (`META_PROFILE_SYNC_ENABLED = false`) and its
+button hidden for Facebook/Instagram, because it:
+- set the Page website to Be More Swan's own URL (`baseUrl`), overwriting the customer's;
+- read the Instagram connection, so a Facebook-only connect was skipped;
+- sent hours and category in formats Meta's Page update doesn't accept.
+
+Fix those, re-add the scope, and submit it on its own.
+
+---
+
 ## Permission answers
 
 ### pages_show_list
@@ -48,11 +61,13 @@ do not create, modify or manage businesses, ad accounts, assets or users in Busi
 _Code: `meta-oauth.ts` business-portfolio fallback._
 
 ### instagram_basic
-**How the app uses it:** Be More Swan reads the connected Instagram Business account's ID,
-username and profile details. We show the user which account is connected, and we use the ID for
-publishing and insights. We also read the user's own media IDs so we can match posts the app
-published with their performance metrics.
-_Code: `meta-oauth.ts`, `publish-instagram.ts`, `ingest-instagram-insights.ts`._
+**How the app uses it:** When the user connects, Be More Swan reads the ID and username of each
+Instagram Business account linked to their Pages. It shows them as @username in an account
+picker, so the user can choose which account to connect, and it stores the chosen account's ID
+for publishing and insights. The app also reads the connected account's follower count
+(`followers_count`), which appears in the Audience panel on the assistant's page. There, the
+business owner can track audience growth alongside their marketing goals.
+_Code: `meta-oauth.ts`, `src/utils/meta-accounts.ts` (picker), `src/utils/follower-counts.ts`._
 
 ### instagram_content_publish
 **How the app uses it:** Be More Swan is a social media planning assistant. The business owner
@@ -65,17 +80,25 @@ _Code: `publish-instagram.ts`._
 ### instagram_manage_insights
 **How the app uses it:** After a post is published through Be More Swan, the app periodically
 reads that post's insights (reach, likes, comments, saves, shares, video views) via
-`/{media-id}/insights`. It shows them to the business owner on the Performance Metrics cards and
-progress toward their marketing goals. Insights are only shown to the account owner and their
+`/{media-id}/insights`. It combines them into the Performance Metrics cards on the assistant's
+page (Engagement Rate, Organic Reach Growth, Meaningful Engagement), which show the business owner
+how their content is performing and track progress toward their marketing goals. Insights are only shown to the account owner and their
 workspace team. They are never shared with third parties or used for advertising.
 _Code: `ingest-instagram-insights.ts`, `get-assistant-performance.ts`._
 
 ### pages_read_engagement
-**How the app uses it:** Be More Swan reads the connected Page's basic details, and reads
-engagement and insights (reach, impressions, link clicks, reactions) for posts the app published
-to that Page. These metrics appear only to the Page owner in their performance dashboard, and
-they help the user see which content drives traffic to their website.
-_Code: `ingest-facebook-insights.ts` (`post_impressions_unique`, `post_impressions`, `post_clicks_by_type`)._
+**How the app uses it:** Be More Swan reads the reactions, comments and shares on posts it
+published to the user's Facebook Page, and the Page's follower count. Engagement is combined
+across posts into the Engagement Rate and Meaningful Engagement cards on the assistant's page. The
+follower count appears in its Audience panel. Be More Swan does not show individual post stats.
+Only the Page owner and their workspace team see this data, and it is never shared with third
+parties or used for advertising.
+_Code: `ingest-facebook-insights.ts` (post `reactions`/`comments`/`shares` summaries),
+`src/utils/follower-counts.ts` (`followers_count`, `fan_count`)._
+
+> ⚠️ Not claimed: reach, impressions and link clicks. The ingester also calls `/{post-id}/insights`
+> for those, but Page/post insights likely also need `read_insights`, which is not requested. Add
+> them to this answer only if `read_insights` is added to `SCOPES` and to the submission.
 
 ### pages_manage_posts
 **How the app uses it:** The business owner creates or approves posts in their Be More Swan
@@ -84,40 +107,66 @@ Page (`/{page-id}/feed`, or `/{page-id}/photos` when an image is attached). Post
 published when the user has created or approved them.
 _Code: `publish-facebook.ts`._
 
-### pages_manage_metadata
-**How the app uses it:** Be More Swan keeps the business's Facebook Page profile consistent with
-the business profile the owner maintains in Be More Swan. When the user triggers a profile sync (and
-once right after connecting), the app updates the Page's website, description, category and opening
-hours. The data comes from what the user entered in their Be More Swan business profile.
-_Code: `social-profile-sync.ts` (`POST /{page-id}`)._
+
+### pages_show_list (Facebook card, ~1 min)
+A–C, then:
+1. Pause on Be More Swan's picker, which lists the user's Pages by name. *Annotation: "Pages
+   listed via /me/accounts using pages_show_list"*
+2. Select the Page → show the Facebook card as connected.
+
+### business_management (Facebook card, ~1.5 min)
+0. Optional first: business.facebook.com → Business settings → Accounts → Pages → show the Page is
+   owned by the portfolio. *Annotation: "Page owned by a Business portfolio, not directly by the user"*
+
+A–C, showing the **business selection** step in the dialog, then:
+1. Pause on the picker with the portfolio-owned Page listed. *Annotation: "Found via
+   /me/businesses → owned_pages using business_management, not returned by /me/accounts"*
+2. Select it → connected.
 
 
----
+### pages_manage_posts (Facebook card, ~2 min)
+A–C → select the Page, then:
+1. Open the Social Media Manager assistant → **Review** → open a Facebook post draft with an image
+   → **Approve & Schedule** for 1–2 minutes ahead.
+2. Optionally show it in the Content Calendar.
+3. Wait (cut is fine here, but not during login) → open the Facebook Page → show the post live.
+   *Annotation: "Published via /{page-id}/photos using pages_manage_posts"*
 
-## Screencast scripts
+### pages_read_engagement (Facebook card, ~2 min)
+A–C → select the Page, then:
+1. Assistant → **Performance Metrics** → pause on Engagement Rate and Meaningful Engagement.
+   *Annotation: "Combined from reactions, comments and shares on the Page's posts, read via
+   pages_read_engagement"*. Don't point at Click-Through Rate (see the read_insights note).
+2. **Audience** block → the Facebook follower count. *Annotation: "Page follower count read via
+   pages_read_engagement"*
+3. Open one of those posts on the Facebook Page → show its reactions, comments and shares as the
+   source.
 
-General rules Meta enforces (most rejections come from these):
-- Use English UI (or captions), at least 720p, with no cuts that hide the login flow.
-- Start **logged out** of Be More Swan. Show login → Connect Facebook/Instagram → the **Meta
-  permission dialog with each permission visible** → the account selection → the feature using it.
-- Show the result **on Facebook/Instagram itself** (the published post, the updated Page info), not
-  just inside Be More Swan.
-- One recording covering everything is fine. Upload it against each permission, and add short
-  captions/annotations that name the permission as each feature appears.
+### instagram_basic (Instagram card, ~1.5 min)
+A–C, then:
+1. Pause on the picker showing **@username** "via <Page name>". *Annotation: "Instagram username and
+   account ID read via instagram_basic"*
+2. Select → connected.
+3. Assistant → **Audience** block → the Instagram follower count. *Annotation: "followers_count
+   read via instagram_basic"*
+4. Open the Instagram profile → same handle and follower count.
 
-Suggested single recording (~4–5 min):
-1. Log in to bemoreswan.com with the reviewer account → Integrations → Connect Facebook & Instagram.
-2. Meta dialog: choose the business portfolio, Page and Instagram account, and leave all permissions
-   granted. *(pages_show_list, business_management)*
-3. Back in Be More Swan: the connected Page and Instagram username are shown. *(instagram_basic)*
-4. Trigger the profile sync [check the button label] → open the Facebook Page in a new tab → show the updated website,
-   description and hours. *(pages_manage_metadata)*
-5. Content calendar: create a post with an image, approve it, publish [check label] or schedule for one minute
-   ahead → show it live on the Facebook Page *(pages_manage_posts)* and on Instagram
-   *(instagram_content_publish)*.
-6. Open the assistant's Performance Metrics → show the reach/engagement figures for those
-   posts. *(instagram_manage_insights, pages_read_engagement)*. Use posts that are a day or more
-   old so the figures are non-zero, and say so in a caption.
+### instagram_content_publish (Instagram card, ~2 min)
+A–C → select the account, then:
+1. Assistant → **Review** → open an Instagram post draft with an image → **Approve & Schedule** for
+   1–2 minutes ahead.
+2. Wait → open the Instagram profile → show the post live. *Annotation: "Published via
+   /{ig-user-id}/media + /media_publish using instagram_content_publish"*
+
+### instagram_manage_insights (Instagram card, ~2 min)
+A–C → select the account, then:
+1. Assistant → **Performance Metrics** → pause on Engagement Rate, Organic Reach Growth and
+   Meaningful Engagement. *Annotation: "Calculated from Instagram post insights read via
+   instagram_manage_insights"*. Click-Through Rate is always empty for Instagram, so don't point
+   at it.
+2. Open one of the published posts on Instagram → **View insights** → show reach, likes, comments,
+   saves and shares. *Annotation: "These per-post insights are read every 6 hours and combined
+   into the cards above"*
 
 ---
 
@@ -131,13 +180,16 @@ Suggested single recording (~4–5 min):
 > enabled.
 >
 > 1. Sign in at https://bemoreswan.com/login.
-> 2. Go to Integrations and click "Connect Facebook & Instagram". Log in with your Facebook test
->    user and select a Page that has a linked Instagram Business account.
-> 3. Click [profile sync button] to see the Page's website/description/hours updated (pages_manage_metadata).
-> 4. Open the Content Calendar, create a post with an image, approve it and publish it [check the button label]. It
+> 2. Go to Integrations. On the Facebook card click Connect, log in with your Facebook test user and
+>    select a Page that has a linked Instagram Business account. Then do the same on the Instagram
+>    card and select that Page's Instagram account.
+> 3. Open the Social Media Manager assistant → Review, open a post with an image and click Approve &
+>    Schedule for a couple of minutes ahead. It
 >    appears on the Facebook Page (pages_manage_posts) and on Instagram (instagram_content_publish).
-> 5. Open the assistant's Performance tab to see post insights (instagram_manage_insights,
->    pages_read_engagement). Insights refresh every 6 hours.
+> 4. Open Assistants → Social Media Manager and scroll to Performance Metrics. The Engagement Rate,
+>    Organic Reach Growth and Meaningful Engagement cards are calculated from post insights
+>    (instagram_manage_insights, pages_read_engagement). Insights refresh every 6 hours, so posts
+>    published during the review appear in the cards later.
 
 **Before submitting:** create a dedicated reviewer login on production. Don't reuse a real
 customer's. Check that every step above matches the current UI labels, and that the reviewer

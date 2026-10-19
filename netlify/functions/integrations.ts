@@ -303,13 +303,13 @@ export default withLambda(async (event) => {
             // to stop.
             const ALLOWED_SCOPES: Record<string, string[]> = {
                 // pages_messaging removed: it is no longer in the Meta grant (meta-oauth.ts SCOPES).
-                facebook:      ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'publish_to_groups', 'pages_manage_metadata'],
+                facebook:      ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'publish_to_groups'],
                 // pages_messaging deliberately NOT listed for Instagram. It is a Facebook Page
                 // permission and does not authorise Instagram DMs — that needs
                 // instagram_manage_messages, which we neither request nor have a capability for.
                 // Listing it implied a DM capability the grant never conferred. Do not re-add it
                 // without both the scope in meta-oauth.ts AND a send path that uses it.
-                instagram:     ['instagram_basic', 'instagram_content_publish', 'instagram_manage_insights', 'pages_manage_metadata', 'pages_manage_posts'],
+                instagram:     ['instagram_basic', 'instagram_content_publish', 'instagram_manage_insights', 'pages_manage_posts'],
                 linkedin:      ['r_liteprofile', 'r_emailaddress', 'w_member_social', 'r_organization_social', 'w_organization_social'],
                 twitter:       [...X_OAUTH_SCOPE_LIST],
                 google:        ['https://www.googleapis.com/auth/drive.readonly', 'https://www.googleapis.com/auth/spreadsheets'],
