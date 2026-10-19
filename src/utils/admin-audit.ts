@@ -85,7 +85,10 @@ export type AdminAction =
     | 'partner_create'
     | 'partner_ledger_change'     // a commission cancelled, or a bonus added
     | 'partner_payout'            // a payout run created / exported (decrypts bank details) / paid / cancelled
-    | 'partner_code_change';      // a partner's memorable partner code turned on, changed or off
+    | 'partner_code_change'       // a partner's memorable partner code turned on, changed or off
+    // Plan moves (Admin → Revenue → Plan moves): changes what many customers pay, in Stripe.
+    | 'plan_move_run'
+    | 'plan_move_cancel';
 
 export interface AdminAuditParams {
     adminId: number;

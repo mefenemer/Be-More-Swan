@@ -94,7 +94,10 @@ const read = (p: string) => readFileSync(join(root, p), 'utf8');
         assert.strictEqual(up.match(/targetPriceId = await targetPriceFor\(sub\)/g)?.length, 2, 'preview and execute must both use it');
         const down = read('netlify/functions/billing-downgrade.ts');
         assert.ok(!/resolveMonthlyPriceId\(stripe, targetMp\)/.test(down), 'downgrade still forces the monthly price');
-        assert.ok(/resolvePriceIdForInterval\(stripe, targetMp, currentItem\.price\?\.recurring\?\.interval === 'year'/.test(down));
+        // Since 2026-10-19 the downgrade schedules through the shared scheduler, which keeps the interval.
+        assert.ok(down.includes('schedulePlanChange(stripe, {'));
+        const sched = read('src/utils/plan-change-schedule.ts');
+        assert.ok(/recurring\?\.interval === 'year' \? 'year' : 'month'/.test(sched) && sched.includes('resolvePriceIdForInterval(stripe, args.target, interval)'));
     });
 
     console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`);

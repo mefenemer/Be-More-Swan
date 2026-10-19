@@ -198,6 +198,15 @@ export const EMAIL_VARIABLES: EmailVariable[] = [
     // Plan prices are read from master_plans at send time (trial-sweep.ts), never typed into a template.
     { key: 'plans.saver_price', label: 'Workflow Saver monthly price', group: 'Billing', sample: '(the live Workflow Saver price)' },
     { key: 'plans.buster_price', label: 'Busywork Buster monthly price', group: 'Billing', sample: '(the live Busywork Buster price)' },
+    // Admin ▸ Plan moves (src/utils/plan-moves.ts) — filled per customer from the move.
+    { key: 'plan_move.from_plan', label: 'Plan they are on now', group: 'Billing', sample: 'The Digital Employee' },
+    { key: 'plan_move.to_plan', label: 'Plan they are moving to', group: 'Billing', sample: 'The Busywork Buster' },
+    { key: 'plan_move.new_price', label: 'New price (with its period)', group: 'Billing', sample: '(the new plan price) a month' },
+    { key: 'plan_move.starts_on', label: 'Date the new plan starts', group: 'Billing', sample: '26 November 2026' },
+    { key: 'plan_move.price_change_line', label: 'Price change sentence', group: 'Billing', sample: 'That is (the difference) a month less than you pay now.' },
+    { key: 'plan_move.discount_line', label: 'What happens to their discount', group: 'Billing', sample: 'Your FOUNDER30 discount (30% off) carries on until July 2027, so you will pay (the discounted price) a month while it lasts.' },
+    { key: 'plan_move.current_price', label: 'Price they keep paying', group: 'Billing', sample: '(their current price) a month' },
+    { key: 'plan_move.assistants_line', label: 'Assistants that will pause (blank when none)', group: 'Billing', sample: '' },
     { key: 'link.action_url', label: 'Primary action URL', group: 'System', sample: `${BASE_URL}/dashboard.html` },
     { key: 'system.app_url', label: 'App URL', group: 'System', sample: BASE_URL },
 ];

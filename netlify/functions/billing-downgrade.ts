@@ -13,9 +13,10 @@ import { getDb } from '../../db/client';
 import { users, plans, masterPlans, aiAssistants, userOrganisations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
-import { resolvePriceIdForInterval } from '../../src/utils/stripe-price';
+import { schedulePlanChange } from '../../src/utils/plan-change-schedule';
 import { sendPlanDowngradeAlert } from '../../src/utils/founder-alerts';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { cancelMovesForCustomerChange } from '../../src/utils/plan-moves';
 
 const jwtSecret    = process.env.JWT_SECRET!;
 const stripeSecret = process.env.STRIPE_SECRET_KEY!;
@@ -205,52 +206,26 @@ export default withLambda(async (event) => {
     // a schedule keeps the subscription alive and renews it at the lower price for the next period,
     // so the customer is downgraded — not cancelled. The webhook (customer.subscription.updated)
     // finalises the DB switch when the new phase enters.
-    let targetPriceId = '';
-
     try {
-        const sub = await stripe.subscriptions.retrieve(activePlan.stripeSubscriptionId, { expand: ['items'] });
-        const currentItem = sub.items.data[0];
-        if (!currentItem) throw new Error('No subscription item found');
-        // Same interval as now: an annual subscriber renews on the lower plan's ANNUAL price, not
-        // the monthly one it was always switched to before.
-        targetPriceId = await resolvePriceIdForInterval(stripe, targetMp, currentItem.price?.recurring?.interval === 'year' ? 'year' : 'month');
-        const currentPeriodEndUnix = currentItem.current_period_end ?? 0;
-
-        // A subscription owns at most one schedule; release any stale one (e.g. from a prior,
-        // still-pending downgrade) so we can build a clean two-phase schedule below.
-        if (typeof sub.schedule === 'string') {
-            await stripe.subscriptionSchedules.release(sub.schedule).catch(() => { /* already released */ });
-        }
-
-        // SC4: build the schedule from the live subscription, then append the target-tier phase.
-        //  • Phase 0 = current price, unchanged, until period end.
-        //  • Phase 1 = target price from renewal onward. Its metadata (masterPlanId/tier) is copied
-        //    onto the subscription when the phase activates — that is what the webhook reads to
-        //    complete the tier switch in our DB.
-        const schedule = await stripe.subscriptionSchedules.create({ from_subscription: activePlan.stripeSubscriptionId });
-        const phase0 = schedule.phases[0];
-        await stripe.subscriptionSchedules.update(schedule.id, {
-            end_behavior: 'release',
-            phases: [
-                {
-                    items: phase0.items.map(i => ({
-                        price: typeof i.price === 'string' ? i.price : i.price.id,
-                        quantity: i.quantity ?? 1,
-                    })),
-                    start_date: phase0.start_date,
-                    end_date: phase0.end_date,
-                },
-                {
-                    items: [{ price: targetPriceId, quantity: 1 }],
-                    proration_behavior: 'none',
-                    metadata: { masterPlanId: String(targetMp.id), tier: targetTierKey },
-                },
-            ],
-            metadata: {
+        // The shared scheduler (src/utils/plan-change-schedule.ts) — the same one Admin ▸ Plan moves
+        // uses. It keeps the subscription's discounts on BOTH phases: this file used to rebuild the
+        // phases without them, so a coupon could vanish the day the downgrade started. Same interval
+        // as now (an annual subscriber renews on the lower plan's annual price), and a downgrade is
+        // never a price rise, so it starts at the next renewal.
+        // The customer's own choice wins over a pending Admin ▸ Plan move (the scheduler below
+        // replaces its Stripe schedule); record that move as cancelled.
+        await cancelMovesForCustomerChange(db, user.organisationId);
+        const change = await schedulePlanChange(stripe, {
+            subscriptionId: activePlan.stripeSubscriptionId,
+            target: targetMp,
+            notBefore: new Date(),
+            phaseMetadata: { masterPlanId: String(targetMp.id), tier: targetTierKey },
+            scheduleMetadata: {
                 pendingDowngradeTierKey: targetTierKey,
                 pendingDowngradeMasterPlanId: String(targetMp.id),
             },
         });
+        const currentPeriodEndUnix = Math.floor(change.effectiveAt.getTime() / 1000);
 
         // SC4c: set DB status to 'downgrading' (the webhook flips it back to 'active' at renewal)
         await db.update(plans)

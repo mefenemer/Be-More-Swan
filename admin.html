@@ -1107,6 +1107,50 @@
         <div id="coupons-stripe-panel" class="hidden mt-6 space-y-4"></div>
       </section>
 
+      <!-- ── Plan moves — Admin → Revenue → Plan moves (admin-plan-moves.ts, src/utils/plan-moves.ts) ──
+           Move customers between plans in bulk. Every move starts at the customer's next renewal; a
+           price rise at the first renewal 30+ days away; every customer is emailed, coupon included. -->
+      <section id="view-plan-moves" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div class="mb-5">
+          <p class="text-sm text-gray-500 max-w-3xl">Move customers from one plan to another. Each move starts at the customer's next renewal, so nobody is charged or refunded mid-month. A move to a more expensive plan waits for the first renewal at least 30 days away, as the Terms promise. Coupons carry across, and every customer gets an email with their new plan, price, start date and what happens to their discount.</p>
+          <p id="pm-mode" class="text-xs font-bold mt-1"></p>
+        </div>
+        <div class="bg-white rounded-2xl border border-gray-200 p-5 mb-6">
+          <div class="flex flex-wrap items-end gap-4">
+            <label class="text-sm">
+              <span class="block text-xs font-bold text-gray-500 mb-1">Move customers on</span>
+              <select id="pm-from" class="border border-gray-300 rounded-lg px-3 py-2 text-sm min-w-[16rem]"></select>
+            </label>
+            <label class="text-sm">
+              <span class="block text-xs font-bold text-gray-500 mb-1">To</span>
+              <select id="pm-to" class="border border-gray-300 rounded-lg px-3 py-2 text-sm min-w-[16rem]"></select>
+            </label>
+            <button type="button" onclick="pmPreview()" id="pm-preview-btn" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border">Preview</button>
+          </div>
+          <p class="text-xs text-gray-400 mt-2">Preview changes nothing. You choose who to move from the list it shows.</p>
+          <div id="pm-preview" class="mt-5"></div>
+        </div>
+        <h3 class="text-sm font-bold text-gray-900 mb-2">Scheduled and past moves</h3>
+        <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide">
+              <tr>
+                <th class="px-4 py-3 text-left">Workspace</th>
+                <th class="px-4 py-3 text-left">Move</th>
+                <th class="px-4 py-3 text-right">Price</th>
+                <th class="px-4 py-3 text-left">Starts</th>
+                <th class="px-4 py-3 text-left">Email</th>
+                <th class="px-4 py-3 text-left">Status</th>
+                <th class="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="pm-moves-tbody">
+              <tr><td colspan="7" class="px-5 py-8 text-center text-gray-400">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <!-- ── Partners — Admin → Revenue → Partners (admin-partners.ts) ─────────────────────
            Affiliate partners earn CASH commission (docs/affiliate-partner-programme-plan.md).
            Customers who refer a friend earn tokens instead and never appear here. The rate and
@@ -3053,7 +3097,7 @@ const VIEW_LABELS = {
   catalog: 'Assistants', analytics: 'Analytics', 'model-config': 'AI Model Config',
   logs: 'System Logs', 'audit-log': 'Audit Log', 'security-abuse': 'Security & Abuse', cogs: 'COGS Dashboard',
   reconciliation: 'Stripe Reconciliation', dunning: 'Dunning Queue', disputes: 'Disputes',
-  coupons: 'Coupons', partners: 'Partners',
+  coupons: 'Coupons', 'plan-moves': 'Plan moves', partners: 'Partners',
   'publish-pipeline': 'Publishing Pipeline',
   'manage-admins': 'Admin Accounts', 'kill-switches': 'Emergency Controls',
   gamification: 'Gamification Settings', 'session-timeout': 'Session Timeout', 'reward-audits': 'Reward Audits',
@@ -3114,6 +3158,7 @@ const ADMIN_CATS = {
     { view: 'disputes',       icon: '⚠️', label: 'Disputes',              perm: 'view_reconciliation' },
     { view: 'cogs',           icon: '💰', label: 'COGS Dashboard',        perm: 'view_cogs' },
     { view: 'coupons',        icon: '🏷️', label: 'Coupons',               perm: 'manage_coupons' },
+    { view: 'plan-moves',     icon: '🔀', label: 'Plan moves',            perm: 'override_subscription' },
     { view: 'partners',       icon: '🤝', label: 'Partners',              perm: 'manage_partners' },
   ]},
   assistants: { label: 'Assistants', children: [
@@ -3475,6 +3520,7 @@ function adminNav(view) {
   if (view === 'hosted-sites')   loadHostedSites();
   if (view === 'cogs')            loadCogsDashboard();
   if (view === 'coupons')         loadCoupons();
+  if (view === 'plan-moves')      loadPlanMoves();
   if (view === 'partners')        loadPartners();
   if (view === 'beta-testers')    loadBetaTesters();
   if (view === 'reconciliation')  loadReconciliation();
@@ -9332,6 +9378,160 @@ async function betaSend(orgId, action) {
 }
 
 // ── Coupons (admin-coupons.ts) ───────────────────────────────────────────────
+// ── Plan moves (Admin → Revenue → Plan moves) ─────────────────────────────────────────────────
+// Bulk move customers between plans (admin-plan-moves.ts). Preview first; the run schedules each
+// move in Stripe for the customer's next renewal and emails them. Prices shown are what Stripe
+// charges them today and what the new plan costs on THEIR interval (monthly or annual).
+const PM_API = '/.netlify/functions/admin-plan-moves';
+const _pm = { plans: [], preview: null, moves: [] };
+const _pmEsc = (v) => escAdm(v == null ? '' : String(v));
+const _pmMoney = (pence, interval) => pence == null ? '—'
+  : '£' + (pence / 100).toLocaleString('en-GB', { minimumFractionDigits: pence % 100 ? 2 : 0, maximumFractionDigits: 2 }) + (interval === 'year' ? '/yr' : '/mo');
+const _pmDate = (iso) => iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+const _pmPlanName = (id) => (_pm.plans.find((p) => p.id === id) || {}).name || `Plan #${id}`;
+
+async function loadPlanMoves() {
+  const tbody = document.getElementById('pm-moves-tbody');
+  try {
+    const d = await api(PM_API);
+    _pm.plans = d.plans || [];
+    _pm.moves = d.moves || [];
+    const mode = document.getElementById('pm-mode');
+    mode.textContent = d.livemode ? 'Live Stripe account — moves change what real customers pay.' : 'Stripe TEST account — moves here affect test subscriptions only.';
+    mode.className = 'text-xs font-bold mt-1 ' + (d.livemode ? 'text-red-600' : 'text-gray-500');
+    const opt = (p) => `<option value="${p.id}">${_pmEsc(p.name)} — £${Number(p.monthlyPriceGbp)}/mo${p.isActive ? '' : ' (not sold)'}</option>`;
+    const from = document.getElementById('pm-from');
+    const to = document.getElementById('pm-to');
+    const keepFrom = from.value, keepTo = to.value;
+    from.innerHTML = '<option value="">Choose a plan…</option>' + _pm.plans.filter((p) => !['trial'].includes(p.tierKey)).map(opt).join('');
+    to.innerHTML = '<option value="">Choose a plan…</option>' + _pm.plans.filter((p) => p.isActive && !p.isContactSales && !['trial', 'beta'].includes(p.tierKey)).map(opt).join('');
+    if (keepFrom) from.value = keepFrom;
+    if (keepTo) to.value = keepTo;
+    _pmRenderMoves();
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="7" class="px-5 py-8 text-center text-red-500">${_pmEsc(e.message)}</td></tr>`;
+  }
+}
+
+function _pmRenderMoves() {
+  const tbody = document.getElementById('pm-moves-tbody');
+  if (!_pm.moves.length) { tbody.innerHTML = '<tr><td colspan="7" class="px-5 py-8 text-center text-gray-400">No plan moves yet.</td></tr>'; return; }
+  const chip = { scheduled: 'bg-blue-50 text-blue-700', applied: 'bg-emerald-100 text-emerald-700', cancelled: 'bg-gray-100 text-gray-600', failed: 'bg-red-50 text-red-700' };
+  const label = { scheduled: 'Scheduled', applied: 'Done', cancelled: 'Cancelled', failed: 'Failed' };
+  let lastBatch = null;
+  tbody.innerHTML = _pm.moves.map((m) => {
+    let head = '';
+    if (m.batchId !== lastBatch) {
+      lastBatch = m.batchId;
+      const pending = _pm.moves.filter((x) => x.batchId === m.batchId && x.status === 'scheduled').length;
+      head = `<tr class="bg-gray-50 border-t border-gray-200"><td colspan="7" class="px-4 py-2 text-xs text-gray-500">
+        Batch of ${_pmDate(m.createdAt)} · ${_pm.moves.filter((x) => x.batchId === m.batchId).length} customer(s)
+        ${pending ? `<button type="button" onclick="pmCancelBatch('${_pmEsc(m.batchId)}')" class="btn-destructive ml-3 px-2 py-0.5 text-[11px] font-bold rounded border">Cancel the ${pending} still scheduled</button>` : ''}</td></tr>`;
+    }
+    const dir = m.direction === 'up' ? ' <span class="text-amber-700 font-bold">↑</span>' : m.direction === 'down' ? ' <span class="text-emerald-700 font-bold">↓</span>' : '';
+    return head + `<tr class="border-t border-gray-100 align-top">
+      <td class="px-4 py-3 font-medium text-gray-900">${_pmEsc(m.workspace || ('Org #' + m.organisationId))}</td>
+      <td class="px-4 py-3 text-gray-700" style="min-width:16rem">${_pmEsc(m.fromMasterPlanId ? _pmPlanName(m.fromMasterPlanId) : '—')} → ${_pmEsc(_pmPlanName(m.toMasterPlanId))}${m.discountLine ? `<p class="text-[11px] text-gray-400 max-w-sm">${_pmEsc(m.discountLine)}</p>` : ''}${m.error ? `<p class="text-[11px] text-red-600 max-w-sm">${_pmEsc(m.error)}</p>` : ''}</td>
+      <td class="px-4 py-3 text-right font-mono whitespace-nowrap">${_pmMoney(m.fromAmountPence, m.billingInterval)} → ${_pmMoney(m.toAmountPence, m.billingInterval)}${dir}</td>
+      <td class="px-4 py-3 text-gray-600 whitespace-nowrap">${_pmDate(m.effectiveAt)}</td>
+      <td class="px-4 py-3 text-gray-600 whitespace-nowrap">${m.emailSentAt ? 'Sent ' + _pmDate(m.emailSentAt) : (m.status === 'scheduled' ? '<span class="text-amber-700">Not sent</span>' : '—')}</td>
+      <td class="px-4 py-3"><span class="px-2 py-0.5 rounded-full text-xs font-bold ${chip[m.status] || ''}">${label[m.status] || _pmEsc(m.status)}</span></td>
+      <td class="px-4 py-3 text-right">${m.status === 'scheduled' ? `<button type="button" onclick="pmCancel(${m.id})" class="btn-destructive px-2.5 py-1 text-xs font-bold rounded-lg border">Cancel</button>` : ''}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function pmPreview() {
+  const from = Number(document.getElementById('pm-from').value) || null;
+  const to = Number(document.getElementById('pm-to').value) || null;
+  const box = document.getElementById('pm-preview');
+  if (!from || !to) { window.showToast?.('Choose both plans first.', { icon: '⚠️' }); return; }
+  box.innerHTML = '<p class="text-sm text-gray-400 animate-pulse">Checking each customer in Stripe…</p>';
+  try {
+    const d = await api(PM_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'preview', fromMasterPlanId: from, toMasterPlanId: to }) });
+    _pm.preview = { ...d, fromMasterPlanId: from, toMasterPlanId: to };
+    _pmRenderPreview();
+  } catch (e) {
+    box.innerHTML = `<p class="text-sm text-red-600">${_pmEsc(e.message)}</p>`;
+  }
+}
+
+function _pmRenderPreview() {
+  const box = document.getElementById('pm-preview');
+  const d = _pm.preview;
+  if (!d) { box.innerHTML = ''; return; }
+  if (!d.rows.length) { box.innerHTML = '<p class="text-sm text-gray-500">Nobody is on that plan.</p>'; return; }
+  const movable = d.rows.filter((r) => !r.skipReason);
+  const rises = movable.filter((r) => r.direction === 'up').length;
+  box.innerHTML = `
+    <p class="text-sm text-gray-700 mb-3"><strong>${movable.length}</strong> of ${d.rows.length} customer(s) can move to <strong>${_pmEsc(d.target.name)}</strong>${rises ? ` — <span class="text-amber-700 font-bold">${rises} would pay more</span>, so theirs starts at the first renewal 30+ days away` : ''}.${d.truncated ? ' <span class="text-amber-700">Only the first batch is shown; run it, then preview again.</span>' : ''}</p>
+    <div class="overflow-x-auto border border-gray-200 rounded-xl">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide">
+          <tr><th class="px-3 py-2"><input type="checkbox" id="pm-all" checked onchange="pmToggleAll(this.checked)"></th>
+          <th class="px-3 py-2 text-left">Workspace</th><th class="px-3 py-2 text-right">Now → new</th>
+          <th class="px-3 py-2 text-left">Starts</th><th class="px-3 py-2 text-left">Coupon / notes</th></tr>
+        </thead>
+        <tbody>${d.rows.map((r) => {
+          const off = !!r.skipReason;
+          const dir = r.direction === 'up' ? ' <span class="text-amber-700 font-bold">↑</span>' : r.direction === 'down' ? ' <span class="text-emerald-700 font-bold">↓</span>' : '';
+          const notes = off ? `<span class="text-gray-500">Skipped: ${_pmEsc(r.skipReason)}</span>`
+            : [_pmEsc(r.discountLine || ''), r.assistantsToPause ? `<span class="text-amber-700">${r.assistantsToPause} assistant(s) will pause.</span>` : ''].filter(Boolean).join(' ');
+          return `<tr class="border-t border-gray-100 align-top ${off ? 'opacity-60' : ''}">
+            <td class="px-3 py-2 text-center">${off ? '' : `<input type="checkbox" class="pm-pick" value="${r.organisationId}" checked>`}</td>
+            <td class="px-3 py-2"><span class="font-medium text-gray-900">${_pmEsc(r.workspace)}</span><p class="text-[11px] text-gray-400">${_pmEsc(r.ownerEmail || 'no owner email — no email will be sent')}</p></td>
+            <td class="px-3 py-2 text-right font-mono whitespace-nowrap">${_pmMoney(r.fromAmountPence, r.interval)} → ${_pmMoney(r.toAmountPence, r.interval)}${dir}</td>
+            <td class="px-3 py-2 whitespace-nowrap text-gray-600">${off ? '—' : _pmDate(r.effectiveAt)}</td>
+            <td class="px-3 py-2 text-xs text-gray-600 max-w-md">${notes}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>
+    ${movable.length ? `<div class="flex justify-end mt-3"><button type="button" onclick="pmRun()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Schedule moves and email customers</button></div>` : ''}`;
+}
+
+function pmToggleAll(on) {
+  document.querySelectorAll('#pm-preview .pm-pick').forEach((c) => { c.checked = on; });
+}
+
+async function pmRun() {
+  const d = _pm.preview;
+  if (!d) return;
+  const picked = Array.from(document.querySelectorAll('#pm-preview .pm-pick:checked')).map((c) => Number(c.value));
+  if (!picked.length) { window.showToast?.('Tick at least one customer.', { icon: '⚠️' }); return; }
+  const rises = d.rows.filter((r) => picked.includes(r.organisationId) && r.direction === 'up').length;
+  const ok = await window.confirmModal(
+    `Move <strong>${picked.length}</strong> customer(s) to <strong>${_pmEsc(d.target.name)}</strong>? ` +
+    `Each change is scheduled in Stripe for their next renewal${rises ? ` (${rises} paying more: the first renewal 30+ days away)` : ''}, ` +
+    `and each customer is emailed now with their new plan, price, start date and coupon. You can cancel any move until it starts.`,
+    { title: 'Schedule plan moves', confirmLabel: 'Schedule and email' });
+  if (!ok) return;
+  try {
+    const r = await api(PM_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      action: 'run', confirm: true, fromMasterPlanId: d.fromMasterPlanId, toMasterPlanId: d.toMasterPlanId, organisationIds: picked }) });
+    const parts = [`${r.scheduled} scheduled`];
+    if (r.skipped.length) parts.push(`${r.skipped.length} skipped`);
+    if (r.failed.length) parts.push(`${r.failed.length} failed — see the list`);
+    window.showToast?.(parts.join(', ') + '.', r.failed.length ? { icon: '⚠️' } : undefined);
+    _pm.preview = null;
+    _pmRenderPreview();
+    loadPlanMoves();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+async function _pmCancel(payload, what) {
+  const ok = await window.confirmModal(`Cancel ${what}? The customer stays on their current plan and price. Anyone already emailed about the move gets a short email saying it is off.`,
+    { title: 'Cancel plan move', confirmLabel: 'Cancel move', confirmColor: '#dc2626' });
+  if (!ok) return;
+  try {
+    const r = await api(PM_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cancel', ...payload }) });
+    window.showToast?.(`${r.cancelled} move(s) cancelled.`);
+    loadPlanMoves();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+function pmCancel(id) { return _pmCancel({ ids: [id] }, 'this move'); }
+function pmCancelBatch(batchId) { return _pmCancel({ batchId }, 'every move in this batch that has not started'); }
+
 const COUPONS_API = '/.netlify/functions/admin-coupons';
 const _coupons = { items: [], editing: null };
 const _cpEsc = (v) => escAdm(v == null ? '' : String(v));
