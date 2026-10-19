@@ -14,6 +14,10 @@
 //      Instagram were invisible on every org; Threads/YouTube/Canva live in workspace_integrations
 //      and were invisible too. One prod workspace with six live connections listed two, and its
 //      primary-platform mismatch check would have false-warned on four.
+//   3. Section 9 counted a DPA acceptance only if its version was a hardcoded '1.0'. accept-dpa.ts has
+//      recorded '1.1' since DPA v1.1, so every workspace that accepted after that had a permanent
+//      BLOCKING gap and generate-post refused ("Blueprint has blocking gaps") however often it was
+//      accepted or recompiled. Found on prod with a freshly provisioned review workspace.
 //
 // Run:  npx tsx tests/blueprint-sections.test.ts
 
@@ -37,6 +41,7 @@ const test = (name: string, fn: () => void) => {
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
 const blueprint = read('../src/utils/blueprint.ts');
 const enforcer = read('../netlify/functions/execution-budget.ts');
+const acceptDpa = read('../netlify/functions/accept-dpa.ts');
 
 console.log('\nBlueprint sections ↔ the code that acts on them\n');
 
@@ -189,6 +194,25 @@ test('section 7 reads BOTH credential stores', () => {
 test('the primary-platform mismatch check counts only usable connections', () => {
     // A revoked token is a real gap; reporting it as connected would hide it.
     assert.match(blueprint, /wsIntegrations\.filter\(w => w\.status === 'active'\)/);
+});
+
+// ── Section 9 — DPA acceptance ───────────────────────────────────────────────────────────────
+
+test('the blueprint counts a DPA with the same version rule as the gates', () => {
+    // hire-assistant, provision-assistant-background and get-assistant-context all use this clause.
+    // A second, hand-written version check here is how 1.1 acceptances came to be invisible.
+    assert.match(blueprint, /dpaAcceptedVersionClause\(\)/,
+        'section 9 must use accept-dpa.ts dpaAcceptedVersionClause()');
+    assert.ok(!/eq\(dpaAcceptances\.version,/.test(blueprint),
+        'no hardcoded single DPA version may gate the blueprint');
+});
+
+test('the version currently being accepted is one the blueprint counts', () => {
+    const current = acceptDpa.match(/CURRENT_DPA_VERSION = '([^']+)'/)?.[1];
+    const valid = acceptDpa.match(/DPA_VERSIONS_STILL_VALID = \[([^\]]*)\]/)?.[1] ?? '';
+    assert.ok(current, 'could not read CURRENT_DPA_VERSION');
+    assert.ok(valid.includes(`'${current}'`),
+        `accepting today records ${current}; it must be in DPA_VERSIONS_STILL_VALID or nothing new can generate`);
 });
 
 console.log(`\n${passed} passed\n`);

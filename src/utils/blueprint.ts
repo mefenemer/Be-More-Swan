@@ -38,6 +38,7 @@ import {
     campaignOrders,
 } from '../../db/schema';
 import { checkProhibitedUsePatterns } from './tos-gate';
+import { dpaAcceptedVersionClause } from '../../netlify/functions/accept-dpa';
 import { OPERATIONAL_TRIGGERS, OPERATIONAL_SOURCES } from './operational-setup';
 import { BUDGET_CONFIG_KEY, resolveBudget } from '../config/execution-budgets';
 import { buildGoalDirective, renderGoalDirective } from './goal-directive';
@@ -414,9 +415,13 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
     };
 
     // ── Section 9 — COMPLIANCE & GOVERNANCE ──────────────────────────────────
-    const CURRENT_DPA = '1.0';
+    // Any version still in DPA_VERSIONS_STILL_VALID counts — the SAME rule hire, provisioning and
+    // opening an assistant use (accept-dpa.ts). This once matched a hardcoded '1.0' only, so after DPA
+    // v1.1 shipped every workspace that accepted 1.1 had a permanent blocking gap and could not
+    // generate. Newest first, so the blueprint shows the latest version accepted.
     const [dpa] = await db.select().from(dpaAcceptances)
-        .where(and(eq(dpaAcceptances.organisationId, asst.organisationId), eq(dpaAcceptances.version, CURRENT_DPA)))
+        .where(and(eq(dpaAcceptances.organisationId, asst.organisationId), dpaAcceptedVersionClause()))
+        .orderBy(desc(dpaAcceptances.acceptedAt))
         .limit(1);
     if (dpa) hashParts.push({ id: `dpa:${dpa.id}`, updatedAt: dpa.acceptedAt });
 
