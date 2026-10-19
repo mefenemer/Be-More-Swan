@@ -78,12 +78,18 @@ check('the server: category callback → validated, high priority, no time in ei
     assert.ok(src.includes('${escHtml(newTicket.description)}'));
 });
 
-check('the Help form asks for a number only — no time picker', () => {
+check('call back is its OWN form, beside the support form — never a mode of it', () => {
+    // Owner, 2026-10-19: the first version switched "How can we help?" into a phone form, so it
+    // looked as if raising a support request had been replaced. They must stay separate.
     const html = read('help-content.html');
-    assert.ok(html.includes('id="cb-phone"') && html.includes('value="callback"') && html.includes('openCallbackForm()'));
+    assert.ok(html.includes('id="cb-form"') && html.includes('id="cb-phone"') && html.includes('id="cb-notes"') && html.includes('id="cb-submit"'));
+    assert.ok(html.indexOf('id="cb-phone"') < html.indexOf('id="cu-form-card"'), 'the phone field belongs to the call-back card');
+    assert.ok(!html.includes('value="callback"'), 'call back is a topic of the support form again');
+    assert.ok(!html.includes('cu-callback-fields'));
     assert.ok(!html.includes('cb-time'), 'a time picker came back');
     const js = read('help.js');
     assert.ok(js.includes("category: 'callback', callback: { phone, timezone: _tz, notes }"));
+    assert.ok(!/topic === 'callback'/.test(js), 'the support form submits call-backs again');
     assert.ok(js.includes("qs.get('callback') === '1'"));
 });
 
