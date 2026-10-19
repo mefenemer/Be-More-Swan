@@ -74,7 +74,16 @@ export type AdminAction =
     | 'beta_reminder_sent'
     // Hosted sites (Admin → Trust → Hosted Sites): taking a customer's public website offline, or
     // putting it back, and closing the reports that led there — "who took it down, and why".
-    | 'hosted_site_moderation';
+    | 'hosted_site_moderation'
+    // Affiliate partners (Admin → Revenue → Partners): commission rates and who may earn cash —
+    // money owed to people outside the company, so every change needs a name against it.
+    | 'partner_rates_change'
+    | 'partner_settings_update'
+    | 'partner_decision'
+    | 'partner_create'
+    | 'partner_ledger_change'     // a commission cancelled, or a bonus added
+    | 'partner_payout'            // a payout run created / exported (decrypts bank details) / paid / cancelled
+    | 'partner_code_change';      // a partner's memorable partner code turned on, changed or off
 
 export interface AdminAuditParams {
     adminId: number;

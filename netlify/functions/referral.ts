@@ -7,6 +7,7 @@
  * POST /referral  → generate / regenerate referral code (idempotent)
  */
 
+import { generateReferralCode } from '../../src/utils/referral-code';
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { eq, desc, and, count } from 'drizzle-orm';
@@ -27,12 +28,8 @@ function getAuth(event: any): number | null {
 }
 
 /** Generate an 8-character alphanumeric code */
-function generateCode(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let code = '';
-    for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
-    return code;
-}
+// The generator lives in src/utils/referral-code.ts (partner approval uses it too).
+const generateCode = generateReferralCode;
 
 export default withLambda(async (event) => {
     const callerId = getAuth(event);
@@ -120,7 +117,7 @@ export default withLambda(async (event) => {
                 referredBy = {
                     displayName: name,
                     joinedAt: (user.createdAt as Date).toISOString(), // AC10: current user's join date
-                    referralBonusApplied: referralRecord.status === 'qualified' || referralRecord.status === 'rewarded',
+                    referralBonusApplied: ['qualified', 'rewarded', 'partner'].includes(referralRecord.status),
                 };
             }
         }

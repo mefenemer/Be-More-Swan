@@ -18,6 +18,7 @@
 // called once real money has been taken — see stripe-webhook.ts.
 
 import type Stripe from 'stripe';
+import { isPartnerReferrer } from './partner-ledger';
 import { and, eq, notInArray } from 'drizzle-orm';
 import { plans, userReferrals } from '../../db/schema';
 import { createNotification } from './notify';
@@ -90,6 +91,15 @@ export async function qualifyPendingReferral(db: Db, userId: number): Promise<bo
         .where(and(eq(userReferrals.referredUserId, userId), eq(userReferrals.status, 'pending')))
         .limit(1);
     if (!pendingReferral) return false;
+
+    // A partner's referral earns cash through partner-ledger.ts, never a token as well. 'partner'
+    // keeps it out of the token vault (which counts 'qualified' rows only).
+    if (await isPartnerReferrer(db, pendingReferral.referrerId)) {
+        await db.update(userReferrals)
+            .set({ status: 'partner', qualifiedAt: new Date() })
+            .where(eq(userReferrals.id, pendingReferral.id));
+        return false;
+    }
 
     await db.update(userReferrals)
         .set({ status: 'qualified', qualifiedAt: new Date() })

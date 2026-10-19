@@ -72,3 +72,32 @@ jobs:
       # statements took production capacity checks down on 2026-10-17 — only Postgres can catch that.
       - name: Task metering
         run: npx tsx tests/task-metering-db.test.ts
+      # The Affiliate Partner Programme's commission ledger (src/utils/partner-ledger.ts): rate lock at
+      # first payment, one row per Stripe payment, refunds/disputes, the nightly release — money owed
+      # to people outside the company, so it is proven on Postgres, not mocks.
+      - name: Partner commission ledger
+        run: npx tsx tests/partner-ledger-db.test.ts
+      # The Partner Ops read queries (src/utils/partner-ops.ts): the Partners list, top referrers, the
+      # pre-payout audit's self-referral signs, recruitment — FILTER aggregates and windows only Postgres proves.
+      - name: Partner Ops queries
+        run: npx tsx tests/partner-ops-db.test.ts
+      # Partner applications (src/utils/partner-applications.ts): one per email, the hashed one-time
+      # account link that opens the sign-up lock for the applicant only, claim-once.
+      - name: Partner applications
+        run: npx tsx tests/partner-applications-db.test.ts
+      # Partner payout details (src/utils/partner-payouts.ts): a change waits for the emailed confirmation,
+      # applies once, for that partner only, and moves the secret in the vault. Plus the Partner page's numbers.
+      - name: Partner payouts
+        run: npx tsx tests/partner-payouts-db.test.ts
+      # Payout runs (src/utils/partner-payout-batches.ts): who is due, locking rows into a run, no
+      # double payment, paid / cancelled, payment files from the vault. This is the step that sends money.
+      - name: Partner payout runs
+        run: npx tsx tests/partner-payout-runs-db.test.ts
+      # Partner codes (src/utils/invite-codes.ts): unique across referral and partner codes, the late
+      # "Have an invite code?" rules, and partner-code customers recorded as such in the ledger.
+      - name: Partner codes
+        run: npx tsx tests/partner-codes-db.test.ts
+      # Partner erasure (src/utils/partner-erasure.ts): identifying data and vault payout details go, the
+      # commission ledger stays (tax law); applicant-only rows deleted; declined ones purged after 12 months.
+      - name: Partner erasure
+        run: npx tsx tests/partner-erasure-db.test.ts

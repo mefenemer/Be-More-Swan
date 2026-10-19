@@ -186,7 +186,10 @@ export default async (request: Request, context: Context) => {
             // ?beta=1 is the beta-tester sign-up link (emailed to applicants) and is let through to
             // the page. That is safe because it grants nothing: register.ts only accepts an email
             // that applied through /beta (src/utils/beta-testers.ts) and 403s everyone else.
-            if (cfg.registrationLocked && path === '/register' && url.searchParams.get('beta') !== '1') {
+            // ?partner=<token> is an approved partner's private sign-up link (src/utils/partner-applications.ts),
+            // let through for the same reason: register.ts accepts it only with a live token and the
+            // email that applied, and refuses everyone else.
+            if (cfg.registrationLocked && path === '/register' && url.searchParams.get('beta') !== '1' && !url.searchParams.get('partner')) {
                 return Response.redirect(new URL('/waitlist.html', request.url), 302);
             }
         }

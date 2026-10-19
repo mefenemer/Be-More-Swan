@@ -1082,6 +1082,140 @@
         <div id="coupons-stripe-panel" class="hidden mt-6 space-y-4"></div>
       </section>
 
+      <!-- ── Partners — Admin → Revenue → Partners (admin-partners.ts) ─────────────────────
+           Affiliate partners earn CASH commission (docs/affiliate-partner-programme-plan.md).
+           Customers who refer a friend earn tokens instead and never appear here. The rate and
+           add-partner modals live OUTSIDE this section — a fixed modal inside .admin-view is trapped
+           by its overflow container. -->
+      <section id="view-partners" class="admin-view hidden overflow-y-auto space-y-6" style="max-height:calc(100vh - 130px)">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <p class="text-sm text-gray-500 max-w-2xl">People who actively promote Be More Swan and earn cash commission. Customers who simply refer a friend earn tokens instead — they are not listed here.</p>
+          <button type="button" onclick="partnerOpenAdd()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Add partner</button>
+        </div>
+
+        <!-- Partner Ops chat (admin-partners-chat.ts): everything above, by asking. It reads with the
+             same queries as this screen and never writes — a change comes back as a card whose button
+             sends the same request as the buttons on this screen. -->
+        <div class="bg-white rounded-2xl border border-gray-200 p-5">
+          <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+            <div>
+              <h3 class="text-sm font-bold text-gray-800">Partner Ops assistant</h3>
+              <p class="text-xs text-gray-500 mt-0.5">Ask about partners, payouts and who to invite, or ask for a change. Changes come back as a card for you to confirm — nothing happens until you click it. It drafts emails but never sends them.</p>
+            </div>
+            <button type="button" onclick="opsClear()" class="btn-utility px-2.5 py-1 text-xs font-bold rounded-lg">New conversation</button>
+          </div>
+          <div id="ops-log" class="space-y-3 overflow-y-auto mb-3" style="max-height:28rem"></div>
+          <div id="ops-starters" class="flex flex-wrap gap-1.5 mb-3">
+            <button type="button" onclick="opsAsk('Who are our top 3 referrers over the last 90 days? Draft a short thank-you note to each.')" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-full border">Top referrers, 90 days</button>
+            <button type="button" onclick="opsAsk('Run a pre-payout check on what is ready to pay. Anything that needs a second look?')" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-full border">Pre-payout check</button>
+            <button type="button" onclick="opsAsk('Which paying customers are most active but not partners yet? Draft a personal invite I could send.')" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-full border">Who should we invite?</button>
+            <button type="button" onclick="opsAsk('Any applications waiting? Summarise each one and say what you would decide.')" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-full border">Review applications</button>
+          </div>
+          <div class="flex gap-2 items-end">
+            <label for="ops-input" class="sr-only">Ask Partner Ops</label>
+            <textarea id="ops-input" rows="2" maxlength="4000" placeholder="e.g. Give Sam a 30% special rate for December" class="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none"
+              onkeydown="if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); opsSend(); }"></textarea>
+            <button id="ops-send" type="button" onclick="opsSend()" class="btn-assistant px-4 py-2 text-sm font-bold rounded-lg">Ask</button>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-gray-200 p-5">
+          <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+            <div>
+              <h3 class="text-sm font-bold text-gray-800">Programme commission rate</h3>
+              <p class="text-xs text-gray-500 mt-0.5">A partner's customer gets the rate in force when they <strong>first pay</strong>, and keeps it for their whole commission length. A rate that has started can't be changed — schedule a new one instead.</p>
+            </div>
+            <button type="button" onclick="partnerOpenRate({ mode: 'schedule' })" class="btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border">Schedule a rate change</button>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="text-xs font-bold text-gray-500 uppercase tracking-wide">
+                <tr><th class="py-2 px-2 whitespace-nowrap text-left">From</th><th class="py-2 px-2 whitespace-nowrap text-left">Until</th><th class="py-2 px-2 whitespace-nowrap text-right">Rate</th><th class="py-2 px-2 whitespace-nowrap text-left pl-4">Paid for</th><th class="py-2 px-2 whitespace-nowrap text-left">Status</th><th class="py-2 px-2 whitespace-nowrap text-right">Actions</th></tr>
+              </thead>
+              <tbody id="partners-rates-tbody"><tr><td colspan="6" class="py-6 text-center text-gray-400">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-gray-200 p-5">
+          <h3 class="text-sm font-bold text-gray-800">Payout rules</h3>
+          <div class="flex flex-wrap items-end gap-4 mt-3">
+            <div>
+              <label for="partners-holding" class="text-xs font-bold text-gray-500 uppercase">Hold commission for (days)</label>
+              <input id="partners-holding" type="number" min="0" max="365" step="1" class="mt-1 block w-32 border border-gray-200 rounded-lg px-3 py-2 text-sm">
+            </div>
+            <div>
+              <label for="partners-minpayout" class="text-xs font-bold text-gray-500 uppercase">Minimum payout (£)</label>
+              <input id="partners-minpayout" type="number" min="0" step="1" class="mt-1 block w-32 border border-gray-200 rounded-lg px-3 py-2 text-sm">
+            </div>
+            <button type="button" onclick="partnerSaveSettings()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Save</button>
+          </div>
+          <p class="text-[11px] text-gray-400 mt-2">Commission waits this long after a payment before it can be paid out, so a refund can still cancel it. Balances under the minimum roll over to the next payout. Changes apply to new commissions.</p>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-gray-200 p-5">
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <h3 class="text-sm font-bold text-gray-800">Partners</h3>
+            <div id="partners-filter" class="flex flex-wrap gap-1.5"></div>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="text-xs font-bold text-gray-500 uppercase tracking-wide">
+                <tr><th class="py-2 px-2 whitespace-nowrap text-left">Partner</th><th class="py-2 px-2 whitespace-nowrap text-left">Status</th><th class="py-2 px-2 whitespace-nowrap text-right">Customers</th><th class="py-2 px-2 whitespace-nowrap text-right">Pending</th><th class="py-2 px-2 whitespace-nowrap text-right">Ready to pay</th><th class="py-2 px-2 whitespace-nowrap text-right">Paid</th><th class="py-2 px-2 whitespace-nowrap text-left pl-4">Rate</th><th class="py-2 px-2 whitespace-nowrap text-right">Actions</th></tr>
+              </thead>
+              <tbody id="partners-tbody"><tr><td colspan="8" class="py-6 text-center text-gray-400">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+              <!-- Payouts (partner-payout-batches.ts): who is due, payout runs, payment files. -->
+        <div class="bg-white rounded-2xl border border-gray-200 p-5">
+          <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+            <div>
+              <h3 class="text-sm font-bold text-gray-800">Payouts</h3>
+              <p class="text-xs text-gray-500 mt-0.5">Ready-to-pay commission for partners with confirmed payout details, at or over the minimum. Create a run, download the files, pay them in Wise / PayPal, then mark the run paid.</p>
+            </div>
+            <button type="button" id="payout-create-btn" onclick="payoutCreate()" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg">Create payout run</button>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="text-xs font-bold text-gray-500 uppercase tracking-wide">
+                <tr><th class="py-2 px-2 text-left whitespace-nowrap">Partner</th><th class="py-2 px-2 text-left whitespace-nowrap">Paid by</th><th class="py-2 px-2 text-right whitespace-nowrap">Ready to pay</th><th class="py-2 px-2 text-left whitespace-nowrap">This run?</th></tr>
+              </thead>
+              <tbody id="payout-preview-tbody"><tr><td colspan="4" class="py-4 text-center text-gray-400">Loading…</td></tr></tbody>
+            </table>
+          </div>
+          <h4 class="text-xs font-bold text-gray-700 uppercase mt-5 mb-1">Payout runs</h4>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="text-xs font-bold text-gray-500 uppercase tracking-wide">
+                <tr><th class="py-2 px-2 text-left whitespace-nowrap">Run</th><th class="py-2 px-2 text-left whitespace-nowrap">Status</th><th class="py-2 px-2 text-right whitespace-nowrap">Total</th><th class="py-2 px-2 text-right whitespace-nowrap">Partners</th><th class="py-2 px-2 text-right whitespace-nowrap">Actions</th></tr>
+              </thead>
+              <tbody id="payout-batches-tbody"></tbody>
+            </table>
+          </div>
+          <p class="text-[11px] text-gray-400 mt-2">Wise files: check the column names once against the template you download from Wise before your first run. Payment reference on bank transfers: <span class="font-mono">BMS PARTNER &lt;run&gt;</span>.</p>
+        </div>
+
+        <!-- Commission ledger: every commission, refund adjustment and bonus. -->
+        <div class="bg-white rounded-2xl border border-gray-200 p-5">
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <h3 class="text-sm font-bold text-gray-800">Commission ledger</h3>
+            <div class="flex flex-wrap gap-1.5 items-center">
+              <div id="ledger-filter" class="flex flex-wrap gap-1.5"></div>
+              <button type="button" onclick="ledgerOpenBonus()" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">Add bonus</button>
+            </div>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="text-xs font-bold text-gray-500 uppercase tracking-wide">
+                <tr><th class="py-2 px-2 text-left whitespace-nowrap">Date</th><th class="py-2 px-2 text-left whitespace-nowrap">Partner</th><th class="py-2 px-2 text-left whitespace-nowrap">What</th><th class="py-2 px-2 text-right whitespace-nowrap">Amount</th><th class="py-2 px-2 text-left whitespace-nowrap">Status</th><th class="py-2 px-2 text-right whitespace-nowrap">Actions</th></tr>
+              </thead>
+              <tbody id="ledger-tbody"><tr><td colspan="6" class="py-4 text-center text-gray-400">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- ── Breach Response — US-GDPR-3.2.1 ─────────────────────────────── -->
       <!-- ── Bias Audit (US-GOV-3.3.1) ─────────────────────────────────────────────────────────
            The quarterly reminder email (quarterly-bias-reminder.ts) links here. The API
@@ -2356,6 +2490,92 @@
   </div>
 </div>
 
+<!-- Partner commission rate — outside every .admin-view, see view-partners. -->
+<div id="partner-rate-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative max-h-[90vh] overflow-y-auto">
+    <button type="button" onclick="partnerCloseRate()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold" aria-label="Close">✕</button>
+    <h3 id="partner-rate-title" class="text-base font-bold text-gray-900 mb-1">Schedule a rate change</h3>
+    <p id="partner-rate-intro" class="text-xs text-gray-500 mb-4"></p>
+    <div class="space-y-3">
+      <div class="grid grid-cols-2 gap-3">
+        <div class="partner-rate-terms">
+          <label for="partner-rate-pct" class="text-xs font-bold text-gray-500 uppercase">Commission (%) <span class="text-red-500">*</span></label>
+          <input id="partner-rate-pct" type="number" min="0" max="100" step="0.5" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div class="partner-rate-terms">
+          <label for="partner-rate-months" class="text-xs font-bold text-gray-500 uppercase">Paid for (months)</label>
+          <input id="partner-rate-months" type="number" min="1" max="120" step="1" placeholder="Lifetime" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+          <p class="text-[11px] text-gray-400 mt-1">Months of each customer's payments. Blank = for as long as they stay.</p>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div id="partner-rate-from-wrap">
+          <label for="partner-rate-from" class="text-xs font-bold text-gray-500 uppercase">From <span class="text-red-500">*</span></label>
+          <input id="partner-rate-from" type="date" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div id="partner-rate-until-wrap">
+          <label for="partner-rate-until" class="text-xs font-bold text-gray-500 uppercase">Until</label>
+          <input id="partner-rate-until" type="date" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+          <p class="text-[11px] text-gray-400 mt-1">Blank = no end date.</p>
+        </div>
+      </div>
+      <div class="partner-rate-terms">
+        <label for="partner-rate-label" class="text-xs font-bold text-gray-500 uppercase">Label (admins only)</label>
+        <input id="partner-rate-label" maxlength="60" placeholder="e.g. Launch month boost" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+      </div>
+      <p class="text-[11px] text-gray-500">Dates are UK days: a rate from 1 December starts at midnight UK time and ends at the start of its Until day.</p>
+      <div id="partner-rate-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
+      <button id="partner-rate-save" type="button" onclick="partnerSaveRate()" class="btn-primary w-full py-2.5 text-sm font-bold rounded-lg">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Partner bonus — outside every .admin-view, see view-partners. -->
+<div id="ledger-bonus-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 relative">
+    <button type="button" onclick="ledgerCloseBonus()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold" aria-label="Close">✕</button>
+    <h3 class="text-base font-bold text-gray-900 mb-1">Add a bonus</h3>
+    <p class="text-xs text-gray-500 mb-4">Ready to pay straight away, in the next payout run. The partner sees the note.</p>
+    <div class="space-y-3">
+      <div>
+        <label for="ledger-bonus-partner" class="text-xs font-bold text-gray-500 uppercase">Partner</label>
+        <select id="ledger-bonus-partner" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></select>
+      </div>
+      <div>
+        <label for="ledger-bonus-amount" class="text-xs font-bold text-gray-500 uppercase">Amount (£)</label>
+        <input id="ledger-bonus-amount" type="number" min="0.01" step="0.01" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+      </div>
+      <div>
+        <label for="ledger-bonus-note" class="text-xs font-bold text-gray-500 uppercase">Note (the partner sees this)</label>
+        <input id="ledger-bonus-note" maxlength="200" placeholder="e.g. Thank you for a brilliant first month" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+      </div>
+      <div id="ledger-bonus-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
+      <button id="ledger-bonus-save" type="button" onclick="ledgerSaveBonus()" class="btn-primary w-full py-2.5 text-sm font-bold rounded-lg">Add bonus</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add an existing user as a partner — outside every .admin-view, see view-partners. -->
+<div id="partner-add-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 relative">
+    <button type="button" onclick="partnerCloseAdd()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold" aria-label="Close">✕</button>
+    <h3 class="text-base font-bold text-gray-900 mb-1">Add partner</h3>
+    <p class="text-xs text-gray-500 mb-4">They join approved, on the programme rate, and start earning cash on customers who first pay from now on. They need a Be More Swan account already, and get a welcome email. (Anyone else can apply on the public /partners page.)</p>
+    <div class="space-y-3">
+      <div>
+        <label for="partner-add-email" class="text-xs font-bold text-gray-500 uppercase">Account email <span class="text-red-500">*</span></label>
+        <input id="partner-add-email" type="email" placeholder="name@example.com" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+      </div>
+      <div>
+        <label for="partner-add-note" class="text-xs font-bold text-gray-500 uppercase">Note (admins only)</label>
+        <textarea id="partner-add-note" rows="2" placeholder="Who they are, how they'll promote…" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none"></textarea>
+      </div>
+      <div id="partner-add-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
+      <button id="partner-add-save" type="button" onclick="partnerSaveAdd()" class="btn-primary w-full py-2.5 text-sm font-bold rounded-lg">Add partner</button>
+    </div>
+  </div>
+</div>
+
 <div id="ai-credits-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative max-h-[85vh] overflow-y-auto">
     <button onclick="document.getElementById('ai-credits-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold">✕</button>
@@ -2794,6 +3014,7 @@ const VIEW_LABELS = {
   catalog: 'Assistants', analytics: 'Analytics', 'model-config': 'AI Model Config',
   logs: 'System Logs', 'audit-log': 'Audit Log', 'security-abuse': 'Security & Abuse', cogs: 'COGS Dashboard',
   reconciliation: 'Stripe Reconciliation', dunning: 'Dunning Queue', disputes: 'Disputes',
+  coupons: 'Coupons', partners: 'Partners',
   'publish-pipeline': 'Publishing Pipeline',
   'manage-admins': 'Admin Accounts', 'kill-switches': 'Emergency Controls',
   gamification: 'Gamification Settings', 'session-timeout': 'Session Timeout', 'reward-audits': 'Reward Audits',
@@ -2852,6 +3073,7 @@ const ADMIN_CATS = {
     { view: 'disputes',       icon: '⚠️', label: 'Disputes',              perm: 'view_reconciliation' },
     { view: 'cogs',           icon: '💰', label: 'COGS Dashboard',        perm: 'view_cogs' },
     { view: 'coupons',        icon: '🏷️', label: 'Coupons',               perm: 'manage_coupons' },
+    { view: 'partners',       icon: '🤝', label: 'Partners',              perm: 'manage_partners' },
   ]},
   assistants: { label: 'Assistants', children: [
     { view: 'catalog',              icon: '🤖', label: 'Assistants',          perm: 'assistant_catalog', group: 'Configuration' },
@@ -3211,6 +3433,7 @@ function adminNav(view) {
   if (view === 'hosted-sites')   loadHostedSites();
   if (view === 'cogs')            loadCogsDashboard();
   if (view === 'coupons')         loadCoupons();
+  if (view === 'partners')        loadPartners();
   if (view === 'beta-testers')    loadBetaTesters();
   if (view === 'reconciliation')  loadReconciliation();
   if (view === 'dunning')         loadDunningQueue();
@@ -9156,6 +9379,678 @@ async function couponDelete(id) {
     loadCoupons();
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
+
+// ── Partners (admin-partners.ts) ─────────────────────────────────────────────
+// Affiliate partners and their commission rates (docs/affiliate-partner-programme-plan.md §4.5).
+// Rates are dated periods; the server checks every edit (partner-rate-periods.ts) — no overlaps,
+// no gap in the programme rate, a started period's rate frozen. Existing dates are sent back as
+// exact ISO instants, never re-derived from a day, so an untouched date can't drift by an hour.
+const PARTNERS_API = '/.netlify/functions/admin-partners';
+const _partners = { data: null, filter: 'all', open: new Set(), rate: null };
+const _pEsc = (v) => escAdm(v == null ? '' : String(v));
+const _pDayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' });          // YYYY-MM-DD
+const _pDay = (iso) => iso ? _pDayFmt.format(new Date(iso)) : '';
+const _pDate = (iso) => iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Europe/London' }) : '—';
+const _pMoney = (pence) => '£' + (Number(pence || 0) / 100).toFixed(2);
+const _pPct = (bps) => { const v = Number(bps) / 100; return (Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')) + '%'; };   // 3000 → 30%, 2550 → 25.5%
+const _pLength = (m) => m == null ? 'Lifetime' : `${m} month${m === 1 ? '' : 's'}`;
+const _pTodayDay = () => _pDayFmt.format(new Date());
+
+function _pState(p, now) {
+  const t = now.getTime();
+  if (p.endsAt && new Date(p.endsAt).getTime() <= t) return 'past';
+  return new Date(p.startsAt).getTime() <= t ? 'current' : 'upcoming';
+}
+const _pStateBadge = {
+  past: '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-gray-100 text-gray-500">Ended</span>',
+  current: '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">In force</span>',
+  upcoming: '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-700">Upcoming</span>',
+};
+const _pStatusBadge = {
+  applied: '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700">Applied</span>',
+  approved: '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">Approved</span>',
+  suspended: '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700">Suspended</span>',
+  rejected: '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-gray-100 text-gray-500">Rejected</span>',
+};
+
+async function loadPartners() {
+  const tbody = document.getElementById('partners-tbody');
+  try {
+    _partners.data = await api(PARTNERS_API);
+    const s = _partners.data.settings;
+    if (s) {
+      document.getElementById('partners-holding').value = s.holdingDays;
+      document.getElementById('partners-minpayout').value = Math.round(s.minPayoutPence / 100);
+    }
+    _partnersRenderRates();
+    _partnersRenderList();
+    loadLedger();
+    loadPayouts();
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="8" class="py-5 text-red-500 text-sm">${_pEsc(e.message)}</td></tr>`;
+    document.getElementById('partners-rates-tbody').innerHTML = '';
+  }
+}
+
+function _partnersRateRows(periods, scope) {
+  const now = new Date(_partners.data.now);
+  return periods.map((p) => {
+    const st = _pState(p, now);
+    const actions = st === 'upcoming'
+      ? `<button type="button" onclick="partnerOpenRate({ mode: 'edit', id: ${p.id}, partnerId: ${scope ?? 'null'} })" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">Edit</button>
+         <button type="button" onclick="partnerDeleteRate(${p.id}, ${scope ?? 'null'})" class="btn-destructive px-2.5 py-1 text-xs font-bold rounded-lg border">Delete</button>`
+      : (st === 'current' && scope != null
+        ? `<button type="button" onclick="partnerOpenRate({ mode: 'end', id: ${p.id}, partnerId: ${scope} })" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">End</button>`
+        : '');
+    return `<tr class="border-t border-gray-100">
+      <td class="py-2 px-2 text-gray-700">${_pDate(p.startsAt)}</td>
+      <td class="py-2 px-2 text-gray-700">${p.endsAt ? _pDate(p.endsAt) : '<span class="text-gray-400">No end</span>'}</td>
+      <td class="py-2 px-2 text-right font-mono font-bold">${_pPct(p.rateBps)}</td>
+      <td class="py-2 px-2 pl-4 text-gray-700">${_pLength(p.durationMonths)}${p.label ? `<p class="text-[11px] text-gray-400">${_pEsc(p.label)}</p>` : ''}</td>
+      <td class="py-2 px-2">${_pStateBadge[st]}</td>
+      <td class="py-2 px-2 text-right whitespace-nowrap">${actions}</td>
+    </tr>`;
+  }).join('');
+}
+
+function _partnersRenderRates() {
+  const rows = _partners.data.programmeRates;
+  document.getElementById('partners-rates-tbody').innerHTML = _partnersRateRows(rows, null)
+    || '<tr><td colspan="6" class="py-6 text-center text-amber-700">No programme rate is set — partners would earn nothing. Schedule one.</td></tr>';
+}
+
+function _partnersRenderList() {
+  const all = _partners.data.partners;
+  const counts = all.reduce((acc, p) => { acc[p.status] = (acc[p.status] || 0) + 1; return acc; }, {});
+  const chips = [['all', `All (${all.length})`], ['applied', `Applications (${counts.applied || 0})`], ['approved', `Approved (${counts.approved || 0})`], ['suspended', `Suspended (${counts.suspended || 0})`], ['rejected', `Rejected (${counts.rejected || 0})`]];
+  document.getElementById('partners-filter').innerHTML = chips.map(([val, label]) => {
+    const on = _partners.filter === val;
+    return `<button type="button" onclick="partnerSetFilter('${val}')" class="px-2.5 py-1 rounded-full text-xs font-bold border cursor-pointer"
+      style="${on ? 'background:#d6006b;border-color:#d6006b;color:#fff' : 'background:#fff;border-color:#e5e7eb;color:#6b7280'}">${label}</button>`;
+  }).join('');
+
+  const now = new Date(_partners.data.now);
+  const list = all.filter((p) => _partners.filter === 'all' || p.status === _partners.filter);
+  document.getElementById('partners-tbody').innerHTML = list.map((p) => {
+    const special = p.rates.find((r) => _pState(r, now) === 'current');
+    const rate = special
+      ? `<span class="font-mono font-bold">${_pPct(special.rateBps)}</span> <span class="text-[11px] text-gray-500">special${special.endsAt ? ' until ' + _pDate(special.endsAt) : ''}</span>`
+      : '<span class="text-gray-500">Programme</span>';
+    const btn = (label, cls, decision) => `<button type="button" onclick="partnerDecide(${p.id}, '${decision}')" class="${cls} px-2.5 py-1 text-xs font-bold rounded-lg border">${label}</button>`;
+    const actions = {
+      applied: btn('Approve', 'btn-golive', 'approve') + ' ' + btn('Reject', 'btn-destructive', 'reject'),
+      approved: btn('Suspend', 'btn-destructive', 'suspend'),
+      suspended: btn('Reinstate', 'btn-secondary', 'reinstate'),
+      rejected: btn('Approve', 'btn-golive', 'approve'),
+    }[p.status] || '';
+    const open = _partners.open.has(p.id);
+    const main = `<tr class="border-t border-gray-100">
+      <td class="py-2 px-2">
+        <button type="button" onclick="partnerToggleOpen(${p.id})" class="text-left cursor-pointer" aria-expanded="${open}">
+          <span class="font-semibold text-gray-900">${_pEsc(p.name || p.email || 'Deleted account')}</span>
+          <span class="text-gray-400 text-xs">${open ? 'Hide details' : 'Details'}</span>
+          ${p.name && p.email ? `<p class="text-[11px] text-gray-500">${_pEsc(p.email)}</p>` : ''}
+        </button>
+      </td>
+      <td class="py-2 px-2">${_pStatusBadge[p.status] || _pEsc(p.status)}</td>
+      <td class="py-2 px-2 text-right font-mono" title="Paying customers / everyone who signed up through them">${p.paying} / ${p.referrals}</td>
+      <td class="py-2 px-2 text-right font-mono">${_pMoney(p.pendingPence)}</td>
+      <td class="py-2 px-2 text-right font-mono">${_pMoney(p.payablePence)}</td>
+      <td class="py-2 px-2 text-right font-mono">${_pMoney(p.paidPence)}</td>
+      <td class="py-2 px-2 pl-4">${rate}</td>
+      <td class="py-2 px-2 text-right whitespace-nowrap">${actions}</td>
+    </tr>`;
+    if (!open) return main;
+    const answers = Object.entries(p.application || {}).filter(([k]) => k !== 'addedByAdmin');
+    const appHtml = p.application?.addedByAdmin
+      ? '<p class="text-xs text-gray-500">Added by an admin — no application.</p>'
+      : (answers.length
+        ? `<dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs">${answers.map(([k, v]) => `<div><dt class="font-bold text-gray-500">${_pEsc(k)}</dt><dd class="text-gray-800 break-words">${_pEsc(typeof v === 'string' ? v : JSON.stringify(v))}</dd></div>`).join('')}</dl>`
+        : '<p class="text-xs text-gray-500">No application answers.</p>');
+    const detail = `<tr class="bg-gray-50/60"><td colspan="8" class="px-4 py-4 space-y-4">
+      <div class="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-600">
+        <span>Joined ${_pDate(p.createdAt)}</span>
+        ${p.referralCode ? `<span>Link code <span class="font-mono font-bold">${_pEsc(p.referralCode)}</span></span>` : ''}
+        ${p.status === 'approved' || p.partnerCode ? `<span>Partner code ${p.partnerCode
+          ? `<span class="font-mono font-bold">${_pEsc(p.partnerCode)}</span>
+             <button type="button" onclick="partnerSetCode(${p.id})" class="btn-utility px-2 py-0.5 text-[11px] font-bold rounded-lg">Change</button>
+             <button type="button" onclick="partnerClearCode(${p.id})" class="btn-utility px-2 py-0.5 text-[11px] font-bold rounded-lg">Turn off</button>`
+          : `<span class="text-gray-400">off</span> <button type="button" onclick="partnerSetCode(${p.id})" class="btn-utility px-2 py-0.5 text-[11px] font-bold rounded-lg">Set a partner code</button>`}</span>` : ''}
+        <span>Account: ${p.hasAccount ? 'yes' : (p.status === 'approved'
+          ? `<span class="text-amber-700 font-semibold">not created yet</span>${p.invitedAt ? ` — link sent ${_pDate(p.invitedAt)}${p.inviteExpiresAt && new Date(p.inviteExpiresAt) < new Date() ? ' (expired)' : ''}` : ''}
+             <button type="button" onclick="partnerResendInvite(${p.id})" class="btn-utility px-2 py-0.5 text-[11px] font-bold rounded-lg">Resend account link</button>`
+          : 'none — applied without one')}</span>
+        <span>Payout details: ${p.hasPayoutDetails ? _pEsc(p.payoutDisplay || p.payoutMethod || 'set') : '<span class="text-amber-700 font-semibold">not set yet</span>'}</span>
+        ${p.decisionNote ? `<span>Last decision note: <em>${_pEsc(p.decisionNote)}</em></span>` : ''}
+        ${!p.hasAccount && (p.status === 'applied' || p.status === 'rejected') ? `<button type="button" onclick="partnerEraseApplication(${p.id})" class="btn-destructive px-2 py-0.5 text-[11px] font-bold rounded-lg">Erase application</button>` : ''}
+      </div>
+      <div><h4 class="text-xs font-bold text-gray-700 uppercase mb-1">Application</h4>${appHtml}</div>
+      <div>
+        <div class="flex items-center justify-between gap-3 mb-1">
+          <h4 class="text-xs font-bold text-gray-700 uppercase">Special rates</h4>
+          <button type="button" onclick="partnerOpenRate({ mode: 'add', partnerId: ${p.id} })" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">Add special rate</button>
+        </div>
+        <p class="text-[11px] text-gray-500 mb-2">For the dates set, this partner's new customers get this rate instead of the programme rate.</p>
+        ${p.rates.length ? `<table class="w-full text-sm"><tbody>${_partnersRateRows(p.rates, p.id)}</tbody></table>` : '<p class="text-xs text-gray-500">None — they are on the programme rate.</p>'}
+      </div>
+    </td></tr>`;
+    return main + detail;
+  }).join('') || `<tr><td colspan="8" class="py-6 text-center text-gray-400">${all.length ? 'Nobody in this group.' : 'No partners yet. Add one, or wait for applications.'}</td></tr>`;
+}
+
+function partnerSetFilter(val) { _partners.filter = val; _partnersRenderList(); }
+function partnerToggleOpen(id) { _partners.open.has(id) ? _partners.open.delete(id) : _partners.open.add(id); _partnersRenderList(); }
+
+function _partnerPeriods(partnerId) {
+  if (partnerId == null) return _partners.data.programmeRates;
+  return _partners.data.partners.find((p) => p.id === partnerId)?.rates || [];
+}
+
+// mode: 'schedule' (programme: end the latest rate and start a new one), 'add' (partner special
+// rate), 'edit' (an upcoming period), 'end' (set an end date on a partner's current period).
+function partnerOpenRate(ctx) {
+  const periods = _partnerPeriods(ctx.partnerId ?? null);
+  const period = ctx.id ? periods.find((p) => p.id === ctx.id) : null;
+  _partners.rate = { ...ctx, partnerId: ctx.partnerId ?? null, period };
+  const set = (id, v) => { document.getElementById(id).value = v ?? ''; };
+  const show = (id, on) => document.getElementById(id).classList.toggle('hidden', !on);
+  const partner = ctx.partnerId != null ? _partners.data.partners.find((p) => p.id === ctx.partnerId) : null;
+  const who = partner ? (partner.name || partner.email || 'this partner') : null;
+  const tomorrow = _pDayFmt.format(new Date(Date.now() + 86400000));
+  const titles = {
+    schedule: ['Schedule a rate change', 'The current rate ends the day this one starts. Customers who already paid keep the rate they got.'],
+    add: [`Special rate for ${who}`, 'Their new customers get this rate instead of the programme rate between these dates.'],
+    edit: ['Edit upcoming rate', 'This rate has not started, so everything can change.'],
+    end: ['End this rate', 'From this date their new customers go back to the programme rate. Customers who already paid keep the rate they got.'],
+  };
+  document.getElementById('partner-rate-title').textContent = titles[ctx.mode][0];
+  document.getElementById('partner-rate-intro').textContent = titles[ctx.mode][1];
+  document.querySelectorAll('.partner-rate-terms').forEach((el) => el.classList.toggle('hidden', ctx.mode === 'end'));
+  show('partner-rate-from-wrap', ctx.mode !== 'end');
+  // The programme rate never has an end date of its own — the next scheduled rate ends it.
+  show('partner-rate-until-wrap', ctx.partnerId != null);
+  const minDay = _pTodayDay();
+  document.getElementById('partner-rate-from').min = minDay;
+  document.getElementById('partner-rate-until').min = minDay;
+  set('partner-rate-pct', period ? Number(period.rateBps) / 100 : '');
+  set('partner-rate-months', period ? (period.durationMonths ?? '') : (ctx.partnerId == null ? 12 : ''));
+  set('partner-rate-from', period ? _pDay(period.startsAt) : tomorrow);
+  set('partner-rate-until', period?.endsAt ? _pDay(period.endsAt) : (ctx.mode === 'end' ? tomorrow : ''));
+  set('partner-rate-label', period?.label || '');
+  document.getElementById('partner-rate-error').classList.add('hidden');
+  document.getElementById('partner-rate-modal').classList.remove('hidden');
+}
+function partnerCloseRate() { document.getElementById('partner-rate-modal').classList.add('hidden'); _partners.rate = null; }
+
+async function _partnerSendRates(partnerId, changes) {
+  await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'rates', partnerId, changes }) });
+}
+
+async function partnerSaveRate() {
+  const ctx = _partners.rate;
+  if (!ctx) return;
+  const btn = document.getElementById('partner-rate-save');
+  const errEl = document.getElementById('partner-rate-error');
+  const val = (id) => document.getElementById(id).value.trim();
+  const pct = val('partner-rate-pct');
+  const terms = {
+    rateBps: pct === '' ? NaN : Math.round(Number(pct) * 100),
+    durationMonths: val('partner-rate-months') === '' ? null : Number(val('partner-rate-months')),
+    startsOn: val('partner-rate-from'),
+    endsOn: ctx.partnerId != null ? (val('partner-rate-until') || null) : null,
+    label: val('partner-rate-label'),
+  };
+  const periods = _partnerPeriods(ctx.partnerId);
+  // The date inputs have a min, but a typed date skips it. Say it plainly here rather than showing
+  // the server's three-part refusal.
+  const today = _pTodayDay();
+  const newStart = ctx.mode === 'end' ? null : terms.startsOn;
+  const newEnd = ctx.mode === 'end' ? val('partner-rate-until') : terms.endsOn;
+  const startChanged = newStart && (!ctx.period || newStart !== _pDay(ctx.period.startsAt));
+  const tooEarly = (startChanged && newStart < today) ? 'A rate can’t start in the past — choose today or later.'
+    : (newEnd && newEnd < today) ? 'A rate can’t end in the past — choose today or later.'
+    : (ctx.mode === 'end' && !newEnd) ? 'Choose the date this rate ends.' : null;
+  if (tooEarly) { errEl.textContent = tooEarly; errEl.classList.remove('hidden'); return; }
+  let changes;
+  if (ctx.mode === 'schedule') {
+    // End whatever is last (open-ended) where the new one starts. Existing dates go back as exact
+    // instants (startsOn untouched = omitted), so they can't be "moved" by a rounding round-trip.
+    const latest = [...periods].sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt)).pop();
+    changes = [];
+    if (latest) changes.push({ op: 'update', id: latest.id, period: { endsOn: terms.startsOn } });
+    changes.push({ op: 'create', period: terms });
+  } else if (ctx.mode === 'add') {
+    changes = [{ op: 'create', period: terms }];
+  } else if (ctx.mode === 'end') {
+    changes = [{ op: 'update', id: ctx.id, period: { endsOn: val('partner-rate-until') } }];
+  } else {
+    changes = [{ op: 'update', id: ctx.id, period: terms }];
+    if (ctx.partnerId == null) {
+      // Programme rates follow on from each other: moving an upcoming start moves the end of the
+      // rate before it, so no gap opens.
+      const sorted = [...periods].sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt));
+      const i = sorted.findIndex((p) => p.id === ctx.id);
+      if (i > 0) changes.unshift({ op: 'update', id: sorted[i - 1].id, period: { endsOn: terms.startsOn } });
+      terms.endsOn = ctx.period.endsAt;            // its own end is set by the next rate, unchanged
+    }
+  }
+  btn.disabled = true;
+  errEl.classList.add('hidden');
+  try {
+    await _partnerSendRates(ctx.partnerId, changes);
+    partnerCloseRate();
+    window.showToast?.('Rate saved.');
+    loadPartners();
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function partnerDeleteRate(id, partnerId) {
+  const periods = [..._partnerPeriods(partnerId)].sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt));
+  const i = periods.findIndex((p) => p.id === id);
+  const p = periods[i];
+  if (!p) return;
+  const ok = await window.confirmModal(
+    `Delete the upcoming <strong>${_pPct(p.rateBps)}</strong> rate from <strong>${_pDate(p.startsAt)}</strong>? It hasn't started, so nobody has been promised it.`,
+    { title: 'Delete upcoming rate', confirmLabel: 'Delete', confirmColor: '#dc2626' });
+  if (!ok) return;
+  const changes = [{ op: 'delete', id }];
+  // Programme rates: the rate before it now runs on to where this one would have ended.
+  if (partnerId == null && i > 0) changes.push({ op: 'update', id: periods[i - 1].id, period: { endsOn: p.endsAt } });
+  try {
+    await _partnerSendRates(partnerId, changes);
+    window.showToast?.('Upcoming rate deleted.');
+    loadPartners();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+async function partnerSaveSettings() {
+  const holdingDays = Number(document.getElementById('partners-holding').value);
+  const pounds = Number(document.getElementById('partners-minpayout').value);
+  try {
+    await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'settings', holdingDays, minPayoutPence: Math.round(pounds * 100) }) });
+    window.showToast?.('Payout rules saved.');
+    loadPartners();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+async function partnerDecide(id, decision) {
+  const p = _partners.data.partners.find((x) => x.id === id);
+  if (!p) return;
+  const who = `<strong>${_pEsc(p.name || p.email || 'this partner')}</strong>`;
+  let note = null;
+  if (decision === 'reject' || decision === 'suspend') {
+    const msg = decision === 'reject'
+      ? `Reject ${who}'s application? They can be approved later if you change your mind.`
+      : `Suspend ${who}? They stop earning on new payments straight away, and their customers don't earn them tokens either. Commission already earned is kept.`;
+    note = await window.promptModal(msg + '<br><br>Reason (admins only, optional):', {
+      title: decision === 'reject' ? 'Reject application' : 'Suspend partner',
+      confirmLabel: decision === 'reject' ? 'Reject' : 'Suspend', multiline: true,
+    });
+    if (note === null) return;
+  } else if (decision === 'approve') {
+    const ok = await window.confirmModal(`Approve ${who}? They start earning cash on customers who first pay from now on.`, { title: 'Approve partner', confirmLabel: 'Approve' });
+    if (!ok) return;
+  }
+  try {
+    const d = await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'decide', partnerId: id, decision, note }) });
+    window.showToast?.({ approve: _partnerEmailedLine('Partner approved.', d.emailed), reject: 'Application rejected.', suspend: 'Partner suspended.', reinstate: 'Partner reinstated.' }[decision]);
+    loadPartners();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+// Partner codes (invite-codes.ts): a memorable code that works like their link — sign-up's "Invited by",
+// /invite/<code>, and the plan picker's "Have an invite code?". New customers only.
+async function partnerSetCode(id) {
+  const p = _partners.data.partners.find((x) => x.id === id);
+  if (!p) return;
+  const code = await window.promptModal(`A memorable code for <strong>${_pEsc(p.name || p.email || '')}</strong> to give their audience, e.g. on a podcast. It works anywhere their link does, gives new customers the normal invite offer, and earns them the customer.<br><br>4–20 letters and numbers, starting with a letter:`,
+    { title: p.partnerCode ? 'Change partner code' : 'Set a partner code', confirmLabel: 'Save code', placeholder: 'SAMSWAN' });
+  if (code === null || !code.trim()) return;
+  try {
+    const d = await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'partner_code', partnerId: id, code }) });
+    window.showToast?.(`Partner code ${d.code} is on.`);
+    loadPartners();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+async function partnerClearCode(id) {
+  const p = _partners.data.partners.find((x) => x.id === id);
+  if (!p) return;
+  const ok = await window.confirmModal(`Turn off <strong>${_pEsc(p.partnerCode)}</strong>? It stops working straight away. Customers who already used it stay theirs; their invite link keeps working.`,
+    { title: 'Turn off partner code', confirmLabel: 'Turn off' });
+  if (!ok) return;
+  try {
+    await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'partner_code', partnerId: id, code: null }) });
+    window.showToast?.('Partner code turned off.');
+    loadPartners();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+// An application with no account and no commission: delete it (a privacy request, or tidying up).
+// Declined ones are also deleted automatically 12 months after the decision (privacy.html §9).
+async function partnerEraseApplication(id) {
+  const p = _partners.data.partners.find((x) => x.id === id);
+  if (!p) return;
+  const ok = await window.confirmModal(`Erase <strong>${_pEsc(p.name || p.email || 'this application')}</strong>'s application? Their name, email and answers are deleted for good. This can't be undone.`,
+    { title: 'Erase application', confirmLabel: 'Erase', confirmColor: '#dc2626' });
+  if (!ok) return;
+  try {
+    await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'erase_application', partnerId: id }) });
+    window.showToast?.('Application erased.');
+    loadPartners();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+// What the approval / add / resend emailed, in one line for the toast.
+function _partnerEmailedLine(lead, emailed) {
+  if (!emailed || emailed.sent === 'none') return `${lead} No email could be sent — check their address.`;
+  return emailed.sent === 'account_link' ? `${lead} Emailed ${emailed.to} a link to set up their partner account.` : `${lead} Emailed ${emailed.to} a welcome.`;
+}
+
+async function partnerResendInvite(id) {
+  const p = _partners.data.partners.find((x) => x.id === id);
+  if (!p) return;
+  const ok = await window.confirmModal(`Email <strong>${_pEsc(p.email || 'them')}</strong> a new link to set up their partner account? Any earlier link stops working.`, { title: 'Resend account link', confirmLabel: 'Send link' });
+  if (!ok) return;
+  try {
+    const d = await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'resend_invite', partnerId: id }) });
+    window.showToast?.(_partnerEmailedLine('Link sent.', d.emailed));
+    loadPartners();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+function partnerOpenAdd() {
+  document.getElementById('partner-add-email').value = '';
+  document.getElementById('partner-add-note').value = '';
+  document.getElementById('partner-add-error').classList.add('hidden');
+  document.getElementById('partner-add-modal').classList.remove('hidden');
+}
+function partnerCloseAdd() { document.getElementById('partner-add-modal').classList.add('hidden'); }
+
+async function partnerSaveAdd() {
+  const btn = document.getElementById('partner-add-save');
+  const errEl = document.getElementById('partner-add-error');
+  btn.disabled = true;
+  errEl.classList.add('hidden');
+  try {
+    const d = await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      action: 'create', email: document.getElementById('partner-add-email').value, note: document.getElementById('partner-add-note').value,
+    }) });
+    partnerCloseAdd();
+    window.showToast?.(_partnerEmailedLine('Partner added.', d.emailed));
+    loadPartners();
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── Partner ledger + payouts (admin-partners.ts ?view=ledger / ?view=payouts) ─
+const _ledger = { filter: 'all', rows: [] };
+const _payouts = { data: null };
+const _lgStatus = {
+  pending: 'Waiting', payable: 'Ready to pay', paid: 'Paid', voided: 'Cancelled',
+};
+const _lgKind = { invoice: 'Commission', bonus: 'Bonus', adjustment: 'Refund adjustment' };
+
+async function loadLedger() {
+  const tbody = document.getElementById('ledger-tbody');
+  try {
+    const q = _ledger.filter === 'all' ? '' : `&status=${_ledger.filter}`;
+    _ledger.rows = (await api(`${PARTNERS_API}?view=ledger${q}`)).ledger || [];
+    document.getElementById('ledger-filter').innerHTML = [['all', 'All'], ['pending', 'Waiting'], ['payable', 'Ready'], ['paid', 'Paid'], ['voided', 'Cancelled']].map(([v, l]) => {
+      const on = _ledger.filter === v;
+      return `<button type="button" onclick="ledgerSetFilter('${v}')" class="px-2.5 py-1 rounded-full text-xs font-bold border cursor-pointer" style="${on ? 'background:#d6006b;border-color:#d6006b;color:#fff' : 'background:#fff;border-color:#e5e7eb;color:#6b7280'}">${l}</button>`;
+    }).join('');
+    tbody.innerHTML = _ledger.rows.map((r) => {
+      const what = r.kind === 'invoice'
+        ? `${_lgKind.invoice} · ${_pPct(r.rate_bps)} of ${_pMoney(r.net_amount_pence)}`
+        : `${_lgKind[r.kind] || r.kind}${r.note ? ' · ' + _pEsc(r.note) : ''}`;
+      const status = r.status === 'pending' ? `Waiting until ${_pDate(r.available_at)}`
+        : r.status === 'voided' ? `Cancelled${r.void_reason ? ' — ' + _pEsc(r.void_reason) : ''}`
+        : (_lgStatus[r.status] || r.status) + (r.payout_batch_id ? ` · run ${r.payout_batch_id}` : '');
+      const canVoid = (r.status === 'pending' || r.status === 'payable') && !r.payout_batch_id;
+      return `<tr class="border-t border-gray-100">
+        <td class="py-2 px-2 whitespace-nowrap text-gray-700">${_pDate(r.created_at)}</td>
+        <td class="py-2 px-2 text-gray-800">${_pEsc(r.name || r.email || 'Partner ' + r.partner_id)}</td>
+        <td class="py-2 px-2 text-gray-600">${what}</td>
+        <td class="py-2 px-2 text-right font-mono ${r.commission_pence < 0 ? 'text-red-600' : ''}">${_pMoney(r.commission_pence)}</td>
+        <td class="py-2 px-2 text-gray-600">${status}</td>
+        <td class="py-2 px-2 text-right whitespace-nowrap">${canVoid ? `<button type="button" onclick="ledgerVoid(${r.id})" class="btn-destructive px-2.5 py-1 text-xs font-bold rounded-lg border">Cancel</button>` : ''}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="6" class="py-6 text-center text-gray-400">No commission yet.</td></tr>';
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="6" class="py-4 text-red-500 text-sm">${_pEsc(e.message)}</td></tr>`;
+  }
+}
+function ledgerSetFilter(v) { _ledger.filter = v; loadLedger(); }
+
+async function ledgerVoid(id) {
+  const r = _ledger.rows.find((x) => x.id === id);
+  if (!r) return;
+  const reason = await window.promptModal(`Cancel this <strong>${_pMoney(r.commission_pence)}</strong> commission for <strong>${_pEsc(r.name || r.email || '')}</strong>? It won't be paid.<br><br>Reason (the partner sees this):`,
+    { title: 'Cancel commission', confirmLabel: 'Cancel commission', cancelLabel: 'Keep it' });
+  if (reason === null) return;
+  try {
+    await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'void', commissionId: id, reason }) });
+    window.showToast?.('Commission cancelled.');
+    loadPartners();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+function ledgerOpenBonus() {
+  const sel = document.getElementById('ledger-bonus-partner');
+  const eligible = (_partners.data?.partners || []).filter((p) => p.status === 'approved' || p.status === 'suspended');
+  sel.innerHTML = eligible.map((p) => `<option value="${p.id}">${_pEsc(p.name || p.email || 'Partner ' + p.id)}</option>`).join('') || '<option value="">No approved partners</option>';
+  document.getElementById('ledger-bonus-amount').value = '';
+  document.getElementById('ledger-bonus-note').value = '';
+  document.getElementById('ledger-bonus-error').classList.add('hidden');
+  document.getElementById('ledger-bonus-modal').classList.remove('hidden');
+}
+function ledgerCloseBonus() { document.getElementById('ledger-bonus-modal').classList.add('hidden'); }
+async function ledgerSaveBonus() {
+  const err = document.getElementById('ledger-bonus-error');
+  const btn = document.getElementById('ledger-bonus-save');
+  const amountPence = Math.round(Number(document.getElementById('ledger-bonus-amount').value) * 100);
+  btn.disabled = true; err.classList.add('hidden');
+  try {
+    await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      action: 'bonus', partnerId: Number(document.getElementById('ledger-bonus-partner').value), amountPence, note: document.getElementById('ledger-bonus-note').value,
+    }) });
+    ledgerCloseBonus();
+    window.showToast?.('Bonus added — it goes out in the next payout run.');
+    loadPartners();
+  } catch (e) { err.textContent = e.message; err.classList.remove('hidden'); }
+  finally { btn.disabled = false; }
+}
+
+async function loadPayouts() {
+  const pre = document.getElementById('payout-preview-tbody');
+  try {
+    _payouts.data = await api(`${PARTNERS_API}?view=payouts`);
+    const { preview, batches } = _payouts.data;
+    pre.innerHTML = preview.lines.map((l) => `<tr class="border-t border-gray-100">
+        <td class="py-2 px-2 text-gray-800">${_pEsc(l.name || l.email || 'Partner ' + l.partnerId)}</td>
+        <td class="py-2 px-2 text-gray-600">${_pEsc(l.payoutDisplay || '—')}</td>
+        <td class="py-2 px-2 text-right font-mono">${_pMoney(l.amountPence)}</td>
+        <td class="py-2 px-2">${l.due ? '<span class="text-xs font-bold text-emerald-700">Yes</span>' : `<span class="text-xs text-gray-500">${_pEsc(l.reason || 'No')}</span>`}</td>
+      </tr>`).join('') || '<tr><td colspan="4" class="py-4 text-center text-gray-400">Nothing is ready to pay.</td></tr>';
+    const due = preview.lines.filter((l) => l.due).length;
+    const btn = document.getElementById('payout-create-btn');
+    btn.disabled = !due;
+    btn.textContent = due ? `Create payout run (${due} · ${_pMoney(preview.totalDuePence)})` : 'Create payout run';
+    document.getElementById('payout-batches-tbody').innerHTML = batches.map((b) => {
+      const open = b.status === 'draft' || b.status === 'exported';
+      const files = [['wise_bank', 'Wise · bank', b.bank_partners], ['wise_email', 'Wise · email', b.wise_partners], ['paypal', 'PayPal', b.paypal_partners]]
+        .filter(([, , n]) => n > 0)
+        .map(([f, label, n]) => `<button type="button" onclick="payoutDownload(${b.id}, '${f}')" class="btn-utility px-2 py-1 text-xs font-bold rounded-lg">${label} (${n})</button>`).join(' ');
+      const statusLabel = { draft: 'Ready to export', exported: 'Exported — awaiting payment', paid: `Paid ${_pDate(b.paid_at)}`, cancelled: 'Cancelled' }[b.status] || b.status;
+      return `<tr class="border-t border-gray-100">
+        <td class="py-2 px-2 whitespace-nowrap text-gray-700">#${b.id} · ${_pDate(b.created_at)}</td>
+        <td class="py-2 px-2 text-gray-600">${statusLabel}</td>
+        <td class="py-2 px-2 text-right font-mono">${_pMoney(b.total_pence)}</td>
+        <td class="py-2 px-2 text-right">${b.partner_count}</td>
+        <td class="py-2 px-2 text-right whitespace-nowrap">${b.status !== 'cancelled' ? files : ''}
+          ${open ? `<button type="button" onclick="payoutMarkPaid(${b.id})" class="btn-golive px-2.5 py-1 text-xs font-bold rounded-lg border">Mark paid</button>
+                    <button type="button" onclick="payoutCancel(${b.id})" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">Cancel run</button>` : ''}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="5" class="py-4 text-center text-gray-400">No payout runs yet.</td></tr>';
+  } catch (e) {
+    pre.innerHTML = `<tr><td colspan="4" class="py-4 text-red-500 text-sm">${_pEsc(e.message)}</td></tr>`;
+  }
+}
+
+async function payoutCreate() {
+  const p = _payouts.data?.preview;
+  const due = (p?.lines || []).filter((l) => l.due);
+  if (!due.length) return;
+  const ok = await window.confirmModal(`Create a payout run for <strong>${due.length}</strong> partner${due.length === 1 ? '' : 's'}, totalling <strong>${_pMoney(p.totalDuePence)}</strong>? Their ready-to-pay commission is set aside for this run. Nothing is paid until you pay it in Wise / PayPal.`,
+    { title: 'Create payout run', confirmLabel: 'Create run' });
+  if (!ok) return;
+  try {
+    const r = await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create_batch' }) });
+    window.showToast?.(`Payout run #${r.batchId} created — download the files below.`);
+    loadPartners();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+// Same-origin download via fetch → blob, so an error shows as a message instead of a broken file.
+async function payoutDownload(batchId, format) {
+  try {
+    const res = await fetch(`${PARTNERS_API}?export=${format}&batchId=${batchId}`);
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'Download failed.'); }
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `bms-partners-${format}-run-${batchId}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    loadPayouts();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+async function payoutMarkPaid(batchId) {
+  const b = (_payouts.data?.batches || []).find((x) => x.id === batchId);
+  const ok = await window.confirmModal(`Mark run <strong>#${batchId}</strong> (${_pMoney(b?.total_pence || 0)}) as paid? Only do this once the money has actually gone out in Wise / PayPal. Partners will see it as paid.`,
+    { title: 'Mark payout run paid', confirmLabel: 'Mark paid' });
+  if (!ok) return;
+  try {
+    await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'mark_paid', batchId }) });
+    window.showToast?.(`Run #${batchId} marked paid.`);
+    loadPartners();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+async function payoutCancel(batchId) {
+  const ok = await window.confirmModal(`Cancel run <strong>#${batchId}</strong>? Its commission goes back to ready-to-pay and can go in the next run. If you've already paid anyone in it, mark it paid instead.`,
+    { title: 'Cancel payout run', confirmLabel: 'Cancel run', cancelLabel: 'Keep it', confirmColor: '#dc2626' });
+  if (!ok) return;
+  try {
+    await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cancel_batch', batchId }) });
+    window.showToast?.(`Run #${batchId} cancelled.`);
+    loadPartners();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+// ── Partner Ops chat (admin-partners-chat.ts) ───────────────────────────────
+// The conversation lives in the page (admin-only, short-lived). Cards carry the exact request the
+// Partners screen's own buttons send; confirming one POSTs it to admin-partners.ts unchanged.
+const OPS_API = '/.netlify/functions/admin-partners-chat';
+const _ops = { turns: [], busy: false };   // turns: { role, content, cards?: [{...card, state}] }
+
+const _opsCardButton = {
+  decision: (c) => ({ approve: 'btn-golive', reinstate: 'btn-secondary' }[c.request.decision] || 'btn-destructive'),
+  add_partner: () => 'btn-golive',
+};
+
+function _opsRender() {
+  const log = document.getElementById('ops-log');
+  if (!log) return;
+  document.getElementById('ops-starters').classList.toggle('hidden', _ops.turns.length > 0);
+  log.innerHTML = _ops.turns.map((t, i) => {
+    if (t.role === 'user') {
+      return `<div class="flex justify-end"><div class="max-w-[85%] bg-gray-100 rounded-2xl px-3 py-2 text-sm text-gray-900 whitespace-pre-wrap">${_pEsc(t.content)}</div></div>`;
+    }
+    const cards = (t.cards || []).map((c, j) => {
+      const btn = (_opsCardButton[c.kind] || (() => 'btn-primary'))(c);
+      const footer = c.state === 'done' ? '<span class="text-xs font-bold text-emerald-700">✓ Done</span>'
+        : c.state === 'dismissed' ? '<span class="text-xs text-gray-400">Dismissed</span>'
+        : `<button type="button" onclick="opsConfirm(${i}, ${j})" class="${btn} px-3 py-1.5 text-xs font-bold rounded-lg border"${c.state === 'busy' ? ' disabled' : ''}>${c.state === 'busy' ? 'Working…' : 'Confirm'}</button>
+           <button type="button" onclick="opsDismiss(${i}, ${j})" class="btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border">Dismiss</button>`;
+      return `<div class="border border-gray-200 rounded-xl p-3 bg-gray-50/60">
+        <p class="text-sm font-bold text-gray-900">${_pEsc(c.title)}</p>
+        <p class="text-xs text-gray-600 mt-0.5">${_pEsc(c.summary)}</p>
+        ${c.error ? `<p class="text-xs text-red-600 mt-1">${_pEsc(c.error)}</p>` : ''}
+        <div class="flex gap-2 mt-2 items-center">${footer}</div>
+      </div>`;
+    }).join('');
+    return `<div class="max-w-[92%] space-y-2">
+      <div class="bg-white border border-gray-200 rounded-2xl px-3 py-2 text-sm text-gray-800 whitespace-pre-wrap">${_pEsc(t.content)}</div>
+      ${cards}
+      <button type="button" onclick="opsCopy(${i})" class="btn-utility px-2 py-0.5 text-[11px] font-bold rounded-lg">Copy</button>
+    </div>`;
+  }).join('') + (_ops.busy ? '<p class="text-xs text-gray-400 animate-pulse">Partner Ops is looking…</p>' : '');
+  log.scrollTop = log.scrollHeight;
+}
+
+function opsAsk(text) { document.getElementById('ops-input').value = text; opsSend(); }
+
+async function opsSend() {
+  const input = document.getElementById('ops-input');
+  const text = input.value.trim();
+  if (!text || _ops.busy) return;
+  input.value = '';
+  _ops.turns.push({ role: 'user', content: text });
+  _ops.busy = true;
+  document.getElementById('ops-send').disabled = true;
+  _opsRender();
+  try {
+    const d = await api(OPS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: _ops.turns.map((t) => ({ role: t.role, content: t.content })) }) });
+    _ops.turns.push({ role: 'assistant', content: d.reply, cards: (d.cards || []).map((c) => ({ ...c, state: 'open' })) });
+  } catch (e) {
+    _ops.turns.pop();           // let them ask again; the failed question goes back in the box
+    input.value = text;
+    window.showToast?.(e.message, { icon: '⚠️' });
+  } finally {
+    _ops.busy = false;
+    document.getElementById('ops-send').disabled = false;
+    _opsRender();
+  }
+}
+
+async function opsConfirm(i, j) {
+  const card = _ops.turns[i]?.cards?.[j];
+  if (!card || card.state !== 'open') return;
+  card.state = 'busy'; card.error = null;
+  _opsRender();
+  try {
+    await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(card.request) });
+    card.state = 'done';
+    window.showToast?.('Done.');
+    loadPartners();
+  } catch (e) {
+    card.state = 'open';
+    card.error = e.message;
+  }
+  _opsRender();
+}
+
+function opsDismiss(i, j) { const c = _ops.turns[i]?.cards?.[j]; if (c && c.state === 'open') { c.state = 'dismissed'; _opsRender(); } }
+
+async function opsCopy(i) {
+  try { await navigator.clipboard.writeText(_ops.turns[i].content); window.showToast?.('Copied.'); }
+  catch { window.showToast?.('Could not copy — select the text instead.', { icon: '⚠️' }); }
+}
+
+function opsClear() { _ops.turns = []; _opsRender(); }
+
 
 // ── Analytics ─────────────────────────────────────────────────────────────────
 async function loadAnalytics() {

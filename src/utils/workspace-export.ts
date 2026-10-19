@@ -148,7 +148,20 @@ export async function buildDataExport(db: Db, scope: ExportScope) {
         chatMessages.push(...await rowsWhere(db, s.chatMessages, inArray(s.chatMessages.chatSessionId, chatIds.slice(i, i + 500))));
     }
 
+    // Affiliate partner (docs/affiliate-partner-programme-plan.md §4.8): their own partner record,
+    // commission and payouts, and link visits. The customers they introduced are other people — only a
+    // COUNT is included, never who they are. Payout details stay in the vault; the row carries only the
+    // masked summary, and token hashes are dropped by stripSecrets.
+    const [partnerRow] = await rowsWhere(db, s.partners, eq(s.partners.userId, userId));
+    const partner = partnerRow ? {
+        record: partnerRow,
+        commissions: await rowsWhere(db, s.partnerCommissions, eq(s.partnerCommissions.partnerId, partnerRow.id as number)),
+        linkVisitsByDay: await rowsWhere(db, s.partnerLinkStats, eq(s.partnerLinkStats.partnerId, partnerRow.id as number)),
+        customersIntroduced: (await db.select({ id: s.partnerReferrals.id }).from(s.partnerReferrals).where(eq(s.partnerReferrals.partnerId, partnerRow.id as number))).length,
+    } : null;
+
     const you = {
+        partner,
         account: userRows[0] ?? null,
         profile: profileRows[0] ?? null,
         termsAcceptances: tosRows,

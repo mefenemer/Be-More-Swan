@@ -14,6 +14,7 @@
 //   - Writes gdpr_erasure_log + admin_audit_log
 //   - Sends confirmation email to the original address before anonymisation
 
+import { erasePartnerDataForUser } from '../../src/utils/partner-erasure';
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import * as crypto from 'crypto';
@@ -229,6 +230,13 @@ export default withLambda(async (event) => {
             }
         }
 
+        // ── 9c. Affiliate partner: application, partner code and vault payout details erased; the
+        //        commission ledger is kept (tax law) and no longer identifies anyone.
+        const partnerErasure = await erasePartnerDataForUser(db, targetUserId).catch((err) => {
+            console.error('[admin-gdpr-erase] partner erasure failed:', err);
+            return { erased: false, partnerId: null, failed: true };
+        });
+
         // ── 10. Purge workspace assets (US-GDPR-2.2.1) ───────────────────────
         const purgeResult = await purgeUserAssets(db, targetUserId).catch(() => ({
             assetsPurged: 0, storageBytesFreed: 0, embeddingsDeleted: 0, partialFailures: ['purge_threw'],
@@ -250,9 +258,11 @@ export default withLambda(async (event) => {
                     'aiAssistants.systemPrompt',
                     'aiUsageLog.sessionId',
                     'aiUsageLog.userId',
+                    ...(partnerErasure.erased ? ['partners (application, partner code, payout details in the vault)'] : []),
                 ],
-                ...(purgeResult.partialFailures.length > 0
-                    ? { partialFailures: purgeResult.partialFailures, erasureStatus: 'PARTIAL' }
+                ...(partnerErasure.erased ? { partnerLedgerKept: 'commission and payout records kept for 7 years (tax law), no longer identifying anyone' } : {}),
+                ...(purgeResult.partialFailures.length > 0 || 'failed' in partnerErasure
+                    ? { partialFailures: [...purgeResult.partialFailures, ...('failed' in partnerErasure ? ['partner_erasure'] : [])], erasureStatus: 'PARTIAL' }
                     : {}),
             },
         });

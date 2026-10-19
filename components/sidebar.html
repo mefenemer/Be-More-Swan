@@ -86,6 +86,13 @@
         <span class="nav-label" data-i18n="workspace.nav.refer_a_friend">Refer a Friend</span>
       </a>
 
+      <!-- Affiliate partners only (check-capacity partnerStatus): shown by workspace.html once it knows.
+           Hidden by default so nobody else ever sees it flash in. -->
+      <a href="#" id="nav-partner" class="hidden flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-colors text-gray-600 hover:bg-gray-100 hover:text-gray-900" style="display:none">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        <span class="nav-label" data-i18n="workspace.nav.partner">Partner</span>
+      </a>
+
       <!-- Feature Requests & Roadmap now lives inside Help & Support (help-content.html) as a tab -->
 
       <!-- Issue #137: Report an Issue moved to the workspace header (icon next to Notifications) -->
