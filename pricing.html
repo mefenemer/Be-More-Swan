@@ -143,7 +143,7 @@
                     <h2 id="card-tier-t1" class="text-xl font-extrabold text-gray-900 mb-3 leading-snug">Best for Solo Operators</h2>
                     <p id="card-desc-t1" class="text-sm text-gray-500 leading-relaxed mb-4 italic">Reclaim hours every day. Hand your most draining task to a helper that never takes a day off.</p>
                     <div class="flex items-end gap-1 mb-1">
-                        <span id="card-price-t1" class="text-4xl font-extrabold text-gray-900 leading-none">£29</span>
+                        <span id="card-price-t1" class="text-4xl font-extrabold text-gray-900 leading-none">&nbsp;</span>
                         <span class="text-gray-400 text-base font-medium mb-1">/month</span>
                     </div>
                     <p id="card-note-t1" class="text-xs text-gray-400 mt-1">Billed monthly · cancel any time</p>
@@ -208,7 +208,7 @@
                     <h2 id="card-tier-t2" class="text-xl font-extrabold text-gray-900 mb-3 leading-snug">Best for Scaling Founders</h2>
                     <p id="card-desc-t2" class="text-sm text-gray-500 leading-relaxed mb-4 italic">Scale your business with autonomous goal tracking, an in-house editor, and your own mini digital department.</p>
                     <div class="flex items-end gap-1 mb-1">
-                        <span id="card-price-t2" class="text-4xl font-extrabold text-gray-900 leading-none">£79</span>
+                        <span id="card-price-t2" class="text-4xl font-extrabold text-gray-900 leading-none">&nbsp;</span>
                         <span class="text-gray-400 text-base font-medium mb-1">/month</span>
                     </div>
                     <p id="card-note-t2" class="text-xs text-gray-400 mt-1">Billed monthly · cancel any time</p>
@@ -314,8 +314,8 @@
              The hero's strongest line ("less than the cost of a single day of agency time") was
              asserted once and never made checkable. This makes the arithmetic explicit. The
              comparison figures are typical UK market RANGES, labelled as illustrative — they are
-             not quotes and must not be presented as ours. Update `cost-per-day` if prices move:
-             it is derived in updatePriceDisplay() from the same source as the cards. -->
+             not quotes and must not be presented as ours. `cost-per-day` is derived in
+             updatePriceDisplay() from the plan price in master data, like the cards. -->
         <div class="max-w-4xl mx-auto mt-14">
             <h2 class="text-2xl font-extrabold text-gray-900 text-center mb-2">What you'd pay to get this done otherwise</h2>
             <p class="text-gray-500 text-center text-sm mb-8 max-w-2xl mx-auto">
@@ -349,12 +349,12 @@
                             <p class="font-extrabold pk-stat-num text-sm">Be More Swan — <span id="anchor-plan-name">The Busywork Buster</span></p>
                             <p class="text-xs pk-stat-lbl mt-0.5">Every assistant working around the clock, no holiday, no sick pay, no notice period</p>
                         </div>
-                        <p class="text-xl font-extrabold pk-stat-num whitespace-nowrap"><span id="anchor-price">£79</span><span class="text-xs font-medium pk-stat-lbl">/mo</span></p>
+                        <p class="text-xl font-extrabold pk-stat-num whitespace-nowrap"><span id="anchor-price">&nbsp;</span><span class="text-xs font-medium pk-stat-lbl">/mo</span></p>
                     </div>
                 </div>
             </div>
             <p class="text-center text-sm text-gray-500 mt-4">
-                That's <strong id="cost-per-day" class="pk-text-dark">about £2.60 a day</strong> — and it doesn't stop at 5pm.
+                That's <strong id="cost-per-day" class="pk-text-dark">&nbsp;</strong> — and it doesn't stop at 5pm.
             </p>
             <p class="text-center text-[11px] text-gray-400 mt-2">
                 Comparison figures are illustrative UK market ranges for equivalent work, not quotations.
@@ -441,14 +441,14 @@
                             <th class="text-center px-4 py-5 bg-gray-50 w-[15%]" style="vertical-align:top">
                                 <div class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-0.5">Tier 1</div>
                                 <div id="tbl-name-t1" class="font-extrabold text-gray-900 text-sm leading-snug">The Workflow<br>Saver</div>
-                                <div id="tbl-price-t1" class="font-extrabold text-gray-900 text-base mt-1.5">£29</div>
+                                <div id="tbl-price-t1" class="font-extrabold text-gray-900 text-base mt-1.5">&nbsp;</div>
                                 <div class="text-[10px] text-gray-400 mt-0.5">/ month</div>
                                 <div class="mt-2" id="tbl-pill-t1"></div>
                             </th>
                             <th class="text-center px-4 py-5 w-[15%] pk-col-th" style="vertical-align:top">
                                 <div class="text-[10px] font-bold uppercase tracking-wider pk-text mb-0.5">Tier 2</div>
                                 <div id="tbl-name-t2" class="font-extrabold text-gray-900 text-sm leading-snug">The Busywork<br>Buster</div>
-                                <div id="tbl-price-t2" class="font-extrabold text-gray-900 text-base mt-1.5">£79</div>
+                                <div id="tbl-price-t2" class="font-extrabold text-gray-900 text-base mt-1.5">&nbsp;</div>
                                 <div class="text-[10px] text-gray-400 mt-0.5">/ month</div>
                                 <div class="mt-2" id="tbl-pill-t2"><span class="pk-pill inline-block text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full">Popular</span></div>
                             </th>
@@ -691,7 +691,7 @@
                      after a price change in the DB and ignored the monthly/annual toggle entirely. -->
                 <a href="#" onclick="event.preventDefault(); choosePlan('pro_team');"
                    class="btn-inverse inline-flex items-center justify-center gap-2 px-8 py-4 font-bold rounded-xl shadow-md transition text-base">
-                    Start with <span id="final-cta-name">The Busywork Buster</span> — <span id="final-cta-price">£79</span>/mo
+                    Start with <span id="final-cta-name">The Busywork Buster</span> — <span id="final-cta-price">&nbsp;</span>/mo
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
                 </a>
                 <button onclick="openEnterpriseModal()"
@@ -762,62 +762,49 @@
     // ── Billing cycle state ────────────────────────────────────────
     let _billingCycle = 'monthly'; // 'monthly' | 'annual'
 
-    // ── US-I18N-2.1: Multi-currency support ───────────────────────
-    const CURRENCY_CONFIG = {
-        GBP: { symbol: '£', locale: 'en-GB', monthly: [29,  79],  annual: [23,  63],  annualTotal: [276,  756] },
-        USD: { symbol: '$', locale: 'en-US', monthly: [35,  95],  annual: [28,  76],  annualTotal: [336,  912] },
-        EUR: { symbol: '€', locale: 'de-DE', monthly: [29,  79],  annual: [23,  63],  annualTotal: [276,  756] },
-        AUD: { symbol: 'A$', locale: 'en-AU', monthly: [55,  143], annual: [44,  114], annualTotal: [528,  1368] },
-        CAD: { symbol: 'C$', locale: 'en-CA', monthly: [49,  127], annual: [39,  102], annualTotal: [468,  1224] },
-    };
-    const SUPPORTED_CURRENCIES = Object.keys(CURRENCY_CONFIG);
-    let _currency = localStorage.getItem('aura_currency') || 'GBP';
-    if (!SUPPORTED_CURRENCIES.includes(_currency)) _currency = 'GBP';
+    // ── Prices: master data only ───────────────────────────────────
+    // Every price on this page comes from get-plans (Admin ▸ Master Data ▸ Plans → master_plans).
+    // None is written in this file (owner, 2026-10-19): the old hardcoded fallbacks kept showing
+    // £79 after the plan became £69, to anyone who saw the page before the fetch landed, and the
+    // US$/€/A$/C$ switcher showed hand-set prices while checkout always charges in pounds.
+    // annualMonthlyGbp / annualTotalGbp are computed server-side by the helper both checkouts
+    // charge with (src/utils/stripe-price.ts), so the advertised yearly price is the charged one.
+    // Card slot → master_plans.tierKey. Fixed by product identity (NOT price order, which the
+    // Admin can change): t1 = The Workflow Saver, t2 = The Busywork Buster. The Digital Employee
+    // ('employee') is no longer sold (17 Oct 2026); get-plans omits it as an inactive plan.
+    const GBP_TIER_ORDER = ['saver', 'buster'];
+    const PRICES = { t1: null, t2: null }; // { monthly, annualMonthly, annualTotal } in GBP
 
-    function fmtPrice(amount, currency) {
-        const cfg = CURRENCY_CONFIG[currency] || CURRENCY_CONFIG.GBP;
-        return cfg.symbol + amount.toLocaleString(cfg.locale);
+    function fmtGbp(amount) {
+        return '£' + Number(amount).toLocaleString('en-GB', { maximumFractionDigits: 2 });
     }
-
-    window.setCurrency = function(c) {
-        if (!SUPPORTED_CURRENCIES.includes(c)) return;
-        _currency = c;
-        localStorage.setItem('aura_currency', c);
-        updatePriceDisplay();
-        // Update selector if present
-        const sel = document.getElementById('currency-selector');
-        if (sel) sel.value = c;
-    };
 
     /** Average days in a month — turns a monthly price into the "about £X a day" anchor. */
     const DAYS_PER_MONTH = 30.44;
 
     function updatePriceDisplay() {
-        const cfg = CURRENCY_CONFIG[_currency] || CURRENCY_CONFIG.GBP;
         const isAnnual = _billingCycle === 'annual';
-        const prices = isAnnual ? cfg.annual : cfg.monthly;
-        const tiers = ['t1', 't2'];
-        tiers.forEach((t, i) => {
+        ['t1', 't2'].forEach((t) => {
+            const p = PRICES[t];
+            if (!p) return; // not loaded: leave the slot blank rather than show a made-up number
+            const priceStr = fmtGbp(isAnnual ? p.annualMonthly : p.monthly);
             const priceEl = document.getElementById('card-price-' + t);
             const noteEl  = document.getElementById('card-note-' + t);
             const saveEl  = document.getElementById('card-save-' + t);
             const tblEl   = document.getElementById('tbl-price-' + t);
-            const priceStr = fmtPrice(prices[i], _currency);
             if (priceEl) priceEl.textContent = priceStr;
             if (tblEl)   tblEl.textContent   = priceStr;
             if (noteEl) {
-                if (isAnnual) {
-                    noteEl.textContent = `Billed ${fmtPrice(cfg.annualTotal[i], _currency)} annually · cancel any time`;
-                } else {
-                    noteEl.textContent = 'Billed monthly · cancel any time';
-                }
+                noteEl.textContent = isAnnual
+                    ? `Billed ${fmtGbp(p.annualTotal)} annually · cancel any time`
+                    : 'Billed monthly · cancel any time';
             }
             // Annual saving in cash. A concrete "Save £192 a year" reads harder than the 20% badge
             // on the toggle, so the card carries the amount and the toggle carries the rate.
             if (saveEl) {
-                const saving = (cfg.monthly[i] * 12) - cfg.annualTotal[i];
+                const saving = (p.monthly * 12) - p.annualTotal;
                 if (isAnnual && saving > 0) {
-                    saveEl.textContent = `Save ${fmtPrice(saving, _currency)} a year`;
+                    saveEl.textContent = `Save ${fmtGbp(saving)} a year`;
                     saveEl.style.display = '';
                 } else {
                     saveEl.style.display = 'none';
@@ -825,29 +812,18 @@
             }
         });
 
-        // Value anchor + final CTA both quote the middle tier (t2) at its CURRENT cycle price,
-        // so they can never drift from the cards the way the old hardcoded "£79/mo" did.
-        const t2Monthly = prices[1];
+        // Value anchor + final CTA both quote the middle tier (t2) at its CURRENT cycle price.
+        const p2 = PRICES.t2;
+        if (!p2) return;
+        const t2Shown = isAnnual ? p2.annualMonthly : p2.monthly;
         const anchorEl = document.getElementById('anchor-price');
-        if (anchorEl) anchorEl.textContent = fmtPrice(t2Monthly, _currency);
+        if (anchorEl) anchorEl.textContent = fmtGbp(t2Shown);
         const perDayEl = document.getElementById('cost-per-day');
-        if (perDayEl) {
-            const perDay = t2Monthly / DAYS_PER_MONTH;
-            const cur = CURRENCY_CONFIG[_currency] || CURRENCY_CONFIG.GBP;
-            perDayEl.textContent = `about ${cur.symbol}${perDay.toFixed(2)} a day`;
-        }
+        if (perDayEl) perDayEl.textContent = `about £${(t2Shown / DAYS_PER_MONTH).toFixed(2)} a day`;
         const finalPriceEl = document.getElementById('final-cta-price');
-        if (finalPriceEl) finalPriceEl.textContent = fmtPrice(t2Monthly, _currency);
+        if (finalPriceEl) finalPriceEl.textContent = fmtGbp(t2Shown);
     }
 
-    // Single source of truth: pull the live GBP prices from the DB (get-plans → master_plans)
-    // so a price change in the Admin Portal shows here without editing this file. GBP only is
-    // managed centrally today; the hardcoded values below stay as pre-fetch fallbacks and for
-    // the other display currencies. Annual = round(monthly × 0.8), matching checkout.
-    // Card slot → master_plans.tierKey. Fixed by product identity (NOT price order, which the
-    // Admin can change): t1 = The Workflow Saver, t2 = The Busywork Buster. The Digital Employee
-    // ('employee') is no longer sold (17 Oct 2026); get-plans omits it as an inactive plan.
-    const GBP_TIER_ORDER = ['saver', 'buster'];
     async function syncLivePricesGBP() {
         try {
             const r = await fetch('/.netlify/functions/get-plans');
@@ -860,21 +836,17 @@
             renderPlanCards(plans.concat(enterprisePlan ? [enterprisePlan] : []));
             // Plan Features: render the DB-driven comparison table (overwrites the static fallback tbody).
             renderComparisonTable(plans, featureCatalog);
-            const byTier = {};
-            plans.forEach(p => { if (p.tierKey) byTier[p.tierKey] = Number(p.monthlyPriceGbp); });
-            const gbp = CURRENCY_CONFIG.GBP;
             GBP_TIER_ORDER.forEach((tk, i) => {
-                const m = byTier[tk];
-                if (!(m > 0)) return; // keep hardcoded fallback if this tier is missing
-                const annual = Math.round(m * 0.8); // monthly-equivalent shown on annual cards
-                gbp.monthly[i] = m;
-                gbp.annual[i] = annual;
-                gbp.annualTotal[i] = annual * 12;
-                const tKey = 't' + (i + 1);
-                BILLING_CONFIG.monthly[tKey] = { price: '£' + m.toLocaleString('en-GB'), note: 'Billed monthly · cancel any time' };
-                BILLING_CONFIG.annual[tKey]  = { price: '£' + annual.toLocaleString('en-GB'), note: `Billed £${(annual * 12).toLocaleString('en-GB')} annually · cancel any time` };
+                const plan = plans.find((p) => p.tierKey === tk);
+                const monthly = Number(plan?.monthlyPriceGbp);
+                if (!(monthly > 0)) return;
+                PRICES['t' + (i + 1)] = {
+                    monthly,
+                    annualMonthly: Number(plan.annualMonthlyGbp),
+                    annualTotal: Number(plan.annualTotalGbp),
+                };
             });
-        } catch { /* non-critical — fall back to the hardcoded prices */ }
+        } catch { /* the price slots stay blank; nothing invented */ }
     }
 
     // ── Plan Features: DB-driven comparison table ────────────────────────────
@@ -903,7 +875,7 @@
         if (def.valueType === 'boolean') return cmpTruthy(value) ? CMP_CHECK : CMP_DASH;
         let text;
         // No assistant cap on a purchasable plan = every role in the library. The catalog's
-        // unlimitedLabel ("Custom") is the Enterprise wording and would misdescribe the £79 plan.
+        // unlimitedLabel ("Custom") is the Enterprise wording and would misdescribe the £69 plan.
         if ((value === null || value === undefined || value === '') && def.key === 'assistant_limit') text = 'All';
         else if (value === null || value === undefined || value === '') text = def.unlimitedLabel || '—';
         else if (def.valueType === 'number') text = Number(value).toLocaleString('en-GB');
@@ -1017,7 +989,7 @@
             // edit in Master Data → Plan Features moves the pink boxes with no code change.
             // Contact-sales (Enterprise) has no numeric limits: apps read "Bespoke", the rest "∞".
             const unlimitedApps = plan.isContactSales ? 'Bespoke' : '∞';
-            // No assistant cap = every role in the library ("All"), the £79 plan's headline.
+            // No assistant cap = every role in the library ("All"), the £69 plan's headline.
             setStatBox('stat-asst-' + slot, plan.assistantLimit, plan.isContactSales ? '∞' : 'All', false);
             setStatBox('stat-task-' + slot, plan.monthlyTaskLimit, '∞', true);
             setStatBox('stat-app-'  + slot, plan.appConnectionLimit, unlimitedApps, false);
@@ -1033,18 +1005,6 @@
         }
     }
 
-    const BILLING_CONFIG = {
-        monthly: {
-            t1: { price: '£29',  note: 'Billed monthly · cancel any time' },
-            t2: { price: '£79',  note: 'Billed monthly · cancel any time' },
-        },
-        annual: {
-            // Monthly equivalent shown on cards; actual charge is the annual total below.
-            t1: { price: '£23',  note: 'Billed £276 annually · cancel any time' },
-            t2: { price: '£63',  note: 'Billed £756 annually · cancel any time' },
-        },
-    };
-
     window.setBillingCycle = function (cycle) {
         _billingCycle = cycle;
 
@@ -1055,17 +1015,6 @@
         // Show/hide annual note
         const note = document.getElementById('billing-cycle-note');
         if (note) note.style.display = cycle === 'annual' ? 'block' : 'none';
-
-        // Update card prices
-        const cfg = BILLING_CONFIG[cycle];
-        ['t1', 't2'].forEach(t => {
-            const priceEl = document.getElementById('card-price-' + t);
-            const noteEl  = document.getElementById('card-note-' + t);
-            const tblEl   = document.getElementById('tbl-price-' + t);
-            if (priceEl) priceEl.textContent = cfg[t].price;
-            if (noteEl)  noteEl.textContent  = cfg[t].note;
-            if (tblEl)   tblEl.textContent   = cfg[t].price;
-        });
 
         // Persist for checkout handoff
         sessionStorage.setItem('billing_cycle', cycle);
@@ -1090,7 +1039,7 @@
 
     // Card CTA identifiers → canonical master_plans tier keys. The cards use legacy labels
     // (starter/pro_team/business); the system + Stripe speak saver/buster/employee. Anchored on
-    // the advertised price: starter £29 = saver, pro_team £79 = buster. ('business' was the
+    // the advertised price: starter £29 = saver, pro_team £69 = buster. ('business' was the
     // retired £349 Digital Employee; no card offers it any more.)
     const CARD_TIER = { starter: 'saver', pro_team: 'buster' };
     // Logged out, every plan button starts the free 14-day trial: sign up with NO plan choice, so
@@ -1111,9 +1060,10 @@
         const planTier = CARD_TIER[tier] || tier; // normalise to the canonical system tier
         const cycle = _billingCycle || 'monthly';
         sessionStorage.setItem('billing_cycle', cycle);
-        sessionStorage.setItem('aura_currency', _currency); // US-I18N-2.1 SC3: pass currency to checkout
+        // Checkout charges in pounds only; the old currency switcher is gone (2026-10-19).
+        sessionStorage.removeItem('aura_currency');
         if (isLoggedIn()) {
-            window.location.href = 'checkout.html?tier=' + planTier + '&cycle=' + cycle + '&currency=' + _currency;
+            window.location.href = 'checkout.html?tier=' + planTier + '&cycle=' + cycle;
         } else {
             // Free trial first: no pending_tier, so no checkout after verification.
             sessionStorage.removeItem('pending_tier');
@@ -1188,37 +1138,11 @@
         setupMobileMenu();
         if (window.i18n) window.i18n.apply();
 
-        // Pull live GBP prices from the DB before first render so the Admin Portal is the single
-        // source of truth for pricing shown here.
+        // The prices come from the DB (Admin Portal) and nowhere else; until they arrive the price
+        // slots are blank.
         await syncLivePricesGBP();
 
-        // US-I18N-2.1 SC2: Detect currency from geo-IP if not already stored
-        if (!localStorage.getItem('aura_currency')) {
-            fetch('/.netlify/functions/detect-currency')
-                .then(r => r.ok ? r.json() : null)
-                .then(d => { if (d?.currency) setCurrency(d.currency); })
-                .catch(() => {});
-        } else {
-            updatePriceDisplay();
-        }
-
-        // Inject currency selector near billing toggle
-        const toggleArea = document.getElementById('toggle-monthly')?.closest('div');
-        if (toggleArea && !document.getElementById('currency-selector')) {
-            const wrap = document.createElement('div');
-            wrap.className = 'flex items-center gap-2 mt-3';
-            wrap.innerHTML = `<label class="text-xs text-gray-500 font-medium">Currency:</label>
-              <select id="currency-selector" onchange="setCurrency(this.value)"
-                class="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-white">
-                <option value="GBP">£ GBP</option>
-                <option value="USD">$ USD</option>
-                <option value="EUR">€ EUR</option>
-                <option value="AUD">A$ AUD</option>
-                <option value="CAD">C$ CAD</option>
-              </select>`;
-            toggleArea.parentElement.insertAdjacentElement('afterend', wrap);
-            document.getElementById('currency-selector').value = _currency;
-        }
+        updatePriceDisplay();
 
         // US-GAP-8.2: capture a referral code arriving on ?ref= (e.g. the co-branded powered-by
         // page) into the same sessionStorage key register.html reads, so attribution survives the

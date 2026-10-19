@@ -195,6 +195,9 @@ export const EMAIL_VARIABLES: EmailVariable[] = [
     { key: 'beta.ends_on', label: 'Beta end date', group: 'Billing', sample: 'Friday 13 November 2026' },
     { key: 'beta.plan_name', label: 'Plan offered', group: 'Billing', sample: 'The Workflow Saver' },
     { key: 'beta.offer_line', label: 'Founding offer sentence', group: 'Billing', sample: 'As a founding member, you can carry on with The Workflow Saver for £20.30 a month for your first 12 months (then £29) — code FOUNDER30 is already applied at the link below.' },
+    // Plan prices are read from master_plans at send time (trial-sweep.ts), never typed into a template.
+    { key: 'plans.saver_price', label: 'Workflow Saver monthly price', group: 'Billing', sample: '(the live Workflow Saver price)' },
+    { key: 'plans.buster_price', label: 'Busywork Buster monthly price', group: 'Billing', sample: '(the live Busywork Buster price)' },
     { key: 'link.action_url', label: 'Primary action URL', group: 'System', sample: `${BASE_URL}/dashboard.html` },
     { key: 'system.app_url', label: 'App URL', group: 'System', sample: BASE_URL },
 ];

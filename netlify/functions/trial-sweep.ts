@@ -12,6 +12,7 @@ import { and, eq, inArray, isNotNull, isNull, notInArray } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { organisations, plans, trials, users } from '../../db/schema';
+import { planPriceVars } from '../../src/utils/plan-price-tokens';
 import { FREE_PLAN_TYPES } from '../../src/config/beta-plan';
 import { sendTemplatedEmail } from '../../src/utils/email';
 import { dueTrials, endTrialFor, resumeAfterTrialConversion, trialsNeedingReminder } from '../../src/utils/trial';
@@ -23,12 +24,16 @@ async function emailVars(db: Db, trial: typeof trials.$inferSelect, baseUrl: str
         ? await db.select({ email: users.email, firstName: users.firstName }).from(users).where(eq(users.id, trial.userId)).limit(1)
         : [];
     const [org] = await db.select({ name: organisations.name }).from(organisations).where(eq(organisations.id, trial.organisationId)).limit(1);
+    // The plan prices the email quotes come from master data (Admin ▸ Master Data ▸ Plans), so a
+    // price change reaches this email with no template edit — "£79" outlived the move to £69 here.
+    const prices = await planPriceVars(db);
     return {
         to: owner?.email ?? null,
         vars: {
             user: { first_name: owner?.firstName ?? '' },
             workspace: { name: org?.name ?? '' },
             trial: { ends_on: trial.endsAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/London' }) },
+            plans: prices,
             link: { action_url: `${baseUrl}/workspace.html?action=select-plan` },
         },
     };
