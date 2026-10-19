@@ -17,6 +17,7 @@ import { backfillLivePlanForOrg } from '../../src/utils/plan-stripe-refs';
 import { qualifyPendingReferral } from '../../src/utils/referral-offer';
 import { invoiceNetPence, recordPartnerPayment, reversePartnerCommission, sessionNetPence, type PartnerPayment } from '../../src/utils/partner-ledger';
 import { finishPlanMove } from '../../src/utils/plan-moves';
+import { planStatusForCancelFlag } from '../../src/utils/subscription-cancel-state';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
@@ -1019,6 +1020,21 @@ export default withLambda(async (event) => {
     // We enforce the new assistant limit: pause excess assistants oldest-first.
     if (stripeEvent.type === 'customer.subscription.updated') {
         const sub    = stripeEvent.data.object as Stripe.Subscription;
+
+        // ── Cancellation set or undone (src/utils/subscription-cancel-state.ts) ──────────
+        // Match on THIS subscription only, and only 'active' ↔ 'cancelling'. Undoing a cancellation
+        // in Stripe used to leave the plan 'cancelling' for good, which blocked Override
+        // Subscription and kept the billing page saying the customer was leaving.
+        const [cancelRow] = await db.select({ id: plans.id, status: plans.status })
+            .from(plans).where(eq(plans.stripeSubscriptionId, sub.id)).limit(1);
+        const nextCancelStatus = planStatusForCancelFlag(cancelRow?.status, sub as any);
+        if (cancelRow && nextCancelStatus) {
+            await db.update(plans)
+                .set({ status: nextCancelStatus, updatedAt: new Date() })
+                .where(and(eq(plans.id, cancelRow.id), eq(plans.status, cancelRow.status)));
+            console.log(`[stripe-webhook] ${sub.id}: plan ${cancelRow.id} ${cancelRow.status} → ${nextCancelStatus} (Stripe cancel flag)`);
+        }
+
         const userId = await _resolveUserIdFromSub(sub);
         if (userId) {
             // Resolve new plan limits from subscription metadata
