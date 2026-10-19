@@ -140,12 +140,14 @@ check('get-assistants sends the goal direction the card relies on', () => {
 
 console.log('\nWidgets: recent work, agenda, capacity');
 const catalog = slice(dash, 'const CATALOG = {', '};');
-check('all three are in the catalog, the order and DEFAULT_ON', () => {
-    for (const k of ['recent-work', 'agenda', 'capacity']) {
+check('recent work and agenda are in the catalog, the order and DEFAULT_ON; task usage is not a widget', () => {
+    for (const k of ['recent-work', 'agenda']) {
         assert.ok(catalog.includes(`'${k}'`), `${k} not in CATALOG`);
         assert.ok(new RegExp(`'${k}':\\s*true`).test(dash), `${k} not default-on`);
         assert.ok(new RegExp(`const ORDER = \\[[^\\]]*'${k}'`).test(dash), `${k} not in ORDER`);
     }
+    // Owner, 2026-10-19: tasks this month lives in the Command Center, not the grid.
+    assert.ok(!catalog.includes(`'capacity'`), 'the task usage card is back in the widget grid');
 });
 check('a SAVED layout gets new widgets in their default state, not switched off', () => {
     const merge = slice(dash, 'function mergeCatalog(l) {', 'function save()');
@@ -163,13 +165,19 @@ check('agenda shows only BOOKED items — status scheduled in every source', () 
     const fn = slice(read('src/utils/team-activity.ts'), 'export async function loadBooked(', '// ── The chat block');
     assert.strictEqual((fn.match(/\.status, 'scheduled'\)/g) || []).length, 3, 'a source not limited to scheduled rows');
     assert.ok(!/pending_approval|'draft'/.test(fn.replace(/\/\/.*$/gm, '')), 'agenda reads unbooked rows');
-    const r = slice(dash, 'async function renderAgenda(el)', 'async function renderCapacity');
+    const r = slice(dash, 'async function renderAgenda(el)', 'async function renderTaskUsage');
     assert.ok(r.includes('esc(x.label)'));
 });
-check('capacity reads the task cap and the credit balance', () => {
-    const r = slice(dash, 'async function renderCapacity(el)', 'function renderTips');
-    assert.ok(r.includes('check-capacity') && r.includes('get-ai-credit-balance'));
-    assert.ok(r.includes('taskLimit') && r.includes('balance'));
+check('task usage sits under the three tiles, above the heatmap, and reads the cap and the per-assistant split', () => {
+    const tiles = dash.indexOf('Estimated Money Saved</div>');
+    const slot = dash.indexOf('<div class="cc-usage" id="cc-usage"');
+    const heat = dash.indexOf('<div class="cc-heatmap-wrap">');
+    assert.ok(tiles > 0 && slot > tiles && heat > slot, 'tiles → tasks this month → heatmap');
+    const r = slice(dash, 'async function renderTaskUsage(el)', 'function renderTips');
+    assert.ok(r.includes('check-capacity') && r.includes('get-usage-summary'));
+    assert.ok(r.includes('cap.noPlan ? \'No plan yet\''), 'no plan must never read as unlimited');
+    assert.ok(r.includes('r.assistantId != null'), '"Unattributed" is not an assistant');
+    assert.ok(dash.includes("renderTaskUsage(document.getElementById('cc-usage'));"));
 });
 check('the new endpoints have timeouts', () => {
     assert.ok(/\[functions\.dashboard-recent-work\]\s*\n\s*timeout = 26/.test(toml));
