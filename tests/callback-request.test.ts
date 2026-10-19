@@ -96,4 +96,25 @@ check('the chat attaches the card from the CUSTOMER\'s words and never claims a 
     assert.ok(reg.includes("'/workspace.html?help=contact&callback=1'"));
 });
 
+check('Team Chat answers "request a call back" with the form, not "Noted"', () => {
+    assert.ok(asksForACall('request a call back'));
+    const src = read('src/utils/team-messages.ts');
+    assert.ok(src.includes('const wantsACall = asksForACall(body);'));
+    assert.ok(src.includes("{ assistantId: a.id, callback: true, label: 'Request a call back' }"));
+    const feed = read('src/components/team-feed.js');
+    assert.ok(feed.includes('if (l.callback) {') && feed.includes("'/workspace.html?help=contact&callback=1'"));
+    // The callback branch must come before the generic "open the assistant" handling.
+    assert.ok(feed.indexOf('if (l.callback) {') < feed.indexOf('if (l.chat) {'));
+});
+
+check('leaving the Overview before its layout arrives does not throw on the next page', () => {
+    // 2026-10-19: opening Help & Support straight after the Overview threw "Cannot read
+    // properties of null (reading 'style')" — renderGrid ran after its page was gone.
+    const html = read('dashboard-content.html');
+    const at = html.indexOf('function renderGrid() {');
+    const body = html.slice(at, at + 900);
+    assert.ok(body.includes('if (!grid.isConnected) return;'));
+    assert.ok(!/getElementById\('dw-empty'\)\.style/.test(body), 'dw-empty is read without a null check again');
+});
+
 console.log(`\n${passed} passed`);

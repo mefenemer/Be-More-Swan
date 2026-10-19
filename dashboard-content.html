@@ -782,11 +782,17 @@
     }
 
     function renderGrid() {
+      // The layout arrives by fetch. Leave the Overview before it lands (open Help & Support straight
+      // away) and this page is already gone: `dw-empty` is null and the read below threw "Cannot read
+      // properties of null (reading 'style')" into the error banner on whatever page came next
+      // (2026-10-19). A grid no longer on the page has nothing to draw.
+      if (!grid.isConnected) return;
       grid.innerHTML = '';
       const enabled = layout.filter(w => w.enabled);
       // Drive visibility via inline style (not Tailwind .hidden) so it works regardless
       // of whether the prebuilt CSS has the utility compiled.
-      document.getElementById('dw-empty').style.display = enabled.length > 0 ? 'none' : 'block';
+      const empty = document.getElementById('dw-empty');
+      if (empty) empty.style.display = enabled.length > 0 ? 'none' : 'block';
       enabled.forEach(w => {
         const meta = CATALOG[w.key]; if (!meta) return;
         const card = document.createElement('div');
