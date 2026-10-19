@@ -210,14 +210,16 @@ A–C → select the account, then:
 ## Reviewer instructions (paste into "Provide testing instructions")
 
 **Set up first (on production):**
-- Use the existing reviewer account **`bmsreview.test@gmail.com`** (`review-login.ts`,
-  `DEFAULT_REVIEW_EMAIL`). Normal login is a magic link a reviewer can't open, so don't create a new
-  address. Its workspace needs a plan with the Social Media Manager assistant and finished
-  onboarding.
-- Netlify prod env: `REVIEW_LOGIN_PASSWORD` (≥ 20 chars, otherwise the page stays dark) and
-  `REVIEW_LOGIN_EXPIRES` (ISO date, well past the review, e.g. 2027-01-31; expired or unparseable
-  turns it off). The password goes only into Meta's form, not this doc. Delete the password var to
-  switch the login off.
+- Reviewer account **`meta-review@bemoreswan.com`**. Normal login is a magic link a reviewer can't
+  open, so the reviewer uses `review-login.html` instead. To create the account, alias the address
+  to a real mailbox, sign up, and open the one magic link. Put the workspace on a plan with the
+  Social Media Manager assistant via the admin billing override, so the 14-day trial can't expire
+  during review or Meta's later re-checks.
+- Netlify prod env: `REVIEW_LOGIN_EMAIL=meta-review@bemoreswan.com` (overrides the default
+  `bmsreview.test@gmail.com`, and only ONE account works at a time, so this cuts off Google's
+  reviewer), `REVIEW_LOGIN_PASSWORD` (≥ 20 chars, otherwise the page stays dark) and
+  `REVIEW_LOGIN_EXPIRES` (ISO date, well past the review, e.g. 2027-01-31). The password goes only
+  into Meta's form, not this doc. Delete the password var to switch the login off.
 - Test `https://bemoreswan.com/review-login.html` in a private window before submitting.
 - A draft Facebook post and a draft Instagram post, each with a JPEG image, waiting in the
   assistant's Review list.
@@ -230,7 +232,7 @@ posts or insights at first. The instructions point them to the screencasts for t
 > them to the owner's Facebook Page and Instagram Business account and reports how they perform.
 >
 > **Login:** https://bemoreswan.com/review-login.html (reviewer sign-in page, not the normal login)
-> Email: bmsreview.test@gmail.com
+> Email: meta-review@bemoreswan.com
 > Password: [REVIEW_LOGIN_PASSWORD]
 > This account has a plan that includes the Social Media Manager assistant, and draft posts are ready to approve.
 >
