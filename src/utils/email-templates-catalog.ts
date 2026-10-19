@@ -299,7 +299,7 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
         preheader: 'Choose a plan to keep your assistants running.',
         bodyHtml: greet +
             p('Your free trial for <strong>{{workspace.name | "your workspace"}}</strong> ends on <strong>{{trial.ends_on}}</strong>.') +
-            p('To keep your assistants working, choose a plan: <strong>The Workflow Saver</strong> (£29 a month, one assistant) or <strong>The Busywork Buster</strong> (£79 a month, every assistant). Cancel any time.') +
+            p('To keep your assistants working, choose a plan: <strong>The Workflow Saver</strong> ({{plans.saver_price}} a month, one assistant) or <strong>The Busywork Buster</strong> ({{plans.buster_price}} a month, every assistant). Cancel any time.') +
             button('Choose a plan', 'link.action_url') +
             p('If you don’t, nothing is charged — there is no card on file. Your assistants simply pause and anything scheduled is held. Nothing is deleted, and you can pick up where you left off whenever you subscribe.') +
             p('Questions? Just reply to this email.') + signoff,
@@ -404,6 +404,96 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             button('See your result', 'link.action_url') +
             p('<span style="color:#6b7280;font-size:14px;">You are getting this one email because this address was entered on bemoreswan.com to request the check. We have not added you to any mailing list. If it wasn’t you, you can ignore it.</span>') +
             signoff,
+    },
+    // ── Affiliate partners (src/utils/partner-applications.ts) ───────────────
+    {
+        triggerKey: 'partner_application_received',
+        name: 'Partner Application — Received',
+        category: 'Account',
+        transactional: true,
+        subject: 'We’ve got your Be More Swan partner application',
+        preheader: 'We’ll be in touch once we’ve had a look.',
+        bodyHtml: greet +
+            p('Thanks for applying to become a Be More Swan partner. We read every application ourselves and will get back to you soon.') +
+            p('If we approve it, we’ll email you a link to set up your partner account, where you’ll find your personal invite link and can track what you earn.') +
+            p('<span style="color:#6b7280;font-size:14px;">You are getting this one email because this address was used to apply on bemoreswan.com. We have not added you to any mailing list.</span>') +
+            signoff,
+    },
+    {
+        triggerKey: 'partner_approved',
+        name: 'Partner Application — Approved',
+        category: 'Account',
+        transactional: true,
+        subject: 'You’re a Be More Swan partner',
+        preheader: 'Your partner link is ready.',
+        bodyHtml: greet +
+            p('Good news — your application is approved. You’re now a Be More Swan partner.') +
+            p('From today you earn commission when someone you invite becomes a paying customer. Sign in to find your personal invite link.') +
+            button('Sign in', 'link.action_url') + signoff,
+    },
+    {
+        triggerKey: 'partner_approved_create_account',
+        name: 'Partner Application — Approved (create account)',
+        category: 'Account',
+        transactional: true,
+        subject: 'You’re approved — set up your Be More Swan partner account',
+        preheader: 'Your private link to create your partner account.',
+        bodyHtml: greet +
+            p('Good news — your application to become a Be More Swan partner is approved.') +
+            p('Use the button below to set up your partner account. Please use this email address — the link is private to you and works once.') +
+            button('Set up my partner account', 'link.action_url') +
+            p('<span style="color:#6b7280;font-size:14px;">The link expires in {{partner.link_expires_days | "14"}} days. If it has, just reply and we’ll send a new one.</span>') +
+            signoff,
+    },
+    {
+        triggerKey: 'partner_payout_confirm',
+        name: 'Partner — Confirm Payout Details',
+        category: 'Security',
+        transactional: true,
+        subject: 'Confirm your new Be More Swan payout details',
+        preheader: 'Nothing changes until you confirm.',
+        bodyHtml: greet +
+            p('You asked to be paid your partner commission to: <strong>{{partner.payout_display}}</strong>.') +
+            p('For your security, nothing changes until you confirm. You’ll need to be signed in.') +
+            button('Confirm payout details', 'link.action_url') +
+            p('<span style="color:#6b7280;font-size:14px;">The link works for 24 hours. If you didn’t ask for this, ignore this email and reply to let us know — your payout details stay as they are.</span>') +
+            signoff,
+    },
+    {
+        triggerKey: 'partner_payout_changed',
+        name: 'Partner — Payout Details Changed',
+        category: 'Security',
+        transactional: true,
+        subject: 'Your Be More Swan payout details were changed',
+        preheader: 'If this wasn’t you, tell us straight away.',
+        bodyHtml: greet +
+            p('Your partner commission will now be paid to: <strong>{{partner.payout_display}}</strong>.') +
+            p('If you didn’t make this change, reply to this email straight away and we’ll hold your payouts while we look into it.') +
+            signoff,
+    },
+    {
+        triggerKey: 'partner_commission_earned',
+        name: 'Partner — Commission Earned',
+        category: 'Account',
+        transactional: true,
+        subject: 'You earned {{partner.amount}} with Be More Swan',
+        preheader: 'A customer you introduced just paid.',
+        bodyHtml: greet +
+            p('Good news — a customer you introduced just paid, and you’ve earned <strong>{{partner.amount}}</strong> in commission.') +
+            p('It becomes ready to pay on <strong>{{partner.ready_on}}</strong>, once the refund window has passed, and goes out in the next monthly payout when you have at least the minimum.') +
+            button('See your Partner page', 'link.action_url') + signoff,
+    },
+    {
+        triggerKey: 'partner_payout_sent',
+        name: 'Partner — Payout Sent',
+        category: 'Account',
+        transactional: true,
+        subject: 'Your Be More Swan payout of {{partner.amount}} is on its way',
+        preheader: 'Thank you for recommending Be More Swan.',
+        bodyHtml: greet +
+            p('We’ve paid <strong>{{partner.amount}}</strong> of partner commission to <strong>{{partner.payout_display}}</strong>. It can take a few working days to arrive.') +
+            p('Thank you for recommending Be More Swan. Your Partner page shows every commission and payout.') +
+            button('See your Partner page', 'link.action_url') + signoff,
     },
     {
         triggerKey: 'data_export_ready',

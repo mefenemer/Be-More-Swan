@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Become a Partner | Be More Swan</title>
+  <meta name="description" content="Recommend Be More Swan to your audience or clients and earn a share of what every customer you introduce pays.">
+  <!-- Not launched yet: out of the index, and not linked from the nav, footer or sitemap until the
+       owner opens the programme publicly (docs/affiliate-partner-programme-plan.md). -->
+  <meta name="robots" content="noindex,follow">
+  <link href="/style.css" rel="stylesheet">
+  <script src="/site-theme.js"></script>
+  <link rel="icon" href="/favicon/favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
+  <link rel="manifest" href="/favicon/manifest.json">
+  <script src="/waitlist-mode.js" defer></script>
+</head>
+<body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
+
+<div id="nav-placeholder"></div>
+
+<!--
+  The partner application (partner-apply.ts). Applying creates NO account — an admin reviews it in
+  Admin → Revenue → Partners, and approval emails a private link to set one up (owner decision
+  2026-10-18). Customers who simply want to refer a friend use Refer a Friend inside the app instead;
+  this page is for people who will actively promote Be More Swan for cash commission.
+  The terms shown come from partner-programme-public.ts, never hard-coded: rates are dated and admin-set.
+-->
+<main class="flex-grow flex items-start justify-center px-4 py-12 w-full">
+  <div class="bg-white p-6 md:p-12 rounded-3xl shadow-xl border border-gray-100 w-full max-w-xl relative overflow-hidden">
+    <div class="absolute top-0 left-0 w-full h-2 bg-emerald-700"></div>
+
+    <div id="partner-intro" class="text-center">
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold uppercase tracking-wider mb-5">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Partner programme
+      </span>
+      <h1 class="text-3xl font-extrabold text-gray-900 tracking-tight mb-3">Become a Be More Swan partner</h1>
+      <p class="text-base text-gray-600 leading-relaxed mb-6">
+        Recommend Be More Swan to your audience or your clients, and earn a share of what every customer you introduce pays.
+      </p>
+    </div>
+
+    <ul id="partner-terms" class="space-y-2 text-sm text-gray-700 mb-8">
+      <li class="flex items-start gap-2"><span class="text-emerald-600 font-bold">✓</span><span id="partner-term-rate"><strong>Cash commission</strong> on every paying customer you introduce.</span></li>
+      <li class="flex items-start gap-2"><span class="text-emerald-600 font-bold">✓</span><span><strong>Your own invite link</strong> — the people you invite get a 14-day free trial, then their first month free.</span></li>
+      <li class="flex items-start gap-2"><span class="text-emerald-600 font-bold">✓</span><span id="partner-term-payout"><strong>Paid monthly</strong> once a customer's refund window has passed.</span></li>
+      <li class="flex items-start gap-2"><span class="text-emerald-600 font-bold">✓</span><span><strong>No cookies, no tracking scripts</strong> — your link carries your code straight into sign-up.</span></li>
+    </ul>
+
+    <form id="partner-form" class="space-y-5" novalidate>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <div>
+          <label for="pa-name" class="block text-sm font-bold text-gray-700 mb-1">Your name <span class="text-emerald-700">*</span></label>
+          <input id="pa-name" type="text" maxlength="120" autocomplete="name" required class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-700 outline-none">
+        </div>
+        <div>
+          <label for="pa-email" class="block text-sm font-bold text-gray-700 mb-1">Email <span class="text-emerald-700">*</span></label>
+          <input id="pa-email" type="email" maxlength="254" autocomplete="email" required class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-700 outline-none">
+        </div>
+      </div>
+
+      <fieldset>
+        <legend class="block text-sm font-bold text-gray-700 mb-2">How would you promote Be More Swan? <span class="text-emerald-700">*</span></legend>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-gray-700">
+          <label class="flex items-center gap-2"><input type="checkbox" name="channels" value="newsletter"> Email newsletter</label>
+          <label class="flex items-center gap-2"><input type="checkbox" name="channels" value="social"> Social media</label>
+          <label class="flex items-center gap-2"><input type="checkbox" name="channels" value="blog_video"> Blog, podcast or YouTube</label>
+          <label class="flex items-center gap-2"><input type="checkbox" name="channels" value="clients"> My own clients (consultancy / agency)</label>
+          <label class="flex items-center gap-2"><input type="checkbox" name="channels" value="community"> A community or membership</label>
+          <label class="flex items-center gap-2"><input type="checkbox" name="channels" value="events"> Events or workshops</label>
+          <label class="flex items-center gap-2"><input type="checkbox" name="channels" value="other"> Something else</label>
+        </div>
+      </fieldset>
+
+      <div>
+        <label for="pa-audience" class="block text-sm font-bold text-gray-700 mb-1">Who is your audience, and roughly how many? <span class="text-gray-400 font-normal">(Optional)</span></label>
+        <input id="pa-audience" type="text" maxlength="200" placeholder="e.g. 4,000 newsletter readers, mostly small-business coaches" class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-700 outline-none">
+      </div>
+      <div>
+        <label for="pa-links" class="block text-sm font-bold text-gray-700 mb-1">Links to your website or channels <span class="text-gray-400 font-normal">(Optional)</span></label>
+        <textarea id="pa-links" rows="2" maxlength="1000" class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-700 outline-none resize-none"></textarea>
+      </div>
+      <div>
+        <label for="pa-message" class="block text-sm font-bold text-gray-700 mb-1">Anything else we should know? <span class="text-gray-400 font-normal">(Optional)</span></label>
+        <textarea id="pa-message" rows="3" maxlength="2000" class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-700 outline-none resize-none"></textarea>
+      </div>
+
+      <!-- Honeypot: people never see or fill it; a bot that does gets the thank-you and nothing is stored. -->
+      <div aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;">
+        <label for="pa-website">Website</label>
+        <input id="pa-website" type="text" tabindex="-1" autocomplete="off">
+      </div>
+
+      <label class="flex items-start gap-2 text-sm text-gray-700">
+        <input id="pa-consent" type="checkbox" class="mt-1">
+        <span>You can contact me about my application. We only use these details to review it — see our <a href="/privacy.html" class="text-emerald-700 font-bold underline underline-offset-2">privacy policy</a>.</span>
+      </label>
+
+      <label class="flex items-start gap-2 text-sm text-gray-700">
+        <input id="pa-terms" type="checkbox" class="mt-1">
+        <span>I have read and agree to the <a href="/partner-terms.html" target="_blank" rel="noopener" class="text-emerald-700 font-bold underline underline-offset-2">Partner Terms</a>, including labelling my posts as ads.</span>
+      </label>
+
+      <div id="pa-error" class="hidden bg-red-50 text-red-700 text-sm font-semibold p-3 rounded-lg border border-red-100"></div>
+      <button id="pa-submit" type="submit" class="btn-primary w-full block text-center px-6 py-4 text-lg font-bold rounded-xl shadow-lg cursor-pointer">Apply to become a partner</button>
+      <p class="text-xs text-gray-500 text-center">You don't need a Be More Swan account to apply. If we approve you, we'll email you a link to set one up.</p>
+    </form>
+
+    <div id="pa-done" class="hidden text-center py-6" aria-live="polite">
+      <h2 class="text-2xl font-extrabold text-gray-900 mb-2">Thanks — we've got your application</h2>
+      <p class="text-gray-600">We read every one ourselves and will email you soon. If we approve it, the email has a link to set up your partner account.</p>
+    </div>
+
+    <p class="text-center text-sm text-gray-500 mt-8">
+      Already a customer and just want to recommend a friend? Use <a href="/referral.html" class="text-emerald-700 font-bold hover:text-emerald-800">Refer a Friend</a>.
+    </p>
+  </div>
+</main>
+
+<div id="footer-placeholder"></div>
+
+<script>
+  async function loadComponent(placeholderId, filePath) {
+    try {
+      const response = await fetch(filePath);
+      if (response.ok) document.getElementById(placeholderId).innerHTML = await response.text();
+    } catch (error) {
+      console.error(`Error loading component ${filePath}:`, error);
+    }
+  }
+
+  const PA_OPENED_AT = Date.now();
+
+  // The live programme terms — never hard-coded (rates are dated and admin-set).
+  async function loadPartnerTerms() {
+    try {
+      const t = await (await fetch('/.netlify/functions/partner-programme-public')).json();
+      if (t.rateBps == null) return;
+      const pct = (Number(t.rateBps) / 100).toString();
+      const length = t.durationMonths == null ? 'for as long as they stay a customer' : `for their first ${t.durationMonths} month${t.durationMonths === 1 ? '' : 's'}`;
+      document.getElementById('partner-term-rate').innerHTML = `<strong>${pct}% commission</strong> on what every customer you introduce pays, ${length}.`;
+      if (t.minPayoutPence != null && t.holdingDays != null) {
+        document.getElementById('partner-term-payout').innerHTML =
+          `<strong>Paid monthly</strong> once a payment is ${t.holdingDays} days old (so refunds can settle), when you have £${Math.round(t.minPayoutPence / 100)} or more to come.`;
+      }
+    } catch (e) { /* the generic wording stays */ }
+  }
+
+  async function submitPartnerApplication(event) {
+    event.preventDefault();
+    const err = document.getElementById('pa-error');
+    const btn = document.getElementById('pa-submit');
+    const val = (id) => document.getElementById(id).value.trim();
+    const body = {
+      name: val('pa-name'), email: val('pa-email'),
+      channels: [...document.querySelectorAll('input[name="channels"]:checked')].map((c) => c.value),
+      audience: val('pa-audience'), links: val('pa-links'), message: val('pa-message'),
+      consent: document.getElementById('pa-consent').checked,
+      acceptTerms: document.getElementById('pa-terms').checked,
+      hp: document.getElementById('pa-website').value, ms: Date.now() - PA_OPENED_AT,
+    };
+    err.classList.add('hidden');
+    btn.disabled = true; btn.textContent = 'Sending…';
+    try {
+      const res = await fetch('/.netlify/functions/partner-apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || 'Something went wrong. Please try again.');
+      document.getElementById('partner-form').classList.add('hidden');
+      document.getElementById('partner-form').style.display = 'none';
+      document.getElementById('pa-done').classList.remove('hidden');
+    } catch (e) {
+      err.textContent = e.message;
+      err.classList.remove('hidden');
+      btn.disabled = false; btn.textContent = 'Apply to become a partner';
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    loadComponent('nav-placeholder', '/components/nav.html');
+    loadComponent('footer-placeholder', '/components/footer.html');
+    document.getElementById('partner-form').addEventListener('submit', submitPartnerApplication);
+    loadPartnerTerms();
+  });
+</script>
+</body>
+</html>

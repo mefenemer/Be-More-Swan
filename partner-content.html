@@ -1,0 +1,410 @@
+<!-- partner-content.html — the affiliate partner's own page in the workspace (view key 'partner').
+     docs/affiliate-partner-programme-plan.md §4.6. Data: partner-hub.ts. Shown in the sidebar only to
+     partners (check-capacity partnerStatus); a partner with no paid plan lands here instead of the plan
+     picker (owner decision 2026-10-18). Customers are never named here — "Customer 3". -->
+<div class="max-w-3xl mx-auto py-8 px-4 space-y-6" id="partner-page">
+
+  <div>
+    <h1 class="text-2xl font-bold text-gray-900">Partner</h1>
+    <p class="mt-1 text-gray-500">Your invite link, what you've earned, and where we pay you.</p>
+  </div>
+
+  <div id="pt-loading" class="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-400 animate-pulse">Loading…</div>
+  <div id="pt-error" class="hidden bg-red-50 border border-red-200 rounded-xl p-5 text-sm text-red-700"></div>
+
+  <!-- Status notices -->
+  <div id="pt-applied" class="hidden bg-amber-50 border border-amber-200 rounded-xl p-5">
+    <p class="font-bold text-gray-900">Your application is being reviewed</p>
+    <p class="text-sm text-gray-600 mt-1">We read every application ourselves. We'll email you as soon as we've decided — your invite link appears here once you're approved.</p>
+  </div>
+  <div id="pt-suspended" class="hidden bg-red-50 border border-red-200 rounded-xl p-5">
+    <p class="font-bold text-gray-900">Your partnership is paused</p>
+    <p class="text-sm text-gray-600 mt-1">You don't earn commission on new payments while it's paused. Commission you've already earned is kept. Reply to our email, or contact us, if you'd like to talk about it.</p>
+  </div>
+
+  <!-- Partner Terms not accepted (admin-added partners, or a new version) -->
+  <div id="pt-terms-banner" class="hidden bg-white border-2 border-pink-300 rounded-xl p-5 space-y-3">
+    <p class="font-bold text-gray-900">Please accept the Partner Terms</p>
+    <p class="text-sm text-gray-600">They explain how you earn and get paid, and how to promote Be More Swan — including labelling your posts as ads. <a href="/partner-terms.html" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Read the Partner Terms</a> (<span id="pt-terms-version"></span>).</p>
+    <button type="button" onclick="window.partnerPage.acceptTerms()" id="pt-terms-btn" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">I accept the Partner Terms</button>
+  </div>
+
+  <!-- Confirm a payout-details change (from the emailed link) -->
+  <div id="pt-confirm" class="hidden bg-white border-2 border-pink-300 rounded-xl p-5 space-y-3">
+    <p class="font-bold text-gray-900">Confirm your new payout details</p>
+    <p class="text-sm text-gray-600">You asked us to pay your commission to <strong id="pt-confirm-display"></strong>. Nothing changes until you confirm.</p>
+    <div id="pt-confirm-error" class="hidden text-sm text-red-600"></div>
+    <div class="flex gap-2">
+      <button type="button" onclick="window.partnerPage.confirmPayout()" id="pt-confirm-btn" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Confirm payout details</button>
+      <button type="button" onclick="window.partnerPage.cancelPayout()" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border">This wasn't me</button>
+    </div>
+  </div>
+
+  <div id="pt-content" class="hidden space-y-6">
+
+    <!-- Invite link -->
+    <div class="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-3">
+      <div class="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h2 class="font-semibold text-gray-800">Your invite link</h2>
+          <p id="pt-terms" class="text-sm text-gray-600 mt-0.5"></p>
+        </div>
+        <span class="text-xs text-gray-500">Code <span id="pt-code" class="font-mono font-bold text-gray-800"></span></span>
+      </div>
+      <div class="flex gap-2">
+        <label for="pt-link" class="sr-only">Your invite link</label>
+        <input id="pt-link" readonly class="flex-1 min-w-0 border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono bg-gray-50">
+        <button type="button" onclick="window.partnerPage.copy('pt-link', this)" class="btn-utility px-3 py-2 text-sm font-bold rounded-lg border">Copy</button>
+      </div>
+      <div id="pt-partner-code" class="hidden text-sm bg-gray-50 border border-gray-200 rounded-lg px-3 py-2" style="display:none">
+        Your partner code: <span id="pt-partner-code-value" class="font-mono font-bold text-gray-900"></span>
+        <span class="text-gray-500">— easy to say out loud. It works just like your link.</span>
+      </div>
+      <p class="text-xs text-gray-500">People you invite get a 14-day free trial, then their first month free. If someone hears about us from you without the link, they can type your code into the “Invited by” box when they sign up, or into “Have an invite code?” when they choose a plan.</p>
+    </div>
+
+    <!-- Partner Assistant (partner-assistant.ts): drafts in their voice with their link + an ad label,
+         answers about their money, hands off to their own assistants. Free, 50 messages in 30 days. -->
+    <div class="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+      <div class="flex items-start justify-between gap-3 flex-wrap mb-3">
+        <div>
+          <h2 class="font-semibold text-gray-800">Partner Assistant</h2>
+          <p class="text-xs text-gray-500 mt-0.5">Drafts posts, emails and scripts in your voice — with your link and an ad label added — and answers questions about what you earn. Free, up to 50 messages a month.</p>
+        </div>
+        <button type="button" onclick="window.partnerPage.chatClear()" class="btn-utility px-2.5 py-1 text-xs font-bold rounded-lg">New conversation</button>
+      </div>
+      <div id="pa-log" class="space-y-3 overflow-y-auto mb-3" style="max-height:28rem"></div>
+      <div id="pa-starters" class="flex flex-wrap gap-1.5 mb-3">
+        <button type="button" onclick="window.partnerPage.ask('Write a personal LinkedIn post about how I use Be More Swan, inviting my network to try it.')" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-full border">LinkedIn post</button>
+        <button type="button" onclick="window.partnerPage.ask('Draft a short email to my newsletter subscribers recommending Be More Swan.')" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-full border">Email to my list</button>
+        <button type="button" onclick="window.partnerPage.ask('Write a 30-second video script recommending Be More Swan to small business owners.')" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-full border">30-second video script</button>
+        <button type="button" onclick="window.partnerPage.ask('How much will I be paid, and when?')" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-full border">What will I be paid?</button>
+        <button type="button" onclick="window.partnerPage.ask('Looking at my numbers, what should I do next to get more paying customers?')" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-full border">What should I do next?</button>
+      </div>
+      <div class="flex gap-2 items-end">
+        <label for="pa-input" class="sr-only">Ask your Partner Assistant</label>
+        <textarea id="pa-input" rows="2" maxlength="4000" placeholder="e.g. Write an Instagram caption for my coaching clients" class="flex-1 min-w-0 border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none"
+          onkeydown="if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); window.partnerPage.chatSend(); }"></textarea>
+        <button id="pa-send" type="button" onclick="window.partnerPage.chatSend()" class="btn-assistant px-4 py-2 text-sm font-bold rounded-lg">Ask</button>
+      </div>
+    </div>
+
+    <!-- Numbers -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="bg-white border border-gray-200 rounded-xl p-4"><p class="text-xs font-bold text-gray-500 uppercase">Visits · 30 days</p><p id="pt-visits" class="text-2xl font-extrabold text-gray-900 mt-1">0</p></div>
+      <div class="bg-white border border-gray-200 rounded-xl p-4"><p class="text-xs font-bold text-gray-500 uppercase">Sign-ups</p><p id="pt-signups" class="text-2xl font-extrabold text-gray-900 mt-1">0</p></div>
+      <div class="bg-white border border-gray-200 rounded-xl p-4"><p class="text-xs font-bold text-gray-500 uppercase">Paying customers</p><p id="pt-paying" class="text-2xl font-extrabold text-gray-900 mt-1">0</p></div>
+      <div class="bg-white border border-gray-200 rounded-xl p-4"><p class="text-xs font-bold text-gray-500 uppercase">Paid to you</p><p id="pt-paid" class="text-2xl font-extrabold text-gray-900 mt-1">£0.00</p></div>
+    </div>
+
+    <!-- Earnings -->
+    <div class="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <p class="text-xs font-bold text-gray-500 uppercase">Ready to pay</p>
+          <p id="pt-payable" class="text-2xl font-extrabold text-gray-900">£0.00</p>
+          <p id="pt-payable-note" class="text-xs text-gray-500 mt-0.5"></p>
+        </div>
+        <div>
+          <p class="text-xs font-bold text-gray-500 uppercase">Waiting</p>
+          <p id="pt-pending" class="text-2xl font-extrabold text-gray-900">£0.00</p>
+          <p id="pt-pending-note" class="text-xs text-gray-500 mt-0.5"></p>
+        </div>
+      </div>
+      <div class="mt-5 overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="text-xs font-bold text-gray-500 uppercase tracking-wide">
+            <tr><th class="py-2 px-2 text-left whitespace-nowrap">Date</th><th class="py-2 px-2 text-left whitespace-nowrap">Customer</th><th class="py-2 px-2 text-right whitespace-nowrap">Commission</th><th class="py-2 px-2 text-left whitespace-nowrap">Status</th></tr>
+          </thead>
+          <tbody id="pt-commissions"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Payout details -->
+    <div class="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">
+      <div>
+        <h2 class="font-semibold text-gray-800">Where we pay you</h2>
+        <p id="pt-payout-current" class="text-sm text-gray-600 mt-0.5"></p>
+      </div>
+      <div id="pt-payout-pending" class="hidden text-sm bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+        Waiting for you to confirm <strong id="pt-pending-display"></strong> — we emailed a link to <span id="pt-account-email"></span>.
+        <button type="button" onclick="window.partnerPage.cancelPayout()" class="btn-utility px-2 py-0.5 text-xs font-bold rounded-lg ml-1">Cancel change</button>
+      </div>
+      <form id="pt-payout-form" onsubmit="event.preventDefault(); window.partnerPage.savePayout();" class="space-y-3">
+        <fieldset class="flex flex-wrap gap-4 text-sm">
+          <legend class="text-xs font-bold text-gray-500 uppercase mb-2">Pay me by</legend>
+          <label class="flex items-center gap-2"><input type="radio" name="pt-method" value="paypal" onchange="window.partnerPage.syncMethod()" checked> PayPal</label>
+          <label class="flex items-center gap-2"><input type="radio" name="pt-method" value="wise" onchange="window.partnerPage.syncMethod()"> Wise</label>
+          <label class="flex items-center gap-2"><input type="radio" name="pt-method" value="bank" onchange="window.partnerPage.syncMethod()"> UK bank account</label>
+        </fieldset>
+        <div id="pt-f-email">
+          <label for="pt-email" class="text-xs font-bold text-gray-500 uppercase"><span id="pt-email-label">PayPal</span> email</label>
+          <input id="pt-email" type="email" autocomplete="email" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div id="pt-f-bank" class="hidden grid grid-cols-1 sm:grid-cols-3 gap-3" style="display:none">
+          <div class="sm:col-span-3"><label for="pt-acc-name" class="text-xs font-bold text-gray-500 uppercase">Name on the account</label><input id="pt-acc-name" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
+          <div><label for="pt-sort" class="text-xs font-bold text-gray-500 uppercase">Sort code</label><input id="pt-sort" inputmode="numeric" placeholder="12-34-56" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
+          <div class="sm:col-span-2"><label for="pt-accno" class="text-xs font-bold text-gray-500 uppercase">Account number</label><input id="pt-accno" inputmode="numeric" placeholder="8 digits" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
+        </div>
+        <div id="pt-payout-error" class="hidden text-sm text-red-600"></div>
+        <button id="pt-payout-save" type="submit" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Save payout details</button>
+        <p class="text-xs text-gray-500">For your security, we email you a link to confirm any change before it takes effect, and we never show your full details here.</p>
+      </form>
+    </div>
+  </div>
+
+  <!-- No paid plan: the one upsell, kept small -->
+  <div id="pt-upsell" class="hidden bg-gray-50 border border-gray-200 rounded-xl p-5 flex items-center justify-between gap-3 flex-wrap" style="display:none">
+    <p class="text-sm text-gray-700"><strong>Want Be More Swan working for your own business too?</strong> Your partner page stays free either way.</p>
+    <button type="button" onclick="window.openPlanSelection && window.openPlanSelection()" class="btn-golive px-4 py-2 text-sm font-bold rounded-lg">See plans</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  const API = '/.netlify/functions/partner-hub';
+  const esc = (v) => (window.escapeHtml ? window.escapeHtml(String(v ?? '')) : String(v ?? ''));
+  const money = (p) => '£' + (Number(p || 0) / 100).toFixed(2);
+  const day = (iso) => iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Europe/London' }) : '';
+  const show = (id, on = true) => { const el = document.getElementById(id); if (!el) return; el.classList.toggle('hidden', !on); el.style.display = on ? '' : 'none'; };
+  let data = null;
+
+  async function load() {
+    try {
+      const res = await fetch(API, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('Could not load your partner page.');
+      data = await res.json();
+    } catch (e) {
+      show('pt-loading', false);
+      document.getElementById('pt-error').textContent = e.message;
+      show('pt-error');
+      return;
+    }
+    show('pt-loading', false);
+    if (!data.partner) {
+      document.getElementById('pt-error').textContent = 'This page is for Be More Swan partners.';
+      show('pt-error');
+      return;
+    }
+    const status = data.partner.status;
+    show('pt-applied', status === 'applied');
+    show('pt-suspended', status === 'suspended');
+    show('pt-terms-banner', (status === 'approved' || status === 'suspended') && !!data.partnerTerms && !data.partnerTerms.accepted);
+    if (data.partnerTerms) document.getElementById('pt-terms-version').textContent = `version ${data.partnerTerms.version}, ${data.partnerTerms.updated}`;
+    if (status === 'approved' || status === 'suspended') render();
+    const cap = await (window.checkCapacity ? window.checkCapacity() : null);
+    show('pt-upsell', !!cap?.noPlan && status !== 'applied');
+
+    // From the "Confirm your new payout details" email.
+    if (window._partnerPayoutToken && (status === 'approved' || status === 'suspended')) {
+      document.getElementById('pt-confirm-display').textContent = data.payout.pending?.display || 'your new details';
+      show('pt-confirm');
+    }
+  }
+
+  function render() {
+    show('pt-content');
+    const l = data.link, t = data.terms, s = data.stats || {};
+    document.getElementById('pt-link').value = l ? l.inviteUrl : '';
+    document.getElementById('pt-code').textContent = l ? l.code : '—';
+    show('pt-partner-code', !!l?.partnerCode);
+    if (l?.partnerCode) document.getElementById('pt-partner-code-value').textContent = l.partnerCode;
+    if (t) {
+      const pct = Number(t.rateBps) / 100;
+      const length = t.durationMonths == null ? 'for as long as they stay' : `for their first ${t.durationMonths} month${t.durationMonths === 1 ? '' : 's'}`;
+      document.getElementById('pt-terms').innerHTML = `You earn <strong>${pct}%</strong> of what each new customer pays, ${length}.` +
+        (t.special ? ` <span class="text-pink-700 font-semibold">Special rate${t.specialUntil ? ' until ' + esc(day(t.specialUntil)) : ''}.</span>` : '') +
+        ' A customer keeps the rate in force when they first pay.';
+    }
+    document.getElementById('pt-visits').textContent = s.clicks_30d ?? 0;
+    document.getElementById('pt-signups').textContent = s.signups ?? 0;
+    document.getElementById('pt-paying').textContent = s.paying ?? 0;
+    document.getElementById('pt-paid').textContent = money(s.paid_pence);
+    document.getElementById('pt-payable').textContent = money(s.payable_pence);
+    document.getElementById('pt-pending').textContent = money(s.pending_pence);
+    const min = data.payoutRules?.minPayoutPence ?? 0;
+    document.getElementById('pt-payable-note').textContent = !s.payable_pence ? 'Nothing to pay yet.'
+      : (s.payable_pence >= min ? (data.payout.display ? 'Included in the next monthly payout.' : 'Add your payout details below so we can pay you.')
+        : `${money(min - s.payable_pence)} more to reach the ${money(min)} minimum — it rolls over until then.`);
+    document.getElementById('pt-pending-note').textContent = s.next_release_at
+      ? `Held ${data.payoutRules?.holdingDays ?? 30} days after each payment in case of a refund. Next amount is ready on ${day(s.next_release_at)}.`
+      : `Commission waits ${data.payoutRules?.holdingDays ?? 30} days after each payment in case of a refund.`;
+
+    const statusLabel = (c) => c.status === 'pending' ? `Waiting until ${esc(day(c.availableAt))}`
+      : c.status === 'payable' ? 'Ready to pay' : c.status === 'paid' ? `Paid${c.paidAt ? ' ' + esc(day(c.paidAt)) : ''}`
+      : `Cancelled${c.voidReason ? ' — ' + esc(c.voidReason.toLowerCase()) : ''}`;
+    document.getElementById('pt-commissions').innerHTML = (data.commissions || []).map((c) => `<tr class="border-t border-gray-100">
+        <td class="py-2 px-2 text-gray-700 whitespace-nowrap">${esc(day(c.createdAt))}</td>
+        <td class="py-2 px-2 text-gray-700">${c.kind === 'bonus' ? 'Bonus' : c.kind === 'adjustment' ? 'Refund adjustment' : esc(c.customer || 'Customer')}</td>
+        <td class="py-2 px-2 text-right font-mono ${c.amountPence < 0 ? 'text-red-600' : 'text-gray-900'}">${money(c.amountPence)}</td>
+        <td class="py-2 px-2 text-gray-600">${statusLabel(c)}</td></tr>`).join('')
+      || '<tr><td colspan="4" class="py-6 text-center text-gray-400">No commission yet — it appears here when someone you invited first pays.</td></tr>';
+
+    const p = data.payout;
+    document.getElementById('pt-payout-current').textContent = p.display
+      ? `We pay you by ${p.display}${p.confirmedAt ? ' (confirmed ' + day(p.confirmedAt) + ')' : ''}.`
+      : 'You haven’t told us where to pay you yet.';
+    show('pt-payout-pending', !!p.pending);
+    if (p.pending) {
+      document.getElementById('pt-pending-display').textContent = p.pending.display;
+      document.getElementById('pt-account-email').textContent = data.partner.accountEmail || 'your account email';
+    }
+    document.getElementById('pt-payout-save').textContent = p.display ? 'Change payout details' : 'Save payout details';
+  }
+
+  function method() { return (document.querySelector('input[name="pt-method"]:checked') || {}).value || 'paypal'; }
+  function syncMethod() {
+    const m = method();
+    show('pt-f-email', m !== 'bank');
+    show('pt-f-bank', m === 'bank');
+    document.getElementById('pt-email-label').textContent = m === 'wise' ? 'Wise' : 'PayPal';
+  }
+
+  async function post(body) {
+    const res = await fetch(API, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || 'Something went wrong. Please try again.');
+    return d;
+  }
+
+  async function savePayout() {
+    const m = method();
+    const err = document.getElementById('pt-payout-error');
+    const btn = document.getElementById('pt-payout-save');
+    const body = m === 'bank'
+      ? { action: 'payout_details', method: m, accountName: document.getElementById('pt-acc-name').value, sortCode: document.getElementById('pt-sort').value, accountNumber: document.getElementById('pt-accno').value }
+      : { action: 'payout_details', method: m, email: document.getElementById('pt-email').value };
+    err.classList.add('hidden'); btn.disabled = true;
+    try {
+      const d = await post(body);
+      ['pt-email', 'pt-acc-name', 'pt-sort', 'pt-accno'].forEach((id) => { document.getElementById(id).value = ''; });
+      window.showToast?.(`Check ${d.sentTo || 'your email'} — confirm the change there and it takes effect.`);
+      await load();
+    } catch (e) {
+      err.textContent = e.message; err.classList.remove('hidden');
+    } finally { btn.disabled = false; }
+  }
+
+  async function confirmPayout() {
+    const btn = document.getElementById('pt-confirm-btn');
+    const err = document.getElementById('pt-confirm-error');
+    btn.disabled = true; err.classList.add('hidden');
+    try {
+      const d = await post({ action: 'confirm_payout', token: window._partnerPayoutToken });
+      window._partnerPayoutToken = null;
+      show('pt-confirm', false);
+      window.showToast?.(`Done — we'll pay you by ${d.display}.`);
+      await load();
+    } catch (e) {
+      err.textContent = e.message; err.classList.remove('hidden'); btn.disabled = false;
+    }
+  }
+
+  async function acceptTerms() {
+    const btn = document.getElementById('pt-terms-btn');
+    btn.disabled = true;
+    try {
+      await post({ action: 'accept_terms' });
+      show('pt-terms-banner', false);
+      window.showToast?.('Thanks — the Partner Terms are accepted.');
+    } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); btn.disabled = false; }
+  }
+
+  async function cancelPayout() {
+    try {
+      await post({ action: 'cancel_payout_change' });
+      window._partnerPayoutToken = null;
+      show('pt-confirm', false);
+      window.showToast?.('That change is cancelled. Your payout details stay as they were.');
+      await load();
+    } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+  }
+
+  async function copy(inputId, btn) {
+    const v = document.getElementById(inputId).value;
+    try { await navigator.clipboard.writeText(v); } catch { document.getElementById(inputId).select(); document.execCommand('copy'); }
+    const was = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = was; }, 1500);
+  }
+
+  // ── Partner Assistant ──────────────────────────────────────────────────────
+  const chat = { turns: [], busy: false };
+  const CHANNEL_LABEL = { linkedin: 'LinkedIn post', social: 'Social post', email: 'Email', video_script: 'Video script', dm: 'Message', other: 'Draft' };
+
+  function chatRender() {
+    const log = document.getElementById('pa-log');
+    if (!log) return;
+    show('pa-starters', chat.turns.length === 0);
+    log.innerHTML = chat.turns.map((t, i) => {
+      if (t.role === 'user') return `<div class="flex justify-end"><div class="max-w-[85%] bg-gray-100 rounded-2xl px-3 py-2 text-sm text-gray-900 whitespace-pre-wrap">${esc(t.content)}</div></div>`;
+      const cards = (t.cards || []).map((c, j) => {
+        if (c.kind === 'draft') return `<div class="border border-gray-200 rounded-xl p-3 bg-gray-50/60">
+            <p class="text-xs font-bold text-gray-500 uppercase">${esc(CHANNEL_LABEL[c.channel] || 'Draft')} · ${esc(c.title)}</p>
+            <div class="text-sm text-gray-800 whitespace-pre-wrap mt-1" id="pa-draft-${i}-${j}">${esc(c.text)}</div>
+            <button type="button" onclick="window.partnerPage.copyDraft(${i}, ${j}, this)" class="btn-utility px-2.5 py-1 text-xs font-bold rounded-lg mt-2">Copy</button>
+          </div>`;
+        if (c.kind === 'handoff') return `<div class="border border-gray-200 rounded-xl p-3 bg-gray-50/60">
+            <p class="text-sm font-bold text-gray-900">Ask your ${esc(c.assistantName)}</p>
+            <p class="text-xs text-gray-600 mt-0.5 whitespace-pre-wrap">${esc(c.brief)}</p>
+            <button type="button" onclick="window.partnerPage.openHandoff(${i}, ${j})" class="btn-assistant px-3 py-1.5 text-xs font-bold rounded-lg mt-2">Open their chat</button>
+            <p class="text-[11px] text-gray-400 mt-1">The brief is typed in for you — nothing is sent until you send it.</p>
+          </div>`;
+        if (c.kind === 'payout_form') return `<div class="border border-gray-200 rounded-xl p-3 bg-gray-50/60">
+            <p class="text-sm text-gray-700">Set where we pay you in <strong>Where we pay you</strong>, below — we'll email you to confirm.</p>
+            <button type="button" onclick="document.getElementById('pt-payout-form').scrollIntoView({ behavior: 'smooth', block: 'center' })" class="btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border mt-2">Go to payout details</button>
+          </div>`;
+        return '';
+      }).join('');
+      return `<div class="max-w-[92%] space-y-2">
+        <div class="bg-white border border-gray-200 rounded-2xl px-3 py-2 text-sm text-gray-800 whitespace-pre-wrap">${esc(t.content)}</div>${cards}
+      </div>`;
+    }).join('') + (chat.busy ? '<p class="text-xs text-gray-400 animate-pulse">Working on it…</p>' : '');
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function ask(text) { document.getElementById('pa-input').value = text; chatSend(); }
+
+  async function chatSend() {
+    const input = document.getElementById('pa-input');
+    const text = input.value.trim();
+    if (!text || chat.busy) return;
+    input.value = '';
+    chat.turns.push({ role: 'user', content: text });
+    chat.busy = true; document.getElementById('pa-send').disabled = true;
+    chatRender();
+    try {
+      const res = await fetch('/.netlify/functions/partner-assistant', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: chat.turns.map((t) => ({ role: t.role, content: t.content })) }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || 'The assistant could not answer just now.');
+      chat.turns.push({ role: 'assistant', content: d.reply, cards: d.cards || [] });
+    } catch (e) {
+      chat.turns.pop(); input.value = text;
+      window.showToast?.(e.message, { icon: '⚠️' });
+    } finally {
+      chat.busy = false; document.getElementById('pa-send').disabled = false;
+      chatRender();
+    }
+  }
+
+  async function copyDraft(i, j, btn) {
+    const c = chat.turns[i]?.cards?.[j];
+    if (!c) return;
+    try { await navigator.clipboard.writeText(c.text); btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = 'Copy'; }, 1500); }
+    catch { window.showToast?.('Could not copy — select the text instead.', { icon: '⚠️' }); }
+  }
+
+  function openHandoff(i, j) {
+    const c = chat.turns[i]?.cards?.[j];
+    if (!c) return;
+    const draft = `From my Partner Assistant: ${c.brief}`;
+    if (typeof window.openAssistantChat === 'function') window.openAssistantChat({ assistantId: c.assistantId, draft });
+    else window.location.href = `/assistant-chat.html?assistantId=${encodeURIComponent(c.assistantId)}`;
+  }
+
+  function chatClear() { chat.turns = []; chatRender(); }
+
+  window.partnerPage = { savePayout, confirmPayout, cancelPayout, copy, syncMethod, ask, chatSend, copyDraft, openHandoff, chatClear, acceptTerms };
+  load();
+})();
+</script>

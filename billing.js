@@ -701,6 +701,8 @@
         if (active.length === 0) { list.innerHTML = ''; empty.classList.remove('hidden'); return; }
         empty.classList.add('hidden');
         list.innerHTML = active.map(_subscriptionCard).join('');
+        // Plan prices on the trial card come from master data, never from this file.
+        window.PlanPrices?.fill(list);
     }
 
     function _subscriptionCard(sub) {
@@ -720,8 +722,8 @@
                 <span class="inline-flex items-center text-xs font-bold px-3 py-1 rounded-full border bg-blue-50 text-blue-700 border-blue-200">Trial</span>
               </div>
               <div class="mt-5 flex gap-3 flex-wrap">
-                <a href="/checkout.html?tier=saver" class="btn-secondary px-4 py-2 text-sm font-bold rounded-xl border">Workflow Saver · £29/mo</a>
-                <a href="/checkout.html?tier=buster" class="btn-primary px-4 py-2 text-sm font-bold rounded-xl">Busywork Buster · £79/mo</a>
+                <a href="/checkout.html?tier=saver" class="btn-secondary px-4 py-2 text-sm font-bold rounded-xl border">Workflow Saver<span data-plan-prices-ready hidden> · <span data-plan-price="saver"></span>/mo</span></a>
+                <a href="/checkout.html?tier=buster" class="btn-primary px-4 py-2 text-sm font-bold rounded-xl">Busywork Buster<span data-plan-prices-ready hidden> · <span data-plan-price="buster"></span>/mo</span></a>
               </div>
             </div>`;
         }

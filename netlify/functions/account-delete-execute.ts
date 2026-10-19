@@ -4,6 +4,7 @@
 // Scheduled hourly (schedule: "0 * * * *")
 // Also handles the GDPR erasure log entry (SC3 / US-GAP-2.1.2 SC3)
 
+import { erasePartnerDataForUser } from '../../src/utils/partner-erasure';
 import type { Handler } from '@netlify/functions';
 import * as crypto from 'crypto';
 import Stripe from 'stripe';
@@ -149,6 +150,10 @@ async function executeDeleteions() {
             .set({ sessionId: null })
             .where(eq(aiUsageLog.userId, user.id))
             .catch(() => {});
+
+        // Affiliate partner: personal data and vault payout details go; the commission ledger stays for
+        // tax law (src/utils/partner-erasure.ts). Before the user row, which only nulls partners.user_id.
+        await erasePartnerDataForUser(db, user.id).catch((err) => console.error(`[account-delete-execute] partner erasure failed for user ${user.id}:`, err));
 
         // Hard-delete user (cascades to all related tables via ON DELETE CASCADE)
         await db.delete(users).where(eq(users.id, user.id)).catch(err => {

@@ -37,10 +37,13 @@ const read = (p: string) => readFileSync(join(root, p), 'utf8');
         assert.strictEqual(annualAmountGbp('349.00'), 3348);
     });
 
-    await check('the pricing page still uses the same sum (round the discounted month, then × 12)', () => {
+    await check('the pricing page shows the annual price the helper computes — it has no sum of its own', () => {
+        // Since 2026-10-19 the page does no arithmetic: get-plans returns annualAmountGbp's result
+        // and the page prints it, so the advertised and the charged yearly price are one number.
+        assert.ok(read('netlify/functions/get-plans.ts').includes('annualAmountGbp(p.monthlyPriceGbp)'));
         const page = read('pricing.html');
-        assert.ok(/const annual = Math\.round\(m \* 0\.8\)/.test(page) && /annualTotal\[i\] = annual \* 12/.test(page),
-            'pricing.html changed its annual sum — change annualAmountGbp with it');
+        assert.ok(page.includes('plan.annualTotalGbp') && !/Math\.round\(m \* 0\.8\)/.test(page),
+            'pricing.html computes its own annual price again — read it from get-plans');
     });
 
     await check('every path that prices an annual plan uses the shared helper — no private formula left', () => {

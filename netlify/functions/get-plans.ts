@@ -9,6 +9,7 @@ import { and, eq, ne, asc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { masterPlans, planFeatures } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { annualAmountGbp } from '../../src/utils/stripe-price';
 
 const HEADERS = {
     'Content-Type': 'application/json',
@@ -83,7 +84,17 @@ export default withLambda(async (event) => {
             .where(eq(planFeatures.isEnabled, true))
             .orderBy(asc(planFeatures.displayOrder));
 
-        return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ plans, enterprisePlan: enterprisePlan ?? null, featureCatalog }) };
+        // Every price a page shows comes from here — no page carries its own copy (owner, 2026-10-19).
+        // The annual figures use the SAME helper both checkouts charge with (stripe-price.ts), so the
+        // advertised yearly price and the charged one cannot disagree.
+        const withPrices = (p: typeof plans[number]) => {
+            const annualTotalGbp = annualAmountGbp(p.monthlyPriceGbp);
+            return { ...p, annualTotalGbp, annualMonthlyGbp: annualTotalGbp / 12 };
+        };
+        return {
+            statusCode: 200, headers: HEADERS,
+            body: JSON.stringify({ plans: plans.map(withPrices), enterprisePlan: enterprisePlan ?? null, featureCatalog }),
+        };
     } catch (err) {
         console.error('[get-plans]', err);
         return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ error: 'Failed to load plans.' }) };

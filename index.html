@@ -275,8 +275,8 @@
                     Here's Exactly What's Included
                 </h2>
                 <p class="text-xl text-gray-500">
-                    <!-- Prices as sold since 17 Oct 2026 (pricing.html: The Digital Employee is no longer sold). -->
-                    No hidden tiers to figure out. Plans are £29 or £79 a month, every one starts with the essentials, and you can try every assistant free for 14 days &mdash; no card needed.
+                    <!-- Prices come from master data via plan-prices.js; none is written here. -->
+                    No hidden tiers to figure out.<span data-plan-prices-ready hidden> Plans are <span data-plan-price="saver"></span> or <span data-plan-price="buster"></span> a month.</span> Every one starts with the essentials, and you can try every assistant free for 14 days &mdash; no card needed.
                 </p>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 text-left">
@@ -650,6 +650,7 @@
 <div id="footer-placeholder"></div>
 
 <script src="./mobileMenu.js"></script>
+<script src="./plan-prices.js"></script>
 
 <script>
     // CTA router — every "get started" button opens the Register page, unless this device is already

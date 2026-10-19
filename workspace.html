@@ -2055,6 +2055,18 @@ window.showComplianceModals = function showComplianceModals(force) {
       <div class="col-span-full text-center py-8 text-gray-400 text-sm animate-pulse">Loading plans…</div>
     </div>
     <div class="px-8 pb-6 text-center border-t border-gray-100 pt-4">
+      <!-- "Have an invite code?" (referral-claim.ts) — only for someone not already invited, who has never
+           paid. A referral code or a partner's partner code; checkout then applies the friend offer. -->
+      <div id="plan-gate-invite" class="hidden max-w-md mx-auto text-left" style="display:none">
+        <label for="plan-gate-invite-code" class="block text-xs font-bold text-gray-500 uppercase mb-1">Have an invite code?</label>
+        <div class="flex gap-2">
+          <input id="plan-gate-invite-code" maxlength="40" autocomplete="off" spellcheck="false" placeholder="e.g. SAMSWAN"
+            class="flex-1 min-w-0 border border-gray-200 rounded-lg px-3 py-2 text-sm uppercase"
+            onkeydown="if (event.key === 'Enter') { event.preventDefault(); window.planGateApplyInvite && window.planGateApplyInvite(); }">
+          <button type="button" id="plan-gate-invite-apply" onclick="window.planGateApplyInvite && window.planGateApplyInvite()" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border">Apply</button>
+        </div>
+        <p id="plan-gate-invite-msg" class="hidden text-xs mt-1"></p>
+      </div>
       <div id="plan-gate-polling" class="hidden mt-3 text-sm text-emerald-700 animate-pulse">Checking your subscription…</div>
     </div>
   </div>
@@ -2786,6 +2798,8 @@ function formatCurrency(amount, currency) {
       'newsletter': { file: 'newsletter.html', title: '| Email Studio' },
       'calendar': { file: 'calendar.html', title: '| Content Calendar' },
       'referral': { file: 'referral-content.html', title: '| Refer a Friend' },
+      // Affiliate partners (docs/affiliate-partner-programme-plan.md §4.6). Sidebar link shown only to partners.
+      'partner': { file: 'partner-content.html', title: '| Partner' },
       'review-queue': { file: 'review-queue.html', title: '| Review' },
       'assistant-setup': { file: 'assistant-setup-checklist.html', title: '| Assistant Setup' },
       'getting-started': { file: 'getting-started.html', title: '| Getting Started' }
@@ -2805,6 +2819,7 @@ function formatCurrency(amount, currency) {
       'team': document.getElementById('nav-team'),
       'calendar': document.getElementById('nav-calendar'),
       'referral': document.getElementById('nav-referral'),
+      'partner': document.getElementById('nav-partner'),
       'review-queue': document.getElementById('nav-review-queue')
     };
 
@@ -3884,6 +3899,10 @@ function formatCurrency(amount, currency) {
       // Outlook calendar). Only a plain tab name is lifted; assets.html ignores one it doesn't have.
       const tabParam = qs.get('tab');
       if (viewParam === 'assets' && tabParam && /^[a-z]{2,20}$/.test(tabParam)) window._bizinfoInitialTab = tabParam;
+      // ?view=partner&payoutToken=… — the link in "Confirm your new payout details". The Partner page
+      // asks the signed-in partner to press Confirm (src/utils/partner-payouts.ts).
+      const payoutTokenParam = qs.get('payoutToken');
+      if (viewParam === 'partner' && payoutTokenParam && /^[A-Za-z0-9_-]{20,100}$/.test(payoutTokenParam)) window._partnerPayoutToken = payoutTokenParam;
       history.replaceState(null, '', window.location.pathname);
       await loadView(viewParam);
     }
@@ -4021,7 +4040,43 @@ function formatCurrency(amount, currency) {
           refBanner.classList.remove('hidden');
         }
         loadPlanCards(referralCode);
+        refreshInviteBox();
       }
+
+      // "Have an invite code?": ask the server what is really on the account rather than trusting a
+      // ?ref in the URL — the banner only claims an offer the checkout will apply.
+      async function refreshInviteBox() {
+        const box = document.getElementById('plan-gate-invite');
+        if (!box) return;
+        try {
+          const st = await (await fetch('/.netlify/functions/referral-claim', { credentials: 'same-origin' })).json();
+          if (st.applied && refBanner) {
+            refBanner.textContent = `🎉 ${st.applied.firstName ? st.applied.firstName + '’s invite' : 'Invite'} applied — your first month is free`;
+            refBanner.classList.remove('hidden');
+          }
+          const show = !!st.eligible;
+          box.classList.toggle('hidden', !show); box.style.display = show ? '' : 'none';
+        } catch { /* leave the box hidden */ }
+      }
+      window.planGateApplyInvite = async function () {
+        const input = document.getElementById('plan-gate-invite-code');
+        const msg = document.getElementById('plan-gate-invite-msg');
+        const btn = document.getElementById('plan-gate-invite-apply');
+        const code = (input.value || '').trim();
+        if (!code) return;
+        btn.disabled = true;
+        try {
+          const res = await fetch('/.netlify/functions/referral-claim', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
+          const d = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(d.error || 'That code could not be applied.');
+          msg.className = 'text-xs mt-1 font-semibold text-emerald-700';
+          msg.textContent = 'Applied.';
+          await refreshInviteBox();
+        } catch (e) {
+          msg.className = 'text-xs mt-1 font-semibold text-red-600';
+          msg.textContent = e.message;
+        } finally { btn.disabled = false; }
+      };
 
       // US-ONB-2.1.2 AC11: strip ?action=select-plan from URL after handling.
       // verify.ts sends a brand-new (no-plan) user here with ?action=select-plan so the hard
@@ -4060,7 +4115,18 @@ function formatCurrency(amount, currency) {
       // assistants visible (server-side gates still block hiring/tasks) rather than being
       // locked out of viewing their data, so we don't hard-gate when assistants exist.
       const cap = await window.checkCapacity();
-      if (!planActivated && cap?.noPlan && (selectPlanRequested || (cap?.assistantCount ?? 0) === 0 || cap?.trialEnded)) {
+      // Affiliate partners (owner decision 2026-10-18): a partner needs no paid plan, so they are never
+      // hard-gated — with no plan they land on their Partner page, and the plan picker stays reachable
+      // (and dismissible) from the upgrade prompts there.
+      const partnerStatus = cap?.partnerStatus || null;
+      const navPartner = document.getElementById('nav-partner');
+      if (navPartner && ['applied', 'approved', 'suspended'].includes(partnerStatus)) {
+        navPartner.classList.remove('hidden'); navPartner.style.display = '';
+      }
+      const partnerNeverGated = partnerStatus === 'approved' || partnerStatus === 'suspended';
+      if (!planActivated && cap?.noPlan && partnerNeverGated) {
+        if (!viewParam || viewParam === 'dashboard') await loadView('partner');
+      } else if (!planActivated && cap?.noPlan && (selectPlanRequested || (cap?.assistantCount ?? 0) === 0 || cap?.trialEnded)) {
         // A workspace whose free trial ran out keeps its assistants (paused) but is asked to choose
         // a plan — say why, rather than greeting them as if they had never been here.
         if (cap?.trialEnded) {
@@ -5931,6 +5997,7 @@ function formatCurrency(amount, currency) {
      library (my-content.html + my-content.js, already loaded above) as a tab on the two
      assistants that consume it. -->
 <script src="/src/components/assistant-my-content.js?v=20261012-created-by"></script>
+<script src="/plan-prices.js"></script>
 <script src="/billing.js"></script>
 <script src="/tour.js"></script>
 

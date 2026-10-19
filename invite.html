@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>You're invited to Be More Swan</title>
+  <meta name="description" content="You've been invited to Be More Swan — your AI team for marketing, leads and admin. Try every assistant free for 14 days.">
+  <!-- One page per person's code: never indexed. -->
+  <meta name="robots" content="noindex,nofollow">
+  <!-- ⚠️ Served at /invite/<code> by a rewrite (netlify.toml), so EVERY path on this page is
+       root-relative: a relative ./style.css would resolve to /invite/style.css and come back as this
+       page (memory subdirectory-url-breaks-relative-paths). -->
+  <link href="/style.css" rel="stylesheet">
+  <script src="/site-theme.js"></script>
+  <link rel="icon" href="/favicon/favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
+  <link rel="manifest" href="/favicon/manifest.json">
+  <script src="/waitlist-mode.js" defer></script>
+</head>
+<body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
+
+<div id="nav-placeholder"></div>
+
+<!--
+  The co-branded invite page (docs/affiliate-partner-programme-plan.md §4.2). The code travels in the
+  URL into sign-up (register.html?ref=CODE → the visible "Invited by" field) — no cookie, nothing
+  stored on the visitor's device. Works for every referral code: a customer's refer-a-friend link and
+  a partner's. invite-lookup.ts names the inviter (first name only) and, for a partner, counts the visit.
+-->
+<main class="flex-grow flex items-center justify-center px-4 py-12 w-full">
+  <div class="bg-white p-8 md:p-12 rounded-3xl shadow-xl border border-gray-100 w-full max-w-lg relative overflow-hidden">
+    <div class="absolute top-0 left-0 w-full h-2 bg-emerald-700"></div>
+
+    <div id="inv-loading" class="flex justify-center py-10">
+      <span class="animate-spin" role="status" aria-label="Loading" style="display:inline-block;box-sizing:border-box;width:28px;height:28px;border-radius:9999px;border:3px solid #eae4d7;border-top-color:#ff007f;"></span>
+    </div>
+
+    <div id="inv-valid" class="hidden text-center">
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold uppercase tracking-wider mb-5">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>You're invited
+      </span>
+      <h1 id="inv-title" class="text-3xl font-extrabold text-gray-900 tracking-tight mb-3">You've been invited to Be More Swan</h1>
+      <p class="text-base text-gray-600 leading-relaxed mb-6">Be More Swan gives your business a team of AI assistants for social posts, blogs, email, leads and more — working alongside you.</p>
+      <ul class="space-y-2 text-sm text-gray-700 mb-8 text-left">
+        <li class="flex items-start gap-2"><span class="text-emerald-600 font-bold">✓</span><span><strong>Try every assistant free for 14 days</strong> — no card needed.</span></li>
+        <li class="flex items-start gap-2"><span class="text-emerald-600 font-bold">✓</span><span id="inv-offer">Then, as an invited guest, <strong>your first month is free</strong>.</span></li>
+        <li class="flex items-start gap-2"><span class="text-emerald-600 font-bold">✓</span><span>Cancel any time.</span></li>
+      </ul>
+      <a id="inv-cta" href="/register.html" data-waitlist-label="Join the waitlist" class="btn-primary inline-block w-full text-center px-6 py-4 text-lg font-bold rounded-xl shadow-lg">Claim your invite</a>
+      <p id="inv-code-line" class="text-xs text-gray-500 mt-3">Your invite code is <span id="inv-code" class="font-mono font-bold text-gray-800"></span> — it's filled in for you.</p>
+      <p id="inv-locked" class="hidden text-xs text-amber-700 font-semibold mt-3">New accounts are paused while we test. Join the waitlist, and enter code <span class="inv-code-copy font-mono"></span> in the “Invited by” box when you sign up.</p>
+    </div>
+
+    <div id="inv-invalid" class="hidden text-center">
+      <h1 class="text-2xl font-extrabold text-gray-900 tracking-tight mb-3">This invite link isn't active</h1>
+      <p class="text-gray-600 mb-6">It may have been mistyped. You can still try Be More Swan free for 14 days.</p>
+      <a href="/register.html" data-waitlist-label="Join the waitlist" class="btn-primary inline-block px-6 py-3 font-bold rounded-xl">Start your free trial</a>
+    </div>
+  </div>
+</main>
+
+<div id="footer-placeholder"></div>
+
+<script>
+  async function loadComponent(placeholderId, filePath) {
+    try {
+      const response = await fetch(filePath);
+      if (response.ok) document.getElementById(placeholderId).innerHTML = await response.text();
+    } catch (error) {
+      console.error(`Error loading component ${filePath}:`, error);
+    }
+  }
+
+  // The code is the last path segment (/invite/SAM4K7PQ), or ?code= when opened as /invite.html.
+  function inviteCode() {
+    const fromQuery = new URLSearchParams(location.search).get('code');
+    if (fromQuery) return fromQuery.trim().toUpperCase();
+    const seg = location.pathname.replace(/\/+$/, '').split('/').pop() || '';
+    return /^invite(\.html)?$/i.test(seg) ? '' : decodeURIComponent(seg).trim().toUpperCase();
+  }
+
+  async function showInvite() {
+    const code = inviteCode();
+    const show = (id) => { const el = document.getElementById(id); el.classList.remove('hidden'); };
+    let d = { valid: false };
+    if (code) {
+      try { d = await (await fetch('/.netlify/functions/invite-lookup?visit=1&code=' + encodeURIComponent(code))).json(); } catch (e) {}
+    }
+    document.getElementById('inv-loading').remove();
+    if (!d.valid) { show('inv-invalid'); return; }
+    if (d.firstName) document.getElementById('inv-title').textContent = `${d.firstName} invited you to Be More Swan`;
+    document.getElementById('inv-code').textContent = d.code;
+    document.querySelectorAll('.inv-code-copy').forEach((el) => { el.textContent = d.code; });
+    document.getElementById('inv-cta').setAttribute('href', '/register.html?ref=' + encodeURIComponent(d.code));
+    show('inv-valid');
+    // While sign-ups are locked, waitlist-mode.js turns the button into "Join the waitlist"; say why,
+    // and keep the code in view so it can be entered later.
+    // The href is set above, AFTER waitlist-mode.js's own rewrite has run, so point it at the waitlist
+    // here too — otherwise the button says "Join the waitlist" but goes to sign-up.
+    if (window.BmsWaitlist && await window.BmsWaitlist.isOn()) {
+      const cta = document.getElementById('inv-cta');
+      cta.setAttribute('href', window.BmsWaitlist.href || '/waitlist.html');
+      cta.textContent = 'Join the waitlist';
+      document.getElementById('inv-code-line').classList.add('hidden');
+      show('inv-locked');
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    loadComponent('nav-placeholder', '/components/nav.html');
+    loadComponent('footer-placeholder', '/components/footer.html');
+    showInvite();
+  });
+</script>
+</body>
+</html>

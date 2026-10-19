@@ -15,6 +15,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { releasePausedLimit, resolveAssistantLimit } from '../../src/utils/release-paused-limit';
 import { backfillLivePlanForOrg } from '../../src/utils/plan-stripe-refs';
 import { qualifyPendingReferral } from '../../src/utils/referral-offer';
+import { invoiceNetPence, recordPartnerPayment, reversePartnerCommission, sessionNetPence, type PartnerPayment } from '../../src/utils/partner-ledger';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
@@ -66,6 +67,49 @@ async function _isUntrackedSubscription(db: ReturnType<typeof getDb>, userId: nu
         .where(and(eq(plans.userId, userId), eq(plans.stripeSubscriptionId, subscriptionId)))
         .limit(1);
     return !row;
+}
+
+// Affiliate Partner Programme (docs/affiliate-partner-programme-plan.md §4.3): record what a
+// payment earns the customer's partner, if they have one. Never blocks the webhook, but a miss is
+// logged LOUDLY: a Stripe retry would not get back here — on the first-payment paths the plan
+// insert short-circuits a redelivery as a duplicate before this line.
+async function _recordPartnerCommission(db: ReturnType<typeof getDb>, payment: PartnerPayment): Promise<void> {
+    try {
+        const out = await recordPartnerPayment(db, payment);
+        if (out.recorded) console.log(`[stripe-webhook] partner ${out.partnerId} earned ${out.commissionPence}p on ${payment.paymentRef}`);
+    } catch (err) {
+        console.error('[stripe-webhook] partner commission NOT recorded — record it by hand:', {
+            userId: payment.userId, paymentRef: payment.paymentRef, netAmountPence: payment.netAmountPence,
+        }, err);
+    }
+}
+
+// A refund or dispute reduces or voids the partner commission on that payment. Matched on the
+// PaymentIntent, with the invoice it paid as a fallback (first payments taken through Checkout are
+// stored under their invoice id, without a PaymentIntent).
+async function _reversePartnerCommission(
+    db: ReturnType<typeof getDb>,
+    paymentIntent: string | { id: string } | null | undefined,
+    amountRefundedPence: number,
+    kind: 'refund' | 'dispute',
+    at: Date,
+): Promise<void> {
+    const paymentIntentId = typeof paymentIntent === 'string' ? paymentIntent : paymentIntent?.id ?? null;
+    if (!paymentIntentId) return;
+    try {
+        let invoiceId: string | null = null;
+        try {
+            const list = await stripe.invoicePayments.list({ payment: { type: 'payment_intent', payment_intent: paymentIntentId }, limit: 1 });
+            const inv = list.data[0]?.invoice;
+            invoiceId = typeof inv === 'string' ? inv : inv?.id ?? null;
+        } catch (lookupErr) {
+            console.warn('[stripe-webhook] could not look up the invoice for a refunded payment:', (lookupErr as any)?.message);
+        }
+        const { adjusted } = await reversePartnerCommission(db, { paymentIntentId, invoiceId, amountRefundedPence, kind, at });
+        if (adjusted) console.log(`[stripe-webhook] ${kind}: adjusted ${adjusted} partner commission row(s) for ${paymentIntentId}`);
+    } catch (err) {
+        console.error(`[stripe-webhook] partner commission NOT adjusted after a ${kind} — fix it by hand:`, { paymentIntentId, amountRefundedPence }, err);
+    }
 }
 
 export default withLambda(async (event) => {
@@ -265,6 +309,15 @@ export default withLambda(async (event) => {
             } catch (refErr) {
                 console.warn('[stripe-webhook] checkout.session referral token grant failed (non-blocking):', refErr);
             }
+            const sessionInvoiceId = typeof session.invoice === 'string' ? session.invoice : session.invoice?.id ?? null;
+            await _recordPartnerCommission(db, {
+                userId:          userIdInt,
+                paymentRef:      sessionInvoiceId ?? session.id,
+                paymentIntentId: null,
+                netAmountPence:  sessionNetPence(session),
+                currency:        session.currency || 'gbp',
+                paidAt:          new Date(stripeEvent.created * 1000),
+            });
         }
 
         // ── Founder alert — a new subscriber just paid ────────────────
@@ -451,6 +504,15 @@ export default withLambda(async (event) => {
         } catch (refErr) {
             console.warn('[stripe-webhook] Referral token grant failed (non-blocking):', refErr);
         }
+        // No VAT is charged through Stripe today, so what was received is the net amount.
+        await _recordPartnerCommission(db, {
+            userId:          userIdInt,
+            paymentRef:      pi.id,
+            paymentIntentId: pi.id,
+            netAmountPence:  pi.amount_received ?? pi.amount ?? 0,
+            currency:        pi.currency || 'gbp',
+            paidAt:          new Date(stripeEvent.created * 1000),
+        });
 
         // ── Founder alert — a new subscriber just paid ────────────────
         await sendNewSubscriberAlert({
@@ -570,6 +632,14 @@ export default withLambda(async (event) => {
                 } catch (refErr) {
                     console.warn('[stripe-webhook] invoice.paid referral token grant failed (non-blocking):', refErr);
                 }
+                await _recordPartnerCommission(db, {
+                    userId,
+                    paymentRef:      invoice.id!,
+                    paymentIntentId: getInvoicePaymentIntentId(invoice),
+                    netAmountPence:  invoiceNetPence(invoice),
+                    currency:        invoice.currency || 'gbp',
+                    paidAt:          new Date(stripeEvent.created * 1000),
+                });
             }
 
             const amount     = invoice.amount_paid ? `£${(invoice.amount_paid / 100).toFixed(2)}` : '';
@@ -853,6 +923,15 @@ export default withLambda(async (event) => {
         }
     }
 
+    // ── charge.refunded — full or partial refund ──────────────────
+    // Only the partner ledger cares today: unpaid commission is reduced or voided, paid commission
+    // is clawed back from the next payout. ⚠️ This event must be ENABLED on the Stripe webhook
+    // endpoint in both environments, or this never runs.
+    if (stripeEvent.type === 'charge.refunded') {
+        const charge = stripeEvent.data.object as Stripe.Charge;
+        await _reversePartnerCommission(db, charge.payment_intent, charge.amount_refunded ?? 0, 'refund', new Date(stripeEvent.created * 1000));
+    }
+
     // ── charge.dispute.created — chargeback opened ────────────────
     // US-ADM-2.2.1: Record dispute, notify super_admins via in-app notification.
     if (stripeEvent.type === 'charge.dispute.created') {
@@ -930,6 +1009,8 @@ export default withLambda(async (event) => {
         } catch (dispErr) {
             console.warn('[stripe-webhook] dispute.created handling error (non-blocking):', dispErr);
         }
+        // A disputed payment earns its partner nothing (re-add as a bonus if the dispute is won).
+        await _reversePartnerCommission(db, dispute.payment_intent, dispute.amount ?? 0, 'dispute', new Date(stripeEvent.created * 1000));
     }
 
     // ── customer.subscription.updated — plan change / downgrade ──

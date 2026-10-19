@@ -317,6 +317,15 @@
   to   = "/powered-by.html"
   status = 200
 
+# Partner / refer-a-friend invite links: /invite/<code> → invite.html (docs/affiliate-partner-programme-plan.md
+# §4.2). Same rules as /powered-by above, for the same reasons: a 200 REWRITE (the page reads the code
+# off the last path segment, which a 301 would discard), ":code" = ONE segment, and invite.html keeps
+# every path root-relative. Out of the index via the "/invite*" X-Robots-Tag rule below.
+[[redirects]]
+  from = "/invite/:code"
+  to   = "/invite.html"
+  status = 200
+
 # Phase 1 External Integrations: pretty /api/* routes for the OAuth router and the
 # generic action-sync endpoint. Rewrites (status 200) — the original path survives in
 # event.rawUrl, which oauth-integrations.ts parses for :provider/:action; provider
@@ -800,6 +809,11 @@ node_bundler = "esbuild"
   [headers.values]
     X-Robots-Tag = "noindex, nofollow"
 
+[[headers]]
+  for = "/invite*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
 # ── auth-guard bindings ─────────────────────────────────────────────────────────
 # Netlify serves every page at BOTH /foo.html and /foo. These two rules used to be the whole
 # binding, and neither matches the extensionless form — so /admin returned the complete admin
@@ -989,6 +1003,12 @@ node_bundler = "esbuild"
 [functions.activate-scheduled-prices]
   schedule = "*/15 * * * *"
 
+# Affiliate Partner Programme: pending partner commissions past their holding period become payable
+# (src/utils/partner-ledger.ts). 02:35 UTC, off the :00/:15/:30 batch. Staging is poked via
+# run-partner-sweep (staging-crons.yml).
+[functions.partner-commission-sweep]
+  schedule = "35 2 * * *"
+
 # US-SALES-1.1 Part 4: Nightly lead identification — 03:00 UTC every day
 [functions.identify-leads]
   schedule = "0 3 * * *"
@@ -1102,6 +1122,15 @@ node_bundler = "esbuild"
 # are ready. Raise the timeout to Netlify's synchronous max so a slow Flux-2 run completes
 # instead of being killed mid-poll (raw 502). The poll budget in fal-gateway stays under this.
 [functions.generate-ai-image]
+  timeout = 26
+
+# Admin → Revenue → Partners ▸ Partner Ops chat: a Claude tool loop (read tools + action cards).
+# Synchronous max, and the function keeps its own 21s budget under it (admin-partners-chat.ts).
+[functions.admin-partners-chat]
+  timeout = 26
+
+# The partner's own Partner Assistant (partner-assistant.ts): the same tool loop and 21s budget.
+[functions.partner-assistant]
   timeout = 26
 
 # The post editor's "Generate with AI" image button — the same synchronous Fal submit+poll as
