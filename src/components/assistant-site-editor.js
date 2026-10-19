@@ -704,7 +704,7 @@
   }
 
   function designPanel() {
-    return templatesCard(false) + structureCard() + designCard();
+    return structureCard() + designCard();
   }
 
   // ── Templates (src/config/site-templates.ts) ───────────────────────────────────────────────
@@ -731,11 +731,13 @@
     const list = state.data.templates || [];
     if (!list.length) return '';
     const current = def().settings.template;
+    // The Templates tab: the same gallery, with a word on which one this site started from. It is a
+    // tab of its own because, tucked inside Design, nobody with a site already found it.
     if (!first) {
       const cur = list.find((x) => x.id === current);
-      return card(`<div class="flex flex-wrap items-center justify-between gap-2"><div><p class="text-sm font-black text-gray-900">Templates</p>
-        <p class="text-xs text-gray-500 mt-1">${cur ? `Started from <strong>${esc(cur.name)}</strong>. ` : ''}Try another look — keep your words and pictures, or start again from a template.</p></div>
-        ${btn('data-tpl-browse', 'Browse templates', true)}</div>`);
+      return card(`<p class="text-sm font-black text-gray-900">Templates</p>
+        <p class="text-xs text-gray-500 mt-1">${cur ? `Started from <strong>${esc(cur.name)}</strong>. ` : ''}Each one is shown with your name. Open one to try it — keep your words and pictures and change only the look, or start again from the template. Nothing changes on your live site until you publish.</p>
+        <div class="flex flex-wrap gap-3 mt-3">${list.map((t) => tplCard(t, 260)).join('')}</div>`);
     }
     return card(`<p class="text-sm font-black text-gray-900">Choose a template</p>
       <p class="text-xs text-gray-500 mt-1">Each one is shown with your name. Pick one to start from — you can change everything afterwards, or try another later.</p>
@@ -1175,7 +1177,7 @@
       host.innerHTML = `<div class="max-w-4xl space-y-4">${noteHtml()}${body}</div>`;
       return;
     }
-    const tabs = [['pages', 'Pages'], ['design', 'Design'], ['details', 'Details']].map(([k, l]) => btn(`data-site-panel="${k}"`, esc(l), state.panel === k)).join(' ');
+    const tabs = [['pages', 'Pages'], ['design', 'Design'], ['templates', 'Templates'], ['details', 'Details']].map(([k, l]) => btn(`data-site-panel="${k}"`, esc(l), state.panel === k)).join(' ');
     host.innerHTML = `
       <div class="grid gap-4 lg:grid-cols-2">
         <div class="space-y-4 min-w-0">
@@ -1186,7 +1188,7 @@
           ${placeholdersCard()}
           <div class="flex flex-wrap gap-2">${tabs}</div>
           ${noteHtml()}
-          ${state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : detailsPanel() + draftCard('again')}
+          ${state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : state.panel === 'templates' ? templatesCard(false) : detailsPanel() + draftCard('again')}
         </div>
         <div class="min-w-0">${previewHtml()}</div>
       </div>`;

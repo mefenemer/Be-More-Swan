@@ -28,6 +28,7 @@ import { failAuditRun, MAX_COMPETITORS, requestAuditRun, sweepStuckAuditRuns } f
 import { CONVERSION_GOALS, saveSiteAuditSettings, WEEKDAYS } from '../../src/utils/site-audit-setup';
 import { asUtcDate, nextCheckDate } from '../../src/utils/site-audit-schedule';
 import { HANDOFF_TARGETS } from '../../src/utils/site-audit-prompts';
+import { plainLocation } from '../../src/utils/site-score';
 import { pickSecondaryPages, type SitePage } from '../../src/utils/site-extract';
 
 /** A fix the user said they'd make that a check has not found on the site for this long. */
@@ -92,7 +93,8 @@ export default withLambda(async (event) => {
             .orderBy(desc(siteAuditRuns.id)).limit(1);
         // Fixes from runs that finished. A run swept as stuck after writing its fixes never showed
         // its report, so its fixes must not appear either.
-        const fixes = await db.select({
+        // plainLocation: rows saved before 2026-10-18 can carry a field name ("pricingAndGuarantees").
+        const fixes = (await db.select({
             id: siteAuditFixes.id, runId: siteAuditFixes.runId, lens: siteAuditFixes.lens, location: siteAuditFixes.location,
             problem: siteAuditFixes.problem, beforeText: siteAuditFixes.beforeText, afterText: siteAuditFixes.afterText,
             whyItMatters: siteAuditFixes.whyItMatters, impact: siteAuditFixes.impact, status: siteAuditFixes.status,
@@ -100,7 +102,8 @@ export default withLambda(async (event) => {
         }).from(siteAuditFixes)
             .innerJoin(siteAuditRuns, eq(siteAuditRuns.id, siteAuditFixes.runId))
             .where(and(eq(siteAuditFixes.auditId, audit.id), eq(siteAuditRuns.status, 'done')))
-            .orderBy(desc(siteAuditFixes.id)).limit(50);
+            .orderBy(desc(siteAuditFixes.id)).limit(50))
+            .map((f) => ({ ...f, location: f.location ? plainLocation(f.location) : f.location }));
 
         // Who can take a hand-off brief: this workspace's working Social / Blog / Campaign assistants.
         // The Website tab opens their chat with the brief typed in — the user sends it.

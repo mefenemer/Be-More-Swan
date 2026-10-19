@@ -36,8 +36,6 @@ function check(name: string, fn: () => void): void {
 // stops being true the dialog goes dead in the same silent way, so move it to body level instead.
 const VIEW_LOCAL: Record<string, string> = {
     'user-detail-panel':      'view-users',
-    'ticket-detail-panel':    'view-tickets',
-    'ir-detail-panel':        'view-issue-reports',
     'audit-diff-modal':       'view-audit-log',
     'modal-log-incident':     'view-breach-response',
     'modal-ico-notification': 'view-breach-response',

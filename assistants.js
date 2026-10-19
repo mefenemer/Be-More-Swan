@@ -7588,6 +7588,8 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // skeleton when they're in.
     _loads.push(_fetchAndRenderAssistantMetrics(assistantId)
         .finally(() => { if (_skelAutopilot) _endCardLoading('autopilot-status-card'); }));
+    // Not awaited: the hero is complete without it, and the strip reveals itself when it lands.
+    _renderAssistantTaskShare(assistantId);
     // Audience counts hit the platform APIs, so they're deliberately not awaited — the Autopilot
     // card is already complete without them and the block reveals itself when they land.
     // Registry-driven, like metricsSource: a role whose audience isn't social gets its own renderer
@@ -8043,6 +8045,39 @@ window._refreshAssistantMetrics = function() {
         _fetchAndRenderAssistantMetrics(current, period);
     }, 250);
 };
+
+// This assistant's share of the month's task allowance (#detail-task-share), beside what every other
+// assistant used. Totals are the org's (check-capacity: usage_counters); the split is task_ledger by
+// assistant (get-usage-summary) — the same two numbers the dashboard's "Tasks this month" card uses.
+// Hidden when the plan has no task limit or the workspace is still on the old credits.
+async function _renderAssistantTaskShare(assistantId) {
+    const strip = document.getElementById('detail-task-share');
+    if (!strip) return;
+    strip.classList.add('hidden');
+    try {
+        const get = (u) => (window.bmsCachedFetch ? window.bmsCachedFetch(u) : fetch(u)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        const [cap, us] = await Promise.all([get('/.netlify/functions/check-capacity'), get('/.netlify/functions/get-usage-summary')]);
+        // The user may have opened another assistant while this was loading.
+        if (Number(window._currentAssistantId) !== Number(assistantId)) return;
+        if (!cap || cap.taskLimit == null || !cap.taskLimit || !us || us.unit !== 'tasks') return;
+        const limit = Number(cap.taskLimit);
+        const total = Number(cap.taskCount || 0);
+        const row = (us.byAssistant || []).find((r) => Number(r.assistantId) === Number(assistantId));
+        const mine = Math.min(Number(row?.tasks || 0), total || Number(row?.tasks || 0));
+        const pct = (v) => Math.round((v / limit) * 100);
+        const minePct = Math.min(100, pct(mine));
+        const othersPct = Math.max(0, Math.min(100 - minePct, pct(total) - minePct));
+        const n = (v) => Number(v).toLocaleString('en-GB');
+        const name = document.getElementById('detail-name-input')?.value?.trim() || 'This assistant';
+        document.getElementById('task-share-pct').textContent = `${minePct}% of your allowance`;
+        document.getElementById('task-share-mine').style.width = `${minePct}%`;
+        document.getElementById('task-share-others').style.width = `${othersPct}%`;
+        document.getElementById('task-share-bar').setAttribute('aria-label', `${name} used ${minePct}% of the monthly task allowance; all assistants together ${Math.min(100, pct(total))}%`);
+        document.getElementById('task-share-note').textContent =
+            `${name}: ${n(mine)} task${mine === 1 ? '' : 's'} · all assistants: ${n(total)} of ${n(limit)} (${Math.min(100, pct(total))}%)`;
+        strip.classList.remove('hidden');
+    } catch { /* the strip just stays hidden */ }
+}
 
 async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
     // Remembered for _refreshAssistantMetrics above — the period toggle calls straight back into
