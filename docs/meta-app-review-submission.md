@@ -65,8 +65,9 @@ _Code: `publish-instagram.ts`._
 ### instagram_manage_insights
 **How the app uses it:** After a post is published through Be More Swan, the app periodically
 reads that post's insights (reach, likes, comments, saves, shares, video views) via
-`/{media-id}/insights`. It shows them to the business owner on the Performance Metrics cards and
-progress toward their marketing goals. Insights are only shown to the account owner and their
+`/{media-id}/insights`. It combines them into the Performance Metrics cards on the assistant's
+page (Engagement Rate, Organic Reach Growth, Meaningful Engagement), which show the business owner
+how their content is performing and track progress toward their marketing goals. Insights are only shown to the account owner and their
 workspace team. They are never shared with third parties or used for advertising.
 _Code: `ingest-instagram-insights.ts`, `get-assistant-performance.ts`._
 
@@ -115,9 +116,14 @@ Suggested single recording (~4–5 min):
 5. Content calendar: create a post with an image, approve it, publish [check label] or schedule for one minute
    ahead → show it live on the Facebook Page *(pages_manage_posts)* and on Instagram
    *(instagram_content_publish)*.
-6. Open the assistant's Performance Metrics → show the reach/engagement figures for those
-   posts. *(instagram_manage_insights, pages_read_engagement)*. Use posts that are a day or more
-   old so the figures are non-zero, and say so in a caption.
+6. Assistants → the Social Media Manager assistant → **Performance Metrics**. Pause on Engagement
+   Rate, Organic Reach Growth and Meaningful Engagement. *(instagram_manage_insights,
+   pages_read_engagement)*. The cards are aggregates, not per post, and Click-Through Rate is
+   always empty for Instagram, so don't point at it.
+7. Open one of the published posts on Instagram → **View insights** and show its reach, likes,
+   comments, saves and shares. Caption: these per-post insights are what Be More Swan reads
+   every 6 hours to calculate the cards. The cards must show real values before you record: use
+   posts published a day or more ago, after an ingest run.
 
 ---
 
@@ -136,8 +142,10 @@ Suggested single recording (~4–5 min):
 > 3. Click [profile sync button] to see the Page's website/description/hours updated (pages_manage_metadata).
 > 4. Open the Content Calendar, create a post with an image, approve it and publish it [check the button label]. It
 >    appears on the Facebook Page (pages_manage_posts) and on Instagram (instagram_content_publish).
-> 5. Open the assistant's Performance tab to see post insights (instagram_manage_insights,
->    pages_read_engagement). Insights refresh every 6 hours.
+> 5. Open Assistants → Social Media Manager and scroll to Performance Metrics. The Engagement Rate,
+>    Organic Reach Growth and Meaningful Engagement cards are calculated from post insights
+>    (instagram_manage_insights, pages_read_engagement). Insights refresh every 6 hours, so posts
+>    published during the review appear in the cards later.
 
 **Before submitting:** create a dedicated reviewer login on production. Don't reuse a real
 customer's. Check that every step above matches the current UI labels, and that the reviewer
