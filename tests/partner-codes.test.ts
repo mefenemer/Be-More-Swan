@@ -54,7 +54,7 @@ check('"Have an invite code?": asks the server, hidden unless eligible, writes o
     assert.ok(ws.includes("const st = await (await fetch('/.netlify/functions/referral-claim', { credentials: 'same-origin' })).json();"));
     assert.ok(ws.includes('const show = !!st.eligible;'));
     const claim = read('netlify/functions/referral-claim.ts');
-    assert.ok(claim.includes("if (impersonating) return json(403"));
+    assert.ok(claim.includes("checkImpersonationBlock(event, 'referral_claim')"));
     assert.ok(claim.includes("checkRateLimit(db, 'referral_claim'"));
 });
 
