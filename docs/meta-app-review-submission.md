@@ -107,11 +107,47 @@ Page (`/{page-id}/feed`, or `/{page-id}/photos` when an image is attached). Post
 published when the user has created or approved them.
 _Code: `publish-facebook.ts`._
 
+---
+
+## Screencast scripts
+
+Based on Meta's guide (developers.facebook.com/docs/app-review/submission-guide/screen-recordings):
+- **Every recording** starts logged out of Be More Swan *and* Facebook. Show the full login, the
+  Connect click, and the **whole Meta dialog** with the permission visibly granted. Then show the
+  feature using the data, and the result on Facebook/Instagram itself.
+- English UI, 1080p, screen width ≤ 1440px, larger cursor, mouse not keyboard, **no audio**.
+- Add on-screen annotations naming the permission at the moment it's used, and zoom in on small
+  details (QuickTime + iMovie is enough).
+- You don't explain *why* in the video. That goes in the form's description.
+
+**Which card:** Integrations has two separate cards. **Facebook** (`platform=facebook`) stores
+the Page connection used by Facebook publishing and Page engagement. Its picker
+lists Page names. **Instagram** (`platform=instagram`) stores the Instagram account connection. Its
+picker lists @usernames. Use Facebook for `pages_*` and Instagram for `instagram_*`.
+
+**Be More Swan shows no per-post stats.** Insights only appear combined, in the **Performance
+Metrics** cards (assistant page) and the **Audience** block. Show the per-post numbers on
+Facebook/Instagram as the source.
+
+**Before recording anything:**
+- The reviewer account's Page is owned by a Business portfolio, and the Facebook user is *not* a
+  direct Page admin (needed to show business_management).
+- That Page has a linked Instagram Business account.
+- The Facebook user manages **at least two Pages**. With one, Be More Swan skips its picker
+  (`meta-oauth.ts:483`) and the Page list that pages_show_list produces is never shown.
+- A few posts were published *by Be More Swan* to both, at least a day ago, with some likes and
+  comments. That way the Performance Metrics cards and Audience block show real values, not "—" or 0.
+
+The common opening (steps A–C) is the same in every recording:
+- **A.** Logged out → log in to bemoreswan.com → **Integrations**.
+- **B.** Click **Connect** on the stated card → Facebook login.
+- **C.** Meta dialog: select the business, the Page (and the Instagram account if asked) → leave
+  all permissions on → continue. *Annotation: "Granting <permission>"*
 
 ### pages_show_list (Facebook card, ~1 min)
 A–C, then:
-1. Pause on Be More Swan's picker, which lists the user's Pages by name. *Annotation: "Pages
-   listed via /me/accounts using pages_show_list"*
+1. Pause on Be More Swan's picker, which lists the user's Pages by name (needs 2+ Pages, or the
+   picker is skipped). *Annotation: "Pages listed via /me/accounts using pages_show_list"*
 2. Select the Page → show the Facebook card as connected.
 
 ### business_management (Facebook card, ~1.5 min)
@@ -127,7 +163,8 @@ A–C, showing the **business selection** step in the dialog, then:
 ### pages_manage_posts (Facebook card, ~2 min)
 A–C → select the Page, then:
 1. Open the Social Media Manager assistant → **Review** → open a Facebook post draft with an image
-   → **Approve & Schedule** for 1–2 minutes ahead.
+   → **Approve & Schedule** for 2–3 minutes ahead. The Facebook publisher runs every 10 minutes,
+   so cut the wait.
 2. Optionally show it in the Content Calendar.
 3. Wait (cut is fine here, but not during login) → open the Facebook Page → show the post live.
    *Annotation: "Published via /{page-id}/photos using pages_manage_posts"*
