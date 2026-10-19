@@ -83,7 +83,9 @@ check('call back is its OWN form, beside the support form — never a mode of it
     // looked as if raising a support request had been replaced. They must stay separate.
     const html = read('help-content.html');
     assert.ok(html.includes('id="cb-form"') && html.includes('id="cb-phone"') && html.includes('id="cb-notes"') && html.includes('id="cb-submit"'));
-    assert.ok(html.indexOf('id="cb-phone"') < html.indexOf('id="cu-form-card"'), 'the phone field belongs to the call-back card');
+    // Owner: "Prefer to talk" sits UNDER "How can we help?".
+    assert.ok(html.indexOf('id="cu-form-card"') < html.indexOf('id="cb-card"'), 'the call-back card must come after the support form');
+    assert.ok(html.indexOf('id="cb-card"') < html.indexOf('id="cb-phone"'), 'the phone field belongs to the call-back card');
     assert.ok(!html.includes('value="callback"'), 'call back is a topic of the support form again');
     assert.ok(!html.includes('cu-callback-fields'));
     assert.ok(!html.includes('cb-time'), 'a time picker came back');
