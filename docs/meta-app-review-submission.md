@@ -106,39 +106,104 @@ _Code: `social-profile-sync.ts` (`POST /{page-id}`)._
 
 ## Screencast scripts
 
-General rules Meta enforces (most rejections come from these):
-- Use English UI (or captions), at least 720p, with no cuts that hide the login flow.
-- Start **logged out** of Be More Swan. Show login → Integrations → the Facebook or Instagram card's Connect → the **Meta
-  permission dialog with each permission visible** → the account selection → the feature using it.
-- Show the result **on Facebook/Instagram itself** (the published post, the updated Page info), not
-  just inside Be More Swan.
-- One recording covering everything is fine. Upload it against each permission, and add short
-  captions/annotations that name the permission as each feature appears.
+Based on Meta's guide (developers.facebook.com/docs/app-review/submission-guide/screen-recordings):
+- **Every recording** starts logged out of Be More Swan *and* Facebook. Show the full login, the
+  Connect click, and the **whole Meta dialog** with the permission visibly granted. Then show the
+  feature using the data, and the result on Facebook/Instagram itself.
+- English UI, 1080p, screen width ≤ 1440px, larger cursor, mouse not keyboard, **no audio**.
+- Add on-screen annotations naming the permission at the moment it's used, and zoom in on small
+  details (QuickTime + iMovie is enough).
+- You don't explain *why* in the video. That goes in the form's description.
 
-Suggested single recording (~4–5 min):
-Integrations has two separate cards. **Facebook** (`platform=facebook`) stores the Page connection
-used by Facebook publishing, Page insights and profile sync. **Instagram** (`platform=instagram`)
-stores the Instagram account connection. Use the Facebook card for every `pages_*` permission and
-the Instagram card for every `instagram_*` one.
+**Which card:** Integrations has two separate cards. **Facebook** (`platform=facebook`) stores
+the Page connection used by Facebook publishing, Page engagement and profile sync. Its picker
+lists Page names. **Instagram** (`platform=instagram`) stores the Instagram account connection. Its
+picker lists @usernames. Use Facebook for `pages_*` and Instagram for `instagram_*`.
 
-1. Log in to bemoreswan.com with the reviewer account → Integrations → **Facebook** card → Connect.
-2. Meta dialog: choose the business portfolio and Page, and leave all permissions granted. Be More
-   Swan's picker then lists the Pages by name. *(pages_show_list, business_management)*
-3. Integrations → **Instagram** card → Connect → Meta dialog → Be More Swan's picker lists the
-   linked accounts as @username → select it. *(instagram_basic)*
-4. Trigger the profile sync [check the button label] → open the Facebook Page in a new tab → show the updated website,
-   description and hours. *(pages_manage_metadata)*
-5. Content calendar: create a post with an image, approve it, publish [check label] or schedule for one minute
-   ahead → show it live on the Facebook Page *(pages_manage_posts)* and on Instagram
-   *(instagram_content_publish)*.
-6. Assistants → the Social Media Manager assistant → **Performance Metrics**. Pause on Engagement
-   Rate, Organic Reach Growth and Meaningful Engagement. *(instagram_manage_insights,
-   pages_read_engagement)*. The cards are aggregates, not per post, and Click-Through Rate is
-   always empty for Instagram, so don't point at it.
-7. Open one of the published posts on Instagram → **View insights** and show its reach, likes,
-   comments, saves and shares. Caption: these per-post insights are what Be More Swan reads
-   every 6 hours to calculate the cards. The cards must show real values before you record: use
-   posts published a day or more ago, after an ingest run.
+**Be More Swan shows no per-post stats.** Insights only appear combined, in the **Performance
+Metrics** cards (assistant page) and the **Audience** block. Show the per-post numbers on
+Facebook/Instagram as the source.
+
+**Before recording anything:**
+- The reviewer account's Page is owned by a Business portfolio, and the Facebook user is *not* a
+  direct Page admin (needed to show business_management).
+- That Page has a linked Instagram Business account.
+- A few posts were published *by Be More Swan* to both, at least a day ago, with some likes and
+  comments. That way the Performance Metrics cards and Audience block show real values, not "—" or 0.
+- The business profile in Be More Swan has a website, description and hours that differ from the
+  Page's current ones, so Sync Profile visibly changes something.
+
+The common opening (steps A–C) is the same in every recording:
+- **A.** Logged out → log in to bemoreswan.com → **Integrations**.
+- **B.** Click **Connect** on the stated card → Facebook login.
+- **C.** Meta dialog: select the business, the Page (and the Instagram account if asked) → leave
+  all permissions on → continue. *Annotation: "Granting <permission>"*
+
+### pages_show_list (Facebook card, ~1 min)
+A–C, then:
+1. Pause on Be More Swan's picker, which lists the user's Pages by name. *Annotation: "Pages
+   listed via /me/accounts using pages_show_list"*
+2. Select the Page → show the Facebook card as connected.
+
+### business_management (Facebook card, ~1.5 min)
+0. Optional first: business.facebook.com → Business settings → Accounts → Pages → show the Page is
+   owned by the portfolio. *Annotation: "Page owned by a Business portfolio, not directly by the user"*
+
+A–C, showing the **business selection** step in the dialog, then:
+1. Pause on the picker with the portfolio-owned Page listed. *Annotation: "Found via
+   /me/businesses → owned_pages using business_management, not returned by /me/accounts"*
+2. Select it → connected.
+
+### pages_manage_metadata (Facebook card, ~1.5 min)
+A–C → select the Page, then:
+1. Open Facebook Page in a new tab → show the current About info (website, description, hours).
+2. Back in Integrations → Facebook card → **Sync Profile**. *Annotation: "Updates the Page's
+   website, description, category and hours via pages_manage_metadata"*
+3. Reload the Facebook Page → show the updated About info.
+
+### pages_manage_posts (Facebook card, ~2 min)
+A–C → select the Page, then:
+1. Open the Social Media Manager assistant → **Review** → open a Facebook post draft with an image
+   → **Approve & Schedule** for 1–2 minutes ahead.
+2. Optionally show it in the Content Calendar.
+3. Wait (cut is fine here, but not during login) → open the Facebook Page → show the post live.
+   *Annotation: "Published via /{page-id}/photos using pages_manage_posts"*
+
+### pages_read_engagement (Facebook card, ~2 min)
+A–C → select the Page, then:
+1. Assistant → **Performance Metrics** → pause on Engagement Rate and Meaningful Engagement.
+   *Annotation: "Combined from reactions, comments and shares on the Page's posts, read via
+   pages_read_engagement"*. Don't point at Click-Through Rate (see the read_insights note).
+2. **Audience** block → the Facebook follower count. *Annotation: "Page follower count read via
+   pages_read_engagement"*
+3. Open one of those posts on the Facebook Page → show its reactions, comments and shares as the
+   source.
+
+### instagram_basic (Instagram card, ~1.5 min)
+A–C, then:
+1. Pause on the picker showing **@username** "via <Page name>". *Annotation: "Instagram username and
+   account ID read via instagram_basic"*
+2. Select → connected.
+3. Assistant → **Audience** block → the Instagram follower count. *Annotation: "followers_count
+   read via instagram_basic"*
+4. Open the Instagram profile → same handle and follower count.
+
+### instagram_content_publish (Instagram card, ~2 min)
+A–C → select the account, then:
+1. Assistant → **Review** → open an Instagram post draft with an image → **Approve & Schedule** for
+   1–2 minutes ahead.
+2. Wait → open the Instagram profile → show the post live. *Annotation: "Published via
+   /{ig-user-id}/media + /media_publish using instagram_content_publish"*
+
+### instagram_manage_insights (Instagram card, ~2 min)
+A–C → select the account, then:
+1. Assistant → **Performance Metrics** → pause on Engagement Rate, Organic Reach Growth and
+   Meaningful Engagement. *Annotation: "Calculated from Instagram post insights read via
+   instagram_manage_insights"*. Click-Through Rate is always empty for Instagram, so don't point
+   at it.
+2. Open one of the published posts on Instagram → **View insights** → show reach, likes, comments,
+   saves and shares. *Annotation: "These per-post insights are read every 6 hours and combined
+   into the cards above"*
 
 ---
 
@@ -155,8 +220,9 @@ the Instagram card for every `instagram_*` one.
 > 2. Go to Integrations. On the Facebook card click Connect, log in with your Facebook test user and
 >    select a Page that has a linked Instagram Business account. Then do the same on the Instagram
 >    card and select that Page's Instagram account.
-> 3. Click [profile sync button] to see the Page's website/description/hours updated (pages_manage_metadata).
-> 4. Open the Content Calendar, create a post with an image, approve it and publish it [check the button label]. It
+> 3. On the Facebook card click Sync Profile, then reload the Page to see the Page's website/description/hours updated (pages_manage_metadata).
+> 4. Open the Social Media Manager assistant → Review, open a post with an image and click Approve &
+>    Schedule for a couple of minutes ahead. It
 >    appears on the Facebook Page (pages_manage_posts) and on Instagram (instagram_content_publish).
 > 5. Open Assistants → Social Media Manager and scroll to Performance Metrics. The Engagement Rate,
 >    Organic Reach Growth and Meaningful Engagement cards are calculated from post insights
