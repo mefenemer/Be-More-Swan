@@ -316,6 +316,37 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             button('Choose a plan', 'link.action_url') + signoff,
     },
 
+    // ── Admin ▸ Revenue ▸ Plan moves (src/utils/plan-moves.ts) ──────────────────────────────
+    // Owner, 2026-10-19: nobody's billing changes silently, and a customer on a coupon is told what
+    // they will actually pay. Every value comes from the move itself — never type a price here.
+    {
+        triggerKey: 'plan_move_scheduled',
+        name: 'Plan Change — Scheduled',
+        category: 'Billing',
+        transactional: true,
+        subject: 'Your Be More Swan plan is changing on {{plan_move.starts_on}}',
+        preheader: 'Your new plan, its price, and what happens to any discount.',
+        bodyHtml: greet +
+            p('We are moving <strong>{{workspace.name | "your workspace"}}</strong> from <strong>{{plan_move.from_plan}}</strong> to <strong>{{plan_move.to_plan}}</strong>.') +
+            p('It starts on <strong>{{plan_move.starts_on}}</strong>, your next renewal, and the new price is <strong>{{plan_move.new_price}}</strong>. {{plan_move.price_change_line}} Nothing changes before then, and there is no extra charge or refund for the current period.') +
+            p('{{plan_move.discount_line}} {{plan_move.assistants_line}}') +
+            button('See your billing', 'link.action_url') +
+            p('If you would rather choose a different plan, change it from your billing page before {{plan_move.starts_on}} and this change is cancelled. Questions? Just reply to this email.') + signoff,
+    },
+
+    {
+        triggerKey: 'plan_move_cancelled',
+        name: 'Plan Change — Cancelled',
+        category: 'Billing',
+        transactional: true,
+        subject: 'Your Be More Swan plan is no longer changing',
+        preheader: 'You stay on your current plan and price.',
+        bodyHtml: greet +
+            p('We told you <strong>{{workspace.name | "your workspace"}}</strong> would move from <strong>{{plan_move.from_plan}}</strong> to <strong>{{plan_move.to_plan}}</strong> on {{plan_move.starts_on}}. That change is cancelled.') +
+            p('You stay on <strong>{{plan_move.from_plan}}</strong> at {{plan_move.current_price}} and nothing about your billing changes. Any discount you have carries on as before.') +
+            p('Sorry for the change of plan. Questions? Just reply to this email.') + signoff,
+    },
+
     // ── Engagement & lifecycle ───────────────────────────────────────────────
     {
         triggerKey: 'win_back',

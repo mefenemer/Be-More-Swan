@@ -18,6 +18,7 @@ import { resolveActionNotifications, PLAN_UPGRADED_TYPES } from '../../src/utils
 import { resolvePriceIdForInterval } from '../../src/utils/stripe-price';
 import { sendPlanUpgradeAlert } from '../../src/utils/founder-alerts';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { cancelMovesForCustomerChange } from '../../src/utils/plan-moves';
 
 const jwtSecret      = process.env.JWT_SECRET!;
 const stripeSecret   = process.env.STRIPE_SECRET_KEY!;
@@ -222,6 +223,14 @@ export default withLambda(async (event) => {
         const currentItemId = sub.items.data[0]?.id;
         if (!currentItemId) throw new Error('No subscription item found');
         targetPriceId = await targetPriceFor(sub);
+
+        // The customer's own choice wins over anything scheduled: a pending Admin ▸ Plan move or an
+        // earlier downgrade owns a subscription schedule, and Stripe will not change the items of a
+        // subscription a schedule manages. Release it and record the move as cancelled.
+        if (typeof sub.schedule === 'string') {
+            await stripe.subscriptionSchedules.release(sub.schedule).catch(() => { /* already released */ });
+        }
+        await cancelMovesForCustomerChange(db, user.organisationId);
 
         // SC3: upgrade with proration — expand latest_invoice so prorated amount and URL are available
         const updatedSub = await stripe.subscriptions.update(currentPlan.stripeSubscriptionId, {

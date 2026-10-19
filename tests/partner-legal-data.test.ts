@@ -30,7 +30,9 @@ const terms = read('partner-terms.html');
 
 check('the page states the version and date the code records, and stays out of the index until launch', () => {
     assert.ok(terms.includes(`Version ${PARTNER_TERMS_VERSION} &middot; Last updated: ${PARTNER_TERMS_UPDATED}`));
-    assert.ok(terms.includes('name="robots" content="noindex,follow"'));
+    // Public since the programme opened: indexed, canonical, in the sitemap and linked from the footer.
+    assert.ok(!terms.includes('noindex'), 'partner terms are public');
+    assert.ok(terms.includes('<link rel="canonical" href="https://bemoreswan.com/partner-terms">'));
     const relative = [...terms.matchAll(/(?:href|src)=["'](?!\/|https?:|#|mailto:)([^"']+)["']/g)].map((m) => m[1]);
     assert.deepStrictEqual(relative, []);
 });

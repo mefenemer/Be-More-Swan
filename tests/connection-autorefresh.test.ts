@@ -38,13 +38,24 @@ const integrations = read('../netlify/functions/integrations.ts');
 const social = cronSelects(read('../netlify/functions/refresh-social-tokens.ts'), 'refresh-social-tokens.ts');
 const meta = cronSelects(read('../netlify/functions/refresh-meta-tokens.ts'), 'refresh-meta-tokens.ts');
 
-const declared = (() => {
-    const m = integrations.match(/const CRON_REFRESHED = new Set\(\[([^\]]*)\]\)/);
-    assert.ok(m, 'could not find CRON_REFRESHED in integrations.ts — update this test');
-    return new Set([...m![1].matchAll(/'([^']+)'/g)].map(x => x[1]));
-})();
+// The list moved to src/config/connection-renewal.ts so the health check reads the same answer;
+// integrations.ts must still build CRON_REFRESHED from it rather than a literal of its own.
+const renewal = read('../src/config/connection-renewal.ts');
+const listIn = (name: string) => {
+    const m = renewal.match(new RegExp(`export const ${name}[^=]*=\\s*\\[([^\\]]*)\\]`));
+    assert.ok(m, `could not find ${name} in connection-renewal.ts — update this test`);
+    return [...m![1].matchAll(/'([^']+)'/g)].map(x => x[1]);
+};
+const declared = new Set(listIn('CRON_RENEWED_SERVICES'));
+assert.ok(/const CRON_REFRESHED = new Set\(CRON_RENEWED_SERVICES\)/.test(integrations),
+    'integrations.ts no longer builds CRON_REFRESHED from CRON_RENEWED_SERVICES — update this test');
 
-const refreshed = new Set([...social, ...meta]);
+// Selected by refresh-social-tokens but NOT renewable: LinkedIn grants our app no refresh token,
+// so the cron can only warn before expiry. Declaring it auto-refreshing is the phantom-entry bug
+// below in disguise — the card said "Connected" until the posts failed (October 2026).
+const SELECTED_BUT_NOT_RENEWABLE = new Set(listIn('CRON_WARNS_OWN_EXPIRY'));
+
+const refreshed = new Set([...social, ...meta].filter(s => !SELECTED_BUT_NOT_RENEWABLE.has(s)));
 
 console.log('\nCRON_REFRESHED ↔ the refresh crons\n');
 
@@ -60,6 +71,14 @@ test('nothing is declared auto-refreshing that no cron renews', () => {
     assert.deepEqual(phantom, [],
         `CRON_REFRESHED claims these renew silently but no cron selects them, so the card will ` +
         `read "Connected" until a publish fails: ${phantom.join(', ')}`);
+});
+
+test('LinkedIn is not declared auto-refreshing while it has no refresh token', () => {
+    assert.ok(social.includes('linkedin'), 'refresh-social-tokens no longer selects linkedin — the 7-day expiry warning lives there');
+    assert.ok(SELECTED_BUT_NOT_RENEWABLE.has('linkedin'), 'CRON_WARNS_OWN_EXPIRY no longer lists linkedin');
+    assert.ok(!declared.has('linkedin'), 'CRON_RENEWED_SERVICES lists linkedin, so its card will hide the 60-day expiry countdown');
+    const cron = read('../netlify/functions/refresh-social-tokens.ts');
+    assert.ok(cron.includes('handleNoRefreshTokenExpiry(db, conn)'), 'the no-refresh-token LinkedIn branch no longer warns before expiry');
 });
 
 test('the Meta pair specifically is covered', () => {

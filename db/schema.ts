@@ -2813,6 +2813,36 @@ export const billingCoupons = pgTable("billing_coupons", {
   deletedAt: timestamp("deleted_at"),
 });
 
+// ── Plan moves — Admin → Revenue → Plan moves ──────────────────────────────────────
+// See db/z-plan-moves.sql. One row per customer per bulk move; the Stripe subscription schedule does
+// the switch at renewal and stripe-webhook.ts marks the row applied. One 'scheduled' row per org.
+export const planMoves = pgTable("plan_moves", {
+  id: serial().primaryKey(),
+  batchId: text("batch_id").notNull(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  planId: integer("plan_id").references(() => plans.id, { onDelete: "set null" }),
+  fromMasterPlanId: integer("from_master_plan_id").references(() => masterPlans.id, { onDelete: "set null" }),
+  toMasterPlanId: integer("to_master_plan_id").notNull().references(() => masterPlans.id),
+  fromAmountPence: integer("from_amount_pence"),
+  toAmountPence: integer("to_amount_pence").notNull(),
+  billingInterval: text("billing_interval").notNull(), // 'month' | 'year'
+  direction: text("direction").notNull(), // 'up' | 'down' | 'same'
+  effectiveAt: timestamp("effective_at").notNull(),
+  stripeSubscriptionId: text("stripe_subscription_id").notNull(),
+  stripeScheduleId: text("stripe_schedule_id"),
+  status: text("status").notNull().default("scheduled"), // 'scheduled' | 'applied' | 'cancelled' | 'failed'
+  error: text("error"),
+  discountLine: text("discount_line"),
+  emailSentAt: timestamp("email_sent_at"),
+  livemode: boolean("livemode").notNull(),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  cancelledBy: integer("cancelled_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  appliedAt: timestamp("applied_at"),
+  cancelledAt: timestamp("cancelled_at"),
+});
+
 // ── Beta endings — Admin → Customers → Beta testers ──────────────────────────────
 // See db/z-beta-endings.sql. One row per beta workspace; end date set per workspace; notices are
 // sent by an admin only; end-beta-sweep ends a workspace only after its notice was sent.

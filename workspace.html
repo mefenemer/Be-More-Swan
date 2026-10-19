@@ -17296,6 +17296,9 @@ function _rqReviewRenderActive() {
 
     // Status note for non-reviewable states: archived (with countdown), scheduled/approved (when),
     // posted (with a live link if we have one).
+    // `when` lost its definition when the subtitle line it sat beside was removed (b1f3a1f4), so
+    // every scheduled, approved or published post threw "Can't find variable: when" on open.
+    const when = post.publishDate ? new Date(post.publishDate).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : null;
     const noteEl = document.getElementById('post-review-archive');
     if (post.status === 'rejected') {
         const days = post.daysRemaining;
