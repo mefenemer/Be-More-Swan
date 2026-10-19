@@ -34,7 +34,8 @@ check('register: the lock is checked AFTER the beta check, and skipped for beta 
     const beta = landmark(REGISTER, 'isBetaApplicant(db, email)');
     const lock = landmark(REGISTER, 'await isRegistrationLocked()');
     assert.ok(beta < lock, 'the lock runs before we know whether this email is a beta applicant — every tester is turned away');
-    assert.match(REGISTER, /if \(!isBeta && await isRegistrationLocked\(\)\)/, 'the lock must exempt beta applicants');
+    // An approved partner's private link is the one other exemption (partner-applications.ts, 2026-10-18).
+    assert.match(REGISTER, /if \(!isBeta && !partnerInvite && await isRegistrationLocked\(\)\)/, 'the lock must exempt beta applicants');
 });
 
 check('register: a beta applicant never carries a paid plan to checkout, and gets the beta plan', () => {
@@ -43,12 +44,12 @@ check('register: a beta applicant never carries a paid plan to checkout, and get
     assert.match(tx, /planType: BETA_PLAN_TYPE,[\s\S]{0,40}status: 'active'/, 'the new workspace must get an active beta plan inside the same transaction');
 });
 
-check('edge: ?beta=1 is let through the lock (and nothing else is)', () => {
+check('edge: ?beta=1 is let through the lock (and only it and an approved partner\'s ?partner= link are)', () => {
     assert.match(GUARD, /registrationLocked\s*&&\s*path\s*===\s*['"]\/register['"]\s*&&\s*url\.searchParams\.get\('beta'\)\s*!==\s*'1'/);
 });
 
 check('register.html: beta mode drops any pending plan and explains a non-applicant instead of redirecting', () => {
-    assert.match(PAGE, /const planTier = IS_BETA \? null :/);
+    assert.match(PAGE, /const planTier = \(IS_BETA \|\| PARTNER_TOKEN\) \? null :/);
     const branch = PAGE.slice(landmark(PAGE, 'data.waitlist && IS_BETA'));
     assert.ok(branch.indexOf('beta.html') !== -1 && branch.indexOf('beta.html') < branch.indexOf("window.location.href = '/waitlist.html'"),
         'a beta sign-up with the wrong email must be told so, not bounced to the waitlist');

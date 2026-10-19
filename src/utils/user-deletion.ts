@@ -12,6 +12,7 @@
 // subscription is KEPT even then: deleting it would drop the plans row while Stripe goes on
 // billing, and every later webhook would land on nothing. That case is reported, not guessed at.
 
+import { erasePartnerDataForUser } from './partner-erasure';
 import { and, eq, ne, inArray, isNotNull, notInArray, type SQL } from 'drizzle-orm';
 import { users, organisations, userOrganisations, plans } from '../../db/schema';
 
@@ -65,6 +66,10 @@ export async function deleteUserAndSoleOrgs(
             ...memberships.map(m => m.orgId),
             ...(legacy?.orgId ? [legacy.orgId] : []),
         ])];
+
+        // A partner's personal data (application, payout details in the vault) goes before the user row;
+        // the commission ledger stays for tax law (src/utils/partner-erasure.ts).
+        await erasePartnerDataForUser(tx, userId);
 
         const deleted = await tx
             .delete(users)

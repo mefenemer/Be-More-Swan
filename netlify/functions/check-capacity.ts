@@ -26,7 +26,7 @@ import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
 import { eq, and, gte, gt, count, sum, asc, or, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { plans, masterPlans, planPrices, aiAssistants, taskRuns, usageCounters, userOrganisations, users, systemConnections, organisations } from '../../db/schema';
+import { plans, masterPlans, planPrices, aiAssistants, taskRuns, usageCounters, userOrganisations, users, systemConnections, organisations, partners } from '../../db/schema';
 import { getPeriodStart } from '../../src/utils/atomic-cap-check';
 import { effectiveLimit, effectiveFeatures, type FeatureOverrides } from '../../src/utils/plan-features';
 import { SOCIAL_PLATFORMS } from '../../src/config/platform-formats';
@@ -136,6 +136,16 @@ export default withLambda(async (event) => {
         const noPlan = plan === null;
         // A workspace on the plan picker because its free trial ran out (vs one that never had a plan).
         const trialEnded = noPlan && orgId ? !!(await getTrial(db, orgId))?.endedAt : false;
+        // Affiliate partners (docs/affiliate-partner-programme-plan.md §4.6, owner decision 2026-10-18):
+        // a partner needs no paid plan, so the workspace never hard-gates them — it opens their
+        // Partner page instead. Best-effort: a failure here must never break the capacity check.
+        let partnerStatus: string | null = null;
+        try {
+            const [pr] = await db.select({ status: partners.status }).from(partners).where(eq(partners.userId, userId)).limit(1);
+            partnerStatus = pr?.status ?? null;
+        } catch (err) {
+            console.error('[check-capacity] partner lookup failed (treated as not a partner):', err);
+        }
         // Plan Features: a "new subscribers only" change freezes existing subscribers at their old
         // values in plans.featureOverrides — prefer that snapshot over the live master_plans column.
         const overrides = (plan as any)?.featureOverrides as FeatureOverrides | null;
@@ -414,6 +424,9 @@ export default withLambda(async (event) => {
                 // Free trial removed: no active/past_due plan → hard-gate. The workspace reads
                 // this to show the non-dismissible plan picker for a brand-new (no-assistant) user.
                 noPlan,
+                // 'applied' | 'approved' | 'suspended' | 'rejected' | null — the workspace shows the
+                // Partner page to the first three, and never hard-gates approved/suspended partners.
+                partnerStatus,
                 currency: userCurrency,      // US-I18N-2.1 SC5: user's billing currency
                 pastDueAmountGbp,            // amount owed on open Stripe invoice (SC2)
                 pastDueAmount: pastDueAmountGbp, // alias — use formatCurrency(pastDueAmount, currency) in UI

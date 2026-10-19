@@ -1174,7 +1174,7 @@ export const userReferrals = pgTable("user_referrals", {
   referrerId: integer("referrer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   referredUserId: integer("referred_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   referralCode: text("referral_code").notNull(),          // the code that was used
-  status: text("status").notNull().default("pending"),    // 'pending' | 'qualified' | 'rewarded'
+  status: text("status").notNull().default("pending"),    // 'pending' | 'qualified' | 'rewarded' | 'spent' | 'partner' (partner track — cash, no token; partner-ledger.ts)
   qualifiedAt: timestamp("qualified_at"),                 // when referred user made first paid invoice
   rewardedAt: timestamp("rewarded_at"),                   // when £10 credit was applied
   stripeBalanceTxId: text("stripe_balance_tx_id"),        // Stripe customer balance transaction id
@@ -5915,3 +5915,170 @@ export const siteReports = pgTable("site_reports", {
   check("site_reports_reason_check", sql`${t.reason} IN ('scam','impersonation','harmful','copyright','other')`),
   check("site_reports_status_check", sql`${t.status} IN ('open','dismissed','actioned')`),
 ]);
+
+// ── Affiliate Partner Programme — db/z-affiliate-partners.sql ────────────────
+// Plan: docs/affiliate-partner-programme-plan.md. Partners earn CASH; customers who refer a friend
+// stay on userReferrals + the token vault. Money is integer pence, rates integer basis points
+// (2500 = 25%). Period rules (no overlaps, no programme gaps, started periods frozen) live in
+// src/utils/partner-rate-periods.ts.
+
+// Non-rate programme settings — exactly one row (id = 1).
+export const partnerProgrammeSettings = pgTable("partner_programme_settings", {
+  id: smallint().primaryKey().default(1),
+  holdingDays: integer("holding_days").notNull().default(30),
+  minPayoutPence: integer("min_payout_pence").notNull().default(5000),
+  currency: text().notNull().default("GBP"),
+  updatedBy: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  check("partner_programme_settings_id_check", sql`${t.id} = 1`),
+  check("partner_programme_settings_holding_days_check", sql`${t.holdingDays} BETWEEN 0 AND 365`),
+  check("partner_programme_settings_min_payout_pence_check", sql`${t.minPayoutPence} >= 0`),
+  check("partner_programme_settings_currency_check", sql`${t.currency} IN ('GBP')`),
+]);
+
+// One per person. userId is nulled (not cascaded) on user delete — the ledger must survive.
+export const partners = pgTable("partners", {
+  id: serial().primaryKey(),
+  userId: integer("user_id").unique().references(() => users.id, { onDelete: "set null" }),
+  status: text().notNull().default("applied"),               // applied | approved | rejected | suspended
+  application: jsonb().$type<Record<string, unknown>>().notNull().default({}),
+  stripeCouponId: text("stripe_coupon_id"),                  // UNUSED — partner codes are BMS codes, see promoCode
+  stripePromoCodeId: text("stripe_promo_code_id").unique(),  // UNUSED
+  // A memorable partner code (db/z-affiliate-partner-codes.sql), set by an admin. Resolves to this
+  // partner like their link does (src/utils/invite-codes.ts). Null = off.
+  promoCode: text("promo_code"),
+  // Partner Terms acceptance (db/z-affiliate-partner-terms.sql; src/config/partner-terms.ts).
+  termsVersion: text("terms_version"),
+  termsAcceptedAt: timestamp("terms_accepted_at"),
+  payoutMethod: text("payout_method"),                       // wise | paypal | bank
+  payoutDetailsEnc: text("payout_details_enc"),              // UNUSED (always null) — details live in the vault, see below
+  payoutDetailsConfirmedAt: timestamp("payout_details_confirmed_at"),
+  // Payout details (db/z-affiliate-partner-payouts.sql): the details are in the VAULT
+  // (aura/partner-<id>/payout); only a masked summary is here. A change waits as "pending" until the
+  // partner confirms it from their email (src/utils/partner-payouts.ts).
+  payoutDisplay: text("payout_display"),
+  payoutPendingMethod: text("payout_pending_method"),
+  payoutPendingDisplay: text("payout_pending_display"),
+  payoutPendingTokenHash: text("payout_pending_token_hash"),
+  payoutPendingExpiresAt: timestamp("payout_pending_expires_at"),
+  vatRegistered: boolean("vat_registered").notNull().default(false),
+  vatNumber: text("vat_number"),
+  decidedBy: integer("decided_by").references(() => users.id, { onDelete: "set null" }),
+  decidedAt: timestamp("decided_at"),
+  decisionNote: text("decision_note"),
+  // Applying without an account (db/z-affiliate-partner-applications.sql): who applied, and the
+  // hashed one-time link approval emails so they can create their partner account.
+  applicantName: text("applicant_name"),
+  applicantEmail: text("applicant_email"),
+  inviteTokenHash: text("invite_token_hash"),
+  inviteExpiresAt: timestamp("invite_expires_at"),
+  invitedAt: timestamp("invited_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("partners_status_idx").on(t.status, t.createdAt),
+  uniqueIndex("partners_applicant_email_uq").on(sql`lower(${t.applicantEmail})`).where(sql`applicant_email IS NOT NULL`),
+  uniqueIndex("partners_invite_token_uq").on(t.inviteTokenHash).where(sql`invite_token_hash IS NOT NULL`),
+  uniqueIndex("partners_promo_code_uq").on(sql`upper(${t.promoCode})`).where(sql`promo_code IS NOT NULL`),
+  uniqueIndex("partners_payout_pending_token_uq").on(t.payoutPendingTokenHash).where(sql`payout_pending_token_hash IS NOT NULL`),
+  check("partners_status_check", sql`${t.status} IN ('applied','approved','rejected','suspended')`),
+  check("partners_payout_method_check", sql`${t.payoutMethod} IN ('wise','paypal','bank')`),
+]);
+
+// Commission rates over time. partnerId null = programme-wide; endsAt null = open-ended;
+// durationMonths null = lifetime.
+export const partnerRatePeriods = pgTable("partner_rate_periods", {
+  id: serial().primaryKey(),
+  partnerId: integer("partner_id").references(() => partners.id, { onDelete: "cascade" }),
+  rateBps: integer("rate_bps").notNull(),
+  durationMonths: integer("duration_months"),
+  startsAt: timestamp("starts_at").notNull(),
+  endsAt: timestamp("ends_at"),
+  label: text(),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("partner_rate_periods_scope_start_uq").on(sql`COALESCE(${t.partnerId}, 0)`, t.startsAt),
+  index("partner_rate_periods_partner_idx").on(t.partnerId, t.startsAt),
+  check("partner_rate_periods_rate_bps_check", sql`${t.rateBps} BETWEEN 0 AND 10000`),
+  check("partner_rate_periods_duration_months_check", sql`${t.durationMonths} IS NULL OR ${t.durationMonths} BETWEEN 1 AND 120`),
+  check("partner_rate_periods_range_check", sql`${t.endsAt} IS NULL OR ${t.endsAt} > ${t.startsAt}`),
+]);
+
+// The partner side of a userReferrals row. Terms are LOCKED (copied) at the customer's first
+// payment that takes money.
+export const partnerReferrals = pgTable("partner_referrals", {
+  id: serial().primaryKey(),
+  referralId: integer("referral_id").notNull().unique().references(() => userReferrals.id, { onDelete: "cascade" }),
+  partnerId: integer("partner_id").notNull().references(() => partners.id, { onDelete: "restrict" }),
+  source: text().notNull().default("link"),                  // link | promo_code | manual
+  subscribedAt: timestamp("subscribed_at"),
+  ratePeriodId: integer("rate_period_id").references(() => partnerRatePeriods.id, { onDelete: "set null" }),
+  rateBps: integer("rate_bps"),
+  durationMonths: integer("duration_months"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("partner_referrals_partner_idx").on(t.partnerId, t.createdAt),
+  check("partner_referrals_source_check", sql`${t.source} IN ('link','promo_code','manual')`),
+  check("partner_referrals_rate_bps_check", sql`${t.rateBps} IS NULL OR ${t.rateBps} BETWEEN 0 AND 10000`),
+  check("partner_referrals_locked_check", sql`(${t.subscribedAt} IS NULL) = (${t.rateBps} IS NULL)`),
+]);
+
+export const partnerPayoutBatches = pgTable("partner_payout_batches", {
+  id: serial().primaryKey(),
+  status: text().notNull().default("draft"),                 // draft | exported | paid | cancelled
+  currency: text().notNull().default("GBP"),
+  totalPence: integer("total_pence").notNull().default(0),
+  partnerCount: integer("partner_count").notNull().default(0),
+  note: text(),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  exportedAt: timestamp("exported_at"),
+  paidBy: integer("paid_by").references(() => users.id, { onDelete: "set null" }),
+  paidAt: timestamp("paid_at"),
+}, (t) => [
+  check("partner_payout_batches_status_check", sql`${t.status} IN ('draft','exported','paid','cancelled')`),
+]);
+
+// The ledger. One 'invoice' row per Stripe invoice (partial unique index = retried webhooks are
+// no-ops); 'bonus' = admin goodwill; 'adjustment' = negative carry-forward for a refunded payout.
+export const partnerCommissions = pgTable("partner_commissions", {
+  id: serial().primaryKey(),
+  partnerId: integer("partner_id").notNull().references(() => partners.id, { onDelete: "restrict" }),
+  partnerReferralId: integer("partner_referral_id").references(() => partnerReferrals.id, { onDelete: "set null" }),
+  kind: text().notNull().default("invoice"),                 // invoice | bonus | adjustment
+  stripeInvoiceId: text("stripe_invoice_id"),
+  stripeChargeId: text("stripe_charge_id"),
+  netAmountPence: integer("net_amount_pence"),               // customer payment excl. VAT
+  rateBps: integer("rate_bps"),                              // snapshot of the rate used
+  commissionPence: integer("commission_pence").notNull(),
+  currency: text().notNull().default("GBP"),
+  status: text().notNull().default("pending"),               // pending | payable | paid | voided
+  availableAt: timestamp("available_at").notNull(),
+  payoutBatchId: integer("payout_batch_id").references(() => partnerPayoutBatches.id, { onDelete: "set null" }),
+  paidAt: timestamp("paid_at"),
+  voidedAt: timestamp("voided_at"),
+  voidReason: text("void_reason"),
+  note: text(),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("partner_commissions_invoice_uq").on(t.stripeInvoiceId).where(sql`kind = 'invoice'`),
+  index("partner_commissions_partner_idx").on(t.partnerId, t.status, t.createdAt),
+  index("partner_commissions_due_idx").on(t.status, t.availableAt),
+  index("partner_commissions_charge_idx").on(t.stripeChargeId),
+  index("partner_commissions_batch_idx").on(t.payoutBatchId),
+  check("partner_commissions_kind_check", sql`${t.kind} IN ('invoice','bonus','adjustment')`),
+  check("partner_commissions_status_check", sql`${t.status} IN ('pending','payable','paid','voided')`),
+  check("partner_commissions_invoice_check", sql`${t.kind} <> 'invoice' OR (${t.stripeInvoiceId} IS NOT NULL AND ${t.netAmountPence} IS NOT NULL AND ${t.rateBps} IS NOT NULL AND ${t.commissionPence} >= 0)`),
+  check("partner_commissions_sign_check", sql`(${t.kind} = 'adjustment' AND ${t.commissionPence} < 0) OR (${t.kind} <> 'adjustment' AND ${t.commissionPence} >= 0)`),
+]);
+
+// /invite/<code> clicks per partner per day — no IP, nothing on the visitor's device.
+export const partnerLinkStats = pgTable("partner_link_stats", {
+  partnerId: integer("partner_id").notNull().references(() => partners.id, { onDelete: "cascade" }),
+  day: date().notNull(),
+  clicks: integer().notNull().default(0),
+}, (t) => [primaryKey({ columns: [t.partnerId, t.day] })]);

@@ -8,6 +8,8 @@ import { sendMagicLinkEmail } from '../../src/utils/email';
 import { checkRateLimit, getClientIp } from '../../src/utils/rate-limit';
 import { isRegistrationLocked } from '../../src/utils/platform-config';
 import { BETA_PLAN_TYPE, getBetaMasterPlan, isBetaApplicant } from '../../src/utils/beta-testers';
+import { claimPartnerInvite, findPartnerByInviteToken } from '../../src/utils/partner-applications';
+import { resolveInviteCode } from '../../src/utils/invite-codes';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { businessDomainOf } from '../../src/utils/email-domain';
 import { findPaidDomainWorkspace } from '../../src/utils/domain-workspace';
@@ -64,7 +66,8 @@ export default withLambda(async (event) => {
         const businessName = body.businessName?.trim() || `${firstName}'s Workspace`;
         let planTier = body.planTier?.trim() || null;
         const attributionRef = body.attributionRef?.trim() || null; // US-AUD-5.3.1 SC5
-        const referralRef = body.referralRef?.trim() || null;        // US-GAP-8.2: workspace referral code
+        const referralRef = body.referralRef?.trim().toUpperCase() || null;   // US-GAP-8.2: workspace referral code (codes are upper case)
+        const partnerToken = typeof body.partnerToken === 'string' ? body.partnerToken.trim() : '';   // approved partner's private link
         // US4 (Domain Consolidation): set once the user has seen the consolidation prompt and
         // explicitly chose to create their own separate workspace anyway.
         const forceNewWorkspace = body.forceNewWorkspace === true || body.forceNewWorkspace === 'true';
@@ -83,8 +86,22 @@ export default withLambda(async (event) => {
         catch (err) { console.error('[register] beta applicant check failed (treated as not beta):', err); }
         if (isBeta) planTier = null;   // never route a beta tester to checkout
 
+        // APPROVED PARTNERS (src/utils/partner-applications.ts): their private link from the approval
+        // email lets them create their account even while registration is locked — for the email
+        // they applied with only. A bad or spent link is refused outright rather than falling through
+        // to an ordinary sign-up the applicant didn't mean to make.
+        phase = 'partner-check';
+        const partnerInvite = partnerToken ? await findPartnerByInviteToken(db, partnerToken) : null;
+        if (partnerToken && !partnerInvite) {
+            return { statusCode: 400, body: JSON.stringify({ error: 'This partner sign-up link has expired or has already been used. Reply to your approval email and we’ll send a new one.' }) };
+        }
+        if (partnerInvite && (partnerInvite.applicantEmail || '').toLowerCase() !== email) {
+            return { statusCode: 400, body: JSON.stringify({ error: 'Please use the email address this link was sent to — the one you applied with.' }) };
+        }
+        if (partnerInvite) planTier = null;   // a partner account starts on the normal free trial, no checkout
+
         // US-ADM-3.2.1: New registration lock
-        if (!isBeta && await isRegistrationLocked()) {
+        if (!isBeta && !partnerInvite && await isRegistrationLocked()) {
             // `waitlist: true` sends register.html on to /waitlist — the edge redirect is the first
             // line, but it fails open, so this is the one that actually holds. The beta hint is for
             // the beta sign-up link (register.html?beta=1), which is let past the edge.
@@ -149,6 +166,9 @@ export default withLambda(async (event) => {
             } else {
                 console.log(`[Security] Blocked duplicate registration attempt for: ${email}`);
             }
+            // An approved partner who already has an account (made after they applied): the link
+            // proves they own this email, so attach the partnership to that account.
+            if (partnerInvite) await claimPartnerInvite(db, partnerInvite.id, existingUser.id).catch((err) => console.error('[register] partner claim (existing account) failed:', err));
             return { statusCode: 200, body: JSON.stringify({ success: true }) };
         }
 
@@ -318,21 +338,26 @@ export default withLambda(async (event) => {
             console.error('[register] Verification email failed to send (account created; user can resend):', emailErr);
         }
 
+        // Approved partner: the new account is theirs, and the link is spent.
+        if (partnerInvite && resultUser) {
+            try { await claimPartnerInvite(db, partnerInvite.id, resultUser.id); }
+            catch (err) { console.error('[register] partner claim failed — link the account in Admin → Partners:', err); }
+        }
+
         // US-GAP-8.2: Record workspace referral if signup came from a referral link
         if (referralRef && resultUser) {
             try {
-                // SC5: Prevent self-referral — look up owner of this code
-                const [referrer] = await db.select({ id: users.id })
-                    .from(users)
-                    .where(eq(users.referralCode, referralRef))
-                    .limit(1);
+                // SC5: Prevent self-referral — look up owner of this code. A referral code or an
+                // approved partner's memorable partner code (src/utils/invite-codes.ts).
+                const invite = await resolveInviteCode(db, referralRef);
+                const referrer = invite ? { id: invite.referrerUserId } : null;
 
-                if (referrer && referrer.id !== resultUser.id) {
+                if (invite && referrer && referrer.id !== resultUser.id) {
                     // SC6: Only create one referral row per referred user (unique constraint on referredUserId)
                     await db.insert(userReferrals).values({
                         referrerId: referrer.id,
                         referredUserId: resultUser.id,
-                        referralCode: referralRef,
+                        referralCode: invite.code,
                         status: 'pending',
                     }).onConflictDoNothing();
 

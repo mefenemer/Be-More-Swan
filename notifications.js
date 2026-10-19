@@ -406,6 +406,8 @@ window.NotifKit = (function () {
         }
         if (meta.action === 'open_wizard')   return { label: meta.ctaLabel || 'Open Setup Wizard', run: openWizard };
         if (meta.action === 'getting_started') return ACTIONS_BY_TYPE.onboarding_prompt;
+        // Affiliate partners: commission earned / payout sent open the Partner page (partner-notify.ts).
+        if (meta.action === 'partner_page')  return { label: 'Open Partner page', run: go('partner') };
         if (ACTIONS_BY_TYPE[notif.type]) return ACTIONS_BY_TYPE[notif.type];
         // Any remaining action-kind item still needs a way in — default to the dashboard.
         if (notif.kind === 'action') return { label: 'Review', run: go('dashboard') };

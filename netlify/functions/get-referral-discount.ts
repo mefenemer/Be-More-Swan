@@ -6,11 +6,10 @@
 // → { valid: boolean, discountPct: number, discountMonths: number, display: string }
 
 import { Handler } from '@netlify/functions';
-import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { REFERRAL_OFFER_DISPLAY } from '../../src/utils/referral-offer';
+import { resolveInviteCode } from '../../src/utils/invite-codes';
 
 // The offer is fixed: the referred friend's first month is free (src/utils/referral-offer.ts holds
 // the coupons). The old REFERRAL_DISCOUNT_PCT / _MONTHS env vars advertised a discount nothing applied.
@@ -27,11 +26,8 @@ export default withLambda(async (event) => {
 
     try {
         const db = getDb();
-        const [referrer] = await db
-            .select({ id: users.id })
-            .from(users)
-            .where(eq(users.referralCode, ref))
-            .limit(1);
+        // A referral code or an approved partner's partner code (src/utils/invite-codes.ts).
+        const referrer = await resolveInviteCode(db, ref);
 
         if (!referrer) {
             return { statusCode: 200, body: JSON.stringify({ valid: false }) };

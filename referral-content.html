@@ -7,6 +7,14 @@
     <p class="mt-1 text-gray-500">Your friend gets <strong>their first month free</strong>. You earn a <strong>referral token</strong> once they make their first payment after the free month. Redeem <strong>1 token for £10 credit</strong> — or save <strong>5 for a free assistant</strong>.</p>
   </div>
 
+  <!-- Affiliate partners: their code earns CASH, not tokens (src/utils/referral-offer.ts marks their
+       referrals 'partner'), so this page would mislead them — point them at their Partner page. -->
+  <div id="ref-partner-state" class="hidden bg-white border border-gray-200 rounded-xl p-6 space-y-3">
+    <h2 class="text-lg font-bold text-gray-900">You're a Be More Swan partner</h2>
+    <p class="text-sm text-gray-600">As a partner, people you invite earn you cash commission rather than referral tokens. Your invite link, earnings and payout details are on your Partner page.</p>
+    <button type="button" onclick="window.loadView ? window.loadView('partner') : (location.href = '/workspace.html?view=partner')" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Go to my Partner page</button>
+  </div>
+
   <!-- No-plan empty state (US-GAP-BUG: shown when user has no active subscription) -->
   <div id="ref-no-plan-state" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-8 text-center space-y-4">
     <div class="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center mx-auto">
@@ -204,6 +212,14 @@
   const BASE = '/.netlify/functions';
 
   async function loadReferral() {
+    // A partner's referrals earn cash on the Partner page, never tokens here.
+    try {
+      const cap = window.checkCapacity ? await window.checkCapacity() : null;
+      if (cap && (cap.partnerStatus === 'approved' || cap.partnerStatus === 'suspended')) {
+        document.getElementById('ref-partner-state').classList.remove('hidden');
+        return;
+      }
+    } catch { /* not a partner, or capacity unavailable — show the normal page */ }
     let data;
     try {
       const res = await fetch(`${BASE}/referral`);

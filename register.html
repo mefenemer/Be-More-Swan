@@ -89,6 +89,18 @@
                placeholder="Acme Corp">
       </div>
 
+      <!-- Invited by — the referral code, VISIBLE and editable (docs/affiliate-partner-programme-plan.md §4.2).
+           Pre-filled from ?ref= (an invite link); someone who heard a code on a podcast types it here.
+           Works for a customer's refer-a-friend code and a partner's alike. Hidden on a partner's own
+           account link — they are the one being invited to promote, not a referred customer. -->
+      <div id="invitedByWrap">
+        <label for="invitedBy" class="block text-sm font-bold text-gray-700 mb-1">Invited by <span class="text-gray-400 font-normal">(Optional)</span></label>
+        <input type="text" id="invitedBy" maxlength="40" autocomplete="off" spellcheck="false"
+               class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none transition-all shadow-sm uppercase"
+               placeholder="Invite code, if someone gave you one">
+        <p id="invitedByNote" class="hidden text-xs mt-1"></p>
+      </div>
+
       <!-- Error Message Container -->
       <div id="errorMessage" class="hidden bg-red-50 text-red-700 text-sm font-semibold p-3 rounded-lg border border-red-100 mt-4">
         <!-- Error text injected here -->
@@ -184,7 +196,57 @@
     // US-GAP-8.2: capture referral code from URL ?ref=
     const refParam = new URLSearchParams(window.location.search).get('ref');
     if (refParam) sessionStorage.setItem('referral_ref', refParam.toUpperCase());
+    initInvitedBy();
   });
+
+  // ── Invited by ──────────────────────────────────────────────────────────────
+  // The field is what is sent (currentReferralRef), so what the person sees is what counts. The
+  // note says whose code it is (first name only — invite-lookup.ts) and what it gets them.
+  let _invitedTimer = null;
+  function initInvitedBy() {
+    const input = document.getElementById('invitedBy');
+    if (!input) return;
+    const start = (sessionStorage.getItem('referral_ref') || '').toUpperCase();
+    if (start) { input.value = start; checkInvitedBy(); }
+    input.addEventListener('input', () => {
+      clearTimeout(_invitedTimer);
+      _invitedTimer = setTimeout(checkInvitedBy, 400);
+    });
+  }
+  async function checkInvitedBy() {
+    const input = document.getElementById('invitedBy');
+    const note = document.getElementById('invitedByNote');
+    const code = input.value.trim().toUpperCase();
+    try { code ? sessionStorage.setItem('referral_ref', code) : sessionStorage.removeItem('referral_ref'); } catch (e) {}
+    if (!code) { note.classList.add('hidden'); return; }
+    try {
+      const d = await (await fetch('/.netlify/functions/invite-lookup?code=' + encodeURIComponent(code))).json();
+      if (input.value.trim().toUpperCase() !== code) return;   // they kept typing
+      note.textContent = d.valid
+        ? `${d.firstName ? d.firstName + ' invited you' : 'Invite code accepted'} — after your 14-day free trial, ${d.offer}.`
+        : 'We don’t recognise that code. Check it, or leave this blank.';
+      note.className = 'text-xs mt-1 font-semibold ' + (d.valid ? 'text-emerald-700' : 'text-amber-700');
+    } catch (e) { note.classList.add('hidden'); }
+  }
+  function currentReferralRef() {
+    if (PARTNER_TOKEN) return undefined;
+    const v = (document.getElementById('invitedBy')?.value || '').trim().toUpperCase();
+    return v || undefined;
+  }
+
+  // An approved partner's private account link (register.html?partner=<token>, from their approval
+  // email). The edge lets it through while sign-ups are locked; register.ts accepts it only with a
+  // live token and the email they applied with (src/utils/partner-applications.ts).
+  const PARTNER_TOKEN = new URLSearchParams(window.location.search).get('partner') || '';
+  if (PARTNER_TOKEN) {
+    try { sessionStorage.removeItem('pending_tier'); } catch (e) {}
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('registerTitle').textContent = 'Set up your partner account';
+      document.getElementById('registerSubtitle').textContent = 'Use the email address you applied with. You’ll find your invite link inside, and you can try every assistant free for 14 days.';
+      const wrap = document.getElementById('invitedByWrap');
+      wrap.classList.add('hidden'); wrap.style.display = 'none';
+    });
+  }
 
   // Beta testers arrive on register.html?beta=1 (the link in their welcome email). The edge lets that
   // through while sign-ups are locked; register.ts checks the email really applied through /beta and
@@ -219,11 +281,11 @@
 
     try {
       sessionStorage.setItem('aura_pending_email', email);
-      const planTier = IS_BETA ? null : sessionStorage.getItem('pending_tier');
+      const planTier = (IS_BETA || PARTNER_TOKEN) ? null : sessionStorage.getItem('pending_tier');
       const response = await fetch('/.netlify/functions/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ firstName, lastName, email, businessName, planTier, attributionRef: sessionStorage.getItem('attribution_ref') || undefined, referralRef: sessionStorage.getItem('referral_ref') || undefined })
+        body: JSON.stringify({ firstName, lastName, email, businessName, planTier, attributionRef: sessionStorage.getItem('attribution_ref') || undefined, referralRef: currentReferralRef(), partnerToken: PARTNER_TOKEN || undefined })
       });
 
       const data = await response.json();
@@ -235,7 +297,7 @@
       if (response.ok && data.consolidation) {
         // US4: the email's domain already belongs to a paid workspace — pause and offer to join it
         // instead of creating a duplicate account. Stash the entered details for the join request.
-        pendingSignup = { firstName, lastName, email, businessName };
+        pendingSignup = { firstName, lastName, email, businessName, partnerToken: PARTNER_TOKEN || undefined };
         showConsolidationPrompt(data.consolidation.domain);
       } else if (response.ok) {
         // MUST go to check-email so the backend can issue the secure cookie via the magic link.
@@ -314,7 +376,7 @@
         body: JSON.stringify({
           ...pendingSignup, planTier, forceNewWorkspace: true,
           attributionRef: sessionStorage.getItem('attribution_ref') || undefined,
-          referralRef: sessionStorage.getItem('referral_ref') || undefined,
+          referralRef: currentReferralRef(),
         }),
       });
       const data = await response.json();

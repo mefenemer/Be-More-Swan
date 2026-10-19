@@ -31,6 +31,9 @@ export type DataCategory =
  * a line when a new model goes into use.
  */
 export const LIST_PRICE_PER_1K: Record<string, { input: number; output: number }> = {
+    // Partner Ops admin chat (admin-partners-chat.ts), and its refusal fallback.
+    'claude-opus-5-5':           { input: 0.004, output: 0.02 },
+    'claude-opus-4-8':           { input: 0.005, output: 0.025 },
     'claude-sonnet-4-6':         { input: 0.003, output: 0.015 },
     'claude-haiku-4-5-20251001': { input: 0.001, output: 0.005 },
     'claude-haiku-4-5':          { input: 0.001, output: 0.005 },
