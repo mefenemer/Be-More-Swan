@@ -12,7 +12,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { sendEmail } from '../../src/utils/email';
 import { adminInbox } from '../../src/utils/admin-inbox';
-import { CALLBACK_CATEGORY, validateCallback, callbackTicket, whenLine, type CallbackRequest } from '../../src/utils/callback-request';
+import { CALLBACK_CATEGORY, validateCallback, callbackTicket, type CallbackRequest } from '../../src/utils/callback-request';
 
 const escHtml = (s: string) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -176,7 +176,7 @@ export default withLambda(async (event: HandlerEvent) => {
       <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827">${callback ? "We'll call you back" : "We've got your message"}</h1>
       <p style="margin:0 0 24px;color:#6b7280;font-size:15px;line-height:1.6">
         ${callback
-            ? `A person from our team will ring you on <strong>${escHtml(callback.phone)}</strong>, aiming for <strong>${escHtml(whenLine(callback))}</strong>. If that time doesn't work for us, we'll email you to arrange another.`
+            ? `A person from our team will call you back on <strong>${escHtml(callback.phone)}</strong>. If we can't reach you, we'll email you.`
             : 'Your support ticket has been created. Our team typically responds within <strong>1–2 business days</strong>.'}
       </p>
 
@@ -216,7 +216,7 @@ export default withLambda(async (event: HandlerEvent) => {
 
             // The business inbox hears about every new ticket — before this, only the admin portal did.
             await alertInbox(callback
-                ? `[Ticket #${newTicket.id}] 📞 Call-back request from ${user.email || 'a customer'} — ${callback.phone}, ${whenLine(callback)}`
+                ? `[Ticket #${newTicket.id}] 📞 Call-back request from ${user.email || 'a customer'} — ${callback.phone}${callback.timezone ? ` (${callback.timezone})` : ''}`
                 : `[Ticket #${newTicket.id}] New ${newTicket.category} ticket: ${newTicket.subject}`,
                 `<p>New support ticket from <strong>${escHtml(user.email || '')}</strong>:</p>
                  <p><strong>${escHtml(newTicket.subject)}</strong> <span style="color:#787263">(${escHtml(newTicket.category)})</span></p>

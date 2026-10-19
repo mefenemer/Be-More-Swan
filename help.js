@@ -126,9 +126,10 @@
     };
 
     // ── Request a call back (src/utils/callback-request.ts) ──────────────────────────────────────
-    // A ticket in category 'callback': phone + best time + the customer's own timezone, so whoever
-    // rings knows it is 9am in New York, not 9am in London. Opened from the "Prefer to talk?" card,
-    // and from the assistant chat (window.openCallbackForm), which only opens this form.
+    // A ticket in category 'callback': a phone number and the customer's own timezone (so whoever
+    // rings does not call in their night). No time is offered or promised — owner's decision.
+    // Opened from the "Prefer to talk?" card, and from the assistant chat's card
+    // (window.openCallbackForm), which only opens this form.
     const _tz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; } })();
     window.openCallbackForm = function () {
         const show = () => {
@@ -143,7 +144,6 @@
 
     async function submitCallback() {
         const phone = (document.getElementById('cb-phone')?.value || '').trim();
-        const bestTime = document.getElementById('cb-time')?.value || 'any';
         const descEl = document.getElementById('ri-description');
         const notes = (descEl?.value || '').trim();
         riError('');
@@ -157,7 +157,7 @@
         try {
             const res = await fetch('/.netlify/functions/support-tickets', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ category: 'callback', callback: { phone, bestTime, timezone: _tz, notes } }),
+                body: JSON.stringify({ category: 'callback', callback: { phone, timezone: _tz, notes } }),
             });
             const d = await res.json().catch(() => ({}));
             if (!res.ok) { riError(d.error || 'Could not send — please try again.'); return; }
@@ -181,7 +181,7 @@
         document.getElementById('cu-image-fields')?.classList.toggle('hidden', !broken);
         document.getElementById('cu-callback-fields')?.classList.toggle('hidden', !callback);
         const tzNote = document.getElementById('cb-tz-note');
-        if (tzNote) tzNote.textContent = _tz ? `In your time zone (${_tz}).` : '';
+        if (tzNote) tzNote.textContent = _tz ? `We'll note your time zone (${_tz}) so we don't call at night.` : '';
         const label = document.getElementById('ri-description-label');
         if (label) label.innerHTML = callback ? 'What would you like to talk about? <span class="text-gray-400 font-normal">(optional)</span>' : 'Tell us more';
         const desc = document.getElementById('ri-description');
@@ -386,7 +386,10 @@
         // ?help=<tab> — a direct link to one Help & Support tab, e.g. the beta testers' welcome
         // email's "share feedback" link (?help=issues / ?help=features). Same timing as ?issue.
         const helpTab = qs.get('help');
-        if (helpTab && TABS.includes(tabName(helpTab))) {
+        if (qs.get('callback') === '1') {
+            // From the chat's "Request a call back" card on a page without this panel.
+            window.addEventListener('load', () => setTimeout(() => window.openCallbackForm(), 600));
+        } else if (helpTab && TABS.includes(tabName(helpTab))) {
             window.addEventListener('load', () => setTimeout(() => window.openHelpTab(helpTab), 600));
         }
     } catch { /* noop */ }
