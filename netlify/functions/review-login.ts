@@ -1,6 +1,7 @@
 // netlify/functions/review-login.ts
 //
-// Password sign-in for ONE named account, so an external reviewer can get into the product.
+// Password sign-in for one named account PER PLATFORM REVIEW (Google OAuth verification, Meta App
+// Review), so an external reviewer can get into the product. See REVIEW_SLOTS.
 //
 // ── Why this exists ──────────────────────────────────────────────────────────
 // Google's OAuth verification team requires "active test credentials" with "all authentication
@@ -10,16 +11,18 @@
 // asks us to remove — and handing over the credentials to a real Gmail inbox is worse, not better.
 //
 // ── The safety model, in order of what an attacker would have to beat ────────
-//  1. DARK BY DEFAULT. With REVIEW_LOGIN_PASSWORD unset, every request gets a plain 404 — the
-//     same response a nonexistent function gives. Deleting that env var in Netlify switches this
-//     off completely with no deploy. That is the intended off switch.
-//     ⚠️ It is the ONLY off switch. The account address is hardcoded (DEFAULT_REVIEW_EMAIL), so
-//     unlike the first cut of this file there is no second env var to clear.
-//  2. FAILS CLOSED ON A DATE. REVIEW_LOGIN_EXPIRES (an ISO date) turns it off by itself once
+//  1. DARK BY DEFAULT. With no slot's password set (REVIEW_LOGIN_PASSWORD for Google,
+//     META_REVIEW_LOGIN_PASSWORD for Meta), every request gets a plain 404 — the same response a
+//     nonexistent function gives. Deleting a slot's password in Netlify switches that reviewer off
+//     with no deploy. That is the intended off switch.
+//     ⚠️ It is the ONLY off switch per slot. The addresses default in code (DEFAULT_REVIEW_EMAIL,
+//     DEFAULT_META_REVIEW_EMAIL), so there is no second env var to clear.
+//  2. FAILS CLOSED ON A DATE. Each slot's *_EXPIRES (an ISO date) turns it off by itself once
 //     verification is done, so a forgotten backdoor stops being one. An unparseable value is
 //     treated as EXPIRED, never as "no expiry" — a typo must not silently extend it.
-//  3. ONE ACCOUNT ONLY. The address must equal REVIEW_LOGIN_EMAIL. There is no lookup path to any
-//     other user, so this cannot become a general password login even if the secret leaks.
+//  3. ONE ACCOUNT PER SLOT. The address must equal that slot's *_EMAIL, and only that slot's
+//     password opens it. There is no lookup path to any other user, so this cannot become a
+//     general password login even if a secret leaks.
 //  4. A WEAK SECRET IS REFUSED. Under MIN_SECRET_LEN characters the endpoint stays dark rather
 //     than accepting a guessable password.
 //  5. Constant-time comparison over SHA-256 digests (equal-length buffers, so neither the value
@@ -60,6 +63,22 @@ export const MIN_SECRET_LEN = 20;
  */
 export const DEFAULT_REVIEW_EMAIL = 'bmsreview.test@gmail.com';
 
+/** Meta App Review's account. Same rules, its own env vars, so each reviewer is switched separately. */
+export const DEFAULT_META_REVIEW_EMAIL = 'meta-review@bemoreswan.com';
+
+/**
+ * One reviewer account per platform review. Each slot is gated by ITS OWN password and expiry, and a
+ * password only ever opens its own slot's account — so a leaked Meta secret cannot reach Google's
+ * account, and deleting one slot's password switches off that reviewer alone.
+ * ⚠️ The Google slot keeps the original unprefixed REVIEW_LOGIN_* names: renaming them would switch
+ * off a live reviewer on deploy.
+ */
+export type ReviewSlot = { key: 'google' | 'meta'; envPrefix: string; defaultEmail: string };
+export const REVIEW_SLOTS: readonly ReviewSlot[] = [
+    { key: 'google', envPrefix: 'REVIEW_LOGIN',      defaultEmail: DEFAULT_REVIEW_EMAIL },
+    { key: 'meta',   envPrefix: 'META_REVIEW_LOGIN', defaultEmail: DEFAULT_META_REVIEW_EMAIL },
+];
+
 export type ReviewConfig =
     | { enabled: false; reason: 'unconfigured' | 'weak_secret' | 'expired' | 'bad_expiry' }
     | { enabled: true; email: string; secret: string };
@@ -72,10 +91,13 @@ export type ReviewConfig =
  * answer produces an identical 404 at the edge; the reason is for logs and tests only, and must
  * never reach the caller.
  */
-export function resolveReviewConfig(env: NodeJS.ProcessEnv | Record<string, string | undefined>): ReviewConfig {
-    const email = (env.REVIEW_LOGIN_EMAIL ?? DEFAULT_REVIEW_EMAIL).trim().toLowerCase();
-    const secret = env.REVIEW_LOGIN_PASSWORD ?? '';
-    const expiresRaw = (env.REVIEW_LOGIN_EXPIRES ?? '').trim();
+export function resolveReviewConfig(
+    env: NodeJS.ProcessEnv | Record<string, string | undefined>,
+    slot: ReviewSlot = REVIEW_SLOTS[0],
+): ReviewConfig {
+    const email = (env[`${slot.envPrefix}_EMAIL`] ?? slot.defaultEmail).trim().toLowerCase();
+    const secret = env[`${slot.envPrefix}_PASSWORD`] ?? '';
+    const expiresRaw = (env[`${slot.envPrefix}_EXPIRES`] ?? '').trim();
 
     if (!email || !secret) return { enabled: false, reason: 'unconfigured' };
     if (secret.length < MIN_SECRET_LEN) return { enabled: false, reason: 'weak_secret' };
@@ -89,6 +111,18 @@ export function resolveReviewConfig(env: NodeJS.ProcessEnv | Record<string, stri
     }
 
     return { enabled: true, email, secret };
+}
+
+/** Every slot that is live right now. Empty means the endpoint is dark (a plain 404). */
+export function resolveEnabledReviewers(env: NodeJS.ProcessEnv | Record<string, string | undefined>):
+    Array<{ slot: ReviewSlot['key']; email: string; secret: string }> {
+    const live: Array<{ slot: ReviewSlot['key']; email: string; secret: string }> = [];
+    for (const slot of REVIEW_SLOTS) {
+        const cfg = resolveReviewConfig(env, slot);
+        if (cfg.enabled) live.push({ slot: slot.key, email: cfg.email, secret: cfg.secret });
+        else if (cfg.reason !== 'unconfigured') console.warn(`[review-login] ${slot.key} slot refused: ${cfg.reason}.`);
+    }
+    return live;
 }
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -111,13 +145,9 @@ export default withLambda(async (event) => {
         return { statusCode: 405, headers: JSON_HEADERS, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
 
-    // (1), (2) and (4) all live here. Any negative answer is the same 404 to the caller.
-    const config = resolveReviewConfig(process.env);
-    if (!config.enabled) {
-        if (config.reason !== 'unconfigured') console.warn(`[review-login] Refused: ${config.reason}.`);
-        return NOT_FOUND;
-    }
-    const { email: reviewEmail, secret: reviewSecret } = config;
+    // (1), (2) and (4) all live here, per slot. No live slot is the same 404 to the caller.
+    const reviewers = resolveEnabledReviewers(process.env);
+    if (reviewers.length === 0) return NOT_FOUND;
 
     const jwtSecret = process.env.JWT_SECRET;
     if (!jwtSecret) {
@@ -145,20 +175,27 @@ export default withLambda(async (event) => {
             return { statusCode: 400, headers: JSON_HEADERS, body: JSON.stringify({ error: 'Email and password are required.' }) };
         }
 
-        // (3) + (5). Both comparisons run every time — returning early on a wrong address would
-        // turn response time into an oracle for "is this the review account?".
-        const emailOk = secretsMatch(email, reviewEmail);
-        const secretOk = secretsMatch(password, reviewSecret);
-        if (!emailOk || !secretOk) {
+        // (3) + (5). Every live slot is checked, and both comparisons run for each — returning
+        // early on a wrong address would turn response time into an oracle for "is this a review
+        // account?". A slot matches only when ITS address AND ITS secret both match, so one slot's
+        // password can never open another slot's account.
+        let matched: (typeof reviewers)[number] | null = null;
+        for (const r of reviewers) {
+            const emailOk = secretsMatch(email, r.email);
+            const secretOk = secretsMatch(password, r.secret);
+            if (emailOk && secretOk && !matched) matched = r;
+        }
+        if (!matched) {
             console.warn(`[review-login] Failed attempt from ${ip}.`);
             return { statusCode: 401, headers: JSON_HEADERS, body: JSON.stringify({ error: 'Those credentials were not recognised.' }) };
         }
+        const reviewEmail = matched.email;
 
         const [user] = await db.select().from(users).where(eq(users.email, reviewEmail)).limit(1);
         if (!user) {
             // Configured for an address with no account — a setup error, not a caller error. Say so
             // in the logs; the caller still gets nothing it could probe with.
-            console.error(`[review-login] REVIEW_LOGIN_EMAIL names an address with no user row.`);
+            console.error(`[review-login] The ${matched.slot} reviewer address has no user row.`);
             return { statusCode: 401, headers: JSON_HEADERS, body: JSON.stringify({ error: 'Those credentials were not recognised.' }) };
         }
         if (user.status !== 'active') {
@@ -187,7 +224,7 @@ export default withLambda(async (event) => {
         // admin portals to decide where a user lands; none of that applies here, because this path
         // serves one pre-provisioned account whose destination is known. A reviewer following
         // written steps needs the SAME page every time far more than it needs that cleverness.
-        console.warn(`[review-login] Review session issued to user ${user.id} from ${ip}.`);
+        console.warn(`[review-login] Review session issued to user ${user.id} (${matched.slot}) from ${ip}.`);
         return {
             statusCode: 200,
             headers: { ...JSON_HEADERS, 'Set-Cookie': sessionCookie },

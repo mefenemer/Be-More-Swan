@@ -215,11 +215,12 @@ A–C → select the account, then:
   to a real mailbox, sign up, and open the one magic link. Put the workspace on a plan with the
   Social Media Manager assistant via the admin billing override, so the 14-day trial can't expire
   during review or Meta's later re-checks.
-- Netlify prod env: `REVIEW_LOGIN_EMAIL=meta-review@bemoreswan.com` (overrides the default
-  `bmsreview.test@gmail.com`, and only ONE account works at a time, so this cuts off Google's
-  reviewer), `REVIEW_LOGIN_PASSWORD` (≥ 20 chars, otherwise the page stays dark) and
-  `REVIEW_LOGIN_EXPIRES` (ISO date, well past the review, e.g. 2027-01-31). The password goes only
-  into Meta's form, not this doc. Delete the password var to switch the login off.
+- Netlify prod env, the **Meta reviewer slot** (separate from Google's `REVIEW_LOGIN_*`, which keeps
+  working): `META_REVIEW_LOGIN_PASSWORD` (≥ 20 chars, otherwise the slot stays dark),
+  `META_REVIEW_LOGIN_EXPIRES` (ISO date, well past the review, e.g. 2027-01-31; expired or
+  unparseable turns it off). `META_REVIEW_LOGIN_EMAIL` is only needed to override the default
+  `meta-review@bemoreswan.com`. The password goes only into Meta's form, not this doc. Delete
+  `META_REVIEW_LOGIN_PASSWORD` to switch the Meta reviewer off without affecting Google's.
 - Test `https://bemoreswan.com/review-login.html` in a private window before submitting.
 - A draft Facebook post and a draft Instagram post, each with a JPEG image, waiting in the
   assistant's Review list.
