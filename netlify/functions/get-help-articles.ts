@@ -7,6 +7,7 @@ import { eq, asc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { helpArticles } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { planPriceVars, fillPlanPriceTokens } from '../../src/utils/plan-price-tokens';
 
 const HEADERS: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -34,10 +35,15 @@ export default withLambda(async (event) => {
             .where(eq(helpArticles.isPublished, true))
             .orderBy(asc(helpArticles.category), asc(helpArticles.sortOrder));
 
+        // Articles quote plan prices as {{plans.saver_price}} / {{plans.buster_price}}; the live
+        // value comes from master data here, so no article carries its own copy of a price.
+        const prices = await planPriceVars(db);
+        const articles = rows.map((a) => ({ ...a, contentMd: fillPlanPriceTokens(a.contentMd ?? '', prices) }));
+
         return {
             statusCode: 200,
             headers: HEADERS,
-            body: JSON.stringify({ articles: rows }),
+            body: JSON.stringify({ articles }),
         };
     } catch (err) {
         console.error('[get-help-articles]', err);

@@ -299,7 +299,7 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
         preheader: 'Choose a plan to keep your assistants running.',
         bodyHtml: greet +
             p('Your free trial for <strong>{{workspace.name | "your workspace"}}</strong> ends on <strong>{{trial.ends_on}}</strong>.') +
-            p('To keep your assistants working, choose a plan: <strong>The Workflow Saver</strong> (£29 a month, one assistant) or <strong>The Busywork Buster</strong> (£79 a month, every assistant). Cancel any time.') +
+            p('To keep your assistants working, choose a plan: <strong>The Workflow Saver</strong> ({{plans.saver_price}} a month, one assistant) or <strong>The Busywork Buster</strong> ({{plans.buster_price}} a month, every assistant). Cancel any time.') +
             button('Choose a plan', 'link.action_url') +
             p('If you don’t, nothing is charged — there is no card on file. Your assistants simply pause and anything scheduled is held. Nothing is deleted, and you can pick up where you left off whenever you subscribe.') +
             p('Questions? Just reply to this email.') + signoff,
