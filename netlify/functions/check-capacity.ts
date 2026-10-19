@@ -36,6 +36,7 @@ import { BETA_TIER_KEY, featureTierKey } from '../../src/config/beta-plan';
 import { TASK_WEIGHTS } from '../../src/config/task-weights';
 import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { getTrial } from '../../src/utils/trial';
+import { resolveImpersonation } from '../../src/utils/impersonation';
 
 const stripe = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
@@ -59,6 +60,12 @@ export default withLambda(async (event) => {
 
     try {
         const db = getDb();
+
+        // An admin impersonating a customer must see the CUSTOMER's capacity. Without this the
+        // workspace read the admin's own (plan-less, assistant-less) account and hard-gated the
+        // impersonated view behind "Choose a plan to activate your workspace".
+        const imp = await resolveImpersonation(db, event.headers?.cookie ?? event.headers?.Cookie, userId);
+        if (imp) userId = imp.impersonatingUserId;
 
         // Resolve the org up front — plan lookup is org-scoped so a member of a paid
         // workspace (who has no personal plan row, only the shared org plan) still resolves
@@ -358,6 +365,7 @@ export default withLambda(async (event) => {
         let pastDueAmountGbp: string | null = null;
         let pastDueAttemptCount: number | null = null;
         let stripePortalUrl: string | null = null;
+        // Not while impersonating: a portal link would let the admin change the customer's billing.
         if (plan?.planStatus === 'past_due' && (plan as any).stripeCustomerId && stripe) {
             try {
                 const openInvoices = await stripe.invoices.list({
@@ -371,11 +379,13 @@ export default withLambda(async (event) => {
                     pastDueAttemptCount = (inv as any).attempt_count ?? null;
                 }
                 // Generate Stripe billing portal URL
-                const portal = await stripe.billingPortal.sessions.create({
-                    customer: (plan as any).stripeCustomerId,
-                    return_url: (process.env.BASE_URL || '') + '/billing.html',
-                });
-                stripePortalUrl = portal.url;
+                if (!imp) {
+                    const portal = await stripe.billingPortal.sessions.create({
+                        customer: (plan as any).stripeCustomerId,
+                        return_url: (process.env.BASE_URL || '') + '/billing.html',
+                    });
+                    stripePortalUrl = portal.url;
+                }
             } catch { /* non-critical — banner will still show without amount */ }
         }
 
