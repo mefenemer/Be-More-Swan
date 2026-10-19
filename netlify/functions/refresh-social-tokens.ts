@@ -12,7 +12,7 @@
 // warm. Mirrors refresh-meta-tokens.ts for failure side-effects (pause posts + notify).
 
 import { Handler } from '@netlify/functions';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, gte, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { systemConnections, scheduledPosts, users, auditLogs, userOrganisations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
@@ -153,9 +153,17 @@ async function refreshConnection(db: ReturnType<typeof getDb>, conn: Conn) {
 
         const refreshToken = stored?.refreshToken as string | undefined;
         if (!refreshToken) {
-            // No refresh token on file (e.g. a legacy connection captured before we
-            // stored one). Can't renew silently — leave it for the health-check/expiry
-            // path to surface a reconnect prompt. Skip without flipping status.
+            // No refresh token on file. For LinkedIn this is EVERY connection, not a legacy edge
+            // case: LinkedIn only issues refresh tokens to apps approved for its partner programmes,
+            // and ours has just "Share on LinkedIn" + "Sign In with LinkedIn". So each connection
+            // dies 60 days after it was made. This branch used to skip silently and leave it to an
+            // expiry alert in integration-health-check.ts — which has never been scheduled — so the
+            // first anyone heard of it was a failed post (Restorative Futures and Kudzu Collab,
+            // October 2026). Warn a week ahead, then condemn honestly at expiry.
+            if (conn.serviceName === 'linkedin') {
+                await handleNoRefreshTokenExpiry(db, conn);
+                return;
+            }
             console.warn(`[refresh-social-tokens] conn ${conn.id} (${conn.serviceName}) has no refresh token — skipping`);
             return;
         }
@@ -209,6 +217,77 @@ async function refreshConnection(db: ReturnType<typeof getDb>, conn: Conn) {
         console.error(`[refresh-social-tokens] conn ${conn.id} (${conn.serviceName}) failed:`, describeError(err));
         await handleRefreshFailure(db, conn, describeError(err), err instanceof TokenLostError ? 'token_lost' : 'rejected');
     }
+}
+
+// How long before a refresh-less token's expiry the user is warned, and the slack either side of
+// it. The warning is sent once per expiry: a reconnect resets token_expires_at 60 days out, so any
+// warning inside the last WARN_WINDOW + a day belongs to the current cycle.
+const NO_REFRESH_WARN_MS = 7 * 24 * 60 * 60 * 1000;
+const NO_REFRESH_WARN_DEDUPE_MS = NO_REFRESH_WARN_MS + 24 * 60 * 60 * 1000;
+
+/**
+ * A connection that cannot be renewed (LinkedIn — see the call site). Nothing here talks to the
+ * provider, so there is no irreversible window: a failed write is retried on the next run.
+ *
+ *   expired         → condemn it like any failed renewal: posts paused, reconnect email.
+ *   within 7 days   → one in-app alert + one email with a reconnect link, so a two-click
+ *                     re-authorise happens BEFORE the posts start failing.
+ *   further out     → nothing yet.
+ */
+async function handleNoRefreshTokenExpiry(db: ReturnType<typeof getDb>, conn: Conn) {
+    if (!conn.tokenExpiresAt) return;
+    const expiry = new Date(conn.tokenExpiresAt);
+    const msLeft = expiry.getTime() - Date.now();
+
+    if (msLeft <= 0) {
+        await handleRefreshFailure(db, conn, `access token reached its expiry (${expiry.toISOString()}) and ${conn.serviceName} issued no refresh token`, 'expired');
+        return;
+    }
+    if (msLeft > NO_REFRESH_WARN_MS) return;
+
+    const warnedType = `${conn.serviceName}_token_expiry_warned`;
+    const [already] = await db.select({ id: auditLogs.id }).from(auditLogs)
+        .where(and(
+            eq(auditLogs.actionType, warnedType),
+            eq(auditLogs.resourceId, String(conn.id)),
+            gte(auditLogs.createdAt, new Date(Date.now() - NO_REFRESH_WARN_DEDUPE_MS)),
+        ))
+        .limit(1);
+    if (already) return;
+
+    // Claim the warning first: a crash after this costs one warning, never a daily stream of them.
+    await db.insert(auditLogs).values({
+        actionType: warnedType,
+        resourceType: 'system_connections',
+        resourceId: String(conn.id),
+        newState: { organisationId: conn.organisationId, expiresAt: expiry.toISOString() },
+    });
+
+    const label = LABELS[conn.serviceName] || conn.serviceName;
+    const daysLeft = Math.max(1, Math.ceil(msLeft / (24 * 60 * 60 * 1000)));
+    const daysPhrase = `${daysLeft} day${daysLeft === 1 ? '' : 's'}`;
+    const dateText = expiry.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/London' });
+
+    const [orgUser] = await db.select({ id: users.id, email: users.email, firstName: users.firstName }).from(users)
+        .innerJoin(userOrganisations, eq(users.id, userOrganisations.userId))
+        .where(eq(userOrganisations.organisationId, conn.organisationId)).limit(1);
+    if (!orgUser) return;
+
+    // 'integration_alert' is in CONNECTION_RESTORED_TYPES, so reconnecting clears this card.
+    await createNotification(db, 'integration_alert_expiring', {
+        userId: orgUser.id,
+        context: { platform: { label }, expiry: { days_left: daysPhrase } },
+        metadata: { connectionId: conn.id, serviceName: conn.serviceName, alertType: 'expiring', assistantId: conn.assistantId },
+    }).catch((err) => console.error(`[refresh-social-tokens] conn ${conn.id} expiry notification failed:`, describeError(err)));
+
+    await sendEmail({
+        to: orgUser.email,
+        subject: `Reconnect ${label} by ${dateText} to keep posting`,
+        html: `<p>Hi ${orgUser.firstName || 'there'},</p>
+               <p>${label} asks every app to be re-authorised every 60 days, and your connection to Be More Swan reaches that limit on <strong>${dateText}</strong> (in ${daysPhrase}).</p>
+               <p>Reconnecting now takes a few seconds and keeps your scheduled ${label} posts going out. If it lapses, they are paused until you reconnect.</p>
+               <p><a href="${reconnectUrl(conn.serviceName, conn.assistantId)}">Reconnect ${label} →</a></p>`,
+    }).catch((err) => console.error(`[refresh-social-tokens] conn ${conn.id} expiry email failed:`, describeError(err)));
 }
 
 /**
@@ -362,7 +441,7 @@ async function handleRefreshFailure(
     db: ReturnType<typeof getDb>,
     conn: Conn,
     msg: string,
-    kind: 'rejected' | 'token_lost',
+    kind: 'rejected' | 'token_lost' | 'expired',
 ) {
     const label = LABELS[conn.serviceName] || conn.serviceName;
 
@@ -411,6 +490,8 @@ async function handleRefreshFailure(
         // lie by omission — the reconnect is real, but nothing was wrong with their account.
         const cause = kind === 'token_lost'
             ? `<p>A problem on our side interrupted the automatic renewal of your ${label} connection before the new credentials could be saved. Reconnecting takes a few seconds and fixes it.</p>`
+            : kind === 'expired'
+            ? `<p>${label} asks every app to be re-authorised every 60 days, and your ${label} connection to Be More Swan has reached that limit. Reconnecting takes a few seconds.</p>`
             : `<p>Your ${label} account connected to Be More Swan needs to be reconnected — its access token could not be automatically refreshed.</p>`;
 
         await step('email', () => sendEmail({

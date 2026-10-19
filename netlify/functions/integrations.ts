@@ -14,6 +14,7 @@ import { resolveActiveOrg } from '../../src/utils/tenant';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
 import { findDisconnectSharing, planDisconnectRevoke } from '../../src/utils/disconnect-revoke';
 import { X_OAUTH_SCOPE_LIST } from '../../src/config/x-scopes';
+import { CRON_RENEWED_SERVICES } from '../../src/config/connection-renewal';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -184,7 +185,7 @@ export default withLambda(async (event) => {
             //
             // Every serviceName a refresh cron actually SELECTS belongs here, or the card nags the
             // user to reconnect something the platform is already renewing on its own:
-            //   x, linkedin           → refresh-social-tokens.ts (every 30 min)
+            //   x                     → refresh-social-tokens.ts (every 30 min)
             //   facebook, instagram   → refresh-meta-tokens.ts   (nightly, 14 days before expiry)
             // The Meta pair was missing, so a healthy Facebook/Instagram connection started showing
             // "Expiring in 7d…1d" for the last week of every 60-day window and then "Disconnected"
@@ -193,7 +194,14 @@ export default withLambda(async (event) => {
             // Safe against masking a genuinely dead connection: _connHealth (integrations.js) tests
             // isConnectionDead(status) BEFORE it looks at autoRefresh, and both crons write a dead
             // status ('token_refresh_failed') when a renewal actually fails.
-            const CRON_REFRESHED = new Set(['x', 'linkedin', 'facebook', 'instagram']);
+            //
+            // LinkedIn is NOT here although refresh-social-tokens selects it: LinkedIn issues no
+            // refresh token to our app (only "Share on LinkedIn" + "Sign In" are approved), so
+            // nothing renews it and each connection dies at 60 days. Listing it made the card read
+            // "Connected" right up to the first failed post. Off the list, it counts down instead;
+            // the cron sends the 7-day warning email. Put it back only once refresh tokens arrive.
+            // The list lives in src/config/connection-renewal.ts, shared with the health check.
+            const CRON_REFRESHED = new Set(CRON_RENEWED_SERVICES);
             for (const m of merged) {
                 (m as typeof m & { autoRefresh: boolean }).autoRefresh =
                     serviceAutoRefreshes(m.serviceName) || CRON_REFRESHED.has(m.serviceName);
