@@ -18,7 +18,10 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveReviewConfig, MIN_SECRET_LEN, DEFAULT_REVIEW_EMAIL } from '../netlify/functions/review-login';
+import {
+    resolveReviewConfig, resolveEnabledReviewers, MIN_SECRET_LEN, DEFAULT_REVIEW_EMAIL,
+    DEFAULT_META_REVIEW_EMAIL, REVIEW_SLOTS,
+} from '../netlify/functions/review-login';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -132,9 +135,53 @@ check('both secrets are compared before anything is returned', () => {
     // "is this the review account?".
     assert.match(FN, /const emailOk = secretsMatch\(/);
     assert.match(FN, /const secretOk = secretsMatch\(/);
-    assert.match(FN, /if \(!emailOk \|\| !secretOk\)/,
-        'both comparisons must run, then one combined rejection');
+    assert.match(FN, /for \(const r of reviewers\) \{/, 'every live slot must be checked');
+    assert.match(FN, /if \(emailOk && secretOk && !matched\) matched = r;/,
+        'a slot matches only on its own address AND its own secret, with no early return');
+    assert.match(FN, /if \(!matched\) \{/, 'then one combined rejection');
     assert.match(FN, /timingSafeEqual/, 'the comparison must be constant-time');
+});
+
+console.log('\n──── a separate Meta reviewer slot ────');
+
+const META = REVIEW_SLOTS.find(s => s.key === 'meta')!;
+const GOOGLE = REVIEW_SLOTS.find(s => s.key === 'google')!;
+
+check('the Google slot keeps the original env names, so deploying this changes nothing for it', () => {
+    assert.equal(GOOGLE.envPrefix, 'REVIEW_LOGIN', 'renaming would switch off a live Google reviewer on deploy');
+    assert.deepEqual(resolveReviewConfig({ REVIEW_LOGIN_PASSWORD: STRONG }),
+        resolveReviewConfig({ REVIEW_LOGIN_PASSWORD: STRONG }, GOOGLE),
+        'the default slot must be Google, so existing callers are unaffected');
+});
+
+check('the Meta slot is dark unless its OWN password is set', () => {
+    assert.equal(resolveReviewConfig({}, META).enabled, false);
+    assert.equal(resolveReviewConfig({ REVIEW_LOGIN_PASSWORD: STRONG }, META).enabled, false,
+        "Google's password must not switch on the Meta slot");
+    const cfg = resolveReviewConfig({ META_REVIEW_LOGIN_PASSWORD: STRONG }, META);
+    assert.equal(cfg.enabled === true && cfg.email, DEFAULT_META_REVIEW_EMAIL);
+});
+
+check('the Meta slot has its own weak-secret and fail-closed expiry rules', () => {
+    assert.equal(resolveReviewConfig({ META_REVIEW_LOGIN_PASSWORD: 'short' }, META).enabled, false);
+    const bad = resolveReviewConfig({ META_REVIEW_LOGIN_PASSWORD: STRONG, META_REVIEW_LOGIN_EXPIRES: 'soon' }, META);
+    assert.equal(bad.enabled === false && bad.reason, 'bad_expiry');
+    const past = resolveReviewConfig({ META_REVIEW_LOGIN_PASSWORD: STRONG, META_REVIEW_LOGIN_EXPIRES: '2020-01-01' }, META);
+    assert.equal(past.enabled === false && past.reason, 'expired');
+});
+
+check('each slot switches on and off independently', () => {
+    const both = resolveEnabledReviewers({ REVIEW_LOGIN_PASSWORD: STRONG, META_REVIEW_LOGIN_PASSWORD: 'y'.repeat(MIN_SECRET_LEN) });
+    assert.deepEqual(both.map(r => r.slot), ['google', 'meta']);
+    assert.deepEqual(resolveEnabledReviewers({ META_REVIEW_LOGIN_PASSWORD: STRONG }).map(r => r.slot), ['meta'],
+        'Meta alone must work with Google switched off');
+    assert.deepEqual(resolveEnabledReviewers({ REVIEW_LOGIN_PASSWORD: STRONG, META_REVIEW_LOGIN_EXPIRES: '2020-01-01', META_REVIEW_LOGIN_PASSWORD: STRONG }).map(r => r.slot), ['google'],
+        "an expired Meta slot must not take Google's down with it");
+    assert.deepEqual(resolveEnabledReviewers({}), [], 'no passwords means the endpoint is dark');
+});
+
+check('the two slots never share an address by default', () => {
+    assert.notEqual(DEFAULT_META_REVIEW_EMAIL, DEFAULT_REVIEW_EMAIL);
 });
 
 console.log('\n──── it does not disturb the login real users have ────');
@@ -149,6 +196,9 @@ check('the reviewer page talks only to the reviewer endpoint', () => {
     assert.match(PAGE, /functions\/review-login/, 'the review page must post to review-login');
     assert.ok(!/functions\/login\b/.test(PAGE), 'and must not also drive the magic-link endpoint');
     assert.match(PAGE, /name="robots" content="noindex/, 'the review page must not be indexable');
+    assert.ok(!PAGE.includes(DEFAULT_REVIEW_EMAIL) && !PAGE.includes(DEFAULT_META_REVIEW_EMAIL),
+        'the page must not print a reviewer address, e.g. as a placeholder');
+    assert.ok(!/Gmail/.test(PAGE), 'the page serves every platform review, not just Google');
 });
 
 check('the session it mints is the one the rest of the app reads', () => {
