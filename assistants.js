@@ -8068,13 +8068,15 @@ async function _renderAssistantTaskShare(assistantId) {
         const minePct = Math.min(100, pct(mine));
         const othersPct = Math.max(0, Math.min(100 - minePct, pct(total) - minePct));
         const n = (v) => Number(v).toLocaleString('en-GB');
+        // Use that rounds to 0 reads as "under 1%", never as nothing used.
+        const label = (v) => (v > 0 && pct(v) === 0 ? 'under 1%' : `${Math.min(100, pct(v))}%`);
         const name = document.getElementById('detail-name-input')?.value?.trim() || 'This assistant';
-        document.getElementById('task-share-pct').textContent = `${minePct}% of your allowance`;
+        document.getElementById('task-share-pct').textContent = `${label(mine)} of your allowance`;
         document.getElementById('task-share-mine').style.width = `${minePct}%`;
         document.getElementById('task-share-others').style.width = `${othersPct}%`;
         document.getElementById('task-share-bar').setAttribute('aria-label', `${name} used ${minePct}% of the monthly task allowance; all assistants together ${Math.min(100, pct(total))}%`);
         document.getElementById('task-share-note').textContent =
-            `${name}: ${n(mine)} task${mine === 1 ? '' : 's'} · all assistants: ${n(total)} of ${n(limit)} (${Math.min(100, pct(total))}%)`;
+            `${name}: ${n(mine)} task${mine === 1 ? '' : 's'} · all assistants: ${n(total)} of ${n(limit)} (${label(total)})`;
         strip.classList.remove('hidden');
     } catch { /* the strip just stays hidden */ }
 }

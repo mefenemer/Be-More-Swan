@@ -112,6 +112,11 @@
           </div>
         </div>
 
+        <!-- Tasks this month — the allowance used across every assistant, under the three tiles and
+             above the heatmap (owner, 2026-10-19). Filled by renderTaskUsage; it was a card in the
+             widget grid below, which is why the grid no longer has a 'capacity' widget. -->
+        <div class="cc-usage" id="cc-usage" aria-live="polite"><div class="cc-hm-skel" style="height:56px"></div></div>
+
         <!-- AC3: Activity heatmap — proves 24/7 background productivity -->
         <div class="cc-heatmap-wrap">
           <div class="cc-heatmap-head">
@@ -252,6 +257,17 @@
   .cc-tile-sub { display: inline-block; margin-top: 8px; font-size: 13px; color: #64748b; }
   .cc-link { border: 0; background: transparent; padding: 0; cursor: pointer; color: var(--color-emerald-800, #d6006b); font-weight: 600; }
   .cc-link:hover { text-decoration: underline; }
+
+  /* Tasks this month (renderTaskUsage) — same divider as the heatmap below it */
+  .cc-usage { position: relative; margin-top: 26px; padding-top: 22px; border-top: 1px solid rgba(15,23,42,0.07); }
+  .cc-usage-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  .cc-usage-title { font-size: 13px; font-weight: 700; color: #334155; }
+  .cc-usage-pct { font-size: 22px; font-weight: 800; color: #0f172a; font-variant-numeric: tabular-nums; }
+  .cc-usage-bar { height: 10px; background: rgba(15,23,42,0.07); border-radius: 999px; margin-top: 8px; overflow: hidden; }
+  .cc-usage-bar > div { height: 100%; border-radius: 999px; }
+  .cc-usage-sub { margin-top: 8px; font-size: 13px; color: #475569; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+  .cc-usage-who { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .cc-usage-chip { font-size: 12px; color: #475569; background: rgba(255,255,255,0.72); border: 1px solid rgba(15,23,42,0.06); border-radius: 999px; padding: 3px 10px; }
 
   /* Heatmap */
   .cc-heatmap-wrap { position: relative; margin-top: 26px; padding-top: 22px; border-top: 1px solid rgba(15,23,42,0.07); }
@@ -738,12 +754,11 @@
       'notifications': { title: 'Latest updates', icon: '🔔', desc: 'Your most recent activity', render: renderNotifications },
       'recent-work':   { title: 'Recent work', icon: '✅', desc: 'What every assistant did this week', render: renderRecentWork },
       'agenda':        { title: 'Next 7 days', icon: '📅', desc: 'Everything booked to go out', render: renderAgenda },
-      'capacity':      { title: 'Tasks this month', icon: '📊', desc: 'How much of your monthly task allowance is used', render: renderCapacity },
       'tips':          { title: 'Tip', icon: '💡', desc: 'Get more from your team', render: renderTips },
       'referral':      { title: 'Invite a teammate', icon: '🎁', desc: 'Share Be More Swan', render: renderReferral },
     };
-    const ORDER = ['roi-mini', 'capacity', 'team-status', 'recent-work', 'agenda', 'notifications', 'tips', 'referral'];
-    const DEFAULT_ON = { 'roi-mini': true, 'team-status': true, 'recent-work': true, 'agenda': true, 'capacity': true, 'notifications': true, 'tips': false, 'referral': false };
+    const ORDER = ['roi-mini', 'team-status', 'recent-work', 'agenda', 'notifications', 'tips', 'referral'];
+    const DEFAULT_ON = { 'roi-mini': true, 'team-status': true, 'recent-work': true, 'agenda': true, 'notifications': true, 'tips': false, 'referral': false };
 
     let layout = [];
     let editing = false;
@@ -905,43 +920,44 @@
         el.querySelector('.dw-link').onclick = () => window.loadView && window.loadView('calendar');
       } catch { el.innerHTML = '<div class="dw-stat-sub">Unavailable right now.</div>'; }
     }
-    // Tasks are a hard monthly cap (never an overage charge). The headline is the share of this
-    // month's allowance used across every assistant (usage_counters, by org); the lines under it are
-    // the assistants doing the most of it (get-usage-summary, task_ledger) — the same figures each
-    // assistant's own page shows as its share. Before the single task allowance, credits paid for
-    // pictures, video and music separately — that row stays for workspaces still on credits.
-    async function renderCapacity(el) {
+    // Tasks this month, in the Command Center under the three tiles. Tasks are a hard monthly cap
+    // (never an overage charge). The headline is the share of this month's allowance used across
+    // every assistant (check-capacity: usage_counters, by org); the chips are the assistants doing the
+    // most of it (get-usage-summary: task_ledger) — the figures each assistant's page shows as its share.
+    async function renderTaskUsage(el) {
+      if (!el) return;
       try {
         const get = u => (window.bmsCachedFetch ? window.bmsCachedFetch(u) : fetch(u)).then(r => r.ok ? r.json() : null).catch(() => null);
-        const [cap, cr, us] = await Promise.all([get('/.netlify/functions/check-capacity'), get('/.netlify/functions/get-ai-credit-balance'), get('/.netlify/functions/get-usage-summary')]);
-        if (!cap && !cr) throw new Error('none');
+        const [cap, us] = await Promise.all([get('/.netlify/functions/check-capacity'), get('/.netlify/functions/get-usage-summary')]);
+        if (!cap) throw new Error('none');
         const n = v => Number(v || 0).toLocaleString('en-GB');
-        const tone = pct => pct >= 90 ? '#ef4444' : pct >= 75 ? '#f59e0b' : '#ec4899';
-        const bar = pct => `<div style="height:8px;background:#f1f5f9;border-radius:999px;margin-top:6px;overflow:hidden" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div style="height:100%;width:${pct}%;background:${tone(pct)}"></div></div>`;
-        // The allowance resets on the 1st, UTC (atomic-cap-check getPeriodStart).
-        const now = new Date();
-        const resets = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
-        let html = '';
-        if (cap && cap.taskLimit != null) {
+        const billing = `<button type="button" class="cc-link" data-cc-billing>Plan &amp; billing →</button>`;
+        if (cap.taskLimit == null || !cap.taskLimit) {
+          // No plan (never chosen, or the trial ended) has no allowance — never call that unlimited.
+          el.innerHTML = `<div class="cc-usage-head"><span class="cc-usage-title">Tasks this month</span><span class="cc-usage-pct" style="font-size:15px">${cap.noPlan ? 'No plan yet' : 'No monthly limit'}</span></div>
+            <div class="cc-usage-sub">${cap.noPlan ? '<span>Choose a plan to get a monthly task allowance.</span>' : ''}${billing}</div>`;
+        } else {
+          const limit = Number(cap.taskLimit);
           const used = Number(cap.taskCount || 0);
-          const pct = cap.taskLimit ? Math.min(100, Math.round((used / cap.taskLimit) * 100)) : 100;
+          const raw = v => Math.round((v / limit) * 100);
+          // Some use that rounds to 0 reads as "under 1%", never as nothing used (38 of 10,500 on prod).
+          const label = v => (v > 0 && raw(v) === 0 ? '<1%' : `${Math.min(100, raw(v))}%`);
+          const pct = Math.min(100, raw(used));
+          const tone = pct >= 90 ? '#ef4444' : pct >= 75 ? '#f59e0b' : '#ec4899';
+          // The allowance resets on the 1st, UTC (atomic-cap-check getPeriodStart).
+          const now = new Date();
+          const resets = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
           const bonus = cap.unifiedTaskMetering && cap.bonusTasks > 0 ? ` · ${n(cap.bonusTasks)} bonus in reserve` : '';
-          html += `<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><span style="font-size:13px;color:#64748b">Tasks used, all assistants</span><strong style="font-size:20px;color:#0f172a">${pct}%</strong></div>${bar(pct)}
-            <div class="dw-stat-sub" style="margin-top:6px">${n(used)} of ${n(cap.taskLimit)} this month${bonus} · resets ${esc(resets)}</div></div>`;
-          const rows = (us && us.unit === 'tasks' && Array.isArray(us.byAssistant) ? us.byAssistant : []).filter(r => r.tasks > 0).slice(0, 3);
-          if (rows.length && cap.taskLimit) {
-            html += `<ul class="dw-list" style="margin-bottom:8px">${rows.map(r => `<li style="justify-content:space-between"><span class="t">${esc(r.name)}</span><span class="dw-stat-sub" style="margin:0;white-space:nowrap">${n(r.tasks)} · ${Math.round((r.tasks / cap.taskLimit) * 100)}%</span></li>`).join('')}</ul>`;
-          }
-        } else if (cap) {
-          html += `<div style="margin-bottom:10px;font-size:13px;display:flex;justify-content:space-between"><span style="color:#64748b">Tasks</span><strong style="color:#0f172a">No monthly limit</strong></div>`;
+          // "Unattributed" (work counted before per-assistant records began) is not an assistant.
+          const top = (us && us.unit === 'tasks' && Array.isArray(us.byAssistant) ? us.byAssistant : [])
+            .filter(r => r.tasks > 0 && r.assistantId != null).slice(0, 4);
+          el.innerHTML = `<div class="cc-usage-head"><span class="cc-usage-title">Tasks this month · all assistants</span><span class="cc-usage-pct">${label(used)} used</span></div>
+            <div class="cc-usage-bar" role="progressbar" aria-label="Monthly task allowance used" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div style="width:${used > 0 ? Math.max(pct, 1) : 0}%;background:${tone}"></div></div>
+            <div class="cc-usage-sub"><span>${n(used)} of ${n(limit)} tasks${bonus} · resets ${esc(resets)}</span>${billing}</div>
+            ${top.length ? `<div class="cc-usage-who">${top.map(r => `<span class="cc-usage-chip">${esc(r.name)} · ${n(r.tasks)} (${label(r.tasks)})</span>`).join('')}</div>` : ''}`;
         }
-        if (cr && cr.balance != null && cr.unit !== 'tasks') {
-          const pct = cr.monthlyCredits ? Math.max(0, Math.min(100, Math.round(((cr.monthlyCredits - cr.balance) / cr.monthlyCredits) * 100))) : null;
-          html += `<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#64748b">AI credits left</span><strong style="color:#0f172a">${esc(cr.monthlyCredits ? `${cr.balance} of ${cr.monthlyCredits}` : String(cr.balance))}</strong></div>${pct != null ? bar(pct) : ''}</div>`;
-        }
-        el.innerHTML = html + `<span class="dw-link">Plan &amp; billing →</span>`;
-        el.querySelector('.dw-link').onclick = () => window.loadView && window.loadView('billing');
-      } catch { el.innerHTML = '<div class="dw-stat-sub">Unavailable right now.</div>'; }
+        el.querySelector('[data-cc-billing]').onclick = () => window.loadView && window.loadView('billing');
+      } catch { el.innerHTML = '<div class="cc-usage-sub">Task usage is unavailable right now.</div>'; }
     }
     function renderTips(el) {
       const tips = ['Press ⌘K anywhere to tell your team what to do.', 'Reject a draft with feedback and it becomes a rule for next time.', 'Set your hourly rate in Settings to unlock the money-saved figure.'];
@@ -960,6 +976,7 @@
       renderGrid();
     }
     init();
+    renderTaskUsage(document.getElementById('cc-usage'));
 
     // Issue #58: the "Latest updates" widget was only ever fetched once at load, so a
     // notification created while the user is sitting on the dashboard (e.g. "issue fixed")
