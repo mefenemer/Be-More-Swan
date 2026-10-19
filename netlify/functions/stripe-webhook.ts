@@ -16,6 +16,7 @@ import { releasePausedLimit, resolveAssistantLimit } from '../../src/utils/relea
 import { backfillLivePlanForOrg } from '../../src/utils/plan-stripe-refs';
 import { qualifyPendingReferral } from '../../src/utils/referral-offer';
 import { invoiceNetPence, recordPartnerPayment, reversePartnerCommission, sessionNetPence, type PartnerPayment } from '../../src/utils/partner-ledger';
+import { finishPlanMove } from '../../src/utils/plan-moves';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
@@ -1028,6 +1029,22 @@ export default withLambda(async (event) => {
                     .from(masterPlans)
                     .where(eq(masterPlans.id, newMasterPlanId))
                     .limit(1);
+
+                // ── Admin ▸ Plan moves: a scheduled move took effect ─────────────
+                // The new phase's metadata carries planMoveId (src/utils/plan-moves.ts). Switch the
+                // plans row BEFORE the limit enforcement below, which reads it. Idempotent, and a
+                // missing plan_moves table must never fail the webhook.
+                const movedTo = await finishPlanMove(db, sub as any).catch((err) => {
+                    console.error('[stripe-webhook] finishing a plan move failed (non-blocking):', (err as any)?.message);
+                    return null;
+                });
+                if (movedTo) {
+                    if (typeof sub.schedule === 'string') {
+                        await stripe.subscriptionSchedules.release(sub.schedule)
+                            .catch(err => console.warn('[stripe-webhook] schedule release after plan move failed (non-blocking):', (err as any)?.message));
+                    }
+                    console.log(`[stripe-webhook] plan move finished for ${sub.id} → ${movedTo}`);
+                }
 
                 // ── Scheduled downgrade took effect ─────────────────────────────
                 // billing-downgrade switches the price at period end via a Stripe subscription
