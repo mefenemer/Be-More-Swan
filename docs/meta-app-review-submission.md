@@ -207,27 +207,66 @@ A–C → select the account, then:
 
 ---
 
-## Reviewer instructions (paste into "Reviewer instructions")
+## Reviewer instructions (paste into "Provide testing instructions")
 
-> Be More Swan (https://bemoreswan.com) is an AI social media assistant for small businesses. It
-> publishes the posts a business owner approves to their Facebook Page and Instagram Business
-> account, and reports how those posts perform.
->
-> Test account: [email] / [password]. This account has a paid plan and the social media assistant
-> enabled.
->
-> 1. Sign in at https://bemoreswan.com/login.
-> 2. Go to Integrations. On the Facebook card click Connect, log in with your Facebook test user and
->    select a Page that has a linked Instagram Business account. Then do the same on the Instagram
->    card and select that Page's Instagram account.
-> 3. Open the Social Media Manager assistant → Review, open a post with an image and click Approve &
->    Schedule for a couple of minutes ahead. It
->    appears on the Facebook Page (pages_manage_posts) and on Instagram (instagram_content_publish).
-> 4. Open Assistants → Social Media Manager and scroll to Performance Metrics. The Engagement Rate,
->    Organic Reach Growth and Meaningful Engagement cards are calculated from post insights
->    (instagram_manage_insights, pages_read_engagement). Insights refresh every 6 hours, so posts
->    published during the review appear in the cards later.
+**Set up first (on production):**
+- A dedicated reviewer account, e.g. `meta-review@bemoreswan.com`. Give it a plan with the Social
+  Media Manager assistant and finish onboarding so nothing blocks Integrations. Never reuse a
+  customer's login. The password goes only into Meta's form, not this doc.
+- A draft Facebook post and a draft Instagram post, each with a JPEG image, waiting in the
+  assistant's Review list.
 
-**Before submitting:** create a dedicated reviewer login on production. Don't reuse a real
-customer's. Check that every step above matches the current UI labels, and that the reviewer
-account can see the Integrations page without onboarding blocking it.
+The reviewer connects their **own** Facebook test user and Page, so they will have no published
+posts or insights at first. The instructions point them to the screencasts for that.
+
+> Be More Swan (https://bemoreswan.com) is a web app for small businesses. Its AI Social Media
+> Manager drafts posts. The business owner reviews and approves them, and Be More Swan publishes
+> them to the owner's Facebook Page and Instagram Business account and reports how they perform.
+>
+> **Login:** https://bemoreswan.com/login
+> Email: [reviewer email]
+> Password: [reviewer password]
+> This account has a plan that includes the Social Media Manager assistant, and draft posts are ready to approve.
+>
+> **Facebook (pages_show_list, business_management, pages_manage_posts, pages_read_engagement)**
+> 1. Go to Integrations → Facebook card → Connect, and log in with your Facebook test user.
+> 2. Select a Page, ideally one owned by a Business portfolio. Be More Swan's picker lists your
+>    Pages (shown when you manage two or more). Select one.
+> 3. Open the Social Media Manager assistant → Review, open the Facebook draft and click
+>    Approve & Schedule for a few minutes ahead. The Facebook publisher runs every 10 minutes,
+>    after which the post appears on your Page.
+>
+> **Instagram (instagram_basic, instagram_content_publish, instagram_manage_insights)**
+> 4. Go to Integrations → Instagram card → Connect, and select your Page's Instagram Business
+>    account. The picker shows it as @username.
+> 5. Approve & Schedule the Instagram draft the same way. It appears on the Instagram profile
+>    within a couple of minutes.
+>
+> **Insights and engagement (instagram_manage_insights, pages_read_engagement, instagram_basic)**
+> 6. In the assistant, the Performance Metrics cards (Engagement Rate, Organic Reach Growth,
+>    Meaningful Engagement) and the Audience block (follower counts) are calculated from post
+>    insights and engagement, which are imported every 6 hours. For a newly connected test Page
+>    they stay empty until posts have been live for a while, so please see the screencasts for
+>    these with real data.
+>
+> Be More Swan never publishes anything the user has not approved.
+
+## Data handling answers
+
+- **Processors with access to Platform Data:** Yes.
+  - Netlify: IT solutions/cloud processing, United Kingdom + United States
+  - Neon: IT solutions/cloud processing, United Kingdom
+  - Anthropic: IT solutions/cloud processing, United States
+
+  These match the sub-processor list on privacy.html and trust.html.
+- **Responsible entity:** Be More Swan Ltd (ICO data controller ZC272072), United Kingdom.
+- **National security requests in the past 12 months:** No.
+- **Public-authority request policies:** tick only what is actually in place ("None of the above"
+  unless a written policy exists).
+
+## App settings checked for review
+
+- Platform: **Website**, Site URL `https://bemoreswan.com`.
+- Valid OAuth Redirect URI: `https://bemoreswan.com/.netlify/functions/meta-oauth?action=callback`
+  (or `META_REDIRECT_URI` if set; see `meta-oauth.ts:243`).
+- Data deletion callback: `https://bemoreswan.com/api/meta/facebook/delete` (`meta-callbacks.ts`).
