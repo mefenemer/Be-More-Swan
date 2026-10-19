@@ -932,6 +932,11 @@
           if (rows.length && cap.taskLimit) {
             html += `<ul class="dw-list" style="margin-bottom:8px">${rows.map(r => `<li style="justify-content:space-between"><span class="t">${esc(r.name)}</span><span class="dw-stat-sub" style="margin:0;white-space:nowrap">${n(r.tasks)} · ${Math.round((r.tasks / cap.taskLimit) * 100)}%</span></li>`).join('')}</ul>`;
           }
+        } else if (cap && cap.noPlan) {
+          // No plan (never chosen, or the trial ended): there is no allowance to show — saying
+          // "No monthly limit" here read as unlimited when the truth is nothing runs until a plan does.
+          html += `<div style="margin-bottom:10px;font-size:13px;display:flex;justify-content:space-between"><span style="color:#64748b">Tasks</span><strong style="color:#0f172a">No plan yet</strong></div>
+            <div class="dw-stat-sub" style="margin-bottom:8px">Choose a plan to get a monthly task allowance.</div>`;
         } else if (cap) {
           html += `<div style="margin-bottom:10px;font-size:13px;display:flex;justify-content:space-between"><span style="color:#64748b">Tasks</span><strong style="color:#0f172a">No monthly limit</strong></div>`;
         }
