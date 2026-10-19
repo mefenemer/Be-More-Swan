@@ -13,27 +13,19 @@ developers.facebook.com/requests, and then they can connect. `request-meta-teste
 
 ---
 
-## ⚠️ Decide first: `pages_messaging`
+## Not submitted: `pages_messaging`
 
-This is the permission most likely to fail review. It is also the only one that requires
-"API test calls" and reproduction steps.
+Removed from this submission and from `SCOPES` in `netlify/functions/meta-oauth.ts`. Why:
 
-- Reviewers for `pages_messaging` expect to **send a message to the Page in Messenger and see the
-  app respond**. The app has no Messenger webhook (no `hub.challenge` handler, no
-  `/{page-id}/subscribed_apps` call), so it never receives or replies to messages.
-- `social-auto-responder.ts` sets the Messenger **greeting** via `/{page-id}/messenger_profile`
-  (legitimate). It also POSTs to `/{page-id}/messaging` with no `recipient`, which the Send API
-  rejects, so the "auto-reply" never actually sends.
-- The Instagram DM greeting call (`/{ig-user-id}/messenger_profile`) needs
-  `instagram_manage_messages`, which is not requested at all.
+- Reviewers for `pages_messaging` expect to message the Page in Messenger and see the app respond.
+  The app has no Messenger webhook (no `hub.challenge` handler, no `/{page-id}/subscribed_apps`).
+- The required "API test call" is unlikely to pass. The `/{page-id}/messaging` call in
+  `social-auto-responder.ts` has no `recipient`, so the Send API rejects it.
+- Instagram DM greetings need `instagram_manage_messages`, which is not requested anyway.
 
-**Recommendation:** remove `pages_messaging` from this submission (Edit submission → remove), and
-remove it from `SCOPES` in `netlify/functions/meta-oauth.ts:42` so the login dialog doesn't ask for
-it. Ship publishing, insights and profile sync first. Submit messaging later, once there is a webhook
-and a real reply flow to demonstrate. Submitting it now risks the **whole** submission being
-rejected.
-
-The answers below include `pages_messaging` in case you keep it.
+Consequence: the auto-responder's push to Meta (`social-auto-responder.ts`) will fail for new
+connections until messaging is built properly and approved. Re-add the scope only alongside a
+webhook, a `subscribed_apps` subscription and a real reply flow, then submit it on its own.
 
 ---
 
@@ -99,14 +91,6 @@ once right after connecting), the app updates the Page's website, description, c
 hours. The data comes from what the user entered in their Be More Swan business profile.
 _Code: `social-profile-sync.ts` (`POST /{page-id}`)._
 
-### pages_messaging _(see warning above)_
-**How the app uses it:** Be More Swan generates a Messenger greeting for the business, using the
-business's tone of voice. After the owner reviews and approves it, the app sets it on their Page
-via the Messenger Profile API (`/{page-id}/messenger_profile`). People who open a conversation with
-the Page then see it.
-_Code: `social-auto-responder.ts`._
-_Reviewer test calls / reproduction: Meta requires at least one successful messaging API call in the
-last 30 days, made from the app, and steps a reviewer can follow to see the result in Messenger._
 
 ---
 
@@ -134,8 +118,6 @@ Suggested single recording (~4–5 min):
 6. Open the assistant's Performance Metrics → show the reach/engagement figures for those
    posts. *(instagram_manage_insights, pages_read_engagement)*. Use posts that are a day or more
    old so the figures are non-zero, and say so in a caption.
-7. *(only if keeping pages_messaging)* Generate the auto-responder → approve → open the Page in
-   Messenger from a different account → show the greeting.
 
 ---
 

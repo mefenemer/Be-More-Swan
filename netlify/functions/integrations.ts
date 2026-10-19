@@ -302,9 +302,8 @@ export default withLambda(async (event) => {
             // capability that uses it. Listing anything else is the over-privilege this exists
             // to stop.
             const ALLOWED_SCOPES: Record<string, string[]> = {
-                // pages_messaging is correct here: Messenger send is a Page-level permission and
-                // it IS in the Meta grant (meta-oauth.ts SCOPES).
-                facebook:      ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'publish_to_groups', 'pages_manage_metadata', 'pages_messaging'],
+                // pages_messaging removed: it is no longer in the Meta grant (meta-oauth.ts SCOPES).
+                facebook:      ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'publish_to_groups', 'pages_manage_metadata'],
                 // pages_messaging deliberately NOT listed for Instagram. It is a Facebook Page
                 // permission and does not authorise Instagram DMs — that needs
                 // instagram_manage_messages, which we neither request nor have a capability for.
