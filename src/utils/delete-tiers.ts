@@ -33,6 +33,14 @@ export const TABLE_DELETE_CONFIG: Record<string, TableDeleteConfig> = {
     scheduled_posts:       { tier: 'hard_confirmed' }, // Draft state only
 
     // ── Blocked — cannot be deleted via UI under any circumstance ────────────
+    // A plan row is what subscribers' plans.master_plan_id and the free beta plan's features
+    // (featureTierKey: beta → 'employee') resolve through. Deleting one strands everyone on it, so
+    // a plan is retired by making it inactive (off the pricing page, checkout and picker). Before
+    // this entry the screen said "Unknown table: master_plans" (2026-10-19).
+    master_plans: {
+        tier: 'blocked',
+        blockedReason: "Plans can't be deleted, only made inactive. Edit the plan and untick Active to stop selling it; anyone already on it keeps it.",
+    },
     admin_audit_log: {
         tier: 'blocked',
         blockedReason: 'Immutable audit record — cannot be deleted',
