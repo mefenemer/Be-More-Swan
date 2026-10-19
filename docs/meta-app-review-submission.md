@@ -29,6 +29,19 @@ webhook, a `subscribed_apps` subscription and a real reply flow, then submit it 
 
 ---
 
+## Not submitted: `pages_manage_metadata`
+
+Removed from this submission and from `SCOPES`. Its only use was the Meta branch of Sync Profile
+(`social-profile-sync.ts`), which is now disabled (`META_PROFILE_SYNC_ENABLED = false`) and its
+button hidden for Facebook/Instagram, because it:
+- set the Page website to Be More Swan's own URL (`baseUrl`), overwriting the customer's;
+- read the Instagram connection, so a Facebook-only connect was skipped;
+- sent hours and category in formats Meta's Page update doesn't accept.
+
+Fix those, re-add the scope, and submit it on its own.
+
+---
+
 ## Permission answers
 
 ### pages_show_list
@@ -94,50 +107,6 @@ Page (`/{page-id}/feed`, or `/{page-id}/photos` when an image is attached). Post
 published when the user has created or approved them.
 _Code: `publish-facebook.ts`._
 
-### pages_manage_metadata
-**How the app uses it:** Be More Swan keeps the business's Facebook Page profile consistent with
-the business profile the owner maintains in Be More Swan. When the user triggers a profile sync (and
-once right after connecting), the app updates the Page's website, description, category and opening
-hours. The data comes from what the user entered in their Be More Swan business profile.
-_Code: `social-profile-sync.ts` (`POST /{page-id}`)._
-
-
----
-
-## Screencast scripts
-
-Based on Meta's guide (developers.facebook.com/docs/app-review/submission-guide/screen-recordings):
-- **Every recording** starts logged out of Be More Swan *and* Facebook. Show the full login, the
-  Connect click, and the **whole Meta dialog** with the permission visibly granted. Then show the
-  feature using the data, and the result on Facebook/Instagram itself.
-- English UI, 1080p, screen width ≤ 1440px, larger cursor, mouse not keyboard, **no audio**.
-- Add on-screen annotations naming the permission at the moment it's used, and zoom in on small
-  details (QuickTime + iMovie is enough).
-- You don't explain *why* in the video. That goes in the form's description.
-
-**Which card:** Integrations has two separate cards. **Facebook** (`platform=facebook`) stores
-the Page connection used by Facebook publishing, Page engagement and profile sync. Its picker
-lists Page names. **Instagram** (`platform=instagram`) stores the Instagram account connection. Its
-picker lists @usernames. Use Facebook for `pages_*` and Instagram for `instagram_*`.
-
-**Be More Swan shows no per-post stats.** Insights only appear combined, in the **Performance
-Metrics** cards (assistant page) and the **Audience** block. Show the per-post numbers on
-Facebook/Instagram as the source.
-
-**Before recording anything:**
-- The reviewer account's Page is owned by a Business portfolio, and the Facebook user is *not* a
-  direct Page admin (needed to show business_management).
-- That Page has a linked Instagram Business account.
-- A few posts were published *by Be More Swan* to both, at least a day ago, with some likes and
-  comments. That way the Performance Metrics cards and Audience block show real values, not "—" or 0.
-- The business profile in Be More Swan has a website, description and hours that differ from the
-  Page's current ones, so Sync Profile visibly changes something.
-
-The common opening (steps A–C) is the same in every recording:
-- **A.** Logged out → log in to bemoreswan.com → **Integrations**.
-- **B.** Click **Connect** on the stated card → Facebook login.
-- **C.** Meta dialog: select the business, the Page (and the Instagram account if asked) → leave
-  all permissions on → continue. *Annotation: "Granting <permission>"*
 
 ### pages_show_list (Facebook card, ~1 min)
 A–C, then:
@@ -154,12 +123,6 @@ A–C, showing the **business selection** step in the dialog, then:
    /me/businesses → owned_pages using business_management, not returned by /me/accounts"*
 2. Select it → connected.
 
-### pages_manage_metadata (Facebook card, ~1.5 min)
-A–C → select the Page, then:
-1. Open Facebook Page in a new tab → show the current About info (website, description, hours).
-2. Back in Integrations → Facebook card → **Sync Profile**. *Annotation: "Updates the Page's
-   website, description, category and hours via pages_manage_metadata"*
-3. Reload the Facebook Page → show the updated About info.
 
 ### pages_manage_posts (Facebook card, ~2 min)
 A–C → select the Page, then:
@@ -220,11 +183,10 @@ A–C → select the account, then:
 > 2. Go to Integrations. On the Facebook card click Connect, log in with your Facebook test user and
 >    select a Page that has a linked Instagram Business account. Then do the same on the Instagram
 >    card and select that Page's Instagram account.
-> 3. On the Facebook card click Sync Profile, then reload the Page to see the Page's website/description/hours updated (pages_manage_metadata).
-> 4. Open the Social Media Manager assistant → Review, open a post with an image and click Approve &
+> 3. Open the Social Media Manager assistant → Review, open a post with an image and click Approve &
 >    Schedule for a couple of minutes ahead. It
 >    appears on the Facebook Page (pages_manage_posts) and on Instagram (instagram_content_publish).
-> 5. Open Assistants → Social Media Manager and scroll to Performance Metrics. The Engagement Rate,
+> 4. Open Assistants → Social Media Manager and scroll to Performance Metrics. The Engagement Rate,
 >    Organic Reach Growth and Meaningful Engagement cards are calculated from post insights
 >    (instagram_manage_insights, pages_read_engagement). Insights refresh every 6 hours, so posts
 >    published during the review appear in the cards later.
