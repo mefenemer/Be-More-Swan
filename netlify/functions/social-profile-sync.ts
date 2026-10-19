@@ -14,6 +14,8 @@ import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { LINKEDIN_ORGANISATION_ACCESS, LINKEDIN_MEMBER_ONLY_REASON } from '../../src/config/linkedin-capabilities';
 
+const META_PROFILE_SYNC_ENABLED = false;
+
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
@@ -81,12 +83,21 @@ export default withLambda(async (event) => {
     const results: Record<string, { status: 'ok' | 'failed' | 'skipped'; detail?: string }> = {};
 
     // ── Meta (Facebook Page) ─────────────────────────────────────────────────
+    // DISABLED (META_PROFILE_SYNC_ENABLED). Known defects, and pages_manage_metadata is no longer
+    // requested or submitted for App Review:
+    //   • website is set to baseUrl — Be More Swan's own URL — overwriting the customer's Page website;
+    //   • reads the 'instagram' connection, so a Facebook-only connect is silently skipped;
+    //   • hours are sent as { day: { open, close } } and category as a display name, neither of which
+    //     matches Meta's Page update format (mon_1_open / category IDs).
+    // Fix these, re-add pages_manage_metadata to meta-oauth.ts SCOPES and get it approved before re-enabling.
     const [metaConn] = await db.select({ id: systemConnections.id, vaultRefKey: systemConnections.vaultRefKey, metadata: systemConnections.metadata })
         .from(systemConnections)
         .where(and(eq(systemConnections.organisationId, organisationId), eq(systemConnections.serviceName, 'instagram'), eq(systemConnections.isActive, true)))
         .limit(1);
 
-    if (metaConn?.vaultRefKey) {
+    if (!META_PROFILE_SYNC_ENABLED) {
+        results.meta = { status: 'skipped', detail: 'Facebook Page profile sync is disabled' };
+    } else if (metaConn?.vaultRefKey) {
         const secret = await getSecret(db, metaConn.vaultRefKey);
         const token  = (secret as { token?: string } | null)?.token;
         const fbPageId = (metaConn.metadata as Record<string, unknown>)?.fbPageId as string | undefined;

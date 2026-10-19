@@ -1934,7 +1934,8 @@ function _platformCard(platform, conn) {
     }
 
     // US-SMM-4.2.2 / 4.2.1: Sync Profile and Generate Auto-Responder for Meta/LinkedIn
-    const syncBtn = (isConnected && (platform.id === 'Instagram' || platform.id === 'Facebook' || platform.id === 'LinkedIn'))
+    // Meta (Instagram/Facebook) removed: Page profile sync is disabled server-side, see social-profile-sync.ts.
+    const syncBtn = (isConnected && platform.id === 'LinkedIn')
         ? `<button onclick="window._intSyncProfile('${platform.id.toLowerCase()}')" class="${brandPill}" type="button">Sync Profile</button>`
         : '';
     const autoRespBtn = (isConnected && (platform.id === 'Instagram' || platform.id === 'Facebook'))
