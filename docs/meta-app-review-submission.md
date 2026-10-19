@@ -108,7 +108,7 @@ _Code: `social-profile-sync.ts` (`POST /{page-id}`)._
 
 General rules Meta enforces (most rejections come from these):
 - Use English UI (or captions), at least 720p, with no cuts that hide the login flow.
-- Start **logged out** of Be More Swan. Show login → Connect Facebook/Instagram → the **Meta
+- Start **logged out** of Be More Swan. Show login → Integrations → the Facebook or Instagram card's Connect → the **Meta
   permission dialog with each permission visible** → the account selection → the feature using it.
 - Show the result **on Facebook/Instagram itself** (the published post, the updated Page info), not
   just inside Be More Swan.
@@ -116,10 +116,16 @@ General rules Meta enforces (most rejections come from these):
   captions/annotations that name the permission as each feature appears.
 
 Suggested single recording (~4–5 min):
-1. Log in to bemoreswan.com with the reviewer account → Integrations → Connect Facebook & Instagram.
-2. Meta dialog: choose the business portfolio, Page and Instagram account, and leave all permissions
-   granted. *(pages_show_list, business_management)*
-3. Back in Be More Swan: the connected Page and Instagram username are shown. *(instagram_basic)*
+Integrations has two separate cards. **Facebook** (`platform=facebook`) stores the Page connection
+used by Facebook publishing, Page insights and profile sync. **Instagram** (`platform=instagram`)
+stores the Instagram account connection. Use the Facebook card for every `pages_*` permission and
+the Instagram card for every `instagram_*` one.
+
+1. Log in to bemoreswan.com with the reviewer account → Integrations → **Facebook** card → Connect.
+2. Meta dialog: choose the business portfolio and Page, and leave all permissions granted. Be More
+   Swan's picker then lists the Pages by name. *(pages_show_list, business_management)*
+3. Integrations → **Instagram** card → Connect → Meta dialog → Be More Swan's picker lists the
+   linked accounts as @username → select it. *(instagram_basic)*
 4. Trigger the profile sync [check the button label] → open the Facebook Page in a new tab → show the updated website,
    description and hours. *(pages_manage_metadata)*
 5. Content calendar: create a post with an image, approve it, publish [check label] or schedule for one minute
@@ -146,8 +152,9 @@ Suggested single recording (~4–5 min):
 > enabled.
 >
 > 1. Sign in at https://bemoreswan.com/login.
-> 2. Go to Integrations and click "Connect Facebook & Instagram". Log in with your Facebook test
->    user and select a Page that has a linked Instagram Business account.
+> 2. Go to Integrations. On the Facebook card click Connect, log in with your Facebook test user and
+>    select a Page that has a linked Instagram Business account. Then do the same on the Instagram
+>    card and select that Page's Instagram account.
 > 3. Click [profile sync button] to see the Page's website/description/hours updated (pages_manage_metadata).
 > 4. Open the Content Calendar, create a post with an image, approve it and publish it [check the button label]. It
 >    appears on the Facebook Page (pages_manage_posts) and on Instagram (instagram_content_publish).
