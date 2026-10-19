@@ -221,6 +221,10 @@ A–C → select the account, then:
   unparseable turns it off). `META_REVIEW_LOGIN_EMAIL` is only needed to override the default
   `meta-review@bemoreswan.com`. The password goes only into Meta's form, not this doc. Delete
   `META_REVIEW_LOGIN_PASSWORD` to switch the Meta reviewer off without affecting Google's.
+- ⚠️ Netlify only applies env changes on the next deploy. After setting (or deleting) these,
+  trigger a deploy. Until then `review-login.html` says "Reviewer sign-in is not currently
+  enabled" (the endpoint 404s). Function logs show `meta slot refused: <reason>` if a value is
+  wrong; no log line means the variable isn't reaching functions (scope/context/name).
 - Test `https://bemoreswan.com/review-login.html` in a private window before submitting.
 - A draft Facebook post and a draft Instagram post, each with a JPEG image, waiting in the
   assistant's Review list.
