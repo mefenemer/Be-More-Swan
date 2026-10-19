@@ -74,11 +74,18 @@ workspace team. They are never shared with third parties or used for advertising
 _Code: `ingest-instagram-insights.ts`, `get-assistant-performance.ts`._
 
 ### pages_read_engagement
-**How the app uses it:** Be More Swan reads the connected Page's basic details, and reads
-engagement and insights (reach, impressions, link clicks, reactions) for posts the app published
-to that Page. These metrics appear only to the Page owner in their performance dashboard, and
-they help the user see which content drives traffic to their website.
-_Code: `ingest-facebook-insights.ts` (`post_impressions_unique`, `post_impressions`, `post_clicks_by_type`)._
+**How the app uses it:** Be More Swan reads the reactions, comments and shares on posts it
+published to the user's Facebook Page, and the Page's follower count. Engagement is combined
+across posts into the Engagement Rate and Meaningful Engagement cards on the assistant's page. The
+follower count appears in its Audience panel. Be More Swan does not show individual post stats.
+Only the Page owner and their workspace team see this data, and it is never shared with third
+parties or used for advertising.
+_Code: `ingest-facebook-insights.ts` (post `reactions`/`comments`/`shares` summaries),
+`src/utils/follower-counts.ts` (`followers_count`, `fan_count`)._
+
+> ⚠️ Not claimed: reach, impressions and link clicks. The ingester also calls `/{post-id}/insights`
+> for those, but Page/post insights likely also need `read_insights`, which is not requested. Add
+> them to this answer only if `read_insights` is added to `SCOPES` and to the submission.
 
 ### pages_manage_posts
 **How the app uses it:** The business owner creates or approves posts in their Be More Swan
