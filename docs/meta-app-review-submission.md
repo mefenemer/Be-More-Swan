@@ -48,11 +48,13 @@ do not create, modify or manage businesses, ad accounts, assets or users in Busi
 _Code: `meta-oauth.ts` business-portfolio fallback._
 
 ### instagram_basic
-**How the app uses it:** Be More Swan reads the connected Instagram Business account's ID,
-username and profile details. We show the user which account is connected, and we use the ID for
-publishing and insights. We also read the user's own media IDs so we can match posts the app
-published with their performance metrics.
-_Code: `meta-oauth.ts`, `publish-instagram.ts`, `ingest-instagram-insights.ts`._
+**How the app uses it:** When the user connects, Be More Swan reads the ID and username of each
+Instagram Business account linked to their Pages. It shows them as @username in an account
+picker, so the user can choose which account to connect, and it stores the chosen account's ID
+for publishing and insights. The app also reads the connected account's follower count
+(`followers_count`), which appears in the Audience panel on the assistant's page. There, the
+business owner can track audience growth alongside their marketing goals.
+_Code: `meta-oauth.ts`, `src/utils/meta-accounts.ts` (picker), `src/utils/follower-counts.ts`._
 
 ### instagram_content_publish
 **How the app uses it:** Be More Swan is a social media planning assistant. The business owner
