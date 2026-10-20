@@ -23,7 +23,7 @@
 import { Handler } from '@netlify/functions';
 import { and, count, eq, isNull, or, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { checkAssistantCapacity } from '../../src/utils/assistant-capacity';
+import { checkAssistantCapacity, checkRoleSwap } from '../../src/utils/assistant-capacity';
 import {
     aiAssistants,
     dpaAcceptances,
@@ -153,6 +153,11 @@ export default withLambda(async (event) => {
                 return json(200, { assistantId: existing.id, name: existing.name || master.name, roleName: master.name, roleKey: master.roleKey, alreadyHired: true });
             }
         }
+
+        // ── 4b. One role switch per billing month on capped plans ───────────────────
+        // After the one-per-role check, so re-opening a role already on the team never counts.
+        const swap = await checkRoleSwap(db, userId, orgId, master.roleKey);
+        if (swap) return json(swap.status, { error: swap.error, code: swap.code, nextSwitchAt: swap.nextSwitchAt });
 
         // ── 5. Create the instance ────────────────────────────────────────────────
         const [created] = await db.insert(aiAssistants).values({

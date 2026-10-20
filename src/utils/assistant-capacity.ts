@@ -13,9 +13,10 @@
 // A limit enforced only by the page that usually precedes the write is not enforced. This is the
 // server-side twin of check-capacity, and it belongs next to the insert.
 
-import { and, asc, count, eq, inArray, ne, or } from 'drizzle-orm';
-import { aiAssistants, masterPlans, organisations, plans } from '../../db/schema';
+import { and, asc, count, eq, gte, inArray, ne, or } from 'drizzle-orm';
+import { aiAssistants, auditLogs, masterAssistants, masterPlans, organisations, plans } from '../../db/schema';
 import { effectiveLimit, type FeatureOverrides } from './plan-features';
+import { getPeriodStart } from './atomic-cap-check';
 
 /**
  * Lifecycle states that OCCUPY a plan seat.
@@ -154,4 +155,166 @@ export function resumeRefusalMessage(limit: number, occupantNames: string[]): st
         return `Your plan runs one assistant at a time. Pause or archive ${list} first, or upgrade your plan.`;
     }
     return `Your plan runs ${limit} assistants at a time. Pause or archive ${names.length > 1 ? 'one of ' : ''}${list} first, or upgrade your plan.`;
+}
+
+// ── Role switches: one per billing month on capped plans ────────────────────────────────────────
+// Owner, 2026-10-20: "Limit Tier 1 to one assistant role change per billing month." Archiving
+// frees a seat, so without this a one-assistant plan could rotate through every role in the
+// catalogue — the £69 plan's whole point — one at a time.
+//
+// The rule, per billing period (= the calendar month, 1st 00:00 UTC — the same period the task
+// allowance resets on, getPeriodStart(); plans carries no Stripe period dates to read instead):
+//   • HELD = the roles the org had at the start of the period: any assistant created before it and
+//     not archived at that moment (working, ready, paused and system-paused all count).
+//   • NEW  = the roles brought in during the period that are not HELD — hired, or reinstated from
+//     an archive. Counted once per role: hiring X, archiving it and getting X back is one change.
+//   • The org may bring in (seats empty at the start of the period) + 1 NEW roles. The empty seats
+//     cover a first hire — an org with nothing is not swapping — and the +1 is the switch.
+//   • A role already HELD or already NEW is never refused: reinstating the role you started the
+//     month with, or pausing and resuming any assistant, is not a change.
+//   • Uncapped plans (assistantLimit null — Tier 2) and orgs with no plan are not limited here.
+// Counted from ai_assistants and the lifecycle audit trail; there is no ledger table.
+//
+// ⚠️ The pricing FAQ states this rule. Change the copy if you change the rule.
+
+export type RoleSwapRefusal = { status: 409; code: 'SWAP_LIMIT'; error: string; nextSwitchAt: string };
+
+export type RoleSwapRow = {
+    id: number;
+    roleKey: string;
+    createdAt: Date;
+    archivedAt: Date | null;
+    lifecycleStatus: string;
+};
+
+/** Lifecycle audit events in the period, oldest first, as far as role switching cares. */
+export type RoleSwapEvent = { assistantId: number; kind: 'archive' | 'reinstate' };
+
+/** Pure: may the org bring `incomingRoleKey` in this period? */
+export function roleSwapAllowed(input: {
+    limit: number;
+    periodStart: Date;
+    rows: RoleSwapRow[];
+    events: RoleSwapEvent[];
+    incomingRoleKey: string;
+}): boolean {
+    const { limit, periodStart, rows, events, incomingRoleKey } = input;
+    const start = periodStart.getTime();
+
+    const firstEvent = new Map<number, RoleSwapEvent['kind']>();
+    const reinstated = new Set<number>();
+    for (const e of events) {
+        if (!firstEvent.has(e.assistantId)) firstEvent.set(e.assistantId, e.kind);
+        if (e.kind === 'reinstate') reinstated.add(e.assistantId);
+    }
+
+    // Was this assistant on the team when the period began? Reinstating clears archivedAt, so for
+    // anything archived or reinstated this period the first event says which side of it we're on.
+    const heldAtStart = (r: RoleSwapRow) => {
+        if (r.createdAt.getTime() >= start) return false;
+        const first = firstEvent.get(r.id);
+        if (first) return first === 'archive';
+        if (r.archivedAt) return r.archivedAt.getTime() >= start;
+        return r.lifecycleStatus !== 'archived';   // archived before archivedAt existed
+    };
+
+    const held = new Set(rows.filter(heldAtStart).map((r) => r.roleKey));
+    const brought = new Set(
+        rows.filter((r) => r.createdAt.getTime() >= start || reinstated.has(r.id))
+            .map((r) => r.roleKey)
+            .filter((k) => !held.has(k)),
+    );
+
+    if (held.has(incomingRoleKey) || brought.has(incomingRoleKey)) return true;
+    const allowance = Math.max(0, limit - held.size) + 1;
+    return brought.size + 1 <= allowance;
+}
+
+/** The first moment of the period after `periodStart` — when the next switch opens. */
+export function nextPeriodStart(periodStart: Date): Date {
+    return new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 1));
+}
+
+export function swapLimitMessage(nextSwitchAt: Date): string {
+    const date = nextSwitchAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+    return `On your plan you can switch to a different assistant once a month. Your next switch is available on ${date}. Upgrade to run every assistant at once.`;
+}
+
+/**
+ * null when the org may bring this role in (hire, or reinstate from an archive), or the refusal.
+ * `incoming` is the catalogue roleKey being hired, or the archived assistant being reinstated.
+ * Callers run it AFTER the capacity check: at capacity the user must free a seat first, and the
+ * capacity refusal says so.
+ */
+export async function checkRoleSwap(
+    db: any,
+    userId: number,
+    orgId: number,
+    incoming: string | { assistantId: number },
+    periodStart: Date = getPeriodStart(),
+): Promise<RoleSwapRefusal | null> {
+    const limit = await resolveSeatLimit(db, userId, orgId);
+    if (limit === 'NO_PLAN' || limit === null) return null;
+
+    const raw: Array<{
+        id: number; masterRoleKey: string | null; configuration: unknown; name: string | null;
+        createdAt: Date; archivedAt: Date | null; lifecycleStatus: string; provisioningStatus: string | null;
+    }> = await db
+        .select({
+            id: aiAssistants.id,
+            masterRoleKey: masterAssistants.roleKey,
+            configuration: aiAssistants.configuration,
+            name: aiAssistants.name,
+            createdAt: aiAssistants.createdAt,
+            archivedAt: aiAssistants.archivedAt,
+            lifecycleStatus: aiAssistants.lifecycleStatus,
+            provisioningStatus: aiAssistants.provisioningStatus,
+        })
+        .from(aiAssistants)
+        .leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
+        .where(eq(aiAssistants.organisationId, orgId));
+
+    // Abandoned pre-payment rows never ran — they are neither a role held nor a role brought in.
+    const rows: RoleSwapRow[] = raw
+        .filter((r) => !['pending', 'pending_payment'].includes(r.provisioningStatus || ''))
+        .map((r) => ({
+            id: r.id,
+            // Same identity hire-assistant's one-per-role check uses: the master link, then
+            // configuration.type, then the name for legacy rows.
+            roleKey: r.masterRoleKey
+                || ((r.configuration as { type?: string } | null)?.type)
+                || `name:${(r.name || '').toLowerCase()}`,
+            createdAt: new Date(r.createdAt),
+            archivedAt: r.archivedAt ? new Date(r.archivedAt) : null,
+            lifecycleStatus: r.lifecycleStatus,
+        }));
+
+    let events: RoleSwapEvent[] = [];
+    if (rows.length) {
+        const audit: Array<{ resourceId: string; actionType: string; newState: unknown }> = await db
+            .select({ resourceId: auditLogs.resourceId, actionType: auditLogs.actionType, newState: auditLogs.newState })
+            .from(auditLogs)
+            .where(and(
+                eq(auditLogs.resourceType, 'ai_assistants'),
+                inArray(auditLogs.resourceId, rows.map((r) => String(r.id))),
+                inArray(auditLogs.actionType, ['assistant_lifecycle_archived', 'assistant_lifecycle_paused']),
+                gte(auditLogs.createdAt, periodStart),
+            ))
+            .orderBy(asc(auditLogs.createdAt));
+        events = audit.flatMap((a): RoleSwapEvent[] => {
+            if (a.actionType === 'assistant_lifecycle_archived') return [{ assistantId: Number(a.resourceId), kind: 'archive' }];
+            return (a.newState as { reason?: string } | null)?.reason === 'user_reinstate'
+                ? [{ assistantId: Number(a.resourceId), kind: 'reinstate' }]
+                : [];
+        });
+    }
+
+    const incomingRoleKey = typeof incoming === 'string'
+        ? incoming
+        : rows.find((r) => r.id === incoming.assistantId)?.roleKey;
+    if (!incomingRoleKey) return null;
+
+    if (roleSwapAllowed({ limit, periodStart, rows, events, incomingRoleKey })) return null;
+    const next = nextPeriodStart(periodStart);
+    return { status: 409, code: 'SWAP_LIMIT', error: swapLimitMessage(next), nextSwitchAt: next.toISOString() };
 }

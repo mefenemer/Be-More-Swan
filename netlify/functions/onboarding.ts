@@ -24,7 +24,7 @@ import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmar
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
-import { checkAssistantCapacity } from '../../src/utils/assistant-capacity';
+import { checkAssistantCapacity, checkRoleSwap } from '../../src/utils/assistant-capacity';
 import { extractOnboardingGuardrails } from '../../src/utils/onboarding-guardrails';
 import { sanitizeUserInput } from '../../src/utils/sanitize-user-input';
 import { createNotification } from '../../src/utils/notify';
@@ -272,6 +272,17 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
         statusCode: capacityRefusal.status,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ error: capacityRefusal.error, code: capacityRefusal.code }),
+      };
+    }
+
+    // 2c. ROLE SWITCH LIMIT — capped plans may switch to a different role once per billing month
+    // (assistant-capacity.ts). Same gate as hire-assistant.ts; this endpoint creates assistants too.
+    const swapRefusal = await checkRoleSwap(db, existingUser.id, orgId, assistantRecord.roleKey);
+    if (swapRefusal) {
+      return {
+        statusCode: swapRefusal.status,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: swapRefusal.error, code: swapRefusal.code, nextSwitchAt: swapRefusal.nextSwitchAt }),
       };
     }
 

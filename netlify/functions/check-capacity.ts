@@ -37,6 +37,7 @@ import { TASK_WEIGHTS } from '../../src/config/task-weights';
 import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { getTrial } from '../../src/utils/trial';
 import { resolveImpersonation } from '../../src/utils/impersonation';
+import { checkRoleSwap } from '../../src/utils/assistant-capacity';
 
 const stripe = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
@@ -393,6 +394,12 @@ export default withLambda(async (event) => {
             ? Math.min(100, Math.round((seatCount / seatLimit) * 100))
             : 0;
 
+        // ?roleKey= — would hiring this role be refused as a second switch this month? Asked by the
+        // catalogue's Hire button so the user hears it before filling in a setup wizard, not after.
+        // hire-assistant / onboarding enforce the same check server-side.
+        const askedRoleKey = (event.queryStringParameters?.roleKey || '').trim();
+        const roleSwap = orgId && askedRoleKey ? await checkRoleSwap(db, userId, orgId, askedRoleKey) : null;
+
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json' },
@@ -444,6 +451,7 @@ export default withLambda(async (event) => {
                 stripePortalUrl,             // Stripe billing portal URL for payment update CTA (SC2)
                 nextPlan,                    // next tier up — null if already on highest plan
                 connectedPlatforms,          // lowercase service names for active connections e.g. ['instagram','facebook']
+                roleSwap,                    // null, or { code: 'SWAP_LIMIT', error, nextSwitchAt } for ?roleKey=
             }),
         };
 

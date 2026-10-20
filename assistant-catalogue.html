@@ -370,7 +370,7 @@
     // but individual "Hire Role" buttons must also check before launching onboarding.
     // We rely on the existing workspace.html _openUpgradeModal / check-capacity logic:
     try {
-      const res = await fetch('/.netlify/functions/check-capacity');
+      const res = await fetch(`/.netlify/functions/check-capacity?roleKey=${encodeURIComponent(roleKey)}`);
       if (!res.ok) throw new Error();
       const cap = await res.json();
       const atLimit = cap.assistantLimit !== null && cap.assistantCount >= cap.assistantLimit;
@@ -383,6 +383,16 @@
               'Upgrade your plan to add more AI assistants to your team.'
             );
           }
+        return;
+      }
+      // One role switch per billing month on capped plans — say so before the setup wizard, not
+      // after it. hire-assistant / onboarding refuse with the same message server-side.
+      if (cap.roleSwap && cap.roleSwap.code === 'SWAP_LIMIT') {
+        if (typeof window.openUpgradeModal === 'function') {
+          window.openUpgradeModal('One switch a month', 'You\'ve already switched assistant this month.', cap.roleSwap.error, cap.nextPlan ? { nextPlan: cap.nextPlan } : {});
+        } else {
+          window.showToast?.(cap.roleSwap.error, { icon: '⚠️' });
+        }
         return;
       }
     } catch { /* allow through on error */ }
