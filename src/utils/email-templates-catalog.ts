@@ -230,9 +230,11 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
         triggerKey: 'renewal_reminder',
         name: 'Renewal Reminder (14 days)',
         category: 'Billing',
-        subject: 'Reminder: Your Be More Swan subscription renews in 14 days',
+        subject: 'Reminder: Your Be More Swan subscription renews on {{billing.renewal_date | "in 14 days"}}',
         bodyHtml: greet +
-            p('Your {{billing.plan_name | "subscription"}} will renew in 14 days for <strong>{{billing.amount}}</strong>{{billing.discount_note}}. No action is needed to continue.') +
+            p('Your {{billing.plan_name | "Be More Swan"}} plan will renew on <strong>{{billing.renewal_date | "in 14 days"}}</strong> for <strong>{{billing.amount}}</strong>. No action is needed to continue.') +
+            // Empty (no voucher) leaves an empty paragraph, which renders as nothing visible.
+            p('{{billing.voucher_details}}') +
             p('You can review or change your plan any time in billing settings.') +
             button('Manage billing', 'billing.portal_url') + signoff,
     },

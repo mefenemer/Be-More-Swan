@@ -12,7 +12,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { summariseDiscount, couponOf, DISCOUNT_EXPANDS, renewalDiscountNote } from '../src/utils/billing-doc';
+import { summariseDiscount, couponOf, DISCOUNT_EXPANDS, renewalDiscountNote, renewalVoucherDetails } from '../src/utils/billing-doc';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -75,9 +75,52 @@ check('the note names the discount, says when it ends, and warns when it has run
     assert.strictEqual(renewalDiscountNote(null, null), '');
 });
 
-check('the default template puts the note straight after the amount', () => {
-    assert.ok(/\{\{billing\.amount\}\}<\/strong>\{\{billing\.discount_note\}\}/.test(read('src/utils/email-templates-catalog.ts')));
+check('discount_note is still sent and declared, for admin-edited templates that use it', () => {
+    assert.ok(/discount_note: discountNote/.test(read('netlify/functions/renewal-reminder.ts')));
     assert.ok(/key: 'billing\.discount_note'/.test(read('src/utils/email-template.ts')), 'the variable is not declared for the Comms editor');
+});
+
+// A customer on a 100% voucher (2026-10-20) read "renews in 14 days" with no date, no plan and no
+// word on the voucher, and asked for an "extension". The reminder now says all three.
+console.log('\nThe renewal reminder names the date, the plan and the voucher');
+
+const sarahLike = { name: '12 Month Free Coupon', percent_off: 100, duration: 'repeating', duration_in_months: 12 };
+
+check('a 100% voucher applied directly (no code) is described in full', () => {
+    const v = { ...summariseDiscount([{ source: { coupon: sarahLike } }], 7900, 'gbp')!, endsAt: '2027-10-19T17:00:00.000Z' };
+    assert.strictEqual(renewalVoucherDetails(v, v, 'month'),
+        'Your voucher: 12 Month Free Coupon, 100% off for 12 months (until 19 October 2027). It saves you £79.00 on this renewal. After 19 October 2027, your plan renews at the full price of £79.00/month.');
+});
+
+check('a code, a once-only and a forever voucher each read right', () => {
+    const v = summariseDiscount([{ promotion_code: { code: 'FOUNDER30' }, source: { coupon: founder } }], 2900, 'gbp')!;
+    assert.strictEqual(renewalVoucherDetails(v, v, 'month'), 'Your voucher: Founding member (code FOUNDER30), 30% off for 12 months. It saves you £8.70 on this renewal.');
+    const once = summariseDiscount([{ source: { coupon: { percent_off: 100, duration: 'once' } } }], 2900, 'gbp')!;
+    assert.strictEqual(renewalVoucherDetails(once, once, 'month'), 'Your voucher: 100% off. It saves you £29.00 on this renewal. It applies to this renewal only; after that your plan renews at the full price of £29.00/month.');
+    const forever = summariseDiscount([{ promotion_code: { code: 'DDREOG55' }, source: { coupon: { percent_off: 100, duration: 'forever' } } }], 2900, 'gbp')!;
+    assert.match(renewalVoucherDetails(forever, forever, 'year'), /^Your voucher: code DDREOG55, 100% off\. .* It lasts for as long as you keep this subscription\.$/);
+});
+
+check('an ended voucher says so, and no voucher says nothing', () => {
+    const v = summariseDiscount([{ promotion_code: { code: 'FOUNDER30' }, source: { coupon: founder } }], 2900, 'gbp')!;
+    assert.strictEqual(renewalVoucherDetails(null, v, 'month'), 'Your voucher (Founding member (code FOUNDER30)) has ended, so this renewal is at the full price.');
+    assert.strictEqual(renewalVoucherDetails(null, null, 'month'), '');
+});
+
+check('the reminder sends the date, plan and voucher, and the default template shows them', () => {
+    const rr = read('netlify/functions/renewal-reminder.ts');
+    assert.ok(/renewal_date: renewalDate/.test(rr), 'the renewal date is worked out but never sent');
+    assert.ok(/plan_name: \(plan\.planName/.test(rr), 'the plan name is never sent');
+    assert.ok(/voucher_details: voucherDetails/.test(rr));
+    const cat = read('src/utils/email-templates-catalog.ts');
+    const i = cat.indexOf("triggerKey: 'renewal_reminder'");
+    assert.ok(i >= 0);
+    const entry = cat.slice(i, cat.indexOf('triggerKey:', i + 1));
+    assert.ok(/renews on \{\{billing\.renewal_date/.test(entry), 'subject has no date');
+    assert.ok(/<strong>\{\{billing\.renewal_date/.test(entry), 'body has no date');
+    assert.ok(/\{\{billing\.voucher_details\}\}/.test(entry), 'body has no voucher paragraph');
+    const vars = read('src/utils/email-template.ts');
+    assert.ok(/key: 'billing\.renewal_date'/.test(vars) && /key: 'billing\.voucher_details'/.test(vars), 'new variables not declared for the Comms editor');
 });
 
 console.log('\nThe in-app plan picker reuses one Stripe price per plan');
