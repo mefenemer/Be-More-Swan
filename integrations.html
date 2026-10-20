@@ -170,6 +170,9 @@
       iconBg: 'bg-orange-100',
       tagline: 'Your {role:crm_enricher} and {role:lead_qualifier} write enriched contact and company data straight into HubSpot.',
       usedBy: '{role:crm_enricher} · {role:lead_qualifier}',
+      // Not offered yet (owner's call 2026-10-20): shown, but no Connect. Keep in step with
+      // connections.html and the 'coming_soon' recipes in db/seed-catalog.ts.
+      comingSoon: true,
     },
     {
       id: 'xero',
@@ -194,6 +197,9 @@
       iconBg: 'bg-blue-100',
       tagline: 'Your {role:crm_enricher} and {role:lead_qualifier} write enriched contact and account data straight into Salesforce.',
       usedBy: '{role:crm_enricher} · {role:lead_qualifier}',
+      // Not offered yet (owner's call 2026-10-20): shown, but no Connect. Keep in step with
+      // connections.html and the 'coming_soon' recipes in db/seed-catalog.ts.
+      comingSoon: true,
     },
     {
       id: 'zendesk',
@@ -235,8 +241,9 @@
       name: 'Gmail',
       emoji: '✉️',
       iconBg: 'bg-red-100',
-      tagline: 'Your {role:lead_qualifier} and {role:tier1_support_agent} draft outreach and reply emails straight into your Gmail Drafts for review.',
-      usedBy: '{role:lead_qualifier} · {role:tier1_support_agent}',
+      // The Gmail-drafts path is gone (gmail.send only since 2026-08-26) and Support never used Gmail.
+      tagline: 'Your {role:lead_qualifier} sends approved outreach from your own Gmail or Google Workspace inbox, and your {role:meeting_note_taker} sends meeting follow-ups from it.',
+      usedBy: '{role:lead_qualifier} · {role:meeting_note_taker}',
     },
     {
       id: 'outlook',
@@ -357,6 +364,24 @@
           : '<span class="text-xs font-bold px-2.5 py-1 rounded-full bg-gray-50 text-gray-500 border border-gray-200">Not connected</span>';
 
       const connectLabel = (s.status === 'expired' ? 'Reconnect ' : 'Connect ') + esc(p.name);
+      // Coming soon: no way to start a connection. A workspace that already connected keeps its
+      // Disconnect button, so nobody is left holding a grant they cannot remove.
+      if (p.comingSoon && !s.connected) {
+        return (
+          '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3 opacity-70">' +
+            '<div class="flex items-start justify-between gap-3">' +
+              '<div class="w-10 h-10 ' + p.iconBg + ' rounded-lg flex items-center justify-center text-xl shrink-0">' + p.emoji + '</div>' +
+              '<span class="text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-500 border border-dashed border-gray-300">Coming soon</span>' +
+            '</div>' +
+            '<div class="grow">' +
+              '<p class="font-bold text-gray-900">' + esc(p.name) + '</p>' +
+              '<p class="text-sm text-gray-500 mt-1">' + esc(roleText(p.tagline)) + '</p>' +
+              '<p class="text-xs text-gray-400 mt-2">For: ' + esc(roleText(p.usedBy)) + '</p>' +
+            '</div>' +
+            '<button type="button" disabled class="w-full px-4 py-2 bg-gray-100 text-gray-400 text-sm font-bold rounded-lg cursor-not-allowed">Coming soon</button>' +
+          '</div>'
+        );
+      }
       const action = s.connected
         ? '<button type="button" data-disconnect="' + p.id + '" class="btn-destructive w-full px-4 py-2 border text-sm font-bold rounded-lg transition">Disconnect</button>'
         : p.needsSubdomain
