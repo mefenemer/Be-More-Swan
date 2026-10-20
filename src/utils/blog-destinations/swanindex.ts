@@ -58,26 +58,40 @@ export const SECTION_TAG_ALIASES: Record<string, string[]> = {
         'integrations', 'data', 'security', 'saas', 'apps', 'product', 'design'],
     culture: ['values', 'leadership', 'communication', 'remote', 'remotework', 'hybrid',
         'workplace', 'diversity', 'inclusion', 'teamculture', 'purpose'],
-    lifestyle: ['burnout', 'wellbeing', 'worklifebalance', 'health', 'habits', 'routine', 'mindset',
-        'timemanagement', 'stress', 'founderlife', 'sleep', 'holiday'],
+    // Added 2026-10-20 beside Lifestyle, not instead of it: Wellbeing is health and support AT WORK
+    // (staff, teams, the people around the owner); Lifestyle stays the owner's own hours and life.
+    // burnout / wellbeing / health / stress moved here from Lifestyle — nearly every piece using
+    // them is about a workforce, and an alias may belong to one section only.
+    wellbeing: ['wellbeing', 'wellness', 'health', 'mentalhealth', 'burnout', 'stress', 'resilience',
+        'employeewellness', 'employeewellbeing', 'workplacewellness', 'workplacewellbeing',
+        'occupationalhealth', 'selfcare', 'anxiety', 'sickness', 'absence', 'returntowork',
+        'substanceuse', 'addiction', 'eap'],
+    lifestyle: ['worklifebalance', 'habits', 'routine', 'mindset', 'timemanagement', 'founderlife',
+        'sleep', 'holiday'],
 };
 
 /**
  * Pick a section for a piece from its tags, or null to leave it unsectioned for an editor.
  *
  * A guess, and treated as one — `section` is an editorial field and the editor tools can overwrite
- * it. Sections are tried in the order given, which is the masthead's own order, so the earlier
- * (broader) section wins a tie rather than whichever the caller happened to list first.
+ * it. The section matching the MOST tags wins; a tie goes to the earlier section in the order given
+ * (the masthead's own), rather than whichever the caller happened to list first.
+ *
+ * Most-tags rather than first-match (2026-10-20): first-match let one stray tag decide. A piece
+ * tagged "employee wellness, mental health, burnout, hr" went to People on "hr" alone, because
+ * People sits earlier in the masthead than the three tags actually describing the piece.
  */
 export function guessSection(tags: string[], sectionKeys: string[]): string | null {
     const norm = (tags || []).map((t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, ''));
+    let best: string | null = null;
+    let bestScore = 0;
     for (const key of sectionKeys) {
         const k = key.replace(/[^a-z0-9]+/g, '');
-        if (norm.some((t) => t === k || t.includes(k))) return key;
-        const aliases = SECTION_TAG_ALIASES[key];
-        if (aliases && norm.some((t) => aliases.includes(t))) return key;
+        const aliases = SECTION_TAG_ALIASES[key] || [];
+        const score = norm.filter((t) => t === k || t.includes(k) || aliases.includes(t)).length;
+        if (score > bestScore) { best = key; bestScore = score; }
     }
-    return null;
+    return best;
 }
 
 /** The standfirst under a headline: the post's meta description, trimmed to a display length. */
