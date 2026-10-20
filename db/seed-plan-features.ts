@@ -56,10 +56,14 @@ interface Def {
 // Order here IS the display order (grouped by category in first-seen order by pricing.html).
 const DEFS: Def[] = [
     // ── Capacity ──────────────────────────────────────────────────────────────
-    { key: 'assistant_limit', label: 'Digital Assistants', description: 'The number of distinct AI roles you can deploy in your account',
+    { key: 'assistant_limit', label: 'Assistants Working at Once', description: 'Hire any assistant in the library. On the Workflow Saver one works at a time, and you can switch it once a calendar month',
       category: 'Capacity', valueType: 'number', storageTarget: 'column', columnName: 'assistantLimit', unlimitedLabel: 'Custom', enterpriseValue: 'Custom' },
-    { key: 'monthly_task_limit', label: 'Completed Tasks / Month', description: 'Each action your assistant completes counts as one task',
+    { key: 'monthly_task_limit', label: 'Completed Tasks / Month', description: 'One finished piece of work: a post, an article, a lead search or an email. AI video and music count as 20',
       category: 'Capacity', valueType: 'number', storageTarget: 'column', columnName: 'monthlyTaskLimit', unlimitedLabel: 'Custom', enterpriseValue: 'Custom' },
+    // Feature-stored number; the plans' own values (5 / 15) are set in master data, so no `values`
+    // here — a re-seed must not rewrite them (db/z-pricing-copy-2026-10-20.sql adds the row).
+    { key: 'website_pages', label: 'Website Pages', description: 'Pages on the website your Website Assistant writes and publishes for you',
+      category: 'Capacity', valueType: 'number', storageTarget: 'feature', unlimitedLabel: 'Custom', enterpriseValue: 'Custom' },
     // app_connection_limit / app_connections removed 2026-10-20 (owner): no plan limits app
     // connections — it depends on which assistants you hire. db/z-plans-no-connection-limit-team-soon.sql
     // clears the limits and switches both catalog rows off.
@@ -71,10 +75,10 @@ const DEFS: Def[] = [
     { key: 'monthly_ai_credits', label: 'AI Media Credits / Month', description: 'Credits included each month for AI media generation (image = 1 credit, video = 5 credits)',
       category: 'AI Media Generation', valueType: 'number', storageTarget: 'feature', unlimitedLabel: 'Custom', enterpriseValue: 'Custom',
       values: { saver: 20, buster: 50, employee: 100 } },
-    { key: 'ai_image_generation', label: 'AI Image Generation', description: 'Generate on-brand images from a prompt — 1 credit each',
+    { key: 'ai_image_generation', label: 'AI Image Generation', description: 'Generate on-brand images from a prompt — 1 task each',
       category: 'AI Media Generation', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: CHECK, buster: CHECK, employee: CHECK } },
-    { key: 'ai_video_generation', label: 'AI Video Generation', description: 'Generate short-form videos from a prompt — 5 credits each',
+    { key: 'ai_video_generation', label: 'AI Video Generation', description: 'Generate short-form videos from a prompt — 20 tasks each',
       category: 'AI Media Generation', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: DASH, buster: CHECK, employee: CHECK } },
     { key: 'credits_rollover', label: 'Unused Credits Roll Over', description: "Any credits you don't use carry forward to the next month",
@@ -95,7 +99,7 @@ const DEFS: Def[] = [
     { key: 'scheduled_workflows', label: 'Around-the-Clock Workflows', description: "Scheduled tasks run automatically, even while you're offline or asleep",
       category: 'Core Features — included on every plan', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: CHECK, buster: CHECK, employee: CHECK } },
-    { key: 'draft_approvals', label: 'Draft Approvals', description: "Every output lands in your inbox for sign-off before it's published or sent",
+    { key: 'draft_approvals', label: 'Draft Approvals', description: "Every post, article and email waits for your sign-off before it's published or sent, unless you choose otherwise",
       category: 'Core Features — included on every plan', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: CHECK, buster: CHECK, employee: CHECK } },
     { key: 'content_calendar', label: 'Content Calendar', description: "Plan, schedule, and review your assistant's upcoming work in one view",
@@ -116,7 +120,7 @@ const DEFS: Def[] = [
     // and no custom reporting exists. db/z-plan-copy-matches-code.sql switches both rows off.
 
     // ── Team & Advanced Features ──────────────────────────────────────────────
-    { key: 'quality_reviewer', label: 'The Quality Reviewer', description: 'A dedicated assistant that checks and critiques the work of your other assistants',
+    { key: 'quality_reviewer', label: 'The Quality Reviewer', description: 'A second check on every social post before it reaches you: it flags anything off-brand or shaky and suggests a fix',
       category: 'Team & Advanced Features', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: DASH, buster: CHECK, employee: CHECK } },
     { key: 'workspace_collaboration', label: 'Workspace Collaboration', description: 'Invite team members, managers, or clients to view and approve outputs',
