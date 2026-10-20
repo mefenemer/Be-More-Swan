@@ -4,7 +4,8 @@
 //
 // GET  /admin-api?resource=dashboard                          → KPIs + subscription tier breakdown
 // GET  /admin-api?resource=users[&q=&page=]                  → paginated user list
-// GET  /admin-api?resource=user&id=N                         → single user detail
+// GET  /admin-api?resource=user&id=N                         → single user detail (+ emailDelivery)
+// GET  /admin-api?resource=email-delivery-problems[&days=30] → addresses Resend is not delivering to
 // PATCH /admin-api?resource=user&id=N                        → edit user (status, role, name)
 // DELETE /admin-api?resource=user&id=N                       → delete user account
 // POST  /admin-api?resource=send-login-link&id=N             → email passwordless link to user (US6 Sc2)
@@ -43,6 +44,7 @@ import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { loadInbox, ticketToIssue, issueToTicket } from '../../src/utils/support-inbox';
 import { resolveEnvironment, runWithEnvironment } from '../../src/utils/env-context';
 import { sendMagicLinkEmail } from '../../src/utils/email';
+import { loadDeliveryReport, listDeliveryProblems } from '../../src/utils/email-delivery';
 import { isAdminRole, hasPermission, requirePermission, permissionsForRole } from '../../src/utils/rbac';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
 import { SPECIAL_CATEGORY_CLAUSE } from './get-dpa-content';
@@ -278,11 +280,24 @@ export default withLambda(async (event) => {
             const [profile] = await db.select().from(userProfiles).where(eq(userProfiles.userId, uid)).limit(1);
             const [plan] = await db.select().from(plans).where(and(eq(plans.userId, uid), eq(plans.status, 'active'))).limit(1);
             const assistantsList = await db.select({ id: aiAssistants.id, name: aiAssistants.name, isActive: aiAssistants.isActive, provisioningStatus: aiAssistants.provisioningStatus }).from(aiAssistants).where(eq(aiAssistants.userId, uid));
+            // Why isn't this person getting our email? Resend's verdict per message (never throws).
+            const emailDelivery = await loadDeliveryReport(db, row.email);
 
             return {
                 statusCode: 200,
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user: row, profile, plan, assistants: assistantsList }),
+                body: JSON.stringify({ user: row, profile, plan, assistants: assistantsList, emailDelivery }),
+            };
+        }
+
+        // ── GET: addresses Resend is not delivering to (Users → Email delivery problems) ──
+        if (event.httpMethod === 'GET' && resource === 'email-delivery-problems') {
+            const days = Math.min(365, Math.max(1, parseInt(qs.days || '30') || 30));
+            const result = await listDeliveryProblems(db, { days });
+            return {
+                statusCode: 200,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...result, days }),
             };
         }
 
@@ -478,15 +493,19 @@ export default withLambda(async (event) => {
             if (!targetUser) return { statusCode: 404, body: JSON.stringify({ error: 'User not found.' }) };
             if (!targetUser.email) return { statusCode: 400, body: JSON.stringify({ error: 'User has no email address.' }) };
 
-            // Generate a single-use token valid for 24 h
+            // Generate a single-use token valid for 24 h. ⚠️ Store the SHA-256 and email the plain
+            // value, exactly as login.ts does — verify.ts hashes what it receives before looking it
+            // up. This used to store the plain token and link to /verify.html (no such page), so
+            // every admin-sent link failed.
             const token = crypto.randomBytes(32).toString('hex');
+            const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
             const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
             await db.update(users)
-                .set({ verificationToken: token, tokenExpiresAt: expiresAt, updatedAt: new Date() })
+                .set({ verificationToken: hashedToken, tokenExpiresAt: expiresAt, updatedAt: new Date() })
                 .where(eq(users.id, uid));
 
-            const loginUrl = `${process.env.BASE_URL || 'https://bemoreswan.com'}/verify.html?token=${token}`;
+            const loginUrl = `${process.env.BASE_URL || 'https://bemoreswan.com'}/verify-account.html?token=${token}`;
 
             if (process.env.RESEND_API_KEY) {
                 await resend.emails.send({

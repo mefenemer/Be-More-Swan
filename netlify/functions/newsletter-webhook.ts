@@ -12,7 +12,8 @@
 // against the audience would leave the Lead Generator free to cold-email them next week.
 //
 // Events handled (Resend names): email.delivered, email.bounced, email.complained, email.opened,
-// email.clicked. email.delivery_delayed is ignored — a delay is not an outcome.
+// email.clicked — plus email.suppressed and email.failed for transactional mail (no send row), which
+// lands in email_delivery_events for the admin user panel. email.delivery_delayed is ignored — a delay is not an outcome.
 //
 // ⚠️ OPENS AND CLICKS COUNT PEOPLE, NOT EVENTS. Each recipient's FIRST open moves opened_at from
 // NULL and increments the issue once; every later open only bumps open_count on their own ledger
@@ -30,6 +31,7 @@ import { normaliseEmail } from '../../src/utils/audience-contacts';
 import { haltEnrolmentsForContact } from '../../src/utils/newsletter-sequence';
 import { recordLinkClick } from '../../src/utils/newsletter-link-clicks';
 import { verifySvixSignature } from '../../src/utils/webhook-verify';
+import { classifyResendEvent, recordDeliveryEvent } from '../../src/utils/email-delivery';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** A soft bounce is a mailbox being full or a server being down — it is not a dead address. */
@@ -94,6 +96,15 @@ export default withLambda(async (event) => {
         }
 
         if (!row) {
+            // No newsletter or campaign row → our own transactional mail (login links, verification,
+            // notifications). Record what happened to it, so an admin can see why someone is not
+            // getting email — Resend accepts a send to a suppressed address and then drops it, and
+            // this event is the only place that shows up. See src/utils/email-delivery.ts.
+            const ev = classifyResendEvent(payload);
+            if (ev && await recordDeliveryEvent(db, ev)) {
+                if (ev.eventType !== 'delivered') console.warn('[newsletter-webhook] transactional email problem', { type: ev.eventType, messageId: messageId.slice(0, 12) });
+                return { statusCode: 200, body: 'transactional' };
+            }
             // Not ours, or an event for a message sent before this table existed. 200 so the
             // provider stops retrying something we will never recognise.
             console.warn('[newsletter-webhook] no matching send row', { type, messageId: messageId.slice(0, 12) });

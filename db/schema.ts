@@ -6112,3 +6112,22 @@ export const partnerLinkStats = pgTable("partner_link_stats", {
   day: date().notNull(),
   clicks: integer().notNull().default(0),
 }, (t) => [primaryKey({ columns: [t.partnerId, t.day] })]);
+
+// ── Transactional email delivery — what Resend did with OUR mail after accepting it ──────────────
+// See db/z-email-delivery-events.sql. Written by newsletter-webhook for events that match no
+// newsletter/campaign send; read by src/utils/email-delivery.ts for the admin user panel. Keyed by
+// address, not user id: a webhook event knows only the recipient.
+export const emailDeliveryEvents = pgTable("email_delivery_events", {
+  id: serial().primaryKey(),
+  email: text().notNull(),
+  eventType: text("event_type").notNull(), // 'delivered' | 'bounced' | 'soft_bounced' | 'complained' | 'suppressed' | 'failed'
+  providerMessageId: text("provider_message_id").notNull(),
+  subject: text(),
+  reason: text(),
+  occurredAt: timestamp("occurred_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("email_delivery_events_message_event_unique").on(t.providerMessageId, t.eventType),
+  index("email_delivery_events_email_idx").on(t.email, t.occurredAt),
+  index("email_delivery_events_occurred_idx").on(t.occurredAt),
+]);
