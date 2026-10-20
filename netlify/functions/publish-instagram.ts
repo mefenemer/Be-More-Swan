@@ -5,7 +5,7 @@
 
 import { Handler } from '@netlify/functions';
 import { heldOrganisationIds, heldOrgsClause } from '../../src/utils/beta-ending';
-import { and, eq, lte, or, isNull, inArray, sql, desc } from 'drizzle-orm';
+import { and, eq, lte, or, isNull, sql, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     scheduledPosts, systemConnections, rateLimitStates, publishCronLog,
@@ -213,37 +213,39 @@ export default withLambda(async () => {
 
     // Claim due posts — SKIP LOCKED prevents concurrent tick double-processing
     const held = await heldOrganisationIds(db);
+    // ⚠️ The claim is ONE statement. It used to be a SELECT … FOR UPDATE SKIP LOCKED followed by a
+    // separate UPDATE — but outside a transaction the row lock ends with the SELECT, so two runs that
+    // overlapped could both pick the same post and publish it twice. That mattered once "Post now"
+    // started running this on demand (publish-now-background.ts) alongside the 10-minute cron.
     const posts = await db.execute<{
         id: number; user_id: number; organisation_id: number; caption: string | null;
         hashtags: string | null; platform_post_id: string | null; connection_id: number | null;
         attempt_count: number; publish_date: string; post_format: string; assistant_id: number | null;
         content_asset_ids: unknown; link_url: string | null; cta_text: string | null;
     }>(
-        `SELECT id, user_id, organisation_id, caption, hashtags, platform_post_id,
+        `UPDATE scheduled_posts SET status = 'publishing', updated_at = now()
+         WHERE id IN (
+           SELECT id FROM scheduled_posts
+           WHERE status = 'scheduled'
+             AND platform = 'instagram'
+             AND publish_date <= now()
+             AND (retry_at IS NULL OR retry_at <= now())
+             -- End of beta: a workspace whose beta ended and has not subscribed is held (beta-ending.ts).
+             ${heldOrgsClause(held)}
+             -- Video text-overlay render gate (Phase 4) — see publish-social-posts for the rationale.
+             AND (render_status IS NULL OR render_status = 'done')
+           ORDER BY publish_date
+           LIMIT ${BATCH}
+           FOR UPDATE SKIP LOCKED)
+         RETURNING id, user_id, organisation_id, caption, hashtags, platform_post_id,
                 connection_id, attempt_count, publish_date, post_format, assistant_id,
-                content_asset_ids, link_url, cta_text
-         FROM scheduled_posts
-         WHERE status = 'scheduled'
-           AND platform = 'instagram'
-           AND publish_date <= now()
-           AND (retry_at IS NULL OR retry_at <= now())
-           -- End of beta: a workspace whose beta ended and has not subscribed is held (beta-ending.ts).
-           ${heldOrgsClause(held)}
-           -- Video text-overlay render gate (Phase 4) — see publish-social-posts for the rationale.
-           AND (render_status IS NULL OR render_status = 'done')
-         ORDER BY publish_date
-         LIMIT ${BATCH}
-         FOR UPDATE SKIP LOCKED`
+                content_asset_ids, link_url, cta_text`
     );
 
     if (!posts.length) {
         await db.insert(publishCronLog).values({ postsProcessed: 0, postsSucceeded: 0, postsFailed: 0, durationMs: Date.now() - tickStart });
         return { statusCode: 200, body: 'no posts due' };
     }
-
-    // Set all claimed posts to 'publishing' atomically
-    const postIds = posts.map(p => p.id);
-    await db.update(scheduledPosts).set({ status: 'publishing', updatedAt: new Date() }).where(inArray(scheduledPosts.id, postIds));
 
     processed = posts.length;
 

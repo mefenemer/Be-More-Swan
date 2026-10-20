@@ -1292,6 +1292,12 @@ window.showComplianceModals = function showComplianceModals(force) {
                   <p class="text-[11px] font-bold text-red-600 uppercase tracking-wider mb-1.5">Compliance — needs your check</p>
                   <div id="prq-warnings" class="space-y-2"></div>
                   <p class="text-[11px] text-gray-500 mt-2">Settle each one, or approve anyway — either way it's recorded.</p>
+                  <!-- Edited the caption to deal with a warning? Saving re-checks on its own; this is the
+                       visible way to ask, so nobody has to guess whether the edit counted. -->
+                  <button type="button" id="prq-recheck-btn" onclick="rqRecheckQuality()"
+                    class="btn-secondary mt-2 w-full px-3 py-2 text-xs font-semibold rounded-lg border transition">
+                    I've edited the caption — check again
+                  </button>
                 </div>
                 <!-- Suggestions are PULL, not push. Nothing appears here until the button below is
                      pressed, and then exactly one suggestion appears. Ignore removes it; Accept rewrites
@@ -10688,6 +10694,19 @@ function _prqRedrawRailAfterFailure(postId) {
     _railRender();
 }
 
+// "Check again". An unsaved edit is saved first — the review reads the STORED caption, so checking
+// without saving would re-judge the old text and report the same warnings back.
+window.rqRecheckQuality = async function () {
+    if (!_prqPostId) return;
+    const field = document.getElementById('post-review-caption');
+    const saved = _rqPostCache[_prqPostId]?.caption ?? '';
+    if (field && field.value !== saved && _rqReviewPostId === _prqPostId) {
+        await rqReviewSaveAmend();   // re-checks on success
+        return;
+    }
+    _rqLoadQualityReview(_prqPostId);
+};
+
 /** Paint a verdict. Used on open and after every action, so there is one rendering path. */
 function _prqRenderReview(data) {
     _prqReview = data;
@@ -10798,7 +10817,7 @@ function _prqWarningCard(warning, disposition, index) {
     }
     return `
       <div class="text-xs bg-red-50 border border-red-200 rounded-lg px-2.5 py-2">
-        <div class="flex gap-2 text-red-700"><span class="shrink-0">⚠</span><span>${_prqEsc(warning)}</span></div>
+        <div class="flex gap-2 text-red-700"><span class="shrink-0">⚠</span><span class="break-words">${_prqLinkify(_prqEsc(warning))}</span></div>
         <div class="flex flex-wrap gap-1.5 mt-2">
           <button type="button" onclick="rqSourceWarning(${index})"
             class="btn-primary px-2 py-1 text-[11px] font-bold rounded-md border">Add a source</button>
@@ -10809,6 +10828,18 @@ function _prqWarningCard(warning, disposition, index) {
         </div>
         <div data-prq-verify="${index}" class="hidden mt-2"></div>
       </div>`;
+}
+
+// A warning that names a link ("confirm bemoreswan.com/register is live") gave nothing to click, so
+// checking it meant copying it out by hand. Runs on ALREADY-ESCAPED text, and only links things with
+// a path, so prose like "e.g." or a bare brand name is left alone.
+function _prqLinkify(escaped) {
+    return escaped.replace(/\b((?:https?:\/\/)?[a-z0-9-]+(?:\.[a-z0-9-]+)+\/[^\s<&'"]*)/gi, (m) => {
+        const url = m.replace(/[.,;:)]+$/, '');
+        const tail = m.slice(url.length);
+        const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+        return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="underline hover:no-underline">${url}</a>${tail}`;
+    });
 }
 
 /** Resolve a warning index back to its text against the verdict currently rendered. */
@@ -13786,9 +13817,19 @@ function _pceIsBlankDraft(post) {
         && !(post.audio || []).length;
 }
 
+// Whether "Draft it for me" holds the shared pink spinner. bmsBusy is refcounted, so release it
+// exactly once however the draft ends (done, failed, start refused, editor moved on).
+let _pceAiBusyHeld = false;
+function _pceAiBusy(on) {
+    if (on === _pceAiBusyHeld) return;
+    _pceAiBusyHeld = on;
+    window.bmsBusy?.(on);
+}
+
 function _pceStopAiPoll() {
     if (_pceAiPoll?.timer) clearInterval(_pceAiPoll.timer);
     _pceAiPoll = null;
+    _pceAiBusy(false);
     const btn = _pceEl('pce-ai-go');
     const label = _pceEl('pce-ai-go-label');
     if (btn) btn.disabled = false;
@@ -13813,6 +13854,9 @@ async function _pceDraftWithAI() {
     const label = _pceEl('pce-ai-go-label');
     if (btn) btn.disabled = true;
     if (label) label.textContent = 'Drafting…';
+    // The house "working" spinner, as Blog Studio's draft has. A greyed button and a 10px grey line
+    // were the only sign for up to a minute, and easy to miss — it read as the click not landing.
+    _pceAiBusy(true);
     _pceSetAiMsg('Your assistant is writing it — this usually takes 30–60 seconds.');
 
     try {
@@ -18198,6 +18242,12 @@ async function rqReviewSaveAmend() {
         // inspector pointing at an element that no longer exists.
         _rqReviewRenderActive();
         _pceSelect('caption');
+        // Re-check compliance against the text just saved. The panel only loaded on open, so a person
+        // who edited a flagged phrase away kept looking at warnings about words no longer in the post,
+        // with nothing to press to find out whether the edit had dealt with them. The server re-runs
+        // only when the caption actually moved (the verdict is cached per caption), so an unchanged
+        // save costs nothing.
+        _rqLoadQualityReview(id);
         const msg = document.getElementById('post-review-amend-msg');
         if (msg) {
             msg.textContent = applyAll ? `Saved to all ${targetIds.length} platforms.` : 'Saved.';

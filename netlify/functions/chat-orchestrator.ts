@@ -19,7 +19,7 @@ import { SPECIAL_CATEGORY_RULE } from '../../src/constants/special-category-rule
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
@@ -763,6 +763,8 @@ type SocialPostDraft = {
     hashtags: string | null;
     /** Wording for a branded text card, when this assistant can produce one. See BRAND CARDS below. */
     cardHeadline: string | null;
+    /** The model says this is a REVISION of the draft in its previous reply, not a new post. */
+    replacesPrevious: boolean;
 };
 
 /**
@@ -790,7 +792,58 @@ function socialPostDraftFromUiElement(uiElement: unknown, forcePlatform: string 
     // path falls back to headlineFromCaption(), exactly as the scheduled drafter does.
     const rawHeadline = typeof ui.cardHeadline === 'string' ? ui.cardHeadline.trim() : '';
     const cardHeadline = rawHeadline ? rawHeadline.slice(0, 300) : null;
-    return { platforms, caption, hashtags, cardHeadline };
+    return { platforms, caption, hashtags, cardHeadline, replacesPrevious: ui.replacesPrevious === true };
+}
+
+/**
+ * Retire the draft a revision replaces.
+ *
+ * Every chat draft is saved the moment it is written, so "change the angle" used to leave the old
+ * version in the Review Queue beside the new one — four rounds of feedback on one post left four
+ * versions (sixteen rows on four platforms), all approvable. The superseded draft is the one linked
+ * from this conversation's most recent drafting reply; it is soft-cancelled (as the editor's own
+ * delete does — 'cancelled' is in no Review Queue column), and ONLY while it is still awaiting
+ * review: anything the user has already approved, scheduled or published is theirs and is left alone.
+ *
+ * Best-effort: failing to tidy up must never cost the turn its new draft.
+ */
+async function retireSupersededChatDraft(
+    db: ReturnType<typeof getDb>,
+    orgId: number,
+    aiAssistantId: number,
+    history: { role: string; uiElementJson: unknown }[],
+    keepIds: number[],
+): Promise<number> {
+    try {
+        let previousPostId: number | null = null;
+        for (let i = history.length - 1; i >= 0 && previousPostId == null; i--) {
+            const ui = history[i].role === 'assistant' ? history[i].uiElementJson as Record<string, unknown> | null : null;
+            const link = ui && ui.type === 'social_post_draft' ? ui.hubLink as Record<string, unknown> | undefined : undefined;
+            if (link && Number.isInteger(link.postId)) previousPostId = link.postId as number;
+        }
+        if (previousPostId == null) return 0;
+
+        const [prev] = await db.select({ id: scheduledPosts.id, crosspostGroupId: scheduledPosts.crosspostGroupId })
+            .from(scheduledPosts)
+            .where(and(eq(scheduledPosts.id, previousPostId), eq(scheduledPosts.organisationId, orgId), eq(scheduledPosts.assistantId, aiAssistantId)))
+            .limit(1);
+        if (!prev) return 0;
+
+        const now = new Date();
+        const retired = await db.update(scheduledPosts)
+            .set({ status: 'cancelled', cancelledAt: now, updatedAt: now })
+            .where(and(
+                prev.crosspostGroupId ? eq(scheduledPosts.crosspostGroupId, prev.crosspostGroupId) : eq(scheduledPosts.id, prev.id),
+                eq(scheduledPosts.organisationId, orgId),
+                eq(scheduledPosts.status, 'pending_approval'),
+                ...(keepIds.length ? [notInArray(scheduledPosts.id, keepIds)] : []),
+            ))
+            .returning({ id: scheduledPosts.id });
+        return retired.length;
+    } catch (err) {
+        console.warn('[chat-orchestrator] could not retire the superseded chat draft:', err instanceof Error ? err.message : err);
+        return 0;
+    }
 }
 
 // ── Drafting INTO a post the user already has open ────────────────────────────
@@ -2170,6 +2223,12 @@ Only include the post draft once you have enough to write real, finished copy �
 
 ONE POST PER REPLY. The draft object below holds exactly one post, so one reply can only ever save one. If the user asks for several at once — three days' worth, a week's worth, one per platform-day — draft the FIRST one properly and end by offering to write the next ("That's Tuesday's saved — want Wednesday next?"). Never describe, summarise or promise posts you have not included here; if they want a whole week filled without asking each time, that is what their posting schedule already does automatically.
 
+REVISING A DRAFT. When the user reacts to a draft you just wrote ("rather than X…", "make it about…", "be careful about…", "that doesn't mention…"), they are giving feedback on THAT post. Set "replacesPrevious": true so the old version is withdrawn from their Review Queue and only the new one remains. Set it false for a genuinely new or additional post ("now the next one", "write one about Y as well").
+
+Read which way the feedback points before you rewrite. "Be careful about X", "watch the X angle" or "this doesn't reference X" means X matters and must be represented ACCURATELY in the post — it is never an instruction to delete X. If you truly cannot tell whether they want something added, softened or removed, ask one short question (uiElement: null) instead of guessing; rewriting in the wrong direction twice is worse than asking once. In your reply, say in a few words what you changed, and make sure the draft actually does that.
+
+Never describe this business's product or service as doing something on its own that its rules, setup or the user say a person approves or controls. If the business's rules say a human reviews or approves work before it goes out, the copy must not imply otherwise (no "sends while you sleep" or "posts without you lifting a finger" for things a person signs off).
+
 NEVER say a post has been drafted, written, saved, scheduled or queued for review unless THIS reply includes the post draft object. If uiElement is null then nothing has been saved, and a reply claiming otherwise sends the user to an empty Review Queue. When you have nothing to include, say plainly what you need in order to write it.`,
                 platformLine,
                 mediaLine,
@@ -2186,7 +2245,8 @@ NEVER say a post has been drafted, written, saved, scheduled or queued for revie
     "type": "social_post_draft",
     "platforms": ["facebook" | "instagram" | "linkedin" | "x", ...],
     "caption": "<the finished, ready-to-post caption>",
-    "hashtags": "<space-separated hashtags>" | null${canCard ? `,
+    "hashtags": "<space-separated hashtags>" | null,
+    "replacesPrevious": true | false  // true ONLY when this revises the draft from your previous reply${canCard ? `,
     "cardHeadline": "<the branded card's single line of type — see BRAND CARDS above>"` : ''}
   }
 }`,
@@ -2775,9 +2835,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             );
             persistedPosts = createdPosts;
             if (createdPosts.length > 0) {
+                const retired = socialDraft.replacesPrevious
+                    ? await retireSupersededChatDraft(db, orgId, session.aiAssistantId, history, createdPosts.map(p => p.id))
+                    : 0;
+                // ONE post on N platforms. "Drafted 4 posts" read as four different posts, and was
+                // printed again under every revision of the same one.
+                const verb = retired > 0 ? 'Revised this post' : 'Drafted this post';
                 hubLink = {
                     tab: 'review-queue',
-                    label: createdPosts.length > 1 ? `Drafted ${createdPosts.length} posts — review & approve` : 'Drafted this post — review & approve',
+                    label: createdPosts.length > 1
+                        ? `${verb} for ${createdPosts.length} platforms — review & approve`
+                        : `${verb} — review & approve`,
                     postId: createdPosts[0].id,
                 };
             }
