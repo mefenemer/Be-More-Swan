@@ -15,6 +15,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { transitionAssistantStatus } from '../../src/utils/assistant-lifecycle';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { releasePausedLimit } from '../../src/utils/release-paused-limit';
+import { checkResumeCapacity } from '../../src/utils/assistant-capacity';
 
 // Issue #191: archiving starts a 14-day reinstate window before purge-archived-assistants.ts
 // (daily cron) permanently deletes the assistant and all of its associated data.
@@ -145,6 +146,13 @@ export default withLambda(async (event) => {
                             code: 'DISCLOSURE_MISSING',
                         }),
                     };
+                }
+
+                // Setting isActive=true makes the lifecycle trigger derive 'working', so this is a
+                // way back into a seat too and needs the same limit check as kickoff-assistant.ts.
+                const capacity = await checkResumeCapacity(db, ctx.userId, orgId, id, existing.lifecycleStatus);
+                if (capacity) {
+                    return { statusCode: capacity.status, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: capacity.error, code: capacity.code }) };
                 }
 
                 // Resume (legacy/direct path, kept for API back-compat). The UI now resumes a
