@@ -45,6 +45,7 @@ import { getDb } from '../../db/client';
 import { users } from '../../db/schema';
 import { checkRateLimit, getClientIp } from '../../src/utils/rate-limit';
 import { resolveActiveOrg } from '../../src/utils/tenant';
+import { recordLogin } from '../../src/utils/login-events';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -215,6 +216,7 @@ export default withLambda(async (event) => {
 
         const signedToken = jwt.sign(tokenPayload, jwtSecret, { expiresIn: '7d' });
         const sessionCookie = `aura_session=${signedToken}; Path=/; Secure; SameSite=Lax; Max-Age=${7 * 24 * 60 * 60}`;
+        await recordLogin(db, { userId: user.id, organisationId: activeOrg?.organisationId, method: 'review_login', headers: event.headers });
 
         const baseUrl = resolveBaseUrl(event.headers);
         if (!baseUrl) {

@@ -11,6 +11,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { resolveActiveOrg } from '../../src/utils/tenant';
 import { findReferralOffer } from '../../src/utils/referral-offer';
 import { startTrialIfEligible } from '../../src/utils/trial';
+import { recordLogin } from '../../src/utils/login-events';
 import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -157,6 +158,7 @@ export default withLambda(async (event) => {
         if (activeOrg) tokenPayload.activeOrganisationId = activeOrg.organisationId;
         const signedToken = jwt.sign(tokenPayload, jwtSecret, { expiresIn: '7d' });
         const sessionCookie = `aura_session=${signedToken}; Path=/; Secure; SameSite=Lax; Max-Age=${7 * 24 * 60 * 60}`;
+        await recordLogin(db, { userId: user.id, organisationId: activeOrg?.organisationId, method: 'magic_link', headers: event.headers });
 
         const baseUrl = resolveBaseUrl(event.headers);
         if (!baseUrl) return { statusCode: 500, body: 'Server misconfigured.' };

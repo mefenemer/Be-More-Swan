@@ -10,6 +10,7 @@ import { getDb } from '../../db/client';
 import { tosAcceptances, users } from '../../db/schema';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { retryBlockedAssistants } from '../../src/utils/retry-provisioning';
+import { pseudonymiseIp } from '../../src/utils/ip-pseudonymise';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 // 2.1 (2026-10-06): clause 11.9 — published blog posts go to The Swan Index by default; opt out by
@@ -45,7 +46,8 @@ export default withLambda(async (event) => {
     // recorded acceptance of the OLD terms and the re-accept prompt came back on every load.
     void body.version;
     const version = CURRENT_TOS_VERSION;
-    const ipAddress = event.headers['x-forwarded-for']?.split(',')[0]?.trim() || event.headers['client-ip'] || null;
+    // Truncated, never stored whole — the privacy policy promises it (src/utils/ip-pseudonymise.ts).
+    const ipAddress = pseudonymiseIp(event.headers['x-forwarded-for']?.split(',')[0]?.trim() || event.headers['client-ip']);
     const userAgent = event.headers['user-agent'] || null;
 
     const db = getDb();

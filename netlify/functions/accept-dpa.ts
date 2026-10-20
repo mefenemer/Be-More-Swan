@@ -12,6 +12,7 @@ import { getDb } from '../../db/client';
 import { users, dpaAcceptances } from '../../db/schema';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { retryBlockedAssistants } from '../../src/utils/retry-provisioning';
+import { pseudonymiseIp } from '../../src/utils/ip-pseudonymise';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -50,9 +51,9 @@ export default withLambda(async (event) => {
     const [user] = await db.select({ email: users.email }).from(users).where(eq(users.id, ctx.userId)).limit(1);
     if (!user?.email) return { statusCode: 400, body: JSON.stringify({ error: 'Account not found.' }) };
 
-    const ipAddress = event.headers['x-nf-client-connection-ip']
-        || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
-        || null;
+    // Truncated, never stored whole — the privacy policy promises it (src/utils/ip-pseudonymise.ts).
+    const ipAddress = pseudonymiseIp(event.headers['x-nf-client-connection-ip']
+        || event.headers['x-forwarded-for']?.split(',')[0]?.trim());
     const userAgent = event.headers['user-agent'] || null;
 
     await db.insert(dpaAcceptances).values({

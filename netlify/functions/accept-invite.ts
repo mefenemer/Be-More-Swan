@@ -14,6 +14,7 @@ import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, userOrganisations, organisations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
+import { recordLogin } from '../../src/utils/login-events';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET!;
@@ -137,6 +138,7 @@ export default withLambda(async (event) => {
 
     // Issue a session JWT + redirect to workspace
     const token = jwt.sign({ userId: user.id, activeOrganisationId: orgId }, jwtSecret, { expiresIn: '7d' });
+    await recordLogin(db, { userId: user.id, organisationId: orgId, method: 'invite', headers: event.headers });
     const cookieOpts = [
         `aura_session=${token}`,
         'Path=/',
