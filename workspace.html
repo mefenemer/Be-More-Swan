@@ -21382,7 +21382,7 @@ async function gpSubmitReject() {
 
       if (d.type === 'navigate' && d.view) {
         showReply(reply);
-        setTimeout(() => { if (window.loadView) window.loadView(d.view); close(); }, 650);
+        setTimeout(() => { goToView(d.view); close(); }, 650);
         return;
       }
 
@@ -21435,13 +21435,24 @@ async function gpSubmitReject() {
         }
     }
 
+    // `agreements` (assistant-command.ts VIEWS) is Account Settings opened on My Agreements, where
+    // the "Your data" export card is — the same two steps the Setup Wizard's compliance step takes.
+    function goToView(view) {
+      if (!window.loadView) return;
+      if (view === 'agreements') {
+        Promise.resolve(window.loadView('settings')).then(() => window.activateSettingsTab?.('agreements'));
+        return;
+      }
+      window.loadView(view);
+    }
+
     function showAnswer(d, reply) {
       // answer + up to two follow-ups: the Help Centre article it came from ("Read the article"),
       // and either "Report an issue" or "Take me there". Each button closes the bar.
       const actions = [];
       if (d.article && window.openHelpArticle) actions.push(['Read the article →', () => window.openHelpArticle(d.article)]);
       if (d.suggestReportIssue && window.openReportIssue) actions.push(['Report an issue →', () => window.openReportIssue('new')]);
-      else if (d.suggestView && window.loadView) actions.push(['Take me there →', () => window.loadView(d.suggestView)]);
+      else if (d.suggestView && window.loadView) actions.push(['Take me there →', () => goToView(d.suggestView)]);
       if (!actions.length) { showReply(reply); return; }
       showReply(`${reply}<div class="cmdbar-followup" style="display:flex;flex-wrap:wrap;gap:8px">${actions.map(() => '<button type="button" class="cmdbar-go"></button>').join('')}</div>`);
       result.querySelectorAll('.cmdbar-go').forEach((btn, i) => {

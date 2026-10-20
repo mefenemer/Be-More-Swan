@@ -30,7 +30,9 @@ const MODEL = 'claude-haiku-4-5-20251001';
 // The workspace views the bar is allowed to route to (mirrors workspace.html routes).
 // `assets` (Business Information) is included so the bar can route a user to the setup
 // step that lives there when they ask about their onboarding progress.
-const VIEWS = ['dashboard', 'assistants', 'review-queue', 'calendar', 'my-content', 'catalog', 'billing', 'settings', 'notifications', 'help', 'referral', 'assets'] as const;
+// `agreements` is not a route of its own: the client opens `settings` on its My Agreements tab,
+// where the agreements and the "Your data" export card are (see goToView in workspace.html).
+const VIEWS = ['dashboard', 'assistants', 'review-queue', 'calendar', 'my-content', 'catalog', 'billing', 'settings', 'agreements', 'notifications', 'help', 'referral', 'assets'] as const;
 
 // Light per-instance rate limit to keep the bar cheap (matches social-troubleshoot-chat style).
 const RATE_WINDOW_MS = 60 * 1000;
@@ -143,6 +145,7 @@ Available workspace views and what each one can actually do (use the exact key o
 - catalog: hire (add) new assistants.
 - billing: subscription, plan tier, and payment details.
 - settings: profile information, notification preferences, sound toggles, agency attribution, and the AI disclosure footer. (There are NO appearance, theme, colour, or dark-mode settings here.)
+- agreements: the My Agreements tab of Account Settings — the agreements the user has accepted, and the "Your data" card where they export a copy of their data. Use this (not settings) for agreements and data export.
 - notifications: the user's notifications list.
 - help: help articles and support tickets.
 - referral: refer-and-earn / invite others.
