@@ -27,6 +27,7 @@ import type { getDb } from '../../db/client';
 import { aiAssistants, auditLogs, scheduledPosts, systemConnections } from '../../db/schema';
 import { DEAD_CONNECTION_STATUSES } from '../config/connection-status';
 import { transitionAssistantStatus } from './assistant-lifecycle';
+import { checkResumeCapacity } from './assistant-capacity';
 import { CONNECTION_RESTORED_TYPES, resolveActionNotifications } from './notification-actions';
 
 type Db = ReturnType<typeof getDb>;
@@ -195,7 +196,7 @@ async function resumeSystemPausedAssistants(
     ];
     if (assistantId) conds.push(eq(aiAssistants.id, assistantId));
 
-    const candidates = await db.select({ id: aiAssistants.id }).from(aiAssistants).where(and(...conds));
+    const candidates = await db.select({ id: aiAssistants.id, userId: aiAssistants.userId }).from(aiAssistants).where(and(...conds));
 
     const wanted = new Set(connectionPauseReasons(serviceName));
     let resumed = 0;
@@ -218,6 +219,15 @@ async function resumeSystemPausedAssistants(
         // No recorded reason → leave it alone. Rows predating the reason argument exist, and a
         // silent auto-resume of an assistant we cannot explain is worse than a manual click.
         if (!reason || !wanted.has(reason)) continue;
+
+        // system_paused frees the seat, so the org may have filled it while this one was down.
+        // Leave it paused rather than run past the plan limit; kicking it off by hand gives the
+        // user the refusal and what to pause instead.
+        const capacity = await checkResumeCapacity(db, a.userId, organisationId, a.id, 'system_paused');
+        if (capacity) {
+            console.log(`[connection-recovery] assistant ${a.id}: plan seat taken — leaving system_paused`);
+            continue;
+        }
 
         const res = await transitionAssistantStatus(db, a.id, 'working', {
             reason: `connection_restored:${serviceName}`,

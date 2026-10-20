@@ -19,6 +19,7 @@ import { PLATFORM_FORMATS } from '../../src/config/platform-formats';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 import { liveRoleLabel } from '../../src/utils/live-role-label';
+import { checkResumeCapacity } from '../../src/utils/assistant-capacity';
 // Display names for the "Connected accounts:" line. Social platforms come from the catalogue so a
 // new one can never arrive here unlabelled; non-social services (Canva, Gmail, …) fall through to
 // the capitalised service name.
@@ -140,6 +141,13 @@ export default withLambda(async (event) => {
     if (state === 'system_paused' && !hasConnection) {
         return json(422, { error: 'Reconnect an account before restarting your assistant.', code: 'NO_CONNECTION' });
     }
+
+    // ── Plan seat ─────────────────────────────────────────────────────────────
+    // paused / system_paused free their seat, so kicking one back off must re-check the plan's
+    // assistant limit — otherwise pause-hire-pause-hire stacks working assistants past it.
+    // ready_for_work already holds a seat and passes straight through.
+    const capacity = await checkResumeCapacity(db, userId, orgId, assistantId, state);
+    if (capacity) return json(capacity.status, { error: capacity.error, code: capacity.code });
 
     // ── Transition (ready_for_work | paused) → working ──────────────────────────
     const result = await transitionAssistantStatus(db, assistantId, 'working', { reason: 'kick_off', actorUserId: userId });
