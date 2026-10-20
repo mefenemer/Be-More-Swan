@@ -339,14 +339,16 @@ test('every catalog metric has a funnel objective, so none can steer nothing', (
 });
 
 test('unavailable metrics are never offered to a user', () => {
-    // linkedin_followers needs LinkedIn ORGANISATION scopes we are not approved for, so a goal set
-    // against it can never move off 'pending'. `available:false` must actually hide it.
-    const li = GOAL_METRICS.find(m => m.key === 'linkedin_followers')!;
-    assert.equal(li.available, false, 'linkedin_followers is not measurable with member-only scopes');
+    // instagram_profile_views is declared but unproven (see goal-metrics.ts), so a goal set against it
+    // could never move off 'pending'. `available:false` must actually hide it, even when connected.
+    const pv = GOAL_METRICS.find(m => m.key === 'instagram_profile_views')!;
+    assert.equal(pv.available, false);
     const offered = availableMetricsForRole('social_media_manager', ['instagram', 'linkedin']);
-    assert.ok(!offered.some(m => m.key === 'linkedin_followers'), 'an unmeasurable metric must not be offered');
-    // ...but the connected, measurable ones still are.
+    assert.ok(!offered.some(m => m.key === 'instagram_profile_views'), 'an unmeasurable metric must not be offered');
+    // ...but the connected, measurable ones still are — LinkedIn Followers included, now that it
+    // reads the Audience card's figure.
     assert.ok(offered.some(m => m.key === 'instagram_followers'));
+    assert.ok(offered.some(m => m.key === 'linkedin_followers'));
 });
 
 // ── Attainability: the "A" in SMART depends on passing a baseline ──────────────

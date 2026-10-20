@@ -8556,6 +8556,11 @@ async function _fetchAndRenderFollowerCounts() {
                 // on a desktop Overview, and label + count + date + Update in one line squeezed the
                 // platform name down to an unreadable "L…".
                 const asOf = r.recordedAt ? `<p class="text-[10px] text-gray-400 mt-1">Entered by you, as of ${new Date(r.recordedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>` : '';
+                // Say where else this number goes. It is the ONE input for a LinkedIn goal now, and
+                // without this line people kept typing it into the goal as well.
+                // Unconditional: this card can paint before the goals have loaded.
+                const feedsGoal = r.platform === 'linkedin'
+                    ? '<p class="text-[10px] text-gray-400 mt-0.5">This figure also drives any LinkedIn Followers goal.</p>' : '';
                 const cta = r.available ? 'Update' : 'Add';
                 return `<div title="${rowTitle}">
                     <div class="flex items-center justify-between gap-3 mb-1">
@@ -8566,6 +8571,7 @@ async function _fetchAndRenderFollowerCounts() {
                     </div>
                     ${bar}
                     ${asOf}
+                    ${feedsGoal}
                     <div id="follower-input-${r.platform}" class="hidden mt-1.5 flex items-center gap-2 justify-end">
                         <input type="number" min="0" inputmode="numeric" placeholder="Followers" class="w-28 border border-gray-300 rounded-lg px-2 py-1 text-xs focus:ring-2 focus:ring-emerald-300 focus:outline-none">
                         <button type="button" onclick="window._saveFollowerCount('${r.platform}', this)" class="btn-primary text-xs font-bold rounded-lg px-2.5 py-1 cursor-pointer">Save</button>
@@ -8675,6 +8681,9 @@ window._saveFollowerCount = async function (platform, btn) {
         });
         if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'Could not save'); }
         await _fetchAndRenderFollowerCounts();
+        // The LinkedIn Followers goal is measured from this very figure and the server has just
+        // re-polled it — repaint the goals so the tile beside this card moves in the same moment.
+        if (platform === 'linkedin' && _goalsAssistantId) await _fetchAndRenderGoals(_goalsAssistantId);
     } catch (e) {
         if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
         if (err) { err.textContent = e.message || 'Could not save'; err.classList.remove('hidden'); }
@@ -10556,7 +10565,12 @@ function _renderGoalProgressCard() {
 function _renderGoalFreshnessNote() {
     const note = document.getElementById('goal-progress-refresh-note');
     if (!note) return;
+    // A LinkedIn Followers goal is "polled" like the others, but what it polls is the figure typed on
+    // the Audience card — say so, or "measured automatically" sends people looking for a feed.
+    const liTail = _goalsCache.some(g => g.metricKey === 'linkedin_followers')
+        ? ' LinkedIn Followers comes from the figure you enter on the Audience card.' : '';
     const set = (text, title) => {
+        if (text && liTail) text += liTail;
         note.textContent = text || '';
         note.title = title || '';
         note.classList.toggle('hidden', !text);
@@ -10633,7 +10647,7 @@ function _buildGoalProgressTile(g) {
         ? (g.isManual ? 'No figure entered yet' : 'Awaiting first data sync')
         : null;
 
-    return `<button type="button" onclick="window._activateMainTab && window._activateMainTab('goals')"
+    return `<button type="button" onclick="window._openGoalFromOverview(${JSON.stringify(String(g.id)).replace(/"/g, '&quot;')})"
         title="Open the Goals tab to update this goal"
         class="text-left w-full group cursor-pointer">
         <div class="flex items-start justify-between gap-3">
@@ -10657,6 +10671,23 @@ function _buildGoalProgressTile(g) {
         </div>
     </button>`;
 }
+
+/**
+ * Overview tile → that goal on the Goals tab. Switching the tab alone left the page scrolled where
+ * the Overview card was, so the click looked like it had done nothing: the Goals tab opened out of
+ * sight below. Scroll to the goal's own card and flash it, so the eye lands where the click went.
+ */
+window._openGoalFromOverview = function (goalId) {
+    window._activateMainTab && window._activateMainTab('goals');
+    requestAnimationFrame(() => {
+        const card = document.querySelector(`[data-goal-card="${CSS.escape(String(goalId))}"]`)
+            || document.getElementById('maintab-goals');
+        if (!card) return;
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        card.style.boxShadow = '0 0 0 3px rgba(236, 72, 153, 0.45)';
+        setTimeout(() => { card.style.boxShadow = ''; }, 1800);
+    });
+};
 
 /** Overview empty-state CTA — jump to the Goals tab with the builder already open. */
 window._addGoalFromOverview = function () {
@@ -10760,7 +10791,7 @@ function _buildGoalCard(g) {
     const due = g.targetDate ? new Date(g.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
     const fmt = (n) => _fmtGoalValue(n, unit);
 
-    return `<div class="border border-gray-200 rounded-xl p-4">
+    return `<div data-goal-card="${_escapeHtml(String(g.id))}" class="border border-gray-200 rounded-xl p-4 transition-shadow">
         <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">

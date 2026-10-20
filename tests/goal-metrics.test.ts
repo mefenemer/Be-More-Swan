@@ -3,6 +3,7 @@
 // (AC1.1.2) and connection-validation (AC1.1.3). Lock its behaviour so additions can't break it.
 // Run:  npx tsx tests/goal-metrics.test.ts
 
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert';
 import {
     GOAL_METRICS,
@@ -184,27 +185,32 @@ check('US-03 AC3.3/AC3.4 — strategyChanges returns only the genuinely changed 
     assert.equal(strategyChanges(current, null).length, 0);
 });
 
-check('US-04 — LinkedIn followers stays in the catalog but is NOT offered (no org scopes)', () => {
+check('US-04 — LinkedIn followers is offered, gated on LinkedIn, and measured from the Audience figure', () => {
     const li = getGoalMetric('linkedin_followers');
     assert.ok(li, 'linkedin_followers should be in the catalog');
     assert.equal(li!.source, 'connection');
     assert.equal(li!.connectionService, 'linkedin');
     assert.equal(li!.objective, 'awareness');
 
-    // This assertion was inverted until 2026-07-30. It read "must be pollable now that the LinkedIn
-    // poller exists" — but a poller existing is not the same as a poller working. The poller calls
-    // /v2/organizationAcls + /v2/networkSizes, which need LinkedIn ORGANISATION scopes; the app is
-    // approved for member-only posting and requests just `openid profile email w_member_social`
-    // (social-oauth-callback.ts), so every call 403s. The metric was offered, accepted, and the
-    // resulting goal sat at 'pending' until it rotted to 'data_disconnected'.
-    // Flip this back only if organisation scopes are actually approved.
-    assert.equal(li!.available, false, 'not measurable with member-only LinkedIn scopes');
+    // History: this was offered on the strength of a poller that called LinkedIn's organisation
+    // endpoints, which 403 for our member-only scopes, so goals rotted to 'data_disconnected'; it was
+    // then switched off (2026-07-30). Since 2026-10-20 it is measured from the figure the user enters
+    // on the Audience card (manual_follower_counts) — a source that always answers — so it is back.
+    assert.equal(li!.available, true, 'measured from the Audience card figure');
 
-    // Being unavailable, it must be hidden even when LinkedIn IS connected — the connection is not
-    // the blocker, the scope grant is.
+    // Still gated on a connected LinkedIn: the Audience card only offers the input for one.
     assert.ok(!availableMetricsForConnections([]).some(m => m.key === 'linkedin_followers'));
-    assert.ok(!availableMetricsForConnections(['linkedin']).some(m => m.key === 'linkedin_followers'));
-    assert.ok(!availableMetricsForConnections(['LinkedIn']).some(m => m.key === 'linkedin_followers'));
+    assert.ok(availableMetricsForConnections(['linkedin']).some(m => m.key === 'linkedin_followers'));
+    assert.ok(availableMetricsForConnections(['LinkedIn']).some(m => m.key === 'linkedin_followers'));
+
+    // And the poller reads that figure, never the LinkedIn API it used to 403 on.
+    const poller = readFileSync(new URL('../netlify/functions/poll-goal-telemetry.ts', import.meta.url), 'utf8');
+    const fn = poller.slice(poller.indexOf('async function fetchLinkedInFollowers'), poller.indexOf('// ── Search Console clicks'));
+    assert.ok(/manualFollowerCounts/.test(fn), 'LinkedIn goal must read manual_follower_counts');
+    assert.ok(!/api\.linkedin\.com/.test(fn), 'LinkedIn goal must not call the LinkedIn API');
+    // And saving the Audience figure re-polls the goal at once.
+    const save = readFileSync(new URL('../netlify/functions/save-follower-count.ts', import.meta.url), 'utf8');
+    assert.ok(/pollOneGoal/.test(save) && /'linkedin_followers'/.test(save), 'save-follower-count must re-poll LinkedIn goals');
 
     // Connection-gating itself still works, proven on a metric that IS measurable.
     assert.ok(!availableMetricsForConnections([]).some(m => m.key === 'instagram_followers'));
@@ -366,13 +372,12 @@ check('x_followers is offered — our API tier was verified, not assumed', () =>
     assert.ok(!availableMetricsForRole('social_media_manager', ['instagram']).some(x => x.key === 'x_followers'));
 });
 
-check('LinkedIn remains the only permanently unmeasurable platform', () => {
-    // Everything else in the catalog is offered, gated on a connection, or waiting on a selftest.
-    // LinkedIn is different in kind: we hold member-only posting scopes, so no LinkedIn metric is
-    // buildable at all without a new product approval.
-    const linkedin = GOAL_METRICS.filter(m => m.connectionService === 'linkedin');
-    assert.ok(linkedin.length > 0);
-    assert.ok(linkedin.every(m => !m.available), 'no LinkedIn metric can be offered on member-only scopes');
+check('the only LinkedIn metric offered is the one measured from the Audience figure', () => {
+    // We hold member-only posting scopes, so no LinkedIn figure can be FETCHED. The one LinkedIn
+    // metric that is offered reads what the user enters on the Audience card instead; any new
+    // LinkedIn metric must not be switched on unless it has a source like that.
+    const offered = GOAL_METRICS.filter(m => m.connectionService === 'linkedin' && m.available).map(m => m.key);
+    assert.deepEqual(offered, ['linkedin_followers']);
 });
 
 check('every connection metric names a service that can actually be connected', () => {

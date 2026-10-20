@@ -173,15 +173,14 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         connectionService: 'linkedin',
         direction: 'increase',
         objective: 'awareness',
-        description: 'Total followers of your connected LinkedIn organisation.',
-        // ⚠️ NOT MEASURABLE TODAY, and this is a permanent platform limit, not a missing poller.
-        // poll-goal-telemetry.ts reads it via /v2/organizationAcls + /v2/networkSizes, both of which
-        // need ORGANISATION scopes. We are approved for member-only posting and request exactly
-        // `openid profile email w_member_social` (social-oauth-callback.ts), so those calls always
-        // 403 — a goal set on this metric sits 'pending' and then rots to 'data_disconnected'.
-        // Offering an unmeasurable metric is worse than not offering it: the user sets a goal in good
-        // faith and it silently never moves. Flip to true only if organisation scopes are approved.
-        available: false,
+        description: 'Your LinkedIn follower / connection count — the figure you enter on the Audience card.',
+        // Read from the AUDIENCE CARD's LinkedIn figure (manual_follower_counts), not from LinkedIn.
+        // LinkedIn exposes no member follower count and we hold no organisation scopes, so the old
+        // live fetch 403'd forever and this was switched off — while users typed the same number
+        // into the Audience card AND a separate goal. Owner, 2026-10-20: the Audience figure drives
+        // the goal. Still gated on a LinkedIn connection (connectionService) because the Audience
+        // card only offers the input for a connected LinkedIn. See poll-goal-telemetry.ts.
+        available: true,
         // B2B follower growth is steadier than IG, but keep the ceiling generous, not blocking.
         realism: { maxDailyDelta: 5000, maxDailyGrowthPct: 0.25 },
     },
