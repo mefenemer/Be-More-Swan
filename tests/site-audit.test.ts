@@ -285,6 +285,22 @@ check('a long testimonial is shortened at a word, and still grounds', () => {
     assert.ok(isGrounded(snip, page));
 });
 
+check('a fix calling OUR shortened quote "truncated" is dropped; a real rewrite of it is kept (bemoreswan.com, 2026-10-20)', () => {
+    const quote = 'I knew that posting consistently on Facebook and Instagram was key to bringing in clients, but the constant loop of writing captions, sizing images, and struggling with scheduling tools was eating up all my energy. I would post heavily for a week, then go dark for a month and lose the momentum I had built.';
+    const page = extractSitePage(`<body><h1>Hello there all</h1><blockquote>"${quote}"</blockquote><p>— Cat, studio founder</p></body>`, 'https://x.example/');
+    const snip = page.structure.proofSnippets.find((p) => p.includes('posting consistently'))!;
+    assert.ok(snip.endsWith('…'));
+    const { fixes, dropped } = groundFixes([
+        { location: 'Proof', currentText: snip, suggestedText: 'Something with a number in it.',
+          problem: 'Truncated testimonials with no concrete result are the weakest proof on the page — completing your reviews with measurable outcomes closes the gap.' },
+        { location: 'Proof', currentText: snip, suggestedText: 'Something with a number in it.',
+          problem: 'The quote describes the pain but never says what changed for her.' },
+        { location: 'Headline', currentText: 'Hello there all', suggestedText: 'A better headline', problem: 'The full quote style headline is vague.' },
+    ], 'compete', page);
+    assert.strictEqual(dropped, 1);
+    assert.deepStrictEqual(fixes.map((f) => f.problem.slice(0, 9)), ['The quote', 'The full ']);
+});
+
 check('the lens prompt says our "…" is ours, and a rewrite keeps its place\'s job', () => {
     const P = readFileSync(join(__dirname, '../src/utils/site-audit-prompts.ts'), 'utf8');
     assert.match(P, /A quote ending in "…" was shortened by US/);
