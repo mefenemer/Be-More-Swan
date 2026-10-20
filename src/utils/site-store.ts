@@ -8,6 +8,7 @@
 import { dietaryWords } from './product-dietary';
 import { depositLabel } from './product-price';
 import { bookableSessions } from './class-sessions';
+import { socialFeedForPrompt } from './site-social-feed';
 import { reviewsForPrompt } from './reviews';
 import { and, desc, eq, inArray, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
@@ -408,7 +409,8 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
             const main = pr.headline ?? pr.heading ?? '';
             const lk = s.look && (s.look.background !== 'auto' || s.look.columns !== 'auto' || s.look.menuLabel)
                 ? ` · look: ${[s.look.background !== 'auto' ? `${s.look.background} background` : '', s.look.columns !== 'auto' ? `${s.look.columns} columns` : '', s.look.menuLabel ? `menu label "${s.look.menuLabel}"` : ''].filter(Boolean).join(', ')}` : '';
-            lines.push(`    · ${s.type} (sectionId ${s.id})${main ? `: "${clip(main, 90)}"` : ''}${items}${typeof pr.body === 'string' ? ` · "${clip(pr.body, 80)}"` : ''}${lk}`);
+            const feed = s.type === 'social_feed' ? ` · ${s.props.enabled ? 'ON' : 'SWITCHED OFF'}, ${s.props.count} newest from ${s.props.platforms.length ? s.props.platforms.join(', ') : 'every platform'}` : '';
+            lines.push(`    · ${s.type} (sectionId ${s.id})${main ? `: "${clip(main, 90)}"` : ''}${items}${typeof pr.body === 'string' ? ` · "${clip(pr.body, 80)}"` : ''}${feed}${lk}`);
         }
     }
     const acct = await connectAccountFor(db, orgId).catch(() => null);
@@ -433,6 +435,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
         ? `Their class / event timetable (next ${tt.length} bookable dates): ${tt.map((x) => `${x.title}, ${x.dateText} ${x.timeText}${x.resourceName ? ` with ${x.resourceName}` : ''} — ${x.left} of ${x.capacity} places left`).join('; ')}.`
         : 'Their class / event timetable is empty (no bookable dates).');
     lines.push(await reviewsForPrompt(db, orgId).catch(() => 'Their reviews could not be read this turn.'));
+    lines.push(await socialFeedForPrompt(db, orgId).catch(() => 'Their published social posts could not be read this turn.'));
     const forms = await listSignupForms(db, orgId).catch(() => []);
     lines.push(forms.length
         ? `Their sign-up forms (for a signup section's formId): ${forms.map((f) => `${f.name} (formId ${f.id}${f.download ? `, emails a free download: "${f.download}"` : ''}${f.active ? '' : ', switched off'})`).join('; ')}.`

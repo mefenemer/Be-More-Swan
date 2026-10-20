@@ -15,6 +15,7 @@
 import { fillTemplateWords, templateById } from '../config/site-templates';
 import { contrastRatio, normalizeHex, readableInkOn } from './brand-kit';
 import { clampText, stripLoneSurrogates } from './text-safe';
+import { SOCIAL_PLATFORMS, type SocialPlatform } from '../config/platform-formats';
 
 // ── Shapes ──────────────────────────────────────────────────────────────────────────────────
 
@@ -186,6 +187,13 @@ export interface GalleryProps { heading: string | null; intro: string | null; la
  * from 23 reviews") is always the honest average of every review recorded, hidden ones included.
  */
 export interface ReviewsProps { heading: string | null; intro: string | null; reviewIds: number[]; limit: number; showSummary: boolean; }
+/**
+ * The latest social posts (site-social-feed.ts) — ONLY posts published through Be More Swan, read
+ * when the page is drawn, so the section holds no posts: just which platforms ([] = all), how many,
+ * and whether it is on. `enabled` false keeps the section (and its settings and place) but leaves it
+ * off the live site — "turn the feed off for now" without losing where it was.
+ */
+export interface SocialFeedProps { heading: string | null; intro: string | null; platforms: SocialPlatform[]; count: number; enabled: boolean; }
 export interface HoursProps { heading: string | null; intro: string | null; showHours: boolean; showContact: boolean; showAddress: boolean; }
 /** 'class': classes and events — dated sessions with places (class-sessions.ts), not times from opening hours. */
 export type BookingSectionKind = 'appointment' | 'consultation' | 'table' | 'class';
@@ -218,9 +226,10 @@ export type SectionBody =
     | { id: string; type: 'hours'; props: HoursProps }
     | { id: string; type: 'menu'; props: MenuProps }
     | { id: string; type: 'gallery'; props: GalleryProps }
-    | { id: string; type: 'reviews'; props: ReviewsProps };
+    | { id: string; type: 'reviews'; props: ReviewsProps }
+    | { id: string; type: 'social_feed'; props: SocialFeedProps };
 export type SectionType = SectionBody['type'];
-export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking', 'hours', 'menu', 'gallery', 'reviews'];
+export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking', 'hours', 'menu', 'gallery', 'reviews', 'social_feed'];
 
 export interface SitePageDef {
     id: string;
@@ -259,7 +268,7 @@ export const LIMITS = {
     itemTitle: 80, itemBody: 400, intro: 300, textBody: 3000, faqItems: 15, q: 200, a: 1000,
     features: 9, stepsMin: 2, steps: 6, testimonials: 9, quote: 500, personName: 80, personDetail: 80,
     buttonLabel: 40, products: 12, productName: 80, productDescription: 400,
-    menuGroups: 12, menuItems: 100, menuNote: 300, galleryImages: 24, caption: 150, reviewsShown: 12,
+    menuGroups: 12, menuItems: 100, menuNote: 300, galleryImages: 24, caption: 150, reviewsShown: 12, socialPosts: 12,
     /** Pence. Stripe's GBP minimum is 30p; the ceiling is a sanity bound for a small-business shop. */
     minPrice: 30, maxPrice: 1_000_000,
 } as const;
@@ -478,6 +487,16 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
                 showSummary: p.showSummary !== false,
             } };
         }
+        case 'social_feed': {
+            const platforms = SOCIAL_PLATFORMS.filter((x) => Array.isArray(p.platforms) && p.platforms.map((v) => (v === 'twitter' ? 'x' : v)).includes(x));
+            const count = Number(p.count);
+            return { type: 'social_feed', props: {
+                heading: textOrNull(p.heading, LIMITS.headline) ?? 'Latest from us', intro: textOrNull(p.intro, LIMITS.intro, true),
+                platforms,
+                count: Number.isInteger(count) && count >= 1 && count <= LIMITS.socialPosts ? count : 6,
+                enabled: p.enabled !== false,
+            } };
+        }
         case 'gallery': {
             const raw = Array.isArray(p.images) ? p.images : [];
             const images = raw.map((x) => {
@@ -547,7 +566,7 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
 }
 
 /** A section's look: a closed set of choices, so nothing here can become CSS. */
-export const GRID_TYPES: readonly SectionType[] = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery', 'reviews'];
+export const GRID_TYPES: readonly SectionType[] = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery', 'reviews', 'social_feed'];
 export function cleanLook(raw: unknown, type: SectionType): SectionLook {
     const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
     const background = o.background === 'plain' || o.background === 'soft' || o.background === 'brand' ? o.background : 'auto';
@@ -839,7 +858,7 @@ export type SiteOperation =
     /** The reverse: the home page's sections go to their own pages (planSplit) — by menu label, else by kind. */
     | { op: 'split_pages' }
     | { op: 'remove_section'; pageId: string; sectionId: string }
-    | { op: 'move_section'; pageId: string; sectionId: string; toIndex: number }
+    | { op: 'move_section'; pageId: string; sectionId: string; toIndex: number; toPageId?: string }
     | { op: 'set_nav'; items: Array<{ label?: string; pageId: string }> }
     | { op: 'set_theme'; theme: Partial<Record<keyof SiteTheme, unknown>> }
     | { op: 'set_settings'; settings: Partial<Record<keyof SiteSettings, unknown>> }
@@ -968,9 +987,14 @@ function applyOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseO
             break;
         }
         case 'move_section': {
+            // toPageId: onto another page (the social feed's "Show it on" — owner 2026-10-20). The
+            // section keeps its id, props and look; toIndex is its place on the page it lands on.
+            const dest = op.toPageId && op.toPageId !== page!.id ? next.pages.find((p) => p.id === op.toPageId) : page!;
+            if (!dest) return { ok: false, error: 'That page no longer exists.' };
+            if (dest !== page && dest.sections.length >= LIMITS.sectionsPerPage) return { ok: false, error: `A page can have up to ${LIMITS.sectionsPerPage} sections.` };
             const [s] = page!.sections.splice(sectionIndex, 1);
-            const to = Math.max(0, Math.min(Number.isInteger(op.toIndex) ? op.toIndex : 0, page!.sections.length));
-            page!.sections.splice(to, 0, s);
+            const to = Math.max(0, Math.min(Number.isInteger(op.toIndex) ? op.toIndex : (dest === page ? 0 : dest.sections.length), dest.sections.length));
+            dest.sections.splice(to, 0, s);
             break;
         }
         case 'set_nav': {

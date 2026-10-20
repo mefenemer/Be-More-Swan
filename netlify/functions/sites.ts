@@ -79,6 +79,9 @@ async function purgeSitePages(slug: string | null | undefined): Promise<void> {
     catch (err) { console.error('[sites] cache purge failed (the change shows within a minute)', err instanceof Error ? err.message : err); }
 }
 import { reviewSummary } from '../../src/utils/reviews';
+import { socialFeedSummary } from '../../src/utils/site-social-feed';
+import { SOCIAL_PLATFORMS } from '../../src/config/platform-formats';
+import { platformLabel } from '../../src/utils/crosspost-view';
 import { depositNote, refundDeposit } from '../../src/utils/booking-deposits';
 import { reconcileSoon } from '../../src/utils/calendar-microsoft';
 import { addSessions, cancelSessions, cleanNewSessions, offerFreedPlaces, ownerTimetable } from '../../src/utils/class-sessions';
@@ -162,6 +165,12 @@ export default withLambda(async (event) => {
                     .orderBy(desc(orgReviews.reviewedOn), desc(orgReviews.id));
                 return { summary: reviewSummary(rows), list: rows.filter((r) => r.status === 'published').map((r) => ({ id: r.id, authorName: r.authorName, rating: r.rating, body: r.body.slice(0, 140), source: r.source, reviewedOn: r.reviewedOn })) };
             })(),
+            // The social posts section's platform picker: every platform, and how many posts each has had
+            // published through Be More Swan (the only posts the section ever shows).
+            social: {
+                platforms: SOCIAL_PLATFORMS.map((p) => ({ key: p, label: platformLabel(p) })),
+                published: await socialFeedSummary(db, orgId).catch(() => []),
+            },
             payments: await (async () => {
                 const acct = await connectAccountFor(db, orgId);
                 return { connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, detailsSubmitted: !!acct?.detailsSubmitted, canConnect: role === 'owner' || role === 'admin' };

@@ -74,6 +74,14 @@ check('the caption path repaints the canvas and the length badges', () => {
     assert.match(body, /_rqReviewRenderActive\(\)/, 'the caption is on the canvas too');
 });
 
+check('Shorter / Longer change the length, never the facts (owner 2026-10-20)', () => {
+    assert.match(ws, /onclick="_railRewrite\('shorter'\)"/, 'the editor offers shorter');
+    assert.match(ws, /onclick="_railRewrite\('longer'\)"/, 'and longer');
+    assert.match(fn, /shorter: 'caption', longer: 'caption'/, 'both may only touch the caption');
+    const longer = fn.slice(landmark(fn, "case 'longer':"), landmark(fn, "case 'hashtags':"));
+    assert.match(longer, /Do NOT invent facts, figures, names, prices/, 'padding a post is how a model invents a statistic');
+});
+
 check('the buttons re-enable even when the call throws', () => {
     assert.match(body, /finally \{/, 'a failed rewrite must not leave step 1 permanently disabled');
 });

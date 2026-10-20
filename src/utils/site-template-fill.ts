@@ -24,7 +24,7 @@ export function wordsOf(s: Section): Words | null {
         case 'features': case 'steps': return { heading: p.heading ?? '', intro: p.intro ?? '', items: items(p.items, ['title', 'body']) };
         case 'faq': return { heading: p.heading ?? '', items: items(p.items, ['q', 'a']) };
         case 'cta': return { heading: p.heading ?? '', body: p.body ?? '', button: p.button?.label ?? '' };
-        case 'contact': case 'booking': case 'hours': case 'reviews': case 'gallery': case 'signup': return { heading: p.heading ?? '', intro: p.intro ?? '' };
+        case 'contact': case 'booking': case 'hours': case 'reviews': case 'gallery': case 'signup': case 'social_feed': return { heading: p.heading ?? '', intro: p.intro ?? '' };
         default: return null;   // products, menu, testimonials: the owner's own, never rewritten
     }
 }
@@ -56,7 +56,7 @@ export function propsFromWords(s: Section, w: unknown): Record<string, unknown> 
             set('heading', str(o.heading)); set('body', str(o.body));
             if (p.button && str(o.button)) out.button = { ...p.button, label: o.button };
             break;
-        case 'contact': case 'booking': case 'hours': case 'reviews': case 'gallery': case 'signup':
+        case 'contact': case 'booking': case 'hours': case 'reviews': case 'gallery': case 'signup': case 'social_feed':
             set('heading', str(o.heading)); set('intro', str(o.intro)); break;
         default: return null;
     }

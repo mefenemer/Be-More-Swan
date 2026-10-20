@@ -1753,15 +1753,19 @@
   // change and refuses the whole batch if any one would break a rule.
 
   // Plain words for each change — never the internal page or section ids the operations carry.
-  const SITE_SECTION_WORDS = { hero: 'top (hero)', features: 'features', steps: 'steps', text: 'text', faq: 'questions', testimonials: 'testimonials', cta: 'call-to-action' };
+  const SITE_SECTION_WORDS = { hero: 'top (hero)', features: 'features', steps: 'steps', text: 'text', faq: 'questions', testimonials: 'testimonials', cta: 'call-to-action', social_feed: 'latest social posts' };
   const SITE_PROP_WORDS = { headline: 'headline', subheadline: 'line under the headline', eyebrow: 'small label', primaryCta: 'main button', secondaryCta: 'second button',
-    image: 'picture', heading: 'heading', intro: 'introduction', items: 'items', body: 'text', button: 'button', layout: 'layout' };
+    image: 'picture', heading: 'heading', intro: 'introduction', items: 'items', body: 'text', button: 'button', layout: 'layout',
+    platforms: 'platforms shown', count: 'number of posts', enabled: 'on/off' };
   const SITE_OP_WORDS = {
     add_page: (o) => `Add a page: “${o.title || ''}”`,
     update_page: (o) => (o.title ? `Rename a page to “${o.title}”` : o.hideFromMenu === true ? 'Hide a page from the menu' : o.hideFromMenu === false ? 'Show a page in the menu' : o.seo ? 'Update a page\'s search title and description' : 'Update a page'),
     remove_page: () => 'Remove a page',
     add_section: (o) => `Add a ${SITE_SECTION_WORDS[(o.section || {}).type] || 'new'} section`,
     update_section: (o) => {
+      // The social posts section's switch, said as what it does.
+      const keys = Object.keys(o.props || {});
+      if (keys.length === 1 && keys[0] === 'enabled' && !o.look) return o.props.enabled ? 'Switch the social posts section on' : 'Switch the social posts section off (kept, not shown)';
       const words = Object.keys(o.props || {}).map((k) => SITE_PROP_WORDS[k] || k);
       const look = o.look || {};
       if (look.menuLabel) words.push(`menu label (“${look.menuLabel}”)`);
@@ -1773,7 +1777,7 @@
     apply_template: (o) => (o.mode === 'full' ? `Start again with the ${o.templateId} template (replaces your pages)` : `Use the ${o.templateId} template's design (your words and pictures stay)`),
     split_pages: () => 'Split the home page back into separate pages, one per menu entry',
     remove_section: () => 'Remove a section',
-    move_section: () => 'Move a section',
+    move_section: (o) => (o.toPageId && o.toPageId !== o.pageId ? 'Move a section to another page' : 'Move a section'),
     set_theme: () => 'Change the design (colours, lettering or corners)',
     set_settings: (o) => {
       const f = o.settings && Array.isArray(o.settings.features) ? o.settings.features : null;

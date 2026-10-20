@@ -25,6 +25,7 @@ import { renderRobots, renderSitemap, renderSiteNotice, renderSitePage, esc, BOO
 import { reviewPage, reviewSubmit } from '../../src/utils/site-review';
 import { bookStep, bookSubmit } from '../../src/utils/site-booking';
 import { loadSiteReviews } from '../../src/utils/reviews';
+import { loadSiteSocialFeed } from '../../src/utils/site-social-feed';
 import { bookableSessions } from '../../src/utils/class-sessions';
 import { bookingSummary, businessSummary } from '../../src/utils/bookings';
 import { canSell, loadSiteProducts, startCheckout } from '../../src/utils/site-shop';
@@ -224,6 +225,7 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
         booking: hasBooking ? { ...await bookingSummary(db, site.organisationId), ...(hasClasses ? { sessions: await bookableSessions(db, site.organisationId, new Date(), [], 60) } : {}) } : null,
         business: await businessSummary(db, site.organisationId),
         reviews: await loadSiteReviews(db, site.organisationId, definition),
+        socialFeed: await loadSiteSocialFeed(db, site.organisationId, definition),
     });
     return { statusCode: page.status, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : page.html };
 }

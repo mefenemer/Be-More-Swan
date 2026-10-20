@@ -4522,6 +4522,17 @@ async function _loadBlogAutopilotStats(assistantId, scheduleActive) {
     }
 }
 
+// The post editor's "post formats" / "tone of voice" links (workspace.html ?settings=) → the Creative
+// Brief panel, scrolled to the Content mix or Voice builder card. Both cards hide for roles that have
+// no such setting, so a hidden card leaves the panel at its top rather than scrolling to nothing.
+window._openContentSettingsCard = function(which) {
+    if (typeof window._openBriefDrawer === 'function') window._openBriefDrawer('strategy');
+    setTimeout(() => {
+        const card = document.getElementById(which === 'voice' ? 'module-voice-builder' : 'module-content-mix');
+        if (card && !card.classList.contains('hidden')) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+};
+
 // "Adjust schedule" / "Turn on autopilot" → open the Operational Setup panel and scroll to the
 // Posting Schedule controls, which already write posting_frequency/days/times/timezone + horizon.
 window._openAutopilotSettings = function() {
@@ -7373,6 +7384,11 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
             }
         } else {
             _activateDefaultMainTab();
+        }
+        if (window._assistantDetailOpenSettings) {
+            const which = window._assistantDetailOpenSettings;
+            window._assistantDetailOpenSettings = null;
+            window._openContentSettingsCard(which);
         }
     } catch (e) {
         console.error('Failed to load assistant detail:', e);

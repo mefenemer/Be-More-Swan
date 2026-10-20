@@ -582,8 +582,8 @@ check('the orchestrator reports a code the user can quote', () => {
 check('step 1\'s rewrite actions are disabled until there is a caption', () => {
     const block = workspace.slice(landmark(workspace, 'id="pce-write-block"'), landmark(workspace, 'id="pce-write-freetext"'));
     const tagged = (block.match(/data-rewrite-action/g) || []).length;
-    assert.strictEqual(tagged, 3,
-        '"Change the tone" / "Suggest hashtags" / "Fix grammar" each spend a generation asking the assistant to rewrite nothing');
+    assert.strictEqual(tagged, 5,
+        'tone / shorter / longer / hashtags / grammar each spend a generation asking the assistant to rewrite nothing');
     // "Shorten for X" is gone: the per-platform caption badges already count every platform's limit
     // live, and _pceOverLimitPlatforms blocks approval — a button duplicating that rule for ONE
     // platform, at the cost of a generation, was the worse half of the pair.
