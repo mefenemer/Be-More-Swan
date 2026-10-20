@@ -1,7 +1,7 @@
 // src/utils/gamification.ts
 // US3.1 — Milestone engine. Evaluates a workspace's all-time progress against the
 // admin-configured thresholds and grants rewards exactly once:
-//   - 100 leads  → +1 bonus referral token (drops into the Reward Vault)   (AC3.1.3)
+//   - 100 leads  → +1 bonus referral token = one free month (since 2026-10-20) (AC3.1.3)
 //   - 50 hours   → beta_access = true (Beta Program + pre-release catalog)  (AC3.1.2)
 // Each grant is logged in reward_audits (AC4.2.1); the unique (org, trigger_event)
 // constraint is the dedup, so it fires once and never double-spends. Honours the
@@ -41,7 +41,7 @@ export async function evaluateMilestones(db: Db, orgId: number, notifyUserId: nu
             (tx) => tx.update(organisations)
                 .set({ bonusReferralTokens: sql`${organisations.bonusReferralTokens} + 1` })
                 .where(eq(organisations.id, orgId)),
-            `🎉 Milestone reached — ${milestones.leads_for_token} leads generated! A bonus referral token has been added to your Reward Vault.`);
+            `🎉 Milestone reached — ${milestones.leads_for_token} leads generated! A bonus free month is ready to claim on your Refer a Friend page.`);
     }
 
     // AC3.1.2 — 50 hours → Beta access

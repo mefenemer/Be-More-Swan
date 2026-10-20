@@ -14,7 +14,7 @@ import { eq, desc, and, count } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
 import { users, userReferrals, plans, organisations, masterPlans, aiAssistants, userOrganisations, referralInvites } from '../../db/schema';
 import { resolveBaseUrl } from '../../src/utils/base-url';
-import { getReferralTokenState, FREE_ASSISTANT_THRESHOLD, CREDIT_GBP } from '../../src/utils/referral-tokens';
+import { getReferralTokenState, freeMonthFor } from '../../src/utils/referral-tokens';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -167,11 +167,13 @@ export default withLambda(async (event) => {
                 totalRewarded,
                 totalPending: referrals.filter(r => r.status === 'pending').length,
                 totalQualified: referrals.filter(r => r.status === 'qualified').length,
+                // Every paying friend's month, claimed ('spent') or not — the page's "Free Months Earned".
+                freeMonthsEarned: referrals.filter(r => r.status === 'qualified' || r.status === 'spent').length,
                 // Reward vault (Referral Program Expansion)
                 availableTokens: tokenState.availableTokens,
                 maturingTokens: tokenState.maturingTokens,
-                freeAssistantThreshold: FREE_ASSISTANT_THRESHOLD,
-                creditGbp: CREDIT_GBP,
+                // One token = one free month of this plan; null on a trial (nothing to credit yet).
+                freeMonthGbp: (await freeMonthFor(db, callerId).catch(() => null))?.amountGbp ?? null,
                 bonusAssistants,
                 assistantLimit,
                 assistantCount,

@@ -6,7 +6,7 @@ import { getDb } from '../../db/client';
 import { users, userProfiles, userOrganisations } from '../../db/schema';
 import { logAuditEvent } from '../../src/utils/audit';
 import { withLambda } from '@netlify/aws-lambda-compat';
-import { checkImpersonationBlock } from '../../src/utils/impersonation';
+import { checkImpersonationBlock, resolveImpersonation } from '../../src/utils/impersonation';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -51,6 +51,14 @@ export default withLambda(async (event: HandlerEvent) => {
     // -------------------------------------------------------------
     if (event.httpMethod === 'GET') {
         try {
+            // During an admin impersonation aura_session is still the ADMIN's (impersonation.ts), so
+            // the header avatar and Account settings showed the admin's own name, email and Super
+            // Admin badge inside the customer's workspace (2026-10-20). Read the customer instead —
+            // the same verified, bound, permission-checked resolution requireTenant uses. PATCH is
+            // already refused above, so this stays read-only.
+            const imp = await resolveImpersonation(db, event.headers.cookie, userId);
+            if (imp) userId = imp.impersonatingUserId;
+
             const [user] = await db.select().from(users).where(eq(users.id, userId));
             const [profile] = await db.select().from(userProfiles).where(eq(userProfiles.userId, userId));
             const [orgMembership] = await db.select({ role: userOrganisations.role })

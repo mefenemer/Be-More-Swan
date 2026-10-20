@@ -169,7 +169,7 @@ const TARGET_ORG = 37;
     for (const fn of MUST_BLOCK) {
         await check(`${fn} blocks during impersonation`, () => {
             const src = read(`netlify/functions/${fn}.ts`);
-            assert.match(src, /import \{ checkImpersonationBlock \} from '\.\.\/\.\.\/src\/utils\/impersonation';/);
+            assert.match(src, /import \{[^}]*\bcheckImpersonationBlock\b[^}]*\} from '\.\.\/\.\.\/src\/utils\/impersonation';/);
             assert.match(src, /checkImpersonationBlock\(event(\.headers\.cookie)?, '[a-z_]+'\)/);
         });
     }
@@ -180,6 +180,14 @@ const TARGET_ORG = 37;
         const src = read('netlify/functions/check-capacity.ts');
         assert.match(src, /resolveImpersonation\(db, [^)]+, userId\);\s*if \(imp\) userId = imp\.impersonatingUserId;/);
         assert.match(src, /if \(!imp\) \{\s*const portal = await stripe\.billingPortal/);
+    });
+    // The header avatar + Account settings read update-profile, which parses aura_session itself —
+    // the admin's. Shown as the admin, the customer's workspace said "Super Admin" with the admin's email.
+    await check('update-profile GET answers for the impersonated customer', () => {
+        const src = read('netlify/functions/update-profile.ts');
+        const get = src.slice(landmark(src, "if (event.httpMethod === 'GET')"), landmark(src, "if (event.httpMethod === 'PATCH')"));
+        assert.match(get, /const imp = await resolveImpersonation\(db, event\.headers\.cookie, userId\);\s*if \(imp\) userId = imp\.impersonatingUserId;/);
+        assert.ok(landmark(get, 'resolveImpersonation(') < landmark(get, 'db.select().from(users)'));
     });
     await check('referral-claim reads the customer and blocks a claim during impersonation', () => {
         const src = read('netlify/functions/referral-claim.ts');

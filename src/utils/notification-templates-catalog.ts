@@ -1403,11 +1403,11 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
     },
     {
         templateKey: 'referral_reward',
-        name: 'Referral token earned',
+        name: 'Referral free month earned',
         category: 'Billing',
         type: 'referral_reward',
-        title: '🎉 Referral Token Earned',
-        message: 'A friend you referred just made their first payment — you\'ve earned a referral token! It unlocks after their 14-day refund window. Save up 5 for a free assistant, or redeem 1 for £10 credit.',
+        title: '🎉 You\'ve Earned a Free Month',
+        message: 'A friend you referred just made their first payment — you\'ve earned a free month! It\'s ready to claim on your Refer a Friend page once their 14-day refund window has passed.',
         variables: [],
     },
     {

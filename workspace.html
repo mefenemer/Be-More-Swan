@@ -98,6 +98,11 @@
      header is lifted above it. Only then: pop-ups (z 70-90) must still cover the header otherwise. */
   body:has(#post-review-modal.pr-page:not(.hidden)) #app-header,
   body:has(#bms-blog-backdrop.bs-page.bs-open) #app-header { z-index: 92; }
+  /* The bell's popover is NOT inside the header — notifications.js appends it to <body> at z 80 —
+     so lifting the header left it opening underneath the editor page (2026-10-20). Lift it too;
+     !important because its z-index is an inline style. */
+  body:has(#post-review-modal.pr-page:not(.hidden)) #notif-popover,
+  body:has(#bms-blog-backdrop.bs-page.bs-open) #notif-popover { z-index: 93 !important; }
 </style>
 </head>
 <body class="bg-gray-50 text-gray-900 font-sans antialiased min-h-screen overflow-x-hidden">
@@ -21380,7 +21385,17 @@ async function gpSubmitReject() {
       }
 
       if (d.type === 'delegate' && d.assistantId) {
-        showReply(reply);
+        // Propose, then spend: a draft costs a task, so nothing is generated until the user says so
+        // (2026-10-20 — this used to fire generate-post the moment the reply came back).
+        showReply(`${reply}<div class="cmdbar-followup"><button type="button" class="cmdbar-go">Draft it →</button></div>`);
+        result.querySelector('.cmdbar-go').onclick = () => draftViaAssistant(d, command);
+        return;
+      }
+      showAnswer(d, reply);
+    }
+
+    async function draftViaAssistant(d, command) {
+        showThinking();
         try {
           // Every connected account, the way Autopilot does it — NOT just whichever platform the
           // router happened to name. This path sent `platform` alone and no `platforms`, so
@@ -21409,15 +21424,16 @@ async function gpSubmitReject() {
             }),
           });
           if (!r.ok) throw 0;
-          showReply(`${reply}<div class="cmdbar-followup"><button type="button" class="cmdbar-go">View in Review →</button></div>`);
+          const who = d.assistantName ? esc(d.assistantName) : 'Your assistant';
+          showReply(`${who} is drafting it now — it will be waiting for you in Review.<div class="cmdbar-followup"><button type="button" class="cmdbar-go">View in Review →</button></div>`);
           result.querySelector('.cmdbar-go').onclick = () => { if (window.loadView) window.loadView('review-queue'); close(); };
           input.value = '';
         } catch {
           showReply('I started on that but couldn’t queue it — you can create it from Review.');
         }
-        return;
-      }
+    }
 
+    function showAnswer(d, reply) {
       // answer (with an optional "Take me there" or "Report an issue" follow-up)
       if (d.suggestReportIssue && window.openReportIssue) {
         showReply(`${reply}<div class="cmdbar-followup"><button type="button" class="cmdbar-go">Report an issue →</button></div>`);

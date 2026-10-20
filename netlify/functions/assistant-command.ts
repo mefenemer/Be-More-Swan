@@ -12,7 +12,7 @@
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
 import { logMessageUsage } from '../../src/utils/ai-usage';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
@@ -69,6 +69,7 @@ export default withLambda(async (event) => {
             id: aiAssistants.id,
             name: aiAssistants.name,
             role: liveRoleLabel,
+            roleKey: sql<string | null>`${aiAssistants.configuration} ->> 'type'`,
             lifecycleStatus: aiAssistants.lifecycleStatus,
             provisioningStatus: aiAssistants.provisioningStatus,
             provisioningBlockedReason: aiAssistants.provisioningBlockedReason,
@@ -78,8 +79,13 @@ export default withLambda(async (event) => {
         computeOnboardingProgress(db, orgId, userId),
     ]);
 
-    // Delegation only makes sense for assistants that can actually pick up work.
+    // Delegation only makes sense for assistants that can actually pick up work — and ONLY the
+    // Social Media Assistant: the client delegates through generate-post, which writes a social post
+    // job for whatever assistant it is given. "Draft a blog post" used to land as a social job on the
+    // Blog Writer (2026-10-20). Other roles are pointed at their own page instead.
+    const DELEGATE_ROLE = 'social_media_manager';
     const assistants = allAssistants.filter(a => ['working', 'ready_for_work', 'paused'].includes(a.lifecycleStatus));
+    const delegates = assistants.filter(a => a.roleKey === DELEGATE_ROLE);
 
     // Plain-English status per assistant so the LLM can give a real, specific answer instead of
     // deflecting to "let me look into it" with nothing to actually check.
@@ -156,7 +162,7 @@ Return STRICT JSON (no markdown, no prose) with this shape:
 
 Rules:
 - "navigate" when the user wants to go somewhere or see something (e.g. "show my review queue", "open calendar", "what needs approval").
-- "delegate" when the user wants the team to CREATE or DO something (e.g. "draft a LinkedIn post about our sale", "write an Instagram caption"). Choose the most relevant assistant id; if none fits, set assistantId null and still give a brief.
+- "delegate" ONLY when the user wants a SOCIAL MEDIA post or caption drafted (e.g. "draft a LinkedIn post about our sale", "write an Instagram caption"), and only to a Social Media Assistant from the list. The reply must say you'll draft it once they confirm (the user gets a "Draft it" button) — never that it is already done. For anything else they want created (a blog post, an email or newsletter, leads, a website change), use type "answer", name the assistant from the list that does it, and set "suggestView" to "assistants".
 - "answer" for questions you can answer briefly, greetings, or anything that doesn't map to a view or a delegation.
 - For "why isn't <assistant> working" / "what's wrong with <assistant>" / "<assistant> isn't posting" style questions, use type "answer" and give a REAL, specific diagnosis straight from that assistant's status line above (e.g. name the actual paused/blocked/provisioning reason and the concrete fix). NEVER reply with a vague promise like "let me look into that" or "I'll help you diagnose this" — you have no way to investigate further than the status already given, so either state the concrete cause now or immediately say you can't tell from here.
 - If the assistant's status above already looks healthy ("active and running normally") but the user insists something is wrong, OR the status data doesn't explain the specific problem they describe, say plainly that you can't identify the cause from here and set "suggestReportIssue" to true so they can report it to be looked into — do not just say you'll look into it yourself and stop.
@@ -201,15 +207,22 @@ Rules:
             // "Report an issue →" button instead of leaving the user with a dead-end promise.
             if (parsed.suggestReportIssue === true) out.suggestReportIssue = true;
         } else if (type === 'delegate') {
-            const validId = assistants.find(a => a.id === Number(parsed.assistantId));
+            const picked = assistants.find(a => a.id === Number(parsed.assistantId));
+            const validId = delegates.find(a => a.id === Number(parsed.assistantId)) || (delegates.length === 1 && !picked ? delegates[0] : undefined);
             out.assistantId = validId ? validId.id : null;
+            out.assistantName = validId ? validId.name : undefined;
             // Normalised through the shared catalogue rather than matched against a local list:
             // the hand-written four here predated Threads and YouTube, so delegating "post this to
             // Threads" silently resolved the platform to null.
             out.platform = normalizePlatform(parsed.platform);
             out.brief = typeof parsed.brief === 'string' ? parsed.brief.slice(0, 500) : command;
             // If we have no assistant to delegate to, soften to guidance.
-            if (!out.assistantId) {
+            if (!out.assistantId && picked) {
+                // The model chose a non-social assistant: send the user to it rather than mis-file.
+                out.type = 'answer';
+                out.reply = `That's one for ${picked.name} — open it from Assistants and ask there.`;
+                out.suggestView = 'assistants';
+            } else if (!out.assistantId) {
                 out.type = 'answer';
                 out.reply = assistants.length
                     ? `I couldn't tell which assistant should handle that — open Assistants and I'll help you pick.`

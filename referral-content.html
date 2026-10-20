@@ -4,14 +4,14 @@
   <!-- Header -->
   <div>
     <h1 class="text-2xl font-bold text-gray-900">Refer a Friend</h1>
-    <p class="mt-1 text-gray-500">Your friend gets <strong>their first month free</strong>. You earn a <strong>referral token</strong> once they make their first payment after the free month. Redeem <strong>1 token for £10 credit</strong> — or save <strong>5 for a free assistant</strong>.</p>
+    <p class="mt-1 text-gray-500">Give a month, get a month. Your friend gets <strong>their first month free</strong>, and once they make their first payment after it, <strong>you get a month free</strong> too — taken off your next bill.</p>
   </div>
 
   <!-- Affiliate partners: their code earns CASH, not tokens (src/utils/referral-offer.ts marks their
        referrals 'partner'), so this page would mislead them — point them at their Partner page. -->
   <div id="ref-partner-state" class="hidden bg-white border border-gray-200 rounded-xl p-6 space-y-3">
     <h2 class="text-lg font-bold text-gray-900">You're a Be More Swan partner</h2>
-    <p class="text-sm text-gray-600">As a partner, people you invite earn you cash commission rather than referral tokens. Your invite link, earnings and payout details are on your Partner page.</p>
+    <p class="text-sm text-gray-600">As a partner, people you invite earn you cash commission rather than free months. Your invite link, earnings and payout details are on your Partner page.</p>
     <button type="button" onclick="window.loadView ? window.loadView('partner') : (location.href = '/workspace.html?view=partner')" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Go to my Partner page</button>
   </div>
 
@@ -23,7 +23,7 @@
       </svg>
     </div>
     <h2 class="text-lg font-bold text-gray-900">Referral link unlocks with a subscription</h2>
-    <p class="text-gray-600 text-sm max-w-md mx-auto">Your personal referral link will be available as soon as you start a paid plan. Subscribe now and start earning £10 for every friend you refer.</p>
+    <p class="text-gray-600 text-sm max-w-md mx-auto">Your personal referral link will be available as soon as you start a paid plan. Subscribe now and earn a free month for every friend who joins.</p>
     <a href="/billing.html" class="inline-block px-6 py-2.5 bg-[#00e55c] hover:bg-[#00cc52] text-white text-sm font-semibold rounded-lg transition-colors">
       Choose a Plan →
     </a>
@@ -36,35 +36,21 @@
     <div id="ref-vault" class="hidden bg-gradient-to-br from-emerald-50 to-white border border-emerald-200 rounded-xl p-6 shadow-sm space-y-5">
       <div class="flex items-start justify-between flex-wrap gap-3">
         <div>
-          <h2 class="font-bold text-gray-900 text-lg">Your Reward Vault</h2>
-          <p class="text-sm text-gray-500">Earn 1 token per paying referral. Spend them your way.</p>
+          <h2 class="font-bold text-gray-900 text-lg">Your free months</h2>
+          <p class="text-sm text-gray-500">One free month for every friend who becomes a paying customer.</p>
         </div>
         <div class="text-right">
           <p id="vault-token-count" class="text-3xl font-extrabold text-emerald-600">0</p>
-          <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Available Tokens</p>
+          <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Ready to claim</p>
         </div>
       </div>
 
-      <!-- Milestone progress to free assistant (AC1.2) -->
-      <div>
-        <div class="flex justify-between items-baseline mb-1 gap-2">
-          <span id="vault-milestone-label" class="text-sm font-semibold text-gray-700">0/5 referrals until your free assistant!</span>
-          <span id="vault-maturing-note" class="hidden text-xs text-amber-600 font-medium whitespace-nowrap"></span>
-        </div>
-        <div class="h-3 w-full rounded-full bg-gray-100 overflow-hidden">
-          <div id="vault-progress-bar" class="h-3 rounded-full bg-emerald-500 transition-all duration-500" style="width:0%"></div>
-        </div>
-      </div>
-
-      <!-- Redemption CTAs (AC1.3 / AC1.4) -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <button id="vault-redeem-credit" class="btn-secondary px-4 py-3 rounded-lg font-semibold text-sm border transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
-          Redeem £10 Credit <span class="text-xs font-normal text-gray-400">(1 token)</span>
-        </button>
-        <button id="vault-redeem-assistant" class="btn-primary px-4 py-3 rounded-lg font-semibold text-sm transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
-          Unlock Free Assistant <span class="text-xs font-normal opacity-80">(5 tokens)</span>
-        </button>
-      </div>
+      <!-- "Give a month, get a month" (owner, 2026-10-20): one token = one month of your own plan as
+           account credit. Replaced £10 credit / 5 tokens for a free assistant (referral-tokens.ts). -->
+      <span id="vault-maturing-note" class="hidden block text-xs text-amber-600 font-medium"></span>
+      <button id="vault-redeem-month" class="btn-primary w-full sm:w-auto px-5 py-3 rounded-lg font-semibold text-sm transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+        Claim a free month
+      </button>
       <p id="vault-limit-note" class="text-xs text-gray-500"></p>
     </div>
 
@@ -112,7 +98,7 @@
 
       <!-- Share actions (shown once a link exists) -->
       <div id="ref-share-row" class="hidden space-y-3">
-        <p class="text-xs text-gray-500">This is your single, reusable link — share it with as many friends as you like. Each friend who subscribes earns you a token.</p>
+        <p class="text-xs text-gray-500">This is your single, reusable link — share it with as many friends as you like. Each friend who becomes a paying customer earns you a free month.</p>
         <div class="flex flex-wrap items-center gap-2">
           <button id="ref-share-email-btn"
             class="btn-secondary inline-flex items-center gap-1.5 px-4 py-2 border text-sm font-semibold rounded-lg transition-colors">
@@ -155,7 +141,7 @@
         </div>
         <div class="text-center">
           <p id="stat-rewarded" class="text-2xl font-bold text-[#00b347]">0</p>
-          <p class="text-xs text-gray-500 mt-0.5">Credits Earned</p>
+          <p class="text-xs text-gray-500 mt-0.5">Free Months Earned</p>
         </div>
       </div>
     </div>
@@ -174,10 +160,10 @@
         </li>
         <li class="flex gap-3">
           <span class="shrink-0 w-6 h-6 rounded-full bg-[#e6faf0] text-[#00b347] font-bold flex items-center justify-center text-xs">3</span>
-          <span>Once they pass their 14-day refund window, a <strong>referral token</strong> lands in your Reward Vault to spend on £10 credit or a free assistant.</span>
+          <span>Once their first payment is past its 14-day refund window, <strong>a free month</strong> is ready for you to claim here. It comes off your next bill.</span>
         </li>
       </ol>
-      <p class="mt-4 text-xs text-gray-400">You have <strong>one reusable referral link</strong> — share the same link with as many friends as you like; there's no limit. Tokens unlock after each referred friend's 14-day refund window.</p>
+      <p class="mt-4 text-xs text-gray-400">You have <strong>one reusable referral link</strong> — share the same link with as many friends as you like; there's no limit. Each free month unlocks 14 days after that friend's first payment.</p>
     </div>
 
     <!-- Activity table -->
@@ -271,7 +257,7 @@
     // Stats
     document.getElementById('stat-pending').textContent   = data.totalPending   || 0;
     document.getElementById('stat-qualified').textContent = data.totalQualified  || 0;
-    document.getElementById('stat-rewarded').textContent  = `${data.totalRewarded || 0} × £${data.rewardGbp || 10}`;
+    document.getElementById('stat-rewarded').textContent  = String(data.freeMonthsEarned || 0);
     document.getElementById('ref-stats').classList.remove('hidden');
 
     // Table
@@ -318,36 +304,27 @@
   function renderVault(data) {
     const vault = document.getElementById('ref-vault');
     if (!vault) return;
-    const tokens    = data.availableTokens || 0;
-    const threshold = data.freeAssistantThreshold || 5;
-    const maturing  = data.maturingTokens || 0;
+    const months   = data.availableTokens || 0;
+    const maturing = data.maturingTokens || 0;
+    const worth    = data.freeMonthGbp; // one month of YOUR plan; null on a trial
 
     vault.classList.remove('hidden');
-    document.getElementById('vault-token-count').textContent = tokens;
-
-    // AC1.2: milestone progress
-    document.getElementById('vault-milestone-label').textContent = tokens >= threshold
-      ? "You've unlocked a free assistant! 🎉"
-      : `${tokens}/${threshold} referrals until your free assistant!`;
-    document.getElementById('vault-progress-bar').style.width =
-      Math.min(100, Math.round((tokens / threshold) * 100)) + '%';
+    document.getElementById('vault-token-count').textContent = months;
 
     const matNote = document.getElementById('vault-maturing-note');
     if (maturing > 0) {
-      matNote.textContent = `${maturing} pending the 14-day window`;
+      matNote.textContent = `${maturing} more on the way — each unlocks 14 days after your friend's first payment`;
       matNote.classList.remove('hidden');
     } else { matNote.classList.add('hidden'); }
 
-    // AC1.3 / AC1.4: redemption CTA states
-    document.getElementById('vault-redeem-credit').disabled    = tokens < 1;
-    document.getElementById('vault-redeem-assistant').disabled = tokens < threshold;
-
-    if (data.assistantLimit != null) {
-      const bonus = data.bonusAssistants || 0;
-      document.getElementById('vault-limit-note').textContent =
-        `Your plan currently allows ${data.assistantLimit} assistant${data.assistantLimit === 1 ? '' : 's'}` +
-        (bonus ? ` (includes ${bonus} bonus from referrals).` : '.');
-    }
+    const btn = document.getElementById('vault-redeem-month');
+    btn.disabled = months < 1 || worth == null;
+    btn.textContent = worth != null
+      ? `Claim a free month (£${Number(worth).toLocaleString('en-GB', { minimumFractionDigits: worth % 1 ? 2 : 0 })} off your next bill)`
+      : 'Claim a free month';
+    document.getElementById('vault-limit-note').textContent = worth == null && months > 0
+      ? 'You can claim your free months once you are on a paid plan.'
+      : '';
   }
 
   async function redeem(type, btn) {
@@ -359,16 +336,12 @@
       });
       const d = await res.json();
       if (!res.ok) {
-        window.showToast?.(d.error || 'Could not redeem your tokens.');
+        window.showToast?.(d.error || 'Could not claim your free month.');
         btn.innerHTML = orig; btn.disabled = false;
         return;
       }
-      if (type === 'credit_10') {
-        window.showToast?.('£10 credit redeemed — it will be applied to your next invoice.', { icon: '💷' });
-      } else {
-        window.showToast?.('Free assistant unlocked! 🎉', { icon: '🎉' });
-        fireConfetti();
-      }
+      window.showToast?.('Free month claimed — it comes off your next bill. 🎉', { icon: '🎉' });
+      fireConfetti();
       btn.innerHTML = orig;          // restore label; renderVault re-sets disabled state
       await loadReferral();          // AC2.4: refresh counts/bar/limit without a page refresh
     } catch {
@@ -377,8 +350,7 @@
     }
   }
 
-  document.getElementById('vault-redeem-credit').addEventListener('click', (e) => redeem('credit_10', e.currentTarget));
-  document.getElementById('vault-redeem-assistant').addEventListener('click', (e) => redeem('free_assistant', e.currentTarget));
+  document.getElementById('vault-redeem-month').addEventListener('click', (e) => redeem('free_month', e.currentTarget));
 
   // Dependency-free confetti burst (AC2.4) — inline canvas, no CDN.
   function fireConfetti() {

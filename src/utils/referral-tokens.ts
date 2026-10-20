@@ -10,16 +10,40 @@
 // availableTokens = matured-&-still-active qualified referrals. Spending flips those
 // rows to 'spent', so they drop out of this set (the reward_redemptions ledger is the
 // audit trail). Legacy 'rewarded' rows (already auto-credited £10) are excluded.
+//
+// What a token is worth — "give a month, get a month" (owner, 2026-10-20): ONE token = one free
+// month of the referrer's own plan, as account credit off their next bill. It replaced "1 token =
+// £10, or 5 = a free assistant": every assistant is on the £69 plan now, and an extra slot on the
+// £29 plan gave away what the upgrade sells. Slots already granted (bonus_assistants) are kept.
 
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, notInArray } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { plans, userReferrals, organisations, userOrganisations } from '../../db/schema';
+import { plans, masterPlans, userReferrals, organisations, userOrganisations } from '../../db/schema';
+import { FREE_PLAN_TYPES } from '../config/beta-plan';
 
 type Db = ReturnType<typeof getDb>;
 
 export const REFUND_WINDOW_DAYS = 14;
-export const FREE_ASSISTANT_THRESHOLD = 5;
-export const CREDIT_GBP = 10;
+/** Redemption type for one token → one free month. Older types ('credit_10', 'free_assistant') stay in the ledger only. */
+export const FREE_MONTH = 'free_month';
+
+/**
+ * A free month for this user: their paid plan's monthly list price (master data), and the Stripe
+ * customer to credit. null on a trial/beta plan or with no billing account — nothing to take a
+ * month off yet; the tokens wait. Annual subscribers get the same monthly figure, held as credit
+ * against their renewal.
+ */
+export async function freeMonthFor(db: Pick<Db, 'select'>, userId: number): Promise<{ amountGbp: number; stripeCustomerId: string } | null> {
+    const [row] = await db
+        .select({ price: masterPlans.monthlyPriceGbp, stripeCustomerId: plans.stripeCustomerId })
+        .from(plans)
+        .innerJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
+        .where(and(eq(plans.userId, userId), eq(plans.status, 'active'), notInArray(plans.planType, [...FREE_PLAN_TYPES])))
+        .limit(1);
+    const amountGbp = Number(row?.price);
+    if (!row?.stripeCustomerId || !(amountGbp > 0)) return null;
+    return { amountGbp, stripeCustomerId: row.stripeCustomerId };
+}
 
 export interface ReferralTokenState {
     /** Spendable balance = matured referral tokens + milestone bonus tokens. */

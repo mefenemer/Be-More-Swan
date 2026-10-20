@@ -1268,7 +1268,8 @@ export const orchestrationRuns = pgTable("orchestration_runs", {
 
 // ── Reward Redemptions — Referral Program Expansion ──────────────────────────
 // Audit trail + double-spend guard for the referral token vault. Each row records
-// a redemption: 'credit_10' (1 token → £10 Stripe credit) or 'free_assistant'
+// a redemption: 'free_month' (1 token → one month of the plan as Stripe credit, since
+// 2026-10-20); legacy rows 'credit_10' (1 token → £10 Stripe credit) or 'free_assistant'
 // (5 tokens → +1 bonus_assistants). availableTokens = matured qualified referrals
 // minus SUM(tokensSpent) here. Written only by owner-role backend functions, so it
 // stays out of the RLS crown-jewels set (like user_referrals).
@@ -1276,7 +1277,7 @@ export const rewardRedemptions = pgTable("reward_redemptions", {
   id: serial().primaryKey(),
   userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   organisationId: integer("organisation_id").references(() => organisations.id, { onDelete: "cascade" }),
-  type: text("type").notNull(),                  // 'credit_10' | 'free_assistant'
+  type: text("type").notNull(),                  // 'free_month' | legacy 'credit_10' | 'free_assistant'
   tokensSpent: integer("tokens_spent").notNull(),
   stripeBalanceTxId: text("stripe_balance_tx_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
