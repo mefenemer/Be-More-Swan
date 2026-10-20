@@ -12247,10 +12247,20 @@ async function confirmCascadeDelete() {
   btn.textContent = 'Deleting…';
 
   try {
-    await api('/.netlify/functions/admin-delete-record', {
-      method: 'POST',
-      body: JSON.stringify({ table: _cascadeTable, id: _cascadeId, reason, previewAcknowledged: true }),
-    });
+    if (_cascadeTable === 'users') {
+      // A user is deleted by admin-api (deleteUserAndSoleOrgs): it also removes a workspace only they
+      // belonged to, logs the GDPR erasure and emails them. admin-delete-record refuses users.
+      await api(`/.netlify/functions/admin-api?resource=user&id=${encodeURIComponent(_cascadeId)}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ reason }),
+      });
+    } else {
+      // DELETE, not POST: admin-delete-record answers anything else with 405 "Method Not Allowed".
+      await api('/.netlify/functions/admin-delete-record', {
+        method: 'DELETE',
+        body: JSON.stringify({ table: _cascadeTable, id: _cascadeId, reason, previewAcknowledged: true }),
+      });
+    }
     closeCascadeDeleteSheet();
     if (typeof _cascadeOnSuccess === 'function') _cascadeOnSuccess();
   } catch (e) {
