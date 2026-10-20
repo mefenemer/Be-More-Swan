@@ -585,7 +585,8 @@ Everything you can change here, the user can also change there by hand.`;
 function mysteryShopperSurfaces(): string {
     return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform, never outside tools:
 - "Website" tab — the tab the user lands on. Their score out of 100 and the three parts of it, what the last check said, the suggested fixes (each with "I'll make this change", "Copy" and "Not for us"), what competitors changed, past checks, and "Check my site now". "Settings" on the same tab changes the website, who it is for, what visitors should do, the competitors and the weekly check day.
-- "Ideas for your other assistants" on the Website tab — each check's briefs for their Social Media, Blog Writing or Campaign Assistant, each with a "Brief <name>" button that opens that assistant's chat with the brief typed in.
+- "Ideas for your other assistants" on the Website tab — each check's briefs for their Social Media, Blog Writing or Campaign Assistant, each with a "Brief <name>" button that opens that assistant's chat with the brief typed in. Once briefed, an idea moves to "History".
+- "History" on the Website tab — past suggestions and what happened to them: fixes that went live, fixes they turned down (each with "Bring back"), briefs sent to their other assistants (each with "Undo"), and earlier checks' ideas nobody acted on.
 - "Goals" tab — the score they are working towards.
 Everything you can do here, the user can also do there by hand.`;
 }

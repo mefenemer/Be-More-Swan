@@ -13,6 +13,10 @@
 //   run        { assistantId }                       → queue a check (baseline the first time); returns runId
 //   run_status { runId }                             → poll a check
 //   fix        { fixId, status: 'accepted'|'dismissed'|'open' }
+//   brief      { assistantId, source: 'idea', runId, handoffIndex }   → a "Brief <name>" click: the
+//              { assistantId, source: 'stalled_fix', fixId }            suggestion is actioned and moves
+//              { assistantId, source: 'chat', target, title?, brief }   to History (site_audit_briefs)
+//   unbrief    { briefId }                           → undo a brief that was clicked by mistake
 //
 // 'done' is never set here: a fix is done when a later check no longer finds the old text on the
 // page (site-audit.ts fixesNowDone). That is the whole "proves the fix landed" promise.
@@ -20,20 +24,26 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
-import { aiAssistants, siteAuditFixes, siteAuditRuns, siteAudits } from '../../db/schema';
+import { aiAssistants, siteAuditBriefs, siteAuditFixes, siteAuditRuns, siteAudits } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { MYSTERY_SHOPPER_ROLE_KEY } from '../../src/constants/roles';
 import { failAuditRun, MAX_COMPETITORS, requestAuditRun, sweepStuckAuditRuns } from '../../src/utils/site-audit';
 import { CONVERSION_GOALS, saveSiteAuditSettings, WEEKDAYS } from '../../src/utils/site-audit-setup';
 import { asUtcDate, nextCheckDate } from '../../src/utils/site-audit-schedule';
-import { HANDOFF_TARGETS } from '../../src/utils/site-audit-prompts';
+import { HANDOFF_TARGETS, type Handoff } from '../../src/utils/site-audit-prompts';
 import { plainLocation } from '../../src/utils/site-score';
 import { pickSecondaryPages, type SitePage } from '../../src/utils/site-extract';
 
 /** A fix the user said they'd make that a check has not found on the site for this long. */
 const STALLED_DAYS = 7;
 import { triggerSiteAudit } from '../../src/utils/trigger-site-audit';
+import { stalledFixBrief } from '../../src/utils/site-audit-briefs';
+
+const BRIEF_SOURCES = ['idea', 'stalled_fix', 'chat'] as const;
+/** Postgres: relation does not exist — db/z-mystery-shopper-briefs.sql not applied yet. */
+const isMissingTable = (err: unknown) => (err as { code?: string })?.code === '42P01'
+    || /site_audit_briefs/.test(String((err as Error)?.message ?? '')) && /does not exist/.test(String((err as Error)?.message ?? ''));
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -102,7 +112,8 @@ export default withLambda(async (event) => {
         }).from(siteAuditFixes)
             .innerJoin(siteAuditRuns, eq(siteAuditRuns.id, siteAuditFixes.runId))
             .where(and(eq(siteAuditFixes.auditId, audit.id), eq(siteAuditRuns.status, 'done')))
-            .orderBy(desc(siteAuditFixes.id)).limit(50))
+            // Every fix, not the latest few: History lists the done and dismissed ones (paged in the tab).
+            .orderBy(desc(siteAuditFixes.id)).limit(1000))
             .map((f) => ({ ...f, location: f.location ? plainLocation(f.location) : f.location }));
 
         // Who can take a hand-off brief: this workspace's working Social / Blog / Campaign assistants.
@@ -137,8 +148,36 @@ export default withLambda(async (event) => {
             if (sitePage) nextPages = pickSecondaryPages(sitePage, 2);
         }
 
+        // History: every check's ideas for the other assistants (the latest check's are also shown on
+        // their own until briefed), and what was briefed. The ideas stay in each run's report — the
+        // record of what the check said; site_audit_briefs is the record of what the user did.
+        const pastIdeas = (await db.select({
+            runId: siteAuditRuns.id, at: siteAuditRuns.createdAt,
+            handoffs: sql<Handoff[] | null>`${siteAuditRuns.report} -> 'handoffs'`,
+        }).from(siteAuditRuns).where(and(
+            eq(siteAuditRuns.auditId, audit.id), eq(siteAuditRuns.status, 'done'),
+            sql`jsonb_typeof(${siteAuditRuns.report} -> 'handoffs') = 'array'`,
+        )).orderBy(desc(siteAuditRuns.id)).limit(500))
+            .filter((r) => Array.isArray(r.handoffs) && r.handoffs.length);
+
+        // Read apart from everything else: before db/z-mystery-shopper-briefs.sql is applied the tab
+        // still works, it just has no record of briefs (and `briefsAvailable` says so).
+        let briefs: Array<typeof siteAuditBriefs.$inferSelect> = [];
+        let briefsAvailable = true;
+        try {
+            briefs = await db.select().from(siteAuditBriefs)
+                .where(and(eq(siteAuditBriefs.auditId, audit.id), eq(siteAuditBriefs.organisationId, orgId)))
+                .orderBy(desc(siteAuditBriefs.id)).limit(1000);
+        } catch (err) {
+            if (!isMissingTable(err)) throw err;
+            briefsAvailable = false;
+        }
+
         const { lastHashes: _h, ...auditOut } = audit;
-        return json(200, { audit: auditOut, runs, latest: latest ?? null, fixes, vocab, team, stalled, nextCheck, nextPages });
+        return json(200, {
+            audit: auditOut, runs, latest: latest ?? null, fixes, vocab, team, stalled, nextCheck, nextPages,
+            pastIdeas, briefs, briefsAvailable,
+        });
     }
 
     if (action === 'save') {
@@ -270,6 +309,85 @@ export default withLambda(async (event) => {
             .returning({ id: siteAuditFixes.id, status: siteAuditFixes.status });
         if (!updated) return json(404, { error: 'Fix not found.' });
         return json(200, { fix: updated });
+    }
+
+    if (action === 'brief') {
+        const shopper = await requireShopper(body.assistantId);
+        if (!shopper) return json(404, { error: 'Assistant not found.' });
+        const audit = await auditFor(shopper.id);
+        if (!audit) return json(400, { error: 'Add your website first.' });
+        const source = String(body.source || '');
+        if (!(BRIEF_SOURCES as readonly string[]).includes(source)) return json(400, { error: 'Unknown brief.' });
+
+        // What was briefed, read from the server's own rows wherever there are some — never the
+        // browser's copy of a check's idea or a fix's wording.
+        let target = '';
+        let title: string | null = null;
+        let brief = '';
+        let runId: number | null = null;
+        let handoffIndex: number | null = null;
+        let fixId: number | null = null;
+        if (source === 'idea') {
+            runId = Number(body.runId);
+            handoffIndex = Number(body.handoffIndex);
+            if (!Number.isInteger(runId) || runId <= 0 || !Number.isInteger(handoffIndex) || handoffIndex < 0) return json(400, { error: 'runId and handoffIndex required.' });
+            const [run] = await db.select({ report: siteAuditRuns.report }).from(siteAuditRuns)
+                .where(and(eq(siteAuditRuns.id, runId), eq(siteAuditRuns.auditId, audit.id), eq(siteAuditRuns.status, 'done'))).limit(1);
+            const h = ((run?.report as { handoffs?: Handoff[] } | null)?.handoffs ?? [])[handoffIndex];
+            if (!h) return json(404, { error: 'That idea was not found.' });
+            target = h.target; title = h.title || null; brief = h.brief;
+        } else if (source === 'stalled_fix') {
+            fixId = Number(body.fixId);
+            if (!Number.isInteger(fixId) || fixId <= 0) return json(400, { error: 'fixId required.' });
+            const [fix] = await db.select({ location: siteAuditFixes.location, afterText: siteAuditFixes.afterText }).from(siteAuditFixes)
+                .where(and(eq(siteAuditFixes.id, fixId), eq(siteAuditFixes.auditId, audit.id))).limit(1);
+            if (!fix) return json(404, { error: 'Fix not found.' });
+            target = 'social_media_manager';
+            title = `A post with the new wording${fix.location ? ` (${plainLocation(fix.location)})` : ''}`;
+            brief = stalledFixBrief(fix.afterText);
+        } else {
+            target = String(body.target || '');
+            brief = String(body.brief || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
+            title = String(body.title || '').replace(/\s+/g, ' ').trim().slice(0, 120) || null;
+            if (!brief) return json(400, { error: 'brief required.' });
+        }
+        if (!(HANDOFF_TARGETS as readonly string[]).includes(target)) return json(400, { error: 'Unknown assistant.' });
+
+        // Who it went to: this workspace's working assistant in that role (as the tab's `team` lists).
+        const [who] = await db.select({ id: aiAssistants.id, name: aiAssistants.name }).from(aiAssistants).where(and(
+            eq(aiAssistants.organisationId, orgId),
+            eq(aiAssistants.isActive, true),
+            sql`(${aiAssistants.configuration} ->> 'type') = ${target}`,
+            sql`${aiAssistants.lifecycleStatus} <> 'archived'`,
+        )).orderBy(aiAssistants.id).limit(1);
+        if (!who) return json(400, { error: 'You don\'t have that assistant yet.' });
+
+        try {
+            const [row] = await db.insert(siteAuditBriefs).values({
+                auditId: audit.id, organisationId: orgId, source, runId, handoffIndex, fixId,
+                targetRole: target, targetAssistantId: who.id, targetName: who.name, title, brief, briefedBy: userId,
+            }).onConflictDoNothing().returning();
+            // Already actioned (a second click, or the other surface got there first) — not an error.
+            return json(200, { brief: row ?? null, already: !row, assistantId: who.id });
+        } catch (err) {
+            if (!isMissingTable(err)) throw err;
+            return json(503, { error: 'Briefs can\'t be recorded yet — the chat still opened.', code: 'BRIEFS_UNAVAILABLE' });
+        }
+    }
+
+    if (action === 'unbrief') {
+        const briefId = Number(body.briefId);
+        if (!Number.isInteger(briefId) || briefId <= 0) return json(400, { error: 'briefId required.' });
+        try {
+            const [gone] = await db.delete(siteAuditBriefs)
+                .where(and(eq(siteAuditBriefs.id, briefId), eq(siteAuditBriefs.organisationId, orgId)))
+                .returning({ id: siteAuditBriefs.id });
+            if (!gone) return json(404, { error: 'Brief not found.' });
+            return json(200, { ok: true });
+        } catch (err) {
+            if (!isMissingTable(err)) throw err;
+            return json(404, { error: 'Brief not found.' });
+        }
     }
 
     return json(400, { error: 'Unknown action.' });

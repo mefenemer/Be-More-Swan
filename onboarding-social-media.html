@@ -9,6 +9,7 @@
        for these, so they must exist before anything can run. -->
   <script src="/dialogs.js"></script>
   <script src="/src/public/role-labels.js"></script>
+  <script src="/src/components/social-profile-url.js"></script>
   <link href="./style.css" rel="stylesheet">
   <script src="/site-theme.js"></script>
   <script src="./explainers.js?v=20260630-2" defer></script>
@@ -555,101 +556,113 @@
           </div>
 
           <label class="block text-sm font-bold text-gray-900 mb-3">Select Platforms & Enter Handles: *</label>
+          <!-- Same shape as Business Information (assets.html #bp-social-grid): the platform's address is
+               fixed in front of the box and only the HANDLE is typed; the full profile URL is built by
+               src/components/social-profile-url.js. Prefilled from Business Information, then Connections,
+               and written back to Business Information on submit (onboarding.ts), so the two never differ. -->
           <div id="social_platforms_container" class="bg-emerald-50 border border-emerald-200 rounded-lg p-4 space-y-4 mb-6">
+            <p class="text-xs text-gray-500">Tick each platform and type just your handle — the part after the web address. Pasting a full link works too.</p>
             <div>
               <label class="flex items-center cursor-pointer">
                 <input type="checkbox" id="chk_fb" value="Facebook" class="h-4 w-4 text-emerald-700 rounded border-gray-300" onchange="toggleHandleInput('fb_handle_container', this.checked)">
                 <span class="ml-2 text-sm text-gray-800">Facebook Page</span>
               </label>
-              <div id="fb_handle_container" class="hidden mt-2 ml-6 relative">
-                <input type="url" id="fb_handle"
-                       class="w-full sm:w-2/3 border border-emerald-200 rounded-md p-2 text-sm focus:ring-2 focus:ring-emerald-700"
-                       value="https://facebook.com/"
-                       placeholder="https://facebook.com/yourpage">
+              <div id="fb_handle_container" class="hidden mt-2 ml-6">
+                <div class="handle-box flex items-stretch w-full sm:w-2/3 border border-emerald-200 rounded-md overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500">
+                  <span class="flex items-center px-3 bg-gray-50 border-r border-gray-200 text-sm text-gray-500 whitespace-nowrap select-none" aria-hidden="true">facebook.com/</span>
+                  <input type="text" id="fb_handle" data-platform="facebook" aria-label="Facebook Page handle" placeholder="yourpage" autocomplete="off" spellcheck="false"
+                         class="flex-1 min-w-0 px-3 py-2 text-sm outline-none bg-transparent">
+                </div>
                 <div class="handle-feedback"></div>
               </div>
             </div>
-
             <div>
               <label class="flex items-center cursor-pointer">
                 <input type="checkbox" id="chk_ig" value="Instagram" class="h-4 w-4 text-emerald-700 rounded border-gray-300" onchange="toggleHandleInput('ig_handle_container', this.checked)">
                 <span class="ml-2 text-sm text-gray-800">Instagram</span>
               </label>
-              <div id="ig_handle_container" class="hidden mt-2 ml-6 relative">
-                <input type="url" id="ig_handle"
-                       class="w-full sm:w-2/3 border border-emerald-200 rounded-md p-2 text-sm focus:ring-2 focus:ring-emerald-700"
-                       value="https://instagram.com/"
-                       placeholder="https://instagram.com/yourhandle">
+              <div id="ig_handle_container" class="hidden mt-2 ml-6">
+                <div class="handle-box flex items-stretch w-full sm:w-2/3 border border-emerald-200 rounded-md overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500">
+                  <span class="flex items-center px-3 bg-gray-50 border-r border-gray-200 text-sm text-gray-500 whitespace-nowrap select-none" aria-hidden="true">instagram.com/</span>
+                  <input type="text" id="ig_handle" data-platform="instagram" aria-label="Instagram handle" placeholder="yourbrand" autocomplete="off" spellcheck="false"
+                         class="flex-1 min-w-0 px-3 py-2 text-sm outline-none bg-transparent">
+                </div>
                 <div class="handle-feedback"></div>
               </div>
             </div>
-
             <div>
               <label class="flex items-center cursor-pointer">
                 <input type="checkbox" id="chk_li" value="LinkedIn" class="h-4 w-4 text-emerald-700 rounded border-gray-300" onchange="toggleHandleInput('li_handle_container', this.checked)">
                 <span class="ml-2 text-sm text-gray-800">LinkedIn</span>
               </label>
-              <div id="li_handle_container" class="hidden mt-2 ml-6 relative">
-                <input type="url" id="li_handle"
-                       class="w-full sm:w-2/3 border border-emerald-200 rounded-md p-2 text-sm focus:ring-2 focus:ring-emerald-700"
-                       value="https://linkedin.com/in/"
-                       placeholder="https://linkedin.com/in/yourprofile">
+              <div id="li_handle_container" class="hidden mt-2 ml-6">
+                <div class="handle-box flex items-stretch w-full sm:w-2/3 border border-emerald-200 rounded-md overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500">
+                  <select id="li_handle_path" data-social-path="linkedin" aria-label="LinkedIn page type"
+                          class="flex items-center px-3 bg-gray-50 border-r border-gray-200 text-sm text-gray-500 whitespace-nowrap select-none cursor-pointer outline-none pr-1">
+                    <option value="company/">linkedin.com/company/</option>
+                    <option value="in/">linkedin.com/in/</option>
+                    <option value="showcase/">linkedin.com/showcase/</option>
+                    <option value="school/">linkedin.com/school/</option>
+                  </select>
+                  <input type="text" id="li_handle" data-platform="linkedin" aria-label="LinkedIn handle" placeholder="yourbrand" autocomplete="off" spellcheck="false"
+                         class="flex-1 min-w-0 px-3 py-2 text-sm outline-none bg-transparent">
+                </div>
                 <div class="handle-feedback"></div>
               </div>
             </div>
-
             <div>
               <label class="flex items-center cursor-pointer">
                 <input type="checkbox" id="chk_x" value="X" class="h-4 w-4 text-emerald-700 rounded border-gray-300" onchange="toggleHandleInput('x_handle_container', this.checked)">
                 <span class="ml-2 text-sm text-gray-800">X (Twitter)</span>
               </label>
-              <div id="x_handle_container" class="hidden mt-2 ml-6 relative">
-                <input type="url" id="x_handle"
-                       class="w-full sm:w-2/3 border border-emerald-200 rounded-md p-2 text-sm focus:ring-2 focus:ring-emerald-700"
-                       value="https://x.com/"
-                       placeholder="https://x.com/yourhandle">
+              <div id="x_handle_container" class="hidden mt-2 ml-6">
+                <div class="handle-box flex items-stretch w-full sm:w-2/3 border border-emerald-200 rounded-md overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500">
+                  <span class="flex items-center px-3 bg-gray-50 border-r border-gray-200 text-sm text-gray-500 whitespace-nowrap select-none" aria-hidden="true">x.com/</span>
+                  <input type="text" id="x_handle" data-platform="x" aria-label="X (Twitter) handle" placeholder="yourbrand" autocomplete="off" spellcheck="false"
+                         class="flex-1 min-w-0 px-3 py-2 text-sm outline-none bg-transparent">
+                </div>
                 <div class="handle-feedback"></div>
               </div>
             </div>
-
             <div>
               <label class="flex items-center cursor-pointer">
                 <input type="checkbox" id="chk_threads" value="Threads" class="h-4 w-4 text-emerald-700 rounded border-gray-300" onchange="toggleHandleInput('threads_handle_container', this.checked)">
                 <span class="ml-2 text-sm text-gray-800">Threads</span>
               </label>
-              <div id="threads_handle_container" class="hidden mt-2 ml-6 relative">
-                <input type="url" id="threads_handle"
-                       class="w-full sm:w-2/3 border border-emerald-200 rounded-md p-2 text-sm focus:ring-2 focus:ring-emerald-700"
-                       value="https://threads.net/@"
-                       placeholder="https://threads.net/@yourhandle">
+              <div id="threads_handle_container" class="hidden mt-2 ml-6">
+                <div class="handle-box flex items-stretch w-full sm:w-2/3 border border-emerald-200 rounded-md overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500">
+                  <span class="flex items-center px-3 bg-gray-50 border-r border-gray-200 text-sm text-gray-500 whitespace-nowrap select-none" aria-hidden="true">threads.com/@</span>
+                  <input type="text" id="threads_handle" data-platform="threads" aria-label="Threads handle" placeholder="yourbrand" autocomplete="off" spellcheck="false"
+                         class="flex-1 min-w-0 px-3 py-2 text-sm outline-none bg-transparent">
+                </div>
                 <div class="handle-feedback"></div>
               </div>
             </div>
-
             <div>
               <label class="flex items-center cursor-pointer">
                 <input type="checkbox" id="chk_tiktok" value="TikTok" class="h-4 w-4 text-emerald-700 rounded border-gray-300" onchange="toggleHandleInput('tiktok_handle_container', this.checked)">
                 <span class="ml-2 text-sm text-gray-800">TikTok</span>
               </label>
-              <div id="tiktok_handle_container" class="hidden mt-2 ml-6 relative">
-                <input type="url" id="tiktok_handle"
-                       class="w-full sm:w-2/3 border border-emerald-200 rounded-md p-2 text-sm focus:ring-2 focus:ring-emerald-700"
-                       value="https://tiktok.com/@"
-                       placeholder="https://tiktok.com/@yourhandle">
+              <div id="tiktok_handle_container" class="hidden mt-2 ml-6">
+                <div class="handle-box flex items-stretch w-full sm:w-2/3 border border-emerald-200 rounded-md overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500">
+                  <span class="flex items-center px-3 bg-gray-50 border-r border-gray-200 text-sm text-gray-500 whitespace-nowrap select-none" aria-hidden="true">tiktok.com/@</span>
+                  <input type="text" id="tiktok_handle" data-platform="tiktok" aria-label="TikTok handle" placeholder="yourbrand" autocomplete="off" spellcheck="false"
+                         class="flex-1 min-w-0 px-3 py-2 text-sm outline-none bg-transparent">
+                </div>
                 <div class="handle-feedback"></div>
               </div>
             </div>
-
             <div>
               <label class="flex items-center cursor-pointer">
                 <input type="checkbox" id="chk_youtube" value="YouTube" class="h-4 w-4 text-emerald-700 rounded border-gray-300" onchange="toggleHandleInput('youtube_handle_container', this.checked)">
                 <span class="ml-2 text-sm text-gray-800">YouTube</span>
               </label>
-              <div id="youtube_handle_container" class="hidden mt-2 ml-6 relative">
-                <input type="url" id="youtube_handle"
-                       class="w-full sm:w-2/3 border border-emerald-200 rounded-md p-2 text-sm focus:ring-2 focus:ring-emerald-700"
-                       value="https://youtube.com/@"
-                       placeholder="https://youtube.com/@yourchannel">
+              <div id="youtube_handle_container" class="hidden mt-2 ml-6">
+                <div class="handle-box flex items-stretch w-full sm:w-2/3 border border-emerald-200 rounded-md overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500">
+                  <span class="flex items-center px-3 bg-gray-50 border-r border-gray-200 text-sm text-gray-500 whitespace-nowrap select-none" aria-hidden="true">youtube.com/@</span>
+                  <input type="text" id="youtube_handle" data-platform="youtube" aria-label="YouTube handle" placeholder="yourchannel" autocomplete="off" spellcheck="false"
+                         class="flex-1 min-w-0 px-3 py-2 text-sm outline-none bg-transparent">
+                </div>
                 <div class="handle-feedback"></div>
               </div>
             </div>
@@ -922,18 +935,59 @@
   // reads the real tier from check-capacity), not through maxApps/maxSteps. The per-tier limits
   // map that used to sit here was assigned and never read.
 
+  // Each box holds only the HANDLE (the address is fixed in front of it), so these check a handle.
+  // A pasted link is first split into its handle by window.SocialProfileUrl — the same reader
+  // Business Information uses — so either form passes.
   const handlePatterns = {
-    // Accepts a vanity URL (facebook.com/yourpage) AND the numeric profile form
-    // (facebook.com/profile.php?id=1234…), which is what Facebook gives profiles/pages
-    // without a username. The old pattern only allowed [\w.-]+, so the ?id= query was rejected.
-    'fb': { regex: /^(https?:\/\/)?(www\.)?facebook\.com\/(profile\.php\?id=\d+|[\w.-]+)\/?$/, example: "https://facebook.com/yourpage" },
-    'ig': { regex: /^@?[a-zA-Z0-9._]{1,30}$/, example: "@yourbrand" },
-    'li': { regex: /^(https?:\/\/)?(www\.)?linkedin\.com\/(in|company)\/[\w-]+\/?$/, example: "https://linkedin.com/in/yourprofile" },
-    'x':  { regex: /^@?[a-zA-Z0-9_]{1,15}$/, example: "@yourhandle" },
-    'threads': { regex: /^@?[a-zA-Z0-9._]{1,30}$/, example: "@yourbrand" },
-    'tiktok':  { regex: /^@?[a-zA-Z0-9._]{2,24}$/, example: "@yourbrand" },
-    'youtube': { regex: /^@?[a-zA-Z0-9._-]{3,30}$/, example: "@yourchannel" }
+    // A vanity name, or the numeric profile form Facebook gives pages without a username.
+    'fb': { regex: /^(profile\.php\?id=\d+|[\w.-]+)$/, example: "yourpage" },
+    'ig': { regex: /^[a-zA-Z0-9._]{1,30}$/, example: "yourbrand" },
+    'li': { regex: /^[\w-]+$/, example: "yourbrand" },
+    'x':  { regex: /^[a-zA-Z0-9_]{1,15}$/, example: "yourbrand" },
+    'threads': { regex: /^[a-zA-Z0-9._]{1,30}$/, example: "yourbrand" },
+    'tiktok':  { regex: /^[a-zA-Z0-9._]{2,24}$/, example: "yourbrand" },
+    'youtube': { regex: /^([a-zA-Z0-9._-]{3,30}|(channel|c|user)\/[\w-]+)$/, example: "yourchannel" }
   };
+
+  // Short code → the platform slug Business Information (organisations.social_handles) uses.
+  const PLATFORM_SLUGS = { fb: 'facebook', ig: 'instagram', li: 'linkedin', x: 'x', threads: 'threads', tiktok: 'tiktok', youtube: 'youtube' };
+  const SPU = () => window.SocialProfileUrl;
+
+  /** Put a stored URL, "@handle" or pasted link into the box as just the handle (LinkedIn: and its page type). */
+  function setHandleBox(p, raw) {
+    const input = document.getElementById(`${p}_handle`);
+    if (!input) return;
+    if (!SPU()) { input.value = raw || ''; return; }
+    const { path, handle, explicitPath } = SPU().split(PLATFORM_SLUGS[p], raw);
+    input.value = handle;
+    // Only when the text itself named the page type ("linkedin.com/in/jane") — a bare handle must
+    // not reset a picker the user set to "in/" back to the default.
+    const sel = document.getElementById(`${p}_handle_path`);
+    if (sel && explicitPath) sel.value = path;
+  }
+
+  /** The full profile URL for a platform's box — what Business Information stores. '' when empty. */
+  function profileUrlFor(p) {
+    const input = document.getElementById(`${p}_handle`);
+    const v = (input?.value || '').trim();
+    if (!v) return '';
+    if (!SPU()) return v;
+    const parts = SPU().split(PLATFORM_SLUGS[p], v);
+    const path = parts.explicitPath ? parts.path : (document.getElementById(`${p}_handle_path`)?.value || '');
+    return SPU().compose(PLATFORM_SLUGS[p], path, parts.handle) || v;
+  }
+
+  /** { slug: profile URL } for every ticked platform with a handle — written back to Business Information. */
+  function collectSocialHandles() {
+    const out = {};
+    PLATFORM_CODES.forEach(p => {
+      if (!document.getElementById(`chk_${p}`)?.checked) return;
+      const url = profileUrlFor(p);
+      if (url) out[PLATFORM_SLUGS[p]] = url;
+    });
+    return out;
+  }
+
 
   // Platform short codes — must stay in sync with the chk_* checkboxes in step 5, the
   // algo_block_* helpers and _platformCodes/_hydratePlatformStrategy in assistants.js.
@@ -951,8 +1005,9 @@
     // Resume existing draft
     await hydrateDraft();
 
-    // Single source of truth: prefill social handles from connected accounts
+    // Prefill social handles from Business Information, then connected accounts
     // (only platforms the draft didn't already set).
+    await prefillSocialsFromBusinessInfo();
     await prefillSocialsFromConnections();
 
     // US1–US3: gate premium feature toggles by the user's real subscription tier.
@@ -1010,7 +1065,15 @@
     });
 
     document.querySelectorAll('input[id$="_handle"]').forEach(input => {
-      input.addEventListener('input', function() { validateHandle(this.id.split('_')[0], this); });
+      const p = input.id.replace(/_handle$/, '');
+      input.addEventListener('input', function() { validateHandle(p, this); });
+      // A pasted full link (or "@name") becomes just the handle when they leave the box — not while
+      // typing, which would move the caret under their fingers.
+      input.addEventListener('blur', function() {
+        const before = this.value;
+        setHandleBox(p, before.trim());
+        if (this.value !== before) { validateHandle(p, this); triggerAutoSave(); }
+      });
     });
 
     document.querySelectorAll('input[type="radio"]').forEach(el => {
@@ -1231,6 +1294,9 @@
           PLATFORM_CODES.forEach(p => {
             const chk = document.getElementById(`chk_${p}`);
             if(chk) toggleHandleInput(`${p}_handle_container`, chk.checked);
+            // Drafts saved before the handle boxes hold a full URL (or a bare "https://x.com/").
+            const box = document.getElementById(`${p}_handle`);
+            if (box && box.value) setHandleBox(p, box.value);
           });
 
           // 5. Resume User Location — a ?step deep-link from the Setup Checklist wins.
@@ -1261,43 +1327,32 @@
 
   // --- 5. VALIDATION LOGIC ---
   function validateHandle(platform, inputEl) {
-    const errorMsg = inputEl.parentNode.querySelector('.handle-feedback') || createErrorEl(inputEl);
-    let fullUrl = inputEl.value.trim();
+    const holder = inputEl.closest(`#${platform}_handle_container`) || inputEl.parentNode;
+    const errorMsg = holder.querySelector('.handle-feedback') || createErrorEl(inputEl);
+    const raw = inputEl.value.trim();
+    const handle = SPU() ? SPU().split(PLATFORM_SLUGS[platform], raw).handle : raw.replace(/^@+/, '');
 
-    // EXTRACTION LOGIC: Normalize full URLs to just the handle/path
-    let cleanHandle = fullUrl
-            .replace(/^https?:\/\/(www\.)?facebook\.com\//i, '')
-            .replace(/^https?:\/\/(www\.)?instagram\.com\//i, '')
-            .replace(/^https?:\/\/(www\.)?linkedin\.com\/(in|company)\//i, '')
-            .replace(/^https?:\/\/(www\.)?twitter\.com\//i, '')
-            .replace(/^https?:\/\/(www\.)?x\.com\//i, '')
-            .replace(/^https?:\/\/(www\.)?threads\.(net|com)\//i, '')
-            .replace(/^https?:\/\/(www\.)?tiktok\.com\//i, '')
-            .replace(/^https?:\/\/(www\.)?youtube\.com\//i, '')
-            .replace('@', '')
-            .replace(/\/$/, '');
-
-    // Format check
-    const isValidFormat = handlePatterns[platform].regex.test(fullUrl) || handlePatterns[platform].regex.test(cleanHandle);
-
-    if (!isValidFormat) {
-      showError(inputEl, errorMsg, `Please enter a valid format, e.g., ${handlePatterns[platform].example}`);
+    if (!handlePatterns[platform].regex.test(handle)) {
+      showError(inputEl, errorMsg, raw ? `That doesn't look like a handle — type just the part after the address, e.g. ${handlePatterns[platform].example}` : 'Type your handle, or untick this platform.');
       return false;
-    } else {
-      showSuccess(inputEl, errorMsg);
-      return true;
     }
+    showSuccess(inputEl, errorMsg);
+    return true;
   }
 
   // Inject strict Tailwind text colors to override default div styling
+  // A handle box draws its border on the wrapper (prefix + input), so colour that.
   function showSuccess(el, err) {
+    el = el.closest('.handle-box') || el;
     el.classList.remove('animate-pulse', 'input-error', 'border-red-500');
     el.classList.add('border-green-500');
-    err.innerText = '✓ Verified';
+    // A format check only — nothing has been looked up, so it must not say "verified".
+    err.innerText = '✓ Looks right';
     err.className = 'handle-feedback text-sm font-bold text-green-600 mt-1 block';
   }
 
   function showError(el, err, msg) {
+    el = el.closest('.handle-box') || el;
     el.classList.remove('animate-pulse', 'border-green-500');
     el.classList.add('input-error', 'border-red-500');
     err.innerText = msg;
@@ -1387,27 +1442,15 @@
     // --- Step 5 Validation (With Auto-Prefixing) ---
     else if (currentStep === 5) {
       let hasPlatform = false, allHandlesValid = true;
-      const prefixes = { 'fb': 'https://facebook.com/', 'li': 'https://linkedin.com/' };
 
       for (const p of PLATFORM_CODES) {
         const chk = document.getElementById(`chk_${p}`);
         if (chk?.checked) {
           hasPlatform = true;
           const handleEl = document.getElementById(`${p}_handle`);
-          let val = handleEl.value.trim();
-
-          // Apply auto-prefixing if needed
-          if (prefixes[p] && val !== '' && !val.startsWith('http')) {
-            val = prefixes[p] + val.replace(/^\//, '');
-            handleEl.value = val;
-          }
-
-          // Use the newly synchronous validateHandle to check format
-          const isFormatValid = validateHandle(p, handleEl);
-          if (!isFormatValid) {
-            allHandlesValid = false;
-            handleEl.classList.add('input-error');
-          }
+          // Tidy a pasted link into the handle first, as Business Information does on blur.
+          setHandleBox(p, handleEl.value.trim());
+          if (!validateHandle(p, handleEl)) allHandlesValid = false;
         }
       }
 
@@ -1435,38 +1478,40 @@
     document.getElementById('algorithm_helpers_container').classList.toggle('hidden', !hasPlatform);
   }
 
-  // Single source of truth for social handles = Connections. Prefill the platform
-  // handles from already-connected accounts so we never ask for them twice. Only
-  // fills platforms the draft hasn't already set — never overrides the user.
+  // Social handles live on Business Information (organisations.social_handles). Prefill each box from
+  // there first, then from any connected account for a platform still empty — so nobody types a handle
+  // twice. Only fills platforms the draft hasn't already set; never overrides the user.
+  function prefillHandle(p, raw) {
+    const chk = document.getElementById(`chk_${p}`);
+    const input = document.getElementById(`${p}_handle`);
+    if (!chk || !input || chk.checked || input.value.trim() || !String(raw || '').trim()) return false;
+    chk.checked = true;
+    toggleHandleInput(`${p}_handle_container`, true);
+    setHandleBox(p, String(raw).trim());
+    input.dispatchEvent(new Event('input', { bubbles: true })); // validate + autosave
+    return true;
+  }
+
+  async function prefillSocialsFromBusinessInfo() {
+    try {
+      const res = await fetch('/.netlify/functions/organisation-profile');
+      if (!res.ok) return;
+      const { profile } = await res.json();
+      const handles = (profile && profile.socialHandles) || {};
+      PLATFORM_CODES.forEach(p => prefillHandle(p, handles[PLATFORM_SLUGS[p]]));
+    } catch { /* non-fatal */ }
+  }
+
   async function prefillSocialsFromConnections() {
-    const MAP = {
-      instagram: { p: 'ig', base: 'https://instagram.com/' },
-      facebook:  { p: 'fb', base: 'https://facebook.com/' },
-      linkedin:  { p: 'li', base: 'https://linkedin.com/in/' },
-      x:         { p: 'x',  base: 'https://x.com/' },
-      twitter:   { p: 'x',  base: 'https://x.com/' },
-      threads:   { p: 'threads', base: 'https://threads.net/@' },
-      tiktok:    { p: 'tiktok',  base: 'https://tiktok.com/@' },
-      youtube:   { p: 'youtube', base: 'https://youtube.com/@' },
-    };
+    const MAP = { instagram: 'ig', facebook: 'fb', linkedin: 'li', x: 'x', twitter: 'x', threads: 'threads', tiktok: 'tiktok', youtube: 'youtube' };
     try {
       const res = await fetch('/.netlify/functions/integrations');
       if (!res.ok) return;
       const { connections } = await res.json();
       (connections || []).forEach(c => {
         if (!c.connected) return;
-        const m = MAP[(c.serviceName || '').toLowerCase()];
-        if (!m) return;
-        const chk = document.getElementById(`chk_${m.p}`);
-        const input = document.getElementById(`${m.p}_handle`);
-        if (!chk || !input || chk.checked || input.value.trim()) return; // draft wins
-        let url = (c.externalUserId || '').trim();
-        if (!url) return;
-        if (!/^https?:\/\//i.test(url)) url = m.base + url.replace(/^@/, '');
-        chk.checked = true;
-        toggleHandleInput(`${m.p}_handle_container`, true);
-        input.value = url;
-        input.dispatchEvent(new Event('input', { bubbles: true })); // validate + autosave
+        const p = MAP[(c.serviceName || '').toLowerCase()];
+        if (p) prefillHandle(p, c.externalUserId);
       });
     } catch { /* non-fatal */ }
   }
@@ -1668,7 +1713,7 @@
     PLATFORM_CODES.forEach(p => {
       const chk = document.getElementById(`chk_${p}`);
       if (chk && chk.checked) {
-        platforms.push(`${chk.value} (${document.getElementById(`${p}_handle`)?.value || missingFallback})`);
+        platforms.push(`${chk.value} (${profileUrlFor(p) || missingFallback})`);
       }
     });
 
@@ -1915,6 +1960,8 @@
       tier: currentTierKey,
       ...(draftId ? { draftId } : {}),
       rawInputs: window.globalRawInputs,
+      // Written back to Business Information (organisations.social_handles) — one place for handles.
+      socialHandles: collectSocialHandles(),
       mediaSources,
       onboardingContext: structuredContext,
       // EU AI Act Art. 50 disclosure — persisted on the assistant so it's pre-set at Kick Off.

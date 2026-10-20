@@ -301,8 +301,8 @@ export default withLambda(async (event) => {
         });
 
         // Referral Program Expansion: earn a referral TOKEN (not an instant £10 credit).
-        // The token matures after the 14-day refund window and is then spendable in the
-        // Reward Vault for £10 credit or a free assistant.
+        // The token matures after the 14-day refund window and is then
+        // claimable on the Refer a Friend page as one free month of their plan (referral-tokens.ts).
         // Only when money was taken: a referred friend's first month is free (£0 session), and
         // their referral then qualifies on the first PAID invoice instead (invoice.paid below).
         if ((session.amount_total ?? 0) > 0) {
@@ -500,7 +500,7 @@ export default withLambda(async (event) => {
         // ── Referral Program Expansion: earn a referral TOKEN ────────
         // The referred friend's first payment qualifies the referral. We no longer apply
         // an instant £10 credit — the referrer gets a token (matures after the 14-day
-        // refund window) to spend in the Reward Vault for £10 credit or a free assistant.
+        // refund window), claimed on the Refer a Friend page as one free month (referral-tokens.ts).
         try {
             await qualifyPendingReferral(db, userIdInt);
         } catch (refErr) {

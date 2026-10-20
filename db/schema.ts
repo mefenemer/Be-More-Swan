@@ -1268,7 +1268,8 @@ export const orchestrationRuns = pgTable("orchestration_runs", {
 
 // ── Reward Redemptions — Referral Program Expansion ──────────────────────────
 // Audit trail + double-spend guard for the referral token vault. Each row records
-// a redemption: 'credit_10' (1 token → £10 Stripe credit) or 'free_assistant'
+// a redemption: 'free_month' (1 token → one month of the plan as Stripe credit, since
+// 2026-10-20); legacy rows 'credit_10' (1 token → £10 Stripe credit) or 'free_assistant'
 // (5 tokens → +1 bonus_assistants). availableTokens = matured qualified referrals
 // minus SUM(tokensSpent) here. Written only by owner-role backend functions, so it
 // stays out of the RLS crown-jewels set (like user_referrals).
@@ -1276,7 +1277,7 @@ export const rewardRedemptions = pgTable("reward_redemptions", {
   id: serial().primaryKey(),
   userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   organisationId: integer("organisation_id").references(() => organisations.id, { onDelete: "cascade" }),
-  type: text("type").notNull(),                  // 'credit_10' | 'free_assistant'
+  type: text("type").notNull(),                  // 'free_month' | legacy 'credit_10' | 'free_assistant'
   tokensSpent: integer("tokens_spent").notNull(),
   stripeBalanceTxId: text("stripe_balance_tx_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -5655,6 +5656,31 @@ export const siteAuditFixes = pgTable("site_audit_fixes", {
   check("site_audit_fixes_lens_check", sql`${t.lens} IN ('clarity','compete','ai')`),
   check("site_audit_fixes_impact_check", sql`${t.impact} IN ('high','medium','low')`),
   check("site_audit_fixes_status_check", sql`${t.status} IN ('open','accepted','done','dismissed')`),
+]);
+
+// What the user did with the Mystery Shopper's ideas for their other assistants: a "Brief <name>"
+// click marks the suggestion actioned and moves it to the Website tab's History.
+// Requires db/z-mystery-shopper-briefs.sql.
+export const siteAuditBriefs = pgTable("site_audit_briefs", {
+  id: serial().primaryKey(),
+  auditId: integer("audit_id").notNull().references(() => siteAudits.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  source: text().notNull(),
+  runId: integer("run_id").references(() => siteAuditRuns.id, { onDelete: "cascade" }),
+  handoffIndex: smallint("handoff_index"),
+  fixId: integer("fix_id").references(() => siteAuditFixes.id, { onDelete: "cascade" }),
+  targetRole: text("target_role").notNull(),
+  targetAssistantId: integer("target_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  targetName: text("target_name"),
+  title: text(),
+  brief: text().notNull(),
+  briefedBy: integer("briefed_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("site_audit_briefs_audit_idx").on(t.auditId, t.createdAt.desc()),
+  uniqueIndex("site_audit_briefs_idea_uq").on(t.runId, t.handoffIndex).where(sql`source = 'idea'`),
+  uniqueIndex("site_audit_briefs_fix_uq").on(t.fixId).where(sql`source = 'stalled_fix'`),
+  check("site_audit_briefs_source_check", sql`${t.source} IN ('idea','stalled_fix','chat')`),
 ]);
 
 // ── Website Assistant — one site per hired assistant (docs/website-assistant-plan.md §6) ─────────

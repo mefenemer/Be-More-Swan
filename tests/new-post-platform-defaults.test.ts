@@ -40,7 +40,8 @@ check('the Create Post sheet preselects every connected platform', () => {
 });
 
 check('the command bar asks for a fan-out, not one network', () => {
-    const block = ws.slice(landmark(ws, "if (d.type === 'delegate' && d.assistantId)"));
+    // The draft runs in draftViaAssistant since 2026-10-20 (the bar proposes, the user confirms).
+    const block = ws.slice(landmark(ws, 'async function draftViaAssistant(d, command) {'));
     const body = block.slice(0, 2200);
     assert.match(body, /platforms: platforms\.length \? platforms : undefined/,
         'sending `platform` alone stores a legacy single-platform job');

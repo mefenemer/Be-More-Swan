@@ -1735,7 +1735,7 @@
       el.dispatchEvent(new CustomEvent('siteaudit:handoff', {
         bubbles: true,
         detail: {
-          target, brief,
+          target, brief, title,
           respond({ ok, error }) {
             btn.disabled = false;
             if (!ok) say(error || 'Could not open their chat.', 'error');

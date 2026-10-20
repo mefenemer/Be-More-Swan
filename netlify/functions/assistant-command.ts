@@ -12,7 +12,7 @@
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
 import { logMessageUsage } from '../../src/utils/ai-usage';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
@@ -21,6 +21,7 @@ import { provisioningBlockInfo } from '../../src/utils/assistant-lifecycle';
 import { normalizePlatform } from '../../src/config/platform-formats';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson } from '../../src/utils/model-json';
+import { loadHelpKnowledge } from '../../src/utils/help-knowledge';
 
 import { liveRoleLabel } from '../../src/utils/live-role-label';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -64,11 +65,12 @@ export default withLambda(async (event) => {
     // All non-archived assistants (with live status) so the bar can both route/delegate AND
     // actually answer "why isn't X working" questions instead of vaguely promising to look into
     // it — every assistant's real lifecycle/provisioning state is given to the LLM below.
-    const [allAssistants, progress] = await Promise.all([
+    const [allAssistants, progress, kb] = await Promise.all([
         db.select({
             id: aiAssistants.id,
             name: aiAssistants.name,
             role: liveRoleLabel,
+            roleKey: sql<string | null>`${aiAssistants.configuration} ->> 'type'`,
             lifecycleStatus: aiAssistants.lifecycleStatus,
             provisioningStatus: aiAssistants.provisioningStatus,
             provisioningBlockedReason: aiAssistants.provisioningBlockedReason,
@@ -76,10 +78,16 @@ export default withLambda(async (event) => {
             .from(aiAssistants)
             .where(and(eq(aiAssistants.organisationId, orgId), inArray(aiAssistants.lifecycleStatus, ['provisioning', 'ready_for_work', 'working', 'paused', 'system_paused']))),
         computeOnboardingProgress(db, orgId, userId),
+        loadHelpKnowledge(db),
     ]);
 
-    // Delegation only makes sense for assistants that can actually pick up work.
+    // Delegation only makes sense for assistants that can actually pick up work — and ONLY the
+    // Social Media Assistant: the client delegates through generate-post, which writes a social post
+    // job for whatever assistant it is given. "Draft a blog post" used to land as a social job on the
+    // Blog Writer (2026-10-20). Other roles are pointed at their own page instead.
+    const DELEGATE_ROLE = 'social_media_manager';
     const assistants = allAssistants.filter(a => ['working', 'ready_for_work', 'paused'].includes(a.lifecycleStatus));
+    const delegates = assistants.filter(a => a.roleKey === DELEGATE_ROLE);
 
     // Plain-English status per assistant so the LLM can give a real, specific answer instead of
     // deflecting to "let me look into it" with nothing to actually check.
@@ -117,6 +125,12 @@ export default withLambda(async (event) => {
                 : '',
         ].filter(Boolean).join('\n');
 
+    // The Help Centre, verbatim. Kept in its own system block AHEAD of everything per-user so it is a
+    // stable cached prefix: only the first question in each cache window pays for the articles.
+    const knowledge = kb.text
+        ? `These are the published Help Centre articles for Be More Swan. They are the ONLY reliable source for how the product works, what it costs and what it can and cannot do.\n\n${kb.text}`
+        : 'The Help Centre articles could not be loaded right now. For "how does it work" questions say you cannot check the Help Centre at the moment and point the user to the Knowledge Base tab.';
+
     const system = `You are the command interpreter for "Be More Swan", a digital-assistant platform for small businesses.
 The user typed a quick command into a Spotlight-style command bar. Decide the single best action and reply in JSON only.
 
@@ -142,21 +156,22 @@ ${assistantList}
 The user's setup progress (use this to answer "what's left to do?", "what should I do next?", "how do I get started?", or to tailor any guidance to where they actually are — never assume they're fully set up):
 ${setupSummary}
 
-Return STRICT JSON (no markdown, no prose) with this shape:
+Return ONE strict JSON object and nothing else — no markdown fences, no text before or after it (anything outside the object is thrown away). Shape:
 {
   "type": "navigate" | "delegate" | "answer",
-  "reply": "one short, warm first-person sentence confirming what you're doing",
+  "reply": "for navigate/delegate: one short, warm first-person sentence confirming what you're doing. For answer: THE ANSWER ITSELF, with the actual facts",
   "view": "<one view key>",          // only for navigate
   "assistantId": <number|null>,       // only for delegate; pick the most relevant active assistant, else null
   "platform": "instagram|facebook|linkedin|x|null",  // only for delegate, if a social platform is named/implied
   "brief": "<concise brief of what to create>",       // only for delegate
   "suggestView": "<one view key|null>",              // only for answer; the view where the user can do what they asked about
-  "suggestReportIssue": <true|false>                  // only for answer; true when you cannot fully resolve a "not working" question from the status data given
+  "suggestReportIssue": <true|false>,                 // only for answer; true when you cannot fully resolve a "not working" question from the status data given
+  "article": "<exact title of the Help Centre article your answer comes from|null>"  // only for answer
 }
 
 Rules:
 - "navigate" when the user wants to go somewhere or see something (e.g. "show my review queue", "open calendar", "what needs approval").
-- "delegate" when the user wants the team to CREATE or DO something (e.g. "draft a LinkedIn post about our sale", "write an Instagram caption"). Choose the most relevant assistant id; if none fits, set assistantId null and still give a brief.
+- "delegate" ONLY when the user wants a SOCIAL MEDIA post or caption drafted (e.g. "draft a LinkedIn post about our sale", "write an Instagram caption"), and only to a Social Media Assistant from the list. The reply must say you'll draft it once they confirm (the user gets a "Draft it" button) — never that it is already done. For anything else they want created (a blog post, an email or newsletter, leads, a website change), use type "answer", name the assistant from the list that does it, and set "suggestView" to "assistants". You cannot hand work to those assistants from here, so never say you will ask them or that it is started — say where to do it (e.g. "Quill, your Blog Writing Assistant, writes those — open it from Assistants and ask there.").
 - "answer" for questions you can answer briefly, greetings, or anything that doesn't map to a view or a delegation.
 - For "why isn't <assistant> working" / "what's wrong with <assistant>" / "<assistant> isn't posting" style questions, use type "answer" and give a REAL, specific diagnosis straight from that assistant's status line above (e.g. name the actual paused/blocked/provisioning reason and the concrete fix). NEVER reply with a vague promise like "let me look into that" or "I'll help you diagnose this" — you have no way to investigate further than the status already given, so either state the concrete cause now or immediately say you can't tell from here.
 - If the assistant's status above already looks healthy ("active and running normally") but the user insists something is wrong, OR the status data doesn't explain the specific problem they describe, say plainly that you can't identify the cause from here and set "suggestReportIssue" to true so they can report it to be looked into — do not just say you'll look into it yourself and stop.
@@ -164,24 +179,30 @@ Rules:
 - For "how do I / where do I / where can I" questions whose answer lives in a workspace view (e.g. "how do I change my settings", "where do I update billing"), use type "answer" AND set "suggestView" to that view key. The client will show a "Take me there →" button, so the reply should name the place (e.g. "You can change that under Settings — I'll add a button to take you there.") and must NOT claim you have already navigated.
 - Only promise to take the user somewhere when you actually set "view" (navigate) or "suggestView" (answer). Never say "I'll point you there" or "taking you there" without one of those set.
 - ONLY set "view" or "suggestView" to a view that genuinely supports what the user asked, per the capability list above. If NO view supports the request (e.g. "change the dashboard colour", "turn on dark mode", "change the theme/font"), DO NOT navigate or set suggestView. Instead return type "answer", suggestView null, and say plainly that the feature isn't available — mention the closest real capability if there is one (e.g. "The dashboard's colours aren't customisable, but you can rearrange its widgets with the Customize button on the dashboard."). Never route the user to a view that can't do the thing they asked.
-- Keep "reply" under 22 words, friendly, first person ("On it — ...", "Opening ...", "Here's ...").
+- For questions about how Be More Swan works, what something does, what a plan includes, prices, limits, billing, referrals, connections, or "how do I / can I / does it…": use type "answer" and answer FROM THE HELP CENTRE ARTICLES above, in plain words. "reply" IS the answer: put the actual facts or steps in it (e.g. "The Workflow Saver is £29 a month: every assistant, one working at a time, 500 tasks a month."), never a teaser like "Here's what it includes" or "I'll show you how it works" — nothing outside the JSON is shown to the user, and the article button is only for reading more. Bad: "Here's how you earn free months." Good: "Your friend gets their first paid month free, and once they've paid you get a month of your plan free too." Set "article" to the exact title of the article the answer comes from, so the user gets a "Read the article" button. Also set "suggestView" when there is a workspace view where they do the thing.
+- If the articles do not cover the question, say plainly that the Help Centre doesn't cover it, set "article" to null, and suggest the Contact us tab (suggestView "help"). NEVER fill the gap from general knowledge or guess at features, prices or limits — a wrong answer here is worse than "I don't know".
+- Keep "reply" under 22 words, friendly, first person ("On it — ...", "Opening ...", "Here's ...") — except a Help Centre answer, which may use up to 70 words so it actually answers the question.
 - Never invent assistant ids or view keys.`;
 
     try {
         const response = await anthropic.messages.create({
             model: MODEL,
-            max_tokens: 300,
-            system,
+            max_tokens: 600,
+            system: [
+                { type: 'text', text: knowledge, cache_control: { type: 'ephemeral' } },
+                { type: 'text', text: system },
+            ],
             messages: [{ role: 'user', content: command }],
         });
         logMessageUsage(response, MODEL, { workspaceId: orgId, userId, sessionId: 'assistant-command' });
 
-        const raw = (response.content[0] as { text: string }).text.trim();
+        const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
+        const raw = (textBlock?.text ?? '').trim();
         // Shared extractor (src/utils/model-json.ts), not a local fence-strip: the private copies
         // anchored their strip to the start of the reply and lost any answer with a line above it.
         const parsed = parseModelJson<{
             type?: string; reply?: string; view?: string;
-            suggestView?: string; suggestReportIssue?: boolean;
+            suggestView?: string; suggestReportIssue?: boolean; article?: unknown;
             assistantId?: unknown; platform?: unknown; brief?: unknown;
         }>(raw);
         if (!parsed) {
@@ -200,16 +221,25 @@ Rules:
             // "why isn't X working" questions the LLM couldn't fully resolve: surface a
             // "Report an issue →" button instead of leaving the user with a dead-end promise.
             if (parsed.suggestReportIssue === true) out.suggestReportIssue = true;
+            // Only a title that really exists — the client opens it by exact title.
+            if (typeof parsed.article === 'string' && kb.titles.includes(parsed.article)) out.article = parsed.article;
         } else if (type === 'delegate') {
-            const validId = assistants.find(a => a.id === Number(parsed.assistantId));
+            const picked = assistants.find(a => a.id === Number(parsed.assistantId));
+            const validId = delegates.find(a => a.id === Number(parsed.assistantId)) || (delegates.length === 1 && !picked ? delegates[0] : undefined);
             out.assistantId = validId ? validId.id : null;
+            out.assistantName = validId ? validId.name : undefined;
             // Normalised through the shared catalogue rather than matched against a local list:
             // the hand-written four here predated Threads and YouTube, so delegating "post this to
             // Threads" silently resolved the platform to null.
             out.platform = normalizePlatform(parsed.platform);
             out.brief = typeof parsed.brief === 'string' ? parsed.brief.slice(0, 500) : command;
             // If we have no assistant to delegate to, soften to guidance.
-            if (!out.assistantId) {
+            if (!out.assistantId && picked) {
+                // The model chose a non-social assistant: send the user to it rather than mis-file.
+                out.type = 'answer';
+                out.reply = `That's one for ${picked.name} — open it from Assistants and ask there.`;
+                out.suggestView = 'assistants';
+            } else if (!out.assistantId) {
                 out.type = 'answer';
                 out.reply = assistants.length
                     ? `I couldn't tell which assistant should handle that — open Assistants and I'll help you pick.`

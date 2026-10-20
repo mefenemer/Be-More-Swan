@@ -1,9 +1,11 @@
 // netlify/functions/redeem-referral-reward.ts
 // Referral Program Expansion — spend referral tokens from the vault.
 //
-//   POST /redeem-referral-reward  { type: 'credit_10' | 'free_assistant' }
-//     credit_10      → US3: deduct 1 token, apply a £10 Stripe customer-balance credit.
-//     free_assistant → US2: deduct 5 tokens, +1 to organisations.bonus_assistants.
+//   POST /redeem-referral-reward  { type: 'free_month' }
+//     free_month → deduct 1 token, apply one month of the caller's own plan as Stripe
+//                  customer-balance credit ("give a month, get a month", owner 2026-10-20).
+//   The old 'credit_10' (£10) and 'free_assistant' (5 tokens → +1 slot) are no longer offered;
+//   see src/utils/referral-tokens.ts for why.
 //
 // All DB work runs inside one transaction with the spent rows locked FOR UPDATE, so two
 // concurrent redemptions can't double-spend the same tokens (AC2.1/AC2.3/AC3.1).
@@ -14,7 +16,7 @@ import { and, eq, gte, inArray, sql } from 'drizzle-orm';
 import Stripe from 'stripe';
 import { getDb } from '../../db/client';
 import { plans, organisations, userReferrals, userOrganisations, rewardRedemptions } from '../../db/schema';
-import { REFUND_WINDOW_DAYS, FREE_ASSISTANT_THRESHOLD, CREDIT_GBP } from '../../src/utils/referral-tokens';
+import { REFUND_WINDOW_DAYS, FREE_MONTH, freeMonthFor } from '../../src/utils/referral-tokens';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -40,10 +42,11 @@ export default withLambda(async (event) => {
     if (!callerId) return json(401, { error: 'Unauthorized.' });
 
     const { type } = JSON.parse(event.body || '{}');
-    if (type !== 'credit_10' && type !== 'free_assistant') {
-        return json(400, { error: 'Invalid redemption type.' });
+    if (type !== FREE_MONTH) {
+        // A tab opened before 2026-10-20 still offers £10 / a free assistant.
+        return json(400, { error: 'Referral rewards have changed — each token is now a free month. Please refresh the page.' });
     }
-    const tokensNeeded = type === 'free_assistant' ? FREE_ASSISTANT_THRESHOLD : 1;
+    const tokensNeeded = 1;
 
     const db = getDb();
     const matureCutoff = new Date(Date.now() - REFUND_WINDOW_DAYS * 24 * 60 * 60 * 1000);
@@ -91,32 +94,17 @@ export default withLambda(async (event) => {
             const referralToSpend = tokensNeeded - bonusToSpend;
             const spendIds = matured.slice(0, referralToSpend).map(r => r.id);
 
-            let stripeBalanceTxId: string | null = null;
-            let newBonus: number | null = null;
-
-            if (type === 'credit_10') {
-                // Apply the Stripe credit FIRST — if it fails we throw and the whole tx rolls back,
-                // so the user never loses tokens without getting the reward (AC3.2).
-                const [plan] = await tx.select({ stripeCustomerId: plans.stripeCustomerId })
-                    .from(plans).where(and(eq(plans.userId, callerId), eq(plans.status, 'active'))).limit(1);
-                if (!plan?.stripeCustomerId) return { ok: false as const, status: 409, error: 'No active billing account to credit.' };
-                if (!stripe) return { ok: false as const, status: 500, error: 'Billing is not configured.' };
-
-                const tx2 = await stripe.customers.createBalanceTransaction(plan.stripeCustomerId, {
-                    amount: -CREDIT_GBP * 100,
-                    currency: 'gbp',
-                    description: 'Referral reward — redeemed token',
-                });
-                stripeBalanceTxId = tx2.id;
-            } else {
-                // free_assistant: bump the org's bonus cap.
-                if (!orgId) return { ok: false as const, status: 409, error: 'No organisation to credit.' };
-                const [org] = await tx.update(organisations)
-                    .set({ bonusAssistants: sql`${organisations.bonusAssistants} + 1` })
-                    .where(eq(organisations.id, orgId))
-                    .returning({ bonusAssistants: organisations.bonusAssistants });
-                newBonus = org?.bonusAssistants ?? null;
-            }
+            // Apply the Stripe credit FIRST — if it fails we throw and the whole tx rolls back,
+            // so the user never loses a token without getting the month (AC3.2).
+            const month = await freeMonthFor(tx, callerId);
+            if (!month) return { ok: false as const, status: 409, error: 'Your free months can be claimed once you are on a paid plan.' };
+            if (!stripe) return { ok: false as const, status: 500, error: 'Billing is not configured.' };
+            const balanceTx = await stripe.customers.createBalanceTransaction(month.stripeCustomerId, {
+                amount: -Math.round(month.amountGbp * 100),
+                currency: 'gbp',
+                description: 'Referral reward — one free month',
+            });
+            const stripeBalanceTxId: string | null = balanceTx.id;
 
             // Consume bonus tokens first (guarded against a concurrent spend).
             if (bonusToSpend > 0 && orgId) {
@@ -145,7 +133,7 @@ export default withLambda(async (event) => {
                 stripeBalanceTxId,
             });
 
-            return { ok: true as const, type, tokensSpent: tokensNeeded, remainingTokens: available - tokensNeeded, newBonus };
+            return { ok: true as const, type, tokensSpent: tokensNeeded, remainingTokens: available - tokensNeeded, creditGbp: month.amountGbp };
         });
 
         if (!result.ok) return json(result.status, { error: result.error });

@@ -119,6 +119,18 @@
             <p id="billing-cycle-note" class="text-sm text-gray-400" style="display:none;">
                 Annual plans billed as a single upfront payment. Cancel any time.
             </p>
+            <!-- Currency picker (owner, 2026-10-20): pounds by default; any other currency is a LIVE
+                 conversion (fx-rates → ECB rates), shown as "≈" and never charged — checkout takes GBP
+                 only, which is why the old hand-set US$/€ prices were removed on 2026-10-19. Hidden
+                 until rates arrive; if they never do, the page is simply in pounds. -->
+            <div id="currency-picker" class="flex flex-col items-center gap-1" style="display:none;">
+                <label for="currency-select" class="text-sm text-gray-500">Show prices in
+                    <select id="currency-select" class="ml-1 border border-gray-300 rounded-lg px-2 py-1 text-sm font-semibold text-gray-800 bg-white">
+                        <option value="GBP" selected>£ GBP</option>
+                    </select>
+                </label>
+                <p id="currency-note" class="text-xs text-gray-400 text-center" style="display:none;"></p>
+            </div>
         </div>
 
         <div class="pricing-grid grid grid-cols-1 sm:grid-cols-2 gap-6 items-stretch">
@@ -826,7 +838,48 @@
     const PRICES = { t1: null, t2: null }; // { monthly, annualMonthly, annualTotal } in GBP
 
     function fmtGbp(amount) {
-        return '£' + Number(amount).toLocaleString('en-GB', { maximumFractionDigits: 2 });
+        // Whole pounds stay whole (£69); anything with pence shows both digits (£55.20, not £55.2).
+        const n = Number(amount);
+        return '£' + n.toLocaleString('en-GB', { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 });
+    }
+
+    // ── Currency picker: live conversion, display only ─────────────
+    // FX = { date, rates: { USD: 1.33, … } } per £1, from fx-rates. Every price below is still
+    // computed in pounds; fmtMoney converts at the last moment, and only for display.
+    const FX_LABELS = { USD: 'US$ USD', EUR: '€ EUR', AUD: 'A$ AUD', CAD: 'C$ CAD' };
+    let FX = null;
+    let _currency = 'GBP';
+    function fmtMoney(gbp, digits = 0) {
+        if (_currency === 'GBP' || !FX || !FX.rates[_currency]) return digits ? '£' + Number(gbp).toFixed(digits) : fmtGbp(gbp);
+        const v = Number(gbp) * FX.rates[_currency];
+        return '≈ ' + new Intl.NumberFormat('en-GB', { style: 'currency', currency: _currency,
+            minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v);
+    }
+    async function loadFxRates() {
+        try {
+            const r = await fetch('/.netlify/functions/fx-rates');
+            if (!r.ok) return;
+            const j = await r.json();
+            if (!j || !j.rates) return;
+            FX = j;
+            const sel = document.getElementById('currency-select');
+            Object.keys(FX_LABELS).forEach((c) => {
+                if (!FX.rates[c]) return;
+                const o = document.createElement('option');
+                o.value = c; o.textContent = FX_LABELS[c];
+                sel.appendChild(o);
+            });
+            sel.addEventListener('change', () => { _currency = sel.value; updatePriceDisplay(); });
+            document.getElementById('currency-picker').style.display = '';
+        } catch { /* no rates: the page stays in pounds and the picker stays hidden */ }
+    }
+    function updateCurrencyNote() {
+        const el = document.getElementById('currency-note');
+        if (!el) return;
+        if (_currency === 'GBP' || !FX) { el.style.display = 'none'; return; }
+        const d = new Date(FX.date + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+        el.textContent = `Approximate, at the European Central Bank rate for ${d}. You're charged in pounds (GBP) — your bank converts at its own rate.`;
+        el.style.display = '';
     }
 
     /** Average days in a month — turns a monthly price into the "about £X a day" anchor. */
@@ -837,7 +890,8 @@
         ['t1', 't2'].forEach((t) => {
             const p = PRICES[t];
             if (!p) return; // not loaded: leave the slot blank rather than show a made-up number
-            const priceStr = fmtGbp(isAnnual ? p.annualMonthly : p.monthly);
+            const priceStr = fmtMoney(isAnnual ? p.annualMonthly : p.monthly);
+            const converted = _currency !== 'GBP' && FX;
             const priceEl = document.getElementById('card-price-' + t);
             const noteEl  = document.getElementById('card-note-' + t);
             const saveEl  = document.getElementById('card-save-' + t);
@@ -847,14 +901,14 @@
             if (noteEl) {
                 noteEl.textContent = isAnnual
                     ? `Billed ${fmtGbp(p.annualTotal)} annually · cancel any time`
-                    : 'Billed monthly · cancel any time';
+                    : (converted ? `Billed ${fmtGbp(p.monthly)} monthly · cancel any time` : 'Billed monthly · cancel any time');
             }
             // Annual saving in cash. A concrete "Save £192 a year" reads harder than the 20% badge
             // on the toggle, so the card carries the amount and the toggle carries the rate.
             if (saveEl) {
                 const saving = (p.monthly * 12) - p.annualTotal;
                 if (isAnnual && saving > 0) {
-                    saveEl.textContent = `Save ${fmtGbp(saving)} a year`;
+                    saveEl.textContent = `Save ${fmtMoney(saving).replace('≈ ', '~')} a year`;
                     saveEl.style.display = '';
                 } else {
                     saveEl.style.display = 'none';
@@ -863,15 +917,16 @@
         });
 
         // Value anchor + final CTA both quote the middle tier (t2) at its CURRENT cycle price.
+        updateCurrencyNote();
         const p2 = PRICES.t2;
         if (!p2) return;
         const t2Shown = isAnnual ? p2.annualMonthly : p2.monthly;
         const anchorEl = document.getElementById('anchor-price');
-        if (anchorEl) anchorEl.textContent = fmtGbp(t2Shown);
+        if (anchorEl) anchorEl.textContent = fmtMoney(t2Shown);
         const perDayEl = document.getElementById('cost-per-day');
-        if (perDayEl) perDayEl.textContent = `about £${(t2Shown / DAYS_PER_MONTH).toFixed(2)} a day`;
+        if (perDayEl) perDayEl.textContent = `about ${fmtMoney(t2Shown / DAYS_PER_MONTH, 2).replace('≈ ', '')} a day`;
         const finalPriceEl = document.getElementById('final-cta-price');
-        if (finalPriceEl) finalPriceEl.textContent = fmtGbp(t2Shown);
+        if (finalPriceEl) finalPriceEl.textContent = fmtMoney(t2Shown);
     }
 
     async function syncLivePricesGBP() {
@@ -1196,6 +1251,7 @@
         await syncLivePricesGBP();
 
         updatePriceDisplay();
+        loadFxRates(); // non-blocking: the page is complete in pounds without it
 
         // US-GAP-8.2: capture a referral code arriving on ?ref= (e.g. the co-branded powered-by
         // page) into the same sessionStorage key register.html reads, so attribution survives the

@@ -769,6 +769,8 @@
 
     // "Open their chat" on a site_audit_handoff card: find this workspace's assistant in that role
     // (site-audits.ts `get` lists them), and open its chat with the brief typed in — never sent.
+    // The brief is recorded (site-audits.ts `brief`, source 'chat'), the same as the Website tab's
+    // "Brief <name>", so it shows in the tab's History. A failed record never stops the chat opening.
     function onSiteAuditHandoff(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -777,8 +779,12 @@
           const who = (data.team || []).find((a) => a.roleKey === d.target);
           if (!who) throw new Error('You don\'t have that assistant yet.');
           const draft = `From my Mystery Shopper's website check: ${d.brief}`;
+          const record = siteAuditPost({ action: 'brief', assistantId, source: 'chat', target: d.target, title: d.title || '', brief: d.brief })
+            .then(siteAuditChanged)
+            .catch(() => { /* the chat still opens; History just won't list this one */ });
           if (typeof window.openAssistantChat === 'function') window.openAssistantChat({ assistantId: who.id, draft });
           else {
+            await record;
             try { await navigator.clipboard.writeText(draft); } catch { /* best effort */ }
             window.location.href = `assistant-chat.html?assistantId=${encodeURIComponent(who.id)}`;
           }

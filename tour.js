@@ -132,7 +132,7 @@
       targets: ['#nav-referral'],
       sidebar: true,
       title: 'Share the Glide',
-      copy: 'Love how this feels? Earn a referral token for every friend who signs up — redeem them for account credit, or save five for a free assistant.',
+      copy: 'Love how this feels? Give a month, get a month — every friend who becomes a paying customer earns you a free month, taken off your next bill.',
       placement: 'right',
     },
     {

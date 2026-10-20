@@ -98,6 +98,11 @@
      header is lifted above it. Only then: pop-ups (z 70-90) must still cover the header otherwise. */
   body:has(#post-review-modal.pr-page:not(.hidden)) #app-header,
   body:has(#bms-blog-backdrop.bs-page.bs-open) #app-header { z-index: 92; }
+  /* The bell's popover is NOT inside the header — notifications.js appends it to <body> at z 80 —
+     so lifting the header left it opening underneath the editor page (2026-10-20). Lift it too;
+     !important because its z-index is an inline style. */
+  body:has(#post-review-modal.pr-page:not(.hidden)) #notif-popover,
+  body:has(#bms-blog-backdrop.bs-page.bs-open) #notif-popover { z-index: 93 !important; }
 </style>
 </head>
 <body class="bg-gray-50 text-gray-900 font-sans antialiased min-h-screen overflow-x-hidden">
@@ -5192,10 +5197,6 @@ function formatCurrency(amount, currency) {
 
     window.renderMyAgreements();
     window.renderDataExport?.();
-
-    // ── US8 AC2: re-open the setup wizard from My Account ──
-    const resumeBtn = document.getElementById('resume-wizard-btn');
-    if (resumeBtn) resumeBtn.addEventListener('click', () => window.SetupWizard?.open?.());
 
     // Helper function to animate the toggle switches smoothly to match the provided image
     function updateToggleView(el, status) {
@@ -21384,7 +21385,17 @@ async function gpSubmitReject() {
       }
 
       if (d.type === 'delegate' && d.assistantId) {
-        showReply(reply);
+        // Propose, then spend: a draft costs a task, so nothing is generated until the user says so
+        // (2026-10-20 — this used to fire generate-post the moment the reply came back).
+        showReply(`${reply}<div class="cmdbar-followup"><button type="button" class="cmdbar-go">Draft it →</button></div>`);
+        result.querySelector('.cmdbar-go').onclick = () => draftViaAssistant(d, command);
+        return;
+      }
+      showAnswer(d, reply);
+    }
+
+    async function draftViaAssistant(d, command) {
+        showThinking();
         try {
           // Every connected account, the way Autopilot does it — NOT just whichever platform the
           // router happened to name. This path sent `platform` alone and no `platforms`, so
@@ -21413,25 +21424,28 @@ async function gpSubmitReject() {
             }),
           });
           if (!r.ok) throw 0;
-          showReply(`${reply}<div class="cmdbar-followup"><button type="button" class="cmdbar-go">View in Review →</button></div>`);
+          const who = d.assistantName ? esc(d.assistantName) : 'Your assistant';
+          showReply(`${who} is drafting it now — it will be waiting for you in Review.<div class="cmdbar-followup"><button type="button" class="cmdbar-go">View in Review →</button></div>`);
           result.querySelector('.cmdbar-go').onclick = () => { if (window.loadView) window.loadView('review-queue'); close(); };
           input.value = '';
         } catch {
           showReply('I started on that but couldn’t queue it — you can create it from Review.');
         }
-        return;
-      }
+    }
 
-      // answer (with an optional "Take me there" or "Report an issue" follow-up)
-      if (d.suggestReportIssue && window.openReportIssue) {
-        showReply(`${reply}<div class="cmdbar-followup"><button type="button" class="cmdbar-go">Report an issue →</button></div>`);
-        result.querySelector('.cmdbar-go').onclick = () => { window.openReportIssue('new'); close(); };
-      } else if (d.suggestView && window.loadView) {
-        showReply(`${reply}<div class="cmdbar-followup"><button type="button" class="cmdbar-go">Take me there →</button></div>`);
-        result.querySelector('.cmdbar-go').onclick = () => { window.loadView(d.suggestView); close(); };
-      } else {
-        showReply(reply);
-      }
+    function showAnswer(d, reply) {
+      // answer + up to two follow-ups: the Help Centre article it came from ("Read the article"),
+      // and either "Report an issue" or "Take me there". Each button closes the bar.
+      const actions = [];
+      if (d.article && window.openHelpArticle) actions.push(['Read the article →', () => window.openHelpArticle(d.article)]);
+      if (d.suggestReportIssue && window.openReportIssue) actions.push(['Report an issue →', () => window.openReportIssue('new')]);
+      else if (d.suggestView && window.loadView) actions.push(['Take me there →', () => window.loadView(d.suggestView)]);
+      if (!actions.length) { showReply(reply); return; }
+      showReply(`${reply}<div class="cmdbar-followup" style="display:flex;flex-wrap:wrap;gap:8px">${actions.map(() => '<button type="button" class="cmdbar-go"></button>').join('')}</div>`);
+      result.querySelectorAll('.cmdbar-go').forEach((btn, i) => {
+        btn.textContent = actions[i][0];
+        btn.onclick = () => { actions[i][1](); close(); };
+      });
     }
 
     // ── AC2: voice dictation (Web Speech API) with waveform ──
@@ -21495,8 +21509,13 @@ async function gpSubmitReject() {
   const MODE_KEY = 'swan_wizard_mode';
   const SINCE_A_KEY = 'swan_wizard_since_assistant';
   const SINCE_D_KEY = 'swan_wizard_since_draft';
+  // "Hire a New Assistant" lands on the catalogue with the drawer kept OUT of the way until a role is
+  // actually picked (_catHire → onAssistantPicked). Leaving the catalogue without picking one drops
+  // the add-assistant journey (onNavigate), so the wizard never lingers for a hire that didn't happen.
+  const AWAIT_PICK_KEY = 'swan_wizard_await_pick';
+  const isAwaitingPick = () => sessionStorage.getItem(AWAIT_PICK_KEY) === '1';
   const isAddMode = () => sessionStorage.getItem(MODE_KEY) === 'new';
-  const clearAddMode = () => { sessionStorage.removeItem(MODE_KEY); sessionStorage.removeItem(SINCE_A_KEY); sessionStorage.removeItem(SINCE_D_KEY); };
+  const clearAddMode = () => { sessionStorage.removeItem(MODE_KEY); sessionStorage.removeItem(SINCE_A_KEY); sessionStorage.removeItem(SINCE_D_KEY); sessionStorage.removeItem(AWAIT_PICK_KEY); };
 
   const drawer = document.getElementById('setup-wizard-drawer');
   const fab    = document.getElementById('setup-wizard-fab');
@@ -21670,7 +21689,7 @@ async function gpSubmitReject() {
             <svg class="w-9 h-9 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
           </div>
           <h3 class="text-xl font-extrabold text-gray-900 mb-1">Your assistant is live!</h3>
-          <p class="text-sm text-gray-500 mb-6">Everything's set up — your assistant is working for you. You can revisit any step from My Account.</p>
+          <p class="text-sm text-gray-500 mb-6">Everything's set up — your assistant is working for you.</p>
           <button type="button" id="setup-wizard-done-btn" class="btn-primary font-bold text-sm rounded-xl px-5 py-2.5 transition cursor-pointer">Done</button>
           <button type="button" id="setup-wizard-tour-btn" class="block mx-auto mt-3 text-sm font-semibold text-emerald-700 hover:text-emerald-800 hover:underline cursor-pointer">🦢 Take a quick tour of the platform &rarr;</button>
           ${renderRecommended(data)}
@@ -21905,11 +21924,13 @@ async function gpSubmitReject() {
     lastData = data;
     render(data);
 
+    // Browsing the catalogue for a new hire: no drawer and no Resume pill until a role is picked.
+    if (isAwaitingPick()) { setOpen(false); showFab(false); return; }
+
     const collapsedPref = collapseStore.getItem(COLLAPSE_KEY) === '1';
     const remaining = (data.total ?? 8) - (data.completedCount ?? 0);
 
-    // Permanent hide once finished, or for users who completed the legacy onboarding —
-    // they can still re-open from My Account (US8 AC2).
+    // Permanent hide once finished, or for users who completed the legacy onboarding.
     if ((data.allDone && celebratedGoLive && !isOpen) || (data.dismissed && !isOpen && firstLoad)) {
       setOpen(false); showFab(false); return;
     }
@@ -21940,6 +21961,7 @@ async function gpSubmitReject() {
 
   function open() {
     collapseStore.removeItem(COLLAPSE_KEY);
+    sessionStorage.removeItem(AWAIT_PICK_KEY);   // asked for by name — never held back
     setOpen(true);
     showFab(false);
     // Render the cached snapshot immediately for a snappy open (no blank drawer while the
@@ -21962,7 +21984,13 @@ async function gpSubmitReject() {
   // Called at the end of every SPA navigation — cheaply re-syncs done flags so a step
   // completed on the page just visited ticks (and celebrates) when the user returns,
   // but never force-opens a collapsed/finished drawer.
-  function onNavigate() {
+  function onNavigate(routeKey) {
+    // Left the catalogue without hiring anyone: the add-assistant journey is over, so drop back to
+    // normal (org-wide) behaviour rather than keeping steps 6-8 scoped to a hire that never happened.
+    if (isAwaitingPick() && routeKey && routeKey !== 'catalog') {
+      clearAddMode();
+      last = null; writeLast(null);
+    }
     // Re-sync after every SPA navigation so the Resume pill (or open drawer) stays correct no
     // matter where the user landed — previously this only ran when the drawer was already open
     // or explicitly collapsed, so a closed-but-not-collapsed wizard (e.g. after a full-page
@@ -21993,12 +22021,21 @@ async function gpSubmitReject() {
     sessionStorage.setItem(MODE_KEY, 'new');
     sessionStorage.setItem(SINCE_A_KEY, String(base?.maxAssistantId ?? 0));
     sessionStorage.setItem(SINCE_D_KEY, String(base?.maxDraftId ?? 0));
+    sessionStorage.setItem(AWAIT_PICK_KEY, '1');
     // Reset celebration/diff baselines so the fresh journey is tracked from scratch.
     last = null; celebratedGoLive = false;
     writeLast(null); writeGoLive(false);
-    await refresh();   // now scoped to the new assistant (steps 6-8 reset)
-    open();
+    // Baseline snapshot, scoped to the new assistant (steps 6-8 reset) — taken now so the steps the
+    // hire completes celebrate on return. The drawer itself stays closed while they browse.
+    await refresh();
     if (window.loadView) window.loadView('catalog');
+  }
+
+  // A role was picked in the catalogue (assistant-catalogue.html _catHire). The pick navigates to that
+  // role's set-up page; from here on the wizard behaves as usual — the drawer and Resume pill return.
+  function onAssistantPicked() {
+    if (!isAwaitingPick()) return;
+    sessionStorage.removeItem(AWAIT_PICK_KEY);
   }
 
   document.getElementById('setup-wizard-close').addEventListener('click', collapse);
@@ -22023,7 +22060,7 @@ async function gpSubmitReject() {
     collapse();
   });
 
-  window.SetupWizard = { refresh, open, collapse, toggle: () => (isOpen ? collapse() : open()), onNavigate, openForNewAssistant };
+  window.SetupWizard = { refresh, open, collapse, toggle: () => (isOpen ? collapse() : open()), onNavigate, openForNewAssistant, onAssistantPicked };
 })();
 </script>
 
