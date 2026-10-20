@@ -19,6 +19,7 @@ import {
     aiAssistants, audienceContacts, audienceForms, goals, masterAssistants, newsletterSendingDomains,
     organisations, userOrganisations, userProfiles, widgetConfigs, workspaceIntegrations,
 } from '../../db/schema';
+import { getTeamAllowance } from './team-seats';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -134,13 +135,18 @@ export async function computeRecommendations(db: Db, orgId: number, userId: numb
         benefit: 'Tell an assistant what success looks like — it reads your goals when it decides what to write, and tracks progress for you.',
         route: { assistantId: hired[0].id, assistantTab: 'goals' },
     }, await soft(() => exists(db.select({ id: goals.id }).from(goals).where(eq(goals.organisationId, orgId)).limit(1))));
-    add({
+    // Only where the plan lets them invite anyone. Since 2026-10-20 no plan does (Workspace
+    // Collaboration is 'coming soon' on the Busywork Buster), and a step nobody can finish just sits
+    // in the guide undone. A workspace that already has a teammate still sees it ticked.
+    const canInvite = await soft(async () => (await getTeamAllowance(db, orgId)).collaboration);
+    const hasTeammate = await soft(() => exists(db.select({ userId: userOrganisations.userId }).from(userOrganisations).where(and(
+        eq(userOrganisations.organisationId, orgId), ne(userOrganisations.userId, userId),
+    )).limit(1)));
+    if (canInvite || hasTeammate) add({
         key: 'invite_teammate', label: 'Invite a teammate',
         benefit: 'Share the review queue with a colleague, so approvals don\'t wait for you.',
         route: { view: 'assets', bizTab: 'team' },
-    }, await soft(() => exists(db.select({ userId: userOrganisations.userId }).from(userOrganisations).where(and(
-        eq(userOrganisations.organisationId, orgId), ne(userOrganisations.userId, userId),
-    )).limit(1))));
+    }, hasTeammate);
     const [profile] = (await soft(() => db.select({ preferences: userProfiles.preferences }).from(userProfiles)
         .where(eq(userProfiles.userId, userId)).limit(1))) || [];
     add({

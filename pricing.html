@@ -45,6 +45,8 @@
         .pk-stat-lbl   { color: #9d174d; }
         .pk-check      { color: #ec4899; }
         .pk-pill       { background-color: #ec4899; color: #ffffff; }
+        /* A feature a plan will have but doesn't yet (master data value 'coming_soon') — never a tick. */
+        .pk-soon       { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700; background:#fef3c7; color:#92400e; white-space:nowrap; }
         .pk-col-tint   { background-color: #fdf2f8; }
         .pk-col-th     { background-color: #fdf2f8; }
         .pk-text       { color: #ec4899; }
@@ -543,12 +545,6 @@
                             <td class="px-4 py-3.5 text-center font-semibold pk-text-dark pk-col-tint align-middle">2,750</td>
                             <td class="px-4 py-3.5 text-center text-gray-700 align-middle">Custom</td>
                         </tr>
-                        <tr class="border-t border-gray-100 hover:bg-gray-50/40">
-                            <td class="px-6 py-3.5 text-gray-700 font-medium">App Connections<br><span class="text-xs text-gray-400 font-normal">The tools and platforms your assistants can connect to and work within</span></td>
-                            <td class="px-4 py-3.5 text-center text-gray-700 align-middle text-xs">Connect up to 4 everyday apps</td>
-                            <td class="px-4 py-3.5 text-center font-semibold pk-text-dark pk-col-tint align-middle text-xs">Connect up to 10 standard apps to power your digital department</td>
-                            <td class="px-4 py-3.5 text-center text-gray-700 align-middle text-xs">Bespoke app limits &amp; custom internal system integrations</td>
-                        </tr>
 
                         <!-- AI MEDIA GENERATION -->
                         <tr class="bg-gray-50/70 border-t border-gray-200">
@@ -643,7 +639,7 @@
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
                             <td class="px-6 py-3.5 text-gray-700 font-medium">Workspace Collaboration<br><span class="text-xs text-gray-400 font-normal">Invite team members, managers, or clients to view and approve outputs</span></td>
                             <td class="px-4 py-3.5 text-center text-gray-300">—</td>
-                            <td class="px-4 py-3.5 text-center text-gray-300 pk-col-tint">—</td>
+                            <td class="px-4 py-3.5 text-center pk-col-tint"><span class="pk-soon">Coming soon</span></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
@@ -976,7 +972,12 @@
         return (plan.features || {})[def.key] ?? null;
     }
     // Render one cell's INNER html by value type. `emphasise` = the popular (buster) column styling.
+    // 'coming_soon' (any value type): the plan will include it but doesn't yet — e.g. Workspace
+    // Collaboration on the Busywork Buster (owner, 2026-10-20). Shown as a pill, never as a tick.
+    const CMP_SOON = '<span class="pk-soon">Coming soon</span>';
+    const cmpComingSoon = (v) => String(v ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_') === 'coming_soon';
     function cmpCellInner(def, value, emphasise) {
+        if (cmpComingSoon(value)) return CMP_SOON;
         if (def.valueType === 'boolean') return cmpTruthy(value) ? CMP_CHECK : CMP_DASH;
         let text;
         // No assistant cap on a purchasable plan = every role in the library. The catalog's

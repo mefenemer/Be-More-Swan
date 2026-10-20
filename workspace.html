@@ -3970,26 +3970,28 @@ function formatCurrency(amount, currency) {
         try {
           const res = await fetch('/.netlify/functions/get-plans');
           if (!res.ok) throw new Error();
-          const { plans } = await res.json();
+          const { plans, featureCatalog } = await res.json();
           if (!plans?.length) {
             cardsEl.innerHTML = '<div class="col-span-full text-center py-8 text-gray-500 text-sm"><a href="/pricing.html" class="text-emerald-700 font-semibold underline">View plans on our pricing page →</a></div>';
             return;
           }
-          // AC2.1.2: turn a features-map entry into a readable bullet (no hardcoded plan copy).
-          const featureLabel = (key, val) => {
-            if (!val) return null;
-            const human = key.replace(/^unlock_/, '').replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
-            return typeof val === 'number' && val > 1 ? `${human} ×${val}` : human;
-          };
+          // AC2.1.2: bullets from the SAME catalog the pricing page's table uses (get-plans →
+          // plan_features, enabled rows only, in display order) — never from raw feature keys. The raw
+          // map still carries retired keys (credit_topups, monthly_ai_credits…), which this picker used
+          // to list as if they were sold. Only features the plan HAS: true, never 'coming_soon'.
+          const catalogBullets = (p) => (featureCatalog || [])
+            .filter(def => def.storageTarget !== 'column' && (def.valueType || 'boolean') === 'boolean')
+            .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0))
+            .filter(def => { const v = (p.features || {})[def.key]; return v === true || v === 'true'; })
+            .map(def => def.label);
           cardsEl.innerHTML = plans.map(p => {
             const price = parseFloat(p.monthlyPriceGbp || 0);
-            const featureBullets = Object.entries(p.features || {}).map(([k, v]) => featureLabel(k, v)).filter(Boolean);
+            // No connection or seat lines (owner, 2026-10-20): connections have no limit — they depend
+            // on which assistants you hire — and team seats are not on sale yet.
             const bullets = [
-              p.assistantLimit ? `Up to ${p.assistantLimit} AI assistant${p.assistantLimit > 1 ? 's' : ''}` : null,
+              p.assistantLimit ? `${p.assistantLimit} assistant${p.assistantLimit > 1 ? 's' : ''} working at a time` : 'Every assistant, all at once',
               p.monthlyTaskLimit ? `${p.monthlyTaskLimit.toLocaleString()} tasks/month` : null,
-              p.appConnectionLimit ? `${p.appConnectionLimit} app connection${p.appConnectionLimit > 1 ? 's' : ''}` : null,
-              p.seatLimit && p.seatLimit > 1 ? `${p.seatLimit} team seats` : null,
-              ...featureBullets,
+              ...catalogBullets(p),
             ].filter(Boolean).slice(0, 8);
             return `
               <div class="border-2 border-gray-200 hover:border-emerald-400 rounded-xl p-5 flex flex-col transition cursor-pointer plan-card" data-plan-id="${p.id}" data-plan-name="${p.name}">

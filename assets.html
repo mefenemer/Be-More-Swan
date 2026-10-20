@@ -1376,9 +1376,9 @@
         const title = callout.querySelector('p.font-semibold');
         const upgrade = callout.querySelector('a');
         if (!collaboration) {
-          if (title) title.textContent = 'Team members come with Workspace Collaboration';
-          calloutMsg.textContent = `Inviting colleagues, managers or clients to review and approve work is part of The Digital Employee plan${data.planName ? ` — you're on ${data.planName}` : ''}. Anyone already in your workspace keeps their access.`;
-          if (upgrade) upgrade.classList.remove('hidden');
+          if (title) title.textContent = 'Team members are coming soon';
+          calloutMsg.textContent = `Inviting colleagues, managers or clients to review and approve work is coming soon to The Busywork Buster. Anyone already in your workspace keeps their access.`;
+          if (upgrade) upgrade.classList.add('hidden');   // no plan includes it yet, so upgrading wouldn't help
           callout.classList.remove('hidden');
         } else if (isAtLimit) {
           if (title) title.textContent = 'All seats in use';

@@ -60,13 +60,9 @@ const DEFS: Def[] = [
       category: 'Capacity', valueType: 'number', storageTarget: 'column', columnName: 'assistantLimit', unlimitedLabel: 'Custom', enterpriseValue: 'Custom' },
     { key: 'monthly_task_limit', label: 'Completed Tasks / Month', description: 'Each action your assistant completes counts as one task',
       category: 'Capacity', valueType: 'number', storageTarget: 'column', columnName: 'monthlyTaskLimit', unlimitedLabel: 'Custom', enterpriseValue: 'Custom' },
-    // Drives the pricing-card "Apps" stat box AND the per-assistant connection limit enforced by
-    // check-capacity. Column-stored so an admin edit in the matrix moves both together.
-    { key: 'app_connection_limit', label: 'App Connections', description: 'The number of apps and tools your assistants can connect to',
-      category: 'Capacity', valueType: 'number', storageTarget: 'column', columnName: 'appConnectionLimit', unlimitedLabel: 'Custom', enterpriseValue: 'Custom' },
-    { key: 'app_connections', label: 'App Connection Details', description: 'The tools and platforms your assistants can connect to and work within',
-      category: 'Capacity', valueType: 'text', storageTarget: 'feature', enterpriseValue: 'Bespoke app limits & custom internal system integrations',
-      values: { saver: 'Connect up to 4 everyday apps', buster: 'Connect up to 10 standard apps to power your digital department', employee: 'Connect up to 15 apps to power your whole digital department' } },
+    // app_connection_limit / app_connections removed 2026-10-20 (owner): no plan limits app
+    // connections — it depends on which assistants you hire. db/z-plans-no-connection-limit-team-soon.sql
+    // clears the limits and switches both catalog rows off.
     { key: 'monthly_x_credits', label: 'X (Twitter) Posting Credits / Month', description: 'Credits for posting to X each month — a text post costs 1 credit, a post with a link costs 13. Buy more any time; purchased credits never expire.',
       category: 'Capacity', valueType: 'number', storageTarget: 'feature', unlimitedLabel: 'Custom', enterpriseValue: 'Custom',
       values: { saver: 150, buster: 500, employee: 1500 } },
@@ -125,7 +121,9 @@ const DEFS: Def[] = [
       values: { saver: DASH, buster: CHECK, employee: CHECK } },
     { key: 'workspace_collaboration', label: 'Workspace Collaboration', description: 'Invite team members, managers, or clients to view and approve outputs',
       category: 'Team & Advanced Features', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
-      values: { saver: DASH, buster: DASH, employee: CHECK } },
+      // Busywork Buster: 'coming_soon' (owner, 2026-10-20) — a pill on the pricing table, never a
+      // tick, and team-seats.ts only treats TRUE as on.
+      values: { saver: DASH, buster: 'coming_soon', employee: CHECK } },
     // 'advanced_tool_vault' ("Advanced Tool Vault") withdrawn 2026-10-12: no integration was ever
     // marked premium, so the row sold nothing. db/z-plan-tool-vault-withdrawn.sql sets its
     // plan_features.is_enabled = false. Restore both if a premium integration tier ships.
