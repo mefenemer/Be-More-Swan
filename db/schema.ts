@@ -6157,3 +6157,19 @@ export const emailDeliveryEvents = pgTable("email_delivery_events", {
   index("email_delivery_events_email_idx").on(t.email, t.occurredAt),
   index("email_delivery_events_occurred_idx").on(t.occurredAt),
 ]);
+
+// ── Logins — one row each time a session cookie is issued to someone signing in ─────────────────
+// See db/z-login-events.sql. Written only by src/utils/login-events.ts (verify, review-login,
+// accept-invite). org-switch re-signs an existing session and is not a login.
+export const loginEvents = pgTable("login_events", {
+  id: serial().primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").references(() => organisations.id, { onDelete: "set null" }),
+  method: text().notNull(), // 'magic_link' | 'review_login' | 'invite'
+  ip: text(),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("login_events_created_idx").on(t.createdAt),
+  index("login_events_user_idx").on(t.userId, t.createdAt),
+]);
