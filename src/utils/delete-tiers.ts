@@ -13,12 +13,15 @@ export interface TableDeleteConfig {
 /** Tier rules per table name */
 export const TABLE_DELETE_CONFIG: Record<string, TableDeleteConfig> = {
     // ── Soft-delete (default for user-facing entities) ───────────────────────
+    // ⚠️ softField must be a column the table really has — the delete runs `UPDATE … SET is_active /
+    // deleted_at`, and a missing column is a 500 after the audit row is written. Pinned against
+    // db/schema.ts by tests/admin-cascade-deletes.test.ts.
+    // users: kept here only so cascade-preview can count dependents. admin-delete-record refuses users;
+    // the sheet deletes them via admin-api DELETE ?resource=user (deleteUserAndSoleOrgs).
     users:             { tier: 'soft', softField: 'isActive' },
-    organisations:     { tier: 'soft', softField: 'isActive' },
     ai_assistants:     { tier: 'soft', softField: 'isActive' },
     master_assistants: { tier: 'soft', softField: 'isActive' },
     workspace_assets:  { tier: 'soft', softField: 'isActive' },
-    content_assets:    { tier: 'soft', softField: 'isActive' },
 
     // ── Hard-delete (operational/transient data) ─────────────────────────────
     rate_limit_attempts:   { tier: 'hard' },
@@ -33,6 +36,15 @@ export const TABLE_DELETE_CONFIG: Record<string, TableDeleteConfig> = {
     scheduled_posts:       { tier: 'hard_confirmed' }, // Draft state only
 
     // ── Blocked — cannot be deleted via UI under any circumstance ────────────
+    // organisations / content_assets were 'soft' on an is_active column neither table has (2026-10-20).
+    organisations: {
+        tier: 'blocked',
+        blockedReason: "A workspace is removed with its last member: use Delete Account on the owner's user panel. That keeps a workspace with a live Stripe subscription instead of stranding it.",
+    },
+    content_assets: {
+        tier: 'blocked',
+        blockedReason: "Deleting the row would leave the stored file behind. Remove it from the workspace's My Content, which deletes both.",
+    },
     // A plan row is what subscribers' plans.master_plan_id and the free beta plan's features
     // (featureTierKey: beta → 'employee') resolve through. Deleting one strands everyone on it, so
     // a plan is retired by making it inactive (off the pricing page, checkout and picker). Before
