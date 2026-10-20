@@ -18,7 +18,7 @@
 //   tierKey: string|null,
 //   tierName: string|null,
 //   gracePeriodEndsAt: string|null,  // ISO string if plan is past_due with grace period active
-//   nextPlan: { tierKey, name, monthlyPriceGbp, assistantLimit } | null,  // null = already on highest plan
+//   nextPlan: { tierKey, name, monthlyPriceGbp, assistantLimit, monthlyTaskLimit } | null,  // null = already on highest plan
 // }
 
 import { Handler } from '@netlify/functions';
@@ -37,6 +37,7 @@ import { TASK_WEIGHTS } from '../../src/config/task-weights';
 import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { getTrial } from '../../src/utils/trial';
 import { resolveImpersonation } from '../../src/utils/impersonation';
+import { checkRoleSwap } from '../../src/utils/assistant-capacity';
 
 const stripe = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
@@ -317,7 +318,7 @@ export default withLambda(async (event) => {
         // Find the cheapest plan that costs more than the current plan — that's the next tier up.
         // Returns null if the user is already on the highest-paid plan (enterprise contact path).
         const userCurrency = (plan as any)?.currency || 'GBP';
-        let nextPlan: { tierKey: string; name: string; monthlyPriceGbp: string; monthlyPrice: string; assistantLimit: number | null } | null = null;
+        let nextPlan: { tierKey: string; name: string; monthlyPriceGbp: string; monthlyPrice: string; assistantLimit: number | null; monthlyTaskLimit: number | null } | null = null;
         // A beta plan costs £0, so "the cheapest plan above it" would offer the ENTRY plan as an
         // upgrade from top-tier limits. Beta testers get no upgrade suggestion at all.
         if (plan?.monthlyPriceGbp != null && plan?.tierKey !== BETA_TIER_KEY) {
@@ -327,6 +328,9 @@ export default withLambda(async (event) => {
                     name: masterPlans.name,
                     monthlyPriceGbp: masterPlans.monthlyPriceGbp,
                     assistantLimit: masterPlans.assistantLimit,
+                    // The upgrade modal's "what you get" list names the next plan's task allowance —
+                    // read here so workspace.html never hardcodes it (it said "2,750" by hand).
+                    monthlyTaskLimit: masterPlans.monthlyTaskLimit,
                     masterPlanId: masterPlans.id,
                 })
                 .from(masterPlans)
@@ -351,7 +355,7 @@ export default withLambda(async (event) => {
                         .limit(1);
                     if (priceRow) monthlyPrice = String(priceRow.monthlyPriceMajorUnit);
                 }
-                nextPlan = { tierKey: nextTierRow.tierKey, name: nextTierRow.name, monthlyPriceGbp: String(nextTierRow.monthlyPriceGbp), monthlyPrice, assistantLimit: nextTierRow.assistantLimit };
+                nextPlan = { tierKey: nextTierRow.tierKey, name: nextTierRow.name, monthlyPriceGbp: String(nextTierRow.monthlyPriceGbp), monthlyPrice, assistantLimit: nextTierRow.assistantLimit, monthlyTaskLimit: nextTierRow.monthlyTaskLimit };
             }
         }
 
@@ -392,6 +396,12 @@ export default withLambda(async (event) => {
         const seatPct = seatLimit
             ? Math.min(100, Math.round((seatCount / seatLimit) * 100))
             : 0;
+
+        // ?roleKey= — would hiring this role be refused as a second switch this month? Asked by the
+        // catalogue's Hire button so the user hears it before filling in a setup wizard, not after.
+        // hire-assistant / onboarding enforce the same check server-side.
+        const askedRoleKey = (event.queryStringParameters?.roleKey || '').trim();
+        const roleSwap = orgId && askedRoleKey ? await checkRoleSwap(db, userId, orgId, askedRoleKey) : null;
 
         return {
             statusCode: 200,
@@ -444,6 +454,7 @@ export default withLambda(async (event) => {
                 stripePortalUrl,             // Stripe billing portal URL for payment update CTA (SC2)
                 nextPlan,                    // next tier up — null if already on highest plan
                 connectedPlatforms,          // lowercase service names for active connections e.g. ['instagram','facebook']
+                roleSwap,                    // null, or { code: 'SWAP_LIMIT', error, nextSwitchAt } for ?roleKey=
             }),
         };
 

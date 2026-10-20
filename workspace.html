@@ -2996,10 +2996,14 @@ function formatCurrency(amount, currency) {
             // Keyed by the tier the user is ON; the value describes what the NEXT tier up unlocks.
             // saver (£29) → buster, buster (£99) → employee. These were the other way round before
             // the plans were re-ordered, so £99 customers were shown a downgrade as their upgrade.
+            const nextTaskLimit = Number(cap.nextPlan && cap.nextPlan.monthlyTaskLimit);
+            const nextPlanTasks = nextTaskLimit > 0 ? `${nextTaskLimit.toLocaleString('en-GB')} tasks per month` : null;
             const TIER_DELTA = {
               // What the NEXT plan adds. Two self-serve plans since 17 Oct 2026: saver → buster, and
               // buster (and the retired employee) → a Bespoke Assistant, the contact-sales path.
-              saver:    ['Every Digital Assistant', '2,750 tasks per month', 'Connect up to 10 standard apps', 'Autonomous goal tracking'],
+              // The task allowance comes from master_plans via check-capacity's nextPlan — never typed
+              // here (it read "2,750" by hand). No number from the server = the line is left out.
+              saver:    ['Every Digital Assistant', nextPlanTasks, 'Connect up to 10 standard apps', 'Autonomous goal tracking'].filter(Boolean),
               buster:   ['An assistant built around your business', 'Your own workflows and systems connected', 'Scope and terms agreed with you'],
               employee: ['Unlimited tasks to order', 'Dedicated account manager', 'Custom SLA & priority support'],
             };

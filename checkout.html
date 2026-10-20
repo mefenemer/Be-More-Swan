@@ -384,20 +384,37 @@
   // dead copy — while these three still carried the pre-reorder feature lists, so the £29 checkout
   // advertised the middle plan's features and the £99 checkout advertised the entry plan's.
   // Lists must stay in step with the pricing cards and master_plans.features.
+  // TASKS_LINE stands in for the monthly task allowance, which is read from master_plans
+  // (get-plans → monthlyTaskLimit) like pricing.html's stat boxes — it used to be typed here by hand
+  // ("600", "2,750") and would silently disagree with the plan the moment an admin changed it.
+  const TASKS_LINE = '__tasks__';
   const PLAN_INFO = {
     saver: {
       label: 'The Workflow Saver',
-      features: ['1 Digital Assistant', '600 tasks per month', 'Connect up to 4 everyday apps', 'Learns your style & voice', 'AI images & music from your tasks'],
+      features: ['1 Digital Assistant', TASKS_LINE, 'Connect up to 4 everyday apps', 'Learns your style & voice', 'AI images & music from your tasks'],
     },
     buster: {
       label: 'The Busywork Buster',
-      features: ['Every Digital Assistant', '2,750 tasks per month', 'Connect up to 10 standard apps', 'Autonomous goal tracking', 'The In-House Editor reviews every draft', 'AI video, images & music from your tasks'],
+      features: ['Every Digital Assistant', TASKS_LINE, 'Connect up to 10 standard apps', 'Autonomous goal tracking', 'The In-House Editor reviews every draft', 'AI video, images & music from your tasks'],
     },
     employee: {
       label: 'The Digital Employee',
-      features: ['10 Digital Assistants', '10,500 tasks per month', 'Connect up to 15 apps', 'Workspace collaboration for your team', '1-on-1 kick-off strategy call', 'AI video, images & music from your tasks'],
+      features: ['10 Digital Assistants', TASKS_LINE, 'Connect up to 15 apps', 'Workspace collaboration for your team', '1-on-1 kick-off strategy call', 'AI video, images & music from your tasks'],
     },
   };
+
+  // The plan's monthly task allowance from master_plans, or null when it cannot be read. A null
+  // drops the line rather than inventing a number.
+  async function fetchTaskLimit(tier) {
+    try {
+      const r = await fetch('/.netlify/functions/get-plans');
+      if (!r.ok) return null;
+      const { plans } = await r.json();
+      const plan = Array.isArray(plans) ? plans.find(p => p.tierKey === tier) : null;
+      const n = Number(plan && plan.monthlyTaskLimit);
+      return n > 0 ? n : null;
+    } catch { return null; }
+  }
 
   function showError(msg) {
     document.getElementById('page-loading').classList.add('hidden');
@@ -414,6 +431,7 @@
 
     _currentTier  = tier;
     _currentCycle = billingCycle;
+    const taskLimitPromise = fetchTaskLimit(tier);
 
     let checkoutData;
     try {
@@ -479,7 +497,11 @@
     if (disclosureEl) {
       disclosureEl.textContent = `Your subscription renews on ${renewalDateStr} for ${formatted}${billingCycle === 'annual' ? '/yr' : '/mo'}. Cancel anytime from Settings → Billing.`;
     }
-    document.getElementById('summary-features').innerHTML = planInfo.features.map(f => `
+    const taskLimit = await taskLimitPromise;
+    const features = planInfo.features
+      .map(f => f === TASKS_LINE ? (taskLimit ? `${taskLimit.toLocaleString('en-GB')} tasks per month` : null) : f)
+      .filter(Boolean);
+    document.getElementById('summary-features').innerHTML = features.map(f => `
       <div class="flex items-center gap-2.5 text-sm text-gray-600">
         <span class="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0">
           <svg class="w-3 h-3 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
