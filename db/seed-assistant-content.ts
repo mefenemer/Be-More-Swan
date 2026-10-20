@@ -114,9 +114,10 @@ const MIGRATED: RoleContent[] = [
             'Personalised Outreach Drafting',
             'You Approve Every Send',  // was 'Handoff to CRM Enricher for missing data' — that role is not live; see db/z-copy-lead-features.sql
         ],
-        // LinkedIn swapped for Outlook 2026-10-20: lead discovery never reads LinkedIn, and approved
-        // outreach sends from Gmail OR Outlook (MAILBOX_PROVIDERS in src/utils/connection-map.ts).
-        integrations: ['HubSpot', 'Salesforce', 'Gmail', 'Outlook'],
+        // 2026-10-20, owner's call (db/z-copy-lead-connectors.sql): approved outreach sends from Gmail OR
+        // Outlook (MAILBOX_PROVIDERS in src/utils/connection-map.ts) — both live. HubSpot and Salesforce
+        // are coming soon. LinkedIn was dropped: lead discovery never reads it.
+        integrations: ['HubSpot (coming soon)', 'Salesforce (coming soon)', 'Gmail', 'Outlook'],
     },
     {
         roleKey: 'accounts_receivable_clerk',
