@@ -73,6 +73,14 @@ export default withLambda(async (event) => {
         return { statusCode: 400, body: JSON.stringify({ error: 'Cascade preview must be acknowledged before deleting.' }) };
     }
 
+    // A user is never deleted here. The soft path would run `UPDATE users SET is_active = false`, and
+    // users has no is_active column; even if it did, the address would stay taken and a workspace only
+    // they belonged to would be orphaned. admin-api DELETE ?resource=user (deleteUserAndSoleOrgs) is
+    // the one user-delete path, and admin.html routes there.
+    if (table === 'users') {
+        return { statusCode: 400, body: JSON.stringify({ error: 'Delete users from the user panel (Admin → Users → Delete Account).' }) };
+    }
+
     const config = TABLE_DELETE_CONFIG[table];
     if (!config) {
         return { statusCode: 400, body: JSON.stringify({ error: `Unknown table: ${table}` }) };
