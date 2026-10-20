@@ -85,7 +85,9 @@ const MIGRATED: RoleContent[] = [
             'Human-in-the-loop Review',
             'Per-platform Hashtag & Format Strategy',
         ],
-        integrations: ['Facebook', 'Instagram', 'LinkedIn', 'X (Twitter)', 'Threads', 'TikTok', 'YouTube'],
+        // Instagram names the account type because a personal account cannot connect (Meta only allows
+        // professional accounts, linked to a Facebook Page). TikTok has no connector yet.
+        integrations: ['Facebook', 'Instagram (Business or Creator)', 'LinkedIn', 'X (Twitter)', 'Threads', 'YouTube', 'TikTok (coming soon)'],
         // url null = the modal renders a branded 16:9 placeholder slot. Set it to go live.
         video: { url: null, title: 'Watch the Social Media Manager in action' },
     },

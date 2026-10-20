@@ -626,7 +626,7 @@ node_bundler = "esbuild"
 #      and resolves by specificity only when two rules set the SAME header).
 #
 # This inverts an allow-list. Everything indexable is: / index about blog pricing contact faq
-# trust privacy terms_of_service data-deletion help assistants licenses register — those 14
+# trust privacy terms_of_service data-deletion help assistants connections licenses register — those 15
 # carry <link rel=canonical> + Open Graph tags and are the entries in sitemap.xml. When you
 # add a public marketing page, add it to sitemap.xml; when you add an app page, add it here.
 #
