@@ -542,6 +542,14 @@ async function handleAssistantVersions(event: any, adminId: number, ip?: string,
     return { statusCode: 405, body: 'Method Not Allowed' };
 }
 
+/** The admin's typed reason from the Delete sheet (JSON body), for the audit row. */
+function deleteReason(event: any): string | undefined {
+    try {
+        const r = JSON.parse(event.body || '{}')?.reason;
+        return typeof r === 'string' && r.trim() ? r.trim().slice(0, 500) : undefined;
+    } catch { return undefined; }
+}
+
 async function handleFeatureFlags(event: any, adminId: number, role: string, ip?: string, ua?: string) {
     const db = getDb();
     const method = event.httpMethod;
@@ -593,7 +601,7 @@ async function handleFeatureFlags(event: any, adminId: number, role: string, ip?
         const [prev] = await db.select().from(featureFlags).where(eq(featureFlags.key, key)).limit(1);
         if (!prev) return notFound();
         await db.delete(featureFlags).where(eq(featureFlags.key, key));
-        void insertAdminAuditLog({ adminId, action: 'feature_flag_toggle', targetType: 'feature_flag', targetId: key, previousState: prev, ipAddress: ip, userAgent: ua });
+        void insertAdminAuditLog({ adminId, action: 'feature_flag_toggle', targetType: 'feature_flag', targetId: key, previousState: prev, reason: deleteReason(event), ipAddress: ip, userAgent: ua });
         return { statusCode: 200, body: JSON.stringify({ ok: true }) };
     }
 
@@ -632,7 +640,7 @@ async function handlePlatformConfig(event: any, adminId: number, ip?: string, ua
         const [prev] = await db.select().from(platformConfig).where(eq(platformConfig.key, key)).limit(1);
         if (!prev) return notFound();
         await db.delete(platformConfig).where(eq(platformConfig.key, key));
-        void insertAdminAuditLog({ adminId, action: 'kill_switch_toggle', targetType: 'platform_config', targetId: key, previousState: prev, ipAddress: ip, userAgent: ua });
+        void insertAdminAuditLog({ adminId, action: 'kill_switch_toggle', targetType: 'platform_config', targetId: key, previousState: prev, reason: deleteReason(event), ipAddress: ip, userAgent: ua });
         return { statusCode: 200, body: JSON.stringify({ ok: true }) };
     }
 
@@ -677,7 +685,7 @@ async function handleSupportedLanguages(event: any, adminId: number, ip?: string
         const code = event.queryStringParameters?.code;
         if (!code) return badRequest('code required.');
         await db.delete(supportedLanguages).where(eq(supportedLanguages.code, code));
-        void insertAdminAuditLog({ adminId, action: 'record_delete', targetType: 'supported_language', targetId: code, ipAddress: ip, userAgent: ua, reason: 'admin_delete' });
+        void insertAdminAuditLog({ adminId, action: 'record_delete', targetType: 'supported_language', targetId: code, ipAddress: ip, userAgent: ua, reason: deleteReason(event) ?? 'admin_delete' });
         return { statusCode: 200, body: JSON.stringify({ deleted: true }) };
     }
 

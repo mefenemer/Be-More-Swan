@@ -12168,6 +12168,15 @@ let _cascadeLabel = null;
 let _cascadeOnSuccess = null;
 let _cascadeBlocked = false;
 
+// Master-data rows keyed by a string, not a numeric id, with nothing that references them. The generic
+// cascade-preview / admin-delete-record pair takes numeric ids from TABLE_DELETE_CONFIG, so these went
+// nowhere ("table and id are required"). master-data-api already deletes (and audits) them by key.
+const KEYED_DELETES = {
+  feature_flags:       { resource: 'feature-flags',       param: 'key',  impact: 'Anything that checks this flag will treat it as off.' },
+  platform_config:     { resource: 'platform-config',     param: 'key',  impact: 'Code that reads this setting falls back to its built-in default.' },
+  supported_languages: { resource: 'supported-languages', param: 'code', impact: 'Anyone who chose this language falls back to English. To stop offering it but keep it for existing users, untick Active instead.' },
+};
+
 async function openCascadeDeleteSheet(table, id, label, onSuccess) {
   _cascadeTable = table;
   _cascadeId = id;
@@ -12184,7 +12193,10 @@ async function openCascadeDeleteSheet(table, id, label, onSuccess) {
   openBottomSheet('cascade-delete');
 
   try {
-    const d = await api(`/.netlify/functions/cascade-preview?table=${encodeURIComponent(table)}&id=${encodeURIComponent(id)}`);
+    const keyed = KEYED_DELETES[table];
+    const d = keyed
+      ? { blocked: false, tier: 'hard', cascadeGroups: [], impact: keyed.impact }
+      : await api(`/.netlify/functions/cascade-preview?table=${encodeURIComponent(table)}&id=${encodeURIComponent(id)}`);
     document.getElementById('cascade-preview-loading').classList.add('hidden');
     document.getElementById('cascade-preview-content').classList.remove('hidden');
 
@@ -12207,7 +12219,8 @@ async function openCascadeDeleteSheet(table, id, label, onSuccess) {
 
       const groups = d.cascadeGroups || [];
       if (groups.length === 0) {
-        groupsEl.innerHTML = '<p class="text-xs text-gray-400">No dependent records will be affected.</p>';
+        groupsEl.innerHTML = '<p class="text-xs text-gray-400">No dependent records will be affected.</p>'
+          + (d.impact ? `<p class="text-xs text-gray-600">${escapeHtmlJs(d.impact)}</p>` : '');
       } else {
         groupsEl.innerHTML = groups.map(g => {
           const typeLabel = g.type === 'hard_deleted' ? '🗑 Hard-deleted'
@@ -12226,8 +12239,12 @@ async function openCascadeDeleteSheet(table, id, label, onSuccess) {
       confirmBtn.textContent = d.tier === 'hard' || d.tier === 'hard_confirmed' ? '⚠️ Permanently Delete' : 'Delete';
     }
   } catch (e) {
+    // Write into #cascade-groups, never over #cascade-preview-content: replacing that container's
+    // innerHTML deleted the banner and reason elements, and every later open threw until a reload.
     document.getElementById('cascade-preview-loading').classList.add('hidden');
-    document.getElementById('cascade-preview-content').innerHTML = `<p class="text-sm text-red-500">Failed to load preview: ${e.message}</p>`;
+    document.getElementById('cascade-blocked-banner').classList.add('hidden');
+    document.getElementById('cascade-reason-section').classList.add('hidden');
+    document.getElementById('cascade-groups').innerHTML = `<p class="text-sm text-red-500">Failed to load preview: ${escapeHtmlJs(e.message)}</p>`;
     document.getElementById('cascade-preview-content').classList.remove('hidden');
   }
 }
@@ -12247,7 +12264,13 @@ async function confirmCascadeDelete() {
   btn.textContent = 'Deleting…';
 
   try {
-    if (_cascadeTable === 'users') {
+    const keyed = KEYED_DELETES[_cascadeTable];
+    if (keyed) {
+      await api(`${MD_API}?resource=${keyed.resource}&${keyed.param}=${encodeURIComponent(_cascadeId)}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ reason }),
+      });
+    } else if (_cascadeTable === 'users') {
       // A user is deleted by admin-api (deleteUserAndSoleOrgs): it also removes a workspace only they
       // belonged to, logs the GDPR erasure and emails them. admin-delete-record refuses users.
       await api(`/.netlify/functions/admin-api?resource=user&id=${encodeURIComponent(_cascadeId)}`, {
