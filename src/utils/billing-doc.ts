@@ -253,3 +253,47 @@ export function renewalDiscountNote(next: VoucherSummary | null, current: Vouche
     if (current) return ` — your ${who(current)} discount has ended, so this is the full price`;
     return '';
 }
+
+/**
+ * The voucher paragraph of the 14-day renewal reminder: what the voucher is, how long it lasts, what
+ * it saves on this renewal and when the full price comes back. Plain text (the template escapes it).
+ *   next     — the discount on the coming invoice (from the invoice preview), or null
+ *   current  — the discount on the subscription right now, or null
+ *   perCycle — "month" | "year", for the full-price line
+ * Pure; '' when there is no voucher either side.
+ */
+export function renewalVoucherDetails(next: VoucherSummary | null, current: VoucherSummary | null, perCycle: string): string {
+    const longDate = (iso: string) => new Date(iso).toLocaleDateString('en-GB', {
+        day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/London',
+    });
+    const title = (v: VoucherSummary) => {
+        const code = v.codes[0];
+        if (v.name && code) return `${v.name} (code ${code})`;
+        return v.name ?? (code ? `code ${code}` : '');
+    };
+    if (next) {
+        const sym = currencySymbol(next.currency);
+        const full = `${sym}${next.grossAmount.toFixed(2)}/${perCycle}`;
+        let lasts = '';
+        let after = '';
+        if (next.duration === 'forever') {
+            after = ' It lasts for as long as you keep this subscription.';
+        } else if (next.duration === 'once') {
+            after = ` It applies to this renewal only; after that your plan renews at the full price of ${full}.`;
+        } else if (next.duration === 'repeating') {
+            const n = next.durationInMonths;
+            lasts = n ? ` for ${n} month${n === 1 ? '' : 's'}` : '';
+            if (next.endsAt) {
+                lasts += ` (until ${longDate(next.endsAt)})`;
+                after = ` After ${longDate(next.endsAt)}, your plan renews at the full price of ${full}.`;
+            }
+        }
+        const t = title(next);
+        return `Your voucher: ${t ? `${t}, ` : ''}${next.label}${lasts}. It saves you ${sym}${next.discountAmount.toFixed(2)} on this renewal.${after}`;
+    }
+    if (current) {
+        const t = title(current);
+        return `Your voucher${t ? ` (${t})` : ''} has ended, so this renewal is at the full price.`;
+    }
+    return '';
+}

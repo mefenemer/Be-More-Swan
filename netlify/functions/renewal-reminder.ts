@@ -11,7 +11,7 @@ import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans, processedWebhookEvents } from '../../db/schema';
 import { sendTemplatedEmail } from '../../src/utils/email';
-import { DISCOUNT_EXPANDS, renewalDiscountNote, summariseDiscount } from '../../src/utils/billing-doc';
+import { DISCOUNT_EXPANDS, renewalDiscountNote, renewalVoucherDetails, summariseDiscount } from '../../src/utils/billing-doc';
 import Stripe from 'stripe';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -59,7 +59,7 @@ async function runRenewalReminder() {
             if (existing) continue;
 
             // Resolve userId via our plans table
-            const [plan] = await db.select({ userId: plans.userId })
+            const [plan] = await db.select({ userId: plans.userId, planName: plans.planName })
                 .from(plans)
                 .where(and(eq(plans.stripeCustomerId, customerId), eq(plans.status, 'active')))
                 .limit(1);
@@ -72,7 +72,7 @@ async function runRenewalReminder() {
             if (!user?.email) continue;
 
             const renewalDate = new Date(periodEnd * 1000).toLocaleDateString('en-GB', {
-                day: 'numeric', month: 'long', year: 'numeric',
+                day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/London',
             });
             const item   = sub.items.data[0];
             const interval = item?.price?.recurring?.interval === 'year' ? 'year' : 'month';
@@ -91,10 +91,12 @@ async function runRenewalReminder() {
             }
             const current = summariseDiscount(((sub as any).discounts || []) as any[], item?.price?.unit_amount ?? 0, 'gbp');
             const amount = amountMinor != null ? `£${(amountMinor / 100).toFixed(2)}` : '';
+            // discount_note stays for any admin-edited template that still uses it; the default
+            // template now carries the fuller voucher_details paragraph instead.
             const discountNote = renewalDiscountNote(next, current);
+            const voucherDetails = renewalVoucherDetails(next, current, interval);
 
             // US-COMMS-1: admin-editable template 'renewal_reminder'.
-            void renewalDate;
             await sendTemplatedEmail({
                 triggerKey: 'renewal_reminder',
                 to: user.email,
@@ -102,7 +104,11 @@ async function runRenewalReminder() {
                     user: { first_name: user.firstName || '' },
                     billing: {
                         amount: amount ? `${amount}/${interval}` : '',
+                        // "The Busywork Buster" → "Busywork Buster", for "Your Busywork Buster plan".
+                        plan_name: (plan.planName || '').replace(/^the\s+/i, ''),
+                        renewal_date: renewalDate,
                         discount_note: discountNote,
+                        voucher_details: voucherDetails,
                         portal_url: `${BASE_URL}/user-settings.html`,
                     },
                 },

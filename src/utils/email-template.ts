@@ -186,6 +186,9 @@ export const EMAIL_VARIABLES: EmailVariable[] = [
     { key: 'billing.portal_url', label: 'Billing portal URL', group: 'Billing', sample: `${BASE_URL}/billing.html` },
     // Empty unless a discount applies. Written to sit straight after the amount, so it starts with " — ".
     { key: 'billing.discount_note', label: 'Discount note (after the amount)', group: 'Billing', sample: ' — that includes your FOUNDER30 discount (30% off, until July 2027)' },
+    { key: 'billing.renewal_date', label: 'Renewal date', group: 'Billing', sample: '26 October 2026' },
+    // Empty unless a voucher applies (renewalVoucherDetails in billing-doc.ts). A full sentence or three.
+    { key: 'billing.voucher_details', label: 'Voucher details (renewal reminder)', group: 'Billing', sample: 'Your voucher: Founding Member (code FOUNDER30), 30% off for 12 months (until 13 October 2027). It saves you £8.70 on this renewal. After 13 October 2027, your plan renews at the full price of £29.00/month.' },
     // Weekly digest figures (netlify/functions/weekly-digest.ts) — counted through roi-activity.ts.
     { key: 'digest.tasks_handled', label: 'Tasks handled (7 days)', group: 'Digest', sample: '42' },
     { key: 'digest.hours_saved', label: 'Hours saved (7 days)', group: 'Digest', sample: '6.5' },
