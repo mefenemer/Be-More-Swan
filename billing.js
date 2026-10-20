@@ -814,10 +814,18 @@
             }
         }
 
+        // What the renewal will cost, so a customer on a 100% voucher sees "for £0.00" rather than
+        // wondering whether a bare "Renews 26 Oct" means a charge. The voucher price only counts if it
+        // is still running on the renewal date; after it ends, the renewal is at full price.
+        const voucherCoversRenewal = ongoingDiscount
+            && (!d.endsAt || !sub.renewalDate || new Date(d.endsAt) > new Date(sub.renewalDate));
+        const renewalAmount = voucherCoversRenewal
+            ? `${money(d.netAmount)}${d.netAmount === 0 ? ' (voucher)' : ''}`
+            : (sub.amountGbp ? amount : '');
         const renewalLine = sub.cancelAtPeriodEnd
             ? `<span class="text-amber-600 font-semibold">Cancels on ${_fmtDate(sub.renewalDate)}</span>`
             : sub.renewalDate
-                ? `Renews <span class="font-semibold text-gray-800">${_fmtDate(sub.renewalDate)}</span>`
+                ? `Renews <span class="font-semibold text-gray-800">${_fmtDate(sub.renewalDate)}</span>${renewalAmount ? ` for <span class="font-semibold text-gray-800">${renewalAmount}</span>` : ''}`
                 : `Started <span class="font-semibold text-gray-800">${_fmtDate(sub.startedAt)}</span>`;
 
         // Show cancel button for any active/trialing plan — Stripe sub ID required for API cancel,
