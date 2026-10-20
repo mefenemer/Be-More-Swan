@@ -266,7 +266,7 @@ const CATALOG = [
     {
         roleKey: 'tier1_support_agent',
         name: 'First-Line Support Assistant',
-        description: 'Instantly resolves common FAQs — refunds, password resets, shipping times — and escalates complex issues to your team with full context.',
+        description: 'Drafts replies to the customer questions you paste or forward, answering from your Knowledge Base, and hands the tricky ones (angry customers, refund demands, requests for a manager) to your team with a summary.',
         category: 'Customer Success & Support',
         iconKey: 'smile',
         iconColor: 'teal',
@@ -308,7 +308,7 @@ const CATALOG = [
     {
         roleKey: 'meeting_note_taker',
         name: 'Minute Taker',
-        description: 'Attends virtual meetings, transcribes the conversation, and instantly extracts action items — assigned to the right people before the call ends.',
+        description: 'Turns the meeting transcripts and notes you paste in into clear minutes: a summary, the decisions made, and every action item with its owner, ready to send to Slack, Notion or Jira.',
         category: 'Project Management',
         iconKey: 'document',
         iconColor: 'blue',
@@ -330,7 +330,7 @@ const CATALOG = [
     {
         roleKey: 'accounts_receivable_clerk',
         name: 'Accounts Receivable Clerk',
-        description: 'Politely but persistently chases unpaid invoices and drafts payment reminders — cash flow protected without awkward conversations.',
+        description: 'Works through the overdue invoices you paste or upload and drafts a chasing email for each one, friendly at first and firmer as the debt ages, while leaving small balances alone.',
         category: 'Finance & Bookkeeping',
         iconKey: 'chart',
         iconColor: 'orange',

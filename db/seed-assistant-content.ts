@@ -114,18 +114,24 @@ const MIGRATED: RoleContent[] = [
             'Personalised Outreach Drafting',
             'You Approve Every Send',  // was 'Handoff to CRM Enricher for missing data' — that role is not live; see db/z-copy-lead-features.sql
         ],
-        integrations: ['HubSpot', 'Salesforce', 'LinkedIn', 'Gmail'],
+        // LinkedIn swapped for Outlook 2026-10-20: lead discovery never reads LinkedIn, and approved
+        // outreach sends from Gmail OR Outlook (MAILBOX_PROVIDERS in src/utils/connection-map.ts).
+        integrations: ['HubSpot', 'Salesforce', 'Gmail', 'Outlook'],
     },
     {
         roleKey: 'accounts_receivable_clerk',
         tagline: 'Protect your cash flow without the awkward conversations.',
-        description: 'Politely but persistently chases unpaid invoices, drafts payment reminders, and logs notes directly into your accounting software.',
+        // Rewritten 2026-10-20 (db/z-copy-live-role-claims.sql). It drafts chasing emails from the invoices
+        // the user pastes or uploads — nothing is sent on a schedule, and it reads no ledger. Xero and
+        // QuickBooks: the payments/accounting categories are not live in src/utils/connection-map.ts.
+        // Gmail was never used by this role.
+        description: 'Works through the overdue invoices you paste or upload and drafts a chasing email for each one, friendly at first and firmer as the debt ages, while leaving small balances alone.',
         keyFeatures: [
-            'Automated Dunning Sequences',
+            'Chasing Emails Matched to How Late Each Invoice Is',
             'Smart Thresholds (ignores small balances)',
-            'Live Ledger Syncing',
+            'You Approve Every Reminder',
         ],
-        integrations: ['Xero', 'QuickBooks', 'Gmail'],
+        integrations: ['Xero (coming soon)', 'QuickBooks (coming soon)'],
     },
     {
         roleKey: 'crm_enricher',
@@ -140,25 +146,33 @@ const MIGRATED: RoleContent[] = [
     },
     {
         roleKey: 'tier1_support_agent',
-        tagline: 'Cut your first-response times to zero.',
-        description: 'Instantly resolves common FAQs—refunds, password resets, shipping times—and seamlessly escalates complex issues to your human team with full context.',
+        // Rewritten 2026-10-20 (db/z-copy-live-role-claims.sql). It drafts a reply for the user to send —
+        // nothing reaches the customer on its own — and a refund demand is a MANDATORY escalation in its
+        // prompt, so "resolves refunds" was the opposite of the truth. Zendesk/Intercom: the support and
+        // chat categories are not live in src/utils/connection-map.ts, so the assistant's Connections tab
+        // shows them as coming soon. Gmail was never used by this role (no send or draft path).
+        tagline: 'Faster first replies, answered from your own help articles.',
+        description: 'Drafts replies to the customer questions you paste or forward, answering from your Knowledge Base, and hands the tricky ones (angry customers, refund demands, requests for a manager) to your team with a summary.',
         keyFeatures: [
-            'Automated Ticket Resolution',
-            'Sentiment Analysis',
+            'Drafted Replies from Your Knowledge Base',
+            'Angry Customers and Refund Demands Flagged',
             'Smart Human Escalation',
         ],
-        integrations: ['Zendesk', 'Intercom', 'Gmail'],
+        integrations: ['Zendesk (coming soon)', 'Intercom (coming soon)'],
     },
     {
         roleKey: 'meeting_note_taker',
         tagline: 'Never lose an action item again.',
-        description: 'Attends virtual meetings, transcribes the conversation, and instantly extracts action items—assigning them to the right people before the call even ends.',
+        // Rewritten 2026-10-20 (db/z-copy-live-role-claims.sql): it never attended or transcribed a
+        // call — chat-orchestrator.ts's meeting_note_taker route works only from text the user pastes,
+        // and there is no Zoom connector. Slack, Notion and Jira are real (sync-action.ts handlers).
+        description: 'Turns the meeting transcripts and notes you paste in into clear minutes: a summary, the decisions made, and every action item with its owner, ready to send to Slack, Notion or Jira.',
         keyFeatures: [
             'Executive Summaries',
             'Action Item Extraction',
             'Direct Project Board Syncing',
         ],
-        integrations: ['Zoom', 'Slack', 'Notion', 'Jira'],
+        integrations: ['Slack', 'Notion', 'Jira', 'Zoom (coming soon)'],
     },
 ];
 
