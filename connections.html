@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connections | Be More Swan</title>
+    <!-- SEO: canonical + social share metadata -->
+    <meta name="description" content="See which tools each Be More Swan assistant connects to, what it does there and why it helps: Facebook, Instagram, LinkedIn, Gmail, Outlook, Slack, Notion and more.">
+    <link rel="canonical" href="https://bemoreswan.com/connections">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Be More Swan">
+    <meta property="og:title" content="Connections | Be More Swan">
+    <meta property="og:description" content="Your assistants work inside the tools you already use. See every connection, assistant by assistant.">
+    <meta property="og:url" content="https://bemoreswan.com/connections">
+    <meta property="og:image" content="https://bemoreswan.com/images/og-default.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="607">
+    <meta property="og:image:alt" content="Be More Swan — your digital workforce">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Connections | Be More Swan">
+    <meta name="twitter:description" content="Your assistants work inside the tools you already use. See every connection, assistant by assistant.">
+    <meta name="twitter:image" content="https://bemoreswan.com/images/og-default.png">
+    <meta name="twitter:image:alt" content="Be More Swan — your digital workforce">
+    <!-- /SEO -->
+    <link href="./style.css" rel="stylesheet">
+    <script src="/site-theme.js"></script>
+    <link rel="icon" href="/favicon/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
+    <link rel="manifest" href="/favicon/manifest.json">
+    <script src="/src/i18n.js"></script>
+  <script src="/waitlist-mode.js" defer></script>
+    <!-- Page-scoped styles. style.css is a compiled Tailwind build, and a utility class it does not
+         already contain fails SILENTLY — so this page's own components are plain CSS, coloured from
+         the site's theme tokens (the brand pink is --color-emerald-700). -->
+    <style>
+        .cx-wrap { max-width: 80rem; margin: 0 auto; padding: 0 1rem; }
+        .cx-eyebrow { display:inline-block; padding:.25rem .75rem; border-radius:9999px; font-size:.75rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; background:var(--color-emerald-50); color:var(--color-emerald-700); border:1px solid var(--color-emerald-100); }
+
+        /* Hero hub: tools out ← assistants → tools in */
+        .cx-hub { display:grid; grid-template-columns:1fr; gap:1.25rem; align-items:center; margin-top:3rem; }
+        @media (min-width: 900px) { .cx-hub { grid-template-columns: 1fr auto 1fr; gap:2rem; } }
+        .cx-hub-side { background:#fff; border:1px solid #f0ebe0; border-radius:1.25rem; padding:1.25rem; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+        .cx-hub-side h2 { font-size:.75rem; font-weight:800; text-transform:uppercase; letter-spacing:.08em; color:#9ca3af; margin:0 0 .85rem; }
+        .cx-hub-tools { display:flex; flex-wrap:wrap; gap:.5rem; }
+        .cx-tool { display:inline-flex; align-items:center; gap:.45rem; padding:.3rem .7rem .3rem .3rem; border-radius:9999px; background:#f9fafb; border:1px solid #eef0f3; font-size:.8rem; font-weight:600; color:#374151; }
+        .cx-hub-core { position:relative; text-align:center; padding:1.75rem 1.5rem; border-radius:1.5rem; color:#fff; background:var(--color-emerald-700); box-shadow:0 12px 32px -12px var(--color-emerald-700); }
+        .cx-hub-core strong { display:block; font-size:1.25rem; font-weight:800; }
+        .cx-hub-core span { display:block; font-size:.85rem; opacity:.9; margin-top:.25rem; }
+        .cx-hub-core .cx-approve { display:inline-block; margin-top:.9rem; padding:.3rem .8rem; border-radius:9999px; background:rgba(255,255,255,.18); font-size:.75rem; font-weight:700; }
+        .cx-arrow { display:none; color:var(--color-emerald-700); font-size:1.5rem; font-weight:800; }
+        @media (min-width: 900px) { .cx-hub-core::before, .cx-hub-core::after { content:'⇄'; position:absolute; top:50%; transform:translateY(-50%); color:var(--color-emerald-700); font-size:1.5rem; font-weight:800; } .cx-hub-core::before { left:-1.6rem; } .cx-hub-core::after { right:-1.6rem; } }
+
+        .cx-badge { flex-shrink:0; display:inline-flex; align-items:center; justify-content:center; width:2.25rem; height:2.25rem; border-radius:.65rem; font-size:.8rem; font-weight:800; line-height:1; }
+        .cx-badge.cx-badge-sm, .cx-tool .cx-badge { width:1.6rem; height:1.6rem; border-radius:9999px; font-size:.62rem; }
+
+        /* How it works */
+        .cx-steps { display:grid; grid-template-columns:1fr; gap:1rem; counter-reset:cx; }
+        @media (min-width: 768px) { .cx-steps { grid-template-columns:repeat(3,1fr); } }
+        .cx-steps li { list-style:none; background:#fff; border:1px solid #f0ebe0; border-radius:1rem; padding:1.25rem 1.25rem 1.25rem 3.75rem; position:relative; color:#4b5563; font-size:.95rem; }
+        .cx-steps li::before { counter-increment:cx; content:counter(cx); position:absolute; left:1.1rem; top:1.15rem; width:1.85rem; height:1.85rem; border-radius:9999px; background:var(--color-emerald-50); color:var(--color-emerald-700); font-weight:800; display:flex; align-items:center; justify-content:center; }
+        .cx-steps strong { display:block; color:#111827; margin-bottom:.2rem; }
+
+        /* Filter bar */
+        .cx-bar { position:sticky; top:0; z-index:20; background:rgba(250,250,249,.94); backdrop-filter:blur(6px); border-bottom:1px solid #eee8dc; padding:.75rem 0; }
+        .cx-bar-inner { display:flex; gap:.75rem; align-items:center; }
+        .cx-chips { display:flex; gap:.5rem; overflow-x:auto; scrollbar-width:none; flex:1; min-width:0; padding-bottom:2px; }
+        .cx-chips::-webkit-scrollbar { display:none; }
+        .cx-chip { flex-shrink:0; display:inline-flex; gap:.4rem; align-items:center; padding:.4rem .8rem; border-radius:9999px; background:#fff; border:1px solid #e5e7eb; font-size:.8rem; font-weight:600; color:#374151; text-decoration:none; white-space:nowrap; }
+        .cx-chip:hover { border-color:var(--color-emerald-700); color:var(--color-emerald-700); }
+        .cx-toggle { flex-shrink:0; display:inline-flex; align-items:center; gap:.5rem; font-size:.8rem; font-weight:600; color:#374151; cursor:pointer; user-select:none; }
+        .cx-toggle input { width:1rem; height:1rem; accent-color:var(--color-emerald-700); }
+
+        /* Assistant sections */
+        .cx-assistant { padding:3rem 0 1rem; scroll-margin-top:4rem; }
+        .cx-assistant-head { display:flex; flex-wrap:wrap; align-items:center; gap:.9rem 1rem; margin-bottom:1.25rem; }
+        .cx-assistant-head > div:first-of-type { flex:1; min-width:12rem; }
+        .cx-assistant-head h3 { font-size:1.5rem; font-weight:800; color:#111827; margin:0; }
+        .cx-assistant-head p { color:#6b7280; margin:.15rem 0 0; }
+        .cx-icon { width:3rem; height:3rem; border-radius:.9rem; background:var(--color-emerald-50); display:flex; align-items:center; justify-content:center; font-size:1.5rem; flex-shrink:0; }
+        .cx-strip { display:flex; }
+        .cx-strip .cx-badge { margin-left:-.35rem; box-shadow:0 0 0 2px #fafaf9; }
+        .cx-strip .cx-badge:first-child { margin-left:0; }
+        .cx-count { font-size:.75rem; font-weight:700; color:#6b7280; background:#fff; border:1px solid #e5e7eb; padding:.25rem .65rem; border-radius:9999px; }
+        .cx-grid { display:grid; grid-template-columns:1fr; gap:1rem; }
+        @media (min-width: 640px) { .cx-grid { grid-template-columns:repeat(2,1fr); } }
+        @media (min-width: 1024px) { .cx-grid { grid-template-columns:repeat(3,1fr); } }
+
+        .cx-card { background:#fff; border:1px solid #eee8dc; border-radius:1rem; padding:1.1rem 1.15rem; display:flex; flex-direction:column; gap:.8rem; box-shadow:0 1px 2px rgba(0,0,0,.03); transition:box-shadow .15s, transform .15s; }
+        .cx-card:hover { box-shadow:0 8px 24px -12px rgba(0,0,0,.18); transform:translateY(-1px); }
+        .cx-card.is-soon { background:#fbfaf7; border-style:dashed; }
+        .cx-card.is-soon .cx-badge { filter:grayscale(.85); opacity:.6; }
+        .cx-card-head { display:flex; align-items:center; gap:.65rem; }
+        .cx-card-head h4 { flex:1; min-width:0; margin:0; font-size:1rem; font-weight:800; color:#111827; }
+        .cx-pill { flex-shrink:0; font-size:.65rem; font-weight:800; text-transform:uppercase; letter-spacing:.06em; padding:.2rem .55rem; border-radius:9999px; }
+        .cx-live { background:var(--color-emerald-50); color:var(--color-emerald-800); border:1px solid var(--color-emerald-100); }
+        .cx-soon { background:#f3f4f6; color:#6b7280; border:1px dashed #d1d5db; }
+        .cx-flow { margin:0; padding:0; display:flex; flex-direction:column; gap:.45rem; }
+        .cx-flow li { list-style:none; font-size:.875rem; color:#374151; line-height:1.45; display:flex; gap:.6rem; align-items:baseline; }
+        .cx-step { flex-shrink:0; width:2.9rem; font-size:.65rem; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--color-emerald-700); }
+        .cx-card.is-soon .cx-step { color:#9ca3af; }
+        .cx-why { margin:auto 0 0; padding-top:.7rem; border-top:1px solid #f3efe6; font-size:.82rem; color:#6b7280; line-height:1.45; }
+        .cx-why strong { color:#374151; }
+        body.cx-live-only .cx-card[data-live="0"] { display:none; }
+        /* An assistant whose connections are ALL coming soon would otherwise leave a bare heading. */
+        body.cx-live-only .cx-assistant:has(.cx-card):not(:has(.cx-card[data-live="1"])) { display:none; }
+
+        /* Campaign Assistant + trust */
+        .cx-note { display:flex; gap:1rem; align-items:flex-start; background:#fff; border:1px solid #eee8dc; border-radius:1rem; padding:1.25rem; }
+        .cx-trust { display:grid; grid-template-columns:1fr; gap:1rem; }
+        @media (min-width: 768px) { .cx-trust { grid-template-columns:repeat(3,1fr); } }
+        .cx-trust div { background:#fff; border:1px solid #eee8dc; border-radius:1rem; padding:1.25rem; }
+        .cx-trust h3 { font-size:1.05rem; font-weight:800; color:#111827; margin:0 0 .35rem; }
+        .cx-trust p { margin:0; color:#4b5563; font-size:.92rem; line-height:1.5; }
+    </style>
+</head>
+<body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
+
+<div id="nav-placeholder"></div>
+
+<!-- What each assistant connects to — checked against the code 2026-10-20, not against other copy.
+     "Live" = a customer can connect it today: the social platforms and Canva in integrations.js
+     PLATFORMS/SOURCES; Gmail/Outlook (MAILBOX_CATALOG, Lead Generator only); Search Console;
+     the blog destinations LinkedIn + The Swan Index (WordPress/Ghost are built but WITHHELD in
+     src/utils/blog-destinations — keep them "Coming soon" until they are offered); and the
+     Integration Scenario Library recipes in db/seed-catalog.ts with status 'available'.
+     "Coming soon" = no connector a customer can switch on: TikTok (no OAuth), LinkedIn Company
+     Pages (no Community Management access), Pipedrive/Zoho (recipes 'coming_soon'), Zoom (meetings
+     come in as pasted transcripts), Zendesk/Intercom/Xero/QuickBooks (their categories are not
+     live in src/utils/connection-map.ts), and HubSpot/Salesforce (owner's call 2026-10-20: not offered
+     yet, though the recipes exist — integrations.html shows them as coming soon too). Assistant names mirror master_assistants — rename both. -->
+<main class="flex-grow">
+
+    <!-- Hero -->
+    <section class="bg-white border-b border-gray-100">
+        <div class="cx-wrap" style="padding-top:4.5rem;padding-bottom:4rem;">
+            <div class="text-center max-w-3xl mx-auto">
+                <span class="cx-eyebrow">Connections</span>
+                <h1 class="text-4xl md:text-5xl font-extrabold text-gray-900 tracking-tight mt-5 mb-5 leading-tight">Your assistants work inside the tools you already use</h1>
+                <p class="text-xl text-gray-500 leading-relaxed">Connect an app once and your assistants can publish to it, send from it or learn from it. You approve the work first, and every connection only does the job it was given.</p>
+            </div>
+
+            <div class="cx-hub" aria-label="How connections fit together">
+                <div class="cx-hub-side">
+                    <h2>Where your work goes out</h2>
+                    <div class="cx-hub-tools">
+                        <span class="cx-tool"><span class="cx-badge" style="background:#1877F2;color:#fff" aria-hidden="true">f</span>Facebook</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:linear-gradient(135deg,#F58529,#DD2A7B 50%,#8134AF);color:#fff" aria-hidden="true">IG</span>Instagram</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:#0A66C2;color:#fff" aria-hidden="true">in</span>LinkedIn</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:#111;color:#fff" aria-hidden="true">X</span>X</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:#111;color:#fff" aria-hidden="true">@</span>Threads</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:#FF0000;color:#fff" aria-hidden="true">▶</span>YouTube</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:#374151;color:#fff" aria-hidden="true">&lt;/&gt;</span>Your website</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:var(--color-emerald-700);color:#fff" aria-hidden="true">S</span>The Swan Index</span>
+                    </div>
+                </div>
+                <div class="cx-hub-core">
+                    <strong>Your assistants</strong>
+                    <span>Draft, write and organise the work</span>
+                    <span class="cx-approve">✓ You approve</span>
+                </div>
+                <div class="cx-hub-side">
+                    <h2>Where they send and learn</h2>
+                    <div class="cx-hub-tools">
+                        <span class="cx-tool"><span class="cx-badge" style="background:#EA4335;color:#fff" aria-hidden="true">M</span>Gmail</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:#0078D4;color:#fff" aria-hidden="true">O</span>Outlook</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:#4A154B;color:#fff" aria-hidden="true">#</span>Slack</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:#111;color:#fff" aria-hidden="true">N</span>Notion</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:#0052CC;color:#fff" aria-hidden="true">J</span>Jira</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:#F06A6A;color:#fff" aria-hidden="true">A</span>Asana</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:#4285F4;color:#fff" aria-hidden="true">G</span>Google Search Console</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:#00C4CC;color:#fff" aria-hidden="true">C</span>Canva</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:#FF4F00;color:#fff" aria-hidden="true">⚡</span>Zapier / Make</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- How it works -->
+    <section class="cx-wrap" style="padding-top:3.5rem;padding-bottom:1rem;">
+        <h2 class="text-3xl font-extrabold text-gray-900 tracking-tight mb-6 text-center">Connecting takes a minute</h2>
+        <ol class="cx-steps" style="padding:0;margin:0;">
+            <li><strong>Pick the app</strong>Open your assistant's Connections tab and choose a tool from the list.</li>
+            <li><strong>Sign in on the app's own page</strong>For most apps you sign in with the app itself, so we never see your password.</li>
+            <li><strong>Choose what it does</strong>Switch on the actions you want, and turn them off or disconnect any time.</li>
+        </ol>
+    </section>
+
+    <!-- Filter bar -->
+    <div class="cx-bar" style="margin-top:2.5rem;">
+        <div class="cx-wrap cx-bar-inner">
+            <nav class="cx-chips" aria-label="Jump to an assistant">
+                <a href="#social" class="cx-chip"><span aria-hidden="true">📣</span>Social Media Assistant</a>
+                <a href="#blog" class="cx-chip"><span aria-hidden="true">✍️</span>Blog Writing Assistant</a>
+                <a href="#email" class="cx-chip"><span aria-hidden="true">💌</span>Email Marketing Assistant</a>
+                <a href="#leads" class="cx-chip"><span aria-hidden="true">🎯</span>Lead Generation Assistant</a>
+                <a href="#meetings" class="cx-chip"><span aria-hidden="true">📝</span>Minute Taker</a>
+                <a href="#design" class="cx-chip"><span aria-hidden="true">🎨</span>Brand Designer</a>
+                <a href="#support" class="cx-chip"><span aria-hidden="true">💬</span>First-Line Support Assistant</a>
+                <a href="#finance" class="cx-chip"><span aria-hidden="true">💷</span>Accounts Receivable Clerk</a>
+                <a href="#campaign" class="cx-chip"><span aria-hidden="true">🧭</span>Campaign Assistant</a>
+            </nav>
+            <label class="cx-toggle"><input type="checkbox" id="cx-live-only"> Live only</label>
+        </div>
+    </div>
+
+    <div class="cx-wrap" style="padding-bottom:2rem;">
+        <section id="social" class="cx-assistant">
+            <div class="cx-assistant-head">
+                <span class="cx-icon" aria-hidden="true">📣</span>
+                <div>
+                    <h3>Social Media Assistant</h3>
+                    <p>Plans, writes and publishes your social posts.</p>
+                </div>
+                <div class="cx-strip" aria-hidden="true"><span class="cx-badge cx-badge-sm" style="background:#1877F2;color:#fff" aria-hidden="true">f</span><span class="cx-badge cx-badge-sm" style="background:linear-gradient(135deg,#F58529,#DD2A7B 50%,#8134AF);color:#fff" aria-hidden="true">IG</span><span class="cx-badge cx-badge-sm" style="background:#0A66C2;color:#fff" aria-hidden="true">in</span><span class="cx-badge cx-badge-sm" style="background:#111;color:#fff" aria-hidden="true">X</span><span class="cx-badge cx-badge-sm" style="background:#111;color:#fff" aria-hidden="true">@</span><span class="cx-badge cx-badge-sm" style="background:#FF0000;color:#fff" aria-hidden="true">▶</span><span class="cx-badge cx-badge-sm" style="background:#00C4CC;color:#fff" aria-hidden="true">C</span><span class="cx-badge cx-badge-sm" style="background:#111;color:#fff" aria-hidden="true">♪</span></div>
+                <span class="cx-count">8 live · 2 coming soon</span>
+            </div>
+            <div class="cx-grid">
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#1877F2;color:#fff" aria-hidden="true">f</span><h4>Facebook</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve a post</li>
+                    <li><span class="cx-step">It</span>Publishes it to your Facebook Page at the scheduled time</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Your Page stays active without you logging in every day.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:linear-gradient(135deg,#F58529,#DD2A7B 50%,#8134AF);color:#fff" aria-hidden="true">IG</span><h4>Instagram</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve a post</li>
+                    <li><span class="cx-step">It</span>Publishes it to your Instagram professional account (Business or Creator)</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Regular posting without the phone-in-hand routine. Personal accounts can’t connect.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#0A66C2;color:#fff" aria-hidden="true">in</span><h4>LinkedIn</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve a post</li>
+                    <li><span class="cx-step">It</span>Publishes it to your personal LinkedIn feed</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Stay visible to your network every week.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#111;color:#fff" aria-hidden="true">X</span><h4>X</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve a post</li>
+                    <li><span class="cx-step">It</span>Publishes it to your X account</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Keep up with a fast feed without living on it. Needs a free X developer account.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#111;color:#fff" aria-hidden="true">@</span><h4>Threads</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve a post</li>
+                    <li><span class="cx-step">It</span>Publishes it to Threads, within its 500-character limit</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> One more audience, without one more job.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#FF0000;color:#fff" aria-hidden="true">▶</span><h4>YouTube</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You attach a video and approve</li>
+                    <li><span class="cx-step">It</span>Uploads it with the title and description written for you</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Your videos go out with the words done for you.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#00C4CC;color:#fff" aria-hidden="true">C</span><h4>Canva</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You pick a Canva design</li>
+                    <li><span class="cx-step">It</span>Brings it into your Content Library to use in posts</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Use designs you already made, without downloading and re-uploading.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#1877F2;color:#fff" aria-hidden="true">f</span><h4>Facebook</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>A post has been live for a while</li>
+                    <li><span class="cx-step">It</span>Reads how it performed on Facebook and Instagram</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Your assistant learns what your audience responds to.</p>
+            </article>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#0A66C2;color:#fff" aria-hidden="true">in</span><h4>LinkedIn</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve a post</li>
+                    <li><span class="cx-step">It</span>Publishes it to your LinkedIn Company Page</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Build your business’s page, not just your own profile.</p>
+            </article>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#111;color:#fff" aria-hidden="true">♪</span><h4>TikTok</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve a video post</li>
+                    <li><span class="cx-step">It</span>Publishes it to TikTok</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Reach a short-video audience from the same plan.</p>
+            </article>
+            </div>
+        </section>
+
+        <section id="blog" class="cx-assistant">
+            <div class="cx-assistant-head">
+                <span class="cx-icon" aria-hidden="true">✍️</span>
+                <div>
+                    <h3>Blog Writing Assistant</h3>
+                    <p>Researches and writes long-form articles in your voice.</p>
+                </div>
+                <div class="cx-strip" aria-hidden="true"><span class="cx-badge cx-badge-sm" style="background:#374151;color:#fff" aria-hidden="true">&lt;/&gt;</span><span class="cx-badge cx-badge-sm" style="background:#0A66C2;color:#fff" aria-hidden="true">in</span><span class="cx-badge cx-badge-sm" style="background:var(--color-emerald-700);color:#fff" aria-hidden="true">S</span><span class="cx-badge cx-badge-sm" style="background:#4285F4;color:#fff" aria-hidden="true">G</span><span class="cx-badge cx-badge-sm" style="background:#00C4CC;color:#fff" aria-hidden="true">C</span><span class="cx-badge cx-badge-sm" style="background:#21759B;color:#fff" aria-hidden="true">W</span><span class="cx-badge cx-badge-sm" style="background:#15171A;color:#fff" aria-hidden="true">G</span></div>
+                <span class="cx-count">5 live · 2 coming soon</span>
+            </div>
+            <div class="cx-grid">
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#374151;color:#fff" aria-hidden="true">&lt;/&gt;</span><h4>Your website</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve an article</li>
+                    <li><span class="cx-step">It</span>Publishes it on your own site through a small embed code</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Fresh articles on your site, with no copying and pasting.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#0A66C2;color:#fff" aria-hidden="true">in</span><h4>LinkedIn</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>An article is published</li>
+                    <li><span class="cx-step">It</span>Shares it to your LinkedIn feed, linking back to your page</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Every article reaches the people who already follow you.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:var(--color-emerald-700);color:#fff" aria-hidden="true">S</span><h4>The Swan Index</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>An article is published</li>
+                    <li><span class="cx-step">It</span>Lists it on The Swan Index, linking back to your page</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Another place readers can find you.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#4285F4;color:#fff" aria-hidden="true">G</span><h4>Google Search Console</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>Every day</li>
+                    <li><span class="cx-step">It</span>Reads which articles are being found in Google, and which are fading</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> You know what to write next and what needs a refresh.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#00C4CC;color:#fff" aria-hidden="true">C</span><h4>Canva</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You pick a Canva design</li>
+                    <li><span class="cx-step">It</span>Uses it as an article’s picture</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Articles that look like your brand.</p>
+            </article>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#21759B;color:#fff" aria-hidden="true">W</span><h4>WordPress</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve an article</li>
+                    <li><span class="cx-step">It</span>Publishes it straight to your WordPress site</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Publish to the site you already run.</p>
+            </article>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#15171A;color:#fff" aria-hidden="true">G</span><h4>Ghost</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve an article</li>
+                    <li><span class="cx-step">It</span>Publishes it to your Ghost blog</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Publish to the site you already run.</p>
+            </article>
+            </div>
+        </section>
+
+        <section id="email" class="cx-assistant">
+            <div class="cx-assistant-head">
+                <span class="cx-icon" aria-hidden="true">💌</span>
+                <div>
+                    <h3>Email Marketing Assistant</h3>
+                    <p>Writes your newsletters and email campaigns.</p>
+                </div>
+                <div class="cx-strip" aria-hidden="true"><span class="cx-badge cx-badge-sm" style="background:#374151;color:#fff" aria-hidden="true">@</span><span class="cx-badge cx-badge-sm" style="background:#EA4335;color:#fff" aria-hidden="true">M</span><span class="cx-badge cx-badge-sm" style="background:#374151;color:#fff" aria-hidden="true">✉</span></div>
+                <span class="cx-count">3 live</span>
+            </div>
+            <div class="cx-grid">
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#374151;color:#fff" aria-hidden="true">@</span><h4>Your sending domain</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve an email</li>
+                    <li><span class="cx-step">It</span>Sends it from your own domain once you have verified it</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Emails come from you, not from us, which helps them reach the inbox.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#EA4335;color:#fff" aria-hidden="true">M</span><h4>Gmail</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve an email to a small list</li>
+                    <li><span class="cx-step">It</span>Sends it from your connected Gmail or Outlook inbox</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Start sending today, before you set up a domain.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#374151;color:#fff" aria-hidden="true">✉</span><h4>Sign-up form</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>Someone signs up on your website</li>
+                    <li><span class="cx-step">It</span>Adds them to your audience through an embed code that works on any site</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Your list grows while you get on with your day.</p>
+            </article>
+            </div>
+        </section>
+
+        <section id="leads" class="cx-assistant">
+            <div class="cx-assistant-head">
+                <span class="cx-icon" aria-hidden="true">🎯</span>
+                <div>
+                    <h3>Lead Generation Assistant</h3>
+                    <p>Finds companies that fit your ideal customer and drafts the outreach.</p>
+                </div>
+                <div class="cx-strip" aria-hidden="true"><span class="cx-badge cx-badge-sm" style="background:#EA4335;color:#fff" aria-hidden="true">M</span><span class="cx-badge cx-badge-sm" style="background:#0078D4;color:#fff" aria-hidden="true">O</span><span class="cx-badge cx-badge-sm" style="background:#FF7A59;color:#fff" aria-hidden="true">H</span><span class="cx-badge cx-badge-sm" style="background:#00A1E0;color:#fff" aria-hidden="true">S</span><span class="cx-badge cx-badge-sm" style="background:#FF4F00;color:#fff" aria-hidden="true">⚡</span><span class="cx-badge cx-badge-sm" style="background:#1A1A1A;color:#fff" aria-hidden="true">P</span><span class="cx-badge cx-badge-sm" style="background:#E42527;color:#fff" aria-hidden="true">Z</span></div>
+                <span class="cx-count">3 live · 6 coming soon</span>
+            </div>
+            <div class="cx-grid">
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#EA4335;color:#fff" aria-hidden="true">M</span><h4>Gmail</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve an outreach email</li>
+                    <li><span class="cx-step">It</span>Sends it from your own Gmail or Google Workspace inbox, with a reminder to chase</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Replies come straight to you, from an address people recognise.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#0078D4;color:#fff" aria-hidden="true">O</span><h4>Outlook</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve an outreach email</li>
+                    <li><span class="cx-step">It</span>Sends it from your Outlook or Microsoft 365 mailbox, with a copy in Sent Items</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> The same, if your business runs on Microsoft.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#FF4F00;color:#fff" aria-hidden="true">⚡</span><h4>Zapier / Make</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You mark a lead as qualified</li>
+                    <li><span class="cx-step">It</span>Sends it to a webhook, so it can go on to almost any app</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Use any tool, even if we haven’t built a direct link to it.</p>
+            </article>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#FF7A59;color:#fff" aria-hidden="true">H</span><h4>HubSpot</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You mark a lead as qualified</li>
+                    <li><span class="cx-step">It</span>Creates or updates the contact in HubSpot, with its score and summary</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Your sales pipeline fills up without any typing.</p>
+            </article>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#FF7A59;color:#fff" aria-hidden="true">H</span><h4>HubSpot</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>A deal moves stage in HubSpot</li>
+                    <li><span class="cx-step">It</span>Updates the lead in Be More Swan to match</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Your assistant learns which leads really turned into customers.</p>
+            </article>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#FF7A59;color:#fff" aria-hidden="true">H</span><h4>HubSpot</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>Every day</li>
+                    <li><span class="cx-step">It</span>Pulls your HubSpot do-not-contact list</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Nobody who opted out gets an email from you.</p>
+            </article>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#00A1E0;color:#fff" aria-hidden="true">S</span><h4>Salesforce</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You mark a lead as qualified</li>
+                    <li><span class="cx-step">It</span>Creates or updates the record in Salesforce</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Your team works leads in the tool they already use.</p>
+            </article>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#1A1A1A;color:#fff" aria-hidden="true">P</span><h4>Pipedrive</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You mark a lead as qualified</li>
+                    <li><span class="cx-step">It</span>Creates the deal in Pipedrive</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> For teams whose pipeline lives in Pipedrive.</p>
+            </article>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#E42527;color:#fff" aria-hidden="true">Z</span><h4>Zoho CRM</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You mark a lead as qualified</li>
+                    <li><span class="cx-step">It</span>Creates the lead in Zoho CRM</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> For teams whose pipeline lives in Zoho.</p>
+            </article>
+            </div>
+        </section>
+
+        <section id="meetings" class="cx-assistant">
+            <div class="cx-assistant-head">
+                <span class="cx-icon" aria-hidden="true">📝</span>
+                <div>
+                    <h3>Minute Taker</h3>
+                    <p>Turns meeting transcripts and notes into minutes and action items.</p>
+                </div>
+                <div class="cx-strip" aria-hidden="true"><span class="cx-badge cx-badge-sm" style="background:#4A154B;color:#fff" aria-hidden="true">#</span><span class="cx-badge cx-badge-sm" style="background:#111;color:#fff" aria-hidden="true">N</span><span class="cx-badge cx-badge-sm" style="background:#0052CC;color:#fff" aria-hidden="true">J</span><span class="cx-badge cx-badge-sm" style="background:#F06A6A;color:#fff" aria-hidden="true">A</span><span class="cx-badge cx-badge-sm" style="background:#FF7A59;color:#fff" aria-hidden="true">H</span><span class="cx-badge cx-badge-sm" style="background:#374151;color:#fff" aria-hidden="true">✉</span><span class="cx-badge cx-badge-sm" style="background:#FF4F00;color:#fff" aria-hidden="true">⚡</span><span class="cx-badge cx-badge-sm" style="background:#2D8CFF;color:#fff" aria-hidden="true">Z</span></div>
+                <span class="cx-count">6 live · 2 coming soon</span>
+            </div>
+            <div class="cx-grid">
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#4A154B;color:#fff" aria-hidden="true">#</span><h4>Slack</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve the minutes</li>
+                    <li><span class="cx-step">It</span>Posts the summary and action items to a Slack channel</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Everyone sees what was agreed, even if they missed the call.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#111;color:#fff" aria-hidden="true">N</span><h4>Notion</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve the minutes</li>
+                    <li><span class="cx-step">It</span>Files a Notion page with the summary and a to-do list</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Your meeting history lives where your team already works.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#0052CC;color:#fff" aria-hidden="true">J</span><h4>Jira</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve the minutes</li>
+                    <li><span class="cx-step">It</span>Creates one Jira ticket for each action item</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Nothing agreed in a meeting gets lost.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#F06A6A;color:#fff" aria-hidden="true">A</span><h4>Asana</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve the minutes</li>
+                    <li><span class="cx-step">It</span>Creates one Asana task for each action item</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Nothing agreed in a meeting gets lost.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#374151;color:#fff" aria-hidden="true">✉</span><h4>Email follow-up</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve the minutes</li>
+                    <li><span class="cx-step">It</span>Emails the follow-up to everyone who attended, from your Gmail if it is connected</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> The follow-up is sent while the meeting is still fresh.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#FF4F00;color:#fff" aria-hidden="true">⚡</span><h4>Zapier / Make</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve the minutes</li>
+                    <li><span class="cx-step">It</span>Sends them to a webhook for any other app</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Use any tool, even if we haven’t built a direct link to it.</p>
+            </article>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#FF7A59;color:#fff" aria-hidden="true">H</span><h4>HubSpot</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve the minutes of a client call</li>
+                    <li><span class="cx-step">It</span>Logs the meeting and its summary on the contact</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Your CRM remembers every conversation.</p>
+            </article>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#2D8CFF;color:#fff" aria-hidden="true">Z</span><h4>Zoom</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>A meeting ends</li>
+                    <li><span class="cx-step">It</span>Picks up the recording automatically, so there is nothing to paste</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Minutes with no copying and pasting.</p>
+            </article>
+            </div>
+        </section>
+
+        <section id="design" class="cx-assistant">
+            <div class="cx-assistant-head">
+                <span class="cx-icon" aria-hidden="true">🎨</span>
+                <div>
+                    <h3>Brand Designer</h3>
+                    <p>Finds and makes pictures and videos in your brand.</p>
+                </div>
+                <div class="cx-strip" aria-hidden="true"><span class="cx-badge cx-badge-sm" style="background:#00C4CC;color:#fff" aria-hidden="true">C</span></div>
+                <span class="cx-count">1 live</span>
+            </div>
+            <div class="cx-grid">
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#00C4CC;color:#fff" aria-hidden="true">C</span><h4>Canva</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You need a picture for a post or article</li>
+                    <li><span class="cx-step">It</span>Offers your own Canva designs alongside stock and AI options</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Your best designs get used again, not forgotten.</p>
+            </article>
+            </div>
+        </section>
+
+        <section id="support" class="cx-assistant">
+            <div class="cx-assistant-head">
+                <span class="cx-icon" aria-hidden="true">💬</span>
+                <div>
+                    <h3>First-Line Support Assistant</h3>
+                    <p>Answers common customer questions and passes the tricky ones to you.</p>
+                </div>
+                <div class="cx-strip" aria-hidden="true"><span class="cx-badge cx-badge-sm" style="background:#03363D;color:#fff" aria-hidden="true">Z</span><span class="cx-badge cx-badge-sm" style="background:#1F8DED;color:#fff" aria-hidden="true">I</span></div>
+                <span class="cx-count">2 coming soon</span>
+            </div>
+            <div class="cx-grid">
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#03363D;color:#fff" aria-hidden="true">Z</span><h4>Zendesk</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>A new ticket arrives</li>
+                    <li><span class="cx-step">It</span>Drafts a reply, or passes it to your team with the context</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Customers hear back faster.</p>
+            </article>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#1F8DED;color:#fff" aria-hidden="true">I</span><h4>Intercom</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>A customer starts a chat</li>
+                    <li><span class="cx-step">It</span>Answers common questions and hands over the rest</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Round-the-clock first replies.</p>
+            </article>
+            </div>
+        </section>
+
+        <section id="finance" class="cx-assistant">
+            <div class="cx-assistant-head">
+                <span class="cx-icon" aria-hidden="true">💷</span>
+                <div>
+                    <h3>Accounts Receivable Clerk</h3>
+                    <p>Chases unpaid invoices politely and persistently.</p>
+                </div>
+                <div class="cx-strip" aria-hidden="true"><span class="cx-badge cx-badge-sm" style="background:#13B5EA;color:#fff" aria-hidden="true">X</span><span class="cx-badge cx-badge-sm" style="background:#2CA01C;color:#fff" aria-hidden="true">qb</span></div>
+                <span class="cx-count">2 coming soon</span>
+            </div>
+            <div class="cx-grid">
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#13B5EA;color:#fff" aria-hidden="true">X</span><h4>Xero</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>An invoice becomes overdue</li>
+                    <li><span class="cx-step">It</span>Drafts a reminder and logs a note against the invoice</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> You get paid sooner, without the awkward conversations.</p>
+            </article>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#2CA01C;color:#fff" aria-hidden="true">qb</span><h4>QuickBooks</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>An invoice becomes overdue</li>
+                    <li><span class="cx-step">It</span>Drafts a reminder and logs a note against the invoice</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> You get paid sooner, without the awkward conversations.</p>
+            </article>
+            </div>
+        </section>
+
+        <section id="campaign" class="cx-assistant">
+            <div class="cx-note">
+                <span class="cx-icon" aria-hidden="true">🧭</span>
+                <div>
+                    <h3 class="text-xl font-extrabold text-gray-900">Campaign Assistant</h3>
+                    <p class="text-gray-600 mt-1">Needs no connections of its own. It briefs your other assistants on one shared goal, and they use their connections to do the work.</p>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Safe by design -->
+    <section class="bg-white border-t border-gray-100" style="margin-top:2rem;">
+        <div class="cx-wrap" style="padding-top:4rem;padding-bottom:4rem;">
+            <h2 class="text-3xl font-extrabold text-gray-900 tracking-tight mb-8 text-center">Connected, but always in your control</h2>
+            <div class="cx-trust">
+                <div>
+                    <h3>Each assistant sees only what it needs</h3>
+                    <p>A connection is only ever used for its assistant's job. Your Social Media Assistant can't reach your CRM, and your Minute Taker can't post to your social accounts.</p>
+                </div>
+                <div>
+                    <h3>Nothing goes out without your OK</h3>
+                    <p>Posts, articles and emails wait for your approval by default. You decide if anything should go out on its own.</p>
+                </div>
+                <div>
+                    <h3>Disconnect any time</h3>
+                    <p>Remove a connection from the Connections tab whenever you like, and the assistant stops using it straight away. Your plan sets how many apps you can connect.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="bg-pink-600 text-white">
+        <div class="max-w-3xl mx-auto px-4 py-16 text-center">
+            <h2 class="text-3xl md:text-4xl font-extrabold mb-4 tracking-tight">Missing a tool you rely on?</h2>
+            <p class="opacity-90 leading-relaxed mb-8 text-lg">Tell us which one. Connections marked &ldquo;Coming soon&rdquo; are next in line, and what customers ask for decides what we build after that.</p>
+            <div class="flex flex-col sm:flex-row gap-3 justify-center">
+                <a href="register.html" data-waitlist-label="Join the waitlist" class="btn-inverse inline-block px-8 py-4 text-lg font-bold rounded-lg shadow-lg hover:shadow-xl transition">Start Your Free Trial</a>
+                <a href="contact.html" class="inline-block px-8 py-4 text-lg font-bold rounded-lg border-2 border-white/30 text-white hover:border-white/60 hover:bg-white/10 transition">Request a connection</a>
+            </div>
+        </div>
+    </section>
+
+</main>
+
+<div id="footer-placeholder"></div>
+
+<script src="./mobileMenu.js"></script>
+<script>
+    async function loadComponent(id, path) {
+        try {
+            const r = await fetch(path);
+            if (r.ok) document.getElementById(id).innerHTML = await r.text();
+        } catch {}
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        await loadComponent('nav-placeholder', './components/nav.html');
+        loadComponent('footer-placeholder', './components/footer.html');
+        if (window.i18n) window.i18n.apply();
+        setupMobileMenu();
+    });
+
+    // "Live only" hides the Coming-soon cards. A per-visitor convenience, so it is not remembered.
+    document.getElementById('cx-live-only').addEventListener('change', (e) => {
+        document.body.classList.toggle('cx-live-only', e.target.checked);
+    });
+</script>
+</body>
+</html>
