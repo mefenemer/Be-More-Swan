@@ -559,6 +559,14 @@
                 && (!q || a.title.toLowerCase().includes(q) || String(a.contentMd || '').toLowerCase().includes(q))));
         }
 
+        // Open by exact title while this page is already showing (Ask Your Team's "Read the article").
+        window._helpShowArticleByTitle = (title) => {
+            const want = String(title || '').toLowerCase();
+            const a = allArticles.find((x) => x.title.toLowerCase() === want);
+            if (a) showArticle(a);
+            return !!a;
+        };
+
         function showArticle(a) {
             document.getElementById('help-article-category').textContent = a.category || '';
             document.getElementById('help-article-title').textContent = a.title;
@@ -624,6 +632,13 @@
     }
 
     window.openHelpArticle = function (title) {
+        // Already on Help & Support with the articles loaded: open it in place. _helpOpenArticle is
+        // only read when the Knowledge Base loads, so on its own this did nothing from the Help page —
+        // which is exactly where Ask Your Team is opened from.
+        if (window._currentViewKey === 'help' && typeof window._helpShowArticleByTitle === 'function') {
+            window.helpShowTab('docs');
+            if (window._helpShowArticleByTitle(title)) return;
+        }
         window._helpOpenArticle = title;
         window.openHelpTab('docs');
     };

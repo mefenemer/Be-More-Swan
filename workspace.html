@@ -21434,16 +21434,18 @@ async function gpSubmitReject() {
     }
 
     function showAnswer(d, reply) {
-      // answer (with an optional "Take me there" or "Report an issue" follow-up)
-      if (d.suggestReportIssue && window.openReportIssue) {
-        showReply(`${reply}<div class="cmdbar-followup"><button type="button" class="cmdbar-go">Report an issue →</button></div>`);
-        result.querySelector('.cmdbar-go').onclick = () => { window.openReportIssue('new'); close(); };
-      } else if (d.suggestView && window.loadView) {
-        showReply(`${reply}<div class="cmdbar-followup"><button type="button" class="cmdbar-go">Take me there →</button></div>`);
-        result.querySelector('.cmdbar-go').onclick = () => { window.loadView(d.suggestView); close(); };
-      } else {
-        showReply(reply);
-      }
+      // answer + up to two follow-ups: the Help Centre article it came from ("Read the article"),
+      // and either "Report an issue" or "Take me there". Each button closes the bar.
+      const actions = [];
+      if (d.article && window.openHelpArticle) actions.push(['Read the article →', () => window.openHelpArticle(d.article)]);
+      if (d.suggestReportIssue && window.openReportIssue) actions.push(['Report an issue →', () => window.openReportIssue('new')]);
+      else if (d.suggestView && window.loadView) actions.push(['Take me there →', () => window.loadView(d.suggestView)]);
+      if (!actions.length) { showReply(reply); return; }
+      showReply(`${reply}<div class="cmdbar-followup" style="display:flex;flex-wrap:wrap;gap:8px">${actions.map(() => '<button type="button" class="cmdbar-go"></button>').join('')}</div>`);
+      result.querySelectorAll('.cmdbar-go').forEach((btn, i) => {
+        btn.textContent = actions[i][0];
+        btn.onclick = () => { actions[i][1](); close(); };
+      });
     }
 
     // ── AC2: voice dictation (Web Speech API) with waveform ──

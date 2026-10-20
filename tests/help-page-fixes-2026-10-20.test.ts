@@ -17,6 +17,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { landmark } from './landmark';
+import { buildHelpKnowledge } from '../src/utils/help-knowledge';
 
 let passed = 0;
 const test = (name: string, fn: () => void) => {
@@ -93,6 +94,46 @@ test('no customer-facing copy still promises £10 tokens or a free assistant', (
         assert.ok(!/£10 credit/i.test(src), `${f} still offers £10 credit`);
         assert.ok(!/Reward Vault/.test(src), `${f} still names the Reward Vault`);
     }
+});
+
+console.log('\nAsk Your Team — answers from the Help Centre\n');
+
+test('the knowledge block is every article, verbatim, in order, with exact titles', () => {
+    const kb = buildHelpKnowledge([
+        { title: 'B "quoted"', category: 'Billing', contentMd: 'Body B' },
+        { title: 'A', category: null, contentMd: '  Body A  ' },
+    ]);
+    assert.deepStrictEqual(kb.titles, ['B "quoted"', 'A']);
+    assert.ok(kb.text.includes('<article title="B &quot;quoted&quot;" category="Billing">\nBody B\n</article>'));
+    assert.ok(kb.text.includes('category="General">\nBody A\n</article>'));
+    assert.strictEqual(buildHelpKnowledge([]).text, '');
+});
+
+test('the articles are a cached prefix AHEAD of the per-user prompt', () => {
+    const src = read('netlify/functions/assistant-command.ts');
+    assert.match(src, /system: \[\s*\{ type: 'text', text: knowledge, cache_control: \{ type: 'ephemeral' \} \},\s*\{ type: 'text', text: system \},\s*\]/);
+    // Nothing per-request may leak into the cached block.
+    const k = src.slice(landmark(src, 'const knowledge = kb.text'), landmark(src, 'const system = `'));
+    assert.ok(!/assistantList|setupSummary|command|Date/.test(k), 'the cached block must be identical for every user');
+});
+
+test('the article it cites must exist, and the bar can open it from the Help page itself', () => {
+    const src = read('netlify/functions/assistant-command.ts');
+    assert.match(src, /typeof parsed\.article === 'string' && kb\.titles\.includes\(parsed\.article\)/);
+    assert.match(read('workspace.html'), /'Read the article →', \(\) => window\.openHelpArticle\(d\.article\)/);
+    const h = read('help.js');
+    const open = h.slice(landmark(h, 'window.openHelpArticle = function (title) {'));
+    assert.ok(landmark(open, "window._currentViewKey === 'help'") < landmark(open, 'window._helpOpenArticle = title;'),
+        'already on Help, the article opens in place — _helpOpenArticle is only read on load');
+});
+
+test('the referral article follows the Help Centre quoting rules', () => {
+    const sql = read('db/help-articles-2026-12zzzzz-referrals.sql');
+    const bodies = [...sql.matchAll(/\$\$([\s\S]*?)\$\$/g)].map((m) => m[1]);
+    assert.strictEqual(bodies.length, 1);
+    assert.ok(!bodies[0].includes(';'), 'no semicolons inside a body');
+    assert.ok(!bodies[0].includes("''"), 'apostrophes inside $$ are literal');
+    assert.ok(!/free assistant|£10|token/i.test(bodies[0]), 'describes the current offer only');
 });
 
 console.log(`\n${passed} checks passed`);
