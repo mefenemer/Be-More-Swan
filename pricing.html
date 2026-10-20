@@ -28,6 +28,8 @@
     <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
     <link rel="manifest" href="/favicon/manifest.json">
     <style>
+        /* Common-questions accordion: hide the native disclosure triangle (Safari ignores list-none). */
+        .pk-faq summary::-webkit-details-marker { display: none; }
         .hero-gradient { background: linear-gradient(160deg, #f0fdf4 0%, #f9fafb 55%, #f5f3ff 100%); }
         @keyframes fadeUp { from { opacity:0; transform:translateY(18px); } to { opacity:1; transform:translateY(0); } }
         .fade-up   { animation: fadeUp .4s ease both; }
@@ -128,7 +130,7 @@
             <div class="flex flex-col bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200 overflow-hidden relative">
                 <div class="p-6 pb-5 border-b border-gray-100">
                     <!-- Audience line is the visual headline; the plan's name is the eyebrow above it.
-                         A buyer can rank "Solo Operators → Scaling Founders → Teams" at a glance, which
+                         A buyer can rank "solo business owners → growing businesses" at a glance, which
                          the plan names alone ("Workflow Saver"/"Busywork Buster") do not let them do.
                          The Most-Popular pill sits IN this row rather than absolutely positioned — the
                          plan name is admin-editable, and a longer one used to slide under the pill. -->
@@ -140,8 +142,8 @@
                         </p>
                         <div id="card-pill-t1" class="flex-shrink-0"></div>
                     </div>
-                    <h2 id="card-tier-t1" class="text-xl font-extrabold text-gray-900 mb-3 leading-snug">Best for Solo Operators</h2>
-                    <p id="card-desc-t1" class="text-sm text-gray-500 leading-relaxed mb-4 italic">Reclaim hours every day. Hand your most draining task to a helper that never takes a day off.</p>
+                    <h2 id="card-tier-t1" class="text-xl font-extrabold text-gray-900 mb-3 leading-snug">Best for solo business owners</h2>
+                    <p id="card-desc-t1" class="text-sm text-gray-500 leading-relaxed mb-4 italic">One assistant that takes your most time-consuming job off your plate, every day.</p>
                     <div class="flex items-end gap-1 mb-1">
                         <span id="card-price-t1" class="text-4xl font-extrabold text-gray-900 leading-none">&nbsp;</span>
                         <span class="text-gray-400 text-base font-medium mb-1">/month</span>
@@ -153,7 +155,7 @@
                     <!-- Capacity stat boxes — pink. DB-driven: renderPlanCards() fills these from
                          get-plans → master_plans (assistantLimit / monthlyTaskLimit / appConnectionLimit).
                          The static numbers are only a pre-fetch fallback. -->
-                    <div class="grid grid-cols-3 gap-2 mb-6">
+                    <div class="grid grid-cols-2 gap-2 mb-6">
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
                             <div id="stat-asst-t1" class="text-xl font-extrabold pk-stat-num">1</div>
                             <div id="stat-asst-lbl-t1" class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistant</div>
@@ -162,10 +164,6 @@
                             <div id="stat-task-t1" class="text-xl font-extrabold pk-stat-num">600</div>
                             <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Tasks/mo</div>
                         </div>
-                        <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div id="stat-app-t1" class="text-xl font-extrabold pk-stat-num">4</div>
-                            <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Apps</div>
-                        </div>
                     </div>
                     <!-- Divider after stat boxes -->
                     <hr class="pk-divider border-t mb-5">
@@ -173,14 +171,14 @@
                          the comparison table below — repeating it here made a wall of text in a
                          narrow column that nobody reads across three cards. -->
                     <ul class="feat-list space-y-2.5 text-sm text-gray-700 flex-grow">
-                        <li class="flex gap-3" title="Generate on-brand AI images and music from the same monthly allowance. An AI image counts as 1 task and an AI music track as 20."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>AI Images &amp; Music</strong> from your tasks</span></li>
-                        <li class="flex gap-3" title="See what your assistants completed this month and the hours they saved you."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Time-Saved Dashboard</span></li>
-                        <li class="flex gap-3" title="Learns your unique style from day one so posts and emails always sound authentic."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Sounds Just Like You</span></li>
-                        <li class="flex gap-3" title="Background habits keep your business moving 24/7 after you log off."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Works While You Sleep</span></li>
-                        <li class="flex gap-3" title="Nothing goes live or gets sent without your quick thumbs-up first."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>You Have the Final Say</span></li>
-                        <li class="flex gap-3" title="One easy calendar to see exactly what your assistant is working on next."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Simple Visual Planner</span></li>
-                        <li class="flex gap-3" title="Dump raw photos, quick videos, and messy notes for your assistant to turn into polished work."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Your Inspiration Folder</span></li>
-                        <li class="flex gap-3" title="Brand-safety rules sit at the top of every assistant's instructions, and nothing goes out without your approval."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Built-in Safety Rules</span></li>
+                        <li class="flex gap-3" title="Choose the assistant for the job you most want off your plate: social media, blog, email marketing or lead generation. You can switch to a different one once a calendar month."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Any one assistant</strong> from the library</span></li>
+                        <li class="flex gap-3" title="Learns your style from your setup answers and from your edits, so drafts sound like you."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Writes in your brand voice</span></li>
+                        <li class="flex gap-3" title="Every post, article and email waits for your OK, unless you choose to let it go out on its own."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>You approve before anything goes out</span></li>
+                        <li class="flex gap-3" title="Plans the work ahead and keeps a calendar of what is scheduled and published, even while you are offline."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Plans and schedules the work for you</span></li>
+                        <li class="flex gap-3" title="Set a target such as 20 new leads this month and see whether you are on track, updated automatically."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>SMART goals with progress tracking</span></li>
+                        <li class="flex gap-3" title="Generate on-brand AI images and music from the same monthly allowance. An AI image counts as 1 task and an AI music track as 20."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>AI images &amp; music</strong> from your tasks</span></li>
+                        <li class="flex gap-3" title="See what your assistants finished this month and the hours it saved you."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Hours-saved report</span></li>
+                        <li class="flex gap-3" title="Brand-safety rules sit at the top of every assistant&#x27;s instructions and cannot be switched off."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Built-in brand-safety rules</span></li>
                     </ul>
                 </div>
                 <div class="px-6 pb-6">
@@ -202,11 +200,11 @@
                             <span id="card-name-t2" class="pk-text">The Busywork Buster</span>
                         </p>
                         <div id="card-pill-t2" class="flex-shrink-0">
-                            <span class="pk-pill text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full">Most Popular</span>
+                            <span class="pk-pill text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full">Best Value</span>
                         </div>
                     </div>
-                    <h2 id="card-tier-t2" class="text-xl font-extrabold text-gray-900 mb-3 leading-snug">Best for Scaling Founders</h2>
-                    <p id="card-desc-t2" class="text-sm text-gray-500 leading-relaxed mb-4 italic">Scale your business with autonomous goal tracking, an in-house editor, and your own mini digital department.</p>
+                    <h2 id="card-tier-t2" class="text-xl font-extrabold text-gray-900 mb-3 leading-snug">Best for growing businesses</h2>
+                    <p id="card-desc-t2" class="text-sm text-gray-500 leading-relaxed mb-4 italic">Every assistant, working as one team on your social media, blog, email and leads. Includes goal tracking and an editor that checks the work.</p>
                     <div class="flex items-end gap-1 mb-1">
                         <span id="card-price-t2" class="text-4xl font-extrabold text-gray-900 leading-none">&nbsp;</span>
                         <span class="text-gray-400 text-base font-medium mb-1">/month</span>
@@ -215,7 +213,7 @@
                     <p id="card-save-t2" class="text-xs font-bold pk-text-dark mt-1.5" style="display:none;"></p>
                 </div>
                 <div class="p-6 flex-grow flex flex-col">
-                    <div class="grid grid-cols-3 gap-2 mb-6">
+                    <div class="grid grid-cols-2 gap-2 mb-6">
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
                             <div id="stat-asst-t2" class="text-xl font-extrabold pk-stat-num">All</div>
                             <div id="stat-asst-lbl-t2" class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistants</div>
@@ -224,26 +222,21 @@
                             <div id="stat-task-t2" class="text-xl font-extrabold pk-stat-num">2.75k</div>
                             <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Tasks/mo</div>
                         </div>
-                        <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div id="stat-app-t2" class="text-xl font-extrabold pk-stat-num">10</div>
-                            <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Apps</div>
-                        </div>
                     </div>
                     <hr class="pk-divider border-t mb-5">
                     <p class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Everything in Tier 1, plus:</p>
                     <ul class="feat-list space-y-2.5 text-sm text-gray-700 flex-grow">
-                        <li class="flex gap-3" title="Adds AI video to AI images and music, all from the same monthly allowance. An AI video counts as 20 tasks."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>AI Video</strong> from your tasks</span></li>
-                        <li class="flex gap-3" title="Hire every assistant in the library and run them side by side — social media, email, leads, website, and more. New roles are included as they launch."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Every Digital Assistant</strong></span></li>
-                        <li class="flex gap-3" title="Connect your digital department to up to 10 standard everyday business tools, like Gmail, Slack, and Google Calendar."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Connect Standard Apps You Use</span></li>
-                        <li class="flex gap-3" title="Set a SMART target and your assistants track progress against it. If a goal falls off track, they can tune their content strategy to recover — every change logged, and you&#39;re notified."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Autonomous Goal Tracking</span></li>
-                        <li class="flex gap-3" title="A dedicated assistant that proofreads and perfects the work of your other assistants before it reaches your desk."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>The In-House Editor</span></li>
-                        <li class="flex gap-3" title="Jump to the front of the queue with priority email support whenever you need help."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Fast-Track Support</span></li>
+                        <li class="flex gap-3" title="Run social media, blog, email marketing and lead generation side by side. New assistants are included as they launch."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Every assistant</strong>, all at once</span></li>
+                        <li class="flex gap-3" title="When a goal slips, your assistants change their own plan to get it back on track. Every change is logged and you are told."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Goals that correct themselves</span></li>
+                        <li class="flex gap-3" title="Adds AI video to AI images and music, all from the same monthly allowance. An AI video counts as 20 tasks."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>AI video</strong> from your tasks</span></li>
+                        <li class="flex gap-3" title="A quality review runs on every social post before it reaches you, with suggested fixes."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>An editor that checks every social post</span></li>
+                        <li class="flex gap-3" title="Your questions go to the front of the queue."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Priority email support</span></li>
                     </ul>
                 </div>
                 <div class="px-6 pb-6">
                     <a href="#" onclick="event.preventDefault(); choosePlan('pro_team');"
                        class="pk-btn w-full block text-center px-6 py-3.5 font-bold rounded-xl shadow-sm transition">
-                        Automate My Workflow
+                        Get Started
                     </a>
                     <p class="text-center text-xs text-gray-400 mt-2.5">14 days free · no card needed</p>
                 </div>
@@ -425,6 +418,63 @@
                 </div>
             </div>
         </div>
+
+        <!-- ── Common questions ─────────────────────────────────────
+             The buying questions the two explainers above don't answer. Each answer is checked
+             against the code (2026-10-20): proration in billing-upgrade.ts, task weights in
+             src/config/task-weights.ts, no rollover (resets on the 1st; task_bonus never expires),
+             prices ex-VAT (terms 6.8, Stripe Tax at checkout).
+             Tier 1 role changes: one per CALENDAR month from the 1st 00:00 UTC (owner decision
+             2026-10-20, PR #449). Roles held on the 1st are free; refusals are 409 SWAP_LIMIT. Keep
+             this answer in step with that rule. Example task counts are per piece
+             of work, never per plan, so they stay true when a plan's allowance changes. -->
+        <div class="max-w-3xl mx-auto mt-6">
+            <div class="rounded-2xl border pk-divider bg-white shadow-sm px-6 sm:px-8 py-2">
+                <details class="pk-faq group border-t border-gray-100 first:border-t-0">
+                    <summary class="flex items-center justify-between gap-4 cursor-pointer list-none py-4 text-sm font-bold text-gray-900">
+                        Which plan should I choose?
+                        <svg class="w-4 h-4 text-gray-400 flex-shrink-0 transition group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </summary>
+                    <p class="text-sm text-gray-600 leading-relaxed pb-4">Choose <strong>Tier 1</strong> if there is one job you want off your plate, such as your social media. Choose <strong>Tier 2</strong> if you want several assistants working at once, AI video, or assistants that change their own plan when a goal slips. You can move up at any time and only pay the difference for the days left in your billing period.</p>
+                </details>
+                <details class="pk-faq group border-t border-gray-100 first:border-t-0">
+                    <summary class="flex items-center justify-between gap-4 cursor-pointer list-none py-4 text-sm font-bold text-gray-900">
+                        Can I change my assistant on Tier 1?
+                        <svg class="w-4 h-4 text-gray-400 flex-shrink-0 transition group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </summary>
+                    <p class="text-sm text-gray-600 leading-relaxed pb-4">On Tier 1 you can switch to a different assistant once per calendar month. The allowance resets on the 1st. Pausing and resuming an assistant, or bringing back the one you started the month with, doesn't count. Your task allowance is shared, so switching doesn't reset it. To run several assistants at the same time, choose Tier 2.</p>
+                </details>
+                <details class="pk-faq group border-t border-gray-100 first:border-t-0">
+                    <summary class="flex items-center justify-between gap-4 cursor-pointer list-none py-4 text-sm font-bold text-gray-900">
+                        What does a month of tasks look like?
+                        <svg class="w-4 h-4 text-gray-400 flex-shrink-0 transition group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </summary>
+                    <p class="text-sm text-gray-600 leading-relaxed pb-4">A social post every day with its own AI image uses about 60 tasks a month. A weekly blog article uses about 4. A lead search uses 1, and so does each outreach email. AI video and music use 20 each, so they add up fastest. Your workspace shows what you have used, by assistant and by type of work.</p>
+                </details>
+                <details class="pk-faq group border-t border-gray-100 first:border-t-0">
+                    <summary class="flex items-center justify-between gap-4 cursor-pointer list-none py-4 text-sm font-bold text-gray-900">
+                        Do unused tasks roll over?
+                        <svg class="w-4 h-4 text-gray-400 flex-shrink-0 transition group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </summary>
+                    <p class="text-sm text-gray-600 leading-relaxed pb-4">No. Your allowance resets on the 1st of each month. Any bonus tasks on your account never expire, and are only used once your monthly allowance runs out.</p>
+                </details>
+                <details class="pk-faq group border-t border-gray-100 first:border-t-0">
+                    <summary class="flex items-center justify-between gap-4 cursor-pointer list-none py-4 text-sm font-bold text-gray-900">
+                        Which apps can my assistants connect to?
+                        <svg class="w-4 h-4 text-gray-400 flex-shrink-0 transition group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </summary>
+                    <p class="text-sm text-gray-600 leading-relaxed pb-4">They work inside your own accounts, such as your Facebook Page, Instagram, LinkedIn, Gmail or Slack. See every connection, assistant by assistant, on our <a href="connections.html" class="font-semibold pk-text-dark underline">Connections page</a>.</p>
+                </details>
+                <details class="pk-faq group border-t border-gray-100 first:border-t-0">
+                    <summary class="flex items-center justify-between gap-4 cursor-pointer list-none py-4 text-sm font-bold text-gray-900">
+                        Do prices include VAT?
+                        <svg class="w-4 h-4 text-gray-400 flex-shrink-0 transition group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </summary>
+                    <p class="text-sm text-gray-600 leading-relaxed pb-4">Prices exclude VAT. The full amount, including any VAT, is shown at checkout before you pay, and every payment comes with an invoice you can download from Billing.</p>
+                </details>
+            </div>
+            <p class="text-center text-sm text-gray-500 mt-4">More questions? <a href="faq.html" class="font-semibold pk-text-dark underline">Read the full FAQs</a>.</p>
+        </div>
     </section>
 
     <!-- ══ FEATURE COMPARISON TABLE ══════════════════════════════ -->
@@ -450,7 +500,7 @@
                                 <div id="tbl-name-t2" class="font-extrabold text-gray-900 text-sm leading-snug">The Busywork<br>Buster</div>
                                 <div id="tbl-price-t2" class="font-extrabold text-gray-900 text-base mt-1.5">&nbsp;</div>
                                 <div class="text-[10px] text-gray-400 mt-0.5">/ month</div>
-                                <div class="mt-2" id="tbl-pill-t2"><span class="pk-pill inline-block text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full">Popular</span></div>
+                                <div class="mt-2" id="tbl-pill-t2"><span class="pk-pill inline-block text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full">Best Value</span></div>
                             </th>
                             <th class="text-center px-4 py-5 bg-gray-50 w-[15%]" style="vertical-align:top">
                                 <div class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-0.5">Tier 3</div>
@@ -667,7 +717,7 @@
                             </td>
                             <td class="px-4 py-5 text-center pk-col-tint">
                                 <a href="#" onclick="event.preventDefault(); choosePlan('pro_team');"
-                                   class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Automate My Workflow</a>
+                                   class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Get Started</a>
                             </td>
                             <td class="px-4 py-5 text-center">
                                 <button onclick="openEnterpriseModal()"
@@ -921,7 +971,7 @@
         html += '<tr class="border-t-2 border-gray-200 bg-gray-50">' +
             '<td class="px-6 py-5"></td>' +
             '<td class="px-4 py-5 text-center"><a href="#" onclick="event.preventDefault(); choosePlan(\'starter\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Get Started</a></td>' +
-            '<td class="px-4 py-5 text-center pk-col-tint"><a href="#" onclick="event.preventDefault(); choosePlan(\'pro_team\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Automate My Workflow</a></td>' +
+            '<td class="px-4 py-5 text-center pk-col-tint"><a href="#" onclick="event.preventDefault(); choosePlan(\'pro_team\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Get Started</a></td>' +
             '<td class="px-4 py-5 text-center"><button onclick="openEnterpriseModal()" class="btn-primary inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Book a Call</button></td>' +
             '</tr>';
 
@@ -933,8 +983,11 @@
     // t2 = buster, t4 = enterprise (contact-sales; the t3 slot was the retired Digital Employee). An admin edit in the Portal
     // (Master Data → Plans) shows here with no code change; missing DB values keep the static copy.
     const CARD_SLOT_BY_TIER = { saver: 't1', buster: 't2', enterprise: 't4' };
-    const CARD_PILL_HTML = '<span class="pk-pill text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full">Most Popular</span>';
-    const TBL_PILL_HTML  = '<span class="pk-pill inline-block text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full">Popular</span>';
+    // "Best Value", not "Most Popular" (2026-10-20): with a handful of customers "most popular" was a
+    // claim we could not stand behind, while Tier 2 really is the cheaper plan per task. If a price
+    // change ever makes that untrue, change this wording. The DB flag keeps its old name, isMostPopular.
+    const CARD_PILL_HTML = '<span class="pk-pill text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full">Best Value</span>';
+    const TBL_PILL_HTML  = '<span class="pk-pill inline-block text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full">Best Value</span>';
 
     function setCardText(id, val) {
         const el = document.getElementById(id);
@@ -987,12 +1040,12 @@
             }
             // Capacity stat boxes — straight from the master_plans capacity columns, so an admin
             // edit in Master Data → Plan Features moves the pink boxes with no code change.
-            // Contact-sales (Enterprise) has no numeric limits: apps read "Bespoke", the rest "∞".
-            const unlimitedApps = plan.isContactSales ? 'Bespoke' : '∞';
+            // Contact-sales (Enterprise) has no numeric limits, so they read "∞".
             // No assistant cap = every role in the library ("All"), the £69 plan's headline.
             setStatBox('stat-asst-' + slot, plan.assistantLimit, plan.isContactSales ? '∞' : 'All', false);
             setStatBox('stat-task-' + slot, plan.monthlyTaskLimit, '∞', true);
-            setStatBox('stat-app-'  + slot, plan.appConnectionLimit, unlimitedApps, false);
+            // No "Apps" box since 2026-10-20: appConnectionLimit is only checked by three onboarding
+            // wizards, not by the Connections tab, so the number was not a limit a buyer would meet.
             // "1 Assistant" vs "All Assistants".
             const asstLbl = document.getElementById('stat-asst-lbl-' + slot);
             if (asstLbl) asstLbl.textContent = Number(plan.assistantLimit) === 1 ? 'Assistant' : 'Assistants';
