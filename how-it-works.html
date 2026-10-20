@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>How It Works | Be More Swan</title>
+    <!-- SEO: canonical + social share metadata -->
+    <meta name="description" content="How Be More Swan works: a team of digital assistants, each hired for one job, working together on the work you do yourself or can't afford to hire for — and nothing goes out without your approval.">
+    <link rel="canonical" href="https://bemoreswan.com/how-it-works">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Be More Swan">
+    <meta property="og:title" content="How It Works | Be More Swan">
+    <meta property="og:description" content="You set the direction. Your team of digital assistants does the work. You approve what goes out.">
+    <meta property="og:url" content="https://bemoreswan.com/how-it-works">
+    <meta property="og:image" content="https://bemoreswan.com/images/og-default.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="607">
+    <meta property="og:image:alt" content="Be More Swan — your digital workforce">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="How It Works | Be More Swan">
+    <meta name="twitter:description" content="You set the direction. Your team of digital assistants does the work. You approve what goes out.">
+    <meta name="twitter:image" content="https://bemoreswan.com/images/og-default.png">
+    <meta name="twitter:image:alt" content="Be More Swan — your digital workforce">
+    <!-- /SEO -->
+    <link href="./style.css" rel="stylesheet">
+    <script src="/site-theme.js"></script>
+    <link rel="icon" href="/favicon/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
+    <link rel="manifest" href="/favicon/manifest.json">
+    <script src="/src/i18n.js"></script>
+  <script src="/waitlist-mode.js" defer></script>
+    <!-- How it works (owner, 2026-10-20): the homepage bookmark became a page that tells the story —
+         how the assistants work on their own, how they work together, and that a person approves the
+         work. Marketing, not a manual: no settings, no jargon.
+
+         Every claim is one the product keeps (checked 2026-10-20): approval is the default for every
+         post, article and email (publish-policy.ts); a rejected draft's reason becomes a rule
+         (showcase copy, social_media_manager); every assistant reads the products list and the rest of
+         the team's recent work (products-and-team-activity prompt blocks); the Orchestrator briefs the
+         other assistants within a task budget the owner sets; the Mystery Shopper's "Ideas for your other
+         assistants" open that assistant's chat with the brief typed in — nothing is sent until you send;
+         a lead marked Won can join the Audience; flat fee, the task cap is a hard stop. Screenshots are
+         the assistant pages' vetted images (fictional Willowbrook Coffee data) — never a real customer.
+
+         Styles are plain CSS on the site's theme tokens: style.css is a compiled Tailwind build, and a
+         utility class it doesn't already contain fails silently. -->
+    <style>
+        .hw-wrap { max-width: 72rem; margin: 0 auto; padding: 0 1rem; }
+        .hw-narrow { max-width: 46rem; margin: 0 auto; }
+        .hw-eyebrow { display:inline-block; padding:.25rem .75rem; border-radius:9999px; font-size:.75rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; background:var(--color-emerald-50); color:var(--color-emerald-700); border:1px solid var(--color-emerald-100); }
+        .hw-h1 { font-size: clamp(2.25rem, 5vw, 3.75rem); font-weight: 800; line-height: 1.08; letter-spacing: -.02em; color: #111827; margin: 1.25rem 0 1.25rem; }
+        .hw-h1 em { font-style: normal; color: var(--color-emerald-700); }
+        .hw-h2 { font-size: clamp(1.75rem, 3.5vw, 2.5rem); font-weight: 800; line-height: 1.15; letter-spacing: -.015em; color: #111827; margin: 0 0 1rem; }
+        .hw-lead { font-size: 1.2rem; line-height: 1.65; color: #4b5563; }
+        .hw-p { font-size: 1.05rem; line-height: 1.7; color: #4b5563; margin: 0 0 1rem; }
+        .hw-section { padding: 5rem 0; }
+        .hw-section-white { background: #fff; border-top: 1px solid #f0ebe0; border-bottom: 1px solid #f0ebe0; }
+        .hw-center { text-align: center; }
+        .hw-small { font-size: .9rem; color: #6b7280; margin-top: 1rem; }
+        .hw-ctas { display:flex; flex-wrap:wrap; gap:.75rem; justify-content:center; margin-top:2rem; }
+
+        /* The two kinds of work */
+        .hw-two { display:grid; grid-template-columns:1fr; gap:1.25rem; margin-top:2.5rem; }
+        @media (min-width: 768px) { .hw-two { grid-template-columns:1fr 1fr; } }
+        .hw-card { background:#fff; border:1px solid #f0ebe0; border-radius:1.25rem; padding:1.75rem; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+        .hw-card h3 { font-size:1.2rem; font-weight:800; color:#111827; margin:0 0 .6rem; }
+        .hw-card ul { margin:.75rem 0 0; padding:0; list-style:none; }
+        .hw-card li { position:relative; padding-left:1.4rem; margin:.45rem 0; color:#4b5563; line-height:1.55; }
+        .hw-card li::before { content:''; position:absolute; left:0; top:.6em; width:.55rem; height:.55rem; border-radius:9999px; background:var(--color-emerald-700); opacity:.75; }
+
+        /* The team */
+        .hw-team { display:grid; grid-template-columns:1fr; gap:1rem; margin-top:2.5rem; }
+        @media (min-width: 640px) { .hw-team { grid-template-columns:repeat(2,1fr); } }
+        @media (min-width: 1024px) { .hw-team { grid-template-columns:repeat(4,1fr); } }
+        .hw-role { display:block; background:#fff; border:1px solid #f0ebe0; border-radius:1rem; padding:1.25rem; text-decoration:none; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+        .hw-role:hover { border-color: var(--color-emerald-200, #f9a8d4); box-shadow:0 8px 24px -12px rgba(0,0,0,.18); transform: translateY(-2px); }
+        .hw-role strong { display:block; color:#111827; font-size:1rem; margin-bottom:.35rem; }
+        .hw-role span { display:block; color:#6b7280; font-size:.92rem; line-height:1.5; }
+
+        /* Story rows: words beside a screenshot, alternating on wide screens */
+        .hw-rows { display:flex; flex-direction:column; gap:4.5rem; margin-top:3.5rem; }
+        .hw-row { display:grid; grid-template-columns:1fr; gap:2rem; align-items:center; }
+        @media (min-width: 900px) {
+            .hw-row { grid-template-columns: 5fr 7fr; gap:3.5rem; }
+            .hw-row.hw-flip { grid-template-columns: 7fr 5fr; }
+            .hw-row.hw-flip .hw-copy { order: 2; }
+        }
+        .hw-step { display:inline-flex; align-items:center; justify-content:center; width:2.25rem; height:2.25rem; border-radius:9999px; background:var(--color-emerald-700); color:#fff; font-weight:800; margin-bottom:1rem; }
+        .hw-kicker { font-size:.8rem; font-weight:800; text-transform:uppercase; letter-spacing:.08em; color:var(--color-emerald-700); margin-bottom:.6rem; }
+        .hw-copy h3 { font-size:1.6rem; font-weight:800; line-height:1.2; color:#111827; margin:0 0 .8rem; }
+        .hw-shot { margin:0; border-radius:1rem; overflow:hidden; border:1px solid #e9e4d8; background:#fff; box-shadow:0 24px 48px -24px rgba(17,24,39,.35); }
+        .hw-shot img { display:block; width:100%; height:auto; }
+        .hw-shot figcaption { padding:.7rem 1rem; font-size:.85rem; color:#6b7280; border-top:1px solid #f3efe6; background:#fcfbf8; }
+
+        /* You stay in charge */
+        .hw-promises { display:grid; grid-template-columns:1fr; gap:1rem; margin-top:2.5rem; }
+        @media (min-width: 768px) { .hw-promises { grid-template-columns:repeat(2,1fr); } }
+        .hw-promise { background:#fff; border:1px solid #f0ebe0; border-radius:1rem; padding:1.5rem; }
+        .hw-promise strong { display:block; font-size:1.05rem; color:#111827; margin-bottom:.4rem; }
+        .hw-promise p { margin:0; color:#4b5563; line-height:1.6; }
+
+        /* Become more */
+        .hw-swan { background: var(--color-emerald-700); color:#fff; border-radius:1.75rem; padding:3.5rem 1.5rem; text-align:center; }
+        @media (min-width: 768px) { .hw-swan { padding:4.5rem 4rem; } }
+        .hw-swan h2 { color:#fff; }
+        .hw-swan p { color:rgba(255,255,255,.92); font-size:1.12rem; line-height:1.75; margin:0 auto 1rem; max-width:40rem; }
+        .hw-swan .hw-big { font-size: clamp(1.25rem, 2.6vw, 1.6rem); font-weight:800; color:#fff; margin-top:1.75rem; }
+
+        @media (prefers-reduced-motion: reduce) { .hw-role { transition:none; } .hw-role:hover { transform:none; } }
+    </style>
+</head>
+<body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
+
+<div id="nav-placeholder"></div>
+
+<main class="flex-grow">
+
+    <!-- Hero -->
+    <section class="hw-section">
+        <div class="hw-wrap hw-center">
+            <div class="hw-narrow">
+                <span class="hw-eyebrow">How it works</span>
+                <h1 class="hw-h1">You set the direction.<br><em>Your team does the work.</em></h1>
+                <p class="hw-lead">Be More Swan gives you a team of digital assistants. Each one is hired for a single job, they all work together, and none of them sends anything out until you say so. It isn&rsquo;t another app to learn. It&rsquo;s the help you&rsquo;ve been doing without.</p>
+                <div class="hw-ctas">
+                    <a href="register.html" data-waitlist-label="Join the waitlist" class="btn-primary inline-block px-8 py-4 text-lg font-bold rounded-lg shadow-lg hover:shadow-xl transition">Start your free trial</a>
+                    <a href="assistants.html" class="btn-secondary inline-block px-8 py-4 text-lg font-bold rounded-lg border transition">Meet the assistants</a>
+                </div>
+                <p class="hw-small">14 days free &middot; no card needed</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- The problem -->
+    <section class="hw-section hw-section-white">
+        <div class="hw-wrap">
+            <div class="hw-narrow hw-center">
+                <h2 class="hw-h2">The work that never quite gets done</h2>
+                <p class="hw-lead">Every founder has a list. The posts you mean to write. The newsletter you haven&rsquo;t sent since spring. The leads you never got round to emailing. The website that says far less than it should.</p>
+            </div>
+            <div class="hw-two">
+                <div class="hw-card">
+                    <h3>The work you do yourself</h3>
+                    <p class="hw-p">At ten o&rsquo;clock at night, after the real work is done, because nobody else will.</p>
+                    <ul>
+                        <li>Writing this week&rsquo;s social posts</li>
+                        <li>Turning what you know into a blog article</li>
+                        <li>Fixing the words on your website</li>
+                    </ul>
+                </div>
+                <div class="hw-card">
+                    <h3>The work you&rsquo;d hire for, if you could</h3>
+                    <p class="hw-p">A marketer, a copywriter, someone for sales. Each one a salary you can&rsquo;t justify yet.</p>
+                    <ul>
+                        <li>Finding new customers and writing to them</li>
+                        <li>Keeping in touch with the ones you have</li>
+                        <li>Running a proper campaign towards a goal</li>
+                    </ul>
+                </div>
+            </div>
+            <p class="hw-lead hw-center" style="margin-top:2.5rem;"><strong style="color:#111827;">That&rsquo;s the work Be More Swan is for.</strong></p>
+        </div>
+    </section>
+
+    <!-- The team -->
+    <section class="hw-section">
+        <div class="hw-wrap">
+            <div class="hw-narrow hw-center">
+                <h2 class="hw-h2">Hire for a role, not a tool</h2>
+                <p class="hw-lead">You don&rsquo;t buy software and work out how to use it. You hire an assistant for a job, the way you&rsquo;d hire a person, and it arrives knowing how to do it.</p>
+            </div>
+            <div class="hw-team">
+                <a class="hw-role" href="assistant.html?role=social_media_manager"><strong>Social Media Assistant</strong><span>Plans, writes and schedules your posts.</span></a>
+                <a class="hw-role" href="assistant.html?role=blog_writer"><strong>Blog Writing Assistant</strong><span>Writes articles in your voice, on a rhythm you set.</span></a>
+                <a class="hw-role" href="assistant.html?role=newsletter_editor"><strong>Email Marketing Assistant</strong><span>Keeps your customers hearing from you.</span></a>
+                <a class="hw-role" href="assistant.html?role=lead_qualifier"><strong>Lead Generation Assistant</strong><span>Finds businesses that fit and drafts the first email.</span></a>
+                <a class="hw-role" href="assistant.html?role=campaign_orchestrator"><strong>Marketing Campaign Orchestrator</strong><span>Turns one goal into a plan for the whole team.</span></a>
+                <a class="hw-role" href="assistant.html?role=brand_designer"><strong>Brand Designer</strong><span>Pictures and graphics that look like you.</span></a>
+                <a class="hw-role" href="assistant.html?role=mystery_shopper"><strong>Mystery Shopper</strong><span>Sees your website the way a stranger does.</span></a>
+                <a class="hw-role" href="assistant.html?role=website_assistant"><strong>Website Assistant</strong><span>Writes and builds your website with you.</span></a>
+            </div>
+        </div>
+    </section>
+
+    <!-- One assistant -->
+    <section class="hw-section hw-section-white">
+        <div class="hw-wrap">
+            <div class="hw-narrow hw-center">
+                <h2 class="hw-h2">How one assistant works</h2>
+                <p class="hw-lead">Brief it once, then let it get on with it. You only step in to say yes, no, or &ldquo;not quite&rdquo;.</p>
+            </div>
+            <div class="hw-rows">
+                <div class="hw-row">
+                    <div class="hw-copy">
+                        <div class="hw-step" aria-hidden="true">1</div>
+                        <h3>Brief it like a new starter</h3>
+                        <p class="hw-p">Tell it about your business, what you sell, who your customers are and how you like to sound &mdash; the conversation you&rsquo;d have with anyone joining your team on their first day. It takes about ten to fifteen minutes.</p>
+                        <p class="hw-p">Then decide the rhythm: three posts a week, an article a fortnight, a newsletter every month.</p>
+                    </div>
+                    <figure class="hw-shot">
+                        <img src="/images/assistants/social_media_manager/calendar.jpg" alt="A month of scheduled social posts on the content calendar" width="800" height="500" loading="lazy" decoding="async">
+                        <figcaption>Once it knows your rhythm, your calendar fills itself.</figcaption>
+                    </figure>
+                </div>
+                <div class="hw-row hw-flip">
+                    <div class="hw-copy">
+                        <div class="hw-step" aria-hidden="true">2</div>
+                        <h3>It does the work. You say yes.</h3>
+                        <p class="hw-p">Your assistant drafts on its own, in the background, whether you&rsquo;re logged in or not. Every draft then waits for you, shown exactly as your customers will see it.</p>
+                        <p class="hw-p">Approve it, change a word, or send it back with a note. Nothing goes out until you&rsquo;re happy.</p>
+                    </div>
+                    <figure class="hw-shot">
+                        <img src="/images/assistants/social_media_manager/previews.jpg" alt="Three social media drafts shown as they will appear on each platform, waiting for approval" width="800" height="500" loading="lazy" decoding="async">
+                        <figcaption>Drafts wait for your approval, shown the way your followers will see them.</figcaption>
+                    </figure>
+                </div>
+                <div class="hw-row">
+                    <div class="hw-copy">
+                        <div class="hw-step" aria-hidden="true">3</div>
+                        <h3>It learns how you like things</h3>
+                        <p class="hw-p">Every time you turn a draft down and say why, your assistant turns that into a rule it follows next time. The first week, you&rsquo;ll make a few changes. A month in, you&rsquo;ll mostly be pressing Approve.</p>
+                        <p class="hw-p">When you trust it, you can let some work go out on its own &mdash; and switch that off again whenever you like.</p>
+                    </div>
+                    <figure class="hw-shot">
+                        <img src="/images/assistants/lead_qualifier/outreach.jpg" alt="A drafted sales email to a local café, waiting to be approved before it is sent" width="800" height="500" loading="lazy" decoding="async">
+                        <figcaption>Even a sales email waits for your go-ahead before it&rsquo;s sent.</figcaption>
+                    </figure>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Together -->
+    <section class="hw-section">
+        <div class="hw-wrap">
+            <div class="hw-narrow hw-center">
+                <h2 class="hw-h2">Better together</h2>
+                <p class="hw-lead">One assistant saves you hours. A team changes how your business runs. Your assistants share what they know &mdash; your products, your brand, and what the rest of the team has done this week &mdash; so they build on each other&rsquo;s work instead of repeating it.</p>
+            </div>
+            <div class="hw-rows">
+                <div class="hw-row">
+                    <div class="hw-copy">
+                        <div class="hw-kicker">One goal, the whole team</div>
+                        <h3>Give it a goal, not a to-do list</h3>
+                        <p class="hw-p">Tell your Marketing Campaign Orchestrator what you want &mdash; &ldquo;win 25 new wholesale accounts before Christmas&rdquo; &mdash; and it plans the campaign and briefs the rest of the team: leads to find, posts to write, emails to send.</p>
+                        <p class="hw-p">You decide how much of your monthly allowance it can use, and it asks before going further.</p>
+                    </div>
+                    <figure class="hw-shot">
+                        <img src="/images/assistants/campaign_orchestrator/campaigns.jpg" alt="Two running marketing campaigns, each with a goal, progress towards it and a task budget" width="800" height="500" loading="lazy" decoding="async">
+                        <figcaption>Each campaign shows its goal, its progress and what&rsquo;s waiting on you.</figcaption>
+                    </figure>
+                </div>
+                <div class="hw-row hw-flip">
+                    <div class="hw-copy">
+                        <div class="hw-kicker">Spotted by one, fixed by another</div>
+                        <h3>Assistants hand work to each other</h3>
+                        <p class="hw-p">Your Mystery Shopper reads your website the way a stranger would and tells you exactly what to change. When the fix is a post, an article or an email, it suggests the job for the assistant who does that &mdash; with the brief already written for you to send.</p>
+                        <p class="hw-p">And when a lead your Lead Generation Assistant found becomes a customer, they can join your mailing list, so your Email Marketing Assistant keeps them coming back.</p>
+                    </div>
+                    <figure class="hw-shot">
+                        <img src="/images/assistants/mystery_shopper/fixes.jpg" alt="Suggested website fixes, each comparing the wording on the site now with a stronger version" width="800" height="500" loading="lazy" decoding="async">
+                        <figcaption>Suggested fixes, side by side with what your website says today.</figcaption>
+                    </figure>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- In charge -->
+    <section class="hw-section hw-section-white">
+        <div class="hw-wrap">
+            <div class="hw-narrow hw-center">
+                <h2 class="hw-h2">You stay in charge</h2>
+                <p class="hw-lead">Your name is on everything your assistants make, so you have the final word on all of it.</p>
+            </div>
+            <div class="hw-promises">
+                <div class="hw-promise"><strong>Nothing goes out without you</strong><p>Every post, article and email waits for your approval unless you choose otherwise &mdash; one platform at a time, and only for as long as you want.</p></div>
+                <div class="hw-promise"><strong>Brand-safe from day one</strong><p>Every assistant follows built-in safety rules that come before any instruction, so your business is never put somewhere it shouldn&rsquo;t be.</p></div>
+                <div class="hw-promise"><strong>One flat monthly fee</strong><p>Work is counted in tasks. When the month&rsquo;s allowance is used, your assistants simply pause &mdash; there is never a surprise bill.</p></div>
+                <div class="hw-promise"><strong>Your business stays yours</strong><p>Your data is kept apart from every other customer&rsquo;s and is never used to train AI models. You own what your assistants make.</p></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Become more -->
+    <section class="hw-section">
+        <div class="hw-wrap">
+            <div class="hw-swan">
+                <h2 class="hw-h2">A new way of working: become more</h2>
+                <p>Above the water, a swan looks effortless. Underneath, it&rsquo;s paddling hard. Most founders are all paddle &mdash; doing every job, all of the time, and never quite catching up.</p>
+                <p>AI isn&rsquo;t here to replace you. Used well, it&rsquo;s the team that takes on the paddling, so you can spend your time on what only you can do: the customer conversations, the next idea, the afternoon off you keep promising yourself.</p>
+                <p class="hw-big">Don&rsquo;t do more. Be more.</p>
+                <div class="hw-ctas">
+                    <a href="register.html" data-waitlist-label="Join the waitlist" class="btn-inverse inline-block px-8 py-4 text-lg font-bold rounded-lg shadow-lg hover:shadow-xl transition">Start your free trial</a>
+                    <a href="pricing.html" class="inline-block px-8 py-4 text-lg font-bold rounded-lg border-2 border-white/30 text-white hover:border-white/60 hover:bg-white/10 transition">See pricing</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+</main>
+
+<div id="footer-placeholder"></div>
+
+<script src="./mobileMenu.js"></script>
+<script>
+    async function loadComponent(id, path) {
+        try {
+            const r = await fetch(path);
+            if (r.ok) document.getElementById(id).innerHTML = await r.text();
+        } catch {}
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        await loadComponent('nav-placeholder', './components/nav.html');
+        loadComponent('footer-placeholder', './components/footer.html');
+        if (window.i18n) window.i18n.apply();
+        setupMobileMenu();
+    });
+</script>
+</body>
+</html>

@@ -16,22 +16,23 @@
 // as the pre-fetch fallback, so the wizard is never blocked waiting on the network.
 
 (function () {
-    // Mirrors master_plans.app_connection_limit / the published pricing cards. Only used until
-    // check-capacity answers — the live column wins whenever it's reachable.
-    const MAX_APPS_BY_TIER  = { saver: 4, buster: 10, employee: 15 };
+    // No app-connection limit on any plan (owner, 2026-10-20): how many tools you connect depends on
+    // which assistants you hire, so the wizards never cap it. maxApps stays in the shape the four
+    // onboarding pages read, always Infinity.
+    const NO_APP_LIMIT = Infinity;
     // Workflow-step ceilings have no master_plans column, so they stay tier-keyed — but off the
     // tier check-capacity reports, not whatever sessionStorage happens to hold. Ordered entry → top.
     const MAX_STEPS_BY_TIER = { saver: 1, buster: 4, employee: 5 };
     // Used when the tier is unknown AND check-capacity is unreachable. Entry-plan limits, so a
     // failure never silently over-grants.
-    const FALLBACK = { maxApps: 2, maxSteps: 1, tierKey: null };
+    const FALLBACK = { maxApps: NO_APP_LIMIT, maxSteps: 1, tierKey: null };
 
     let _cache = null;
 
     /** Synchronous best guess from a tier key — the pre-fetch value the wizards start from. */
     window.planLimitsForTier = function (tierKey) {
         if (!tierKey || !(tierKey in MAX_STEPS_BY_TIER)) return { ...FALLBACK };
-        return { maxApps: MAX_APPS_BY_TIER[tierKey], maxSteps: MAX_STEPS_BY_TIER[tierKey], tierKey };
+        return { maxApps: NO_APP_LIMIT, maxSteps: MAX_STEPS_BY_TIER[tierKey], tierKey };
     };
 
     /**
@@ -46,9 +47,7 @@
             if (res.ok) {
                 const cap = await res.json();
                 _cache = {
-                    // null from check-capacity means UNLIMITED — keep it unlimited rather than
-                    // letting `null` collapse to 0 and lock the user out of every integration.
-                    maxApps: cap.appConnectionLimit == null ? Infinity : cap.appConnectionLimit,
+                    maxApps: NO_APP_LIMIT,
                     maxSteps: MAX_STEPS_BY_TIER[cap.tierKey] ?? FALLBACK.maxSteps,
                     tierKey: cap.tierKey || null,
                 };

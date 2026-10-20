@@ -62,8 +62,8 @@
         "a": "From your setup answers — your brand voice, topics and rules — and from the reasons you give when you reject or edit a draft. It turns your corrections into rules it follows next time."
       },
       {
-        "q": "Does it use tasks or credits?",
-        "a": "Each drafted post uses one task, however many platforms it goes to. An AI image uses one more task, and an AI video or music track uses 20. A post to X with a link uses 10. Your own uploads, stock media and branded graphics are free."
+        "q": "Does it use tasks?",
+        "a": "Each drafted post uses one task, however many platforms it goes to. An AI image adds 1 task, an AI video 20 (on the Busywork Buster plan) and an AI music track 20 (12 if you share it with the Be More Swan community). A post to X with a link uses 10. Your own uploads, stock media and branded graphics are free."
       },
       {
         "q": "Which platforms can it post to?",
@@ -129,8 +129,8 @@
         "a": "Yes. Press Write Blog Post, give it a subject, and either write it yourself or ask the assistant to draft it for you."
       },
       {
-        "q": "Does it use tasks or credits?",
-        "a": "Each drafted article uses one task. AI images use AI media credits. Stock pictures and your own uploads are free."
+        "q": "Does it use tasks?",
+        "a": "Each drafted article uses one task, and an AI image adds 1 more. Stock pictures and your own uploads are free."
       }
     ]
   },
@@ -192,7 +192,7 @@
         "a": "Yes. Set up a sending domain and your emails come from your own address, which helps them land in the inbox."
       },
       {
-        "q": "Does it use tasks or credits?",
+        "q": "Does it use tasks?",
         "a": "Each email it drafts or rewrites uses one task. Sending doesn't."
       }
     ]
@@ -369,8 +369,8 @@
     ],
     "faqs": [
       {
-        "q": "Does it cost credits?",
-        "a": "Stock photos, stock videos and branded graphics are free. AI images use 1 AI media credit for a round of four, and an AI video clip uses 5 — AI video is on the Busywork Buster and Digital Employee plans."
+        "q": "Does it use tasks?",
+        "a": "Stock photos, stock videos and branded graphics are free. AI images use 1 task for a round of four, and an AI video clip uses 20 tasks — AI video is on the Busywork Buster plan."
       },
       {
         "q": "Can I use my own photos?",
@@ -511,8 +511,8 @@
     ],
     "faqs": [
       {
-        "q": "Can I put my site live yet?",
-        "a": "Not yet. Today you build and preview your site; it stays a private draft that search engines are told to ignore. Putting it live on its own web address is coming next."
+        "q": "Can I put my site live?",
+        "a": "Yes. Press Publish and your site goes live on its own free address, yourname.bemoreswan.site, or on a domain you own. Until you publish, it stays a private draft that search engines are told to ignore. You can publish changes, go back to an earlier version or take the site offline at any time."
       },
       {
         "q": "Does it use tasks?",
@@ -520,7 +520,7 @@
       },
       {
         "q": "How many pages can I have?",
-        "a": "Up to 5 pages on the £29 plan, and more on the higher plans."
+        "a": "Up to 5 pages on the Workflow Saver plan and 15 on the Busywork Buster."
       },
       {
         "q": "Will it make up reviews or prices?",

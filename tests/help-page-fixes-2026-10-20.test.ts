@@ -18,6 +18,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { landmark } from './landmark';
 import { buildHelpKnowledge } from '../src/utils/help-knowledge';
+import { teamAllowanceFrom } from '../src/utils/team-seats';
 
 let passed = 0;
 const test = (name: string, fn: () => void) => {
@@ -134,6 +135,63 @@ test('the referral article follows the Help Centre quoting rules', () => {
     assert.ok(!bodies[0].includes(';'), 'no semicolons inside a body');
     assert.ok(!bodies[0].includes("''"), 'apostrophes inside $$ are literal');
     assert.ok(!/free assistant|£10|token/i.test(bodies[0]), 'describes the current offer only');
+});
+
+test('the data export article follows the Help Centre quoting rules and matches the code', () => {
+    const sql = read('db/help-articles-2026-12zzzzzz-data-export.sql');
+    const bodies = [...sql.matchAll(/\$\$([\s\S]*?)\$\$/g)].map((m) => m[1]);
+    assert.strictEqual(bodies.length, 1);
+    assert.ok(!bodies[0].includes(';'), 'no semicolons inside a body');
+    assert.ok(!bodies[0].includes("''"), 'apostrophes inside $$ are literal');
+    // The claims it makes are the ones the code makes.
+    const ui = read('user-settings.html');
+    assert.ok(ui.includes('>Your data<') && ui.includes('>Export my data<') && ui.includes('data-tab="agreements">My Agreements<'));
+    assert.ok(read('netlify/functions/data-export-download.ts').includes('.json'), 'the file is JSON');
+    assert.ok(read('src/utils/workspace-export.ts').includes("EXPORT_WORKSPACE_ROLES = ['owner', 'admin']"), 'workspace part is owners and admins');
+    assert.ok(/24 hours/.test(bodies[0]) && /one export a day/i.test(bodies[0]));
+});
+
+console.log('\nTeam seats coming soon; no app-connection limit (owner, 2026-10-20)\n');
+
+test("'coming_soon' never switches invites on — only true does", () => {
+    assert.strictEqual(teamAllowanceFrom({ workspace_collaboration: 'coming_soon' }, 3).collaboration, false);
+    assert.strictEqual(teamAllowanceFrom({ workspace_collaboration: 'coming_soon' }, 3).maxSeats, 1);
+    assert.strictEqual(teamAllowanceFrom({ workspace_collaboration: true }, 3).maxSeats, 3);
+    assert.ok(!read('src/utils/team-seats.ts').includes('Digital Employee plan'), 'the retired plan is not offered as the way to get invites');
+});
+
+test('the pricing table and plan picker show coming soon, never a tick, and no seats or connections', () => {
+    const p = read('pricing.html');
+    assert.match(p, /if \(cmpComingSoon\(value\)\) return CMP_SOON;/);
+    assert.ok(landmark(p, 'if (cmpComingSoon(value))') < landmark(p, "if (def.valueType === 'boolean') return cmpTruthy"));
+    assert.ok(!/>App Connections<br>/.test(p), 'the static fallback row is gone');
+    const ws = read('workspace.html');
+    const picker = ws.slice(landmark(ws, 'async function loadPlanCards(referralCode) {'), landmark(ws, 'async function loadPlanCards(referralCode) {') + 4000);
+    assert.ok(!/appConnectionLimit|seatLimit/.test(picker), 'no connection or seat bullets');
+    assert.match(picker, /return v === true \|\| v === 'true';/, 'only features the plan HAS');
+});
+
+test('the onboarding wizards never cap connections', () => {
+    const o = read('onboarding-plan-limits.js');
+    assert.ok(!/MAX_APPS_BY_TIER|appConnectionLimit/.test(o));
+    assert.strictEqual((o.match(/maxApps: NO_APP_LIMIT/g) || []).length, 3);
+});
+
+test('the setup guide only offers "Invite a teammate" where inviting is possible', () => {
+    const r = read('src/utils/onboarding-recommendations.ts');
+    assert.match(r, /if \(canInvite \|\| hasTeammate\) add\(\{\s*key: 'invite_teammate'/);
+});
+
+test('public copy: no connection limits, team members coming soon, no Minute Taking on the homepage', () => {
+    const faq = read('faq.html');
+    assert.match(faq, /Is there a limit on how many apps I can connect\?/);
+    assert.match(faq, /coming soon to the Busywork Buster/);
+    assert.ok(!/Standard App and a Premium App|connection limit mid-month/.test(faq));
+    assert.ok(!read('index.html').includes('Minute Taking'));
+    const sql = read('db/z-plans-no-connection-limit-team-soon.sql');
+    assert.match(sql, /'"coming_soon"'::jsonb/);
+    assert.match(sql, /WHERE key IN \('app_connection_limit', 'app_connections'\)/);
+    assert.ok(!/master_plans[\s\S]*?updated_at[\s\S]*?RETURNING tier_key/.test(sql.split('UPDATE plan_features')[0]), 'master_plans has no updated_at column');
 });
 
 console.log(`\n${passed} checks passed`);

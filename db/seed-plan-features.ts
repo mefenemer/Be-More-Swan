@@ -56,17 +56,17 @@ interface Def {
 // Order here IS the display order (grouped by category in first-seen order by pricing.html).
 const DEFS: Def[] = [
     // ── Capacity ──────────────────────────────────────────────────────────────
-    { key: 'assistant_limit', label: 'Digital Assistants', description: 'The number of distinct AI roles you can deploy in your account',
+    { key: 'assistant_limit', label: 'Assistants Working at Once', description: 'Hire any assistant in the library. On the Workflow Saver one works at a time, and you can switch it once a calendar month',
       category: 'Capacity', valueType: 'number', storageTarget: 'column', columnName: 'assistantLimit', unlimitedLabel: 'Custom', enterpriseValue: 'Custom' },
-    { key: 'monthly_task_limit', label: 'Completed Tasks / Month', description: 'Each action your assistant completes counts as one task',
+    { key: 'monthly_task_limit', label: 'Completed Tasks / Month', description: 'One finished piece of work: a post, an article, a lead search or an email. AI video and music count as 20',
       category: 'Capacity', valueType: 'number', storageTarget: 'column', columnName: 'monthlyTaskLimit', unlimitedLabel: 'Custom', enterpriseValue: 'Custom' },
-    // Drives the pricing-card "Apps" stat box AND the per-assistant connection limit enforced by
-    // check-capacity. Column-stored so an admin edit in the matrix moves both together.
-    { key: 'app_connection_limit', label: 'App Connections', description: 'The number of apps and tools your assistants can connect to',
-      category: 'Capacity', valueType: 'number', storageTarget: 'column', columnName: 'appConnectionLimit', unlimitedLabel: 'Custom', enterpriseValue: 'Custom' },
-    { key: 'app_connections', label: 'App Connection Details', description: 'The tools and platforms your assistants can connect to and work within',
-      category: 'Capacity', valueType: 'text', storageTarget: 'feature', enterpriseValue: 'Bespoke app limits & custom internal system integrations',
-      values: { saver: 'Connect up to 4 everyday apps', buster: 'Connect up to 10 standard apps to power your digital department', employee: 'Connect up to 15 apps to power your whole digital department' } },
+    // Feature-stored number; the plans' own values (5 / 15) are set in master data, so no `values`
+    // here — a re-seed must not rewrite them (db/z-pricing-copy-2026-10-20.sql adds the row).
+    { key: 'website_pages', label: 'Website Pages', description: 'Pages on the website your Website Assistant writes and publishes for you',
+      category: 'Capacity', valueType: 'number', storageTarget: 'feature', unlimitedLabel: 'Custom', enterpriseValue: 'Custom' },
+    // app_connection_limit / app_connections removed 2026-10-20 (owner): no plan limits app
+    // connections — it depends on which assistants you hire. db/z-plans-no-connection-limit-team-soon.sql
+    // clears the limits and switches both catalog rows off.
     { key: 'monthly_x_credits', label: 'X (Twitter) Posting Credits / Month', description: 'Credits for posting to X each month — a text post costs 1 credit, a post with a link costs 13. Buy more any time; purchased credits never expire.',
       category: 'Capacity', valueType: 'number', storageTarget: 'feature', unlimitedLabel: 'Custom', enterpriseValue: 'Custom',
       values: { saver: 150, buster: 500, employee: 1500 } },
@@ -75,10 +75,10 @@ const DEFS: Def[] = [
     { key: 'monthly_ai_credits', label: 'AI Media Credits / Month', description: 'Credits included each month for AI media generation (image = 1 credit, video = 5 credits)',
       category: 'AI Media Generation', valueType: 'number', storageTarget: 'feature', unlimitedLabel: 'Custom', enterpriseValue: 'Custom',
       values: { saver: 20, buster: 50, employee: 100 } },
-    { key: 'ai_image_generation', label: 'AI Image Generation', description: 'Generate on-brand images from a prompt — 1 credit each',
+    { key: 'ai_image_generation', label: 'AI Image Generation', description: 'Generate on-brand images from a prompt — 1 task each',
       category: 'AI Media Generation', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: CHECK, buster: CHECK, employee: CHECK } },
-    { key: 'ai_video_generation', label: 'AI Video Generation', description: 'Generate short-form videos from a prompt — 5 credits each',
+    { key: 'ai_video_generation', label: 'AI Video Generation', description: 'Generate short-form videos from a prompt — 20 tasks each',
       category: 'AI Media Generation', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: DASH, buster: CHECK, employee: CHECK } },
     { key: 'credits_rollover', label: 'Unused Credits Roll Over', description: "Any credits you don't use carry forward to the next month",
@@ -99,7 +99,7 @@ const DEFS: Def[] = [
     { key: 'scheduled_workflows', label: 'Around-the-Clock Workflows', description: "Scheduled tasks run automatically, even while you're offline or asleep",
       category: 'Core Features — included on every plan', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: CHECK, buster: CHECK, employee: CHECK } },
-    { key: 'draft_approvals', label: 'Draft Approvals', description: "Every output lands in your inbox for sign-off before it's published or sent",
+    { key: 'draft_approvals', label: 'Draft Approvals', description: "Every post, article and email waits for your sign-off before it's published or sent, unless you choose otherwise",
       category: 'Core Features — included on every plan', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: CHECK, buster: CHECK, employee: CHECK } },
     { key: 'content_calendar', label: 'Content Calendar', description: "Plan, schedule, and review your assistant's upcoming work in one view",
@@ -120,12 +120,14 @@ const DEFS: Def[] = [
     // and no custom reporting exists. db/z-plan-copy-matches-code.sql switches both rows off.
 
     // ── Team & Advanced Features ──────────────────────────────────────────────
-    { key: 'quality_reviewer', label: 'The Quality Reviewer', description: 'A dedicated assistant that checks and critiques the work of your other assistants',
+    { key: 'quality_reviewer', label: 'The Quality Reviewer', description: 'A second check on every social post before it reaches you: it flags anything off-brand or shaky and suggests a fix',
       category: 'Team & Advanced Features', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: DASH, buster: CHECK, employee: CHECK } },
     { key: 'workspace_collaboration', label: 'Workspace Collaboration', description: 'Invite team members, managers, or clients to view and approve outputs',
       category: 'Team & Advanced Features', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
-      values: { saver: DASH, buster: DASH, employee: CHECK } },
+      // Busywork Buster: 'coming_soon' (owner, 2026-10-20) — a pill on the pricing table, never a
+      // tick, and team-seats.ts only treats TRUE as on.
+      values: { saver: DASH, buster: 'coming_soon', employee: CHECK } },
     // 'advanced_tool_vault' ("Advanced Tool Vault") withdrawn 2026-10-12: no integration was ever
     // marked premium, so the row sold nothing. db/z-plan-tool-vault-withdrawn.sql sets its
     // plan_features.is_enabled = false. Restore both if a premium integration tier ships.

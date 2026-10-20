@@ -36,7 +36,10 @@ export function teamAllowanceFrom(
     seatLimit: number | null,
     planName: string | null = null,
 ): TeamAllowance {
-    const collaboration = !!features[COLLABORATION_FEATURE];
+    // Strictly true: the Busywork Buster carries 'coming_soon' (owner, 2026-10-20 — invites are not
+    // finished), which the pricing table shows as a pill and which must never switch invites on.
+    const v = features[COLLABORATION_FEATURE];
+    const collaboration = v === true || v === 'true';
     if (!collaboration) return { collaboration, maxSeats: 1, planName };
     return { collaboration, maxSeats: seatLimit && seatLimit > 0 ? seatLimit : null, planName };
 }
@@ -74,7 +77,7 @@ export async function getTeamAllowance(db: Db, orgId: number): Promise<TeamAllow
 export function seatRefusal(allowance: TeamAllowance): { error: string; code: string } {
     if (!allowance.collaboration) {
         return {
-            error: `Inviting team members is part of Workspace Collaboration, which comes with The Digital Employee plan${allowance.planName ? ` — you're on ${allowance.planName}` : ''}. Upgrade to invite colleagues, managers or clients.`,
+            error: `Inviting team members isn't available yet — it's coming soon to The Busywork Buster. For a team today, ask us about a Bespoke Assistant.`,
             code: 'COLLABORATION_NOT_IN_PLAN',
         };
     }

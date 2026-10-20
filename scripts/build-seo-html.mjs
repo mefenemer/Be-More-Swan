@@ -53,6 +53,7 @@ const FOOTER_PAGES = [
     'pricing.html',
     'assistants.html',
     'connections.html',
+    'how-it-works.html',
     'faq.html',
     'trust.html',
     'contact.html',
