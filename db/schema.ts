@@ -5657,6 +5657,31 @@ export const siteAuditFixes = pgTable("site_audit_fixes", {
   check("site_audit_fixes_status_check", sql`${t.status} IN ('open','accepted','done','dismissed')`),
 ]);
 
+// What the user did with the Mystery Shopper's ideas for their other assistants: a "Brief <name>"
+// click marks the suggestion actioned and moves it to the Website tab's History.
+// Requires db/z-mystery-shopper-briefs.sql.
+export const siteAuditBriefs = pgTable("site_audit_briefs", {
+  id: serial().primaryKey(),
+  auditId: integer("audit_id").notNull().references(() => siteAudits.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  source: text().notNull(),
+  runId: integer("run_id").references(() => siteAuditRuns.id, { onDelete: "cascade" }),
+  handoffIndex: smallint("handoff_index"),
+  fixId: integer("fix_id").references(() => siteAuditFixes.id, { onDelete: "cascade" }),
+  targetRole: text("target_role").notNull(),
+  targetAssistantId: integer("target_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  targetName: text("target_name"),
+  title: text(),
+  brief: text().notNull(),
+  briefedBy: integer("briefed_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("site_audit_briefs_audit_idx").on(t.auditId, t.createdAt.desc()),
+  uniqueIndex("site_audit_briefs_idea_uq").on(t.runId, t.handoffIndex).where(sql`source = 'idea'`),
+  uniqueIndex("site_audit_briefs_fix_uq").on(t.fixId).where(sql`source = 'stalled_fix'`),
+  check("site_audit_briefs_source_check", sql`${t.source} IN ('idea','stalled_fix','chat')`),
+]);
+
 // ── Website Assistant — one site per hired assistant (docs/website-assistant-plan.md §6) ─────────
 // `draft` has always passed normaliseSiteDefinition (src/utils/site-definition.ts). The live site is
 // served from site_versions (published_version), never from the draft. Requires

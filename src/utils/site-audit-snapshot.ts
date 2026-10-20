@@ -8,7 +8,7 @@
 
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, siteAuditFixes, siteAuditRuns, siteAudits } from '../../db/schema';
+import { aiAssistants, siteAuditBriefs, siteAuditFixes, siteAuditRuns, siteAudits } from '../../db/schema';
 import { WEEKDAYS } from './site-audit-setup';
 import { asUtcDate, nextCheckDate } from './site-audit-schedule';
 import { HANDOFF_TARGETS, type Handoff } from './site-audit-prompts';
@@ -56,6 +56,18 @@ export async function buildSiteAuditSnapshot(db: Db, orgId: number, assistantId:
         lines.push(`Next weekly check: ${new Date(`${next}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'UTC' })}.`);
     }
 
+    // What has been briefed to the other assistants (the Website tab's History). Read apart: before
+    // db/z-mystery-shopper-briefs.sql is applied there is simply no record.
+    let briefed: Array<{ source: string; runId: number | null; handoffIndex: number | null; targetName: string | null; targetRole: string; title: string | null; brief: string; createdAt: Date }> = [];
+    try {
+        briefed = await db.select({
+            source: siteAuditBriefs.source, runId: siteAuditBriefs.runId, handoffIndex: siteAuditBriefs.handoffIndex,
+            targetName: siteAuditBriefs.targetName, targetRole: siteAuditBriefs.targetRole, title: siteAuditBriefs.title,
+            brief: siteAuditBriefs.brief, createdAt: siteAuditBriefs.createdAt,
+        }).from(siteAuditBriefs).where(and(eq(siteAuditBriefs.auditId, audit.id), eq(siteAuditBriefs.organisationId, orgId)))
+            .orderBy(desc(siteAuditBriefs.id)).limit(10);
+    } catch { /* table not there yet */ }
+
     const latestDone = runs.find((r) => r.status === 'done');
     if (latestDone) {
         const lenses = ((latestDone.scores as { lenses?: Record<Lens, LensScore> } | null)?.lenses) ?? null;
@@ -66,9 +78,10 @@ export async function buildSiteAuditSnapshot(db: Db, orgId: number, assistantId:
             + `${audit.baselineScore !== null ? ` (first check: ${audit.baselineScore})` : ''}; target ${audit.targetScore}.`
             + (lensText ? ` ${lensText}.` : ''));
         const report = latestDone.report as { summary?: string; competitorChanges?: Array<{ url: string; changes: string[] }>; handoffs?: Handoff[] } | null;
-        if (report?.handoffs?.length) {
-            lines.push('Ideas that check had for other assistants (the "Ideas for your other assistants" section of the Website tab):');
-            for (const h of report.handoffs) lines.push(`- for the ${h.target}: ${clip(h.title, 80)} — ${clip(h.brief, 240)}`);
+        const waitingIdeas = (report?.handoffs ?? []).filter((_, i) => !briefed.some((b) => b.source === 'idea' && b.runId === latestDone.id && b.handoffIndex === i));
+        if (waitingIdeas.length) {
+            lines.push('Ideas that check had for other assistants, not yet briefed (the "Ideas for your other assistants" section of the Website tab):');
+            for (const h of waitingIdeas) lines.push(`- for the ${h.target}: ${clip(h.title, 80)} — ${clip(h.brief, 240)}`);
         }
         if (report?.summary) lines.push(`What that check said: ${clip(report.summary, 400)}`);
         const changes = (report?.competitorChanges ?? []).filter((c) => c.changes?.length);
@@ -91,9 +104,10 @@ export async function buildSiteAuditSnapshot(db: Db, orgId: number, assistantId:
     }).from(siteAuditFixes)
         .innerJoin(siteAuditRuns, eq(siteAuditRuns.id, siteAuditFixes.runId))
         .where(and(eq(siteAuditFixes.auditId, audit.id), eq(siteAuditRuns.status, 'done')))
-        .orderBy(desc(siteAuditFixes.id)).limit(20);
+        .orderBy(desc(siteAuditFixes.id)).limit(60);
     const waiting = fixes.filter((f) => f.status === 'open' || f.status === 'accepted');
     const done = fixes.filter((f) => f.status === 'done');
+    const dismissed = fixes.filter((f) => f.status === 'dismissed');
     if (waiting.length) {
         lines.push('Suggested fixes waiting (fixId — where — now → suggested — status):');
         for (const f of waiting) {
@@ -103,7 +117,16 @@ export async function buildSiteAuditSnapshot(db: Db, orgId: number, assistantId:
     } else {
         lines.push('No suggested fixes are waiting.');
     }
-    if (done.length) lines.push(`Fixes a later check confirmed are live: ${done.slice(0, 5).map((f) => `${f.id} (${f.location || 'Page'})`).join(', ')}.`);
+    // What has changed — the Website tab's "History". Lets the chat answer "what have we changed?".
+    if (done.length) {
+        lines.push('Fixes a later check confirmed are live (History):');
+        for (const f of done.slice(0, 8)) lines.push(`- ${f.id} — ${f.location || 'Page'} — was "${clip(f.before, 100)}", now "${clip(f.after, 140)}" (confirmed ${day(f.updatedAt)})`);
+    }
+    if (dismissed.length) lines.push(`Fixes they turned down ("Not for us", in History — "Bring back" or a site_audit_fix_update "open" restores one): ${dismissed.slice(0, 8).map((f) => `${f.id} (${f.location || 'Page'})`).join(', ')}.`);
+    if (briefed.length) {
+        lines.push('Briefs already sent to their other assistants (History) — do not suggest these again:');
+        for (const b of briefed) lines.push(`- ${day(b.createdAt)} to ${b.targetName || b.targetRole}: ${clip(b.title || b.brief, 120)}`);
+    }
 
     // Who a hand-off can go to. A target role nobody has hired cannot take one.
     const team = await db.select({ name: aiAssistants.name, roleKey: sql<string>`${aiAssistants.configuration} ->> 'type'` })

@@ -580,10 +580,12 @@ window.initBrandAssets = function() {
     function showSocialHandle(el, raw) {
         const p = el.dataset.platform;
         if (!SPU()) { el.value = raw || ''; return; }
-        const { path, handle } = SPU().split(p, raw);
+        const { path, handle, explicitPath } = SPU().split(p, raw);
         el.value = handle;
+        // Only when the text named the page type ("linkedin.com/in/jane"): tidying a bare handle on
+        // blur used to reset a picker the customer had set to "in/" back to the default "company/".
         const sel = document.querySelector(`#bp-social-grid [data-social-path="${p}"]`);
-        if (sel && path) sel.value = path;
+        if (sel && explicitPath) sel.value = path;
     }
 
     function fillSocialHandles(handles) {

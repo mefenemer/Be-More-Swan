@@ -12,6 +12,7 @@ import { getDb } from '../../db/client';
 import { organisations, users } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { businessDomainOf } from '../../src/utils/email-domain';
+import { cleanSocialHandles } from '../../src/utils/social-handles';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
@@ -28,25 +29,6 @@ async function callerEmail(db: ReturnType<typeof getDb>, userId: number): Promis
     const [u] = await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
     return u?.email ?? null;
 }
-
-// Future-proof set of social platforms whose handles/URLs are captured on Business
-// Information. Only a subset are connectable today (see integrations.js catalogue);
-// the rest are accepted now so the handle is ready the moment a connector ships.
-const SOCIAL_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'x', 'tiktok', 'youtube', 'pinterest', 'threads'];
-
-// Sanitise the per-platform handles object: keep only known slugs, trim, cap length,
-// drop blanks. Returns null when nothing usable was supplied.
-const cleanHandles = (v: unknown): Record<string, string> | null => {
-    if (!v || typeof v !== 'object') return null;
-    const src = v as Record<string, unknown>;
-    const out: Record<string, string> = {};
-    for (const p of SOCIAL_PLATFORMS) {
-        const raw = src[p];
-        const s = typeof raw === 'string' ? raw.trim().slice(0, 300) : '';
-        if (s) out[p] = s;
-    }
-    return Object.keys(out).length ? out : null;
-};
 
 export default withLambda(async (event) => {
     if (!['GET', 'POST'].includes(event.httpMethod || '')) return json(405, { error: 'Method Not Allowed' });
@@ -129,7 +111,7 @@ export default withLambda(async (event) => {
             websiteUrl:          clip(body.websiteUrl, 500),
             outreachPostalAddress: clip(body.outreachPostalAddress, 500),
             socialLinks:         clip(body.socialLinks, 1000),
-            socialHandles:       cleanHandles(body.socialHandles),
+            socialHandles:       cleanSocialHandles(body.socialHandles),
             targetAudience:      clip(body.targetAudience, 1000),
             updatedAt:           new Date(),
         };

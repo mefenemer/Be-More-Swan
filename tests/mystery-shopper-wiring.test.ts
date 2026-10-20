@@ -17,6 +17,7 @@ import {
     CONVERSION_GOALS, SETUP_KEYS, rawFromSetup, setupAnswersFor, validateSettings, type SiteAuditSettings,
 } from '../src/utils/site-audit-setup';
 import { MYSTERY_SHOPPER_ROLE_KEY } from '../src/constants/roles';
+import { stalledFixBrief } from '../src/utils/site-audit-briefs';
 
 let passed = 0;
 let total = 0;
@@ -156,6 +157,43 @@ check('a hand-off only ever TYPES the brief into the other chat — it never sen
     assert.match(tab, /window\.openAssistantChat\(\{ assistantId: who\.id, draft \}\)/);
     assert.match(session, /window\.openAssistantChat\(\{ assistantId: who\.id, draft \}\)/);
     assert.ok(!/sendMessage\(/.test(tab));
+});
+
+console.log('\nBriefs and History');
+
+check('a Brief click is recorded on BOTH surfaces through the one server action', () => {
+    const api = read('netlify/functions/site-audits.ts');
+    assert.match(api, /if \(action === 'brief'\)/);
+    assert.match(api, /if \(action === 'unbrief'\)/);
+    assert.match(tab, /post\(\{ action: 'brief', assistantId: state\.assistantId, \.\.\.what \}\)/);
+    assert.match(tab, /briefAndOpen\(who, ideaDraft\(h\), \{ source: 'idea', runId, handoffIndex: i \}\)/);
+    assert.match(tab, /briefAndOpen\(who, stalledFixBrief\(f\.afterText\), \{ source: 'stalled_fix', fixId: f\.id \}\)/);
+    assert.match(session, /siteAuditPost\(\{ action: 'brief', assistantId, source: 'chat'/);
+    assert.match(cards, /target, brief, title,/);
+});
+
+check('a briefed idea leaves the Ideas card and the chat snapshot', () => {
+    assert.match(tab, /filter\(\(\[, i\]\) => !ideaBrief\(latest\.id, i\)\)/);
+    assert.match(read('src/utils/site-audit-snapshot.ts'), /not yet briefed/);
+});
+
+check('the tab types exactly the brief the server records for a stalled fix', () => {
+    const at = tab.indexOf('const stalledFixBrief = (afterText) => `');
+    assert.ok(at > -1);
+    const tpl = tab.slice(tab.indexOf('`', at) + 1, tab.indexOf('`;', at));
+    assert.strictEqual(tpl.replace('${afterText}', 'X'), stalledFixBrief('X'));
+});
+
+check('History is on the tab, named to the chat, and degrades without its table', () => {
+    assert.match(tab, /<h3 class="text-sm font-black text-gray-900">History<\/h3>/);
+    assert.ok(tab.includes('Undo — not briefed after all') && tab.includes('Bring back'));
+    const at = chat.indexOf('function mysteryShopperSurfaces()');
+    assert.ok(chat.slice(at, chat.indexOf('\n}', at)).includes('"History"'));
+    assert.match(read('netlify/functions/site-audits.ts'), /briefsAvailable = false/);
+    const sql = read('db/z-mystery-shopper-briefs.sql');
+    assert.match(sql, /CREATE TABLE IF NOT EXISTS site_audit_briefs/);
+    assert.match(sql, /site_audit_briefs_idea_uq ON site_audit_briefs \(run_id, handoff_index\) WHERE source = 'idea'/);
+    assert.match(read('db/schema.ts'), /export const siteAuditBriefs = pgTable\("site_audit_briefs"/);
 });
 
 check('handlers are bound to document once, not from render', () => {

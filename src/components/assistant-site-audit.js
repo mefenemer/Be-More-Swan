@@ -14,6 +14,12 @@
  * Spend without a click. "Check my site now" is the only button that can use a task, and it says so.
  * Mark a fix done: only a later check can, when the old wording has gone from the page.
  *
+ * ── Briefs and History ────────────────────────────────────────────────────────
+ * A "Brief <name>" click opens that assistant's chat with the brief typed in AND records the brief
+ * (site-audits.ts `brief` → site_audit_briefs): the idea leaves "Ideas for your other assistants" and
+ * appears in "History", which also lists every fix that went live or was dismissed and every earlier
+ * check's ideas — so the user can see what has changed. "Undo" puts a brief back.
+ *
  * Handlers are bound to `document` once, at load, never from render. Every server value is escaped.
  * ⚠️ The button and section names are quoted to the chat (chat-orchestrator.ts mysteryShopperSurfaces);
  * tests/mystery-shopper-wiring.test.ts fails if they drift apart.
@@ -21,6 +27,7 @@
 (function () {
   const API = '/.netlify/functions/site-audits';
   const POLL_MS = 5000;
+  const HISTORY_PAGE = 20;
 
   const LENSES = [
     ['clarity', 'First impression', 'A sceptical first-time visitor with five seconds to spare.'],
@@ -43,7 +50,8 @@
     rendered: false,
     settingsOpen: false,
     showHistory: false,
-    showClosed: false,
+    historyFilter: 'all',  // 'all' | 'fixes' | 'briefs'
+    historyShown: 20,      // client-paged: "Show more" adds HISTORY_PAGE
     note: null,          // { text, tone }
     pollTimer: null,
   };
@@ -61,6 +69,13 @@
   const ROLE_FALLBACK = { social_media_manager: 'Social Media Assistant', blog_writer: 'Blog Writing Assistant', campaign_orchestrator: 'Campaign Assistant' };
   const roleLabel = (k) => (window.RoleLabels && window.RoleLabels.get && window.RoleLabels.get(k)) || ROLE_FALLBACK[k] || 'assistant';
   const teamFor = (roleKey) => (state.data?.team || []).find((a) => a.roleKey === roleKey) || null;
+  const briefs = () => state.data?.briefs || [];
+  /** The recorded brief for one of a check's ideas, or for a fix's "say it meanwhile" nudge. */
+  const ideaBrief = (runId, i) => briefs().find((b) => b.source === 'idea' && b.runId === runId && b.handoffIndex === i) || null;
+  const fixBrief = (fixId) => briefs().find((b) => b.source === 'stalled_fix' && b.fixId === fixId) || null;
+  /** Same words as src/utils/site-audit-briefs.ts stalledFixBrief — what History records as briefed. */
+  const stalledFixBrief = (afterText) => `Please draft a post that leads with this message: "${afterText}". It is how we now describe what we do, and our website will say the same soon. Keep any [placeholders] for me to fill in.`;
+  const ideaDraft = (h) => `From ${state.assistantName || 'my Mystery Shopper'}'s check of ${pageName(state.data.audit.url)}: ${h.brief}`;
 
   // ── Server ─────────────────────────────────────────────────────────────────
   async function post(payload) {
@@ -235,6 +250,10 @@
 
   /** A week after "I'll make this change" and it is still not on the site: say it elsewhere meanwhile. */
   function stalledNudge(f) {
+    const done = fixBrief(f.id);
+    if (done) {
+      return `<p class="mt-3 text-xs text-indigo-700">You briefed ${esc(done.targetName || 'your Social Media Assistant')} on ${esc(when(done.createdAt))} to post the new wording while this waits — it's in History.</p>`;
+    }
     const social = teamFor('social_media_manager');
     return `
       <div class="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
@@ -245,24 +264,30 @@
       </div>`;
   }
 
-  /** The last check's ideas for the other assistants. Each opens their chat with the brief typed in. */
+  /** One idea for another assistant, with its Brief button (or why there isn't one). */
+  function ideaCard(h, runId, i) {
+    const who = teamFor(h.target);
+    return `
+      <div class="border border-gray-200 rounded-xl p-4">
+        <p class="text-xs font-bold text-gray-900">${esc(h.title)}</p>
+        <p class="text-xs text-gray-700 mt-1">${esc(h.brief)}</p>
+        ${who
+          ? `<button type="button" data-sa-handoff="${i}" data-run="${esc(runId)}" class="mt-2 btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Brief ${esc(who.name)}</button>`
+          : `<p class="text-xs text-gray-500 mt-2">For a ${esc(roleLabel(h.target))} — you don't have one yet.</p>`}
+      </div>`;
+  }
+
+  /** The last check's ideas for the other assistants, minus any already briefed (those are in History). */
   function handoffsBlock(latest) {
     const handoffs = latest?.report?.handoffs || [];
     if (!handoffs.length) return '';
+    const waiting = handoffs.map((h, i) => [h, i]).filter(([, i]) => !ideaBrief(latest.id, i));
     return `
       <h3 class="text-sm font-black text-gray-900">Ideas for your other assistants</h3>
-      <p class="text-xs text-gray-500 mt-1">While your website is being changed, these help in the meantime. Each opens that assistant's chat with the brief typed in — nothing is sent until you send it.</p>
-      <div class="space-y-3 mt-3">${handoffs.map((h, i) => {
-        const who = teamFor(h.target);
-        return `
-          <div class="border border-gray-200 rounded-xl p-4">
-            <p class="text-xs font-bold text-gray-900">${esc(h.title)}</p>
-            <p class="text-xs text-gray-700 mt-1">${esc(h.brief)}</p>
-            ${who
-              ? `<button type="button" data-sa-handoff="${i}" class="mt-2 btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Brief ${esc(who.name)}</button>`
-              : `<p class="text-xs text-gray-500 mt-2">For a ${esc(roleLabel(h.target))} — you don't have one yet.</p>`}
-          </div>`;
-      }).join('')}</div>`;
+      <p class="text-xs text-gray-500 mt-1">While your website is being changed, these help in the meantime. Each opens that assistant's chat with the brief typed in — nothing is sent until you send it. Once you've briefed one it moves to History.</p>
+      <div class="space-y-3 mt-3">${waiting.length
+        ? waiting.map(([h, i]) => ideaCard(h, latest.id, i)).join('')
+        : '<p class="text-sm text-gray-500">You\'ve briefed every idea from the last check — they\'re in History below.</p>'}</div>`;
   }
 
   /** Target reached: the weekly checks carry on; offer the next page worth working on. */
@@ -282,19 +307,12 @@
   function fixesBlock() {
     const fixes = state.data?.fixes || [];
     const waiting = fixes.filter((f) => f.status === 'open' || f.status === 'accepted');
-    const done = fixes.filter((f) => f.status === 'done');
-    const dismissed = fixes.filter((f) => f.status === 'dismissed');
-    const closed = [...done, ...dismissed];
+    const closed = fixes.filter((f) => f.status === 'done' || f.status === 'dismissed').length;
     return `
       <h3 class="text-sm font-black text-gray-900">Suggested fixes</h3>
       <p class="text-xs text-gray-500 mt-1">Every "on your site now" quote was read from your page. A fix is marked done when a later check no longer finds the old wording.</p>
       <div class="space-y-3 mt-3">${waiting.length ? waiting.map(fixCard).join('') : '<p class="text-sm text-gray-500">Nothing waiting — the next check will look again.</p>'}</div>
-      ${closed.length ? `
-        <button type="button" data-sa-toggle-closed class="mt-3 text-xs text-gray-500 underline">${state.showClosed ? 'Hide' : 'Show'} done and dismissed (${closed.length})</button>
-        ${state.showClosed ? `<ul class="mt-2 space-y-1">${closed.map((f) => `
-          <li class="text-xs text-gray-600">${f.status === 'done' ? '<span class="font-bold text-green-700">Live</span>' : '<span class="font-bold text-gray-500">Dismissed</span>'}
-            — ${esc(f.location || 'Page')}: "${esc(f.afterText)}"
-            ${f.status === 'dismissed' ? `<button type="button" data-sa-fix="${esc(f.id)}" data-status="open" class="ml-1 underline">Bring back</button>` : ''}</li>`).join('')}</ul>` : ''}` : ''}`;
+      ${closed ? `<p class="text-xs text-gray-500 mt-3">${closed} done or dismissed — see History below.</p>` : ''}`;
   }
 
   function missingBlock(latest) {
@@ -322,6 +340,90 @@
             : c && c.changes && c.changes.length ? `<ul class="list-disc pl-5 mt-1">${c.changes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`
             : '<span class="text-gray-500"> — no change spotted at the last check</span>'}</li>`;
       }).join('')}</ul>`;
+  }
+
+  /**
+   * Everything that has happened to the suggestions, newest first: fixes that went live or were
+   * dismissed, briefs sent to other assistants, and earlier checks' ideas that nobody acted on.
+   */
+  function historyEntries() {
+    const out = [];
+    for (const f of state.data?.fixes || []) {
+      if (f.status !== 'done' && f.status !== 'dismissed') continue;
+      out.push({ kind: 'fix', at: f.updatedAt, f });
+    }
+    for (const b of briefs()) out.push({ kind: 'brief', at: b.createdAt, b });
+    const latestId = state.data?.latest?.id;
+    for (const r of state.data?.pastIdeas || []) {
+      if (r.runId === latestId) continue;   // the latest check's open ideas have their own card
+      (r.handoffs || []).forEach((h, i) => { if (!ideaBrief(r.runId, i)) out.push({ kind: 'idea', at: r.at, h, runId: r.runId, i }); });
+    }
+    return out.sort((a, b) => new Date(b.at) - new Date(a.at));
+  }
+
+  const SOURCE_WORDS = { idea: 'An idea from a check', stalled_fix: 'To post the new wording while your website change waits', chat: 'From your chat' };
+
+  function historyItem(e) {
+    const pill = (text, cls) => `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}">${esc(text)}</span>`;
+    if (e.kind === 'fix') {
+      const f = e.f;
+      const live = f.status === 'done';
+      return `
+        <li class="border border-gray-200 rounded-xl p-4">
+          <div class="flex flex-wrap items-center gap-2">
+            ${live ? pill('Live on your site', 'bg-green-50 text-green-700') : pill('Not for us', 'bg-gray-100 text-gray-600')}
+            <span class="text-xs font-bold text-gray-900">${esc(f.location || 'Page')}</span>
+            <span class="text-[10px] text-gray-500">${live ? `Confirmed ${esc(when(f.updatedAt))}` : `Dismissed ${esc(when(f.updatedAt))}`} · suggested ${esc(when(f.createdAt))}</span>
+          </div>
+          <div class="grid gap-2 mt-2 md:grid-cols-2">
+            <div class="bg-gray-50 rounded-lg p-2"><p class="text-[10px] font-bold text-gray-500 uppercase">${live ? 'Was' : 'On your site'}</p><p class="text-xs text-gray-700 mt-0.5 break-words">${esc(f.beforeText)}</p></div>
+            <div class="bg-indigo-50/60 rounded-lg p-2"><p class="text-[10px] font-bold text-indigo-700 uppercase">${live ? 'Now' : 'Suggested'}</p><p class="text-xs text-gray-900 mt-0.5 break-words">${esc(f.afterText)}</p></div>
+          </div>
+          ${live ? '' : `<button type="button" data-sa-fix="${esc(f.id)}" data-status="open" class="mt-2 text-xs text-gray-500 underline">Bring back</button>`}
+        </li>`;
+    }
+    if (e.kind === 'brief') {
+      const b = e.b;
+      return `
+        <li class="border border-gray-200 rounded-xl p-4">
+          <div class="flex flex-wrap items-center gap-2">
+            ${pill(`Briefed ${b.targetName || roleLabel(b.targetRole)}`, 'bg-indigo-50 text-indigo-700')}
+            ${b.title ? `<span class="text-xs font-bold text-gray-900">${esc(b.title)}</span>` : ''}
+            <span class="text-[10px] text-gray-500">${esc(when(b.createdAt))} · ${esc(SOURCE_WORDS[b.source] || '')}</span>
+          </div>
+          <p class="text-xs text-gray-700 mt-2">${esc(b.brief)}</p>
+          <button type="button" data-sa-unbrief="${esc(b.id)}" class="mt-2 text-xs text-gray-500 underline">Undo — not briefed after all</button>
+        </li>`;
+    }
+    const who = teamFor(e.h.target);
+    return `
+      <li class="border border-gray-200 rounded-xl p-4">
+        <div class="flex flex-wrap items-center gap-2">
+          ${pill('Not actioned', 'bg-gray-100 text-gray-600')}
+          <span class="text-xs font-bold text-gray-900">${esc(e.h.title)}</span>
+          <span class="text-[10px] text-gray-500">Idea from the ${esc(when(e.at))} check, for a ${esc(roleLabel(e.h.target))}</span>
+        </div>
+        <p class="text-xs text-gray-700 mt-2">${esc(e.h.brief)}</p>
+        ${who ? `<button type="button" data-sa-handoff="${e.i}" data-run="${esc(e.runId)}" class="mt-2 btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Brief ${esc(who.name)}</button>` : ''}
+      </li>`;
+  }
+
+  function suggestionHistoryBlock() {
+    const all = historyEntries();
+    const filters = [['all', 'All'], ['fixes', 'Website fixes'], ['briefs', 'Briefs and ideas']];
+    const shown = all.filter((e) => state.historyFilter === 'all' || (state.historyFilter === 'fixes' ? e.kind === 'fix' : e.kind !== 'fix'));
+    const page = shown.slice(0, state.historyShown);
+    return `
+      <h3 class="text-sm font-black text-gray-900">History</h3>
+      <p class="text-xs text-gray-500 mt-1">Past suggestions and what happened to them — fixes that went live or that you turned down, briefs you sent to your other assistants, and ideas nobody acted on.</p>
+      ${state.data?.briefsAvailable === false ? '<p class="text-xs text-amber-700 mt-2">Briefs to your other assistants aren\'t being recorded yet, so they don\'t appear here.</p>' : ''}
+      <div class="flex flex-wrap gap-2 mt-3" role="tablist">${filters.map(([k, label]) => `
+        <button type="button" data-sa-history-filter="${k}" role="tab" aria-selected="${state.historyFilter === k}" class="px-3 py-1 rounded-full text-xs font-bold border transition ${state.historyFilter === k ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'}">${label}</button>`).join('')}
+      </div>
+      ${page.length
+        ? `<ul class="space-y-3 mt-3">${page.map(historyItem).join('')}</ul>`
+        : `<p class="text-sm text-gray-500 mt-3">${all.length ? 'Nothing of that kind yet.' : 'Nothing yet — when a fix goes live, you dismiss one, or you brief another assistant, it is listed here.'}</p>`}
+      ${shown.length > page.length ? `<button type="button" data-sa-history-more class="mt-3 text-xs text-gray-500 underline">Show more (${shown.length - page.length} older)</button>` : ''}`;
   }
 
   function historyBlock() {
@@ -385,6 +487,7 @@
         ${latest?.report?.handoffs?.length ? card(handoffsBlock(latest)) : ''}
         ${latest ? card(missingBlock(latest) || '<p class="text-xs text-gray-500">Every check passed at the last look.</p>') : ''}
         ${card(competitorsBlock(audit, latest))}
+        ${card(suggestionHistoryBlock())}
         ${(state.data.runs || []).length ? card(historyBlock()) : ''}
       </div>`;
     restoreTyped(el, typed);
@@ -441,7 +544,9 @@
     if (t('[data-sa-settings-open]')) { state.settingsOpen = !state.settingsOpen; render(); return; }
     if (t('[data-sa-settings-close]')) { state.settingsOpen = false; render(); return; }
     if (t('[data-sa-toggle-history]')) { state.showHistory = !state.showHistory; render(); return; }
-    if (t('[data-sa-toggle-closed]')) { state.showClosed = !state.showClosed; render(); return; }
+    const hf = t('[data-sa-history-filter]');
+    if (hf) { state.historyFilter = hf.dataset.saHistoryFilter; state.historyShown = HISTORY_PAGE; render(); return; }
+    if (t('[data-sa-history-more]')) { state.historyShown += HISTORY_PAGE; render(); return; }
 
     const run = t('[data-sa-run]');
     if (run) {
@@ -467,9 +572,17 @@
 
     const handoff = t('[data-sa-handoff]');
     if (handoff) {
-      const h = (state.data?.latest?.report?.handoffs || [])[Number(handoff.dataset.saHandoff)];
+      const i = Number(handoff.dataset.saHandoff);
+      const runId = Number(handoff.dataset.run);
+      const run = runId === state.data?.latest?.id
+        ? { handoffs: state.data.latest.report?.handoffs }
+        : (state.data?.pastIdeas || []).find((r) => r.runId === runId);
+      const h = (run?.handoffs || [])[i];
       const who = h && teamFor(h.target);
-      if (who) openChatWithBrief(who, `From ${state.assistantName || 'my Mystery Shopper'}'s check of ${pageName(state.data.audit.url)}: ${h.brief}`);
+      if (who) {
+        handoff.disabled = true;
+        await briefAndOpen(who, ideaDraft(h), { source: 'idea', runId, handoffIndex: i });
+      }
       return;
     }
 
@@ -478,8 +591,20 @@
       const f = (state.data?.fixes || []).find((x) => x.id === Number(stalled.dataset.saStalled));
       const who = teamFor('social_media_manager');
       if (f && who) {
-        openChatWithBrief(who, `Please draft a post that leads with this message: "${f.afterText}". It is how we now describe what we do, and our website will say the same soon. Keep any [placeholders] for me to fill in.`);
+        stalled.disabled = true;
+        await briefAndOpen(who, stalledFixBrief(f.afterText), { source: 'stalled_fix', fixId: f.id });
       }
+      return;
+    }
+
+    const unbrief = t('[data-sa-unbrief]');
+    if (unbrief) {
+      unbrief.disabled = true;
+      try {
+        await post({ action: 'unbrief', briefId: Number(unbrief.dataset.saUnbrief) });
+        say(null);
+      } catch (err) { say(err.message, 'error'); }
+      await load();
       return;
     }
 
@@ -511,6 +636,26 @@
   });
 
   /**
+   * A "Brief <name>" click: open their chat with the brief typed in, and record the brief so the
+   * suggestion counts as actioned and moves to History. Where the chat opens in a modal it opens at
+   * once and the record follows; where opening means leaving the page, the record is written first.
+   * A failed record never stops the chat opening.
+   */
+  async function briefAndOpen(who, draft, what) {
+    const record = post({ action: 'brief', assistantId: state.assistantId, ...what })
+      .then(() => say(`Briefed ${who.name} — it's in History.`))
+      .catch((err) => say(err.message, 'error'));
+    if (typeof window.openAssistantChat === 'function') {
+      openChatWithBrief(who, draft);
+      await record;
+      await load();
+      return;
+    }
+    await record;
+    openChatWithBrief(who, draft);
+  }
+
+  /**
    * Open another assistant's chat with a brief typed in (never sent — the user reads and sends it).
    * Where the chat modal is not on the page, the brief goes to the clipboard and the chat page opens.
    */
@@ -535,6 +680,8 @@
       state.loaded = false;
       state.rendered = false;
       state.settingsOpen = false;
+      state.historyFilter = 'all';
+      state.historyShown = HISTORY_PAGE;
       state.note = null;
       // Eager: the count of undecided fixes drives the tab badge, visible from every tab.
       load();

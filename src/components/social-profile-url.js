@@ -61,7 +61,9 @@
       const m = lower.match(new RegExp('^(?:[a-z0-9-]+\\.)*' + host.replace(/\./g, '\\.') + '(?=/|$)'));
       if (m) { s = noScheme.slice(m[0].length).replace(/^\/+/, ''); break; }
     }
-    s = s.replace(/[?#].*$/, '').replace(/\/+$/, '').trim();
+    // Facebook pages without a username live at profile.php?id=<number> — the query IS the handle.
+    const fbProfile = platform === 'facebook' && s.match(/^profile\.php\?id=\d+/i);
+    s = fbProfile ? fbProfile[0] : s.replace(/[?#].*$/, '').replace(/\/+$/, '').trim();
 
     let path = '';
     let explicitPath = false;

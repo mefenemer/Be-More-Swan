@@ -31,6 +31,7 @@ import { createNotification } from '../../src/utils/notify';
 import { isEuCountry } from '../../src/config/compliance';
 import { normalizeMediaSources, type MediaSource } from '../../src/utils/media-sources';
 import { formatPlatformStrategyBrief } from '../../src/utils/platform-strategy-brief';
+import { mergeSocialHandles } from '../../src/utils/social-handles';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const connectionString = process.env.NETLIFY_DATABASE_URL;
@@ -258,6 +259,26 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
       }
     }
 
+    // 2a. ONE PER ROLE — the same rule hire-assistant.ts applies to every schema-driven role. The name
+    // check above let a second Social Media Assistant through under a different name: both then drew
+    // on the workspace's ONE set of social connections (one vault key per org + service) and filled
+    // their own posting slots, so the accounts got double the cadence, and everything that looks up
+    // "the" assistant in a role (hand-offs, the Mystery Shopper's briefs, chat routing) took whichever
+    // came first. Abandoned set-ups (pending) don't count, nor do archived ones.
+    const [sameRole] = await db.select({ id: aiAssistants.id, name: aiAssistants.name }).from(aiAssistants).where(and(
+      eq(aiAssistants.organisationId, orgId),
+      sql`(${aiAssistants.masterAssistantId} = ${assistantRecord.id} OR (${aiAssistants.configuration} ->> 'type') = ${assistantRecord.roleKey})`,
+      sql`COALESCE(${aiAssistants.provisioningStatus}, '') NOT IN ('pending', 'pending_payment')`,
+      sql`${aiAssistants.lifecycleStatus} IS DISTINCT FROM 'archived'`,
+    )).limit(1);
+    if (sameRole) {
+      return {
+        statusCode: 409,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: `${sameRole.name} is already your ${assistantRecord.name} — a workspace has one of each assistant. You can change ${sameRole.name}'s set-up from its Assistant Profile.`, code: 'ALREADY_HIRED', assistantId: sameRole.id }),
+      };
+    }
+
     // 2b. CAPACITY GATE
     // This endpoint creates an assistant and had no plan check of any kind. The only gate was in
     // the browser (assistant-catalogue.html's _catHire) — which the setup wizard's "Resume setup"
@@ -296,6 +317,15 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
 
     const orgUpdate: Record<string, unknown> = {};
     if (businessName?.trim()) orgUpdate.name = sanitizeText(businessName.trim());
+
+    // The handles typed in this set-up go to Business Information, where every other surface reads
+    // them (Connections, the brand kit, the assistants). They used to stay in the brief text only, so
+    // Business Information still showed the old ones — or none. Platforms not named here keep theirs.
+    if (body.socialHandles && typeof body.socialHandles === 'object') {
+      const [org] = await db.select({ socialHandles: organisations.socialHandles }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+      const merged = mergeSocialHandles(org?.socialHandles, body.socialHandles);
+      if (merged) orgUpdate.socialHandles = merged;
+    }
 
     // EU AI Act Art. 50 safety net: if register.ts missed EU detection (VPN/proxy/no header),
     // set aiDisclosureFooterEnabled=true here before any content is ever generated.

@@ -180,6 +180,9 @@
   let _catCategory = 'All Roles';
   let _catQ = '';
   let _catWlPending = null;
+  // roleKey → { id, name } for the roles already on this workspace's team (get-assistants). A role is
+  // hired once per workspace: hire-assistant / onboarding hand back or refuse a second instance.
+  let _catHired = {};
 
   function _esc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -189,6 +192,25 @@
   function _renderCard(a) {
     const icon = _ICONS[a.iconKey] || _ICONS.document;
     const iconCls = `icon-${a.iconColor || 'blue'}`;
+
+    const hired = _catHired[a.roleKey];
+    if (hired) {
+      // Already on the team — no second Hire. "Open" goes to the assistant they already have.
+      return `
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col relative" data-hired="${_esc(a.roleKey)}">
+          <div class="absolute top-4 right-4 bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-xs font-bold border border-gray-200">On your team</div>
+          <div class="p-6 flex-grow">
+            <div class="w-12 h-12 rounded-xl ${iconCls} flex items-center justify-center mb-4">${icon}</div>
+            <h2 class="text-xl font-bold text-gray-900 mb-1 pr-28">${_esc(a.name)}</h2>
+            <p class="text-sm text-gray-500 font-medium mb-4">${_esc(a.category)}</p>
+            <p class="text-sm text-gray-600 leading-relaxed">${_esc(a.description || '')}</p>
+          </div>
+          <div class="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center gap-3">
+            <span class="text-sm text-gray-600 min-w-0 truncate">Hired as <span class="font-semibold text-gray-800">${_esc(hired.name)}</span></span>
+            <button type="button" onclick="window._catOpenHired('${_esc(a.roleKey)}')" style="cursor:pointer" class="btn-secondary border px-4 py-2 rounded-lg text-sm font-semibold transition flex-shrink-0">Open</button>
+          </div>
+        </div>`;
+    }
 
     if (a.beta) {
       // Early access (US-AUD-2.3.1 / AC3.1.2): a BETA role — built and past every go-live check.
@@ -285,16 +307,42 @@
     }
     empty.classList.add('hidden');
     grid.classList.remove('hidden');
-    grid.innerHTML = list.map(_renderCard).join('');
+
+    // What they can hire comes first; what they already have, then what isn't ready yet.
+    const available = list.filter(a => !a.comingSoon && !_catHired[a.roleKey]);
+    const hired = list.filter(a => !a.comingSoon && _catHired[a.roleKey]);
+    const soon = list.filter(a => a.comingSoon);
+    const heading = (text, first) => `<h2 class="col-span-full text-sm font-bold text-gray-500 uppercase tracking-wider ${first ? '' : 'mt-6'}">${text}</h2>`;
+    const filtered = _catCategory !== 'All Roles' || !!_catQ;
+    const none = filtered
+      ? 'No assistants you can hire match this search.'
+      : 'There are no new assistants to hire right now — every assistant that is available is already on your team.';
+    grid.innerHTML = heading('Available to hire', true)
+      + (available.length
+        ? available.map(_renderCard).join('')
+        : `<div id="cat-none-available" class="col-span-full bg-gray-50 border border-gray-200 rounded-2xl px-6 py-5 text-sm text-gray-600">${none}${soon.length ? ' The roles under Coming soon can tell you when they launch.' : ''}</div>`)
+      + (hired.length ? heading('Already on your team') + hired.map(_renderCard).join('') : '')
+      + (soon.length ? heading('Coming soon') + soon.map(_renderCard).join('') : '');
   }
 
   // ── Load data ──────────────────────────────────────────────────────────────
   async function _loadCatalog() {
     try {
-      const [catRes, milestoneRes] = await Promise.all([
+      const [catRes, milestoneRes, teamRes] = await Promise.all([
         fetch('/.netlify/functions/master-assistants'),
         fetch('/.netlify/functions/milestone-progress'),
+        fetch('/.netlify/functions/get-assistants').catch(() => null),
       ]);
+      // Roles already on the team. Archived ones don't count (they can be restored instead), nor do
+      // abandoned set-ups (pending rows hire-assistant / onboarding replace on the next hire).
+      _catHired = {};
+      if (teamRes && teamRes.ok) {
+        const { assistants: team } = await teamRes.json().catch(() => ({}));
+        (team || []).forEach(t => {
+          if (!t.roleKey || t.lifecycleStatus === 'archived' || ['pending', 'pending_payment'].includes(t.status)) return;
+          if (!_catHired[t.roleKey]) _catHired[t.roleKey] = { id: t.id, name: t.name || 'your assistant' };
+        });
+      }
       if (!catRes.ok) throw new Error();
       const { assistants } = await catRes.json();
       _catAll = assistants || [];
@@ -364,8 +412,19 @@
     _catTimer = setTimeout(() => { _catQ = e.target.value.trim(); _renderGrid(); }, 250);
   });
 
+  // ── Open the assistant already hired in this role ──────────────────────────
+  window._catOpenHired = function (roleKey) {
+    const hired = _catHired[roleKey];
+    if (!hired) return;
+    window.AssistantDetailModal?.close?.();
+    if (typeof window.routeToAssistantDetail === 'function') window.routeToAssistantDetail(hired.id);
+    else window.location.href = `workspace.html?view=assistant-detail&assistantId=${encodeURIComponent(hired.id)}`;
+  };
+
   // ── Hire Role (capacity gate) ──────────────────────────────────────────────
   window._catHire = async function (roleKey) {
+    // Already on the team (e.g. the detail modal's Hire button): open that one, never a second.
+    if (_catHired[roleKey]) { window._catOpenHired(roleKey); return; }
     // workspace.html's routeToView handles capacity checking when navigating to 'catalog',
     // but individual "Hire Role" buttons must also check before launching onboarding.
     // We rely on the existing workspace.html _openUpgradeModal / check-capacity logic:
@@ -396,6 +455,9 @@
         return;
       }
     } catch { /* allow through on error */ }
+
+    // A role is picked — the set-up wizard (held back while they browsed) comes back from here.
+    window.SetupWizard?.onAssistantPicked?.();
 
     // Schema-driven roles (Lead Generator, AR Clerk, CRM Enricher, Tier 1 Support, …)
     // go to the AssistantOnboardingShell wizard on assistant-setup.html — it hires the
