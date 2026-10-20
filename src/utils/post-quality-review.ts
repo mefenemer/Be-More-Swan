@@ -324,7 +324,17 @@ disclosure, or a breach of the content rules below. Do NOT raise one for matters
 length or hashtag choice.${withSuggestions ? ' Those belong in the suggestion.' : ''}
 
 Raise a warning ONLY where there is a specific, nameable problem a person can act on. A caption
-with nothing to verify must return an empty array — do not invent a warning to seem thorough.${
+with nothing to verify must return an empty array — do not invent a warning to seem thorough.
+
+Links: never warn just to "confirm this URL is live / correct". You cannot open it, and the person
+cannot act on that beyond clicking it. A link on the business's own website domain (see Website
+below) is theirs to use. Only flag a link that is plainly malformed or points at a different
+business's domain than the caption implies.
+
+When you flag an offer, price, discount, trial or guarantee because it is NOT among the declared
+facts, say so in plain terms and end that warning with: "If it's real, add it under Business
+Information ▸ Products & Services, or mark this warning as sourced." — so the person knows where
+to declare it once instead of being asked again on every post.${
     withSuggestions ? '' : `
 
 Do NOT return a suggestions field — no written style advice is wanted on this pass. This is about

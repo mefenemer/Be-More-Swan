@@ -363,9 +363,9 @@ export default withLambda(async (event) => {
             return json(400, { error: 'Unknown target metric.' });
         }
         // Reject a metric we cannot actually measure, even if a stale client still offers it.
-        // `linkedin_followers` is the live example: it needs LinkedIn organisation scopes we are not
-        // approved for, so a goal set on it would sit 'pending' and then rot to 'data_disconnected'
-        // forever. Failing here is far kinder than accepting a goal that can never move.
+        // `linkedin_followers` was the example (organisation scopes we are not approved for, so a goal
+        // on it rotted to 'data_disconnected'); it now reads the Audience card's figure instead.
+        // Failing here is far kinder than accepting a goal that can never move.
         if (!getGoalMetric(metricKey)!.available) {
             return json(400, {
                 error: `"${getGoalMetric(metricKey)!.label}" can't be measured yet, so a goal can't be set against it.`,

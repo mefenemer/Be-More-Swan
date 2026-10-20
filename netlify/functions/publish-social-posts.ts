@@ -12,9 +12,8 @@
 import { livePostUrl } from '../../src/utils/post-live-url';
 import { heldOrganisationIds, heldOrgsClause } from '../../src/utils/beta-ending';
 import { Handler } from '@netlify/functions';
-import { inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, rateLimitStates, publishCronLog } from '../../db/schema';
+import { rateLimitStates, publishCronLog } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { resolvePostMediaList, hasAttachedMedia, resolveSocialCredentials, publishX, publishLinkedIn, publishThreads, type DriverResult } from '../../src/utils/social-publish';
 import { resolveBaseUrl } from '../../src/utils/base-url';
@@ -102,24 +101,30 @@ export default withLambda(async () => {
     );
 
     const held = await heldOrganisationIds(db);
+    // ⚠️ The claim is ONE statement. It used to be a SELECT … FOR UPDATE SKIP LOCKED followed by a
+    // separate UPDATE — but outside a transaction the row lock ends with the SELECT, so two runs that
+    // overlapped could both pick the same post and publish it twice. That mattered once "Post now"
+    // started running this on demand (publish-now-background.ts) alongside the 10-minute cron.
     const posts = await db.execute<PostRow>(
-        `SELECT id, user_id, organisation_id, caption, hashtags, connection_id,
+        `UPDATE scheduled_posts SET status = 'publishing', updated_at = now()
+         WHERE id IN (
+           SELECT id FROM scheduled_posts
+           WHERE status = 'scheduled'
+             AND platform IN ('linkedin','x','threads','youtube')
+             AND publish_date <= now()
+             AND (retry_at IS NULL OR retry_at <= now())
+             -- End of beta: a workspace whose beta ended and has not subscribed is held (beta-ending.ts).
+             ${heldOrgsClause(held)}
+             -- Video text-overlay render gate (Phase 4). NULL = nothing to render, 'done' = the
+             -- overlaid clip is attached. 'pending'/'rendering' hold the post back so it can never
+             -- publish without its text; 'failed' holds it back too, for the reviewer to resolve.
+             AND (render_status IS NULL OR render_status = 'done')
+           ORDER BY publish_date
+           LIMIT ${BATCH}
+           FOR UPDATE SKIP LOCKED)
+         RETURNING id, user_id, organisation_id, caption, hashtags, connection_id,
                 attempt_count, publish_date, platform, content_asset_ids, assistant_id,
-                link_url, cta_text
-         FROM scheduled_posts
-         WHERE status = 'scheduled'
-           AND platform IN ('linkedin','x','threads','youtube')
-           AND publish_date <= now()
-           AND (retry_at IS NULL OR retry_at <= now())
-           -- End of beta: a workspace whose beta ended and has not subscribed is held (beta-ending.ts).
-           ${heldOrgsClause(held)}
-           -- Video text-overlay render gate (Phase 4). NULL = nothing to render, 'done' = the
-           -- overlaid clip is attached. 'pending'/'rendering' hold the post back so it can never
-           -- publish without its text; 'failed' holds it back too, for the reviewer to resolve.
-           AND (render_status IS NULL OR render_status = 'done')
-         ORDER BY publish_date
-         LIMIT ${BATCH}
-         FOR UPDATE SKIP LOCKED`
+                link_url, cta_text`
     );
 
     if (!posts.length) {
@@ -127,8 +132,6 @@ export default withLambda(async () => {
         return { statusCode: 200, body: 'no posts due' };
     }
 
-    await db.update(scheduledPosts).set({ status: 'publishing', updatedAt: new Date() })
-        .where(inArray(scheduledPosts.id, posts.map(p => p.id)));
     processed = posts.length;
 
     // Orgs already notified this tick that their X allowance is spent — one notification per org,

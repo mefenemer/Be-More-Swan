@@ -67,22 +67,28 @@ export default withLambda(async () => {
     );
 
     const held = await heldOrganisationIds(db);
+    // ⚠️ The claim is ONE statement. It used to be a SELECT … FOR UPDATE SKIP LOCKED followed by a
+    // separate UPDATE — but outside a transaction the row lock ends with the SELECT, so two runs that
+    // overlapped could both pick the same post and publish it twice. That mattered once "Post now"
+    // started running this on demand (publish-now-background.ts) alongside the 10-minute cron.
     const posts = await db.execute<PostRow>(
-        `SELECT id, user_id, organisation_id, caption, hashtags, connection_id,
+        `UPDATE scheduled_posts SET status = 'publishing', updated_at = now()
+         WHERE id IN (
+           SELECT id FROM scheduled_posts
+           WHERE status = 'scheduled'
+             AND platform = 'facebook'
+             AND publish_date <= now()
+             AND (retry_at IS NULL OR retry_at <= now())
+             -- End of beta: a workspace whose beta ended and has not subscribed is held (beta-ending.ts).
+             ${heldOrgsClause(held)}
+             -- Video text-overlay render gate (Phase 4) — see publish-social-posts for the rationale.
+             AND (render_status IS NULL OR render_status = 'done')
+           ORDER BY publish_date
+           LIMIT ${BATCH}
+           FOR UPDATE SKIP LOCKED)
+         RETURNING id, user_id, organisation_id, caption, hashtags, connection_id,
                 attempt_count, publish_date, content_asset_ids, assistant_id,
-                link_url, cta_text
-         FROM scheduled_posts
-         WHERE status = 'scheduled'
-           AND platform = 'facebook'
-           AND publish_date <= now()
-           AND (retry_at IS NULL OR retry_at <= now())
-           -- End of beta: a workspace whose beta ended and has not subscribed is held (beta-ending.ts).
-           ${heldOrgsClause(held)}
-           -- Video text-overlay render gate (Phase 4) — see publish-social-posts for the rationale.
-           AND (render_status IS NULL OR render_status = 'done')
-         ORDER BY publish_date
-         LIMIT ${BATCH}
-         FOR UPDATE SKIP LOCKED`
+                link_url, cta_text`
     );
 
     if (!posts.length) {
@@ -90,10 +96,6 @@ export default withLambda(async () => {
         return { statusCode: 200, body: 'no posts due' };
     }
 
-    await db.execute(
-        `UPDATE scheduled_posts SET status = 'publishing', updated_at = now()
-         WHERE id IN (${posts.map(p => p.id).join(',')})`
-    );
     processed = posts.length;
 
     await Promise.allSettled(posts.map(async post => {

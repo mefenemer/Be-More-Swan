@@ -9,6 +9,7 @@
 //   200 { approved: true, post, confirmation }         — success
 //   409 { pastSchedule: true, scheduledFor, platform } — scheduled time in past, awaiting user action
 
+import { triggerPublishNow } from '../../src/utils/trigger-publish-now';
 import { Handler } from '@netlify/functions';
 import { and, eq, gte, ne, sql } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
@@ -603,6 +604,10 @@ export default withLambda(async (event) => {
             } : {}),
         },
     }).catch(() => {});
+
+    // "Post now" means now, not "on the next 10-minute cron tick" — run the publisher straight away.
+    // Awaited (Lambda freezes an un-awaited dispatch); a failed dispatch only means the cron does it.
+    if (action === 'publish_now') await triggerPublishNow([post.platform]);
 
     // ── Build confirmation message ─────────────────────────────────────────────
     const dateLabel = say(newPublishDate);

@@ -448,8 +448,8 @@ export default withLambda(async (event) => {
             push(m.key, { outcome: 'skipped', detail: 'Internal metric — counted from our own database, no third-party call to verify.' });
         } else if (m.key === 'linkedin_followers') {
             push(m.key, {
-                outcome: 'unsupported',
-                detail: 'Needs LinkedIn ORGANISATION scopes; the app holds member-only (w_member_social). Permanently unmeasurable until those scopes are approved.',
+                outcome: 'skipped',
+                detail: 'Read from the figure entered on the Audience card (manual_follower_counts) — no LinkedIn call to verify.',
             });
         } else {
             const connected = await db

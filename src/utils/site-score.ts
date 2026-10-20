@@ -331,6 +331,15 @@ export function plainLocation(location: string): string {
         .replace(/\s+/g, ' ').trim();
 }
 
+// A snippet ending in "…" was shortened by US (site-extract.ts cap). The prompt says so, but a model
+// still told bemoreswan.com its testimonial was "truncated" and to "complete" it (2026-10-20), so a
+// fix that quotes a shortened snippet and complains about it being cut off is dropped here too.
+const ENDS_SHORTENED = /(\.\.\.|…)["'”’]?$/;
+const TRUNCATION_COMPLAINT = /\btruncat|\bcut (?:off|short)\b|\bunfinished\b|\bincomplete\b|\btrails? off\b|\bmid-?sentence\b|\bfull (?:quote|review|testimonial)s?\b|\bcomplet\w* (?:the |your |these |this )?(?:quote|review|testimonial)s?\b/i;
+export function complainsAboutOurEllipsis(fix: Pick<SuggestedFix, 'currentText' | 'problem'>): boolean {
+    return ENDS_SHORTENED.test(fix.currentText.trim()) && TRUNCATION_COMPLAINT.test(fix.problem);
+}
+
 /** Keep only fixes that quote real page text and actually propose something different. */
 export function groundFixes(raw: unknown, lens: Lens, page: SitePage): { fixes: SuggestedFix[]; dropped: number } {
     const list = Array.isArray(raw) ? raw : [];
@@ -348,6 +357,7 @@ export function groundFixes(raw: unknown, lens: Lens, page: SitePage): { fixes: 
         };
         const ok = fix.problem && fix.suggestedText && fix.currentText &&
             isGrounded(fix.currentText, page) &&
+            !complainsAboutOurEllipsis(fix) &&
             normaliseText(fix.currentText) !== normaliseText(fix.suggestedText);
         if (ok) fixes.push(fix); else dropped++;
     }

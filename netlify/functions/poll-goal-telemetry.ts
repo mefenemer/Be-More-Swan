@@ -21,7 +21,7 @@ import { getDb } from '../../db/client';
 import {
     goals, goalTelemetry, aiAssistants, systemConnections,
     scheduledPosts, plans, masterPlans, assistantRecords, blogPosts,
-    audienceContacts, newsletterIssues, siteAudits, sites, visualBriefOptions, visualBriefs } from '../../db/schema';
+    audienceContacts, newsletterIssues, siteAudits, sites, visualBriefOptions, visualBriefs, manualFollowerCounts } from '../../db/schema';
 import { normaliseSiteDefinition } from '../../src/utils/site-definition';
 import { placeholdersIn } from '../../src/utils/site-draft';
 import { createNotification } from '../../src/utils/notify';
@@ -140,49 +140,23 @@ async function fetchXFollowers(token: string): Promise<FetchResult> {
 
 export type LiConn = { id: number; vaultRefKey: string | null; metadata: any };
 
-// ── LinkedIn GET with the same 429-backoff + auth handling as the IG path ───────
-async function liFetch(url: string, token: string): Promise<{ ok: boolean; disconnected: boolean; body: any }> {
-    for (let attempt = 0; attempt < 3; attempt++) {
-        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, 'X-Restli-Protocol-Version': '2.0.0' } });
-        if (res.status === 429) {                        // AC4.3.1 — exponential backoff before retry
-            await sleep(1000 * 2 ** attempt);
-            continue;
-        }
-        if (res.status === 401 || res.status === 403) return { ok: false, disconnected: true, body: null };
-        if (!res.ok) return { ok: false, disconnected: false, body: null };
-        return { ok: true, disconnected: false, body: await res.json().catch(() => null) };
-    }
-    return { ok: false, disconnected: false, body: null };   // exhausted retries — transient
-}
-
-// ── LinkedIn organisation follower count (org URN resolved once, then cached on the connection) ──
-async function fetchLinkedInFollowers(db: any, conn: LiConn): Promise<FetchResult> {
-    if (!conn.vaultRefKey) return { value: null, disconnected: true };
-    const secret = await getSecret(db, conn.vaultRefKey);
-    const token = (secret?.token as string | undefined) ?? null;
-    if (!token) return { value: null, disconnected: true };
-
-    // Resolve the administered organisation URN, caching it so we skip the ACL call next time.
-    const meta = (conn.metadata as Record<string, any>) ?? {};
-    let orgUrn: string | null = typeof meta.organizationUrn === 'string' ? meta.organizationUrn : null;
-    if (!orgUrn) {
-        const acl = await liFetch('https://api.linkedin.com/v2/organizationAcls?q=roleAssignee&role=ADMINISTRATOR&projection=(elements*(organization))', token);
-        if (acl.disconnected) return { value: null, disconnected: true };
-        if (!acl.ok) return { value: null, disconnected: false };
-        orgUrn = (acl.body?.elements?.[0]?.organization as string | undefined) ?? null;
-        if (!orgUrn) return { value: null, disconnected: false };   // no administered org yet — transient, token is fine
-        await db.update(systemConnections)
-            .set({ metadata: { ...meta, organizationUrn: orgUrn }, updatedAt: new Date() })
-            .where(eq(systemConnections.id, conn.id))
-            .catch(() => {});
-    }
-
-    // firstDegreeSize = the org's follower count. Requires r_organization_social.
-    const orgId = orgUrn.split(':').pop();
-    const net = await liFetch(`https://api.linkedin.com/v2/networkSizes/urn:li:organization:${orgId}?edgeType=CompanyFollowedByMember`, token);
-    if (net.disconnected) return { value: null, disconnected: true };
-    if (!net.ok) return { value: null, disconnected: false };
-    return { value: typeof net.body?.firstDegreeSize === 'number' ? net.body.firstDegreeSize : null, disconnected: false };
+// ── LinkedIn followers = the figure the user enters on the Audience card ────────
+// LinkedIn will not tell us this number: the member API has no follower count, and the
+// organisation calls (/organizationAcls, /networkSizes) need scopes we are not approved for, so the
+// old live fetch 403'd every time and the goal rotted to 'data_disconnected'. Meanwhile the user was
+// already typing the figure into the Audience card (save-follower-count.ts) and then again into the
+// goal. One input now: the goal reads the latest Audience entry. save-follower-count re-polls the
+// org's LinkedIn goals the moment a figure is saved, so the bar moves without waiting for the cron.
+//
+// Never 'disconnected': no figure yet is "nothing entered", not a broken connection.
+async function fetchLinkedInFollowers(db: any, organisationId: number): Promise<FetchResult> {
+    const [row] = await db
+        .select({ count: manualFollowerCounts.count })
+        .from(manualFollowerCounts)
+        .where(and(eq(manualFollowerCounts.organisationId, organisationId), eq(manualFollowerCounts.platform, 'linkedin')))
+        .orderBy(desc(manualFollowerCounts.recordedAt))
+        .limit(1);
+    return { value: row ? Number(row.count) : null, disconnected: false };
 }
 
 // ── Search Console clicks (the 'action' / traffic metric) ───────────────────────
@@ -427,10 +401,8 @@ async function fetchMetric(
             return fetchXFollowers(token);
         }
 
-        case 'linkedin_followers': {
-            if (!conns.li) return { value: null, disconnected: true };
-            return fetchLinkedInFollowers(db, conns.li);
-        }
+        case 'linkedin_followers':
+            return fetchLinkedInFollowers(db, goal.organisationId);
         case 'search_clicks': {
             return fetchSearchClicks(db, goal);
         }
