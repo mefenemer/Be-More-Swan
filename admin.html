@@ -161,6 +161,8 @@
             class="flex-1 max-w-sm border border-gray-200 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
             oninput="debounce(() => loadUsers(), 350)">
         </div>
+        <!-- Email delivery problems: addresses Resend is not delivering to (src/utils/email-delivery.ts) -->
+        <div id="email-delivery-problems" class="hidden mb-6 bg-white rounded-2xl border border-amber-200 overflow-hidden"></div>
         <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
           <table class="w-full text-sm">
             <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide">
@@ -3508,7 +3510,7 @@ function adminNav(view) {
 
   // Lazy-load section data
   if (view === 'dashboard')    loadDashboard();
-  if (view === 'users')        loadUsers();
+  if (view === 'users')        { loadUsers(); loadEmailDeliveryProblems(); }
   if (view === 'tickets')      loadTickets();
   if (view === 'inbox')        loadInbox();
   if (view === 'catalog')      loadAssistantsAdmin();
@@ -7058,6 +7060,7 @@ async function openUserPanel(uid) {
         <h4 class="text-xs font-bold text-gray-400 uppercase mb-2">Provisioned Assistants</h4>
         ${d.assistants.map(a => `<div class="text-sm py-1 border-b border-gray-50">${a.name} <span class="text-xs text-gray-400">${a.provisioningStatus}</span></div>`).join('')}
       </div>` : ''}
+      ${renderEmailDelivery(d.emailDelivery)}
       <div class="space-y-2 pt-2">
         <button onclick="openBillingOverride(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}')" class="btn-secondary w-full py-2 text-sm font-bold border rounded-lg hover:opacity-80">💳 Override Subscription</button>
         <button onclick="openAiCredits(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}')" class="btn-secondary w-full py-2 text-sm font-bold border rounded-lg hover:opacity-80">🎨 AI Credits</button>
@@ -7080,6 +7083,82 @@ async function openUserPanel(uid) {
 }
 
 function closeUserPanel() { document.getElementById('user-detail-panel').classList.add('hidden'); }
+
+// ── Email delivery (src/utils/email-delivery.ts) ─────────────────────────────
+// Resend accepts a send to a suppressed address and then drops it, so "we sent it" proves nothing.
+// These show Resend's own verdict, recorded from its webhook.
+const EMAIL_DELIVERY_LABELS = {
+  ok: ['Delivering', 'bg-green-100 text-green-700'],
+  no_data: ['No events yet', 'bg-gray-100 text-gray-500'],
+  suppressed: ['Suppressed by Resend', 'bg-red-100 text-red-700'],
+  bounced: ['Bounced', 'bg-red-100 text-red-700'],
+  complained: ['Marked as spam', 'bg-red-100 text-red-700'],
+  failed: ['Send failed', 'bg-red-100 text-red-700'],
+  soft_bounced: ['Soft bounce', 'bg-amber-100 text-amber-700'],
+  delivered: ['Delivered', 'bg-green-100 text-green-700'],
+};
+function emailDeliveryBadge(key) {
+  const [label, cls] = EMAIL_DELIVERY_LABELS[key] || [key, 'bg-gray-100 text-gray-500'];
+  return `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${cls}">${escapeHtmlJs(label)}</span>`;
+}
+
+function renderEmailDelivery(r) {
+  if (!r) return '';
+  if (r.tracked === false) {
+    return `<div><h4 class="text-xs font-bold text-gray-400 uppercase mb-2">Email delivery</h4>
+      <p class="text-xs text-gray-400">Not tracked yet — db/z-email-delivery-events.sql has not been applied here.</p></div>`;
+  }
+  const problem = r.problem && r.status !== 'ok' ? `
+      <div class="mt-2 p-3 rounded-lg bg-red-50 border border-red-100 text-sm">
+        <p class="font-semibold text-red-800">${escapeHtmlJs(r.problem.subject || 'Email')} · ${fmtDateTime(r.problem.occurredAt)}</p>
+        ${r.problem.reason ? `<p class="text-xs text-red-700 mt-1">${escapeHtmlJs(r.problem.reason)}</p>` : ''}
+        ${r.advice ? `<p class="text-xs text-gray-700 mt-2">${escapeHtmlJs(r.advice)}</p>` : ''}
+        <a href="https://resend.com/suppressions" target="_blank" rel="noopener" class="inline-block mt-2 text-xs font-semibold text-emerald-600 hover:underline">Open Resend → Suppressions ↗</a>
+      </div>` : '';
+  const cleared = r.status === 'ok' && r.problem
+    ? `<p class="text-xs text-gray-500 mt-1">Earlier problem (${escapeHtmlJs((EMAIL_DELIVERY_LABELS[r.problem.eventType] || [r.problem.eventType])[0])}, ${fmt(r.problem.occurredAt)}) cleared by a later delivery.</p>` : '';
+  const rows = (r.recent || []).slice(0, 8).map(e => `
+      <div class="flex items-center justify-between gap-3 text-xs py-1 border-b border-gray-50">
+        <span class="truncate text-gray-700">${escapeHtmlJs(e.subject || '(no subject)')}</span>
+        <span class="shrink-0 flex items-center gap-2">${emailDeliveryBadge(e.eventType)}<span class="text-gray-400">${fmtDateTime(e.occurredAt)}</span></span>
+      </div>`).join('');
+  return `<div>
+      <h4 class="text-xs font-bold text-gray-400 uppercase mb-2">Email delivery</h4>
+      <div>${emailDeliveryBadge(r.status)}${r.lastDeliveredAt ? `<span class="text-xs text-gray-400 ml-2">last delivered ${fmtDateTime(r.lastDeliveredAt)}</span>` : ''}</div>
+      ${problem}${cleared}
+      ${rows ? `<div class="mt-3">${rows}</div>` : ''}
+    </div>`;
+}
+
+async function loadEmailDeliveryProblems() {
+  const box = document.getElementById('email-delivery-problems');
+  if (!box) return;
+  try {
+    const d = await api('/.netlify/functions/admin-api?resource=email-delivery-problems&days=30');
+    if (!d.tracked || !d.problems?.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    box.innerHTML = `
+      <div class="px-5 py-3 bg-amber-50 border-b border-amber-200">
+        <h3 class="text-sm font-bold text-amber-900">⚠️ Email delivery problems (${d.problems.length})</h3>
+        <p class="text-xs text-amber-800">Resend is not delivering our email to these addresses — login links included. Last ${d.days} days.</p>
+      </div>
+      <table class="w-full text-sm">
+        <tbody>${d.problems.map(p => `
+          <tr class="border-b border-gray-50 last:border-0">
+            <td class="px-5 py-2"><div class="font-medium text-gray-900">${escapeHtmlJs(p.userName || '')}</div><div class="text-xs text-gray-500">${escapeHtmlJs(p.email)}</div></td>
+            <td class="px-5 py-2">${emailDeliveryBadge(p.status)}</td>
+            <td class="px-5 py-2 text-xs text-gray-500"><div class="truncate max-w-xs">${escapeHtmlJs(p.problem.subject || '')}</div>${fmtDateTime(p.problem.occurredAt)}</td>
+            <td class="px-5 py-2 text-right">${p.userId
+              ? `<button onclick="openUserPanel(${Number(p.userId)})" class="text-xs text-emerald-600 font-semibold hover:underline">View user</button>`
+              : '<span class="text-xs text-gray-400">No account</span>'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+    box.classList.remove('hidden');
+  } catch (e) {
+    box.classList.add('hidden');
+    console.warn('[admin] email delivery problems:', e.message);
+  }
+}
 
 async function suspendUser(uid) {
   if (!(await window.confirmModal('', { title: 'Suspend this user?' }))) return;
