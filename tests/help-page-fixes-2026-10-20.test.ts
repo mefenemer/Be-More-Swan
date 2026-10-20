@@ -137,6 +137,17 @@ test('the referral article follows the Help Centre quoting rules', () => {
     assert.ok(!/free assistant|£10|token/i.test(bodies[0]), 'describes the current offer only');
 });
 
+test('"Take me there" for data export opens Account Settings on My Agreements, not Profile', () => {
+    const src = read('netlify/functions/assistant-command.ts');
+    assert.match(src, /const VIEWS = \[[^\]]*'agreements'/, 'agreements is a view the bar may suggest');
+    assert.match(src, /- agreements: [^\n]*export/, 'and the model is told the export lives there');
+    const ws = read('workspace.html');
+    const go = ws.slice(landmark(ws, 'function goToView(view) {'));
+    assert.ok(landmark(go, "window.loadView('settings')") < landmark(go, "window.activateSettingsTab?.('agreements')"));
+    assert.match(ws, /'Take me there →', \(\) => goToView\(d\.suggestView\)/);
+    assert.match(ws, /setTimeout\(\(\) => \{ goToView\(d\.view\); close\(\); \}/, 'a navigate reply goes the same way');
+});
+
 test('the data export article follows the Help Centre quoting rules and matches the code', () => {
     const sql = read('db/help-articles-2026-12zzzzzz-data-export.sql');
     const bodies = [...sql.matchAll(/\$\$([\s\S]*?)\$\$/g)].map((m) => m[1]);
