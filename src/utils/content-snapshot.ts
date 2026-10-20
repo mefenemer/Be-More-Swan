@@ -27,6 +27,7 @@ import type { getDb } from '../../db/client';
 import { blogPosts, newsletterIssues, scheduledPosts } from '../../db/schema';
 import { ATTENTION_STATUSES, AWAITING_REVIEW_STATUSES, BOOKED_STATUSES } from '../config/post-status';
 import { platformName } from './team-activity';
+import { loadBlogReaders, renderReadersForChat } from './blog-readers';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -179,7 +180,12 @@ export async function buildBlogSnapshot(db: Db, organisationId: number, aiAssist
             col(and(eq(blogPosts.status, 'published'), gte(blogPosts.publishedAt, since(RECENT_DAYS))), desc(blogPosts.publishedAt), `In the "Posted" column — published in the last ${RECENT_DAYS} days`),
             col(inArray(blogPosts.status, ['failed', 'paused', 'approved']), desc(blogPosts.updatedAt), 'In the "Needs attention" column — failed to publish, paused, or approved but not booked; the user picks a new time there'),
         ]);
-        return renderContentSnapshot({ noun: 'articles', tab: 'Blogs', sections, stateWords: BLOG_WORDS, timezone });
+        // Reader figures ride along (owner, 2026-10-20: the chat must answer "how many people read
+        // it?" from the Readers panel's own numbers). A failure here costs this block, not the queue.
+        const readers = await loadBlogReaders(db, organisationId, aiAssistantId)
+            .then((r) => renderReadersForChat(r))
+            .catch((err) => { console.error('[content-snapshot] blog readers read failed (non-fatal)', err); return 'READERS: could not be read this turn — say so; never estimate a number.'; });
+        return `${renderContentSnapshot({ noun: 'articles', tab: 'Blogs', sections, stateWords: BLOG_WORDS, timezone })}\n\n${readers}`;
     } catch (err) {
         console.error('[content-snapshot] blog read failed (non-fatal)', err);
         return null;

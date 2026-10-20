@@ -26,7 +26,7 @@ import { getDb } from '../../db/client';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseSwanRoute } from '../../src/utils/swan-index/route';
 import {
-    listSections, getFeatured, getLatest, getByAuthor, getArticle, listAuthors, getIndexableUrls,
+    listSections, getFeatured, getLatest, getLiveMonths, getByAuthor, getArticle, listAuthors, getIndexableUrls,
 } from '../../src/utils/swan-index/queries';
 import {
     renderShell, renderHome, renderList, renderArticle, renderAuthor, renderAbout,
@@ -39,6 +39,8 @@ import { getProfileByHandle } from '../../src/utils/swan-index/profile';
 import { resolveInlineMedia, resolveFeatureImageUrl } from '../../src/utils/blog-media-resolve';
 import { isAiAssisted, BLOG_AI_NOTICE } from '../../src/utils/blog-ai-assisted';
 import { escHtml } from '../../src/utils/blog-seo';
+import { parseMonth } from '../../src/utils/blog-filters';
+import { parseSwanRead, recordSwanRead } from '../../src/utils/swan-index/reads';
 
 // s-maxage stays under the 600s presigned-media lifetime, or a cached page outlives its own images.
 // The article route resolves media on every render, so this is the ceiling, not a target.
@@ -189,11 +191,18 @@ function noindexHeader(res: Result): Result {
 }
 
 export default withLambda(async (event: HandlerEvent) => {
-    if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
-
     // A Netlify rewrite is a 200, so rawUrl still carries the URL the visitor actually requested —
     // the only place the real path survives. Same reason blog-page.ts reads it.
     const pathname = event.rawUrl ? new URL(event.rawUrl).pathname : (event.path || '/');
+
+    // The article reader beacon (src/utils/swan-index/reads.ts). Always 204, never an error.
+    if (event.httpMethod === 'POST' && /\/_read\/?$/.test(pathname)) {
+        const read = parseSwanRead(event.body);
+        if (read) { try { await recordSwanRead(getDb(), read); } catch (err) { console.error('[swan-index read]', err); } }
+        return { statusCode: 204, body: '' };
+    }
+    if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
+
     const origin = resolveOrigin(pathname, event.rawUrl);
 
     // One exit point for the header, so a page added later cannot forget it.
@@ -244,9 +253,20 @@ async function serve(event: HandlerEvent, pathname: string, origin: Origin): Pro
 
     // ── latest / section ───────────────────────────────────────────────────────────────────────
     if (route.kind === 'latest' || route.kind === 'section') {
-        const key = route.kind === 'section' ? route.key : null;
+        // Reader filters: /latest?section=&month= (the filter form's target) and /section/:key?month=.
+        // An unknown ?section= is ignored rather than 404'd — it came from a query string, not a link we made.
+        const qs = event.queryStringParameters || {};
+        const month = parseMonth(qs.month);
+        const qsSection = route.kind === 'latest' && typeof qs.section === 'string'
+            ? sections.find((s) => s.key === qs.section!.trim().toLowerCase())?.key ?? null : null;
+        const key = route.kind === 'section' ? route.key : qsSection;
         const section = key ? sections.find((s) => s.key === key) : null;
         if (key && !section) return notFound(sections, baseUrl, base);
+
+        const path = route.kind === 'section' ? `/section/${encodeURIComponent(key!)}` : '/latest';
+        const filtered = !!(month || qsSection);
+        const query = new URLSearchParams({ ...(qsSection ? { section: qsSection } : {}), ...(month ? { month } : {}) }).toString();
+        const [items, months] = await Promise.all([getLatest(db, 60, key, month), getLiveMonths(db, key)]);
 
         return html(200, renderList({
             sections,
@@ -254,11 +274,15 @@ async function serve(event: HandlerEvent, pathname: string, origin: Origin): Pro
             heading: section ? section.label : 'The Index',
             standfirst: section?.standfirst ?? 'Everything published across the network, newest first.',
             currentSection: key,
-            items: await getLatest(db, 60, key),
-            pageUrl: `${baseUrl}${key ? `/section/${encodeURIComponent(key)}` : '/latest'}`,
+            items,
+            pageUrl: `${baseUrl}${path}${query ? `?${query}` : ''}`,
+            // A filtered view is a slice of a page that already exists: canonical to the section (or
+            // /latest) itself, and kept out of the index.
+            canonicalUrl: filtered ? `${baseUrl}${section ? `/section/${encodeURIComponent(section.key)}` : '/latest'}` : undefined,
             baseUrl,
+            filters: { months, section: key, month },
             // Our own editorial listings, not syndicated content — indexable, unlike the articles.
-            robots: robotsFor(origin, 'index,follow'),
+            robots: robotsFor(origin, filtered ? 'noindex,follow' : 'index,follow'),
         }), true);
     }
 
@@ -400,6 +424,7 @@ async function serve(event: HandlerEvent, pathname: string, origin: Origin): Pro
             aiNotice: BLOG_AI_NOTICE,
             more,
             baseUrl,
+            readBeacon: { handle: profile.handle, slug: route.slug },
         }), true);
     }
 

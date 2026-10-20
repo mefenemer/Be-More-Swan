@@ -671,6 +671,12 @@
 
     <!-- Value wins: posts that converted on saves/shares regardless of reach (AC8) -->
     <p id="metric-value-wins" class="hidden text-xs text-emerald-700 font-medium mt-3"></p>
+
+    <!-- Readers — Blog Writer only (owner, 2026-10-20: "how many blog viewers"). Filled by
+         _loadBlogReaders in assistants.js from get-blog-performance's `readers`; hidden for every
+         other role. Own blog and The Swan Index are separate columns on purpose — see
+         src/utils/blog-readers.ts. -->
+    <div id="blog-readers-panel" class="hidden mt-4 bg-white rounded-2xl border border-gray-200 shadow-sm p-5"></div>
   </div>
 
   </div>

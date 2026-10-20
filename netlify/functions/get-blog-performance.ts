@@ -28,6 +28,7 @@ import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, blogEngagementStats, blogPosts, workspaceIntegrations } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { countRoiActivity } from '../../src/utils/roi-activity';
+import { loadBlogReaders } from '../../src/utils/blog-readers';
 import {
     BLOG_PERFORMANCE_DAYS, buildBlogPerformance, emptyBlogPerformance,
     type BlogPerformanceCounts,
@@ -88,6 +89,7 @@ export default withLambda(async (event) => {
             gscRows,
             engagementRows,
             roi,
+            readers,
         ] = await Promise.all([
             db.select({ count: count() }).from(blogPosts)
                 .where(and(mine, eq(blogPosts.status, 'published'), gte(blogPosts.publishedAt, windowStart))),
@@ -142,6 +144,9 @@ export default withLambda(async (event) => {
                         .where(and(mine, eq(blogPosts.status, 'published'))),
                 )),
             countRoiActivity(db, { organisationId: orgId, assistantIds: [assistantId], windowStart }),
+            // The Readers panel under the cards — per post, own blog and The Swan Index kept apart.
+            // Lifetime, like engagementRows above. See src/utils/blog-readers.ts.
+            loadBlogReaders(db, orgId, assistantId),
         ]);
 
         const gscConnected = Number(gscRows[0]?.count ?? 0) > 0;
@@ -167,7 +172,7 @@ export default withLambda(async (event) => {
             hoursSaved: roi.degraded ? 0 : roi.hoursSaved,
         };
 
-        return json(buildBlogPerformance(counts, periodDays));
+        return json({ ...buildBlogPerformance(counts, periodDays), readers });
     } catch (err) {
         console.error('[get-blog-performance]', err);
         // A 500, NOT a 200 with an empty payload. The renderer keeps 'error' and 'no-data' apart

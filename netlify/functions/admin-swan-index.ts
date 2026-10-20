@@ -405,6 +405,18 @@ export default withLambda(async (event) => {
 
         if (Object.keys(patch).length === 1) return json(400, { error: 'Nothing to change.' });
 
+        // A piece on the site must have a section (owner, 2026-10-20) — the public queries hide one
+        // without, so letting it through here would "publish" a piece nobody can see. Checked on
+        // the RESULTING state, so it catches both going live unsectioned and clearing the section
+        // of a piece already live.
+        const nextStatus = (patch.status ?? current.status) as string;
+        const nextSection = 'section' in patch ? patch.section : current.section;
+        if ((nextStatus === 'live' || nextStatus === 'featured') && !nextSection) {
+            return json(422, {
+                error: 'Choose a section first — a piece only appears on The Swan Index once it has one.',
+            });
+        }
+
         await db.update(swanIndexPosts).set(patch).where(eq(swanIndexPosts.id, id!));
 
         // Ranks are only ever gapless immediately after this runs — see resequenceFeatured.

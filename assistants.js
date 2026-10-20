@@ -9327,6 +9327,7 @@ async function _loadBlogMetrics(assistantId) {
         const res = await fetch(`/.netlify/functions/get-blog-performance?id=${assistantId}`);
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        _renderBlogReaders(data.readers);
 
         if (!data.hasData) { _setMetricsEmptyState('blog-no-data'); return; }
 
@@ -9380,6 +9381,66 @@ async function _loadBlogMetrics(assistantId) {
         console.error('[blog-metrics] load failed:', err);
         _setMetricsEmptyState('error');
     }
+}
+
+// ── Blog Writer: Readers panel ───────────────────────────────────────────────
+// "How many people are reading my blog?" — per post, with the author's own blog and The Swan Index
+// in separate columns (they are measured differently, and one reader may see both; they are never
+// summed into one "total"). Lifetime figures: neither source keeps a daily history. Data and the
+// rules behind it: src/utils/blog-readers.ts.
+function _renderBlogReaders(readers) {
+    const panel = document.getElementById('blog-readers-panel');
+    if (!panel) return;
+    if (!readers || !Array.isArray(readers.posts) || !readers.posts.length) { panel.classList.add('hidden'); return; }
+    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const n = (v) => Number(v || 0).toLocaleString();
+    const secs = (v) => (v == null ? '—' : v < 60 ? `${v}s` : `${Math.floor(v / 60)}m${v % 60 ? ` ${v % 60}s` : ''}`);
+    const t = readers.totals || {};
+    const onSwan = t.postsOnSwan > 0;
+
+    const rows = readers.posts.map((p) => {
+        const swanCell = !p.swan
+            ? '<span class="text-gray-300" title="Not sent to The Swan Index">—</span>'
+            : p.swan.url
+                ? `<a href="${esc(p.swan.url)}" target="_blank" rel="noopener" class="font-semibold text-gray-900 hover:underline">${n(p.swan.views)}</a> <span class="text-gray-400">· ${n(p.swan.reads)} engaged</span>`
+                : `<span class="text-gray-400">${p.swan.status === 'pending' ? 'Waiting for an editor' : 'Not on the site'}</span>`;
+        return `<tr class="border-t border-gray-100">
+          <td class="py-2 pr-3 min-w-0"><p class="font-semibold text-gray-900" style="overflow-wrap:break-word" title="${esc(p.title)}">${esc(p.title)}</p>
+            ${p.publishedAt ? `<p class="text-[11px] text-gray-400">${esc(new Date(p.publishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }))}</p>` : ''}</td>
+          <td class="py-2 px-3 text-right whitespace-nowrap font-semibold text-gray-900">${n(p.blogReads)}</td>
+          <td class="py-2 px-3 text-right whitespace-nowrap text-gray-600">${secs(p.avgReadSeconds)}</td>
+          ${onSwan ? `<td class="py-2 pl-3 text-right">${swanCell}</td>` : ''}
+        </tr>`;
+    }).join('');
+
+    panel.innerHTML = `
+      <div class="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+        <h4 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Readers</h4>
+        <span class="text-xs text-gray-400 font-medium">Since tracking began</span>
+      </div>
+      <div class="grid grid-cols-1 ${onSwan ? 'sm:grid-cols-2' : ''} gap-3 mb-4">
+        <div class="rounded-xl bg-gray-50 border border-gray-100 p-3">
+          <p class="text-2xl font-extrabold text-gray-900">${n(t.blogReads)}</p>
+          <p class="text-xs text-gray-500">reads on your blog</p>
+        </div>
+        ${onSwan ? `<div class="rounded-xl bg-gray-50 border border-gray-100 p-3">
+          <p class="text-2xl font-extrabold text-gray-900">${n(t.swanViews)}</p>
+          <p class="text-xs text-gray-500">views on The Swan Index · ${n(t.swanReads)} stayed 15s+ or read past halfway</p>
+        </div>` : ''}
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-[11px] text-gray-400 uppercase tracking-wide">
+            <th class="text-left font-bold pb-1 pr-3">Post</th>
+            <th class="text-right font-bold pb-1 px-3">Reads</th>
+            <th class="text-right font-bold pb-1 px-3">Avg read</th>
+            ${onSwan ? '<th class="text-right font-bold pb-1 pl-3">Swan Index</th>' : ''}
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="text-[11px] text-gray-400 mt-3">Counted anonymously when someone reads a post on your embedded blog, your hosted blog pages${onSwan ? ' or The Swan Index' : ''}. Readers with JavaScript turned off, and copies you paste elsewhere, aren't counted.</p>`;
+    panel.classList.remove('hidden');
 }
 
 // ── Campaign Assistant KPI cards ─────────────────────────────────────────────
@@ -9749,6 +9810,9 @@ async function _loadAssistantMetrics(assistantId, roleKey) {
     // Start muted. Every path out of this function that doesn't produce a figure — fetch
     // failure, no published posts, a metric the platform doesn't report — leaves it that way.
     _KPI_KEYS.forEach(k => _setKpiCard(k, { empty: true }));
+    // Blog Writer only; _loadBlogMetrics shows it again. Hidden here so a cached page that switches
+    // role never strands one assistant's readers under another's cards.
+    document.getElementById('blog-readers-panel')?.classList.add('hidden');
 
     // Role-specific data source. Registry-driven rather than a roleKey compared inline here, so a
     // second role needing its own figures is a registry entry and not another branch in this file.

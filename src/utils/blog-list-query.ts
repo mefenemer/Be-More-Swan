@@ -9,12 +9,46 @@
 // The paging RULES (sort key, keyset cursor, size caps) live in blog-list-paging.ts; this module
 // only runs them.
 
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { blogPosts } from '../../db/schema';
 import { listSortKey, afterCursor, takePage } from './blog-list-paging';
 import { resolveCardImageUrls } from './blog-media-resolve';
 import { cardImageRef } from './blog-card-image';
 import { isAiAssisted } from './blog-ai-assisted';
+import { monthLabel, NO_FILTER, type BlogFacets, type BlogListFilter } from './blog-filters';
+
+/** The reader's category / month filter as WHERE clauses. Values are bound, never interpolated. */
+function filterClauses(filter: BlogListFilter) {
+    return [
+        ...(filter.tag ? [sql`${blogPosts.tags} @> ${JSON.stringify([filter.tag])}::jsonb`] : []),
+        ...(filter.month ? [sql`to_char(${listSortKey}, 'YYYY-MM') = ${filter.month}`] : []),
+    ];
+}
+
+/**
+ * What a reader can filter this blog by: every tag in use (most-used first) and every month that
+ * has a post (newest first), each with its count. Over ALL published posts, not the current page,
+ * so the menus do not change as the reader pages.
+ */
+export async function listBlogFacets(db: any, orgId: number): Promise<BlogFacets> {
+    const [tagRows, monthRows] = await Promise.all([
+        db.execute(sql`
+            SELECT t.tag AS value, count(*)::int AS count
+              FROM blog_posts p, jsonb_array_elements_text(CASE WHEN jsonb_typeof(p.tags) = 'array' THEN p.tags ELSE '[]'::jsonb END) AS t(tag)
+             WHERE p.organisation_id = ${orgId} AND p.status = 'published' AND btrim(t.tag) <> ''
+             GROUP BY t.tag ORDER BY count(*) DESC, t.tag LIMIT 40`),
+        db.execute(sql`
+            SELECT to_char(COALESCE(p.published_at, p.created_at), 'YYYY-MM') AS value, count(*)::int AS count
+              FROM blog_posts p
+             WHERE p.organisation_id = ${orgId} AND p.status = 'published'
+             GROUP BY 1 ORDER BY 1 DESC LIMIT 120`),
+    ]);
+    const rows = (r: any): any[] => (Array.isArray(r) ? r : r?.rows || []);
+    return {
+        categories: rows(tagRows).map((r) => ({ value: String(r.value), label: String(r.value), count: Number(r.count) })),
+        months: rows(monthRows).map((r) => ({ value: String(r.value), label: monthLabel(String(r.value)), count: Number(r.count) })),
+    };
+}
 
 export interface PublishedPostSummary {
     title: string;
@@ -32,9 +66,10 @@ export interface PublishedPostSummary {
 export async function listPublishedPosts(
     db: any,
     orgId: number,
-    opts: { size: number; cursorId: number | null },
+    opts: { size: number; cursorId: number | null; filter?: BlogListFilter },
 ): Promise<{ posts: PublishedPostSummary[]; nextCursor: string | null }> {
     const { size, cursorId } = opts;
+    const filter = opts.filter || NO_FILTER;
     // `db` is untyped here (as in blog-media-resolve), so name the row shape takePage passes through.
     const rows: any[] = await db
         .select({
@@ -62,6 +97,7 @@ export async function listPublishedPosts(
             eq(blogPosts.organisationId, orgId),
             eq(blogPosts.status, 'published'),
             ...(cursorId ? [afterCursor(cursorId, orgId)] : []),
+            ...filterClauses(filter),
         ))
         // id DESC is not decoration: two posts published in the same second would otherwise
         // come back in whatever order the planner chose, and a keyset cursor built on an

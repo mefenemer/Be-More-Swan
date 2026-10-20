@@ -114,6 +114,50 @@
     return out.length ? '<ul class="bms-tags">' + out.join('') + '</ul>' : '';
   }
 
+  // ── Placeholder plate + share row ─────────────────────────────────────────
+  // Server-side twins live in src/utils/blog-share.ts (hosted permalink + The Swan Index). This
+  // file imports nothing, so the copy is deliberate: keep the networks, order and plate in step.
+  function plateInitial(title) {
+    var m = String(title || '').match(/[A-Za-z0-9\u00C0-\u024F]/);
+    return m ? m[0].toUpperCase() : '\u2726';
+  }
+  // Where a post has no feature image. Decorative: the headline beside it says what it is.
+  function plateHtml(title, cls) {
+    return '<div class="' + cls + ' bms-plate" aria-hidden="true"><span>' + esc(plateInitial(title)) + '</span></div>';
+  }
+  function shareHtml(url, title) {
+    if (!url || !/^https?:\/\//i.test(url)) return '';
+    var u = encodeURIComponent(url), t = encodeURIComponent(title || '');
+    var links = [
+      ['LinkedIn', 'https://www.linkedin.com/sharing/share-offsite/?url=' + u],
+      ['Facebook', 'https://www.facebook.com/sharer/sharer.php?u=' + u],
+      ['X', 'https://twitter.com/intent/tweet?url=' + u + '&text=' + t],
+      ['Email', 'mailto:?subject=' + t + '&body=' + u],
+    ].map(function (l) {
+      return '<a class="bms-share-btn" href="' + esc(l[1]) + '"'
+        + (l[0] === 'Email' ? '' : ' target="_blank" rel="noopener noreferrer"') + '>' + esc(l[0]) + '</a>';
+    }).join('');
+    return '<div class="bms-share"><span class="bms-share-label">Share this post</span><div class="bms-share-row">'
+      + (navigator.share ? '<button type="button" class="bms-share-btn" data-share-native>Share\u2026</button>' : '')
+      + links + '<button type="button" class="bms-share-btn" data-share-copy>Copy link</button></div></div>';
+  }
+  function bindShare(root, url, title) {
+    var nat = root.querySelector('[data-share-native]');
+    if (nat) nat.addEventListener('click', function () { navigator.share({ title: title, url: url }).catch(function () {}); });
+    var copy = root.querySelector('[data-share-copy]');
+    if (copy) copy.addEventListener('click', function () {
+      var done = function () { copy.textContent = 'Link copied'; setTimeout(function () { copy.textContent = 'Copy link'; }, 2000); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, function () { window.prompt('Copy this link', url); });
+      else window.prompt('Copy this link', url);
+    });
+  }
+
+  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  function monthLabel(key) {
+    var m = /^(\d{4})-(\d{2})$/.exec(key || '');
+    return m ? MONTHS[Number(m[2]) - 1] + ' ' + m[1] : String(key || '');
+  }
+
   // Remove the body's own leading <h1>.
   //
   // The published payload is a render of the post's Markdown, so it ALREADY opens with an <h1>
@@ -291,8 +335,27 @@
       '.bms .bms-tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0;padding:0;list-style:none;}' +
       '.bms .bms-tags li{font-size:12px;line-height:1;padding:5px 9px;border-radius:999px;' +
         'background:#f3f4f6;color:#4b5563;}' +
+      // Placeholder plate (no feature image): a soft tint in the accent with the title's initial.
+      '.bms .bms-plate{display:flex;align-items:center;justify-content:center;overflow:hidden;' +
+        'background:linear-gradient(135deg,#f9fafb 0%,#e5e7eb 100%);}' +
+      '.bms .bms-plate span{font-weight:700;line-height:1;color:' + accent + ';opacity:.45;font-size:32px;}' +
+      '.bms .bms-hero.bms-plate{aspect-ratio:16/9;border-radius:8px;}' +
+      '.bms .bms-hero.bms-plate span{font-size:72px;}' +
+      // Filter bar. font:inherit for the same :host{all:initial} reason as .bms-more.
+      '.bms .bms-filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 8px;}' +
+      '.bms .bms-filters select{font:inherit;font-size:14px;padding:7px 10px;border:1px solid #e5e7eb;' +
+        'border-radius:8px;background:#fff;color:#111827;max-width:100%;}' +
+      '.bms .bms-filters .bms-clear{font:inherit;font-size:14px;background:none;border:0;color:' + accent + ';cursor:pointer;padding:6px 4px;}' +
+      // Share row under a post.
+      '.bms .bms-share{margin:28px 0 0;padding-top:16px;border-top:1px solid #e5e7eb;}' +
+      '.bms .bms-share-label{display:block;font-size:13px;color:#6b7280;margin:0 0 8px;}' +
+      '.bms .bms-share-row{display:flex;flex-wrap:wrap;gap:8px;}' +
+      '.bms .bms-share-btn{font:inherit;font-size:14px;line-height:1;padding:8px 13px;border-radius:999px;' +
+        'border:1px solid #e5e7eb;background:none;color:#111827;text-decoration:none;cursor:pointer;}' +
+      '.bms .bms-share-btn:hover{border-color:' + accent + ';color:' + accent + ';}' +
       '@media (max-width:520px){.bms .bms-card,.bms a.bms-card{display:block;}' +
-        '.bms .bms-thumb{width:100%;height:160px;margin-bottom:12px;}}';
+        '.bms .bms-thumb{width:100%;height:160px;margin-bottom:12px;}' +
+        '.bms .bms-thumb.bms-plate span{font-size:56px;}}';
     shadow.appendChild(base);
     if (theme.customCss) {
       var custom = document.createElement('style');
@@ -331,15 +394,43 @@
     // It now returns a page plus a nextCursor, and this walks it a page at a time.
     var PAGE_SIZE = 12;
     var listState = null;
+    // The reader's category / month filter, and what there is to filter by (/facets, fetched once).
+    var filter = { tag: '', month: '' };
+    var facets = null;
+
+    function listUrl(cursor) {
+      return API + '/posts?limit=' + PAGE_SIZE
+        + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '')
+        + (filter.tag ? '&tag=' + encodeURIComponent(filter.tag) : '')
+        + (filter.month ? '&month=' + encodeURIComponent(filter.month) : '');
+    }
+
+    // Hidden until there is something to choose between: one tag or one month is not a filter.
+    function filtersHtml() {
+      if (!facets) return '';
+      var cats = facets.categories || [], months = facets.months || [];
+      if (cats.length < 2 && months.length < 2 && !filter.tag && !filter.month) return '';
+      function opts(list, current, all, label) {
+        return '<option value="">' + esc(all) + '</option>' + list.map(function (f) {
+          return '<option value="' + esc(f.value) + '"' + (f.value === current ? ' selected' : '') + '>'
+            + esc(label(f)) + ' (' + Number(f.count || 0) + ')</option>';
+        }).join('');
+      }
+      return '<div class="bms-filters" role="group" aria-label="Filter posts">'
+        + (cats.length ? '<select data-bms-filter="tag" aria-label="Category">' + opts(cats, filter.tag, 'All categories', function (f) { return f.label; }) + '</select>' : '')
+        + (months.length ? '<select data-bms-filter="month" aria-label="Month">' + opts(months, filter.month, 'All dates', function (f) { return monthLabel(f.value); }) + '</select>' : '')
+        + ((filter.tag || filter.month) ? '<button type="button" class="bms-clear">Clear filters</button>' : '')
+        + '</div>';
+    }
 
     function cardHtml(p) {
       var href = postHref(p.slug);
-      // The thumbnail is optional and its absence is a normal state, not a failure — a text-only
-      // essay gets a text-only card rather than a placeholder box. loading="lazy" because a long
-      // blog is exactly where a list of images costs the reader something.
+      // No image → the placeholder plate, so the list keeps one rhythm (owner, 2026-10-20: a post
+      // without a feature image shows a placeholder). loading="lazy" because a long blog is exactly
+      // where a list of images costs the reader something.
       var thumb = p.imageUrl
         ? '<img class="bms-thumb" src="' + esc(p.imageUrl) + '" alt="' + esc(p.imageAlt || '') + '" loading="lazy">'
-        : '';
+        : plateHtml(p.title, 'bms-thumb');
       // Byline and date on one line, tags under it. Each part is independently optional — a post
       // with no tags must not leave an empty strip, and a missing date must not leave a stray
       // separator, so the dot is built from what is actually present rather than hard-coded.
@@ -362,8 +453,13 @@
     }
 
     function paintList() {
-      if (!listState.posts.length) { view.innerHTML = '<p>No posts yet.</p>'; return; }
-      var html = listState.posts.map(cardHtml).join('');
+      var bar = filtersHtml();
+      if (!listState.posts.length) {
+        view.innerHTML = bar + ((filter.tag || filter.month) ? '<p>No posts match these filters.</p>' : '<p>No posts yet.</p>');
+        bindFilters();
+        return;
+      }
+      var html = bar + listState.posts.map(cardHtml).join('');
       if (listState.cursor) {
         html += '<button class="bms-more" type="button"' + (listState.loading ? ' disabled' : '') + '>' +
           (listState.loading ? 'Loading…' : listState.error ? 'Could not load more — try again' : 'Load more posts') +
@@ -375,6 +471,18 @@
       });
       var more = view.querySelector('.bms-more');
       if (more) more.addEventListener('click', loadMore);
+      bindFilters();
+    }
+
+    function bindFilters() {
+      Array.prototype.forEach.call(view.querySelectorAll('[data-bms-filter]'), function (sel) {
+        sel.addEventListener('change', function () {
+          filter[sel.getAttribute('data-bms-filter')] = sel.value;
+          renderList();
+        });
+      });
+      var clear = view.querySelector('.bms-clear');
+      if (clear) clear.addEventListener('click', function () { filter = { tag: '', month: '' }; renderList(); });
     }
 
     function loadMore() {
@@ -386,7 +494,7 @@
       // fetch is in flight (a reader clicks a post, then Back); without this the response would
       // append its page onto whatever list exists by the time it lands.
       var mine = listState;
-      getJSON(API + '/posts?limit=' + PAGE_SIZE + '&cursor=' + encodeURIComponent(listState.cursor))
+      getJSON(listUrl(listState.cursor))
         .then(function (data) {
           mine.posts = mine.posts.concat(data.posts || []);
           mine.cursor = data.nextCursor || null;
@@ -405,7 +513,12 @@
     function renderList() {
       listState = { posts: [], cursor: null, loading: true, error: false };
       var mine = listState;
-      getJSON(API + '/posts?limit=' + PAGE_SIZE).then(function (data) {
+      // Facets once per page load; a failure just means no filter bar, never no list.
+      if (!facets) getJSON(API + '/facets').then(function (f) {
+        facets = f || { categories: [], months: [] };
+        if (mine === listState && !mine.loading) paintList();
+      }).catch(function () { facets = { categories: [], months: [] }; });
+      getJSON(listUrl(null)).then(function (data) {
         mine.posts = data.posts || [];
         mine.cursor = data.nextCursor || null;
         mine.loading = false;
@@ -429,14 +542,20 @@
         var hero = (fi && fi.url)
           ? '<img class="bms-hero" src="' + esc(fi.url) + '" alt="' + esc(fi.alt || '') + '">' +
             (fi.attribution ? '<p class="bms-credit">' + esc(fi.attribution) + '</p>' : '')
-          : '';
+          : plateHtml(h1, 'bms-hero');
+        // The address a reader would send a friend: the post's own page where there is one,
+        // otherwise this page with the #bms/<slug> route that reopens it here.
+        var shareUrl;
+        try { shareUrl = new URL(postHref(post.slug) || location.href, location.href).href; } catch (e) { shareUrl = location.href; }
         view.innerHTML =
           '<button class="bms-back">← All posts</button>' +
           hero +
           '<h1>' + esc(h1) + '</h1>' + intro +
           stripLeadingH1(payload.html) +
-          badgeHtml(post, config.badgeEnabled);
+          badgeHtml(post, config.badgeEnabled) +
+          shareHtml(shareUrl, h1);
         view.querySelector('.bms-back').addEventListener('click', function () { navigate(null); });
+        bindShare(view, shareUrl, h1);
         trackEngagement(post, variant && variant.id);
       }).catch(function () { view.innerHTML = '<p>Unable to load this post.</p>'; });
     }

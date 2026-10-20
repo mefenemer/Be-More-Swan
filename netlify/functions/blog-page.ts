@@ -28,7 +28,8 @@ import { resolveInlineMedia, resolveFeatureImageUrl } from '../../src/utils/blog
 import { resolveCanonical, renderBlogPage, renderBlogIndexPage } from '../../src/utils/blog-seo';
 import { parseBlogRoute, parseBlogIndexRoute, BlogIndexRoute } from '../../src/utils/blog-route';
 import { parseCursor } from '../../src/utils/blog-list-paging';
-import { listPublishedPosts } from '../../src/utils/blog-list-query';
+import { listPublishedPosts, listBlogFacets } from '../../src/utils/blog-list-query';
+import { parseBlogFilter, isFiltered, filterQuery } from '../../src/utils/blog-filters';
 import { isAiAssisted } from '../../src/utils/blog-ai-assisted';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { excerpt } from '../../src/utils/markdown-render';
@@ -80,7 +81,11 @@ async function renderIndex(event: HandlerEvent, route: BlogIndexRoute) {
     if (!cfg || cfg.status !== 'active') return notFound('blog');
 
     const cursorId = parseCursor(event.queryStringParameters?.cursor);
-    const { posts, nextCursor } = await listPublishedPosts(db, cfg.organisationId, { size: INDEX_PAGE_SIZE, cursorId });
+    const filter = parseBlogFilter(event.queryStringParameters);
+    const [{ posts, nextCursor }, facets] = await Promise.all([
+        listPublishedPosts(db, cfg.organisationId, { size: INDEX_PAGE_SIZE, cursorId, filter }),
+        listBlogFacets(db, cfg.organisationId),
+    ]);
     // A cursor that lands on nothing (stale, foreign, or made up) is not a page — 404 rather than
     // serve crawlers an empty, indexable-looking shell. Page 1 with no posts is a real, empty blog.
     if (cursorId && !posts.length) return notFound('blog');
@@ -88,7 +93,7 @@ async function renderIndex(event: HandlerEvent, route: BlogIndexRoute) {
     const origin = (resolveBaseUrl(event.headers as Record<string, string | undefined>) || '').replace(/\/+$/, '');
     const indexPath = route.pathname;
     const firstUrl = `${origin}${indexPath}`;
-    const pageUrl = cursorId ? `${firstUrl}?cursor=${cursorId}` : firstUrl;
+    const pageUrl = `${firstUrl}${filterQuery(filter, { cursor: cursorId ? String(cursorId) : null })}`;
 
     const html = renderBlogIndexPage({
         siteName: cfg.orgName || 'Blog',
@@ -96,8 +101,9 @@ async function renderIndex(event: HandlerEvent, route: BlogIndexRoute) {
         // Page 1 is THE index. A cursor page is self-canonical and noindex,follow: its contents shift
         // every time a post is published (keyset pages are stable for a reader, not for an index),
         // so crawlers should follow its links to the permalinks and not index the page itself.
-        canonicalUrl: pageUrl,
-        robots: cursorId ? 'noindex,follow' : 'index,follow',
+        // A filtered view (tag / month) is the same posts again — noindex, canonical to the full list.
+        canonicalUrl: isFiltered(filter) ? firstUrl : pageUrl,
+        robots: cursorId || isFiltered(filter) ? 'noindex,follow' : 'index,follow',
         posts: posts.map((p) => ({
             title: p.title,
             slug: p.slug,
@@ -110,8 +116,12 @@ async function renderIndex(event: HandlerEvent, route: BlogIndexRoute) {
         // that the customer's site (Wix) has no per-post route of its own. The permalink still
         // carries the post's real canonical in its <head>.
         postHref: (slug) => `${indexPath}/${encodeURIComponent(slug)}`,
-        olderHref: nextCursor ? `${indexPath}?cursor=${encodeURIComponent(nextCursor)}` : null,
-        firstHref: cursorId ? indexPath : null,
+        // The pager carries the reader's filters, or "Older posts" would quietly drop them.
+        olderHref: nextCursor ? `${indexPath}${filterQuery(filter, { cursor: nextCursor })}` : null,
+        firstHref: cursorId ? `${indexPath}${filterQuery(filter)}` : null,
+        facets,
+        filter,
+        indexPath,
         homeUrl: cfg.siteBaseUrl || cfg.orgWebsiteUrl || null,
         theme: (cfg.theme as { fontFamily?: string | null; fontUrl?: string | null } | null) || null,
     });

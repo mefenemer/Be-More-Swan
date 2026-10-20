@@ -163,7 +163,7 @@ const query = queryMod.slice(landmark(queryMod, 'export async function listPubli
 
 check('the widget list AND the hosted index both run the one shared query', () => {
     const list = api.slice(landmark(api, "if (resource === 'posts' && !slug)"), landmark(api, "if (resource === 'posts' && slug)"));
-    assert.match(list, /listPublishedPosts\(db, orgId, \{ size, cursorId \}\)/);
+    assert.match(list, /listPublishedPosts\(db, orgId, \{ size, cursorId, filter \}\)/);
     const page = readFileSync(join(root, 'netlify/functions/blog-page.ts'), 'utf8');
     assert.match(page, /listPublishedPosts\(db, cfg\.organisationId,/);
 });
@@ -201,7 +201,8 @@ const widget = readFileSync(join(root, 'widget.js'), 'utf8');
 
 check('the widget asks for a page and follows nextCursor', () => {
     assert.match(widget, /\/posts\?limit=' \+ PAGE_SIZE/, 'the first request must ask for a page');
-    assert.match(widget, /'&cursor=' \+ encodeURIComponent\(listState\.cursor\)/, 'and later ones must carry the cursor');
+    assert.match(widget, /'&cursor=' \+ encodeURIComponent\(cursor\)/, 'and later ones must carry the cursor');
+    assert.match(widget, /getJSON\(listUrl\(listState\.cursor\)\)/, 'load more passes the cursor');
     assert.match(widget, /data\.nextCursor \|\| null/, 'the cursor must come from the response');
 });
 

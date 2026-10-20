@@ -98,28 +98,57 @@ function publicPosts(db: Db) {
         .leftJoin(swanIndexSections, eq(swanIndexSections.key, swanIndexPosts.section));
 }
 
+/**
+ * A piece with no section is not on the site (owner, 2026-10-20: "to appear on the Swan Index, a
+ * post must have a category"). The editor desk refuses to put one live without a section
+ * (admin-swan-index.ts); this is the read-side half, so a piece whose section is later cleared, or
+ * one that went live before the rule, drops off every page rather than appearing uncategorised.
+ */
+const HAS_SECTION = isNotNull(swanIndexPosts.section);
+
 /** A suspended or withdrawn profile takes its whole back catalogue off the site with it. */
 const VISIBLE = and(
     inArray(swanIndexPosts.status, [...PUBLIC_STATUSES]),
     eq(swanIndexProfiles.status, 'active'),
+    HAS_SECTION,
 );
 
 /** The curated front page, in editorial order. `featured_rank` 1 is the lead story. */
 export async function getFeatured(db: Db, limit = 7): Promise<SwanCard[]> {
     const rows = await publicPosts(db)
-        .where(and(eq(swanIndexPosts.status, 'featured'), eq(swanIndexProfiles.status, 'active')))
+        .where(and(eq(swanIndexPosts.status, 'featured'), eq(swanIndexProfiles.status, 'active'), HAS_SECTION))
         .orderBy(swanIndexPosts.featuredRank)
         .limit(limit);
     return attachCardImages(db, (rows as CardRow[]).map(toCard));
 }
 
-/** Everything live across the network, newest first. */
-export async function getLatest(db: Db, limit = 30, section?: string | null): Promise<SwanCard[]> {
+/** Everything live across the network, newest first — optionally one section and/or one month ('YYYY-MM'). */
+export async function getLatest(db: Db, limit = 30, section?: string | null, month?: string | null): Promise<SwanCard[]> {
     const rows = await publicPosts(db)
-        .where(section ? and(VISIBLE, eq(swanIndexPosts.section, section)) : VISIBLE)
+        .where(and(
+            VISIBLE,
+            ...(section ? [eq(swanIndexPosts.section, section)] : []),
+            ...(month ? [sql`to_char(${swanIndexPosts.liveAt}, 'YYYY-MM') = ${month}`] : []),
+        ))
         .orderBy(desc(swanIndexPosts.liveAt))
         .limit(limit);
     return attachCardImages(db, (rows as CardRow[]).map(toCard));
+}
+
+/**
+ * Every month with something public in it (newest first, with counts) — the reader's date filter.
+ * Scoped to the section being viewed, so the menu never offers a month that would come back empty.
+ */
+export async function getLiveMonths(db: Db, section?: string | null): Promise<Array<{ value: string; count: number }>> {
+    const rows = await db
+        .select({ value: sql<string>`to_char(${swanIndexPosts.liveAt}, 'YYYY-MM')`, count: sql<number>`count(*)::int` })
+        .from(swanIndexPosts)
+        .innerJoin(swanIndexProfiles, eq(swanIndexProfiles.id, swanIndexPosts.profileId))
+        .where(and(VISIBLE, isNotNull(swanIndexPosts.liveAt), ...(section ? [eq(swanIndexPosts.section, section)] : [])))
+        .groupBy(sql`1`)
+        .orderBy(sql`1 desc`)
+        .limit(120);
+    return rows.map((r) => ({ value: String(r.value), count: Number(r.count) }));
 }
 
 export async function getByAuthor(db: Db, profileId: number, limit = 60): Promise<SwanCard[]> {
@@ -198,6 +227,7 @@ export async function getArticle(db: Db, handle: string, slug: string): Promise<
             inArray(swanIndexPosts.status, [...PUBLIC_STATUSES]),
             eq(swanIndexProfiles.status, 'active'),
             eq(blogPosts.status, 'published'),
+            HAS_SECTION,
         ))
         .limit(1);
     if (!row) return null;
@@ -226,6 +256,7 @@ export async function listAuthors(db: Db, limit = 200): Promise<AuthorListRow[]>
         .innerJoin(swanIndexPosts, and(
             eq(swanIndexPosts.profileId, swanIndexProfiles.id),
             inArray(swanIndexPosts.status, [...PUBLIC_STATUSES]),
+            HAS_SECTION,
         ))
         .where(eq(swanIndexProfiles.status, 'active'))
         .groupBy(
