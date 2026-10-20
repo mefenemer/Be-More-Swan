@@ -422,13 +422,16 @@ const MEETING_ASANA_FIELDS = [
 // tier 1 native | 2 universal webhook | 3 roadmap (greyed + upvotable).
 const SCENARIOS = [
     // ── Tier 1: HubSpot (2-way) ──
+    // HubSpot + Salesforce recipes: 'coming_soon' since 2026-10-20 (owner's call — not offered yet, though
+    // the handlers are built). integration-scenarios.ts refuses to enable a non-available recipe; existing
+    // activations keep firing. db/z-crm-recipes-coming-soon.sql applies it to existing databases.
     {
         scenarioKey: 'hubspot_handoff_push', providerKey: 'hubspot', tier: 1,
         direction: 'outbound', scenarioType: 'handoff_push',
         title: 'Push Qualified Lead to HubSpot',
         description: 'When a lead is qualified or books a meeting, create/update the HubSpot contact with the AI summary and attribution.',
         triggerConfig: { on: 'lead.status_changed', when: ['QUALIFIED'] },
-        actionType: 'hubspot_update_record', fieldSchema: LEAD_HANDOFF_FIELDS, status: 'available', sortOrder: 10,
+        actionType: 'hubspot_update_record', fieldSchema: LEAD_HANDOFF_FIELDS, status: 'coming_soon', sortOrder: 10,
     },
     {
         scenarioKey: 'hubspot_feedback_loop', providerKey: 'hubspot', tier: 1,
@@ -436,7 +439,7 @@ const SCENARIOS = [
         title: 'Sync Closed-Won/Lost from HubSpot',
         description: 'When a HubSpot deal reaches Closed Won or Closed Lost, record the outcome on the matching BMS lead to train discovery.',
         triggerConfig: { on: 'crm.deal_stage_changed', stagePath: 'properties.dealstage', identifierPath: 'properties.email', stageMap: { closedwon: 'CLOSED_WON', closedlost: 'CLOSED_LOST' } },
-        actionType: null, fieldSchema: [], status: 'available', sortOrder: 11,
+        actionType: null, fieldSchema: [], status: 'coming_soon', sortOrder: 11,
     },
     {
         scenarioKey: 'hubspot_suppression_sync', providerKey: 'hubspot', tier: 1,
@@ -444,7 +447,7 @@ const SCENARIOS = [
         title: 'Suppress Existing HubSpot Customers',
         description: 'Daily, pull your existing-customer domains from HubSpot so the discovery AI never prospects a current client.',
         triggerConfig: { on: 'schedule.daily' },
-        actionType: null, fieldSchema: [], status: 'available', sortOrder: 12,
+        actionType: null, fieldSchema: [], status: 'coming_soon', sortOrder: 12,
     },
     // ── Tier 1: Salesforce ──
     {
@@ -453,7 +456,7 @@ const SCENARIOS = [
         title: 'Push Qualified Lead to Salesforce',
         description: 'Create/update the Salesforce Contact or Account with the enriched lead fields on qualification.',
         triggerConfig: { on: 'lead.status_changed', when: ['QUALIFIED'] },
-        actionType: 'salesforce_update_record', fieldSchema: LEAD_HANDOFF_FIELDS, status: 'available', sortOrder: 20,
+        actionType: 'salesforce_update_record', fieldSchema: LEAD_HANDOFF_FIELDS, status: 'coming_soon', sortOrder: 20,
     },
     // ── Tier 2: Universal webhook ──
     {
@@ -471,7 +474,7 @@ const SCENARIOS = [
         title: 'Log Booked Meeting to HubSpot',
         description: 'When a meeting is booked, stamp the meeting time and summary onto the HubSpot contact.',
         triggerConfig: { on: 'lead.status_changed', when: ['MEETING_BOOKED'] },
-        actionType: 'hubspot_update_record', fieldSchema: MEETING_CRM_FIELDS, status: 'available', sortOrder: 40,
+        actionType: 'hubspot_update_record', fieldSchema: MEETING_CRM_FIELDS, status: 'coming_soon', sortOrder: 40,
     },
     {
         scenarioKey: 'slack_meeting_summary', providerKey: 'slack', tier: 1,
