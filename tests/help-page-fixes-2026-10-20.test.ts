@@ -136,4 +136,18 @@ test('the referral article follows the Help Centre quoting rules', () => {
     assert.ok(!/free assistant|£10|token/i.test(bodies[0]), 'describes the current offer only');
 });
 
+test('the data export article follows the Help Centre quoting rules and matches the code', () => {
+    const sql = read('db/help-articles-2026-12zzzzzz-data-export.sql');
+    const bodies = [...sql.matchAll(/\$\$([\s\S]*?)\$\$/g)].map((m) => m[1]);
+    assert.strictEqual(bodies.length, 1);
+    assert.ok(!bodies[0].includes(';'), 'no semicolons inside a body');
+    assert.ok(!bodies[0].includes("''"), 'apostrophes inside $$ are literal');
+    // The claims it makes are the ones the code makes.
+    const ui = read('user-settings.html');
+    assert.ok(ui.includes('>Your data<') && ui.includes('>Export my data<') && ui.includes('data-tab="agreements">My Agreements<'));
+    assert.ok(read('netlify/functions/data-export-download.ts').includes('.json'), 'the file is JSON');
+    assert.ok(read('src/utils/workspace-export.ts').includes("EXPORT_WORKSPACE_ROLES = ['owner', 'admin']"), 'workspace part is owners and admins');
+    assert.ok(/24 hours/.test(bodies[0]) && /one export a day/i.test(bodies[0]));
+});
+
 console.log(`\n${passed} checks passed`);
