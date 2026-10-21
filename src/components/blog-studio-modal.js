@@ -15,6 +15,8 @@
  * Public API (attached to window):
  *   openBlogStudio({ assistantId?, postId?, intent? })  — open the modal; postId loads an existing draft.
  *     intent:'review' puts the Approve / Pick a time / Reject bar on screen while the post is undecided.
+ *   openBlogStudio({ mode:'setup', assistantId? })  — "Blog setup": Search Console and the blog widget
+ *     only. Both are set once for the whole blog, so they are not shown in a post's editor.
  *   closeBlogStudio()                          — close + tear down the editor.
  *   blogStudioAvailable(assistants)            — gate helper: true iff an active Blog Writer exists.
  *
@@ -246,6 +248,17 @@
     // when they overrun.
     + '.bs-pending{display:block;font-size:11px;color:#b45309;margin-top:4px;}'
     + '.bs-hidden{display:none !important;}'
+    // Setup vs post (2026-10-21). Search Console and the widget are set once per business, so a
+    // post's editor no longer carries them as sections 7 and 8 — a link at the foot of its rail opens
+    // "Blog setup", which is this same panel showing only those two.
+    + '#bms-blog-backdrop:not(.bs-setup) [data-bs-sec=search],#bms-blog-backdrop:not(.bs-setup) [data-bs-sec=widget]{display:none;}'
+    + '#bms-blog-backdrop.bs-setup .bs-sec:not([data-bs-sec=search]):not([data-bs-sec=widget]){display:none;}'
+    + '#bms-blog-backdrop.bs-setup #bs-workspace{grid-template-columns:minmax(0,1fr);max-width:680px;}'
+    + '#bms-blog-backdrop.bs-setup #bs-workspace > div:nth-child(2),#bms-blog-backdrop.bs-setup #bs-setup-link,#bms-blog-backdrop.bs-setup .bs-sec-num{display:none;}'
+    + '.bs-setup-link{display:block;width:100%;text-align:left;background:none;border:1px dashed #d1d5db;border-radius:12px;padding:10px 12px;'
+    + 'font-size:13px;font-weight:600;color:#374151;cursor:pointer;}'
+    + '.bs-setup-link:hover{border-color:#f9a8d4;color:#9d174d;background:#fff;}'
+    + '.bs-setup-link span{display:block;font-weight:400;font-size:12px;color:#6b7280;}'
     // The decision bar (intent:'review'). The approve step was section 6 of 8, collapsed, under the
     // editor — on a phone, a long scroll from the post it decides. Sticky at the top of the editor
     // column on a wide screen; pinned to the bottom of the screen on a narrow one, where the columns
@@ -593,6 +606,8 @@
     + '          <span class="bs-status" style="font-size:11px;">A full page of your posts that we host. <strong>On Wix</strong> (or any site builder), point your site\u2019s Blog menu item at this link instead of using an embed box.</span></div>'
     + '        </div>'
     + '      </details>'
+    + '      <button type="button" id="bs-setup-link" class="bs-setup-link">Blog setup \u203A'
+    + '<span>Google Search Console, the blog widget, embed code and RSS feed \u2014 set once for your whole blog.</span></button>'
     + '    </div>'
     + '    <div>'
     // The buttons here do nothing of their own: each presses its twin in "Approve & publish", so
@@ -1986,6 +2001,11 @@
       var sec = document.querySelector('[data-bs-sec="publish"]');
       if (sec) { sec.open = true; sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     }
+    el('bs-setup-link').addEventListener('click', function () {
+      var aid = state.assistantId;
+      closeBlogStudio();
+      openBlogStudio({ mode: 'setup', assistantId: aid });
+    });
     el('bs-decide-approve').addEventListener('click', function () { el('bs-approve').click(); });
     el('bs-decide-time').addEventListener('click', function () { openPublishSection(); el('bs-pick-time').click(); });
     el('bs-decide-reject').addEventListener('click', function () { openPublishSection(); el('bs-reject').click(); });
@@ -2622,7 +2642,8 @@
     } else {
       trail = '<button type="button" data-bs-crumb="back">' + esc(window._currentViewTitle || 'Back') + '</button>' + sep;
     }
-    nav.innerHTML = trail + '<span class="bs-crumb-here" aria-current="page">Blog Studio</span>';
+    var here = el('bms-blog-backdrop').classList.contains('bs-setup') ? 'Blog setup' : 'Blog Studio';
+    nav.innerHTML = trail + '<span class="bs-crumb-here" aria-current="page">' + here + '</span>';
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────────────────────────
@@ -2631,7 +2652,10 @@
     inject();
     state.assistantId = opts.assistantId != null ? opts.assistantId : null;
     state.reviewIntent = opts.intent === 'review';
+    var setup = opts.mode === 'setup';
     var bd = el('bms-blog-backdrop');
+    bd.classList.toggle('bs-setup', setup);
+    el('bs-dialog-title').textContent = setup ? 'Blog setup' : 'Blog Studio';
     // Page mode only inside the workspace — it needs a header and a sidebar to sit beside.
     var inWorkspace = !!document.getElementById('sidebar-container');
     bd.classList.toggle('bs-page', inWorkspace);
@@ -2642,6 +2666,18 @@
     state.returnFocus = document.activeElement;
 
     clearWorkspaceState();
+    // Blog setup: no post, no editor — just the two whole-blog panels, loaded fresh.
+    if (setup) {
+      state.postId = null;
+      el('bs-decide').classList.add('bs-hidden');
+      bd.classList.remove('bs-deciding');
+      el('bs-workspace').classList.remove('bs-hidden');
+      loadWidget();
+      loadSearchConsole();
+      var gsc = document.querySelector('#bms-blog-backdrop [data-bs-sec="search"]');
+      if (gsc) gsc.open = true;
+      return;
+    }
     // Resolve AI image generation before the author can reach for it. Reset to "no" first and paint
     // that, so a previous org's capability can never leave the button live for a beat.
     state.canImage = false;

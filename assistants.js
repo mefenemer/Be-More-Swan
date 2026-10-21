@@ -5921,6 +5921,8 @@ function _applyDashboardRegistry(data) {
     toggle('detail-rq-col-approved', rqIsRecords || rqIsNewsletter);
     // "Sent" for emails and "Published" for blogs (set below); every other role keeps "Posted".
     setText('detail-rq-col-label-posted', 'Posted');
+    const setupBtn = document.getElementById('detail-rq-setup-btn');
+    if (setupBtn) setupBtn.style.display = rqIsBlog ? '' : 'none';
     document.querySelector('#maintab-review-queue [role="tablist"]')?.setAttribute('aria-label', rqIsBlog ? 'Blogs by stage' : 'Posts by stage');
     if (rqIsBlog) {
         setText('detail-rq-primary-label', 'Write Blog Post');

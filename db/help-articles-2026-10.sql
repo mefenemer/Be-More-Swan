@@ -325,7 +325,7 @@ Researches and writes long-form posts in your voice, on a cadence you set.
 
 ## Search performance
 
-Connect **Google Search Console** from Blog Studio to see impressions and clicks for each post. The assistant flags a post for a refresh when its traffic starts to slide.
+Connect **Google Search Console** from **Blog setup** on the Blogs tab to see impressions and clicks for each post. The assistant flags a post for a refresh when its traffic starts to slide.
 
 ## Where things live
 

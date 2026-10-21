@@ -912,10 +912,17 @@
         <button type="button" id="detail-rq-autopilot-chip" style="display:none" onclick="window._activateMainTab && window._activateMainTab('goals')"
           class="hidden mt-2 inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition cursor-pointer"></button>
       </div>
-      <button type="button" id="detail-rq-primary-btn" onclick="openGeneratePostSheet()" class="btn-assistant px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer flex items-center gap-1.5">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-        <span id="detail-rq-primary-label">Assign Task</span>
-      </button>
+      <div class="flex flex-wrap items-center gap-2">
+        <!-- Blog Writer only: Search Console and the blog widget, set once for the whole blog
+             (Blog Studio's mode:'setup'). They used to be sections 7–8 of every post's editor. -->
+        <button type="button" id="detail-rq-setup-btn" style="display:none"
+          onclick="window.openBlogStudio && window.openBlogStudio({ mode: 'setup', assistantId: window._currentAssistantId })"
+          class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border transition cursor-pointer">Blog setup</button>
+        <button type="button" id="detail-rq-primary-btn" onclick="openGeneratePostSheet()" class="btn-assistant px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer flex items-center gap-1.5">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          <span id="detail-rq-primary-label">Assign Task</span>
+        </button>
+      </div>
     </div>
 
     <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
