@@ -59,7 +59,7 @@ check('Website, Enquiries, Orders, Bookings — each its own tab, in that order,
     assert.ok(at('sitebuilder') < at('siteenquiries') && at('siteenquiries') < at('siteorders') && at('siteorders') < at('sitebookings') && at('sitebookings') < html.indexOf('id="maintab-btn-calendar"'));
     for (const h of ['website', 'enquiries', 'orders', 'bookings']) assert.ok(html.includes(`data-site-host="${h}"`), h);
     const a = read('assistants.js');
-    assert.ok(a.includes("if (name === 'siteorders') window.AssistantSiteEditor?.activate('orders');"));
+    assert.ok(a.includes("if (name === 'siteorders') siteEditor((ed) => ed.activate('orders'));"));
     const ed = read('src/components/assistant-site-editor.js');
     assert.ok(ed.includes("const tabs = [['pages', 'Pages'], ['design', 'Design'], ['templates', 'Templates'], ['details', 'Details']]"), 'the Website tab keeps only its own panels — Templates its own, or nobody with a site finds it');
     assert.ok(ed.includes("show('maintab-btn-siteorders', featureOn('shop')); show('maintab-btn-sitebookings', featureOn('bookings'));"));
@@ -156,6 +156,26 @@ check('a picture with no description: said in words, announced, and Save stops b
     assert.ok(ed.includes('Needed — a few words on what it shows.') && ed.includes('still need${missing === 1 ?'));
     assert.ok(/const noAlt = \[\.\.\.form\.querySelectorAll\('\[data-alt-needed\]'\)\][\s\S]{0,500}role="alert"[\s\S]{0,600}return;/.test(ed));
     assert.ok(/matches\('\[data-alt-needed\]'\)\) markAlt\(e\.target\)/.test(ed), 'kept in step as they type');
+});
+
+console.log('\nLow items (UI review, 2026-10-21)');
+
+check('tabs say which is selected; loading text is readable; Publish says why it is greyed out; no second accent colour', () => {
+    const ed = read('src/components/assistant-site-editor.js');
+    assert.ok(ed.includes('data-site-panel="${k}" aria-pressed="${state.panel === k}"') && ed.includes('data-site-page="${esc(x.id)}" aria-pressed="${x.id === p.id}"'));
+    assert.ok(!/text-gray-400[^"]*">Loading/.test(ed), 'loading text at least gray-500');
+    assert.ok(ed.includes("${s.publishBlocker ? `<p class=\"text-xs font-semibold text-amber-800 mt-2\">${esc(s.publishBlocker)}</p>` : ''}"), 'shown before an address exists too');
+    assert.ok(!ed.includes('indigo'), 'emphasis uses the brand pink (emerald-200/800, remapped in input.css)');
+    assert.ok(/aria-label="Use picture \$\{i \+ 1\} of \$\{all\.length\}" data-mp-ai-pick/.test(read('src/components/media-picker.js')));
+});
+
+check('the editor loads only for a Website Assistant, when first needed', () => {
+    const ws = read('workspace.html');
+    const a = read('assistants.js');
+    assert.ok(!ws.includes('<script src="/src/components/assistant-site-editor.js">'));
+    assert.ok(/function siteEditor\(fn\) \{\s*if \(window\.AssistantSiteEditor\) \{ fn\(window\.AssistantSiteEditor\); return; \}/.test(a));
+    assert.ok(!/window\.AssistantSiteEditor\?\./.test(a), 'every call goes through siteEditor()');
+    assert.ok(a.includes('siteEditor((ed) => ed.init({ assistantId: data.id, assistantName: data.name }));'));
 });
 
 console.log(`\n${passed}/${total} passed\n`);

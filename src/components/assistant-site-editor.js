@@ -139,7 +139,7 @@
     const what = v.video ? 'video' : 'picture';
     return `<div class="flex flex-wrap items-center gap-3 mt-1">
         ${src ? thumbHtml(src, v.video, 96, 64)
-          : `<span class="inline-flex items-center justify-center text-xs text-gray-400 border border-dashed border-gray-300 rounded-lg" style="width:96px;height:64px">No ${allowVideo ? 'picture or video' : 'picture'}</span>`}
+          : `<span class="inline-flex items-center justify-center text-xs text-gray-500 border border-dashed border-gray-300 rounded-lg" style="width:96px;height:64px">No ${allowVideo ? 'picture or video' : 'picture'}</span>`}
         ${btn(`${attrs.pick}`, src ? `Change ${what}` : (allowVideo ? 'Choose picture or video' : 'Choose picture'), !src)}
         ${src ? btn(`${attrs.clear}`, 'Remove') : ''}
       </div>`;
@@ -721,12 +721,12 @@
   function pagesPanel() {
     const d = def();
     const p = page();
-    const pageTabs = d.pages.map((x) => `<button type="button" data-site-page="${esc(x.id)}" class="sb-tap px-3 py-1.5 text-xs font-bold rounded-lg border ${x.id === p.id ? 'btn-primary' : 'btn-secondary'}">${esc(x.title)}</button>`).join(' ');
+    const pageTabs = d.pages.map((x) => `<button type="button" data-site-page="${esc(x.id)}" aria-pressed="${x.id === p.id}" class="sb-tap px-3 py-1.5 text-xs font-bold rounded-lg border ${x.id === p.id ? 'btn-primary' : 'btn-secondary'}">${esc(x.title)}</button>`).join(' ');
     const adding = state.adding && state.adding.pageId === p.id ? state.adding : null;
     const sections = p.sections.map((s, i) => `
       ${i > 0 ? (adding && adding.at === i ? addPickerHtml(true) : `<li class="flex justify-center">${btn(`data-site-add-open data-at="${i}" aria-label="Add a section here, after ${esc(TYPE_LABEL[p.sections[i - 1].type])}"`, '+ Add here')}</li>`) : ''}
       <li class="border border-gray-200 rounded-lg p-3 flex flex-wrap items-center justify-between gap-2">
-        <div class="min-w-0"><p class="text-xs font-bold text-gray-900">${esc(TYPE_LABEL[s.type])}${s.look && s.look.menuLabel && d.structure === 'one_page' ? ` <span class="font-semibold text-indigo-700">· In the menu as “${esc(s.look.menuLabel)}”</span>` : ''}</p><p class="text-xs text-gray-500 truncate">${esc(sectionSummary(s))}</p></div>
+        <div class="min-w-0"><p class="text-xs font-bold text-gray-900">${esc(TYPE_LABEL[s.type])}${s.look && s.look.menuLabel && d.structure === 'one_page' ? ` <span class="font-semibold text-emerald-800">· In the menu as “${esc(s.look.menuLabel)}”</span>` : ''}</p><p class="text-xs text-gray-500 truncate">${esc(sectionSummary(s))}</p></div>
         <div class="flex flex-wrap gap-1">
           ${swanBtn(p.id, s.id)}
           ${btn(`data-site-edit="${esc(s.id)}"`, 'Edit')}
@@ -901,7 +901,7 @@
     }
     return card(`<p class="text-sm font-black text-gray-900">Choose a template</p>
       <p class="text-xs text-gray-500 mt-1">Each one is shown with your name. Pick one to start from — you can change everything afterwards, or try another later.</p>
-      <div class="flex flex-wrap gap-3 mt-3">${list.map((t) => tplCard(t, 260)).join('')}</div>`, 'border-indigo-200');
+      <div class="flex flex-wrap gap-3 mt-3">${list.map((t) => tplCard(t, 260)).join('')}</div>`, 'border-emerald-200');
   }
 
   /** The full-size look at one template, and the choice to use it. Built per open; its handlers live on it. */
@@ -1034,7 +1034,7 @@
       <p class="text-sm font-black text-gray-900">${first ? 'First, choose what your website does' : 'What your website does'}</p>
       <p class="text-xs text-gray-500 mt-1">Untick what you don't need: it's hidden here, ${esc(state.assistantName || 'your assistant')} won't suggest it, and its tab disappears. You can switch it back on any time.</p>
       <div class="grid gap-2 sm:grid-cols-2 mt-3">${list.map((f) => `<label class="flex items-center gap-2 text-xs text-gray-800"><input type="checkbox" data-site-feature="${esc(f.key)}" ${featureOn(f.key) ? 'checked' : ''}> ${esc(f.label)}</label>`).join('')}</div>
-      <div class="mt-3">${btn('data-site-features-save', first ? 'Use these' : 'Save', true)}</div>`, first ? 'border-indigo-200' : '');
+      <div class="mt-3">${btn('data-site-features-save', first ? 'Use these' : 'Save', true)}</div>`, first ? 'border-emerald-200' : '');
   }
 
   function detailsPanel() {
@@ -1053,16 +1053,16 @@
 
   function enquiriesPanel() {
     const list = state.enquiries;
-    if (!list) return card('<p class="text-sm text-gray-400 text-center">Loading enquiries…</p>');
+    if (!list) return card('<p class="text-sm text-gray-500 text-center">Loading enquiries…</p>');
     if (!list.length) return card(`<p class="text-sm font-black text-gray-900">Enquiries</p><p class="text-xs text-gray-500 mt-1">Messages people send from a contact form on your site appear here, and in your email. Add a "Contact form" section to a page to start receiving them.</p>`);
     const shown = list.slice(0, state.enquiryShown);
     return card(`
       <p class="text-sm font-black text-gray-900">Enquiries</p>
       <p class="text-xs text-gray-500 mt-1 mb-3">Sent from the contact forms on your site. Each one was also emailed to you — reply to them directly. Anyone who ticked "Send me news and offers" is added to your Audience; anyone else only if they tell you they'd like your emails.</p>
       <ul class="space-y-2">${shown.map((q) => `
-        <li class="border ${q.status === 'new' ? 'border-indigo-200' : 'border-gray-200'} rounded-lg p-3">
+        <li class="border ${q.status === 'new' ? 'border-emerald-200' : 'border-gray-200'} rounded-lg p-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <p class="text-xs font-bold text-gray-900">${esc(q.name)} ${q.status === 'new' ? '<span class="text-xs font-bold text-indigo-700">· New</span>' : ''}</p>
+            <p class="text-xs font-bold text-gray-900">${esc(q.name)} ${q.status === 'new' ? '<span class="text-xs font-bold text-emerald-800">· New</span>' : ''}</p>
             <p class="text-xs text-gray-500">${esc(new Date(q.createdAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }))}${q.pagePath ? ` · ${esc(q.pagePath)}` : ''}</p>
           </div>
           <p class="text-xs text-gray-600 mt-1"><a class="underline" href="mailto:${esc(q.email)}">${esc(q.email)}</a>${q.phone ? ` · <a class="underline" href="tel:${esc(q.phone)}">${esc(q.phone)}</a>` : ''}</p>
@@ -1106,7 +1106,7 @@
   function ordersPanel() {
     const list = state.orders;
     const top = paymentsCard();
-    if (!list) return top + card('<p class="text-sm text-gray-400 text-center">Loading orders…</p>');
+    if (!list) return top + card('<p class="text-sm text-gray-500 text-center">Loading orders…</p>');
     if (!list.length) return top + card('<p class="text-sm font-black text-gray-900">Orders</p><p class="text-xs text-gray-500 mt-1">When someone buys from your site, the order appears here and in your email.</p>');
     const shown = list.slice(0, state.orderShown);
     return top + card(`
@@ -1114,9 +1114,9 @@
       <ul class="space-y-2 mt-3">${shown.map((o) => {
         const a = o.shippingAddress && o.shippingAddress.address;
         const addr = a ? [o.shippingAddress.name, a.line1, a.line2, a.city, a.postal_code].filter(Boolean).join(', ') : '';
-        return `<li class="border ${o.status === 'paid' ? 'border-indigo-200' : 'border-gray-200'} rounded-lg p-3">
+        return `<li class="border ${o.status === 'paid' ? 'border-emerald-200' : 'border-gray-200'} rounded-lg p-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <p class="text-xs font-bold text-gray-900">${esc(o.quantity)} × ${esc(o.itemName)} · ${esc(money(o.amountTotal, o.currency))} ${o.status === 'paid' ? '<span class="text-xs font-bold text-indigo-700">· New</span>' : ''}</p>
+            <p class="text-xs font-bold text-gray-900">${esc(o.quantity)} × ${esc(o.itemName)} · ${esc(money(o.amountTotal, o.currency))} ${o.status === 'paid' ? '<span class="text-xs font-bold text-emerald-800">· New</span>' : ''}</p>
             <p class="text-xs text-gray-500">${esc(new Date(o.createdAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }))}</p>
           </div>
           <p class="text-xs text-gray-600 mt-1">${esc(o.customerName || '')}${o.customerEmail ? ` · <a class="underline" href="mailto:${esc(o.customerEmail)}">${esc(o.customerEmail)}</a>` : ''}</p>
@@ -1134,7 +1134,7 @@
   }
 
   // ── Bookings (bookings.ts) ─────────────────────────────────────────────────
-  const BOOKING_TONE = { awaiting_payment: ['Paying the deposit…', 'text-gray-500'], pending: ['Waiting for you', 'text-indigo-700'], confirmed: ['Confirmed', 'text-green-700'], declined: ['Declined', 'text-gray-500'], cancelled: ['Cancelled', 'text-gray-500'] };
+  const BOOKING_TONE = { awaiting_payment: ['Paying the deposit…', 'text-gray-500'], pending: ['Waiting for you', 'text-emerald-800'], confirmed: ['Confirmed', 'text-green-700'], declined: ['Declined', 'text-gray-500'], cancelled: ['Cancelled', 'text-gray-500'] };
   function bookingsPanel() {
     const b = state.data.booking || {};
     const head = card(`<p class="text-sm font-black text-gray-900">Bookings</p>
@@ -1142,7 +1142,7 @@
       <p class="text-xs text-gray-500 mt-1">Add a "Bookings" section to a page to show it on your website.</p>`);
     const list = state.bookings;
     const tt = timetableCard();
-    if (!list) return head + tt + card('<p class="text-sm text-gray-400 text-center">Loading bookings…</p>');
+    if (!list) return head + tt + card('<p class="text-sm text-gray-500 text-center">Loading bookings…</p>');
     if (!list.length) return head + tt + card('<p class="text-xs text-gray-500">No bookings yet. They appear here, and in your email, as they come in.</p>');
     const now = Date.now();
     const order = (x) => (x.status === 'pending' ? 0 : 1);
@@ -1152,7 +1152,7 @@
       if (x.status === 'cancelled') label = x.cancelledBy === 'customer' ? 'Cancelled by them' : 'Cancelled by you';
       if (x.moved && x.status !== 'cancelled') label += ' · moved by them';
       const past = new Date(x.startsAt).getTime() < now;
-      return `<li class="border ${x.status === 'pending' ? 'border-indigo-200' : 'border-gray-200'} rounded-lg p-3 ${past ? 'opacity-70' : ''}">
+      return `<li class="border ${x.status === 'pending' ? 'border-emerald-200' : 'border-gray-200'} rounded-lg p-3 ${past ? 'opacity-70' : ''}">
         <div class="flex flex-wrap items-center justify-between gap-2"><p class="text-xs font-bold text-gray-900">${esc(x.when)}</p><span class="text-xs font-bold ${tone}">${esc(label)}</span></div>
         <p class="text-xs text-gray-800 mt-1">${esc(x.what)} · ${esc(x.customerName)}${x.reminded ? ' <span class="text-gray-500">· reminder sent</span>' : ''}</p>
         <p class="text-xs text-gray-600 mt-1"><a class="underline" href="mailto:${esc(x.customerEmail)}">${esc(x.customerEmail)}</a>${x.customerPhone ? ` · <a class="underline" href="tel:${esc(x.customerPhone)}">${esc(x.customerPhone)}</a>` : ''}</p>
@@ -1194,7 +1194,7 @@
         <div class="md:col-span-2">${btn('data-session-add', 'Add these dates', true)}</div></div>`
       : `<p class="text-xs text-gray-500 mt-2">First add your classes or events (with their prices) in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')}.</p>`;
     const now = Date.now();
-    const rows = !tt ? '<p class="text-xs text-gray-400 mt-3">Loading…</p>'
+    const rows = !tt ? '<p class="text-xs text-gray-500 mt-3">Loading…</p>'
       : !tt.length ? '<p class="text-xs text-gray-500 mt-3">No dates added yet.</p>'
         : `<ul class="space-y-2 mt-3">${tt.map((x) => {
           const past = new Date(x.endsAt).getTime() < now;
@@ -1293,7 +1293,7 @@
         return `<li ${now ? 'aria-current="step"' : ''}>${done
           ? `<button type="button" data-site-setup-step="${n}" class="sb-tap flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-gray-50" aria-label="Step ${n}, done: ${esc(label)}. Go back to it">${inner}</button>`
           : `<span class="flex items-center gap-2 px-2 py-1">${inner}<span class="sr-only">${now ? ' (this step)' : ' (to do)'}</span></span>`}</li>`;
-      }).join('')}</ol>`, 'border-indigo-200');
+      }).join('')}</ol>`, 'border-emerald-200');
   }
   function setupSkipHtml() {
     return card(`<p class="text-sm font-black text-gray-900">Or start without either</p>
@@ -1310,7 +1310,7 @@
   function draftCard(where) {
     const s = state.data.site;
     if (s.drafting && state.data.import && state.data.import.status === 'reading') return '';
-    if (s.drafting) return card('<p class="text-sm font-semibold text-indigo-700">Drafting your whole site — this takes a minute or two. You can leave this page; you\'ll be notified when it\'s ready.</p>');
+    if (s.drafting) return card('<p class="text-sm font-semibold text-emerald-800">Drafting your whole site — this takes a minute or two. You can leave this page; you\'ll be notified when it\'s ready.</p>');
     const who = esc(state.assistantName || 'Your Website Assistant');
     const form = `
       <textarea data-site-draft-request rows="2" class="${inputCls} mt-3" placeholder="Anything to include? e.g. a page for each service, a friendly tone, mention free delivery"></textarea>
@@ -1322,7 +1322,7 @@
         : `<p class="text-sm font-black text-gray-900">Let ${who} write your site</p>
         <p class="text-xs text-gray-500 mt-1">It writes every page from your business details, products and set-up answers, using only the things you chose for your website. You then change anything you like. Uses 1 task.</p>`}
         ${form}
-        <div class="mt-3">${btn('data-site-draft', def().settings.template ? 'Write the words' : 'Write my site', true)}</div>`, 'border-indigo-200');
+        <div class="mt-3">${btn('data-site-draft', def().settings.template ? 'Write the words' : 'Write my site', true)}</div>`, 'border-emerald-200');
     }
     return `<details class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
       <summary class="text-sm font-black text-gray-900 cursor-pointer">Start again from scratch</summary>
@@ -1340,7 +1340,7 @@
     const s = state.data.site;
     const who = esc(state.assistantName || 'Your Website Assistant');
     if (imp && imp.status === 'reading' && s.drafting) {
-      return card(`<p class="text-sm font-semibold text-indigo-700">Reading your site at ${esc(imp.sourceUrl)} — this takes a minute or two. You can leave this page; you'll be notified when the imported draft is ready to look at.</p>`, 'border-indigo-200');
+      return card(`<p class="text-sm font-semibold text-emerald-800">Reading your site at ${esc(imp.sourceUrl)} — this takes a minute or two. You can leave this page; you'll be notified when the imported draft is ready to look at.</p>`, 'border-emerald-200');
     }
     if (imp && imp.status === 'ready') return importReviewCard(imp);
     const f = state.importForm;
@@ -1363,7 +1363,7 @@
       <p class="text-xs text-gray-500 mt-2">${who} reads your home page and the pages in its menu (up to ${esc(state.data.maxPages)} on your plan) and lays your own words out as your new site. Nothing is reworded or made up — anything missing is left in [square brackets] for you. Prices aren't copied; they belong in Business Information. You see the result before it replaces anything. Uses 1 task, only if a draft is made.</p>`;
     if (where === 'start') {
       return card(`<p class="text-sm font-black text-gray-900">Already have a website?</p>
-        <p class="text-xs text-gray-500 mt-1">Bring it over from Wix, Squarespace, WordPress or anywhere else.</p>${form}`, 'border-indigo-200');
+        <p class="text-xs text-gray-500 mt-1">Bring it over from Wix, Squarespace, WordPress or anywhere else.</p>${form}`, 'border-emerald-200');
     }
     return `<details class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
       <summary class="text-sm font-black text-gray-900 cursor-pointer">Import my current site</summary>${form}</details>`;
@@ -1397,7 +1397,7 @@
         ${btn('data-site-import-use', 'Use this as my draft', state.previewImport)}
         ${btn('data-site-import-discard', 'Discard')}
       </div>
-      <p class="text-xs text-gray-500 mt-2">"Use this as my draft" replaces your current draft with the imported pages, keeping your design. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing goes live until you publish.'}</p>`, 'border-indigo-200');
+      <p class="text-xs text-gray-500 mt-2">"Use this as my draft" replaces your current draft with the imported pages, keeping your design. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing goes live until you publish.'}</p>`, 'border-emerald-200');
   }
 
   // ── Publish ────────────────────────────────────────────────────────────────
@@ -1430,7 +1430,7 @@
         ${live ? `<a href="${esc(s.url)}" target="_blank" rel="noopener" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">View live site</a>${btn('data-site-unpublish', 'Take offline')}` : ''}
         ${s.publishedVersion ? btn('data-site-versions', state.versions ? 'Hide earlier versions' : 'Earlier versions') : ''}
       </div>
-      ${s.publishBlocker && s.slug ? `<p class="text-xs font-semibold text-amber-800 mt-2">${esc(s.publishBlocker)}</p>` : ''}`;
+      ${s.publishBlocker ? `<p class="text-xs font-semibold text-amber-800 mt-2">${esc(s.publishBlocker)}</p>` : ''}`;
     const versions = state.versions ? `<ul class="mt-3 space-y-1">${state.versions.length ? state.versions.map((v) => `
         <li class="flex flex-wrap items-center justify-between gap-2 text-xs border border-gray-200 rounded-lg px-3 py-2">
           <span>Version ${esc(v.version)} · ${esc(new Date(v.publishedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }))} · ${esc(v.pages)} page${v.pages === 1 ? '' : 's'}${v.version === s.publishedVersion && live ? ' · <strong>live</strong>' : ''}</span>
@@ -1627,7 +1627,7 @@
   function render() {
     const host = document.querySelector(`[data-site-host="${state.surface}"]`);
     if (!host) return;
-    if (!state.loaded) { host.innerHTML = card('<p class="text-sm text-gray-400 text-center">Loading your website…</p>'); return; }
+    if (!state.loaded) { host.innerHTML = card('<p class="text-sm text-gray-500 text-center">Loading your website…</p>'); return; }
     if (state.loadError && !state.data) { host.innerHTML = card(`<p class="text-sm font-bold text-gray-700 text-center">Could not load your website</p><p class="text-xs text-gray-500 mt-2 text-center">${esc(state.loadError)}</p><div class="mt-3 text-center">${btn('data-site-retry', 'Try again', true)}</div>`); return; }
     paintTabBadges();
     if (state.surface !== 'website') {
@@ -1637,7 +1637,7 @@
       afterPaint(host);
       return;
     }
-    const tabs = [['pages', 'Pages'], ['design', 'Design'], ['templates', 'Templates'], ['details', 'Details']].map(([k, l]) => btn(`data-site-panel="${k}"`, esc(l), state.panel === k)).join(' ');
+    const tabs = [['pages', 'Pages'], ['design', 'Design'], ['templates', 'Templates'], ['details', 'Details']].map(([k, l]) => btn(`data-site-panel="${k}" aria-pressed="${state.panel === k}"`, esc(l), state.panel === k)).join(' ');
     if (!host.querySelector(':scope > [data-site-layout]')) {
       host.innerHTML = '<div data-site-layout class="grid gap-4 lg:grid-cols-2"><div class="space-y-4 min-w-0"></div><div class="min-w-0"></div></div>';
     }
