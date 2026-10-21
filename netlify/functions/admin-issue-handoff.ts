@@ -29,7 +29,7 @@ import { Handler } from '@netlify/functions';
 import { and, eq, asc, lt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { issueReports, issueReportMessages, users } from '../../db/schema';
-import { ISSUE_STATUS_LABEL, maybeAdvanceToReadyToTest, triggerStagingDeployIfDrained, triggerProdDeploy } from '../../src/utils/issue-reports';
+import { ISSUE_STATUS_LABEL, maybeAdvanceToReadyToTest, triggerStagingDeployIfDrained, triggerProdDeploy, reclaimStaleMerges } from '../../src/utils/issue-reports';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
@@ -144,6 +144,9 @@ export default withLambda(async (event) => {
     // A super-admin pressed "Merge to staging" (dev_merge_status='queued'); the runner
     // claims it (queued → merging), merges the PR, then POSTs ?action=merge-result.
     if (event.httpMethod === 'GET' && action === 'claim-merge') {
+        // Self-heal any merge stranded by a runner that died mid-merge before claiming new work.
+        await reclaimStaleMerges(db).catch((e) => console.error('[handoff] merge reclaim failed:', e?.message || e));
+
         const [next] = await db
             .select({ id: issueReports.id })
             .from(issueReports)

@@ -17,7 +17,7 @@ import { and, eq, ne, desc, asc, sql, or, isNull, isNotNull, inArray, notInArray
 import { getDb } from '../../db/client';
 import { issueReports, issueReportMessages, users } from '../../db/schema';
 import { hasPermission } from '../../src/utils/rbac';
-import { ISSUE_STATUS_LABEL, isIssueStatus, notifyIssueUser, maybeAdvanceToReadyToTest, type IssueStatus } from '../../src/utils/issue-reports';
+import { ISSUE_STATUS_LABEL, isIssueStatus, notifyIssueUser, maybeAdvanceToReadyToTest, reclaimStaleMerges, isMergeClaimStale, STALE_MERGE_MINS, type IssueStatus } from '../../src/utils/issue-reports';
 import { createRoadmapItemFromIssue, isRoadmapPriority, type RoadmapPriority } from '../../src/utils/feature-roadmap';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -228,34 +228,60 @@ export default withLambda(async (event) => {
         if (!hasPermission(admin.role, 'deploy_code')) {
             return json(403, { error: 'Merging to staging requires the deploy_code privilege.' });
         }
+        let body: any = {};
+        try { body = event.body ? JSON.parse(event.body) : {}; } catch { /* body is optional here */ }
+        const force = body?.force === true;
+
         const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (!issue) return json(404, { error: 'Issue not found.' });
         if (!issue.devPrUrl) return json(400, { error: 'This issue has no pull request to merge.' });
         if (issue.devSqlStatus === 'pending') {
             return json(400, { error: 'Run the database migration for this fix before merging to staging.' });
         }
-        if (issue.devMergeStatus === 'queued' || issue.devMergeStatus === 'merging') {
-            return json(409, { error: 'A merge is already in progress for this issue.' });
-        }
         if (issue.devMergeStatus === 'merged') {
             return json(409, { error: 'This pull request has already been merged.' });
         }
+        // 'queued' means no runner has picked it up yet — re-queuing changes nothing, so it's a
+        // plain 409. A 'merging' claim blocks a re-request too, UNLESS the runner has gone quiet
+        // (no heartbeat for STALE_MERGE_MINS): then a super-admin can force it, instead of the
+        // issue being 409'd forever. `canForce` tells the UI to offer that retry.
+        if (issue.devMergeStatus === 'queued') {
+            return json(409, { error: 'A merge is already queued for this issue — it starts as soon as a developer runner is online.', canForce: false });
+        }
+        const stuck = issue.devMergeStatus === 'merging';
+        if (stuck && !force) {
+            return isMergeClaimStale(issue.devRunnerHeartbeat)
+                ? json(409, { error: `The merge looks stuck — the runner hasn't responded for over ${STALE_MERGE_MINS} minutes. Force a re-queue to hand it back to the developer runner.`, canForce: true })
+                : json(409, { error: 'A merge is already in progress for this issue.', canForce: false });
+        }
 
-        await db.update(issueReports).set({
+        // Compare-and-swap on the status we just read, so a runner reporting its result in the
+        // meantime isn't overwritten by a stale force.
+        const queued = await db.update(issueReports).set({
             devMergeStatus: 'queued',
             devMergeResult: null,
+            devRunnerId: null,
+            devRunnerHeartbeat: null,
             updatedAt: new Date(),
-        }).where(eq(issueReports.id, id));
+        }).where(and(
+            eq(issueReports.id, id),
+            issue.devMergeStatus ? eq(issueReports.devMergeStatus, issue.devMergeStatus) : isNull(issueReports.devMergeStatus),
+        )).returning({ id: issueReports.id });
+        if (queued.length === 0) {
+            return json(409, { error: 'This merge changed state while you were looking at it — reload the ticket and try again.' });
+        }
 
         await db.insert(issueReportMessages).values({
             issueId: id,
             authorType: 'admin',
             authorId: admin.id,
-            body: "🔀 We've queued this fix to merge into staging — it should be there shortly.",
+            body: stuck
+                ? '🔁 Merge force-requeued — the previous attempt appeared stuck, so it was reset and handed back to the developer runner.'
+                : "🔀 We've queued this fix to merge into staging — it should be there shortly.",
             status: null,
         });
 
-        return json(200, { ok: true, devMergeStatus: 'queued' });
+        return json(200, { ok: true, devMergeStatus: 'queued', forced: stuck });
     }
 
     // ── POST ?action=request-prod-promote: promote a staging-verified fix to prod ──
@@ -390,6 +416,9 @@ export default withLambda(async (event) => {
 
     // ── GET list ─────────────────────────────────────────────────────────────────
     if (event.httpMethod === 'GET') {
+        // Self-heal merges stranded by a dead runner so the list reflects true state.
+        await reclaimStaleMerges(db).catch((e) => console.error('[issue-reports] merge reclaim failed:', e?.message || e));
+
         const status = qs.status && isIssueStatus(qs.status) ? qs.status : null;
         const where = status ? eq(issueReports.status, status) : undefined;
         const rows = await db
