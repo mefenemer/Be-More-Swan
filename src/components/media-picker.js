@@ -137,7 +137,9 @@
     let closed = false;
     const msg = $('[data-mp-msg]');
     const say = (text, bad) => { msg.textContent = text || ''; msg.className = `text-xs font-semibold px-5 mt-2 ${bad ? 'text-red-600' : 'text-gray-600'}`; };
-    const close = () => { closed = true; back.remove(); document.removeEventListener('keydown', onKey); document.removeEventListener('paste', onPaste); };
+    // Focus goes into the picker and comes back to the button that opened it (dialogs.js holdDialogFocus).
+    const release = window.holdDialogFocus ? window.holdDialogFocus(back, $('[data-mp-close]')) : () => {};
+    const close = () => { closed = true; back.remove(); document.removeEventListener('keydown', onKey); document.removeEventListener('paste', onPaste); release(); };
     const done = $('[data-mp-done]');
     const refreshDone = () => {
       if (!done) return;

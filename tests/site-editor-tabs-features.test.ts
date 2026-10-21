@@ -78,7 +78,7 @@ check('a swan on every section (list and preview) sends the request to the chat,
 });
 check('"Draft my whole site": up front on a new site, otherwise "Start again" folded into Details', () => {
     const ed = read('src/components/assistant-site-editor.js');
-    assert.ok(ed.includes("['draft', isFresh() || state.data.site.drafting || (def().settings.template && !state.data.site.publishedVersion) ? draftCard('start') : '']"), 'up front on a new site, or one started from a template');
+    assert.ok(ed.includes("['draft', (fresh ? step === 3 || s.drafting : s.drafting || (def().settings.template && !s.publishedVersion)) ? draftCard('start') : '']"), 'step 3 of a new site, or up front on one started from a template');
     assert.ok(ed.includes("detailsPanel() + draftCard('again')") && ed.includes('Start again from scratch'));
     assert.ok(!ed.includes('          ${draftCard()}'), 'no longer under every panel');
 });
@@ -91,7 +91,7 @@ check('a click or the drafting poll no longer reloads the preview or wipes what 
     assert.ok(ed.includes("if (frame.dataset.src !== src) { frame.dataset.src = src; frame.src = src; }"));
     assert.ok(!/host\.innerHTML = `[\s\S]{0,200}previewHtml/.test(ed), 'the whole tab is no longer one innerHTML write');
     // The template galleries are rewritten only when their HTML changed.
-    assert.ok(ed.includes("['templates', isFresh() && !def().settings.template ? templatesCard(true) : '', { keep: true }]"));
+    assert.ok(ed.includes("['templates', step === 2 && !def().settings.template ? templatesCard(true) : '', { keep: true }]"));
     // A poll with nothing new does not repaint.
     assert.ok(/const same = state\.loaded && sig === state\.dataSig;[\s\S]{0,120}if \(!same\) \{ keepEditing\(\); state\.version\+\+; rerender\(\); \}/.test(ed));
     // Typed text is kept unless the server changed that box; the section form keeps its own (by position).
@@ -103,12 +103,59 @@ check('labels name their boxes, buttons are 44px at phone width, and notes are a
     assert.ok(/function nameFields\(root\)[\s\S]{0,600}l\.htmlFor = box\.id;/.test(ed));
     assert.ok(/function afterPaint\(host\) \{\s*nameFields\(host\);/.test(ed));
     assert.ok(ed.includes('aria-label="Picture ${i + 1}: what it shows (needed)"'));
-    assert.ok(ed.includes("'@media (max-width: 639px) { .sb-tap { min-height: 44px; min-width: 44px; } }'"));
+    assert.ok(ed.includes("'@media (max-width: 639px) { .sb-tap { min-height: 44px; min-width: 44px; }"));
     assert.ok(/const btn = [^\n]*sb-tap/.test(ed), 'every btn() gets the phone tap size');
     assert.ok(!/class="text-xs text-gray-[56]00 underline[^"]*">(Remove|\+ Add another|Cancel)/.test(ed), 'no small text-link buttons in the section form');
     assert.ok(ed.includes("['note', noteHtml(), { live: true }]") && ed.includes("el.setAttribute('aria-live', 'polite')"));
     assert.ok(/state\.focusSection = ed\.sectionId \|\|/.test(ed), 'after a save the edited section comes back into view');
     assert.ok(/r\.top < 0 \|\| r\.bottom > window\.innerHeight[\s\S]{0,120}showToast\(state\.note\.text/.test(ed), 'a note out of sight is also a toast');
+});
+
+console.log('\nMedium items (UI review, 2026-10-21)');
+
+check('a new site is set up one numbered step at a time, with one main button, and nothing to publish yet', () => {
+    const ed = read('src/components/assistant-site-editor.js');
+    assert.ok(/function setupStep\(\) \{[\s\S]{0,300}if \(!featuresOn\(\)\) return 1;[\s\S]{0,200}return 2;[\s\S]{0,40}return 3;/.test(ed));
+    assert.ok(ed.includes('aria-current="step"') && ed.includes('data-site-setup-step') && ed.includes('data-site-setup-skip'));
+    assert.ok(ed.includes("['publish', fresh ? '' : publishCard()]"), 'Publish waits for a draft');
+    assert.ok(ed.includes("primary && !quietPrimary ? 'btn-primary'") && ed.includes('quietPrimary = fresh && !state.editing;'));
+    assert.ok(ed.includes("btn('data-site-words-open', 'Add your own words')"), '"Add your own words" is an option, not a main button');
+});
+
+check('narrow screens: a Preview button in reach opens it full screen; no device switch on a phone; the frame fits the screen', () => {
+    const ed = read('src/components/assistant-site-editor.js');
+    assert.ok(ed.includes("'Preview my site'") && ed.includes("{ attrs: { 'data-sb-narrow-only': '', style: 'position:sticky;bottom:12px;"), 'sticky on the block wrapper, so it stays in reach');
+    assert.ok(ed.includes("slot.toggleAttribute('data-sb-full', !!state.previewFull)") && ed.includes("btn('data-site-preview-close', 'Close preview', true)"));
+    assert.ok(/<div class="flex gap-1" data-sb-wide-only>/.test(ed));
+    assert.ok(ed.includes('height:min(720px, 70vh)'));
+    assert.ok(/activate\(surface\) \{\s*setPreviewFull\(false\);/.test(ed), 'leaving the tab never leaves the preview covering the page');
+});
+
+check('dialogs built here keep keyboard focus and give it back; switching device or mode changes only the frame', () => {
+    const dj = read('dialogs.js');
+    assert.ok(/window\.holdDialogFocus = function \(root, first\)/.test(dj) && /before\.focus\(\)/.test(dj));
+    const ed = read('src/components/assistant-site-editor.js');
+    assert.strictEqual((ed.match(/window\.holdDialogFocus\(back, back\.querySelector\('\[data-tpl-close\]'\)\)/g) || []).length, 2, 'template viewer and gallery');
+    assert.ok(ed.includes("if (dv) { view.device = dv.dataset.tplDevice; update(); return; }") && !/view\.(mode|keepColours) = [^;]+; paint\(\);/.test(ed));
+    assert.ok(/window\.holdDialogFocus\(back, \$\('\[data-mp-close\]'\)\)/.test(read('src/components/media-picker.js')));
+});
+
+check('adding a section: a picker that says what each is for, and "+ Add here" between sections', () => {
+    const ed = read('src/components/assistant-site-editor.js');
+    assert.ok(!ed.includes('data-site-new-type'), 'the bare list of names is gone');
+    assert.ok(/const TYPE_INFO = \{[\s\S]{0,200}hero: \[/.test(ed) && ed.includes('data-site-new-section="${esc(t)}"'));
+    assert.ok(ed.includes('data-site-add-open data-at="${i}"'));
+    assert.ok(ed.includes("...(ed.index != null && !moving ? { index: ed.index } : {})"), 'added where it was asked for');
+    const r = applySiteOperation(site(), { op: 'add_section', pageId: site().pages[0].id, section: { type: 'faq', props: { items: [{ q: 'Q?', a: 'A.' }] } }, index: 0 } as never);
+    assert.ok(r.ok && r.definition.pages[0].sections[0].type === 'faq', 'the server honours the position');
+});
+
+check('a picture with no description: said in words, announced, and Save stops before the server drops it', () => {
+    const ed = read('src/components/assistant-site-editor.js');
+    assert.ok(ed.includes('data-g-alt data-alt-needed aria-required="true"') && ed.includes("im.alt ? '' : 'aria-invalid=\"true\"'"));
+    assert.ok(ed.includes('Needed — a few words on what it shows.') && ed.includes('still need${missing === 1 ?'));
+    assert.ok(/const noAlt = \[\.\.\.form\.querySelectorAll\('\[data-alt-needed\]'\)\][\s\S]{0,500}role="alert"[\s\S]{0,600}return;/.test(ed));
+    assert.ok(/matches\('\[data-alt-needed\]'\)\) markAlt\(e\.target\)/.test(ed), 'kept in step as they type');
 });
 
 console.log(`\n${passed}/${total} passed\n`);

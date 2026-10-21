@@ -158,7 +158,7 @@
     thumbs: {}, bookings: null, timetable: null,
     words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
     importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false,
-    dataSig: null, noteShown: null, focusSection: null, focusEditor: false, focusSel: null, busy: false, trigger: null, noteAt: null,
+    dataSig: null, noteShown: null, focusSection: null, focusEditor: false, setupStep: null, setupSkipped: false, adding: null, previewFull: false, focusSel: null, busy: false, trigger: null, noteAt: null,
   };
 
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -304,13 +304,23 @@
 
   // ── Render ─────────────────────────────────────────────────────────────────
   function card(inner, extra = '') { return `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 ${extra}">${inner}</div>`; }
-  const btn = (attrs, label, primary) => `<button type="button" ${attrs} class="${primary ? 'btn-primary' : 'btn-secondary border'} sb-tap px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">${label}</button>`;
-  // At phone width every button here is at least 44px square to tap (WCAG 2.5.5). The prebuilt
-  // style.css has no min-h-[44px] or sm: variant of it, so the one rule is added here, once.
+  // While a new site is being set up, only the current step's button is the main (pink) one.
+  let quietPrimary = false;
+  const btn = (attrs, label, primary) => `<button type="button" ${attrs} class="${primary && !quietPrimary ? 'btn-primary' : 'btn-secondary border'} sb-tap px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">${label}</button>`;
+  // Rules the prebuilt style.css has no utilities for, added here once: every button at least 44px
+  // square at phone width (WCAG 2.5.5); what shows only on narrow or wide screens; the preview full screen.
   if (!document.getElementById('sb-tap-style')) {
     const st = document.createElement('style');
     st.id = 'sb-tap-style';
-    st.textContent = '@media (max-width: 639px) { .sb-tap { min-height: 44px; min-width: 44px; } }';
+    st.textContent = [
+      '@media (max-width: 639px) { .sb-tap { min-height: 44px; min-width: 44px; } [data-sb-wide-only] { display: none !important; } }',
+      '@media (min-width: 1024px) { [data-sb-narrow-only] { display: none !important; } }',
+      'iframe[data-site-preview] { max-width: 100%; }',
+      '[data-sb-full] { position: fixed; inset: 0; z-index: 10500; background: #fff; overflow: auto; }',
+      '[data-sb-full] > div { height: 100%; display: flex; flex-direction: column; padding: 8px !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }',
+      '[data-sb-full] [data-sb-frame-box] { flex: 1; min-height: 0; }',
+      '[data-sb-full] iframe[data-site-preview] { height: 100% !important; }',
+    ].join('\n');
     document.head.appendChild(st);
   }
 
@@ -346,6 +356,16 @@
     note.textContent = n > max ? `Too long by ${n - max} character${n - max === 1 ? '' : 's'} — it would be shortened to fit. Trim it here so it ends where you want.` : `${n} / ${max} characters`;
   }
 
+  /** "Needed" under a picture's description box while it is empty — kept in step by markAlt as they type. */
+  const altHint = (alt) => `<p data-alt-hint class="text-xs font-bold text-amber-800 mt-1" ${alt ? 'hidden' : ''}>Needed — a few words on what it shows. Without them the picture is left out.</p>`;
+  function markAlt(el) {
+    const empty = !el.value.trim();
+    el.classList.toggle('border-amber-500', empty);
+    if (empty) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid');
+    const hint = el.nextElementSibling;
+    if (hint && hint.hasAttribute('data-alt-hint')) hint.hidden = !empty;
+  }
+
   function fieldHtml(f, value) {
     const name = `f-${f.k}`;
     const req = f.required ? ' <span class="text-red-500">*</span>' : '';
@@ -375,7 +395,7 @@
       return `<p class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
         ${pictureHtml(v, { pick: `data-site-pick="${esc(f.k)}"`, clear: `data-site-pick-clear="${esc(f.k)}"` }, !!f.video)}
         <input type="hidden" name="${name}-asset" value="${esc(v.assetId || '')}"><input type="hidden" name="${name}-video" value="${v.video ? '1' : ''}">
-        <input name="${name}-alt" class="${inputCls} mt-2 ${has && !v.alt ? 'border-amber-500' : ''}" placeholder="What the picture shows — e.g. Our roastery in Leeds (needed)" value="${esc(v.alt || '')}">
+        <input name="${name}-alt" ${has ? `data-alt-needed aria-required="true" ${v.alt ? '' : 'aria-invalid="true"'}` : ''} class="${inputCls} mt-2 ${has && !v.alt ? 'border-amber-500' : ''}" placeholder="What the picture shows — e.g. Our roastery in Leeds (needed)" value="${esc(v.alt || '')}">${has ? altHint(v.alt) : ''}
         <details class="mt-1" ${!v.assetId && v.url ? 'open' : ''}><summary class="text-xs text-gray-500 cursor-pointer">Use a web address instead</summary>
           <input name="${name}-url" class="${inputCls} mt-1" placeholder="https://… picture address" value="${esc(v.assetId ? '' : (v.url || ''))}"></details>`;
     }
@@ -470,14 +490,15 @@
     }
     if (f.kind === 'gallery') {
       const list = Array.isArray(value) ? value : [];
-      return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)} <span class="font-normal text-gray-500">(${list.length} of 24)</span></p>
+      const missing = list.filter((im) => !im.alt).length;
+      return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)} <span class="font-normal text-gray-500">(${list.length} of 24)</span>${missing ? ` <span class="text-amber-800">· ${missing} still need${missing === 1 ? 's' : ''} a description</span>` : ''}</p>
         <div data-gallery class="space-y-2 mt-1">${list.map((im, i) => {
           const src = im.assetId ? thumbOf(im.assetId) : (im.url || '');
           return `<div class="flex gap-3 border border-gray-200 rounded-lg p-2" data-gallery-item>
             <input type="hidden" data-g-asset value="${esc(im.assetId || '')}"><input type="hidden" data-g-url value="${esc(im.assetId ? '' : (im.url || ''))}"><input type="hidden" data-g-video value="${im.video ? '1' : ''}">
             ${src ? thumbHtml(src, im.video, 72, 72) : '<span style="width:72px;height:72px;flex-shrink:0" class="bg-gray-100 rounded-lg"></span>'}
             <div class="flex-1 min-w-0">
-              <input data-g-alt aria-label="Picture ${i + 1}: what it shows (needed)" class="${inputCls} ${im.alt ? '' : 'border-amber-500'}" placeholder="What the picture shows (needed)" value="${esc(im.alt || '')}">
+              <input data-g-alt data-alt-needed aria-required="true" ${im.alt ? '' : 'aria-invalid="true"'} aria-label="Picture ${i + 1}: what it shows (needed)" class="${inputCls} ${im.alt ? '' : 'border-amber-500'}" placeholder="What the picture shows (needed)" value="${esc(im.alt || '')}">${altHint(im.alt)}
               <input data-g-caption aria-label="Picture ${i + 1}: caption (optional)" class="${inputCls} mt-1" placeholder="Caption under it (optional)" value="${esc(im.caption || '')}">
               <div class="flex flex-wrap gap-1 mt-1">
                 ${i > 0 ? btn(`data-gallery-move="${i}" data-to="${i - 1}"`, 'Move up') : ''}
@@ -667,11 +688,41 @@
     }
   }
 
+  /** What each kind of section is for, in the owner's words — shown when adding one. */
+  const TYPE_INFO = {
+    hero: ['👋', 'The big opening: a headline, a line under it, buttons and a picture'],
+    features: ['✨', 'A few short points side by side — what you offer, or why choose you'],
+    steps: ['🔢', 'How it works, step by step'],
+    text: ['📝', 'A heading and paragraphs, with a picture beside them if you like'],
+    faq: ['❓', 'Questions people ask, with your answers'],
+    testimonials: ['💬', 'What customers have said about you'],
+    cta: ['👉', 'A short nudge with one button — book, call or buy'],
+    contact: ['✉️', 'A form visitors fill in to send you a message'],
+    signup: ['📨', 'One of your sign-up forms, to grow your email list'],
+    products: ['🛍️', 'Things to buy, from Business Information'],
+    booking: ['📅', 'Let people book appointments, tables or classes'],
+    hours: ['🕒', 'Opening hours, where to find you and contact buttons'],
+    menu: ['📋', 'A price list or menu, from Business Information'],
+    gallery: ['🖼️', 'Your own pictures and videos in a grid'],
+    reviews: ['⭐', 'Quotes from your customer reviews'],
+    social_feed: ['📣', 'Your latest posts published through Be More Swan'],
+  };
+  function addPickerHtml(here) {
+    const types = state.data.vocab.sectionTypes.filter((t) => typeAllowed(t) && FORMS[t]);
+    return `<li data-site-add-picker class="border border-gray-300 rounded-lg p-3 bg-gray-50">
+      <div class="flex items-center justify-between gap-2"><p class="text-xs font-black text-gray-900">What would you like to add${here ? ' here' : ''}?</p>${btn('data-site-add-close', 'Cancel')}</div>
+      <div class="grid gap-2 sm:grid-cols-2 mt-2">${types.map((t) => `<button type="button" data-site-new-section="${esc(t)}" class="sb-tap text-left bg-white border border-gray-200 rounded-lg p-2 hover:shadow-sm flex gap-2 items-start">
+          <span aria-hidden="true" style="font-size:18px;line-height:1.2">${(TYPE_INFO[t] || ['➕'])[0]}</span>
+          <span class="min-w-0"><span class="block text-xs font-bold text-gray-900">${esc(TYPE_LABEL[t] || t)}</span><span class="block text-xs text-gray-500">${esc((TYPE_INFO[t] || ['', ''])[1])}</span></span></button>`).join('')}</div></li>`;
+  }
+
   function pagesPanel() {
     const d = def();
     const p = page();
     const pageTabs = d.pages.map((x) => `<button type="button" data-site-page="${esc(x.id)}" class="sb-tap px-3 py-1.5 text-xs font-bold rounded-lg border ${x.id === p.id ? 'btn-primary' : 'btn-secondary'}">${esc(x.title)}</button>`).join(' ');
+    const adding = state.adding && state.adding.pageId === p.id ? state.adding : null;
     const sections = p.sections.map((s, i) => `
+      ${i > 0 ? (adding && adding.at === i ? addPickerHtml(true) : `<li class="flex justify-center">${btn(`data-site-add-open data-at="${i}" aria-label="Add a section here, after ${esc(TYPE_LABEL[p.sections[i - 1].type])}"`, '+ Add here')}</li>`) : ''}
       <li class="border border-gray-200 rounded-lg p-3 flex flex-wrap items-center justify-between gap-2">
         <div class="min-w-0"><p class="text-xs font-bold text-gray-900">${esc(TYPE_LABEL[s.type])}${s.look && s.look.menuLabel && d.structure === 'one_page' ? ` <span class="font-semibold text-indigo-700">· In the menu as “${esc(s.look.menuLabel)}”</span>` : ''}</p><p class="text-xs text-gray-500 truncate">${esc(sectionSummary(s))}</p></div>
         <div class="flex flex-wrap gap-1">
@@ -691,8 +742,8 @@
         <div class="flex flex-wrap gap-2 items-center">${pageTabs}
           ${d.pages.length < state.data.maxPages ? btn('data-site-add-page', '+ Page') : `<span class="text-xs text-gray-500">${esc(state.data.maxPages)} of ${esc(state.data.maxPages)} pages on your plan — the most it includes.</span> ${btn('data-site-billing', 'See plans')}`}</div>
         <p class="text-sm font-black text-gray-900 mt-4 mb-3">Sections on ${esc(p.title)}</p>
-        <ul class="space-y-2">${sections || '<li class="text-xs text-gray-500">No sections yet.</li>'}</ul>
-        <div class="flex flex-wrap gap-2 items-center mt-4"><select data-site-new-type aria-label="Kind of section to add" class="${inputCls}" style="max-width:220px">${state.data.vocab.sectionTypes.filter(typeAllowed).map((t) => `<option value="${esc(t)}">${esc(TYPE_LABEL[t] || t)}</option>`).join('')}</select>${btn('data-site-new-section', 'Add a section')}</div>`)}
+        <ul class="space-y-2">${sections || (adding ? '' : '<li class="text-xs text-gray-500">No sections yet.</li>')}${adding && adding.at == null ? addPickerHtml(false) : ''}</ul>
+        ${adding && adding.at == null ? '' : `<div class="mt-4">${btn('data-site-add-open', '+ Add a section')}</div>`}`)}
       ${state.editing ? editorHtml() : ''}
       ${wordsCard(p)}
       ${card(`
@@ -730,7 +781,7 @@
       return card(`<div class="flex flex-wrap items-center justify-between gap-2">
         <div><p class="text-sm font-black text-gray-900">Have your own words for this page?</p>
         <p class="text-xs text-gray-500 mt-1">Paste them in or drop in a Word document or PDF — they're placed on the page exactly as you wrote them.</p></div>
-        ${btn('data-site-words-open', 'Add your own words', true)}</div>`);
+        ${btn('data-site-words-open', 'Add your own words')}</div>`);
     }
     return card(`
       <p class="text-sm font-black text-gray-900">Add your own words to "${esc(p.title)}"</p>
@@ -883,21 +934,36 @@
         </div>
         <div class="flex-1 bg-gray-100 p-3" style="min-height:0;overflow:auto"><iframe title="Preview of the ${esc(t.name)} template" src="${esc(tplSrc(t.id, view))}" style="display:block;margin:0 auto;width:${view.device === 'mobile' ? '390px' : '100%'};height:100%;border:0;background:#fff;border-radius:8px"></iframe></div>
         <div class="flex flex-wrap items-center justify-end gap-2 px-5 py-3 border-t border-gray-100">
-          <p class="text-xs text-gray-500 mr-auto">${view.mode === 'full' ? 'Pictures are free stock photos to swap for your own. Words in [square brackets] are for you to fill in before you publish.' : 'Your pages, words and pictures stay exactly as they are; only the look changes.'}</p>
+          <p data-tpl-note class="text-xs text-gray-500 mr-auto">${view.mode === 'full' ? 'Pictures are free stock photos to swap for your own. Words in [square brackets] are for you to fill in before you publish.' : 'Your pages, words and pictures stay exactly as they are; only the look changes.'}</p>
           <button type="button" data-tpl-use class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">${view.mode === 'full' ? `Use ${esc(t.name)}` : `Use this design`}</button>
         </div></div>`;
     };
     paint();
+    // Device, mode and colours change the frame and the words under it — the dialog isn't rebuilt.
+    const update = () => {
+      const frame = back.querySelector('iframe');
+      const src = tplSrc(t.id, view);
+      if (frame.getAttribute('src') !== src) frame.setAttribute('src', src);
+      frame.style.width = view.device === 'mobile' ? '390px' : '100%';
+      back.querySelectorAll('[data-tpl-device]').forEach((b) => {
+        const on = b.dataset.tplDevice === view.device;
+        b.className = `px-2 py-1 text-xs font-bold rounded-lg border ${on ? 'btn-primary' : 'btn-secondary'}`;
+        b.setAttribute('aria-pressed', String(on));
+      });
+      back.querySelector('[data-tpl-note]').textContent = view.mode === 'full' ? 'Pictures are free stock photos to swap for your own. Words in [square brackets] are for you to fill in before you publish.' : 'Your pages, words and pictures stay exactly as they are; only the look changes.';
+      back.querySelector('[data-tpl-use]').textContent = view.mode === 'full' ? `Use ${t.name}` : 'Use this design';
+    };
     document.body.appendChild(back);
+    const release = window.holdDialogFocus ? window.holdDialogFocus(back, back.querySelector('[data-tpl-close]')) : () => {};
     const onKey = (e) => { if (e.key === 'Escape') close(); };
-    const close = () => { back.remove(); document.removeEventListener('keydown', onKey); };
+    const close = () => { back.remove(); document.removeEventListener('keydown', onKey); release(); };
     document.addEventListener('keydown', onKey);
     back.addEventListener('click', async (e) => {
       if (e.target === back || e.target.closest('[data-tpl-close]')) { close(); return; }
       const sw = e.target.closest('[data-tpl-switch]');
       if (sw) { close(); openTemplate(sw.dataset.tplSwitch); return; }
       const dv = e.target.closest('[data-tpl-device]');
-      if (dv) { view.device = dv.dataset.tplDevice; paint(); return; }
+      if (dv) { view.device = dv.dataset.tplDevice; update(); return; }
       if (e.target.closest('[data-tpl-use]')) {
         if (view.mode === 'full' && !fresh) {
           const ok = await window.confirmModal(`Your pages are replaced with the <strong>${esc(t.name)}</strong> template's layout. Your live site doesn't change until you publish, and earlier published versions are kept.`, { title: 'Start again from this template?', confirmLabel: 'Start again', cancelLabel: 'Keep my pages' });
@@ -911,8 +977,8 @@
       }
     });
     back.addEventListener('change', (e) => {
-      if (e.target.name === 'tpl-mode') { view.mode = e.target.value; paint(); }
-      if (e.target.matches('[data-tpl-keep]')) { view.keepColours = e.target.checked; paint(); }
+      if (e.target.name === 'tpl-mode') { view.mode = e.target.value; update(); }
+      if (e.target.matches('[data-tpl-keep]')) { view.keepColours = e.target.checked; update(); }
     });
   }
   function openTemplateGallery() {
@@ -929,8 +995,9 @@
         <button type="button" data-tpl-close class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Close</button></div>
       <div class="p-5 overflow-y-auto" style="min-height:0"><div class="flex flex-wrap gap-4 justify-center">${list.map((t) => tplCard(t, 270)).join('')}</div></div></div>`;
     document.body.appendChild(back);
+    const release = window.holdDialogFocus ? window.holdDialogFocus(back, back.querySelector('[data-tpl-close]')) : () => {};
     const onKey = (e) => { if (e.key === 'Escape') close(); };
-    const close = () => { back.remove(); document.removeEventListener('keydown', onKey); };
+    const close = () => { back.remove(); document.removeEventListener('keydown', onKey); release(); };
     document.addEventListener('keydown', onKey);
     back.addEventListener('click', (e) => {
       if (e.target === back || e.target.closest('[data-tpl-close]')) { close(); return; }
@@ -1158,7 +1225,8 @@
   function previewHeadHtml(showImport) {
     return `<div class="flex flex-wrap items-center justify-between gap-2 mb-3">
         <p class="text-sm font-black text-gray-900">Preview <span class="text-xs font-semibold text-gray-500">— ${showImport ? 'your imported site (not your draft yet)' : state.data.site.status === 'published' ? 'your draft' : 'not live yet'}</span></p>
-        <div class="flex gap-1">${btn(`data-site-device="desktop"`, 'Desktop', state.device === 'desktop')}${btn(`data-site-device="mobile"`, 'Phone', state.device === 'mobile')}</div>
+        <div class="flex gap-1" data-sb-wide-only>${btn(`data-site-device="desktop" aria-pressed="${state.device === 'desktop'}"`, 'Desktop', state.device === 'desktop')}${btn(`data-site-device="mobile" aria-pressed="${state.device === 'mobile'}"`, 'Phone', state.device === 'mobile')}</div>
+        ${state.previewFull ? btn('data-site-preview-close', 'Close preview', true) : ''}
       </div>`;
   }
   function paintPreview(slot) {
@@ -1167,15 +1235,68 @@
     let frame = slot.querySelector('iframe[data-site-preview]');
     if (!frame) {
       slot.innerHTML = card(`<div data-site-preview-head></div>
-      <div class="bg-gray-100 rounded-lg p-2" style="overflow:auto"><iframe data-site-preview title="Preview of your website" style="display:block;margin:0 auto;height:720px;border:0;background:#fff;border-radius:8px"></iframe></div>`);
+      <div data-sb-frame-box class="bg-gray-100 rounded-lg p-2" style="overflow:auto"><iframe data-site-preview title="Preview of your website" style="display:block;margin:0 auto;height:min(720px, 70vh);border:0;background:#fff;border-radius:8px"></iframe></div>`);
       frame = slot.querySelector('iframe[data-site-preview]');
     }
+    slot.toggleAttribute('data-sb-full', !!state.previewFull);
+    if (state.previewFull) { slot.setAttribute('role', 'dialog'); slot.setAttribute('aria-modal', 'true'); slot.setAttribute('aria-label', 'Preview of your website'); }
+    else { slot.removeAttribute('role'); slot.removeAttribute('aria-modal'); slot.removeAttribute('aria-label'); }
     const head = slot.querySelector('[data-site-preview-head]');
     const headHtml = previewHeadHtml(showImport);
     if (head._html !== headHtml) { head.innerHTML = headHtml; head._html = headHtml; }
     // Phone: 390px wide, or the whole box on a screen narrower than that (no sideways scroll).
     frame.style.width = state.device === 'mobile' ? 'min(390px, 100%)' : '100%';
     if (frame.dataset.src !== src) { frame.dataset.src = src; frame.src = src; }
+  }
+
+  /** The preview full screen (narrow screens, where it sits below everything else) — and back. */
+  let previewRelease = null;
+  function setPreviewFull(on) {
+    if (!!state.previewFull === !!on) return;
+    state.previewFull = !!on;
+    document.body.style.overflow = on ? 'hidden' : '';
+    rerender();
+    const host = document.querySelector('[data-site-host="website"]');
+    if (on) {
+      const close = host && host.querySelector('[data-site-preview-close]');
+      previewRelease = window.holdDialogFocus && close ? window.holdDialogFocus(close.closest('[data-sb-full]'), close) : null;
+      if (!previewRelease && close) close.focus();
+    } else {
+      if (previewRelease) previewRelease();
+      previewRelease = null;
+      // The button that opened it was repainted since, so focus its replacement.
+      if (!host || !host.contains(document.activeElement)) host?.querySelector('[data-site-preview-full]')?.focus();
+    }
+  }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.previewFull) setPreviewFull(false); });
+
+  // ── A new site's first steps (UI review 2026-10-21) ─────────────────────────
+  // One at a time and numbered, each with one main button: what the website does → a template or
+  // their current site (or neither) → the words. A step already done can be gone back to.
+  function setupStep() {
+    if (state.setupStep) return state.setupStep;
+    if (!featuresOn()) return 1;
+    if (!def().settings.template && !state.data.import && !state.setupSkipped) return 2;
+    return 3;
+  }
+  function setupStepsHtml(step) {
+    const who = esc(state.assistantName || 'your assistant');
+    const steps = [[1, 'Choose what your website does'], [2, 'Pick a template, or bring your site'], [3, `Let ${who} write it`]];
+    return card(`<p class="text-sm font-black text-gray-900">Set up your website <span class="text-xs font-semibold text-gray-500">— step ${step} of 3</span></p>
+      <ol class="flex flex-wrap gap-2 mt-2" aria-label="Setting up your website">${steps.map(([n, label]) => {
+        const done = n < step;
+        const now = n === step;
+        const dot = `<span aria-hidden="true" class="inline-flex items-center justify-center rounded-full font-black ${now ? 'btn-primary' : done ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}" style="width:22px;height:22px;font-size:11px;flex-shrink:0">${done ? '✓' : n}</span>`;
+        const inner = `${dot}<span class="text-xs font-bold ${now ? 'text-gray-900' : 'text-gray-500'}">${esc(label)}</span>`;
+        return `<li ${now ? 'aria-current="step"' : ''}>${done
+          ? `<button type="button" data-site-setup-step="${n}" class="sb-tap flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-gray-50" aria-label="Step ${n}, done: ${esc(label)}. Go back to it">${inner}</button>`
+          : `<span class="flex items-center gap-2 px-2 py-1">${inner}<span class="sr-only">${now ? ' (this step)' : ' (to do)'}</span></span>`}</li>`;
+      }).join('')}</ol>`, 'border-indigo-200');
+  }
+  function setupSkipHtml() {
+    return card(`<p class="text-sm font-black text-gray-900">Or start without either</p>
+      <p class="text-xs text-gray-500 mt-1">${esc(state.assistantName || 'Your assistant')} writes your site from your business details instead. You can try a template any time from the Templates tab.</p>
+      <div class="mt-3">${btn('data-site-setup-skip', 'Skip this step')}</div>`);
   }
 
   // A new site: nothing written yet beyond the starter (never published, two sections at most).
@@ -1197,7 +1318,7 @@
         ${def().settings.template ? `<p class="text-sm font-black text-gray-900">Let ${who} write the words</p>
         <p class="text-xs text-gray-500 mt-1">It rewrites every section of your template for your business, from your details, products and set-up answers — the layout, pictures and design stay as they are. Anything it doesn't know stays in [square brackets] for you. Uses 1 task.</p>`
         : `<p class="text-sm font-black text-gray-900">Let ${who} write your site</p>
-        <p class="text-xs text-gray-500 mt-1">It writes every page from your business details, products and set-up answers, using only the things you ticked above. You then change anything you like. Uses 1 task.</p>`}
+        <p class="text-xs text-gray-500 mt-1">It writes every page from your business details, products and set-up answers, using only the things you chose for your website. You then change anything you like. Uses 1 task.</p>`}
         ${form}
         <div class="mt-3">${btn('data-site-draft', def().settings.template ? 'Write the words' : 'Write my site', true)}</div>`, 'border-indigo-200');
     }
@@ -1397,7 +1518,7 @@
       }
     });
   }
-  /** blocks: [key, html, { keep, live }] in order. An empty block is hidden; a `live` one (the note)
+  /** blocks: [key, html, { keep, live, attrs }] in order (attrs: set on the wrapper when it is made). An empty block is hidden; a `live` one (the note)
    *  stays in the page, empty and zero-height, so screen readers announce what is said in it. */
   function paintBlocks(parent, blocks) {
     const want = new Set(blocks.map(([key]) => key));
@@ -1409,6 +1530,7 @@
         el = document.createElement('div');
         el.dataset.siteBlock = key;
         if (opts.live) { el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); }
+        Object.entries(opts.attrs || {}).forEach(([k, v]) => el.setAttribute(k, v));
       }
       const at = prev ? prev.nextSibling : parent.firstChild;
       if (el !== at) parent.insertBefore(el, at);
@@ -1507,16 +1629,30 @@
       host.innerHTML = '<div data-site-layout class="grid gap-4 lg:grid-cols-2"><div class="space-y-4 min-w-0"></div><div class="min-w-0"></div></div>';
     }
     const layout = host.firstElementChild;
+    const s = state.data.site;
+    const fresh = isFresh();
+    const step = fresh ? setupStep() : 0;
+    // During set-up the panel below is for looking around: its buttons give way to the step's.
+    quietPrimary = fresh && !state.editing;
+    const panel = state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : state.panel === 'templates' ? templatesCard(false) : detailsPanel() + draftCard('again') + (state.data.import || fresh ? '' : importCard('again'));
+    quietPrimary = false;
     paintBlocks(layout.firstElementChild, [
-      ['features', featuresOn() ? '' : featuresCard(true)],
-      ['import', state.data.import || isFresh() ? importCard('start') : ''],
-      ['templates', isFresh() && !def().settings.template ? templatesCard(true) : '', { keep: true }],
-      ['draft', isFresh() || state.data.site.drafting || (def().settings.template && !state.data.site.publishedVersion) ? draftCard('start') : ''],
-      ['publish', publishCard()],
+      ['setup', fresh ? setupStepsHtml(step) : ''],
+      ['features', (fresh ? step === 1 : !featuresOn()) ? featuresCard(true) : ''],
+      ['templates', step === 2 && !def().settings.template ? templatesCard(true) : '', { keep: true }],
+      ['import', state.data.import || step === 2 ? importCard('start') : ''],
+      ['setup-skip', step === 2 && !state.data.import ? setupSkipHtml() : ''],
+      ['draft', (fresh ? step === 3 || s.drafting : s.drafting || (def().settings.template && !s.publishedVersion)) ? draftCard('start') : ''],
+      // Nothing to publish until there is a draft.
+      ['publish', fresh ? '' : publishCard()],
       ['placeholders', placeholdersCard()],
       ['tabs', `<div class="flex flex-wrap gap-2">${tabs}</div>`],
       ['note', noteHtml(), { live: true }],
-      [`panel-${state.panel}`, state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : state.panel === 'templates' ? templatesCard(false) : detailsPanel() + draftCard('again') + (state.data.import || isFresh() ? '' : importCard('again')), { keep: state.panel === 'templates' }],
+      [`panel-${state.panel}`, panel, { keep: state.panel === 'templates' }],
+      // Narrow screens: the preview is below everything, so a button that stays in reach opens it.
+      // Sticky on the wrapper itself — inside it, it could only stick within its own height.
+      ['preview-jump', btn('data-site-preview-full style="box-shadow:0 4px 14px rgba(0,0,0,.15)"', 'Preview my site'),
+        { attrs: { 'data-sb-narrow-only': '', style: 'position:sticky;bottom:12px;z-index:5;display:flex;justify-content:flex-end' } }],
     ]);
     paintPreview(layout.lastElementChild);
     afterPaint(host);
@@ -1555,6 +1691,20 @@
     if (!form || !state.assistantId) return;
     e.preventDefault();
     if (state.busy) return;
+    // A picture with no description would be left out by the server: stop here and say so, beside Save.
+    const noAlt = [...form.querySelectorAll('[data-alt-needed]')].filter((x) => !x.value.trim());
+    if (noAlt.length) {
+      noAlt.forEach(markAlt);
+      let msg = form.querySelector('[data-site-form-error]');
+      if (!msg) {
+        form.querySelector('[data-site-section-save]').insertAdjacentHTML('afterend', '<p data-site-form-error role="alert" class="text-xs font-semibold text-red-600 mt-2"></p>');
+        msg = form.querySelector('[data-site-form-error]');
+      }
+      msg.textContent = `${noAlt.length === 1 ? 'A picture still needs' : `${noAlt.length} pictures still need`} a few words on what ${noAlt.length === 1 ? 'it shows' : 'they show'} before you save.`;
+      noAlt[0].scrollIntoView({ block: 'center' });
+      noAlt[0].focus({ preventScroll: true });
+      return;
+    }
     state.trigger = e.submitter || form.querySelector('[data-site-section-save]');
     const ed = state.editing;
     const props = readForm(form, ed.type);
@@ -1564,12 +1714,13 @@
     const ops = ed.sectionId
       ? [{ op: 'update_section', pageId: ed.pageId, sectionId: ed.sectionId, props, look },
         ...(moving ? [{ op: 'move_section', pageId: ed.pageId, sectionId: ed.sectionId, toPageId, toIndex: 99 }] : [])]
-      : [{ op: 'add_section', pageId: moving ? toPageId : ed.pageId, section: { type: ed.type, props, look } }];
+      : [{ op: 'add_section', pageId: moving ? toPageId : ed.pageId, section: { type: ed.type, props, look }, ...(ed.index != null && !moving ? { index: ed.index } : {}) }];
     await apply(ops, () => {
       state.editing = null;
       if (moving) state.pageId = toPageId;
       const sections = (page() || { sections: [] }).sections;
-      state.focusSection = ed.sectionId || (sections[sections.length - 1] || {}).id || null;
+      const added = ed.index != null && !moving ? sections[ed.index] : sections[sections.length - 1];
+      state.focusSection = ed.sectionId || (added || {}).id || null;
     });
   });
 
@@ -1660,6 +1811,8 @@
       if (pg.dataset.sitePage !== p.id) state.editing = null;
       state.pageId = pg.dataset.sitePage; state.previewPath = pathOf(page()); render(); return;
     }
+    if (t('[data-site-preview-full]')) { setPreviewFull(true); return; }
+    if (t('[data-site-preview-close]')) { setPreviewFull(false); return; }
     const dev = t('[data-site-device]');
     if (dev) { state.device = dev.dataset.siteDevice; render(); return; }
     if (t('[data-site-edit-cancel]')) {
@@ -1678,11 +1831,29 @@
       render();
       return;
     }
-    if (t('[data-site-new-section]')) {
-      const type = document.querySelector('[data-site-new-type]').value;
+    const addOpen = t('[data-site-add-open]');
+    if (addOpen) {
+      state.adding = { pageId: p.id, at: addOpen.dataset.at != null ? Number(addOpen.dataset.at) : null };
+      render();
+      // The clicked button was replaced by the repaint, so find the tab again from the document.
+      document.querySelector('[data-site-host="website"] [data-site-add-picker] [data-site-new-section]')?.focus();
+      return;
+    }
+    if (t('[data-site-add-close]')) {
+      const at = state.adding && state.adding.at;
+      state.adding = null;
+      render();
+      document.querySelector(`[data-site-host="website"] ${at != null ? `[data-site-add-open][data-at="${at}"]` : '[data-site-add-open]:not([data-at])'}`)?.focus();
+      return;
+    }
+    const newSection = t('[data-site-new-section]');
+    if (newSection) {
+      const type = newSection.dataset.siteNewSection;
       if (!FORMS[type]) return;   // a type this editor has no form for — nothing to open
       if (!(await leaveEditor())) return;
-      state.editing = { pageId: p.id, sectionId: null, type, props: JSON.parse(JSON.stringify(BLANK[type] || {})), look: { ...LOOK_DEFAULT } };
+      const index = state.adding && state.adding.pageId === p.id ? state.adding.at : null;
+      state.adding = null;
+      state.editing = { pageId: p.id, sectionId: null, type, index, props: JSON.parse(JSON.stringify(BLANK[type] || {})), look: { ...LOOK_DEFAULT } };
       state.focusEditor = true;
       render();
       return;
@@ -1900,6 +2071,9 @@
     const tplOpen = t('[data-tpl-open]');
     if (tplOpen) { openTemplate(tplOpen.dataset.tplOpen); return; }
     if (t('[data-site-split]')) { await backToPages(); return; }
+    const stepBack = t('[data-site-setup-step]');
+    if (stepBack) { state.setupStep = Number(stepBack.dataset.siteSetupStep); render(); return; }
+    if (t('[data-site-setup-skip]')) { state.setupSkipped = true; state.setupStep = null; render(); return; }
     if (t('[data-site-features-save]')) {
       const host = hostOf(e);
       const features = [...host.querySelectorAll('[data-site-feature]:checked')].map((x) => x.dataset.siteFeature);
@@ -1910,7 +2084,7 @@
         const ok = await window.confirmModal(`Your site already has: ${inUse.map((f) => `<strong>${esc(f.label)}</strong>`).join(', ')}. Those sections stay where they are until you remove them — switching off only stops new ones being added or suggested.`, { title: 'Switch these off?', confirmLabel: 'Switch off', cancelLabel: 'Keep them on' });
         if (!ok) { rerender(); return; }
       }
-      await apply([{ op: 'set_settings', settings: { features } }]);
+      await apply([{ op: 'set_settings', settings: { features } }], () => { state.setupStep = null; });
       return;
     }
     if (t('[data-site-combine]')) {
@@ -2101,6 +2275,7 @@
   });
   document.addEventListener('input', (e) => {
     if (e.target.matches && e.target.matches('[data-max]')) updateLenNote(e.target);
+    if (e.target.matches && e.target.matches('[data-alt-needed]')) markAlt(e.target);
   });
   document.addEventListener('dragover', (e) => { if (e.target.closest && e.target.closest('[data-site-words-drop]')) e.preventDefault(); });
   document.addEventListener('drop', (e) => {
@@ -2123,12 +2298,13 @@
       clearTimeout(state.pollTimer);
       Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false, domainChecked: false, domainTyped: null,
         words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
-        importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false, dataSig: null, noteShown: null, focusSection: null });
+        importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false, dataSig: null, noteShown: null, focusSection: null, setupStep: null, setupSkipped: false, adding: null });
       load();
     },
     // surface: 'website' (pages, design, details, preview) or 'enquiries' | 'orders' | 'bookings',
     // each its own tab. A list re-reads every time its tab is opened.
     activate(surface) {
+      setPreviewFull(false);
       // Leaving the Website tab keeps an open section form, with what was typed, for coming back.
       if (state.surface === 'website') keepEditing();
       // A note ("Saved.") belongs to the tab it was said on.

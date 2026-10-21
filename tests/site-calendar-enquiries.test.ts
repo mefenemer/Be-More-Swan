@@ -68,8 +68,8 @@ console.log('\nWords and order');
 check('"Availability", not "Timetable"; the Website tab leads with a new site\'s first steps; layout in Design', () => {
     const ed = read('src/components/assistant-site-editor.js');
     assert.ok(ed.includes('<p class="text-sm font-black text-gray-900">Availability</p>') && !ed.includes('Timetable — classes'));
-    const r = ed.slice(ed.indexOf("['features', featuresOn() ? '' : featuresCard(true)]"));
-    assert.ok(r.indexOf("['publish', publishCard()]") > 0, 'what the website does comes before Publish');
+    const r = ed.slice(ed.indexOf("['features', (fresh ? step === 1 : !featuresOn()) ? featuresCard(true) : '']"));
+    assert.ok(r.indexOf("['publish', fresh ? '' : publishCard()]") > 0, 'what the website does comes before Publish');
     assert.ok(ed.includes('return structureCard() + designCard();'), 'the layout, then the design — templates have their own tab (2026-10-18)');
     assert.ok(ed.includes("state.panel === 'templates' ? templatesCard(false)"));
     const pages = ed.slice(ed.indexOf('  function pagesPanel() {'), ed.indexOf('  // ── "Add your own words"'));
