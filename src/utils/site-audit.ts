@@ -24,11 +24,11 @@ import { resolveBaseUrl } from './base-url';
 import { sendTemplatedEmail } from './email';
 import { buildTasterResult, tasterToken, unreadableResult, type TasterResult } from './site-taster';
 import { gatewayGenerate } from '../lib/ai-gateway';
-import { CRAWLERS, robotsAllows } from '../lib/robots';
+import { CRAWLERS } from '../lib/robots';
+import { fetchSiteHtml } from './site-fetch';
 import { parseModelJson } from './model-json';
 import { createNotification } from './notify';
 import { loadProductsBlock } from './org-products';
-import { safeFetchText, SafeFetchError } from './safe-fetch';
 import {
     buildLensPrompt, buildSummaryPrompt, sanitiseSummary, type AuditBrief, type Handoff, type Priority,
 } from './site-audit-prompts';
@@ -268,25 +268,10 @@ export function fixesNowDone(open: Array<{ id: number; beforeText: string }>, pa
 
 // ── Real dependencies ───────────────────────────────────────────────────────────────────────
 
-/** Read and extract one page, politely and safely. Never throws. */
+/** Read and extract one page, politely and safely (site-fetch.ts). Never throws. */
 export async function fetchSitePageLive(url: string): Promise<FetchResult> {
-    try {
-        const u = new URL(url);
-        if (!(await robotsAllows(u.host, u.pathname + u.search, CRAWLERS.mysteryShopper))) {
-            return { ok: false, message: `${u.host} asks crawlers like ours not to read this page (robots.txt), so we didn't.` };
-        }
-        const res = await safeFetchText(url, {
-            userAgent: CRAWLERS.mysteryShopper.userAgent, timeoutMs: FETCH_TIMEOUT_MS, maxBytes: FETCH_MAX_BYTES,
-        });
-        if (res.contentType && !/html|xml/i.test(res.contentType)) {
-            return { ok: false, message: 'That link isn\'t a web page (it returned a file).' };
-        }
-        return { ok: true, page: extractSitePage(res.body, res.finalUrl) };
-    } catch (err) {
-        if (err instanceof SafeFetchError) return { ok: false, message: err.message };
-        console.error('[site-audit] fetch failed', { url, message: err instanceof Error ? err.message : String(err) });
-        return { ok: false, message: 'We couldn\'t reach that page just now.' };
-    }
+    const r = await fetchSiteHtml(url, CRAWLERS.mysteryShopper, { timeoutMs: FETCH_TIMEOUT_MS, maxBytes: FETCH_MAX_BYTES });
+    return r.ok ? { ok: true, page: extractSitePage(r.html, r.finalUrl) } : r;
 }
 
 // ── Database layer ──────────────────────────────────────────────────────────────────────────

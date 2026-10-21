@@ -888,6 +888,24 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // "Read my site" on a site_import_request card — sites.ts `import`, the Website tab's same button.
+    function onSiteImport(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      sitePost({ action: 'import', assistantId, url: d.url || '', pictures: d.pictures, ownSite: d.ownSite === true })
+        .then(() => { respond({ ok: true }); siteChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
+    // A site_import_decision card — sites.ts import_accept / import_discard, the Website tab's two buttons.
+    function onSiteImportDecision(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      sitePost({ action: d.decision === 'use' ? 'import_accept' : 'import_discard', assistantId })
+        .then(() => { respond({ ok: true }); siteChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     function onSiteDraft(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -1193,6 +1211,8 @@
     container.addEventListener('siteaudit:handoff', onSiteAuditHandoff);
     container.addEventListener('site:apply', onSiteApply);
     container.addEventListener('site:draft', onSiteDraft);
+    container.addEventListener('site:import', onSiteImport);
+    container.addEventListener('site:importDecision', onSiteImportDecision);
     container.addEventListener('site:words', onSiteWords);
     container.addEventListener('site:bookingSetup', onBookingSetup);
     container.addEventListener('site:reviewsAdd', onReviewsAdd);
@@ -1250,6 +1270,8 @@
         container.removeEventListener('siteaudit:handoff', onSiteAuditHandoff);
         container.removeEventListener('site:apply', onSiteApply);
         container.removeEventListener('site:draft', onSiteDraft);
+        container.removeEventListener('site:import', onSiteImport);
+        container.removeEventListener('site:importDecision', onSiteImportDecision);
         container.removeEventListener('site:words', onSiteWords);
         container.removeEventListener('site:bookingSetup', onBookingSetup);
         container.removeEventListener('site:reviewsAdd', onReviewsAdd);

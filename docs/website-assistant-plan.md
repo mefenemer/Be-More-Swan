@@ -180,6 +180,22 @@ published_by) · `site_domains` (hostname, verification, cert state). Form submi
 4. Custom domains (D2). Mystery Shopper → one-click fixes.
 5. (moved into 3)
 6. Import-my-site, remaining sections, widget catalogue (post-launch).
+   - **Import my current site, built 2026-10-21** (owner asked to start it): Website tab "Already have a
+     website?" / Details ▸ Import my current site, and the chat's `site_import_request` +
+     `site_import_decision` cards — all `sites.ts` `import` / `import_accept` / `import_discard`. Reads the
+     home page + its menu pages (≤ the plan's pages, contact page kept) through `site-fetch.ts` (robots.txt
+     as `BeMoreSwan-SiteImport`, then safe-fetch); `readImportPage` (site-extract.ts) turns each into
+     numbered blocks; the model returns only a block-number PLAN; `assembleImport` (site-import.ts) builds
+     OUR sections from their blocks — their words by construction, never their HTML/CSS. Prices are never
+     copied (listed for Business Information); anything the plan forgets goes back where it was read;
+     clutter it skips is listed; missing names are [placeholders]; contact forms never offer the Audience.
+     Pictures: the owner chooses copy (into content_assets, provider `site_import`, via safeFetchBinary)
+     or leave out — never hot-linked. Result waits in `site_imports` ('ready') and replaces the draft only
+     on "Use this as my draft"; 1 task (`site_draft`) only once a draft exists. Too little to read (a
+     JavaScript-only site) → told plainly, nothing charged. Measured 2026-10-21: Wix and Squarespace
+     server-render (~100% of visible words read); Square Online read 0% — no headless browser for now.
+     SQL: db/z-site-import.sql. Fixed on the way: robots.txt `*` wildcards (Squarespace's default file had
+     blocked every Squarespace site for the Mystery Shopper too).
 
 Phases 1–3 = a sellable "website managed by your assistant" on a Swan subdomain.
 

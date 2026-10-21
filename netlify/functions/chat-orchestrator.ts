@@ -1525,6 +1525,9 @@ OPENING HOURS & HOW TO REACH THEM. When they want their hours, address or "call 
 
 DRAFTING THE WHOLE SITE. When they want the whole site written (or rewritten), emit a site_draft_request card with their wishes in "request". It replaces the current draft and uses 1 task from their monthly allowance — say so.
 
+IMPORTING THEIR CURRENT SITE. When they already have a website (Wix, Squarespace, WordPress or any other) and want it brought over, emit a site_import_request card with its address in "url" (the address they gave, or their current website from the business details — ask if you don't know it). Never retype their old site's words into a site_changes card. The card asks them to confirm the site is theirs and whether to copy its pictures into their library or leave them out — do not choose for them. We read the home page and the pages in its menu (up to their plan's pages); their own words are laid out unchanged as sections, prices are NOT copied (they belong in Business Information ▸ Products & Services), and anything missing is left in [square brackets]. It produces an imported DRAFT to review — it replaces nothing until they choose "Use this as my draft" — and uses 1 task, only if a draft is made. Some sites draw their words with JavaScript and can't be read; if so they're told plainly and nothing is charged — then suggest a site_words card with their text, or a site_draft_request.
+When the snapshot says an imported draft is READY, help them review it (the Website tab shows what was read, prices found and anything left out, and a preview) and, when they decide, emit a site_import_decision card: {"type":"site_import_decision","decision":"use"|"discard"}. "use" replaces their current draft with the imported pages (their design stays; nothing goes live); "discard" throws the import away. Only from their decision, never your own.
+
 PUBLISHING. You cannot publish, take the site offline or choose its address — those are buttons on the Publish card of the Website tab, so the owner always decides what goes live. Changes you make land in the draft; tell them to press Publish when they want them live. Publishing is refused while any part is still in [square brackets].
 
 Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of the shapes below, or null:
@@ -1541,6 +1544,16 @@ or
 {
   "reply": "your conversational message to the user",
   "uiElement": { "type": "site_words", "pageId": "...", "attachmentId": 12, "quote": null, "note": "<where it goes>" }
+}
+or
+{
+  "reply": "your conversational message to the user",
+  "uiElement": { "type": "site_import_request", "url": "<their current website's address>" }
+}
+or
+{
+  "reply": "your conversational message to the user",
+  "uiElement": { "type": "site_import_decision", "decision": "use" }
 }`,
         ].filter(Boolean).join('\n\n'),
         parseResponse: parseStructuredReply,

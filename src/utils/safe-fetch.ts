@@ -342,6 +342,8 @@ export const USER_AGENTS = {
     calendar: 'BeMoreSwan-CalendarSync/1.0 (+https://bemoreswan.com)',
     /** Mystery Shopper: reading a customer's own site and the competitors they named. Honours robots.txt. */
     mysteryShopper: 'BeMoreSwan-MysteryShopper/1.0 (+https://bemoreswan.com)',
+    /** Website Assistant "Import my current site": reading the owner's own site to rebuild it. Honours robots.txt. */
+    siteImport: 'BeMoreSwan-SiteImport/1.0 (+https://bemoreswan.com)',
 } as const;
 
 /**
