@@ -18,42 +18,11 @@ import { getDb } from '../../db/client';
 import { aiAssistants, auditLogs, scheduledPosts } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { requireTenant } from '../../src/utils/tenant';
-import { gatewayGenerate } from '../../src/lib/ai-gateway';
+import { parseScheduleInstruction } from '../../src/utils/parse-schedule-instruction';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 // Statuses that can be rescheduled (all non-terminal, non-publishing states).
 const RESCHEDULABLE = ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled'];
-
-/**
- * Parse a natural-language scheduling instruction into a UTC Date.
- * Returns null if the LLM cannot determine a clear date/time.
- */
-async function parseInstruction(instruction: string, now: Date, timezone: string): Promise<Date | null> {
-    const localNow = now.toLocaleString('en-GB', {
-        timeZone: timezone,
-        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-        hour: '2-digit', minute: '2-digit',
-    });
-
-    const { text } = await gatewayGenerate({
-        system: `You are a scheduling assistant. Given a natural-language rescheduling instruction and the current date/time, output ONLY a valid ISO 8601 UTC timestamp (e.g. 2026-07-04T15:00:00Z) representing when the post should go out. If the instruction is ambiguous or you cannot determine a specific date/time, output exactly the word NULL. Output nothing else.`,
-        messages: [{
-            role: 'user',
-            content: `Current date/time in user's timezone (${timezone}): ${localNow}\nInstruction: "${instruction}"\n\nISO UTC timestamp:`,
-        }],
-        maxTokens: 60,
-    });
-
-    const trimmed = text.trim();
-    if (trimmed === 'NULL' || !trimmed) return null;
-
-    // Accept ISO formats, strip any surrounding quotes or trailing text.
-    const isoMatch = trimmed.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?(?:[+-]\d{2}:\d{2})?/);
-    if (!isoMatch) return null;
-
-    const parsed = new Date(isoMatch[0]);
-    return isNaN(parsed.getTime()) ? null : parsed;
-}
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
@@ -131,7 +100,7 @@ export default withLambda(async (event) => {
         // Natural-language path — parsed against the assistant's timezone resolved above.
         let parsed: Date | null = null;
         try {
-            parsed = await parseInstruction(instruction, now, timezone);
+            parsed = await parseScheduleInstruction(instruction, now, timezone);
         } catch (err) {
             console.error('[reschedule-post-chat] LLM parse error', err);
             return { statusCode: 502, body: JSON.stringify({ error: 'The assistant could not reach the AI service. Please try again.' }) };

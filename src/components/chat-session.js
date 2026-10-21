@@ -781,6 +781,44 @@
       document.dispatchEvent(new CustomEvent('posts:changed', { detail: { assistantId } }));
     }
 
+    // Blog action cards → the endpoints Blog Studio's own buttons call (schedule-blog, reject-blog-post),
+    // so the rules there — no empty post, no time in the past, nothing already live — apply here too.
+    async function onBlogAction(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const when = (iso) => {
+        const opts = { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' };
+        try { return new Date(iso).toLocaleString('en-GB', d.timezone ? { ...opts, timeZone: d.timezone } : opts); }
+        catch { return new Date(iso).toLocaleString('en-GB', opts); }
+      };
+      try {
+        let message = 'Done.';
+        if (d.action === 'approve') {
+          const r = await postActionCall('schedule-blog', { id: d.postId, action: 'approve' });
+          message = r.post?.publishDate ? `Approved — it goes live ${when(r.post.publishDate)}. It’s in the "Scheduled" column.` : 'Approved.';
+        } else if (d.action === 'schedule') {
+          if (!d.scheduleAt) throw new Error('No time to book it for.');
+          const r = await postActionCall('schedule-blog', { id: d.postId, publishDate: d.scheduleAt });
+          message = `Booked — it goes live ${when(r.post?.publishDate || d.scheduleAt)}.`;
+        } else if (d.action === 'unschedule') {
+          await postActionCall('schedule-blog', { id: d.postId, action: 'unschedule' });
+          message = 'Off the schedule — it’s back in "Review" as a draft.';
+        } else if (d.action === 'reject') {
+          const r = await postActionCall('reject-blog-post', { id: d.postId, feedbackText: d.reason, applyAsRule: d.applyAsRule === true, redraft: d.redraft === true });
+          message = 'Rejected.' + (r.ruleId ? ' Your assistant will remember why.' : '') + (r.redraftQueued ? ' A replacement is being written for this slot.' : '');
+        } else {
+          throw new Error('Unknown action.');
+        }
+        respond({ ok: true, message });
+      } catch (err) {
+        respond({ ok: false, error: err.message });
+      }
+      // Repaint the Blogs tab behind the chat, the same way Blog Studio does after an action.
+      window.detailRqRefresh?.();
+      window._detailRqRefreshColumnCounts?.();
+      document.dispatchEvent(new CustomEvent('posts:changed', { detail: { assistantId } }));
+    }
+
     // Mystery Shopper cards → site-audits.ts, the same actions as the Website tab's buttons. Each
     // dispatches `siteaudit:changed` so the tab behind the chat reloads.
     function siteAuditPost(payload) {
@@ -1265,6 +1303,7 @@
     container.addEventListener('campaign:saveLearning', onCampaignSaveLearning);
     container.addEventListener('brief:create', onBriefCreate);
     container.addEventListener('post:action', onPostAction);
+    container.addEventListener('blog:action', onBlogAction);
     container.addEventListener('brief:review', onBriefReview);
     container.addEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
     container.addEventListener('siteaudit:check', onSiteAuditCheck);
@@ -1325,6 +1364,7 @@
         container.removeEventListener('campaign:saveLearning', onCampaignSaveLearning);
         container.removeEventListener('brief:create', onBriefCreate);
         container.removeEventListener('post:action', onPostAction);
+        container.removeEventListener('blog:action', onBlogAction);
         container.removeEventListener('brief:review', onBriefReview);
         container.removeEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
         container.removeEventListener('siteaudit:check', onSiteAuditCheck);

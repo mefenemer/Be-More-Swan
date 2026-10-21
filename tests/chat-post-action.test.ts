@@ -164,7 +164,7 @@ async function main() {
         ]);
         assert.strictEqual(out[0], plain);
         assert.strictEqual((out[1].uiElement as any).blocked, null);
-        assert.ok(read('netlify/functions/get-chat-session.ts').includes('messages: await refreshPostActionCards(db, orgId, session.aiAssistantId, messages)'));
+        assert.ok(read('netlify/functions/get-chat-session.ts').includes('await refreshPostActionCards(db, orgId, session.aiAssistantId, messages)'));
     });
 
     console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);

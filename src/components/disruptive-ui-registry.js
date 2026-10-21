@@ -2912,6 +2912,94 @@
   }
 
   register('post_action_proposal', renderPostActionProposalCard);
+
+  // ── Built-in: Blog Action Proposal Card (Blog Writer chat) ─────────────────
+  // { type: 'blog_action_proposal', action: 'approve'|'schedule'|'unschedule'|'reject', postId,
+  //   title, status, publishDate, scheduleAt, timezone, reason, when, blocked, settled? }
+  //
+  // The blog twin of the card above: Blog Studio's Approve, "Pick a time myself", Unschedule and
+  // Reject. Every fact on it was read from blog_posts by the orchestrator (src/utils/chat-blog-action.ts)
+  // — including `scheduleAt`, the exact instant a "schedule" books, worked out before the card was
+  // shown so the user agrees to a real time. The click dispatches `blog:action`; chat-session.js
+  // calls schedule-blog / reject-blog-post, the same endpoints Blog Studio uses.
+  const BLOG_ACTION_COPY = {
+    approve: { head: 'Approve this article', button: 'Approve', busy: 'Approving…' },
+    schedule: { head: 'Book this article', button: 'Book it', busy: 'Booking…' },
+    unschedule: { head: 'Take this article off the schedule', button: 'Unschedule', busy: 'Clearing the schedule…' },
+    reject: { head: 'Reject this article', button: 'Reject article', busy: 'Rejecting…' },
+  };
+
+  function renderBlogActionProposalCard(ui, esc) {
+    const copy = BLOG_ACTION_COPY[ui.action];
+    const postId = Number(ui.postId);
+    if (!copy || !Number.isInteger(postId)) return null;
+    const fmt = (iso) => {
+      if (!iso) return '';
+      const opts = { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' };
+      try { return new Date(iso).toLocaleString('en-GB', ui.timezone ? { ...opts, timeZone: ui.timezone } : opts); }
+      catch { return new Date(iso).toLocaleString('en-GB', opts); }
+    };
+    const booked = fmt(ui.publishDate);
+    const at = fmt(ui.scheduleAt);
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const canOpen = typeof window.openBlogStudio === 'function';
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      <p class="text-xs text-gray-500 mt-2">#${postId}${booked ? ` · booked for ${esc(booked)}` : ''}</p>
+      ${ui.title ? `<p class="text-sm font-bold text-gray-900 mt-1 break-words">${esc(ui.title)}</p>` : ''}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${!blocked && ui.action === 'schedule' ? `<p class="text-sm text-gray-700 mt-3"><span class="font-bold">Goes live:</span> ${esc(at)}</p>
+        ${ui.when ? `<p class="text-xs text-gray-500 mt-1">From “${esc(ui.when)}”. If that’s not the time you meant, press Not now and say it again.</p>` : ''}` : ''}
+      ${!blocked && ui.action === 'approve' ? '<p class="text-xs text-gray-600 mt-3">Your assistant books it into the next free slot in its posting schedule. It goes live on your blog then, and to any platforms you’ve connected.</p>' : ''}
+      ${!blocked && ui.action === 'unschedule' ? '<p class="text-xs text-gray-600 mt-3">It goes back to a draft in the "Review" column and won’t publish until it’s approved again.</p>' : ''}
+      ${!blocked && ui.action === 'reject' ? `
+        <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-reason-${postId}">What’s wrong with it</label>
+        <textarea id="bap-reason-${postId}" data-bap-reason rows="2" maxlength="500" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.reason || '')}</textarea>
+        <label class="flex items-start gap-2 text-xs text-gray-700 mt-2">
+          <input type="checkbox" data-bap-rule checked class="mt-0.5">
+          <span>Keep this as a rule for future articles</span>
+        </label>
+        <label class="flex items-start gap-2 text-xs text-gray-700 mt-1">
+          <input type="checkbox" data-bap-redraft checked class="mt-0.5">
+          <span>Write a replacement for this slot</span>
+        </label>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-bap-go class="${ui.action === 'reject' || ui.action === 'unschedule' ? 'btn-destructive' : 'btn-primary'} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>
+        <button type="button" data-bap-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+        ${canOpen ? '<button type="button" data-bap-open class="btn-swan-link px-1 py-2 text-sm font-bold">Open in Blog Studio</button>' : ''}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-bap-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-bap-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-bap-go], [data-bap-cancel], [data-bap-reason], [data-bap-rule], [data-bap-redraft]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-bap-open]')) { window.openBlogStudio?.({ postId }); return; }
+      if (e.target.closest('[data-bap-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-bap-go]')) return;
+      const reason = el.querySelector('[data-bap-reason]')?.value.trim() || '';
+      if (ui.action === 'reject' && !reason) { say('Say what’s wrong with it first — that is what your assistant learns from.', 'error'); return; }
+      setBusy(true);
+      say(copy.busy);
+      el.dispatchEvent(new CustomEvent('blog:action', {
+        bubbles: true,
+        detail: {
+          action: ui.action, postId, scheduleAt: ui.scheduleAt || null, timezone: ui.timezone || null, reason,
+          applyAsRule: !!el.querySelector('[data-bap-rule]')?.checked,
+          redraft: !!el.querySelector('[data-bap-redraft]')?.checked,
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Done.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('blog_action_proposal', renderBlogActionProposalCard);
   register('SocialPostDraftCard', renderSocialPostDraftCard);
 
   // ── Built-in: Blog Post Draft Card ──────────────────────────────────────────

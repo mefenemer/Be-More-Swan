@@ -47,8 +47,8 @@ export interface SnapshotItem {
     text: string | null;
     /** Optional extra, e.g. "sent to 412 people". */
     extra?: string | null;
-    /** The row's id, shown as "#123" so the chat can name the exact post in a post_action_proposal.
-     *  Posts only: the blog and email chats have no action that takes one. */
+    /** The row's id, shown as "#123" so the chat can name the exact post in a post_action_proposal
+     *  (social) or blog_action_proposal (blog). The email chat has no action that takes one. */
     ref?: number | null;
 }
 
@@ -170,9 +170,9 @@ const BLOG_WORDS: Record<string, string> = {
 export async function buildBlogSnapshot(db: Db, organisationId: number, aiAssistantId: number, timezone?: string | null): Promise<string | null> {
     try {
         const scope = and(eq(blogPosts.organisationId, organisationId), eq(blogPosts.assistantId, aiAssistantId));
-        const cols = { status: blogPosts.status, publishDate: blogPosts.publishDate, publishedAt: blogPosts.publishedAt, title: blogPosts.title };
-        type Row = { status: string; publishDate: Date | null; publishedAt: Date | null; title: string };
-        const map = (r: Row): SnapshotItem => ({ when: r.publishedAt ?? r.publishDate, where: '', status: r.status, text: r.title });
+        const cols = { id: blogPosts.id, status: blogPosts.status, publishDate: blogPosts.publishDate, publishedAt: blogPosts.publishedAt, title: blogPosts.title };
+        type Row = { id: number; status: string; publishDate: Date | null; publishedAt: Date | null; title: string };
+        const map = (r: Row): SnapshotItem => ({ ref: r.id, when: r.publishedAt ?? r.publishDate, where: '', status: r.status, text: r.title });
         const col = (where: SQL | undefined, order: SQL, title: string) => column(
             db.select({ n: sql<number>`count(*)::int` }).from(blogPosts).where(and(scope, where)),
             db.select(cols).from(blogPosts).where(and(scope, where)).orderBy(order).limit(SNAPSHOT_LIMIT),
@@ -181,7 +181,7 @@ export async function buildBlogSnapshot(db: Db, organisationId: number, aiAssist
         const sections = await Promise.all([
             col(inArray(blogPosts.status, ['draft', 'pending_approval', 'in_review']), sql`${blogPosts.publishDate} ASC NULLS LAST`, 'In the "Review" column — drafts waiting for the user'),
             col(inArray(blogPosts.status, ['scheduled', 'publishing']), asc(blogPosts.publishDate), 'In the "Scheduled" column — booked to publish'),
-            col(and(eq(blogPosts.status, 'published'), gte(blogPosts.publishedAt, since(RECENT_DAYS))), desc(blogPosts.publishedAt), `In the "Posted" column — published in the last ${RECENT_DAYS} days`),
+            col(and(eq(blogPosts.status, 'published'), gte(blogPosts.publishedAt, since(RECENT_DAYS))), desc(blogPosts.publishedAt), `In the "Published" column — published in the last ${RECENT_DAYS} days`),
             col(inArray(blogPosts.status, ['failed', 'paused', 'approved']), desc(blogPosts.updatedAt), 'In the "Needs attention" column — failed to publish, paused, or approved but not booked; the user picks a new time there'),
         ]);
         // Reader figures ride along (owner, 2026-10-20: the chat must answer "how many people read

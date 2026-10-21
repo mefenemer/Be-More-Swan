@@ -17,6 +17,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, chatMessages, chatSessions, masterAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { refreshPostActionCards } from '../../src/utils/chat-post-action';
+import { refreshBlogActionCards } from '../../src/utils/chat-blog-action';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 function json(statusCode: number, body: unknown) {
@@ -80,8 +81,9 @@ export default withLambda(async (event) => {
             createdAt: session.createdAt,
             updatedAt: session.updatedAt,
         },
-        // Stored post-action cards are re-checked against their posts, so one already acted on
-        // says so instead of offering a button the endpoint would refuse. Never throws.
-        messages: await refreshPostActionCards(db, orgId, session.aiAssistantId, messages),
+        // Stored post- and blog-action cards are re-checked against their rows, so one already acted
+        // on says so instead of offering a button the endpoint would refuse. Neither throws.
+        messages: await refreshBlogActionCards(db, orgId, session.aiAssistantId,
+            await refreshPostActionCards(db, orgId, session.aiAssistantId, messages)),
     });
 });
