@@ -47,8 +47,8 @@ export interface SnapshotItem {
     text: string | null;
     /** Optional extra, e.g. "sent to 412 people". */
     extra?: string | null;
-    /** The row's id, shown as "#123" so the chat can name the exact post in a post_action_proposal
-     *  (social) or blog_action_proposal (blog). The email chat has no action that takes one. */
+    /** The row's id, shown as "#123" so the chat can name the exact item in a post_action_proposal
+     *  (social), blog_action_proposal (blog) or email_action_proposal (email). */
     ref?: number | null;
 }
 
@@ -214,12 +214,13 @@ export async function buildEmailsSnapshot(db: Db, organisationId: number, aiAssi
     try {
         const scope = and(eq(newsletterIssues.organisationId, organisationId), eq(newsletterIssues.assistantId, aiAssistantId));
         const cols = {
+            id: newsletterIssues.id,
             status: newsletterIssues.status, subject: newsletterIssues.subject, scheduledFor: newsletterIssues.scheduledFor,
             sentAt: newsletterIssues.sentAt, recipientCount: newsletterIssues.recipientCount,
         };
-        type Row = { status: string; subject: string; scheduledFor: Date | null; sentAt: Date | null; recipientCount: number };
+        type Row = { id: number; status: string; subject: string; scheduledFor: Date | null; sentAt: Date | null; recipientCount: number };
         const map = (r: Row): SnapshotItem => ({
-            when: r.sentAt ?? r.scheduledFor, where: '', status: r.status, text: r.subject,
+            ref: r.id, when: r.sentAt ?? r.scheduledFor, where: '', status: r.status, text: r.subject,
             extra: r.status === 'sent' && r.recipientCount ? `sent to ${r.recipientCount} ${r.recipientCount === 1 ? 'person' : 'people'}` : null,
         });
         const col = (where: SQL | undefined, order: SQL, title: string) => column(

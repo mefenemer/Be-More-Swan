@@ -142,8 +142,8 @@ for (const r of ROLES) {
     check('it forbids inventing places and changing existing work', () => {
         assert.ok(/Never name a tab, section, button or setting that is not listed/.test(surfaces));
         assert.ok(/never tell the user a section does not exist/.test(surfaces));
-        // The social and blog chats CAN act on existing work now (src/utils/chat-post-action.ts,
-        // chat-blog-action.ts) — but only by proposing a card the user confirms. Email still cannot.
+        // Every content chat CAN act on existing work now (chat-post-action.ts, chat-blog-action.ts,
+        // chat-email-action.ts) — but only by proposing a card the user confirms.
         if (r.helper === 'socialSurfaces') {
             assert.ok(/only that click changes anything/.test(surfaces), 'the social chat must say the user\'s click acts, not the chat');
             assert.ok(/never say a post HAS been approved, rejected, retried or moved/.test(surfaces));
@@ -152,7 +152,10 @@ for (const r of ROLES) {
             assert.ok(/never say an article HAS been approved, scheduled, unscheduled or rejected/.test(surfaces));
             assert.ok(/You cannot publish one immediately/.test(surfaces));
         } else {
-            assert.ok(/you cannot change them from this chat/.test(surfaces));
+            // Email (chat-email-action.ts, 2026-10-21): the same confirm-card rule.
+            assert.ok(/only that click changes anything/.test(surfaces), 'the email chat must say the user\'s click acts, not the chat');
+            assert.ok(/never say an email HAS been approved, scheduled or sent back/.test(surfaces));
+            assert.ok(/You cannot send one immediately/.test(surfaces));
         }
     });
 }

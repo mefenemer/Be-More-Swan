@@ -819,6 +819,40 @@
       document.dispatchEvent(new CustomEvent('posts:changed', { detail: { assistantId } }));
     }
 
+    // Email action cards → newsletter-issues, the Email Studio's own endpoint (approve, reject), so its
+    // owner/admin rule and empty-email check apply here too. Never `send`.
+    async function onEmailAction(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const when = (iso) => {
+        const opts = { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' };
+        try { return new Date(iso).toLocaleString('en-GB', d.timezone ? { ...opts, timeZone: d.timezone } : opts); }
+        catch { return new Date(iso).toLocaleString('en-GB', opts); }
+      };
+      try {
+        let message = 'Done.';
+        if (d.action === 'approve') {
+          await postActionCall('newsletter-issues', { action: 'approve', id: d.issueId });
+          message = 'Approved — it’s in the "Approved" column. Nothing is sent until you send or schedule it.';
+        } else if (d.action === 'schedule') {
+          if (!d.scheduleAt) throw new Error('No time to book it for.');
+          const r = await postActionCall('newsletter-issues', { action: 'approve', id: d.issueId, scheduledFor: d.scheduleAt });
+          message = `Approved and booked — it sends ${when(r.issue?.scheduledFor || d.scheduleAt)}.`;
+        } else if (d.action === 'reject') {
+          await postActionCall('newsletter-issues', { action: 'reject', id: d.issueId });
+          message = 'Back to a draft in "Review" — it won’t be sent.';
+        } else {
+          throw new Error('Unknown action.');
+        }
+        respond({ ok: true, message });
+      } catch (err) {
+        respond({ ok: false, error: err.message });
+      }
+      window.detailRqRefresh?.();
+      window._detailRqRefreshColumnCounts?.();
+      document.dispatchEvent(new CustomEvent('posts:changed', { detail: { assistantId } }));
+    }
+
     // Mystery Shopper cards → site-audits.ts, the same actions as the Website tab's buttons. Each
     // dispatches `siteaudit:changed` so the tab behind the chat reloads.
     function siteAuditPost(payload) {
@@ -1304,6 +1338,7 @@
     container.addEventListener('brief:create', onBriefCreate);
     container.addEventListener('post:action', onPostAction);
     container.addEventListener('blog:action', onBlogAction);
+    container.addEventListener('email:action', onEmailAction);
     container.addEventListener('brief:review', onBriefReview);
     container.addEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
     container.addEventListener('siteaudit:check', onSiteAuditCheck);
@@ -1365,6 +1400,7 @@
         container.removeEventListener('brief:create', onBriefCreate);
         container.removeEventListener('post:action', onPostAction);
         container.removeEventListener('blog:action', onBlogAction);
+        container.removeEventListener('email:action', onEmailAction);
         container.removeEventListener('brief:review', onBriefReview);
         container.removeEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
         container.removeEventListener('siteaudit:check', onSiteAuditCheck);

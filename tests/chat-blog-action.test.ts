@@ -161,7 +161,7 @@ async function main() {
         assert.match(session, /container\.addEventListener\('blog:action', onBlogAction\);/);
     });
     await check('reopening a conversation re-checks blog cards too', () => {
-        assert.match(read('netlify/functions/get-chat-session.ts'), /messages: await refreshBlogActionCards\(db, orgId, session\.aiAssistantId,/);
+        assert.match(read('netlify/functions/get-chat-session.ts'), /await refreshBlogActionCards\(db, orgId, session\.aiAssistantId,/);
     });
 
     console.log(`\n${passed}/${total} checks passed`);

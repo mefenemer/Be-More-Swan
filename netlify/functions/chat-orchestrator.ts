@@ -63,6 +63,7 @@ import { buildTeamActivityBlock } from '../../src/utils/team-activity';
 import { buildBlogSnapshot, buildEmailsSnapshot, buildPostsSnapshot } from '../../src/utils/content-snapshot';
 import { postActionFromUiElement, resolvePostActionProposal, type PostActionCard } from '../../src/utils/chat-post-action';
 import { blogActionFromUiElement, resolveBlogActionProposal, type BlogActionCard } from '../../src/utils/chat-blog-action';
+import { emailActionFromUiElement, resolveEmailActionProposal, type EmailActionCard } from '../../src/utils/chat-email-action';
 import { parseScheduleInstruction } from '../../src/utils/parse-schedule-instruction';
 import { attachmentLine, buildAttachmentsBlock, readAttachments, saveAttachments, type AcceptedAttachment } from '../../src/utils/chat-attachments';
 import { enforcePromptModeration } from '../../src/utils/moderation';
@@ -659,7 +660,7 @@ function emailSurfaces(): string {
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above, or the Email Studio. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
-EXISTING EMAILS — you can see your single emails (below) but you cannot change them from this chat: you cannot approve, edit, reschedule, delete or send one that already exists. If asked to, say so and tell them which column of the "Emails" tab it is in. You CAN write a new version as a fresh draft if they want one.`;
+EXISTING EMAILS — you can act on the single emails listed below, each named by its "#" number, in three ways: approve one in "Review" (it moves to "Approved" and waits there until they send or schedule it), approve one for a send time the user names (in "Review", "Approved" or "Scheduled" — it is booked to send then), or send one back to a draft (from "Review", "Approved" or "Scheduled"; it will not go out). To do any of them, emit an email_action_proposal naming the email's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say an email HAS been approved, scheduled or sent back — say the card is there to confirm. One email per reply. If you cannot tell which one they mean, ask, quoting the candidates. Only an owner or admin of the business can approve an email; if the card says they can't, that is why. You cannot send one immediately, edit an existing email's words, change who it goes to, or archive one: for those, tell them which column of the "Emails" tab it is in so they can open it in the Email Studio. You CAN write a new version as a fresh draft if they want one.`;
 }
 
 // ── Internal Data Hub persistence (Golden Rule 2) ─────────────────────────────
@@ -2143,6 +2144,14 @@ A campaign, as a plan or as finished drafts:
 }
 Campaign rules: "newsletters" is in send order and "sequenceOrder" runs 1, 2, 3… with no gaps. "sendDay" counts the day they enter as Day 1 and only goes up. "delayDaysAfterPrevious" is days since the PREVIOUS email — the first email's is sendDay − 1, every later one is its sendDay minus the previous email's sendDay. For a countdown (renewal, launch) still count forward from the day they enter, and put the countdown ("14 days before") in "role". In a plan, fill every field except bodyMarkdown, which is "".
 
+To act on a single email that already exists (see EXISTING EMAILS), uiElement is instead:
+{
+  "type": "email_action_proposal",
+  "action": "approve" | "schedule" | "reject",
+  "issueId": <the number after # in YOUR EMAILS RIGHT NOW>,
+  "when": "<schedule only: the send time exactly as the user said it, e.g. 'Tuesday at 10am'>" | null
+}
+
 A sign-up form:
 {
   "type": "audience_form_draft",
@@ -2882,6 +2891,16 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 content = 'I couldn’t find that article among this assistant’s articles, so I haven’t set anything up. Which one do you mean? You can also open it on the "Blogs" tab.';
             }
         }
+        // And the Email Marketing assistant's (src/utils/chat-email-action.ts), the same way.
+        let emailAction: EmailActionCard | null = null;
+        const emailActionReq = route === ROUTES.newsletter_editor ? emailActionFromUiElement(uiElement) : null;
+        if (emailActionReq) {
+            emailAction = await resolveEmailActionProposal(db, orgId, session.aiAssistantId, emailActionReq, snapshotTz, parseScheduleInstruction);
+            uiElement = emailAction;
+            if (!emailAction) {
+                content = 'I couldn’t find that email among this assistant’s emails, so I haven’t set anything up. Which one do you mean? You can also open it on the "Emails" tab.';
+            }
+        }
         const postActionReq = route === ROUTES.social_media_manager && !draftTarget ? postActionFromUiElement(uiElement) : null;
         if (postActionReq) {
             postAction = await resolvePostActionProposal(db, orgId, session.aiAssistantId, postActionReq, snapshotTz);
@@ -2966,7 +2985,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             uiElement = newsletterDraft ? { type: NEWSLETTER_ISSUE_DRAFT_TYPE, ...newsletterDraft }
                 : campaignDraft ? { type: NEWSLETTER_CAMPAIGN_DRAFT_TYPE, ...campaignDraft }
                 : formDraft ? { type: AUDIENCE_FORM_DRAFT_TYPE, ...formDraft }
-                : null;
+                // An action card on an existing email was already checked and rebuilt above — keep it.
+                : emailAction;
         }
 
         // ── Reply ↔ persistence reconciliation ────────────────────────────────────
@@ -3026,7 +3046,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
         // And the newsletter route's. Identical shape: it never persists on the turn, so the only
         // unbacked claim available to it is claiming an issue it did not write.
-        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised) {
+        // !emailAction: a "booked for Tuesday" reply describes its action card, not an unbacked claim.
+        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised && !emailAction) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked newsletter draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );
