@@ -21,3 +21,4 @@ node_modules/
 # Not secret (no tokens), but it is an operational record of vault key names and connection ids,
 # and this repo commits the whole working tree — so it would ship to GitHub on the next push.
 meta-vault-backfill-report.json
+.claude/launch.json
