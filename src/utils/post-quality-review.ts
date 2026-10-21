@@ -211,8 +211,8 @@ export interface ReviewablePost {
 export const FACT_LOCATIONS = {
     catalogue: 'Business Information ▸ Products & Services',
     profile: 'Business Information ▸ Business Profile',
-    briefMessage: "the assistant's Creative Brief ▸ Objective & Message",
-    briefSales: "the assistant's Creative Brief ▸ Sales Context",
+    briefMessage: "the assistant's What I post about card ▸ Objective & Message",
+    briefSales: "the assistant's What I post about card ▸ Sales Context",
 } as const;
 export type FactLocation = typeof FACT_LOCATIONS[keyof typeof FACT_LOCATIONS];
 export const FACT_LOCATION_VALUES: readonly string[] = Object.values(FACT_LOCATIONS);

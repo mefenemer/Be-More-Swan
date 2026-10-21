@@ -590,7 +590,7 @@ function mysteryShopperSurfaces(): string {
 - "Website" tab — the tab the user lands on. Their score out of 100 and the three parts of it, what the last check said, the suggested fixes (each with "I'll make this change", "Copy" and "Not for us"), what competitors changed, past checks, and "Check my site now". "Settings" on the same tab changes the website, who it is for, what visitors should do, the competitors and the weekly check day.
 - "Ideas for your other assistants" on the Website tab — each check's briefs for their Social Media, Blog Writing or Campaign Assistant, each with a "Brief <name>" button that opens that assistant's chat with the brief typed in. Once briefed, an idea moves to "History".
 - "History" on the Website tab — past suggestions and what happened to them: fixes that went live, fixes they turned down (each with "Bring back"), briefs sent to their other assistants (each with "Undo"), and earlier checks' ideas nobody acted on.
-- "Goals" tab — the score they are working towards.
+- "Results" tab — the score they are working towards (their goals), and how this assistant is doing.
 Everything you can do here, the user can also do there by hand.`;
 }
 
@@ -609,9 +609,9 @@ function socialSurfaces(): string {
 - "Calendar" tab — the same posts laid out by date.
 - "Inspo" tab — example posts the user admires; you write in their style.
 - "My Content" tab — the pictures and videos the user has uploaded or approved, which posts can use.
-- "Goals" tab — the targets this assistant is working towards and how it is doing.
+- "Results" tab — how this assistant is doing: progress towards its goals, its performance figures, the "Autopilot" card (whether it is drafting on a schedule, with "Adjust schedule"; how many posts are created, scheduled and published; posts per platform; and audience size), and the goals themselves (set or change one here).
 - "Activity" tab — a log of what this assistant has done.
-- "Assistant Profile" button (top of the page) — this assistant's settings, as cards: "Mandate", "Operational Setup" (how posts are triggered, where content comes from, and the posting schedule), "Creative Brief" (objective, audience, voice and content pillars), "Connections" (the social accounts it posts to — reconnect an account here), "Rules", "Brand Safety & Legal" and "Notifications".
+- "Assistant Profile" button (top of the page) — this assistant's settings, as cards: "What I do" (the job it was hired for), "When and how I post" (how posts are triggered, where content comes from, and the posting schedule), "What I post about" (objective, audience, voice and content pillars), "Connections" (the social accounts it posts to — reconnect an account here), "Do’s and don’ts" (its rules), "Safety and legal" (AI disclosure and brand safety) and "Notifications".
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
@@ -624,7 +624,7 @@ EXISTING POSTS — you can act on the posts listed below, each named by its "#" 
 // emailCampaignsTab, inspoTab, myContentTab, hasCreativeBrief:false → the Profile card is retitled
 // "Brand Knowledge") and the column buttons in assistant-detail.html. Pinned by
 // tests/content-prompt-surfaces.test.ts.
-const PROFILE_CARDS_NON_SOCIAL = `"Mandate", "Operational Setup" (how and how often it drafts), "Brand Knowledge" (business information and brand context), "Connections", "Rules", "Brand Safety & Legal" and "Notifications"`;
+const PROFILE_CARDS_NON_SOCIAL = `"What I do" (the job it was hired for), "When and how I work" (how and how often it drafts), "Brand Knowledge" (business information and brand context), "Connections", "Do’s and don’ts" (its rules), "Safety and legal" and "Notifications"`;
 
 function blogSurfaces(): string {
     return `YOUR OWN DASHBOARD — these are the tabs and buttons on YOUR page inside this platform, and the only names you may use for places in it:
@@ -632,7 +632,8 @@ function blogSurfaces(): string {
 - "Calendar" tab — the same articles laid out by date.
 - "Inspo" tab — writing the user admires; you write in that style.
 - "My Content" tab — the pictures the user has uploaded or approved, which articles can use.
-- "Goals" tab and "Activity" tab — this assistant's targets, and a log of what it has done.
+- "Results" tab — how this assistant is doing: progress towards its goals, its performance figures, the "Autopilot" card (its drafting schedule, with "Adjust schedule", and how many articles are created, scheduled and published), and the goals themselves (set or change one here).
+- "Activity" tab — a log of what this assistant has done.
 - "Assistant Profile" button (top of the page) — this assistant's settings, as cards: ${PROFILE_CARDS_NON_SOCIAL}.
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above, or Blog Studio. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
@@ -645,7 +646,8 @@ function emailSurfaces(): string {
 - "Emails" tab — the page opens here. Every single email you draft, in columns: "Review" (drafts waiting for the user), "Approved" (approved, not yet sent or scheduled), "Scheduled" (booked to send), "Sent", "Needs attention" (failed to send) and "Archived". Opening one opens it in the Email Studio, where it is edited, given its recipients, previewed, approved, scheduled and sent. "Write Email" at the top starts one.
 - "Campaigns" tab — the automatic series of emails: the welcome sequence and any others.
 - "Calendar" tab — the same emails laid out by date.
-- "Goals" tab and "Activity" tab — this assistant's targets, and a log of what it has done.
+- "Results" tab — how this assistant is doing: progress towards its goals, its performance figures, and the goals themselves (set or change one here).
+- "Activity" tab — a log of what this assistant has done.
 - "Assistant Profile" button (top of the page) — this assistant's settings, as cards: ${PROFILE_CARDS_NON_SOCIAL}.
 - Outside this page: the "Audience" page holds subscribers, segments and sign-up forms.
 

@@ -376,7 +376,7 @@
           <button type="button" id="btn-refresh-goals"
             title="Re-measure these goals now instead of waiting for the next background check"
             class="hidden btn-secondary shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border transition cursor-pointer">Check again now</button>
-          <button type="button" onclick="window._activateMainTab && window._activateMainTab('goals')"
+          <button type="button" onclick="window._openGoalsList && window._openGoalsList()"
             class="btn-secondary shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border transition cursor-pointer">Manage goals</button>
         </div>
       </div>
@@ -538,8 +538,10 @@
 
   <!-- Performance KPIs — issue #183: moved beneath the assistant name/header section (out of the
        now-removed Overview tab) so it's visible without needing to click into a tab.
-       order:-1 pulls this above the status row within the flex-column wrapper. -->
-  <div class="mb-8" style="order:-1">
+       order:-1 pulls this above the status row within the flex-column wrapper.
+       A role with goalsTab.bringsResults (Social Media, 2026-10-21 trial) has this card and Goal
+       Progress moved into its Goals tab, renamed "Results" — see _applyDashboardRegistry. -->
+  <div id="performance-metrics-card" class="mb-8" style="order:-1">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Performance Metrics</h3>
       <span id="metrics-status-note" class="text-xs text-gray-400 font-medium">Last 30 days</span>
@@ -809,20 +811,20 @@
       <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-strategy" id="maintab-btn-strategy" data-maintab="strategy" class="main-tab-btn hidden" style="display:none">
         <span id="strategy-tab-label">Strategy</span>
       </button>
+      <!-- Calendar — this assistant's scheduled work / timeline (assistant-calendar.js scopes
+           the global calendar to this assistant). Always shown. -->
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-calendar" id="maintab-btn-calendar" data-maintab="calendar" class="main-tab-btn">Calendar</button>
       <!-- Inspo — content-roles only (inspoTab: social_media_manager, blog_writer); the
            styles/tones the assistant studies and applies to every draft
-           (assistant-inspo.js → inspo-items.ts). Sits right after the Review Queue (Posts) tab and
-           before Calendar so the content-creation tabs read together. Hidden by default, shown by
+           (assistant-inspo.js → inspo-items.ts). Sits AFTER Calendar (2026-10-21): Posts and Calendar
+           are two views of the same posts, and an input tab between them split them up. Hidden by default, shown by
            _applyDashboardRegistry when an inspoTab exists. -->
       <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-inspo" id="maintab-btn-inspo" data-maintab="inspo" class="main-tab-btn hidden">
         <span id="inspo-tab-label">Inspo</span>
       </button>
-      <!-- Calendar — this assistant's scheduled work / timeline (assistant-calendar.js scopes
-           the global calendar to this assistant). Always shown. -->
-      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-calendar" id="maintab-btn-calendar" data-maintab="calendar" class="main-tab-btn">Calendar</button>
       <!-- My Content — content-roles only (myContentTab: social_media_manager, blog_writer);
            the org-wide content library (uploads/links/AI-generated media) this assistant draws
-           on for posts. Placed right after Calendar (issue #213). Hidden by default, shown by
+           on for posts. Placed after Inspo (issue #213; Calendar moved ahead of Inspo 2026-10-21). Hidden by default, shown by
            _applyDashboardRegistry when a myContentTab exists. -->
       <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-mycontent" id="maintab-btn-mycontent" data-maintab="mycontent" class="main-tab-btn hidden">
         <span id="mycontent-tab-label">My Content</span>
@@ -1018,6 +1020,13 @@
        assistant-scoped). Populated by assistant-my-content.js, which reuses the
        standalone my-content.html fragment + my-content.js controller. -->
   <div id="maintab-mycontent" role="tabpanel" aria-labelledby="maintab-btn-mycontent" class="main-tab-content hidden">
+    <!-- Shown inside one assistant, the library read as THAT assistant's — and deleting here removes
+         a picture from every assistant's posts. Say so before anything is touched (UX review,
+         2026-10-21). -->
+    <p class="mb-4 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3">
+      <span class="font-bold text-gray-900">Shared with all your assistants.</span>
+      Pictures and videos here can be used by any of them, so removing one removes it for all.
+    </p>
     <div id="mycontent-host"></div>
   </div><!-- /maintab-mycontent -->
 
@@ -1138,7 +1147,7 @@
     <button type="button" data-tab="problem" class="detail-tab-btn brief-card w-full text-left">
       <div class="flex items-center justify-between gap-4">
         <div>
-          <p class="text-sm font-bold text-gray-900">Mandate</p>
+          <p class="text-sm font-bold text-gray-900">What I do</p>
           <p class="text-xs text-gray-500 mt-0.5">The bottleneck this assistant was hired to solve</p>
         </div>
         <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
@@ -1148,7 +1157,7 @@
     <button type="button" data-tab="operation" class="detail-tab-btn brief-card w-full text-left">
       <div class="flex items-center justify-between gap-4">
         <div>
-          <p class="text-sm font-bold text-gray-900">Operational Setup</p>
+          <p id="opcard-operation-title" class="text-sm font-bold text-gray-900">When and how I post</p>
           <p id="opcard-operation-sub" class="text-xs text-gray-500 mt-0.5">Trigger, content source and posting schedule</p>
         </div>
         <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
@@ -1158,7 +1167,7 @@
     <button type="button" data-tab="strategy" class="detail-tab-btn brief-card w-full text-left">
       <div class="flex items-center justify-between gap-4">
         <div>
-          <p id="opcard-strategy-title" class="text-sm font-bold text-gray-900">Creative Brief</p>
+          <p id="opcard-strategy-title" class="text-sm font-bold text-gray-900">What I post about</p>
           <p id="opcard-strategy-sub" class="text-xs text-gray-500 mt-0.5">Objective, audience, voice and content pillars</p>
         </div>
         <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
@@ -1178,7 +1187,7 @@
     <button type="button" data-tab="rules" class="detail-tab-btn brief-card w-full text-left">
       <div class="flex items-center justify-between gap-4">
         <div>
-          <p class="text-sm font-bold text-gray-900">Rules</p>
+          <p class="text-sm font-bold text-gray-900">Do’s and don’ts</p>
           <p class="text-xs text-gray-500 mt-0.5">Strict rules, assistant rules and learned directives</p>
         </div>
         <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
@@ -1188,7 +1197,7 @@
     <button type="button" data-tab="guardrails" class="detail-tab-btn brief-card w-full text-left">
       <div class="flex items-center justify-between gap-4">
         <div>
-          <p class="text-sm font-bold text-gray-900">Brand Safety &amp; Legal</p>
+          <p class="text-sm font-bold text-gray-900">Safety and legal</p>
           <p class="text-xs text-gray-500 mt-0.5">Knowledge base and AI disclosure</p>
         </div>
         <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
@@ -1212,7 +1221,7 @@
   <div id="tab-problem" class="detail-tab-content space-y-6">
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-6">
-        <h3 class="text-lg font-bold text-gray-900">Mandate</h3>
+        <h3 class="text-lg font-bold text-gray-900">What I do</h3>
         <p class="text-sm text-gray-500 mt-1">What bottleneck or time-drain were you trying to solve? This shapes everything your assistant prioritises.</p>
       </div>
       <!-- Role-specific quick-start suggestions (populated by _renderMandateSuggestions() in
@@ -1241,7 +1250,7 @@
   <div id="tab-operation" class="detail-tab-content hidden space-y-6">
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-6">
-        <h3 class="text-lg font-bold text-gray-900">Operational Setup</h3>
+        <h3 id="operation-heading" class="text-lg font-bold text-gray-900">When and how I post</h3>
         <p id="operation-intro" class="text-sm text-gray-500 mt-1">When does your assistant run, and where does it get its content from?</p>
       </div>
       <div class="space-y-6">
@@ -1959,7 +1968,7 @@
     <!-- Knowledge base & brand context -->
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-6">
-        <h3 class="text-lg font-bold text-gray-900">Brand Safety &amp; Legal</h3>
+        <h3 class="text-lg font-bold text-gray-900">Safety and legal</h3>
         <p class="text-sm text-gray-500 mt-1">Background context that protects your brand from compliance risk. For hard constraints, see the Rules section.</p>
       </div>
       <div>
@@ -2246,7 +2255,7 @@
 </div>
 
 <!-- ── Modal: Copy rules from another assistant ─────────────────── -->
-<div id="modal-copy-rules" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+<div id="modal-copy-rules" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
     <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-emerald-50">
       <div class="flex items-center gap-3">
@@ -2259,7 +2268,7 @@
         </div>
       </div>
       <button onclick="document.getElementById('modal-copy-rules').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2275,7 +2284,7 @@
     </div>
     <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-between bg-gray-50/50 rounded-b-2xl">
       <button onclick="document.getElementById('modal-copy-rules').classList.add('hidden')" type="button"
-        class="px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Cancel</button>
+        class="btn-secondary px-4 py-2.5 text-sm font-bold rounded-lg border transition cursor-pointer">Cancel</button>
       <button id="btn-copy-rules-confirm" onclick="window._confirmCopyRules()" type="button"
         class="btn-utility px-6 py-2.5 text-sm font-bold rounded-lg shadow transition cursor-pointer flex items-center gap-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
@@ -2286,7 +2295,7 @@
 </div>
 
 <!-- ── Modal: Tuning Session (Epic 3.1) — correct an output → learned directive ─── -->
-<div id="modal-tuning" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+<div id="modal-tuning" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full overflow-hidden flex flex-col max-h-[90vh]">
     <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-indigo-50">
       <div class="flex items-center gap-3">
@@ -2299,7 +2308,7 @@
         </div>
       </div>
       <button onclick="window._closeTuningSession()" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2324,7 +2333,7 @@
     </div>
     <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3 bg-gray-50/50">
       <button id="tuning-cancel-btn" onclick="window._closeTuningSession()" type="button"
-        class="px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Cancel</button>
+        class="btn-secondary px-4 py-2.5 text-sm font-bold rounded-lg border transition cursor-pointer">Cancel</button>
       <button id="tuning-submit-btn" onclick="window._submitTuning()" type="button"
         class="btn-primary px-6 py-2.5 text-sm font-bold rounded-lg shadow transition cursor-pointer">Submit correction</button>
       <!-- Post-submit actions (hidden until a directive is created) -->
@@ -2337,12 +2346,12 @@
 </div>
 
 <!-- ── Modal: Tuning post picker (Epic 3.1 — action-bar / Runbook entry) ─── -->
-<div id="modal-tuning-picker" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+<div id="modal-tuning-picker" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
     <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-indigo-50">
       <h3 class="font-extrabold text-gray-900">Choose a post to tune</h3>
       <button onclick="document.getElementById('modal-tuning-picker').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2353,7 +2362,7 @@
 </div>
 
 <!-- ── Modal: Review Progress (SMART Goals US2.2) ───────────────── -->
-<div id="modal-review-progress" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+<div id="modal-review-progress" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
     <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
       <div class="min-w-0">
@@ -2361,7 +2370,7 @@
         <p class="text-xs text-gray-500 mt-0.5">Actual performance against the trajectory needed to hit your target.</p>
       </div>
       <button onclick="document.getElementById('modal-review-progress').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2386,7 +2395,7 @@
 </div>
 
 <!-- ── Modal: Magic Wand suggestion (US3.2 — goal-aware field rewrite) ─── -->
-<div id="modal-wand" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+<div id="modal-wand" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
     <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-emerald-50">
       <div>
@@ -2394,7 +2403,7 @@
         <p id="wand-field-label" class="text-xs text-emerald-800 mt-0.5"></p>
       </div>
       <button onclick="document.getElementById('modal-wand').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2403,14 +2412,14 @@
       <div id="wand-suggestion" style="min-height:64px" class="text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg p-3"></div>
     </div>
     <div class="px-6 py-4 border-t border-gray-100 bg-gray-50/50 rounded-b-2xl flex items-center justify-end gap-3">
-      <button onclick="document.getElementById('modal-wand').classList.add('hidden')" type="button" class="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Dismiss</button>
+      <button onclick="document.getElementById('modal-wand').classList.add('hidden')" type="button" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border transition cursor-pointer">Dismiss</button>
       <button id="wand-accept" type="button" class="btn-primary px-5 py-2 text-sm font-bold rounded-lg shadow transition cursor-pointer">Accept Suggestion</button>
     </div>
   </div>
 </div>
 
 <!-- ── Modal: One-Click Fix (SMART Goals US-03 — diagnosis + strategy diff + apply) ─── -->
-<div id="modal-strategy-fix" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+<div id="modal-strategy-fix" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
     <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-emerald-50">
       <div class="min-w-0">
@@ -2418,7 +2427,7 @@
         <p class="text-xs text-emerald-700 mt-0.5">Why this goal is slipping — and the strategy change to fix it.</p>
       </div>
       <button onclick="document.getElementById('modal-strategy-fix').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2426,14 +2435,14 @@
       <div class="flex items-center justify-center py-10 text-sm text-gray-400">Analysing your strategy…</div>
     </div>
     <div id="strategy-fix-footer" class="px-6 py-4 border-t border-gray-100 bg-gray-50/50 rounded-b-2xl flex items-center justify-end gap-3 hidden">
-      <button onclick="document.getElementById('modal-strategy-fix').classList.add('hidden')" type="button" class="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Dismiss</button>
+      <button onclick="document.getElementById('modal-strategy-fix').classList.add('hidden')" type="button" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border transition cursor-pointer">Dismiss</button>
       <button id="strategy-fix-accept" type="button" class="btn-primary px-5 py-2 text-sm font-bold rounded-lg shadow transition cursor-pointer">Accept &amp; Update Strategy</button>
     </div>
   </div>
 </div>
 
 <!-- ── Modal: Be More Swan Safe Content Benchmark (read-only detail) ─── -->
-<div id="modal-safety-benchmark" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+<div id="modal-safety-benchmark" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
     <div class="px-6 py-5 border-b border-indigo-100 bg-indigo-100/60 flex items-center justify-between gap-4 sticky top-0">
       <div class="flex items-center gap-3">
@@ -2446,7 +2455,7 @@
         </div>
       </div>
       <button onclick="document.getElementById('modal-safety-benchmark').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-indigo-400 hover:bg-indigo-100 hover:text-indigo-700 transition cursor-pointer shrink-0">
+        class="p-2 rounded-lg text-indigo-400 hover:bg-indigo-100 hover:text-indigo-700 transition cursor-pointer shrink-0" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2478,7 +2487,7 @@
 </div>
 
 <!-- ── Modal: Suggest a Safety Rule ─────────────────────────────── -->
-<div id="modal-safety-feedback" class="fixed inset-0 bg-gray-900/60 hidden z-[51] flex items-center justify-center p-4 backdrop-blur-sm">
+<div id="modal-safety-feedback" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-[51] flex items-center justify-center p-4 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
     <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-indigo-50">
       <div class="flex items-center gap-3">
@@ -2491,7 +2500,7 @@
         </div>
       </div>
       <button onclick="document.getElementById('modal-safety-feedback').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2515,7 +2524,7 @@
     </div>
     <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-between bg-gray-50/50 rounded-b-2xl">
       <button onclick="document.getElementById('modal-safety-feedback').classList.add('hidden')" type="button"
-        class="px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Cancel</button>
+        class="btn-secondary px-4 py-2.5 text-sm font-bold rounded-lg border transition cursor-pointer">Cancel</button>
       <button id="btn-safety-submit" onclick="window._submitSafetyFeedback()" type="button"
         class="btn-primary px-6 py-2.5 text-sm font-bold rounded-lg shadow transition cursor-pointer flex items-center gap-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
@@ -2526,7 +2535,7 @@
 </div>
 
 <!-- ── Connect modal (moved from the standalone Connections page) ─────── -->
-<div id="modal-connect" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm">
+<div id="modal-connect" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm">
   <div class="bg-white w-full sm:rounded-2xl sm:max-w-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
     <div id="modal-platform-header" class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
       <div class="flex items-center gap-4">
@@ -2536,7 +2545,7 @@
           <p id="modal-platform-desc" class="text-sm text-gray-500 mt-0.5"></p>
         </div>
       </div>
-      <button onclick="document.getElementById('modal-connect').classList.add('hidden')" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" type="button">
+      <button onclick="document.getElementById('modal-connect').classList.add('hidden')" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" type="button" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2580,7 +2589,7 @@
     </div>
     <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3 bg-gray-50/50 rounded-b-2xl">
       <button onclick="document.getElementById('modal-connect').classList.add('hidden')" type="button"
-        class="px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Cancel</button>
+        class="btn-secondary px-4 py-2.5 text-sm font-bold rounded-lg border transition cursor-pointer">Cancel</button>
       <button id="btn-connect-submit" onclick="window._intSubmit(event)" type="button"
         class="btn-primary px-6 py-2.5 text-sm font-bold rounded-lg shadow transition cursor-pointer flex items-center gap-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
@@ -2595,7 +2604,7 @@
      Meta-side setup (Business account, linked Page, admin access) instead of
      landing on an unhelpful Facebook error page. Driven by integrations.js
      (_intOpenPreConnect). -->
-<div id="modal-preconnect" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm">
+<div id="modal-preconnect" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm">
   <div class="bg-white w-full sm:rounded-2xl sm:max-w-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
     <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
       <div class="flex items-center gap-4">
@@ -2605,7 +2614,7 @@
           <p id="preconnect-intro" class="text-sm text-gray-500 mt-0.5"></p>
         </div>
       </div>
-      <button onclick="document.getElementById('modal-preconnect').classList.add('hidden')" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" type="button">
+      <button onclick="document.getElementById('modal-preconnect').classList.add('hidden')" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" type="button" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2630,42 +2639,15 @@
     </div>
     <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3 bg-gray-50/50 rounded-b-2xl">
       <button onclick="document.getElementById('modal-preconnect').classList.add('hidden')" type="button"
-        class="px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Cancel</button>
+        class="btn-secondary px-4 py-2.5 text-sm font-bold rounded-lg border transition cursor-pointer">Cancel</button>
       <a id="btn-preconnect-continue" href="#"
         class="btn-primary px-6 py-2.5 text-sm font-bold rounded-lg shadow transition cursor-pointer inline-block"></a>
     </div>
   </div>
 </div>
 
-<!-- ── Disconnect confirmation modal ───────────────────────────────── -->
-<div id="modal-disconnect" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-  <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6" onclick="event.stopPropagation()">
-    <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center text-red-600 text-2xl mb-4">⚠️</div>
-    <h3 class="text-xl font-bold text-gray-900 mb-2">Disconnect this platform?</h3>
-    <p class="text-gray-600 text-sm mb-6">This will permanently delete the stored credentials and <strong>pause any assistants</strong> currently posting to this platform. You can reconnect at any time.</p>
-    <div class="flex gap-3 justify-end">
-      <button onclick="document.getElementById('modal-disconnect').classList.add('hidden')" class="px-4 py-2 font-bold text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer" type="button">Keep it</button>
-      <button id="btn-confirm-disconnect" class="btn-destructive px-4 py-2 font-bold rounded-lg cursor-pointer" type="button">Yes, Disconnect</button>
-    </div>
-  </div>
-</div>
-
-<!-- US-AUD-4.2.1: Revoke All confirmation modal (SC4) -->
-<div id="modal-revoke-all" class="fixed inset-0 bg-gray-900/70 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-  <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
-    <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center text-red-600 text-2xl mb-4">🔒</div>
-    <h3 class="text-xl font-bold text-gray-900 mb-2">Revoke all connections?</h3>
-    <p class="text-gray-600 text-sm mb-6">This will <strong>permanently delete all stored credentials</strong> for every member of your workspace and pause all connected assistants. This cannot be undone.</p>
-    <div class="flex gap-3 justify-end">
-      <button onclick="document.getElementById('modal-revoke-all').classList.add('hidden')"
-        class="px-4 py-2 font-bold text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer" type="button">Cancel</button>
-      <button id="btn-confirm-revoke-all"
-        class="btn-destructive px-4 py-2 font-bold rounded-lg cursor-pointer" type="button">
-        Yes, Revoke All
-      </button>
-    </div>
-  </div>
-</div>
+<!-- Disconnect now uses /dialogs.js confirmModal (integrations.js _intPromptDisconnect). So does
+     "Revoke all connections" (window._revokeAllConnections, below). -->
 
 <script>
 // Issue #65: header "More actions" menu (Pause Assistant / Archive) — click to toggle,
@@ -2686,24 +2668,22 @@
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
 })();
 
-// US-AUD-4.2.1 SC4: Revoke all connections for the org
-window._revokeAllConnections = function () {
-  document.getElementById('modal-revoke-all').classList.remove('hidden');
-};
-
-document.getElementById('btn-confirm-revoke-all')?.addEventListener('click', async function () {
-  const btn = document.getElementById('btn-confirm-revoke-all');
-  btn.textContent = 'Revoking…';
-  btn.disabled = true;
+// US-AUD-4.2.1 SC4: Revoke all connections for the org. Confirmed through /dialogs.js (focus held,
+// Escape cancels, focus returned) — it used to be a hand-built modal with none of that.
+window._revokeAllConnections = async function () {
+  const ok = await window.confirmModal(
+    'This <strong>permanently deletes all stored credentials</strong> for every member of your workspace and pauses all connected assistants. This cannot be undone.',
+    { title: 'Revoke all connections?', confirmLabel: 'Yes, revoke all', cancelLabel: 'Cancel' },
+  );
+  if (!ok) return;
+  const fb = document.getElementById('revoke-all-feedback');
   try {
     const res = await fetch('/.netlify/functions/revoke-connections', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ scope: 'org' }),
     });
-    const data = await res.json();
-    document.getElementById('modal-revoke-all').classList.add('hidden');
-    const fb = document.getElementById('revoke-all-feedback');
+    const data = await res.json().catch(() => ({}));
     if (res.ok) {
       fb.textContent = `✓ All connections revoked (${data.revoked} total). All assistant integrations have been paused.`;
       fb.classList.remove('hidden');
@@ -2713,13 +2693,9 @@ document.getElementById('btn-confirm-revoke-all')?.addEventListener('click', asy
       fb.classList.remove('hidden');
     }
   } catch {
-    document.getElementById('modal-revoke-all').classList.add('hidden');
     window.showToast?.('Network error. Please try again.', { icon: '⚠️' });
-  } finally {
-    btn.textContent = 'Yes, Revoke All';
-    btn.disabled = false;
   }
-});
+};
 
 // SC5: Single-connection revocation — called from the platform card's "Disconnect" button
 window._revokeConnection = async function (connectionId, onSuccess) {

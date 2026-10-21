@@ -14,7 +14,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { postActionFromUiElement, resolvePostActionProposal } from '../src/utils/chat-post-action';
+import { postActionFromUiElement, refreshPostActionCards, resolvePostActionProposal } from '../src/utils/chat-post-action';
 import { renderContentSnapshot } from '../src/utils/content-snapshot';
 
 let passed = 0;
@@ -141,6 +141,30 @@ async function main() {
         }
         assert.doesNotMatch(h, /acknowledgeWarnings/, 'compliance warnings are settled on the post, never waved through from chat');
         assert.doesNotMatch(h, /publish_now/, 'chat never publishes immediately');
+    });
+
+    console.log('\nReopening a conversation');
+
+    await check('a stored card whose post was dealt with says so, with no button', async () => {
+        const post = { id: 5, status: 'scheduled', platform: 'linkedin', publishDate: new Date(), caption: 'x', crosspostGroupId: null };
+        const [m] = await refreshPostActionCards(fakeDb([post]), 1, 2, [
+            { uiElement: { type: 'post_action_proposal', action: 'approve', postId: 5, postIds: [5] } },
+        ]);
+        const ui = m.uiElement as Record<string, unknown>;
+        assert.strictEqual(ui.settled, true);
+        assert.match(String(ui.blocked), /Already dealt with — this post is now booked to publish\./);
+        assert.deepStrictEqual(ui.postIds, []);
+    });
+
+    await check('a stored card that still applies stays live, and other messages pass through untouched', async () => {
+        const post = { id: 5, status: 'pending_approval', platform: 'linkedin', publishDate: new Date(), caption: 'x', crosspostGroupId: null };
+        const plain = { uiElement: null, content: 'hi' };
+        const out = await refreshPostActionCards(fakeDb([post]), 1, 2, [
+            plain, { uiElement: { type: 'post_action_proposal', action: 'approve', postId: 5 } },
+        ]);
+        assert.strictEqual(out[0], plain);
+        assert.strictEqual((out[1].uiElement as any).blocked, null);
+        assert.ok(read('netlify/functions/get-chat-session.ts').includes('messages: await refreshPostActionCards(db, orgId, session.aiAssistantId, messages)'));
     });
 
     console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);

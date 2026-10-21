@@ -46,6 +46,78 @@ window.holdDialogFocus = function (root, first) {
   };
 };
 
+/**
+ * Page dialogs — a dialog whose markup lives in a page (a form, a picker, a chart) rather than being
+ * built here. Mark the overlay `data-dialog` and its close (×) button `data-dialog-cancel`; the page
+ * keeps opening and closing it by toggling `hidden` exactly as before. While one is open it gets
+ * what confirmModal gives: role="dialog" + aria-modal, labelled by its heading, focus moved in, Tab
+ * and Shift+Tab kept inside it, Escape pressing its close button (so the page's own close logic
+ * runs), and focus returned to the button that opened it. Stacked dialogs (one opened over another)
+ * act on the TOPMOST only — holdDialogFocus per dialog would fight over Tab.
+ *
+ * The assistant-detail page's ten hand-built dialogs had none of this (UI review, 2026-10-21).
+ */
+(function () {
+  const FOCUSABLE = 'button:not([disabled]),[href],input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+  const opened = []; // { el, before }, oldest first
+  const isOpen = (el) => el.isConnected && !el.classList.contains('hidden') && el.style.display !== 'none';
+  const controls = (el) => [...el.querySelectorAll(FOCUSABLE)].filter((c) => c.offsetParent !== null);
+
+  function sync(el) {
+    const i = opened.findIndex((o) => o.el === el);
+    if (isOpen(el) && i < 0) {
+      el.setAttribute('role', 'dialog');
+      el.setAttribute('aria-modal', 'true');
+      if (!el.hasAttribute('aria-labelledby')) {
+        const h = el.querySelector('h1,h2,h3');
+        if (h) { if (!h.id) h.id = `${el.id || 'dialog'}-title`; el.setAttribute('aria-labelledby', h.id); }
+      }
+      opened.push({ el, before: document.activeElement });
+      // After the page has finished filling it in (most open, then render).
+      setTimeout(() => { if (isOpen(el) && !el.contains(document.activeElement)) controls(el)[0]?.focus(); }, 0);
+    } else if (!isOpen(el) && i >= 0) {
+      const [{ before }] = opened.splice(i, 1);
+      if (before && before.isConnected && typeof before.focus === 'function') before.focus();
+    }
+  }
+
+  function start() {
+    document.querySelectorAll('[data-dialog]').forEach(sync);
+    new MutationObserver((muts) => {
+      for (const m of muts) {
+        if (m.type === 'attributes' && m.target.nodeType === 1 && m.target.hasAttribute('data-dialog')) sync(m.target);
+      }
+      // A view swap can remove an open dialog from the page without closing it.
+      for (let i = opened.length - 1; i >= 0; i--) if (!opened[i].el.isConnected) opened.splice(i, 1);
+    }).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'], subtree: true, childList: true });
+  }
+
+  // confirmModal / alertModal / promptModal / choiceModal can open OVER a page dialog; while one is
+  // up its own keyboard handling owns the keys (its Escape must not also close the dialog beneath).
+  const BUILT_HERE = '#aura-confirm-modal';
+
+  document.addEventListener('keydown', (e) => {
+    const top = opened[opened.length - 1]?.el;
+    if (!top || !isOpen(top) || document.querySelector(BUILT_HERE)) return;
+    if (e.key === 'Escape') {
+      const close = top.querySelector('[data-dialog-cancel]');
+      if (close) { e.preventDefault(); e.stopPropagation(); close.click(); }
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const list = controls(top);
+    if (!list.length) return;
+    const a = list[0];
+    const z = list[list.length - 1];
+    const inside = top.contains(document.activeElement);
+    if (e.shiftKey && (!inside || document.activeElement === a)) { e.preventDefault(); z.focus(); }
+    else if (!e.shiftKey && (!inside || document.activeElement === z)) { e.preventDefault(); a.focus(); }
+  }, true);
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  else start();
+})();
+
 // Lightweight, dependency-free toast. Inline styles on purpose: arbitrary
 // Tailwind classes aren't in the prebuilt style.css, so they'd no-op here.
 window.showToast = function (message, opts = {}) {

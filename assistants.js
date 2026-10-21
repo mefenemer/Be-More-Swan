@@ -3609,8 +3609,8 @@ window._detailRqRecordAct = async function (btn, action) {
                 : action === 'backToEnrichment' ? `Moved to ${_rqHubTabLabel()}. It has left the Outreach columns — move it back when it's ready to be emailed. Nothing was looked up: "Send back for enrichment" is the button that researches a lead.`
                 : action === 'reject' && patch.feedback
                     ? (patchResult.feedbackSaved === false
-                        ? 'Rejected, but your note couldn’t be saved. Add it as a rule on the Rules tab instead.'
-                        : 'Rejected. Your assistant will follow that from now on — it’s listed under Learned Directives on the Rules tab.')
+                        ? 'Rejected, but your note couldn’t be saved. Add it under Do’s and don’ts in Assistant Profile instead.'
+                        : 'Rejected. Your assistant will follow that from now on — it’s listed under Learned Directives in Do’s and don’ts, in Assistant Profile.')
                 : action === 'reject' ? 'Rejected.' : 'Updated.';
             window.showToast?.(toast);
         }
@@ -4114,14 +4114,15 @@ window._openProfileDrawer = function() {
 // Open (or swap to) a specific section panel, with a back arrow to the home index.
 window._openBriefDrawer = function(tabKey) {
     _briefShowPanel('tab-' + tabKey);
-    const titles = { problem: 'Mandate', operation: 'Operational Setup', strategy: 'Creative Brief', platforms: 'Connections', rules: 'Rules', guardrails: 'Brand Safety & Legal', notifications: 'Notifications' };
+    const titles = { problem: 'What I do', operation: 'When and how I post', strategy: 'What I post about', platforms: 'Connections', rules: 'Do’s and don’ts', guardrails: 'Safety and legal', notifications: 'Notifications' };
     // The 'strategy' card is the one the role registry RENAMES: roles with hasCreativeBrief:false
     // (every non-social role) lose the marketing cards, so _applyRoleDashboard rewrites the nav
     // card's title to "Brand Knowledge". Reading that element back keeps the drawer header saying
     // whatever the card the user just clicked says — a static map here shipped a "Creative Brief"
     // header above a panel the user had opened from a "Brand Knowledge" card.
-    const cardTitle = document.getElementById('opcard-strategy-title');
-    if (tabKey === 'strategy' && cardTitle && cardTitle.textContent.trim()) titles.strategy = cardTitle.textContent.trim();
+    // 'operation' is renamed the same way ("When and how I work" for a role that doesn't post).
+    const cardTitle = document.getElementById(`opcard-${tabKey}-title`);
+    if ((tabKey === 'strategy' || tabKey === 'operation') && cardTitle && cardTitle.textContent.trim()) titles[tabKey] = cardTitle.textContent.trim();
     const titleEl = document.getElementById('brief-drawer-title');
     if (titleEl) titleEl.textContent = titles[tabKey] || tabKey;
     const backBtn = document.getElementById('brief-drawer-back');
@@ -5539,7 +5540,7 @@ async function _renderOutreachEmailConnect(data) {
                <div>
                  <p class="font-bold text-gray-900 text-sm">This assistant is set to send from ${esc(M.brand)}, but ${esc(ALT.brand)} is what's connected</p>
                  <p class="text-sm text-gray-600 mt-0.5">Your setup answer says outreach goes out through ${esc(M.account)}, and that account isn't connected — so approved leads are being handed back as drafts. ${altAccountName ? `<span class="font-semibold text-gray-800">${esc(altAccountName)}</span> is connected` : `Your ${esc(ALT.brand)} account is connected`} and can send instead.</p>
-                 <p class="text-xs text-gray-500 mt-1.5">Switching changes this assistant's setup answer. You can also change it under Operational Setup → “${esc('Send outreach emails from your own inbox?')}”.</p>
+                 <p class="text-xs text-gray-500 mt-1.5">Switching changes this assistant's setup answer. You can also change it under When and how I post → “${esc('Send outreach emails from your own inbox?')}”.</p>
                </div>
              </div>
              <div class="shrink-0 flex flex-col items-stretch gap-2">
@@ -5718,8 +5719,35 @@ function _applyDashboardRegistry(data) {
     toggle('maintab-btn-review-queue', !cfg.hideReviewQueue);
     // A role whose campaigns carry their own targets (the Campaign Assistant) has no separate goals:
     // two places to set "what success is" was the confusion. The Goal Progress card goes with it.
-    toggle('maintab-btn-goals', !cfg.hideGoals);
+    // "How is it going" in one place (owner, 2026-10-21 — trialled on Social Media, then every role):
+    // the Goal Progress, Performance Metrics and Autopilot cards move off the top of the page into
+    // the Goals tab, renamed "Results", above the goals themselves. Off the top, the page opens on
+    // the work instead of screens of dashboard on a phone. The cards keep their ids, so everything
+    // that fills them still does. A role may override with its own goalsTab.
+    const goalsTab = cfg.goalsTab || { label: 'Results', bringsResults: true };
+    window._detailResultsInGoalsTab = !!goalsTab.bringsResults;
+    // A role without goals (cfg.hideGoals) keeps a Results tab when its results move there — just
+    // without the goals section — so its figures still have a home.
+    toggle('maintab-btn-goals', !cfg.hideGoals || window._detailResultsInGoalsTab);
     toggle('goal-progress-card', !cfg.hideGoals);
+    toggle('tab-goals', !cfg.hideGoals);
+    setText('maintab-btn-goals', goalsTab.label || 'Goals');
+    if (window._detailResultsInGoalsTab) {
+        const panel = document.getElementById('maintab-goals');
+        const goalsList = document.getElementById('tab-goals');
+        // Autopilot carries the Created / Scheduled / Published totals, Content by platform and
+        // Audience with it — all three are sections of that one card (owner, 2026-10-21).
+        ['goal-progress-card', 'performance-metrics-card', 'autopilot-status-card'].forEach((id) => {
+            const card = document.getElementById(id);
+            if (!card || !panel || !goalsList) return;
+            card.style.order = ''; // the flex ordering belonged to the overview stack it has left
+            panel.insertBefore(card, goalsList);
+        });
+        // In the tab it stands alone, so it needs the gap the status row's grid used to give it.
+        document.getElementById('autopilot-status-card')?.classList.add('mb-8');
+        // Connections is left alone in the status row: one column, so it isn't a half-width card.
+        document.getElementById('overview-status-row')?.classList.remove('lg:grid-cols-2');
+    }
     // Social/blog retire the Data Hub tab (cfg.hideDataHub) — and the action bar with the primary
     // action ("Create a Post") lives INSIDE that tab's panel. Hiding the tab button alone left the
     // panel itself visible whenever _activateMainTab hadn't run yet, so it leaked in under the tab
@@ -5890,6 +5918,9 @@ function _applyDashboardRegistry(data) {
     if (mods.hasCreativeBrief === false) {
         setText('opcard-strategy-title', 'Brand Knowledge');
         setText('opcard-strategy-sub', 'Business information and brand context your assistant applies');
+        // "When and how I post" is the social role's card; every other role's is about its work.
+        setText('opcard-operation-title', 'When and how I work');
+        setText('operation-heading', 'When and how I work');
     }
     if (mods.hasPostingSchedule === false) {
         setText('opcard-operation-sub', 'Trigger and content source');
@@ -8995,6 +9026,36 @@ window._rbcRegenerate = async function () {
 };
 
 // ─────────────────────────────────────────────────────────────────
+// Where each Kick Off item is put right. Only "AI disclosure" used to have a way there, so every
+// other outstanding item was a list of things to fix with no route to any of them (UX review,
+// 2026-10-21). Keys come from get-assistant-readiness.ts. ⚠️ prohibited_use and conformity have NO
+// customer-facing control at all — nothing in the app sets them — so they go to support, who can.
+// Blueprint gaps (`blueprint:…`) carry their own "where" in the hint and get no link.
+const _KICKOFF_FIX = {
+    brand_strategy: { where: 'What I post about', go: "window._openBriefDrawer('strategy')" },
+    connections:    { where: 'Connections', go: "window._openBriefDrawer('platforms')" },
+    disclosure:     { where: 'Safety and legal', go: 'window._goToDisclosureField()' },
+    guardrails:     { where: 'Do’s and don’ts', go: "window._openBriefDrawer('rules')" },
+    tos:            { where: 'My Agreements', go: "Promise.resolve(window.loadView('settings')).then(() => window.activateSettingsTab?.('agreements'))" },
+    dpa:            { where: 'My Agreements', go: "Promise.resolve(window.loadView('settings')).then(() => window.activateSettingsTab?.('agreements'))" },
+    prohibited_use: { where: 'support', label: 'Ask us to review this →', go: "window.openCallbackForm ? window.openCallbackForm() : (location.href = '/workspace.html?help=contact')" },
+    conformity:     { where: 'support', label: 'Ask us to review this →', go: "window.openCallbackForm ? window.openCallbackForm() : (location.href = '/workspace.html?help=contact')" },
+};
+// Defined once at load: it used to be assigned only on the checklist's normal path, so the
+// blocked-provisioning list (which renders and returns first) offered a link to nothing.
+window._goToDisclosureField = function() {
+    document.querySelector('.detail-tab-btn[data-tab="guardrails"]')?.click();
+    setTimeout(() => {
+        const el = document.getElementById('edit_ai_disclosure');
+        if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); }
+    }, 120);
+};
+function _kickoffFixLink(key) {
+    const fix = _KICKOFF_FIX[key];
+    if (!fix) return '';
+    return ` <button type="button" onclick="${fix.go}" title="Opens ${fix.where}" class="link font-semibold cursor-pointer">${fix.label || 'Do this now →'}</button>`;
+}
+
 // Kick Off Meeting — readiness checklist + activation gate. Fetches
 // get-assistant-readiness and renders the checklist; the Kick Off button is
 // enabled only when all required items pass and the assistant isn't already
@@ -9110,7 +9171,7 @@ async function _renderKickOff(assistantId) {
                 ${it.done ? bTick : bCross}
                 <span class="min-w-0">
                     <span class="block text-sm font-semibold ${it.done ? 'text-gray-800' : 'text-red-700'}">${it.label}${it.required ? '' : ' <span class="text-xs font-normal text-gray-400">(recommended)</span>'}</span>
-                    ${it.done ? '' : `<span class="block text-xs text-red-500 mt-0.5">${it.hint || ''}${it.key === 'disclosure' ? ' <button type="button" onclick="window._goToDisclosureField()" class="text-emerald-600 hover:underline cursor-pointer font-semibold">Open Guardrails tab →</button>' : ''}</span>`}
+                    ${it.done ? '' : `<span class="block text-xs text-red-500 mt-0.5">${it.hint || ''}${_kickoffFixLink(it.key)}</span>`}
                 </span>
             </li>`).join('') || '';
         btn.classList.add('hidden');
@@ -9122,14 +9183,6 @@ async function _renderKickOff(assistantId) {
     const tick = `<svg class="w-4 h-4 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>`;
     const cross = `<svg class="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="2"/></svg>`;
 
-    window._goToDisclosureField = function() {
-        document.querySelector('.detail-tab-btn[data-tab="guardrails"]')?.click();
-        setTimeout(() => {
-            const el = document.getElementById('edit_ai_disclosure');
-            if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); }
-        }, 120);
-    };
-
     // label/hint are escaped because they are no longer all hard-coded here: blueprint-derived
     // items (key `blueprint:…`) build their label from the assistant's own onboarding answers —
     // "Connect ${platform}" comes from primary_platforms, which the user types. Unescaped, an
@@ -9139,7 +9192,7 @@ async function _renderKickOff(assistantId) {
             ${it.done ? tick : cross}
             <span class="min-w-0">
                 <span class="block text-sm font-semibold ${it.done ? 'text-gray-800' : 'text-gray-500'}">${_escapeHtml(it.label)}${it.required ? '' : ' <span class="text-xs font-normal text-gray-400">(recommended)</span>'}</span>
-                ${it.done ? '' : `<span class="block text-xs text-gray-400 mt-0.5">${_escapeHtml(it.hint || '')}${it.key === 'disclosure' ? ' <button type="button" onclick="window._goToDisclosureField()" class="text-emerald-600 hover:underline cursor-pointer font-semibold">Open Guardrails tab →</button>' : ''}</span>`}
+                ${it.done ? '' : `<span class="block text-xs text-gray-400 mt-0.5">${_escapeHtml(it.hint || '')}${_kickoffFixLink(it.key)}</span>`}
             </span>
         </li>`).join('') || '<li class="text-sm text-gray-400">No checklist items.</li>';
 
@@ -10871,13 +10924,13 @@ function _renderGoalFreshnessNote() {
     const manual = _goalsCache.filter(g => g.isManual);
     const polled = _goalsCache.filter(g => !g.isManual);
     const manualTail = manual.length && polled.length
-        ? ` ${manual.length === 1 ? 'One of these' : `${manual.length} of these`} you report yourself, from the Goals tab.`
+        ? ` ${manual.length === 1 ? 'One of these' : `${manual.length} of these`} you report yourself, ${_goalsPlace()}.`
         : '';
 
     if (!polled.length) {
         const one = manual.length === 1;
         return set(
-            `You report ${one ? 'this figure' : 'these figures'} yourself — nothing measures ${one ? 'it' : 'them'} automatically. Update ${one ? 'it' : 'them'} from the Goals tab.`,
+            `You report ${one ? 'this figure' : 'these figures'} yourself — nothing measures ${one ? 'it' : 'them'} automatically. Update ${one ? 'it' : 'them'} ${_goalsPlace()}.`,
             'User-reported metrics have no data source we can poll (revenue and enquiry counts live in your books, not in a connected platform), so the bar moves when you enter a new figure and not before.',
         );
     }
@@ -10937,7 +10990,7 @@ function _buildGoalProgressTile(g) {
         : null;
 
     return `<button type="button" onclick="window._openGoalFromOverview(${JSON.stringify(String(g.id)).replace(/"/g, '&quot;')})"
-        title="Open the Goals tab to update this goal"
+        title="Go to this goal to update it"
         class="text-left w-full group cursor-pointer">
         <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
@@ -10978,10 +11031,28 @@ window._openGoalFromOverview = function (goalId) {
     });
 };
 
+/** "Manage goals" on the Goal Progress card: open the goals list, and bring it into view — on a
+ *  role whose Goal Progress card already sits in the Goals tab, switching tabs alone does nothing. */
+window._openGoalsList = function () {
+    window._activateMainTab && window._activateMainTab('goals');
+    document.getElementById('tab-goals')?.scrollIntoView({ block: 'start' });
+};
+
+/** Where the user goes to change a goal, said in the Goal Progress card's own words: the card is
+ *  either on the page above the tabs, or (goalsTab.bringsResults) in the same tab as the goals. */
+function _goalsPlace() {
+    return window._detailResultsInGoalsTab ? 'in Goals below' : 'from the Goals tab';
+}
+
 /** Overview empty-state CTA — jump to the Goals tab with the builder already open. */
 window._addGoalFromOverview = function () {
     window._activateMainTab('goals');
-    setTimeout(() => window._toggleGoalBuilder(true), 80);
+    // Into view as well: with the Goal Progress card in the same tab (goalsTab.bringsResults) the
+    // form opens below it — just off the bottom of a phone screen.
+    setTimeout(() => {
+        window._toggleGoalBuilder(true);
+        document.getElementById('goal-builder-heading')?.scrollIntoView({ block: 'center' });
+    }, 80);
 };
 
 function _syncReviewButton() {

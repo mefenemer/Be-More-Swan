@@ -564,13 +564,6 @@ window.initIntegrations = async function () {
     await _loadAssistantsForFilter();
     await _loadConnections();
 
-    // Disconnect confirm button
-    const confirmBtn = document.getElementById('btn-confirm-disconnect');
-    if (confirmBtn) {
-        const newBtn = confirmBtn.cloneNode(true);
-        confirmBtn.parentNode.replaceChild(newBtn, confirmBtn);
-        newBtn.addEventListener('click', _doDisconnect);
-    }
 };
 
 // ── Init inside the assistant detail Connections tab ─────────────
@@ -590,13 +583,6 @@ window.initAssistantConnections = async function (assistantId, currentData) {
     await _loadSocialHandles();
     await _loadConnections();
 
-    // Disconnect confirm button (same wiring as initIntegrations)
-    const confirmBtn = document.getElementById('btn-confirm-disconnect');
-    if (confirmBtn) {
-        const newBtn = confirmBtn.cloneNode(true);
-        confirmBtn.parentNode.replaceChild(newBtn, confirmBtn);
-        newBtn.addEventListener('click', _doDisconnect);
-    }
 };
 
 // The same save feedback drives the Connections drawer header and the Overview status card,
@@ -2346,10 +2332,17 @@ window._intSubmit = async function (e) {
 };
 
 // ── Disconnect ────────────────────────────────────────────────────
-window._intPromptDisconnect = function (connId) {
-    _connToDelete = connId;
+// The shared /dialogs.js confirm (focus held, Escape cancels, focus returned) — it used to be a
+// hand-built modal in assistant-detail.html with none of that.
+window._intPromptDisconnect = async function (connId) {
     _closeDrawerForModal();
-    document.getElementById('modal-disconnect').classList.remove('hidden');
+    const ok = await window.confirmModal(
+        'This permanently deletes the stored credentials and <strong>pauses any assistants</strong> currently posting to this platform. You can reconnect at any time.',
+        { title: 'Disconnect this platform?', confirmLabel: 'Yes, disconnect', cancelLabel: 'Keep it' },
+    );
+    if (!ok) return;
+    _connToDelete = connId;
+    await _doDisconnect();
 };
 
 // ── US-SMM-4.2.2: Sync Profile ───────────────────────────────────
@@ -2670,9 +2663,12 @@ async function _doDisconnect() {
     try {
         const res = await fetch(`/.netlify/functions/integrations?id=${_connToDelete}`, { method: 'DELETE' });
         if (res.ok) {
-            document.getElementById('modal-disconnect').classList.add('hidden');
             _connToDelete = null;
             await _loadConnections();
+        } else {
+            // Used to do nothing at all on a refusal, so the click looked ignored.
+            const d = await res.json().catch(() => ({}));
+            window.showToast?.(d.error || 'Could not disconnect. Please try again.', { icon: '⚠️' });
         }
     } catch {
         window.showToast?.('Could not disconnect. Please try again.', { icon: '⚠️' });

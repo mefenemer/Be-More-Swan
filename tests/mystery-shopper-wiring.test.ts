@@ -114,7 +114,7 @@ console.log('\nNames the chat quotes');
 check('every tab and button the chat names is on the page', () => {
     const at = chat.indexOf('function mysteryShopperSurfaces()');
     const surfaces = chat.slice(at, chat.indexOf('\n}', at));
-    for (const name of ['"Website" tab', '"Check my site now"', '"Settings"', '"I\'ll make this change"', '"Copy"', '"Not for us"', '"Goals" tab',
+    for (const name of ['"Website" tab', '"Check my site now"', '"Settings"', '"I\'ll make this change"', '"Copy"', '"Not for us"', '"Results" tab',
         '"Ideas for your other assistants"', '"Brief <name>"']) {
         assert.ok(surfaces.includes(name), `surfaces names ${name}`);
     }

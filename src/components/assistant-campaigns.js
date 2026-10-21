@@ -879,7 +879,7 @@
         </div>
         <label class="flex items-start gap-2 text-xs text-gray-700">
           <input type="checkbox" data-cmp-keep-apply="${id}" data-keep="keep-apply-${id}" class="mt-0.5">
-          <span>Also make kept lessons a rule for the writing assistants this campaign briefed (you can remove it from each assistant's Rules tab).</span>
+          <span>Also make kept lessons a rule for the writing assistants this campaign briefed (you can remove it from each assistant's Do’s and don’ts card).</span>
         </label>
         <p class="text-xs text-gray-500">Kept lessons are read by your Campaign Assistant whenever it plans a campaign.</p>
       </div>`;

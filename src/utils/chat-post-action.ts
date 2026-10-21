@@ -156,3 +156,36 @@ export async function resolvePostActionProposal(
         return null;
     }
 }
+
+// ── Reopening a conversation ─────────────────────────────────────────────────────────────────────
+// A card is stored with the message and comes back on every reload. Once its post has been dealt
+// with — approved, rejected, moved, published — pressing the old button was refused by the endpoint
+// and read like an error. So a stored card is checked again when the conversation is loaded, and one
+// that no longer applies says what happened to the post instead of offering a button.
+
+const NOW_WORDS: Record<string, string> = {
+    draft: 'waiting for approval', pending_approval: 'waiting for approval', in_review: 'waiting for approval',
+    approved: 'booked to publish', scheduled: 'booked to publish', publishing: 'publishing right now',
+    paused: 'paused', paused_credits: 'paused', published: 'published', failed: 'failed to publish',
+    rejected: 'rejected', cancelled: 'withdrawn',
+};
+
+/** Re-check every stored post_action_proposal in a transcript. Mutates nothing it is given. */
+export async function refreshPostActionCards<M extends { uiElement: unknown }>(
+    db: Db, organisationId: number, aiAssistantId: number, messages: M[],
+): Promise<M[]> {
+    return Promise.all(messages.map(async (m) => {
+        const ui = m.uiElement as Record<string, unknown> | null;
+        if (!ui || ui.type !== POST_ACTION_PROPOSAL_TYPE) return m;
+        const req = postActionFromUiElement(ui);
+        if (!req) return m;
+        const tz = typeof ui.timezone === 'string' ? ui.timezone : null;
+        const now = await resolvePostActionProposal(db, organisationId, aiAssistantId, req, tz);
+        // `settled` tells the card this is history, not a refusal: its header says so.
+        if (!now) return { ...m, uiElement: { ...ui, postIds: [], settled: true, blocked: 'This post no longer exists.' } };
+        if (now.blocked) {
+            return { ...m, uiElement: { ...now, settled: true, blocked: `Already dealt with — this post is now ${NOW_WORDS[now.status] ?? now.status}.` } };
+        }
+        return { ...m, uiElement: now };
+    }));
+}

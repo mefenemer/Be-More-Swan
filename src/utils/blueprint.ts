@@ -96,8 +96,8 @@ export interface MissingField {
  * than a clear instruction. Links get added where these are rendered for the owner who must act.
  */
 const WHERE = {
-    operationalSetup: 'Assistant profile ▸ How it Works ▸ Operational Setup',
-    guardrails:       'Assistant profile ▸ Guardrails',
+    operationalSetup: 'Assistant Profile ▸ When and how I post',
+    guardrails:       'Assistant Profile ▸ Safety and legal',
     compliance:       'Assistant profile ▸ Compliance',
     kickOff:          'Assistant profile ▸ Kick-Off checklist',
     businessProfile:  'Business Information ▸ Business Profile',

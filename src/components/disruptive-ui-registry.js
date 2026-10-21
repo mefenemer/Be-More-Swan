@@ -1443,7 +1443,7 @@
       ${campaignId ? `
         <label class="flex items-start gap-2 text-xs text-gray-700 mt-3">
           <input type="checkbox" data-clp-apply ${ui.applyToDrafting === true ? 'checked' : ''} class="mt-0.5">
-          <span>Also make it a rule for the writing assistants this campaign briefed. You can remove it from each assistant's Rules tab.</span>
+          <span>Also make it a rule for the writing assistants this campaign briefed. You can remove it from each assistant's Do’s and don’ts card.</span>
         </label>` : ''}
       <p class="text-xs text-gray-600 mt-2">Your Campaign Assistant reads kept lessons whenever it plans a campaign.</p>
       <div class="flex items-center gap-2 mt-3">
@@ -2863,10 +2863,10 @@
     const el = document.createElement('div');
     el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
-      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
       <p class="text-xs text-gray-500 mt-2">#${postId}${labels.length ? ` · ${esc(labels.join(', '))}` : ''}${when ? ` · ${esc(when)}` : ''}</p>
       ${ui.text ? `<p class="text-sm text-gray-900 mt-1 break-words">“${esc(ui.text)}”</p>` : ''}
-      ${blocked ? `<p class="text-sm text-amber-800 mt-3">${esc(blocked)}</p>` : ''}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
       ${!blocked && ui.action === 'reschedule' ? `<p class="text-sm text-gray-700 mt-3"><span class="font-bold">New time:</span> ${esc(ui.when || '')}</p>
         <p class="text-xs text-gray-500 mt-1">The exact time is worked out when you press ${esc(copy.button)}, and said back to you here.</p>` : ''}
       ${!blocked && ui.action === 'reject' ? `
