@@ -219,8 +219,9 @@
     + 'transition:background .12s ease,border-color .12s ease,box-shadow .12s ease,transform .06s ease;}'
     + '.bs-btn:active:not(:disabled){transform:translateY(1px);}'
     + '.bs-btn:focus-visible{outline:2px solid #ec4899;outline-offset:2px;}'
-    + '.bs-btn-primary{background:#ec4899;color:#fff;border-color:#ec4899;box-shadow:0 1px 2px rgba(17,24,39,.12);}'
-    + '.bs-btn-primary:hover:not(:disabled){background:#db2777;border-color:#db2777;}'
+    // The app's deep pink (.btn-primary), not #ec4899 — white on that is ~3.5:1 and fails AA.
+    + '.bs-btn-primary{background:#d6006b;color:#fff;border-color:#d6006b;box-shadow:0 1px 2px rgba(17,24,39,.12);}'
+    + '.bs-btn-primary:hover:not(:disabled){background:#b0005a;border-color:#b0005a;}'
     + '.bs-btn-ghost{background:#fff;color:#374151;border-color:#d1d5db;box-shadow:0 1px 2px rgba(17,24,39,.06);}'
     + '.bs-btn-ghost:hover:not(:disabled){background:#fdf2f8;border-color:#f9a8d4;color:#9d174d;}'
     // The compact variant for the dense media row, so five actions still fit on one line.
@@ -335,7 +336,7 @@
     + '  <button type="button" class="bms-blog-close" id="bs-close" aria-label="Close">&times;</button>'
     + '  <nav id="bs-crumbs" class="bs-crumbs" aria-label="Breadcrumb"></nav>'
     + '  <div class="bs-row" style="justify-content:space-between;margin-bottom:16px;padding-right:40px;">'
-    + '    <h1 style="font-size:20px;font-weight:700;">Blog Studio</h1>'
+    + '    <h1 id="bs-dialog-title" style="font-size:20px;font-weight:700;">Blog Studio</h1>'
     + '    <span id="bs-save-status" class="bs-status"></span>'
     + '  </div>'
     // The old "Start a new post" brief screen is gone: opening Blog Studio drops straight into the
@@ -469,9 +470,11 @@
     // sat at its natural size. Four buttons doing the same job at two different widths reads as
     // two different kinds of control. All four are now natural-width in wrapping rows.
     + '        <div class="bs-row">'
-    + '          <button id="bs-approve" class="bs-btn bs-btn-outline">Let <span id="bs-approve-name">your assistant</span> schedule it</button>'
+    // Approve is the primary action — the home page promise is "you just approve". Publish now was
+    // the pink one, and it went live with a single click; it is now the outline button and asks first.
+    + '          <button id="bs-approve" class="bs-btn bs-btn-primary"><span>Approve \u2014 <span id="bs-approve-name">your assistant</span> picks the time</span></button>'
     + '          <button id="bs-pick-time" class="bs-btn bs-btn-ghost">Pick a time myself</button>'
-    + '          <button id="bs-publish" class="bs-btn bs-btn-primary">Publish now</button>'
+    + '          <button id="bs-publish" class="bs-btn bs-btn-outline">Publish now</button>'
     // Only on an assistant-written draft that is still undecided (syncRejectButton). The social
     // Review has had "reject, say why, and the assistant learns" since reject-post.ts; a blog draft
     // could only be approved or archived, and archiving taught the Blog Writer nothing.
@@ -493,7 +496,7 @@
     + '          </div>'
     + '        </div>'
     + '        <div id="bs-schedule-picker" class="bs-hidden" style="margin-top:12px;">'
-    + '          <div class="bs-field"><label>Scheduled date &amp; time</label>'
+    + '          <div class="bs-field"><label for="bs-schedule-at">Scheduled date &amp; time</label>'
     + '            <input id="bs-schedule-at" type="datetime-local"></div>'
     + '          <div class="bs-row">'
     + '            <button id="bs-schedule" class="bs-btn bs-btn-primary">Confirm schedule</button>'
@@ -617,7 +620,7 @@
     // Every action's outcome is reported here ("Approved — scheduled for…", errors). It lives in the
     // right column, not in the Approve & publish section, so it stays visible when that section is
     // collapsed — a result nobody can see reads as a button that did nothing.
-    + '      <div id="bs-action-status" class="bs-banner bs-hidden" style="margin-top:12px;"></div>'
+    + '      <div id="bs-action-status" class="bs-banner bs-hidden" role="status" aria-live="polite" style="margin-top:12px;"></div>'
     // The A/B test, made visible. It was running invisibly: the variants were never shown, no state
     // was reported, and the winner was promoted by a cron the author had no way of observing.
     + '      <div id="bs-hooks-panel" class="bs-panel bs-hidden" style="margin-top:16px;">'
@@ -1772,8 +1775,8 @@
         // Names only what the Connections tab can actually offer today — see
         // WITHHELD_BLOG_DESTINATIONS. Listing a platform here that has no card there sends the
         // author looking for a button that is not on the screen.
-        setStatus('bs-dist-status', 'No other platforms connected yet. Connect LinkedIn from your '
-          + 'assistant\u2019s Connections tab and it\u2019ll appear here.');
+        setStatus('bs-dist-status', 'No other platforms connected yet. Connect LinkedIn with Manage connections '
+          + 'on your assistant\u2019s page and it\u2019ll appear here.');
         return;
       }
       connected.forEach(function (d) {
@@ -1868,9 +1871,16 @@
     // every state this screen can still act on, so keeping it up (as it used to, with a green banner
     // and a live Unpublish button) invited the author to undo the thing they had just asked for. The
     // toast carries the confirmation the banner used to.
+    //
+    // Publishing goes live on the owner's site and every connected platform at once, with no second
+    // look, so it asks — like Archive and Unpublish — after the feature-image nudge.
     el('bs-publish').addEventListener('click', async function () {
       if (!state.postId || blockedAsEmpty()) return;
       if (!(await confirmFeatureImage())) return;
+      if (!(await window.confirmModal(
+        'It goes live on your blog straight away, and is sent to any other platforms you have connected.',
+        { title: 'Publish this post now?', confirmLabel: 'Yes, publish now', cancelLabel: 'Not yet', tone: 'golive' },
+      ))) return;
       setBanner('bs-action-status', 'Publishing…');
       setBusy(true);
       flushDraft().then(function () {
@@ -1929,7 +1939,9 @@
         { title: 'Archive this draft?', confirmLabel: 'Yes, archive it', cancelLabel: 'Keep editing' },
       ))) return;
       setBanner('bs-action-status', 'Archiving…');
+      setBusy(true);
       api('blog-posts?id=' + encodeURIComponent(state.postId), { method: 'DELETE' }).then(function (res) {
+        setBusy(false);
         if (res.ok) { notifyChanged(); closeBlogStudio(); }
         else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not archive this draft.', 'error');
       });
@@ -1957,12 +1969,15 @@
       }
       var name = assistantName() || 'Your assistant';
       setBanner('bs-action-status', 'Rejecting\u2026');
+      // Busy: a second click with "Write a replacement" ticked would queue a second redraft.
+      setBusy(true);
       api('reject-blog-post', { method: 'POST', body: JSON.stringify({
         id: state.postId,
         feedbackText: reason,
         applyAsRule: el('bs-reject-rule').checked,
         redraft: el('bs-reject-redraft').checked && !el('bs-reject-redraft-row').classList.contains('bs-hidden'),
       }) }).then(function (res) {
+        setBusy(false);
         if (!res.ok) { setBanner('bs-action-status', (res.body && res.body.error) || 'Could not reject this draft.', 'error'); return; }
         var msg = 'Draft rejected.'
           + (res.body.ruleId ? ' ' + name + ' will remember your feedback.' : '')
@@ -1986,9 +2001,11 @@
       if (!state.postId || blockedAsEmpty()) return;
       if (!(await confirmFeatureImage())) return;
       setBanner('bs-action-status', 'Scheduling…');
+      setBusy(true);
       flushDraft().then(function () {
         return api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, action: 'approve' }) });
       }).then(function (res) {
+        setBusy(false);
         if (res.ok && res.body.post) {
           setBanner('bs-action-status', 'Approved — scheduled for ' + new Date(res.body.post.publishDate).toLocaleString());
           el('bs-unschedule').classList.remove('bs-hidden');
@@ -2003,9 +2020,11 @@
       if (!iso) { setBanner('bs-action-status', 'Pick a date & time.', 'error'); return; }
       if (!(await confirmFeatureImage())) return;
       setBanner('bs-action-status', 'Scheduling…');
+      setBusy(true);
       flushDraft().then(function () {
         return api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, publishDate: iso }) });
       }).then(function (res) {
+        setBusy(false);
         if (res.ok) {
           setBanner('bs-action-status', 'Scheduled for ' + new Date(res.body.post.publishDate).toLocaleString());
           el('bs-schedule-picker').classList.add('bs-hidden');
@@ -2016,7 +2035,9 @@
     });
     el('bs-unschedule').addEventListener('click', function () {
       if (!state.postId) return;
+      setBusy(true);
       api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, action: 'unschedule' }) }).then(function (res) {
+        setBusy(false);
         if (res.ok) {
           setBanner('bs-action-status', 'Schedule cleared — back to draft.');
           el('bs-unschedule').classList.add('bs-hidden');
@@ -2048,8 +2069,8 @@
               return d.label + ': ' + (d.error || 'not connected');
             }).join('; '), 'error');
           } else if (!sent.length) {
-            setBanner('bs-action-status', 'No other platforms are connected — connect one from your '
-              + 'assistant\u2019s Connections tab first.', 'error');
+            setBanner('bs-action-status', 'No other platforms are connected — use Manage connections on your '
+              + 'assistant\u2019s page to add one first.', 'error');
           } else {
             setBanner('bs-action-status', 'Sent to ' + syndicationNames(sent) + '.');
           }
@@ -2065,7 +2086,9 @@
         { title: 'Take this post off your site?', confirmLabel: 'Yes, unpublish', cancelLabel: 'Leave it live' },
       ))) return;
       setBanner('bs-action-status', 'Unpublishing…');
+      setBusy(true);
       api('unpublish-blog', { method: 'POST', body: JSON.stringify({ id: state.postId }) }).then(function (res) {
+        setBusy(false);
         if (!res.ok) {
           setBanner('bs-action-status', (res.body && res.body.error) || 'Could not unpublish this post.', 'error');
           return;
@@ -2471,6 +2494,7 @@
     backdrop.id = 'bms-blog-backdrop';
     backdrop.setAttribute('role', 'dialog');
     backdrop.setAttribute('aria-modal', 'true');
+    backdrop.setAttribute('aria-labelledby', 'bs-dialog-title');
     backdrop.innerHTML = MARKUP;
     document.body.appendChild(backdrop);
 
@@ -2549,6 +2573,8 @@
     renderCrumbs(inWorkspace);
     bd.classList.add('bs-open');
     window.ScrollLock.lock('blog-studio');
+    // Remembered so closing puts keyboard focus back where the user was, not at the top of the page.
+    state.returnFocus = document.activeElement;
 
     clearWorkspaceState();
     // Resolve AI image generation before the author can reach for it. Reset to "no" first and paint
@@ -2605,6 +2631,10 @@
       state.contentChanged = false;
       notifyChanged();
     }
+    // Focus back where the user was — only if it survived that re-render (a rebuilt card is gone).
+    var back = state.returnFocus;
+    state.returnFocus = null;
+    if (back && back.isConnected && typeof back.focus === 'function') back.focus();
   }
 
   // The two pure functions behind the "Where this post gets published" panel's copy.

@@ -3675,9 +3675,11 @@ const _RQ_BLOG_STATUS = {
 };
 
 function _rqBlogActions(p, statusKey) {
-    const primary = 'btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer';
-    const secondary = 'btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
-    const danger = 'btn-destructive px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
+    // min-h-[44px] below sm: a ~30px button is too small a target for a thumb.
+    const tap = 'min-h-[44px] sm:min-h-0';
+    const primary = `btn-primary ${tap} px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer`;
+    const secondary = `btn-secondary ${tap} px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer`;
+    const danger = `btn-destructive ${tap} px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer`;
     const btn = (action, label, cls) => `<button type="button" onclick="_detailRqBlogAct(this,'${action}')" class="${cls}">${label}</button>`;
     const actions = [];
     if (statusKey === 'review') {
@@ -3715,8 +3717,8 @@ function _rqBlogActions(p, statusKey) {
     return `<div class="flex flex-wrap items-center gap-2 mt-3">
         ${actions.join('')}
         <div class="rq-sched-row hidden w-full flex items-center gap-2 mt-2">
-          <input type="datetime-local" class="rq-sched-input border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
-          <button type="button" onclick="_detailRqBlogAct(this,'schedule')" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Confirm schedule</button>
+          <input type="datetime-local" aria-label="Publish date and time" class="rq-sched-input border border-gray-300 rounded-lg px-2 py-1.5 text-base sm:text-xs focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">
+          <button type="button" onclick="_detailRqBlogAct(this,'schedule')" class="btn-primary min-h-[44px] sm:min-h-0 px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Confirm schedule</button>
         </div>
         <p class="rq-rec-err hidden w-full text-xs font-semibold text-red-600 mt-1"></p>
     </div>`;
@@ -3729,6 +3731,21 @@ const _RQ_BLOG_ATTENTION_NOTE = {
     approved: 'Approved, but not booked to publish. Pick a time to schedule it.',
 };
 
+// blog_posts.status in the owner's words — the raw values ("pending_approval") were printed as-is.
+const _RQ_BLOG_STATUS_LABEL = {
+    draft: 'Draft',
+    pending_approval: 'Waiting for you',
+    in_review: 'Waiting for you',
+    approved: 'Approved',
+    scheduled: 'Scheduled',
+    publishing: 'Publishing now',
+    published: 'Live',
+    failed: 'Didn’t publish',
+    paused: 'Paused',
+    archived: 'Archived',
+    rejected: 'Turned down',
+};
+
 function _detailRqBlogCard(p, statusKey) {
     const note = statusKey === 'attention' ? _RQ_BLOG_ATTENTION_NOTE[p.status] : null;
     const when = p.publishDate
@@ -3738,7 +3755,7 @@ function _detailRqBlogCard(p, statusKey) {
       <div class="min-w-0">
         <p class="text-sm font-bold text-gray-900 truncate">${_rqEsc(p.title || '(untitled draft)')}</p>
         <div class="flex items-center gap-2 mt-2">
-          <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">${_rqEsc(p.status)}</span>
+          <span class="text-[11px] font-bold px-2 py-0.5 rounded-full border ${p.status === 'failed' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-gray-100 text-gray-600 border-gray-200'}">${_rqEsc(_RQ_BLOG_STATUS_LABEL[p.status] || p.status)}</span>
           ${when ? `<span class="text-[11px] font-semibold text-gray-400">${_rqEsc(when)}</span>` : ''}
         </div>
         ${note ? `<p class="text-xs text-gray-600 mt-2">${_rqEsc(note)}</p>` : ''}
@@ -3932,7 +3949,12 @@ async function _detailRqRenderBlog(statusKey) {
 
     container.innerHTML = posts.length
         ? `<div class="divide-y divide-gray-100">${posts.map((p) => _detailRqBlogCard(p, statusKey)).join('')}</div>`
-        : `<p class="text-sm text-gray-400 py-10 text-center">${statusKey === 'review' ? 'No blog drafts awaiting review.' : 'Nothing here yet.'}</p>`;
+        : (statusKey === 'review'
+            ? `<div class="py-10 text-center">
+                 <p class="text-sm text-gray-500">No blog drafts waiting for you. Nothing publishes until you approve it.</p>
+                 <button type="button" onclick="window.openBlogStudio && window.openBlogStudio({ assistantId: window._currentAssistantId })" class="btn-primary min-h-[44px] sm:min-h-0 mt-3 px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer">Write Blog Post</button>
+               </div>`
+            : '<p class="text-sm text-gray-400 py-10 text-center">Nothing here yet.</p>');
 }
 
 // Open in Blog Studio / schedule / unschedule a blog draft from the Review Queue.
@@ -3990,7 +4012,7 @@ window._detailRqBlogAct = async function (btn, action) {
             } else if (!sent.length) {
                 // The case that started all this: nothing connected, so nothing happened, and the
                 // old code path said nothing at all.
-                showErr('No other platforms are connected — connect one from the Connections tab first.');
+                showErr('No other platforms are connected — use Manage connections on this page to add one first.');
             } else {
                 window.showToast?.(`Sent to ${sent.map((d) => d.label).join(', ')}.`);
             }
@@ -4589,7 +4611,8 @@ window._renderAutopilotCard = function(data) {
         if (horizonStat) horizonStat.classList.add('hidden');
         document.getElementById('autopilot-next')?.classList.add('hidden');
     } else {
-        if (pill) { pill.textContent = '● Paused'; pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500'; }
+        // "Off", not "Paused": the heading says "Autopilot is off", and "paused" reads as broken.
+        if (pill) { pill.textContent = '● Off'; pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500'; }
         if (headline) headline.textContent = isBlog
             ? 'Autopilot is off — you’re writing posts manually'
             : 'Autopilot is off — you’re creating posts manually';
@@ -5841,10 +5864,12 @@ function _applyDashboardRegistry(data) {
     // for someone to press Send now or for its scheduled time — hiding the column would hide every
     // issue sitting in exactly that state.
     toggle('detail-rq-col-approved', rqIsRecords || rqIsNewsletter);
-    // "Sent" for emails (set below); every other role keeps "Posted".
+    // "Sent" for emails and "Published" for blogs (set below); every other role keeps "Posted".
     setText('detail-rq-col-label-posted', 'Posted');
+    document.querySelector('#maintab-review-queue [role="tablist"]')?.setAttribute('aria-label', rqIsBlog ? 'Blogs by stage' : 'Posts by stage');
     if (rqIsBlog) {
         setText('detail-rq-primary-label', 'Write Blog Post');
+        setText('detail-rq-col-label-posted', 'Published');
         const rqBtn = document.getElementById('detail-rq-primary-btn');
         if (rqBtn) rqBtn.onclick = () => { window.openBlogStudio?.({ assistantId: data.id }); };
     } else if (rqIsNewsletter) {
@@ -8105,8 +8130,8 @@ async function _fetchAndRenderLeadRoi(assistantId, period = 'all') {
     // what routes it, and that is set once by _applyDashboardRegistry).
     roiStrip.querySelectorAll('.metrics-period-btn').forEach(btn => {
         const active = btn.dataset.period === period;
-        btn.className = `metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition ${active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
-        btn.setAttribute('aria-selected', String(active));
+        btn.className = `metrics-period-btn min-h-[44px] sm:min-h-0 px-2.5 py-1 text-[11px] font-bold rounded-md transition ${active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
+        btn.setAttribute('aria-pressed', String(active));
         btn.onclick = active ? null : () => _fetchAndRenderLeadRoi(assistantId, btn.dataset.period);
     });
 
@@ -8189,8 +8214,8 @@ async function _fetchAndRenderBlogRoi(assistantId, period = 'all') {
     // the blog branch — the strip's dataset flag is what routes it, set once by the registry.
     roiStrip.querySelectorAll('.metrics-period-btn').forEach(btn => {
         const active = btn.dataset.period === period;
-        btn.className = `metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition ${active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
-        btn.setAttribute('aria-selected', String(active));
+        btn.className = `metrics-period-btn min-h-[44px] sm:min-h-0 px-2.5 py-1 text-[11px] font-bold rounded-md transition ${active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
+        btn.setAttribute('aria-pressed', String(active));
         btn.onclick = active ? null : () => _fetchAndRenderBlogRoi(assistantId, btn.dataset.period);
     });
 
@@ -8337,8 +8362,8 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
     // dashboard is showing.
     (roiStrip || card).querySelectorAll('.metrics-period-btn').forEach(btn => {
         const active = btn.dataset.period === period;
-        btn.className = `metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition ${active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
-        btn.setAttribute('aria-selected', String(active));
+        btn.className = `metrics-period-btn min-h-[44px] sm:min-h-0 px-2.5 py-1 text-[11px] font-bold rounded-md transition ${active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
+        btn.setAttribute('aria-pressed', String(active));
         btn.onclick = active ? null : () => _fetchAndRenderAssistantMetrics(assistantId, btn.dataset.period);
     });
 
@@ -9391,6 +9416,7 @@ function _setMetricsEmptyState(mode, info) {
 
     const title = document.getElementById('metrics-empty-title');
     const body  = document.getElementById('metrics-empty-body');
+    document.getElementById('metrics-empty-cta')?.classList.toggle('hidden', mode !== 'blog-no-data');
     if (mode === 'error') {
         if (title) title.textContent = 'Performance metrics couldn’t be loaded';
         if (body)  body.textContent  = 'Something went wrong fetching them. Refresh the page to try again — this doesn’t affect your posts or scheduling.';
@@ -9409,7 +9435,7 @@ function _setMetricsEmptyState(mode, info) {
         // assistant writes long-form to blog_posts, not social posts, so "nothing has been
         // published" points at the wrong thing entirely. Name the action that fills the cards.
         if (title) title.textContent = 'No blog activity to measure yet';
-        if (body)  body.textContent  = 'These fill in as your assistant drafts posts, you approve them, and they go live. Open the Blogs tab to write the first one or review what is waiting.';
+        if (body)  body.textContent  = 'These fill in as your assistant drafts posts, you approve them, and they go live. Write the first one or review what is waiting on the Blogs tab.';
         if (note) note.textContent = '';
     } else if (mode === 'records-no-data') {
         // Not "nothing published" — this assistant publishes nothing. What is missing is its work.
@@ -9577,6 +9603,9 @@ async function _loadBlogMetrics(assistantId) {
     // defensively: a role switch on a cached page would otherwise strand it under a draft count.
     document.getElementById('metric-value-wins')?.classList.add('hidden');
 
+    // The green here is deliberate — it means "going well", not a leftover brand colour. The dot
+    // was colour-only, so it now names its state for screen readers too.
+    const _DOT_LABEL = { up: 'Trending up', down: 'Trending down', live: 'Live' };
     const setDot = (k, state) => {
         const el = dotEl(k);
         if (!el) return;
@@ -9584,6 +9613,30 @@ async function _loadBlogMetrics(assistantId) {
             state === 'up' ? 'bg-emerald-400' : state === 'down' ? 'bg-rose-400' :
             state === 'live' ? 'bg-emerald-400' : 'bg-gray-200'
         );
+        if (_DOT_LABEL[state]) {
+            el.setAttribute('role', 'img');
+            el.setAttribute('aria-label', _DOT_LABEL[state]);
+            el.removeAttribute('aria-hidden');
+        } else {
+            el.removeAttribute('role');
+            el.removeAttribute('aria-label');
+            el.setAttribute('aria-hidden', 'true');
+        }
+    };
+
+    // "Not tracked" on the two search cards used to be a dead end: the only Connect button was
+    // inside a single post's editor in Blog Studio. Same OAuth route as Blog Studio's #bs-gsc-connect.
+    const gscCta = (k, show) => {
+        const line = trendEl(k)?.parentElement;
+        if (!line) return;
+        let cta = line.parentElement.querySelector('.kpi-gsc-cta');
+        if (!show) { cta?.remove(); return; }
+        if (cta) return;
+        cta = document.createElement('a');
+        cta.href = '/.netlify/functions/oauth-integrations?provider=searchconsole&action=connect';
+        cta.className = 'kpi-gsc-cta btn-secondary inline-flex items-center min-h-[44px] sm:min-h-0 mt-2 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
+        cta.textContent = 'Connect Google Search Console';
+        line.after(cta);
     };
 
     // "2m 40s" / "45s". Minutes-and-seconds rather than a decimal: nobody reads "2.7 minutes" as
@@ -9625,6 +9678,7 @@ async function _loadBlogMetrics(assistantId) {
         _setKpiCard('reach', { empty: !hasSearch || !m.searchImpressions });
         if (trendEl('reach')) trendEl('reach').textContent = t.searchImpressions || '—';
         if (hasSearch && m.searchImpressions) setDot('reach', 'live');
+        gscCta('reach', !hasSearch);
 
         // Card 3 — Organic Clicks. Same null-vs-zero contract as card 2 above: null means Search
         // Console is not connected ("we cannot see this"), 0 means we asked and nobody clicked
@@ -9635,6 +9689,7 @@ async function _loadBlogMetrics(assistantId) {
         _setKpiCard('ctr', { empty: !hasClicks || !m.searchClicks });
         if (trendEl('ctr')) trendEl('ctr').textContent = t.searchClicks || '—';
         if (hasClicks && m.searchClicks) setDot('ctr', 'live');
+        gscCta('ctr', !hasClicks);
 
         // Card 4 — Average Read Time, from the widget's anonymous engagement beacon. null means
         // nothing has been measured (the blog is not embedded anywhere, or nobody has opened a

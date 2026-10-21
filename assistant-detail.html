@@ -258,10 +258,10 @@
         <!-- Same All Time / This Month / This Week periods as the dashboard hero, so the two views
              always agree — including the default, which is All Time because both calendar windows
              cliff-drop to zero at every rollover (see src/utils/roi-period.ts). -->
-        <div class="flex items-center gap-0.5 p-0.5 rounded-lg bg-gray-100 shrink-0" role="tablist" aria-label="Time period">
-          <button type="button" data-period="week" class="metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition" role="tab">Week</button>
-          <button type="button" data-period="month" class="metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition" role="tab">Month</button>
-          <button type="button" data-period="all" class="metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition" role="tab">All</button>
+        <div class="flex items-center gap-0.5 p-0.5 rounded-lg bg-gray-100 shrink-0" role="group" aria-label="Time period">
+          <button type="button" data-period="week" class="metrics-period-btn min-h-[44px] sm:min-h-0 px-2.5 py-1 text-[11px] font-bold rounded-md transition">Week</button>
+          <button type="button" data-period="month" class="metrics-period-btn min-h-[44px] sm:min-h-0 px-2.5 py-1 text-[11px] font-bold rounded-md transition">Month</button>
+          <button type="button" data-period="all" class="metrics-period-btn min-h-[44px] sm:min-h-0 px-2.5 py-1 text-[11px] font-bold rounded-md transition">All</button>
         </div>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -667,8 +667,11 @@
         <div class="min-w-0">
           <p id="metrics-empty-title" class="text-sm font-bold text-gray-700"></p>
           <p id="metrics-empty-body" class="text-xs text-gray-500 mt-1 leading-relaxed"></p>
-          <!-- No "Open Review Queue" button here. It was removed 2026-07-30 because it didn't work:
-               the panel is explanatory, and the jump it offered was not a route to metrics anyway. -->
+          <!-- No "Open Review Queue" button for every role: it was removed 2026-07-30 because it didn't
+               work. The Blog Writer gets this one (shown only for 'blog-no-data'), because its body
+               text already sends the owner to the Blogs tab and a sentence with no button was a dead end. -->
+          <button type="button" id="metrics-empty-cta" onclick="window._activateMainTab && window._activateMainTab('review-queue')"
+            class="hidden btn-primary min-h-[44px] sm:min-h-0 mt-3 px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer">Go to Blogs</button>
         </div>
       </div>
     </div>
