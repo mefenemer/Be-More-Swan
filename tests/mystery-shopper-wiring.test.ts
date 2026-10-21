@@ -216,7 +216,8 @@ check('handlers are bound to document once, not from render', () => {
 });
 
 check('the check button states the task cost on both surfaces', () => {
-    assert.match(tab, /A check that re-scores uses 1 task/);
+    // On the tab it is the button's own title since the Checks card went (owner, 2026-10-21).
+    assert.match(tab, /data-sa-run [^>]*title="A check that re-scores uses 1 task/);
     assert.match(cards, /A check that re-scores uses 1 task/);
 });
 

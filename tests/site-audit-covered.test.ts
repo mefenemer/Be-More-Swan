@@ -151,7 +151,14 @@ check('the score card lives in the Results tab; Checks keeps Check my site now a
     assert.match(tab, /host\.innerHTML = card\(scoreBlock\(audit, latest\)\) \+ card\(trendCardHtml\(audit\)\);/);
     const checks = tab.slice(tab.indexOf('function checksPanel('), tab.indexOf('function render()'));
     assert.ok(!checks.includes('scoreBlock('), 'the score card is not on Checks any more');
-    assert.ok(checks.includes('data-sa-run') && checks.includes('data-sa-settings-open') && checks.includes('data-sa-open-results'));
+    assert.ok(checks.includes('data-sa-run') && checks.includes('data-sa-settings-open'), 'the two buttons stay');
+    // No card round them any more (owner, 2026-10-21): no site name, score line, last-scored line or task note.
+    const top = checks.slice(checks.indexOf('return `'), checks.indexOf('${goalBlock(audit)}'));
+    assert.ok(!top.includes('card(') && !top.includes('Visitors should') && !top.includes('Score: '), 'the card is gone');
+    assert.match(top, /data-sa-run[^>]*title="A check that re-scores uses 1 task/, 'the spend button still says what it costs');
+    assert.match(top, /data-sa-past-checks[^>]*>\$\{state\.pastOpen \? 'Hide past checks' : 'View past checks'\}/, 'past checks behind a button beside Settings');
+    assert.match(checks, /What the last check said<\/h3>\$\{lastAt \? `<span class="text-xs text-gray-500">\$\{esc\(when\(lastAt\)\)\}/, 'the summary is dated');
+    assert.match(tab, /<details data-sa-why \$\{state\.whyOpen \? 'open' : ''\}>/, 'the score list folds');
     assert.match(tab, /String\(window\._currentAssistantId\) !== String\(state\.assistantId\)\) return;/, 'never paints into another assistant');
     assert.match(tab, /e\.target\.closest\('#site-audit-host, #site-audit-results-host'\)/, 'its buttons are handled');
 });
@@ -178,9 +185,11 @@ check('the score over time: month, quarter or year, one line against the target,
 
 console.log('\nThe Website tab and My Assistants');
 
-check('competitors can be edited from their own card', () => {
+check('competitors are edited in Settings, which Needs attention opens at them', () => {
     const tab = read('src/components/assistant-site-audit.js');
-    assert.match(tab, /data-sa-edit-competitors[^>]*>\$\{comps\.length \? 'Edit competitors' : 'Add competitors'\}/);
+    assert.ok(!tab.includes('function competitorsBlock('), 'the Competitors card is gone from Checks (owner, 2026-10-21)');
+    assert.match(tab, /data-sa-edit-competitors[^>]*>Edit competitors</);
+    assert.match(tab, /name="competitor"/);
     assert.match(tab, /t\('\[data-sa-edit-competitors\]'\)[\s\S]{0,120}state\.settingsOpen = true;/);
 });
 
