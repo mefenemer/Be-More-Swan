@@ -283,6 +283,19 @@ async function firstRun() {
         assert.deepStrictEqual(fixesNowDone(open, extractSitePage(fixture('spa-shell'), SITE)), []);
     });
 
+    await check('a fix that ADDS to the old wording is done once the suggested wording is on the page', () => {
+        // bemoreswan.com 2026-10-21: the old button text is still a part of the new one.
+        const page = (cta: string) => extractSitePage(fixture('squarespace-weak').replace('Learn More', cta), SITE);
+        const cta = [{ id: 7, beforeText: 'Learn More', afterText: 'Learn More — No Card Required' }];
+        assert.deepStrictEqual(fixesNowDone(cta, page('Learn More')), [], 'not made yet');
+        assert.deepStrictEqual(fixesNowDone(cta, page('Learn More &mdash; No Card Required')), [7], 'punctuation is forgiven');
+        assert.deepStrictEqual(fixesNowDone([{ id: 8, beforeText: 'Learn More', afterText: 'Learn More [today]' }], page('Learn More')), [],
+            'a suggestion that is only the old text plus a placeholder proves nothing');
+        // Placeholders are the owner's own words — anything there counts.
+        const quote = [{ id: 9, beforeText: 'Learn More', afterText: 'Learn More about how it saved me [hours] every week. — [Name]' }];
+        assert.deepStrictEqual(fixesNowDone(quote, page('Learn More about how it saved me 6 hours every week.')), [9]);
+    });
+
     await check('merging competitor pages adds pricing/proof/FAQ without duplicates', () => {
         const home = extractSitePage(fixture('wordpress-strong'), RIVAL);
         const merged = mergeSecondary(home, [extractSitePage(PRICING_PAGE, RIVAL_PRICING), home]);
@@ -376,8 +389,10 @@ async function firstRun() {
     const worker = readFileSync(join(root, 'netlify', 'functions', 'run-site-audit-background.ts'), 'utf8');
     const pipeline = readFileSync(join(root, 'src', 'utils', 'site-audit.ts'), 'utf8');
 
-    await check('a user can never mark a fix "done" — only a later check can', () => {
-        assert.match(api, /const USER_FIX_STATUSES = \['accepted', 'dismissed', 'open'\] as const;/);
+    await check('a user can mark a fix done, but never undo one a check confirmed', () => {
+        assert.match(api, /const USER_FIX_STATUSES = \['accepted', 'dismissed', 'open', 'done'\] as const;/);
+        assert.match(api, /status\} = 'done' AND \$\{siteAuditFixes\.verifiedRunId\} IS NULL/);
+        assert.ok(!/status: 'done', verifiedRunId/.test(api.slice(api.indexOf("action === 'fix'"), api.indexOf("action === 'brief'"))), 'the API never sets verifiedRunId');
     });
 
     await check('the API is tenant-scoped and role-guarded', () => {

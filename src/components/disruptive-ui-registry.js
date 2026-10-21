@@ -1660,10 +1660,10 @@
   }
   register('site_audit_settings', renderSiteAuditSettingsCard);
 
-  // { type: 'site_audit_fix_update', decisions: [{ fixId, status: 'accepted'|'dismissed'|'open' }] }
-  // There is no "done": a later check marks a fix done when the old text has left the page.
+  // { type: 'site_audit_fix_update', decisions: [{ fixId, status: 'accepted'|'dismissed'|'open'|'done' }] }
+  // "done" is the user's "I've made this change"; a later check confirms it (site-audits.ts).
   function renderSiteAuditFixUpdateCard(ui, esc) {
-    const WORDS = { accepted: "I'll make this change", dismissed: 'Not for us', open: 'Undecided again' };
+    const WORDS = { accepted: "I'll make this change", dismissed: 'Not for us', open: 'Undecided again', done: "I've made this change" };
     const decisions = (Array.isArray(ui.decisions) ? ui.decisions : [])
       .map((d) => ({ fixId: Number(d && d.fixId), status: d && d.status }))
       .filter((d) => Number.isInteger(d.fixId) && d.fixId > 0 && Object.prototype.hasOwnProperty.call(WORDS, d.status))
@@ -1675,7 +1675,7 @@
       ${decisions.length
         ? `<ul class="mt-2 space-y-1">${decisions.map((d) => `<li class="text-xs text-gray-800">Fix ${esc(d.fixId)}: <span class="font-bold">${esc(WORDS[d.status])}</span></li>`).join('')}</ul>`
         : '<p class="text-xs text-amber-700 mt-2">No fixes were named.</p>'}
-      <p class="text-xs text-gray-600 mt-2">The next check confirms each change once the old wording has gone from your site.</p>
+      <p class="text-xs text-gray-600 mt-2">The next check confirms each change once it finds it on your site.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-safu-confirm ${decisions.length ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Confirm</button>
         <button type="button" data-safu-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>

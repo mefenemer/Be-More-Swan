@@ -239,7 +239,8 @@
         ${(state.data?.stalled || []).includes(f.id) ? stalledNudge(f) : ''}
         <div class="flex flex-wrap items-center gap-2 mt-3">
           ${accepted
-            ? `<span class="text-xs font-semibold text-green-700">You said you'll make this change — the next check confirms it.</span>
+            ? `<span class="text-xs font-semibold text-green-700">You said you'll make this change. Made it? Tell us here, or the next check will spot it.</span>
+               <button type="button" data-sa-fix="${esc(f.id)}" data-status="done" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">I've made this change</button>
                <button type="button" data-sa-fix="${esc(f.id)}" data-status="open" class="text-xs text-gray-500 underline">Undo</button>`
             : `<button type="button" data-sa-fix="${esc(f.id)}" data-status="accepted" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">I'll make this change</button>
                <button type="button" data-sa-fix="${esc(f.id)}" data-status="dismissed" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">Not for us</button>`}
@@ -351,18 +352,23 @@
     if (e.kind === 'fix') {
       const f = e.f;
       const live = f.status === 'done';
+      // Done by a check (verifiedRunId) or by the user's "I've made this change" — which the next
+      // check that can see the change confirms.
+      const confirmed = live && f.verifiedRunId != null;
       return `
         <li class="border border-gray-200 rounded-xl p-4">
           <div class="flex flex-wrap items-center gap-2">
-            ${live ? pill('Live on your site', 'bg-green-50 text-green-700') : pill('Not for us', 'bg-gray-100 text-gray-600')}
+            ${confirmed ? pill('Live on your site', 'bg-green-50 text-green-700') : live ? pill('You marked this done', 'bg-green-50 text-green-700') : pill('Not for us', 'bg-gray-100 text-gray-600')}
             <span class="text-xs font-bold text-gray-900">${esc(f.location || 'Page')}</span>
-            <span class="text-[10px] text-gray-500">${live ? `Confirmed ${esc(when(f.updatedAt))}` : `Dismissed ${esc(when(f.updatedAt))}`} · suggested ${esc(when(f.createdAt))}</span>
+            <span class="text-[10px] text-gray-500">${confirmed ? `Confirmed by a check ${esc(when(f.updatedAt))}` : live ? `Marked done ${esc(when(f.updatedAt))}` : `Dismissed ${esc(when(f.updatedAt))}`} · suggested ${esc(when(f.createdAt))}</span>
           </div>
           <div class="grid gap-2 mt-2 md:grid-cols-2">
             <div class="bg-gray-50 rounded-lg p-2"><p class="text-[10px] font-bold text-gray-500 uppercase">${live ? 'Was' : 'On your site'}</p><p class="text-xs text-gray-700 mt-0.5 break-words">${esc(f.beforeText)}</p></div>
             <div class="bg-indigo-50/60 rounded-lg p-2"><p class="text-[10px] font-bold text-indigo-700 uppercase">${live ? 'Now' : 'Suggested'}</p><p class="text-xs text-gray-900 mt-0.5 break-words">${esc(f.afterText)}</p></div>
           </div>
-          ${live ? '' : `<button type="button" data-sa-fix="${esc(f.id)}" data-status="open" class="mt-2 text-xs text-gray-500 underline">Bring back</button>`}
+          ${confirmed ? '' : live
+            ? `<button type="button" data-sa-fix="${esc(f.id)}" data-status="accepted" class="mt-2 text-xs text-gray-500 underline">Not done after all</button>`
+            : `<button type="button" data-sa-fix="${esc(f.id)}" data-status="open" class="mt-2 text-xs text-gray-500 underline">Bring back</button>`}
         </li>`;
     }
     if (e.kind === 'brief') {

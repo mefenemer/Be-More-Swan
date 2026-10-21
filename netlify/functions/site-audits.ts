@@ -12,14 +12,16 @@
 //   calendar   { assistantId, from, to }             → checks that ran in the window (calendar.js)
 //   run        { assistantId }                       → queue a check (baseline the first time); returns runId
 //   run_status { runId }                             → poll a check
-//   fix        { fixId, status: 'accepted'|'dismissed'|'open' }
+//   fix        { fixId, status: 'accepted'|'dismissed'|'open'|'done' }
 //   brief      { assistantId, source: 'idea', runId, handoffIndex }   → a "Brief <name>" click: the
 //              { assistantId, source: 'stalled_fix', fixId }            suggestion is actioned and moves
 //              { assistantId, source: 'chat', target, title?, brief }   to History (site_audit_briefs)
 //   unbrief    { briefId }                           → undo a brief that was clicked by mistake
 //
-// 'done' is never set here: a fix is done when a later check no longer finds the old text on the
-// page (site-audit.ts fixesNowDone). That is the whole "proves the fix landed" promise.
+// A check marks a fix done when the old text has gone or the suggested text is on the page
+// (site-audit.ts fixesNowDone) and records which run proved it (verified_run_id). The user can also
+// say "I've made this change" (status 'done', verified_run_id NULL): a check can't always see the
+// change — a long testimonial is read only in part — and the next check that can see it confirms it.
 
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -49,7 +51,7 @@ function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-const USER_FIX_STATUSES = ['accepted', 'dismissed', 'open'] as const;
+const USER_FIX_STATUSES = ['accepted', 'dismissed', 'open', 'done'] as const;
 
 /** Run fields the screens need — never `pages`, which is large and for the server's own comparisons. */
 const RUN_SUMMARY = {
@@ -303,11 +305,11 @@ export default withLambda(async (event) => {
             .where(and(
                 eq(siteAuditFixes.id, fixId),
                 eq(siteAuditFixes.organisationId, orgId),
-                // A verified fix stays done — the page proved it.
-                inArray(siteAuditFixes.status, ['open', 'accepted', 'dismissed']),
+                // A fix a check verified stays done — the page proved it. One the user marked done can be undone.
+                sql`(${siteAuditFixes.status} IN ('open', 'accepted', 'dismissed') OR (${siteAuditFixes.status} = 'done' AND ${siteAuditFixes.verifiedRunId} IS NULL))`,
             ))
             .returning({ id: siteAuditFixes.id, status: siteAuditFixes.status });
-        if (!updated) return json(404, { error: 'Fix not found.' });
+        if (!updated) return json(404, { error: 'Fix not found, or a check has already confirmed it.' });
         return json(200, { fix: updated });
     }
 

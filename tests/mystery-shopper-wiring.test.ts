@@ -153,9 +153,12 @@ check('chat handlers call the same actions as the tab, and tell the tab to reloa
     assert.match(tab, /document\.addEventListener\('siteaudit:changed'/);
 });
 
-check('nothing on either surface can mark a fix "done"', () => {
-    assert.ok(!/data-status="done"/.test(tab));
-    assert.match(cards, /const WORDS = \{ accepted: "I'll make this change", dismissed: 'Not for us', open: 'Undecided again' \};/);
+check('both surfaces can say "I\'ve made this change" — and only a fix no check confirmed can be undone', () => {
+    assert.match(tab, /data-status="done" class="btn-primary[^"]*">I've made this change</);
+    assert.match(cards, /const WORDS = \{ accepted: "I'll make this change", dismissed: 'Not for us', open: 'Undecided again', done: "I've made this change" \};/);
+    assert.ok(chat.includes('"accepted" | "dismissed" | "open" | "done"'), 'the prompt offers done');
+    assert.match(tab, /const confirmed = live && f\.verifiedRunId != null;/);
+    assert.match(tab, /\$\{confirmed \? '' : live/, 'no undo on a confirmed fix');
 });
 
 check('a hand-off only ever TYPES the brief into the other chat — it never sends', () => {

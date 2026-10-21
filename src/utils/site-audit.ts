@@ -37,7 +37,7 @@ import {
     describeChanges, diffSitePages, extractSitePage, pickSecondaryPages, siteContentHash, normaliseText, type SitePage,
 } from './site-extract';
 import {
-    groundFixes, isGrounded, sanitiseRubricAnswers, scoreAudit, type AuditScore, type Lens, type RubricAnswer, type SuggestedFix,
+    groundFixes, isGrounded, sanitiseRubricAnswers, scoreAudit, suggestionIsLive, type AuditScore, type Lens, type RubricAnswer, type SuggestedFix,
 } from './site-score';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
 
@@ -263,10 +263,13 @@ export async function runAuditCore(input: AuditInput, deps: AuditDeps): Promise<
     };
 }
 
-/** Open or accepted fixes whose old text is gone from the page — the change landed. Pure. */
-export function fixesNowDone(open: Array<{ id: number; beforeText: string }>, page: SitePage): number[] {
+/**
+ * Fixes whose change landed: the old text is gone from the page, or the suggested text is on it
+ * (a suggestion that adds to the old wording leaves the old wording in place). Pure.
+ */
+export function fixesNowDone(open: Array<{ id: number; beforeText: string; afterText?: string | null }>, page: SitePage): number[] {
     if (page.thin) return [];   // a page we couldn't read proves nothing either way
-    return open.filter((f) => !isGrounded(f.beforeText, page)).map((f) => f.id);
+    return open.filter((f) => !isGrounded(f.beforeText, page) || (!!f.afterText && suggestionIsLive(f.afterText, page))).map((f) => f.id);
 }
 
 // ── Real dependencies ───────────────────────────────────────────────────────────────────────
@@ -386,12 +389,17 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
 
         // Fixes from earlier runs whose old text has gone — verified by this read. Only fixes for THIS
         // page: a homepage fix is not "done" because its wording is absent from the pricing page.
-        const open = await db.select({ id: siteAuditFixes.id, beforeText: siteAuditFixes.beforeText }).from(siteAuditFixes)
+        // Every fix for this page — the user decided on each, so none is raised again with the same old text.
+        const known = await db.select({
+            id: siteAuditFixes.id, beforeText: siteAuditFixes.beforeText, afterText: siteAuditFixes.afterText,
+            status: siteAuditFixes.status, verifiedRunId: siteAuditFixes.verifiedRunId,
+        }).from(siteAuditFixes)
             .where(and(
                 eq(siteAuditFixes.auditId, audit.id),
-                inArray(siteAuditFixes.status, ['open', 'accepted']),
                 sql`(${siteAuditFixes.pageUrl} IS NULL OR ${siteAuditFixes.pageUrl} = ${audit.url})`,
             ));
+        // Open and accepted fixes, plus ones the user marked done that no check has confirmed yet.
+        const open = known.filter((f) => f.status === 'open' || f.status === 'accepted' || (f.status === 'done' && f.verifiedRunId === null));
         const doneIds = fixesNowDone(open, outcome.pages[SITE_KEY]);
         if (doneIds.length) {
             await db.update(siteAuditFixes)
@@ -420,9 +428,12 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
                 whyItMatters: p.whyItMatters, impact: p.impact, pageUrl: audit.url,
             };
         });
-        // Don't re-raise a fix that is already on the list with the same old text.
-        const stillOpen = new Set(open.filter((o) => !doneIds.includes(o.id)).map((o) => normaliseText(o.beforeText)));
-        const fresh = rows.filter((r) => !stillOpen.has(normaliseText(r.beforeText)));
+        // Don't re-raise a fix that is already on the list with the same old text — waiting, marked
+        // done by the user (its old wording can still be on the page) or "Not for us". A fix a check
+        // confirmed can come back: its old text had gone, so finding it again means it returned.
+        const decided = new Set(known.filter((o) => !(o.status === 'done' && o.verifiedRunId !== null))
+            .map((o) => normaliseText(o.beforeText)));
+        const fresh = rows.filter((r) => !decided.has(normaliseText(r.beforeText)));
         if (fresh.length) await db.insert(siteAuditFixes).values(fresh);
 
         // The success latch: done + charged in ONE update, only from 'running'.

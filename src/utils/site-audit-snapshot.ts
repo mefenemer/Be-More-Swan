@@ -100,7 +100,7 @@ export async function buildSiteAuditSnapshot(db: Db, orgId: number, assistantId:
 
     const fixes = await db.select({
         id: siteAuditFixes.id, location: siteAuditFixes.location, before: siteAuditFixes.beforeText, after: siteAuditFixes.afterText,
-        status: siteAuditFixes.status, updatedAt: siteAuditFixes.updatedAt,
+        status: siteAuditFixes.status, verifiedRunId: siteAuditFixes.verifiedRunId, updatedAt: siteAuditFixes.updatedAt,
     }).from(siteAuditFixes)
         .innerJoin(siteAuditRuns, eq(siteAuditRuns.id, siteAuditFixes.runId))
         .where(and(eq(siteAuditFixes.auditId, audit.id), eq(siteAuditRuns.status, 'done')))
@@ -119,8 +119,8 @@ export async function buildSiteAuditSnapshot(db: Db, orgId: number, assistantId:
     }
     // What has changed — the Website tab's "History". Lets the chat answer "what have we changed?".
     if (done.length) {
-        lines.push('Fixes a later check confirmed are live (History):');
-        for (const f of done.slice(0, 8)) lines.push(`- ${f.id} — ${f.location || 'Page'} — was "${clip(f.before, 100)}", now "${clip(f.after, 140)}" (confirmed ${day(f.updatedAt)})`);
+        lines.push('Fixes that are done (Done tab):');
+        for (const f of done.slice(0, 8)) lines.push(`- ${f.id} — ${f.location || 'Page'} — was "${clip(f.before, 100)}", now "${clip(f.after, 140)}" (${f.verifiedRunId !== null ? 'a check confirmed it' : 'they marked it done; no check has confirmed it yet'} ${day(f.updatedAt)})`);
     }
     if (dismissed.length) lines.push(`Fixes they turned down ("Not for us", in History — "Bring back" or a site_audit_fix_update "open" restores one): ${dismissed.slice(0, 8).map((f) => `${f.id} (${f.location || 'Page'})`).join(', ')}.`);
     if (briefed.length) {
