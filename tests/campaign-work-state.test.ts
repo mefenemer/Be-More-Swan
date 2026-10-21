@@ -127,7 +127,11 @@ check('the Campaign Assistant hides Goals', () => {
     const s = reg.indexOf('campaign_orchestrator: {');
     const e = reg.indexOf('\n    },', s);
     assert.ok(reg.slice(s, e).includes('hideGoals: true'), 'Goals still shown');
-    assert.ok(read('assistants.js').includes("toggle('maintab-btn-goals', !cfg.hideGoals)"), 'flag is read by nothing');
+    // Since 2026-10-21 the tab is "Results" on every role and holds the role's figures; for this role
+    // it keeps them but shows no goals — no Goal Progress card and no goals section.
+    const js = read('assistants.js');
+    assert.ok(js.includes("toggle('goal-progress-card', !cfg.hideGoals);"), 'Goal Progress still shown');
+    assert.ok(js.includes("toggle('tab-goals', !cfg.hideGoals);"), 'the goals section is still shown');
 });
 
 console.log(`\n${passed} passed`);

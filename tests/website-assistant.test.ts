@@ -163,7 +163,7 @@ check('dashboard entry: own tab and metrics, no social modules, no queue, Data H
 
 check('the page has the tab, its panel and the script; every branch routes to them', () => {
     assert.match(read('assistant-detail.html'), /id="maintab-btn-sitebuilder" data-maintab="sitebuilder"/);
-    assert.match(read('assistant-detail.html'), /<div id="maintab-sitebuilder" class="main-tab-content hidden">\s*<div id="site-editor-host" data-site-host="website"><\/div>/);
+    assert.match(read('assistant-detail.html'), /<div id="maintab-sitebuilder" role="tabpanel" aria-labelledby="maintab-btn-sitebuilder" class="main-tab-content hidden">\s*<div id="site-editor-host" data-site-host="website"><\/div>/);
     assert.match(assistants, /s\.src = '\/src\/components\/assistant-site-editor\.js';/, 'loaded on demand by siteEditor()');
     assert.match(assistants, /toggle\('maintab-btn-sitebuilder', !!siteEditorTab\)/);
     assert.match(assistants, /if \(name === 'sitebuilder'\) siteEditor\(\(ed\) => ed\.activate\('website'\)\);/);

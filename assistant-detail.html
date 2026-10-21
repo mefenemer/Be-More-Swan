@@ -114,8 +114,8 @@
   <div id="assistant-detail-content" class="hidden pb-16">
 
   <!-- Back nav -->
-  <nav class="flex mb-6 text-sm font-medium text-gray-500">
-    <button id="btn-back-assistants" class="hover:text-emerald-700 transition-colors flex items-center gap-1 cursor-pointer">
+  <nav class="flex mb-6 text-sm font-medium text-gray-500" aria-label="Back">
+    <button type="button" id="btn-back-assistants" class="hover:text-emerald-800 transition-colors flex items-center gap-1 cursor-pointer">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
       Back to Team
     </button>
@@ -197,7 +197,7 @@
       </div>
       <!-- CTA group -->
       <div class="flex items-center gap-2.5 w-full sm:w-auto shrink-0">
-        <span id="detail-save-status" class="text-sm font-semibold text-emerald-600 transition-all mr-1"></span>
+        <span id="detail-save-status" role="status" aria-live="polite" class="text-sm font-semibold text-emerald-800 transition-all mr-1"></span>
         <!-- Issue #197: the assistant's chat intake (Data Hub tab's primary action, or the assistants
              list card) was the only way to open a conversation — nothing on this page's default
              Overview tab. A header CTA guarantees a chat entry point on every tab, for every role. -->
@@ -236,7 +236,7 @@
           <!-- #connections-pill ("N of M on") and #connections-headline ("Posting to …") were here.
                Both were derived state that the Connections tab already shows in full, and computing
                them was what made this card wait on four separate loads before it could paint. -->
-          <span id="connections-save-status" class="text-xs font-bold text-emerald-600 transition-all"></span>
+          <span id="connections-save-status" role="status" aria-live="polite" class="text-xs font-bold text-emerald-800 transition-all"></span>
         </div>
         <button type="button" onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')" class="btn-secondary shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer">Manage connections</button>
       </div>
@@ -269,14 +269,14 @@
           <!-- The heading is id'd because it is not the same claim on every role: a Social Media
                Manager saves drafting TIME, a Lead Generator saves the EFFORT of research, writing
                and chasing. _fetchAndRenderAssistantMetrics rewrites it per roiSource. -->
-          <p class="text-[11px] font-bold text-emerald-600 uppercase tracking-wide" id="metrics-hours-label">Time Saved</p>
+          <p class="text-[11px] font-bold text-emerald-800 uppercase tracking-wide" id="metrics-hours-label">Time Saved</p>
           <p class="text-2xl font-black text-emerald-700 leading-tight" id="metrics-hours-saved">—</p>
-          <p class="text-[11px] text-emerald-500 leading-tight" id="metrics-hours-note">Based on ~30 min per post</p>
+          <p class="text-[11px] text-gray-500 leading-tight" id="metrics-hours-note">Based on ~30 min per post</p>
         </div>
         <div class="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2" id="metrics-roi-col">
-          <p class="text-[11px] font-bold text-emerald-600 uppercase tracking-wide">Money Saved</p>
+          <p class="text-[11px] font-bold text-emerald-800 uppercase tracking-wide">Money Saved</p>
           <p class="text-2xl font-black text-emerald-700 leading-tight" id="metrics-gbp-saved">—</p>
-          <p class="text-[11px] text-emerald-500 leading-tight" id="metrics-roi-note"></p>
+          <p class="text-[11px] text-gray-500 leading-tight" id="metrics-roi-note"></p>
         </div>
       </div>
     </div>
@@ -376,7 +376,7 @@
           <button type="button" id="btn-refresh-goals"
             title="Re-measure these goals now instead of waiting for the next background check"
             class="hidden btn-secondary shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border transition cursor-pointer">Check again now</button>
-          <button type="button" onclick="window._activateMainTab && window._activateMainTab('goals')"
+          <button type="button" onclick="window._openGoalsList && window._openGoalsList()"
             class="btn-secondary shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border transition cursor-pointer">Manage goals</button>
         </div>
       </div>
@@ -413,7 +413,7 @@
             </div>
             <p id="autopilot-headline" class="text-sm text-gray-700 mt-1 font-semibold"></p>
             <p id="autopilot-detail" class="text-xs text-gray-500 mt-0.5"></p>
-            <p id="autopilot-next" class="hidden text-xs font-semibold text-emerald-700 mt-1"></p>
+            <p id="autopilot-next" class="hidden text-xs font-semibold text-emerald-800 mt-1"></p>
           </div>
         </div>
         <button type="button" id="autopilot-adjust-btn" onclick="window._openAutopilotSettings && window._openAutopilotSettings()" class="btn-secondary shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border transition cursor-pointer">Adjust schedule</button>
@@ -421,7 +421,7 @@
       <!-- Flow stats — the two numbers that tell the story: what's queued for the user to act on, and
            how far ahead the assistant is drafting. -->
       <div class="mt-4 pt-4 border-t border-gray-100 flex flex-wrap gap-x-10 gap-y-2">
-        <button type="button" onclick="window._activateMainTab && window._activateMainTab('review-queue')" class="text-left cursor-pointer group">
+        <button type="button" onclick="window._openDetailRqColumn && window._openDetailRqColumn('review')" class="text-left cursor-pointer group">
           <p class="text-xl font-black text-gray-900"><span id="autopilot-pending">0</span></p>
           <p class="link text-xs font-semibold">Waiting for your review</p>
         </button>
@@ -443,7 +443,7 @@
           <p class="text-2xl font-black text-blue-700 leading-tight" id="metrics-total-scheduled">—</p>
         </div>
         <div class="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2 flex flex-col justify-center">
-          <p class="text-[11px] font-bold text-emerald-600 uppercase tracking-wide">Published</p>
+          <p class="text-[11px] font-bold text-emerald-800 uppercase tracking-wide">Published</p>
           <p class="text-2xl font-black text-emerald-700 leading-tight" id="metrics-total-published">—</p>
         </div>
       </div>
@@ -453,7 +453,7 @@
            screen of its own, so three of them sat unnoticed for a week. Click-through goes to the
            column that can act on them. Hidden while the count is 0. -->
       <button type="button" id="metrics-needs-attention"
-        onclick="window._activateMainTab && window._activateMainTab('review-queue'); window.detailRqOpenStatus && window.detailRqOpenStatus('attention')"
+        onclick="window._openDetailRqColumn && window._openDetailRqColumn('attention')"
         class="hidden btn-secondary mt-2 w-full text-left text-xs font-bold border rounded-lg px-3 py-2 transition cursor-pointer"></button>
       <!-- Content by platform — relocated here from the standalone "Impact & ROI" card so the
            per-platform split sits with the Created/Scheduled/Published totals it breaks down.
@@ -538,8 +538,10 @@
 
   <!-- Performance KPIs — issue #183: moved beneath the assistant name/header section (out of the
        now-removed Overview tab) so it's visible without needing to click into a tab.
-       order:-1 pulls this above the status row within the flex-column wrapper. -->
-  <div class="mb-8" style="order:-1">
+       order:-1 pulls this above the status row within the flex-column wrapper.
+       A role with goalsTab.bringsResults (Social Media, 2026-10-21 trial) has this card and Goal
+       Progress moved into its Goals tab, renamed "Results" — see _applyDashboardRegistry. -->
+  <div id="performance-metrics-card" class="mb-8" style="order:-1">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Performance Metrics</h3>
       <span id="metrics-status-note" class="text-xs text-gray-400 font-medium">Last 30 days</span>
@@ -700,8 +702,8 @@
        `auto` too, and the nav's -1px bottom margin overflows the box by exactly that 1px — enough
        for a full-height vertical scrollbar to appear beside the tabs. Pin overflow-y closed so only
        the intended horizontal scroll survives. -->
-  <div class="mb-8 border-b border-gray-200 overflow-x-auto overflow-y-hidden">
-    <nav class="-mb-px flex gap-x-8" aria-label="Assistant sections">
+  <div class="tab-scroller mb-8 border-b border-gray-200 overflow-x-auto overflow-y-hidden">
+    <nav class="-mb-px flex gap-x-8" role="tablist" aria-label="Assistant sections">
       <!-- ── Core three — the unified template, same order on every assistant ──
            Data Hub · Review Queue · Calendar. All three are ALWAYS shown
            (assistant-dashboard-registry.js gives every role a hubTab + reviewQueue);
@@ -717,7 +719,7 @@
            Signal Inbox does on the Lead Generator: it is the top of this role's funnel and the only
            place a campaign can be started. Hidden by default, shown by _applyDashboardRegistry.
            assistant-campaigns.js → campaigns.ts. Design: docs/campaign-orchestrator-plan.md §3.3 -->
-      <button type="button" id="maintab-btn-campaigns" data-maintab="campaigns" class="main-tab-btn hidden">
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-campaigns" id="maintab-btn-campaigns" data-maintab="campaigns" class="main-tab-btn hidden">
         <span id="campaigns-tab-label">Campaigns</span>
         <!-- Same trap as the signals badge below: `hidden` loses to `inline-flex` (equal
              specificity, emitted later in style.css), so the starting state is pinned inline too.
@@ -727,7 +729,7 @@
       <!-- Briefs — Brand Designer only (briefsTab: brand_designer). One card per brief, its options as
            a grid to approve or turn down. Sits first: it is the only thing this role does.
            assistant-briefs.js → brand-briefs.ts. Design: docs/brand-designer-plan.md §4 -->
-      <button type="button" id="maintab-btn-briefs" data-maintab="briefs" class="main-tab-btn hidden">
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-briefs" id="maintab-btn-briefs" data-maintab="briefs" class="main-tab-btn hidden">
         <span id="briefs-tab-label">Briefs</span>
         <!-- `hidden` loses to `inline-flex` (equal specificity, later in style.css): pinned inline too. -->
         <span id="briefs-review-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
@@ -735,7 +737,7 @@
       <!-- Website — Mystery Shopper only (siteAuditTab: mystery_shopper). The site's score, the
            suggested fixes, competitor changes and past checks. Sits first: it is what the role is for.
            assistant-site-audit.js → site-audits.ts. Design: docs/mystery-shopper-plan.md §4 -->
-      <button type="button" id="maintab-btn-website" data-maintab="website" class="main-tab-btn hidden">
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-website" id="maintab-btn-website" data-maintab="website" class="main-tab-btn hidden">
         <span id="website-tab-label">Website</span>
         <!-- `hidden` loses to `inline-flex` (equal specificity, later in style.css): pinned inline too. -->
         <span id="site-audit-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
@@ -743,23 +745,23 @@
       <!-- Website — Website Assistant only (siteEditorTab: website_assistant). The site's pages and
            sections, design and details, and the live preview. assistant-site-editor.js → sites.ts.
            Ids say "sitebuilder" because "website" is the Mystery Shopper's tab. -->
-      <button type="button" id="maintab-btn-sitebuilder" data-maintab="sitebuilder" class="main-tab-btn hidden">
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-sitebuilder" id="maintab-btn-sitebuilder" data-maintab="sitebuilder" class="main-tab-btn hidden">
         <span id="sitebuilder-tab-label">Website</span>
       </button>
       <!-- What the website brings in — Website Assistant only, each its own tab (owner, 2026-10-16):
            enquiries, orders and bookings are checked daily; editing the site is occasional. Shown by
            assistants.js with the Website tab; Orders/Bookings follow the site's chosen features.
            Rendered by assistant-site-editor.js into its own host (data-site-host). -->
-      <button type="button" id="maintab-btn-siteenquiries" data-maintab="siteenquiries" class="main-tab-btn hidden">
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-siteenquiries" id="maintab-btn-siteenquiries" data-maintab="siteenquiries" class="main-tab-btn hidden">
         <span>Enquiries</span><span id="site-enquiries-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
-      <button type="button" id="maintab-btn-siteorders" data-maintab="siteorders" class="main-tab-btn hidden">
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-siteorders" id="maintab-btn-siteorders" data-maintab="siteorders" class="main-tab-btn hidden">
         <span>Orders</span><span id="site-orders-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
-      <button type="button" id="maintab-btn-sitebookings" data-maintab="sitebookings" class="main-tab-btn hidden">
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-sitebookings" id="maintab-btn-sitebookings" data-maintab="sitebookings" class="main-tab-btn hidden">
         <span>Bookings</span><span id="site-bookings-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
-      <button type="button" id="maintab-btn-signals" data-maintab="signals" class="main-tab-btn hidden">
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-signals" id="maintab-btn-signals" data-maintab="signals" class="main-tab-btn hidden">
         <span id="signals-tab-label">Searches</span>
         <!-- `hidden` loses to `inline-flex` (equal specificity, emitted later in style.css), so the
              starting state is pinned inline too — otherwise an empty amber pill shows until the
@@ -768,7 +770,7 @@
       </button>
       <!-- Data Hub — the assistant's workspace/database. Label comes from the role's hubTab
            (Content Library for social/blog; Leads / Ledger / Tickets / … for data-hub roles). -->
-      <button type="button" id="maintab-btn-datahub" data-maintab="datahub" class="main-tab-btn active-tab">
+      <button type="button" role="tab" aria-selected="true" tabindex="0" aria-controls="maintab-datahub" id="maintab-btn-datahub" data-maintab="datahub" class="main-tab-btn active-tab">
         <span id="datahub-tab-label">Data Hub</span>
       </button>
       <!-- Review Queue — items awaiting the human's approval (posts pending_approval, or records
@@ -778,7 +780,7 @@
            `firstChild.nodeValue` to avoid deleting the badge beside it — a hack that had already
            been copy-pasted onto the lifecycle column buttons below. A span makes both writers
            ordinary setText/setTabCount calls and leaves the badge alone by construction. -->
-      <button type="button" id="maintab-btn-review-queue" data-maintab="review-queue" class="main-tab-btn">
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-review-queue" id="maintab-btn-review-queue" data-maintab="review-queue" class="main-tab-btn">
         <span id="review-queue-tab-label">Review</span>
         <span id="detail-rq-pending-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
@@ -786,7 +788,7 @@
            series (welcome + form-started) with status and results; each opens in the Email Studio.
            Sits right after Review: emails move draft → review → sent there, campaigns live here.
            Badge = campaigns written but switched off. assistant-email-campaigns.js. -->
-      <button type="button" id="maintab-btn-email-campaigns" data-maintab="email-campaigns" class="main-tab-btn hidden">
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-email-campaigns" id="maintab-btn-email-campaigns" data-maintab="email-campaigns" class="main-tab-btn hidden">
         <span id="email-campaigns-tab-label">Campaigns</span>
         <span id="email-campaigns-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
@@ -796,7 +798,7 @@
            thing that happens to an approved lead. Hidden by default, shown by
            _applyDashboardRegistry. assistant-lead-threads.js → lead-threads.ts.
            Design: docs/lead-generator-revenue-engine-plan.md §5.1-5.2 -->
-      <button type="button" id="maintab-btn-conversations" data-maintab="conversations" class="main-tab-btn hidden">
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-conversations" id="maintab-btn-conversations" data-maintab="conversations" class="main-tab-btn hidden">
         <span id="conversations-tab-label">Conversations</span>
       </button>
       <!-- Strategy — lead roles only (strategyTab: lead_qualifier), AND only when the workspace has
@@ -806,46 +808,46 @@
            feature — `hidden` alone loses to inline-flex.
            assistant-strategy.js → strategy-proposals.ts.
            Design: docs/lead-generator-revenue-engine-plan.md §7, docs/strategy-agent-plan.md -->
-      <button type="button" id="maintab-btn-strategy" data-maintab="strategy" class="main-tab-btn hidden" style="display:none">
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-strategy" id="maintab-btn-strategy" data-maintab="strategy" class="main-tab-btn hidden" style="display:none">
         <span id="strategy-tab-label">Strategy</span>
-      </button>
-      <!-- Inspo — content-roles only (inspoTab: social_media_manager, blog_writer); the
-           styles/tones the assistant studies and applies to every draft
-           (assistant-inspo.js → inspo-items.ts). Sits right after the Review Queue (Posts) tab and
-           before Calendar so the content-creation tabs read together. Hidden by default, shown by
-           _applyDashboardRegistry when an inspoTab exists. -->
-      <button type="button" id="maintab-btn-inspo" data-maintab="inspo" class="main-tab-btn hidden">
-        <span id="inspo-tab-label">Inspo</span>
       </button>
       <!-- Calendar — this assistant's scheduled work / timeline (assistant-calendar.js scopes
            the global calendar to this assistant). Always shown. -->
-      <button type="button" id="maintab-btn-calendar" data-maintab="calendar" class="main-tab-btn">Calendar</button>
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-calendar" id="maintab-btn-calendar" data-maintab="calendar" class="main-tab-btn">Calendar</button>
+      <!-- Inspo — content-roles only (inspoTab: social_media_manager, blog_writer); the
+           styles/tones the assistant studies and applies to every draft
+           (assistant-inspo.js → inspo-items.ts). Sits AFTER Calendar (2026-10-21): Posts and Calendar
+           are two views of the same posts, and an input tab between them split them up. Hidden by default, shown by
+           _applyDashboardRegistry when an inspoTab exists. -->
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-inspo" id="maintab-btn-inspo" data-maintab="inspo" class="main-tab-btn hidden">
+        <span id="inspo-tab-label">Inspo</span>
+      </button>
       <!-- My Content — content-roles only (myContentTab: social_media_manager, blog_writer);
            the org-wide content library (uploads/links/AI-generated media) this assistant draws
-           on for posts. Placed right after Calendar (issue #213). Hidden by default, shown by
+           on for posts. Placed after Inspo (issue #213; Calendar moved ahead of Inspo 2026-10-21). Hidden by default, shown by
            _applyDashboardRegistry when a myContentTab exists. -->
-      <button type="button" id="maintab-btn-mycontent" data-maintab="mycontent" class="main-tab-btn hidden">
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-mycontent" id="maintab-btn-mycontent" data-maintab="mycontent" class="main-tab-btn hidden">
         <span id="mycontent-tab-label">My Content</span>
       </button>
       <!-- ── Secondary tabs — role-gated, after the core three ── -->
-      <button type="button" id="maintab-btn-goals" data-maintab="goals" class="main-tab-btn">Goals</button>
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-goals" id="maintab-btn-goals" data-maintab="goals" class="main-tab-btn">Goals</button>
       <!-- Workflow tab REMOVED 2026-08-15. Its only card was "Active Workflows", which has been a
            disabled "Coming soon" panel since issue #147: orchestrations.ts has no runtime consumer,
            so nothing could ever populate it. A permanent empty tab teaches users that tabs here can
            be empty. Reinstate it in the commit that ships assistant-to-assistant orchestration —
            the markup is in git, not in this file. -->
-      <button type="button" data-maintab="activity"      class="main-tab-btn">Activity</button>
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-activity" id="maintab-btn-activity" data-maintab="activity" class="main-tab-btn">Activity</button>
       <!-- Knowledge Base — support-only (kbTab, tier1_support_agent); manages the KB articles
            that ground the assistant's answers (assistant-knowledge-base.js → kb-articles.ts).
            Placed last; hidden by default, shown by _applyDashboardRegistry when a kbTab exists. -->
-      <button type="button" id="maintab-btn-kb" data-maintab="kb" class="main-tab-btn hidden">
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-kb" id="maintab-btn-kb" data-maintab="kb" class="main-tab-btn hidden">
         <span id="kb-tab-label">Knowledge Base</span>
       </button>
     </nav>
   </div>
 
   <!-- ── MAIN TAB: Activity ─────────────────────────────────────────── -->
-  <div id="maintab-activity" class="main-tab-content hidden">
+  <div id="maintab-activity" role="tabpanel" aria-labelledby="maintab-btn-activity" class="main-tab-content hidden">
 
   <!-- AC6: Daily Relationship-Building Checklist (relocated here by issue #181) — hidden until
        loaded; only shown for social assistants. -->
@@ -855,7 +857,7 @@
         <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Today's Relationship-Building Checklist</h3>
         <p class="text-xs text-gray-400 mt-1">Daily community actions to build genuine relationships. Tick them off as you go.</p>
       </div>
-      <button type="button" id="rbc-regenerate-btn" onclick="window._rbcRegenerate()" class="text-xs font-bold text-emerald-600 hover:text-emerald-800 transition cursor-pointer shrink-0">Regenerate</button>
+      <button type="button" id="rbc-regenerate-btn" onclick="window._rbcRegenerate()" class="text-xs font-bold text-emerald-800 hover:text-emerald-800 transition cursor-pointer shrink-0">Regenerate</button>
     </div>
     <div id="rbc-list" class="space-y-2">
       <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading checklist…</div>
@@ -871,15 +873,17 @@
       <!-- One row per cross-post instead of one per platform — the same saved setting as the
            notification inbox (src/components/crosspost-view.js). The server does the merging. -->
       <label id="activity-crosspost-toggle" class="flex items-center gap-1.5 text-xs font-medium text-gray-500 cursor-pointer select-none" title="When a post goes to several platforms, show it once instead of once per platform">
-        <input type="checkbox" data-crosspost-toggle checked class="h-3.5 w-3.5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer">
+        <input type="checkbox" data-crosspost-toggle checked class="h-3.5 w-3.5 rounded border-gray-300 text-emerald-800 focus:ring-emerald-700 cursor-pointer">
         Combine platforms
       </label>
-      <div id="activity-timeframe-btns" class="flex gap-1">
-        <button data-tf="1d"  class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-indigo-500 bg-indigo-50 text-indigo-700 font-semibold">1d</button>
-        <button data-tf="7d"  class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">7d</button>
-        <button data-tf="30d" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">30d</button>
-        <button data-tf="90d" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">90d</button>
-        <button data-tf="all" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">All</button>
+      <!-- Same segmented look as the ROI period toggle (.metrics-period-btn); it used to be indigo, off
+           the button system. aria-pressed says which timeframe is showing. -->
+      <div id="activity-timeframe-btns" class="flex items-center gap-0.5 p-0.5 rounded-lg bg-gray-100" role="group" aria-label="Timeframe">
+        <button type="button" data-tf="1d" aria-pressed="true" title="Last day" class="activity-tf-btn px-2.5 py-1 text-xs font-bold rounded-md transition bg-white text-gray-900 shadow-sm">1d</button>
+        <button type="button" data-tf="7d" aria-pressed="false" title="Last 7 days" class="activity-tf-btn px-2.5 py-1 text-xs font-bold rounded-md transition text-gray-500 hover:text-gray-700">7d</button>
+        <button type="button" data-tf="30d" aria-pressed="false" title="Last 30 days" class="activity-tf-btn px-2.5 py-1 text-xs font-bold rounded-md transition text-gray-500 hover:text-gray-700">30d</button>
+        <button type="button" data-tf="90d" aria-pressed="false" title="Last 90 days" class="activity-tf-btn px-2.5 py-1 text-xs font-bold rounded-md transition text-gray-500 hover:text-gray-700">90d</button>
+        <button type="button" data-tf="all" aria-pressed="false" title="All time" class="activity-tf-btn px-2.5 py-1 text-xs font-bold rounded-md transition text-gray-500 hover:text-gray-700">All</button>
       </div>
       </div>
     </div>
@@ -891,7 +895,7 @@
   </div><!-- /maintab-activity -->
 
   <!-- ── MAIN TAB: Review Queue ──────────────────────────────────────── -->
-  <div id="maintab-review-queue" class="main-tab-content hidden">
+  <div id="maintab-review-queue" role="tabpanel" aria-labelledby="maintab-btn-review-queue" class="main-tab-content hidden">
 
     <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
       <div>
@@ -900,7 +904,7 @@
              in _applyDashboardRegistry. -->
         <p id="detail-rq-subtitle" class="text-sm text-gray-500 mt-1">Items awaiting your review — approve, edit or reject before anything is scheduled.</p>
       </div>
-      <button id="detail-rq-primary-btn" onclick="openGeneratePostSheet()" class="btn-assistant px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer flex items-center gap-1.5">
+      <button type="button" id="detail-rq-primary-btn" onclick="openGeneratePostSheet()" class="btn-assistant px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer flex items-center gap-1.5">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
         <span id="detail-rq-primary-label">Assign Task</span>
       </button>
@@ -908,8 +912,8 @@
 
     <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
       <!-- Lifecycle columns -->
-      <div class="flex gap-1 px-4 pt-3 border-b border-gray-100 overflow-x-auto">
-        <button class="detail-rq-col px-4 py-2 text-sm font-semibold rounded-t border-b-2 border-emerald-600 text-emerald-700 whitespace-nowrap"
+      <div class="tab-scroller flex gap-1 px-4 pt-3 border-b border-gray-100 overflow-x-auto" role="tablist" aria-label="Posts by stage">
+        <button type="button" role="tab" aria-controls="detail-rq-groups" aria-selected="true" tabindex="0" class="detail-rq-col px-4 py-2 text-sm font-semibold rounded-t border-b-2 text-emerald-800 whitespace-nowrap"
           data-status="review" onclick="detailRqOpenStatus('review', this)">
           Review
           <span id="detail-rq-col-count-review" class="ml-1 bg-amber-100 text-amber-700 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
@@ -919,15 +923,15 @@
              assistant books it into the next free cadence slot. The column could therefore never
              be anything but empty. _applyDashboardRegistry un-hides it for records-based roles,
              where 'approved' is a real resting state. -->
-        <button id="detail-rq-col-approved" class="detail-rq-col hidden px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+        <button type="button" role="tab" aria-controls="detail-rq-groups" aria-selected="false" tabindex="-1" id="detail-rq-col-approved" class="detail-rq-col hidden px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
           data-status="approved" onclick="detailRqOpenStatus('approved', this)">Approved
           <span id="detail-rq-col-count-approved" class="ml-1 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
         </button>
-        <button class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+        <button type="button" role="tab" aria-controls="detail-rq-groups" aria-selected="false" tabindex="-1" class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
           data-status="scheduled" onclick="detailRqOpenStatus('scheduled', this)">Scheduled
           <span id="detail-rq-col-count-scheduled" class="ml-1 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
         </button>
-        <button id="detail-rq-col-posted" class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+        <button type="button" role="tab" aria-controls="detail-rq-groups" aria-selected="false" tabindex="-1" id="detail-rq-col-posted" class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
           data-status="posted" onclick="detailRqOpenStatus('posted', this)"><span id="detail-rq-col-label-posted">Posted</span>
           <span id="detail-rq-col-count-posted" class="ml-1 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
         </button>
@@ -939,19 +943,19 @@
              server for approvalStatus=undefined, which is not a valid filter and therefore returned
              EVERY record in the hub, rendered with no action buttons at all. _applyDashboardRegistry
              hides it for those roles. -->
-        <button id="detail-rq-col-attention" class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+        <button type="button" role="tab" aria-controls="detail-rq-groups" aria-selected="false" tabindex="-1" id="detail-rq-col-attention" class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
           data-status="attention" onclick="detailRqOpenStatus('attention', this)">Needs attention
           <span id="detail-rq-col-count-attention" class="ml-1 bg-red-100 text-red-700 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
         </button>
         <!-- Archived covers rejected AND cancelled (expanded server-side): both mean "not going out",
              differing only in who stopped it. Cancelled posts previously appeared nowhere. -->
-        <button class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+        <button type="button" role="tab" aria-controls="detail-rq-groups" aria-selected="false" tabindex="-1" class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
           data-status="archived" onclick="detailRqOpenStatus('archived', this)">Archived
           <span id="detail-rq-col-count-archived" class="ml-1 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
         </button>
       </div>
       <!-- Content -->
-      <div id="detail-rq-groups" class="px-4 py-2 min-h-[200px]"></div>
+      <div id="detail-rq-groups" role="tabpanel" class="px-4 py-2 min-h-[200px]"></div>
     </div>
 
   </div><!-- /maintab-review-queue -->
@@ -961,7 +965,7 @@
        enrichment diffs / meeting notes / ledger / tickets. Populated by
        assistant-data-hub.js from the hubTab config; records live in
        assistant_records (netlify/functions/assistant-records.ts). -->
-  <div id="maintab-datahub" class="main-tab-content">
+  <div id="maintab-datahub" role="tabpanel" aria-labelledby="maintab-btn-datahub" class="main-tab-content">
 
     <!-- Primary action bar (Epic 2.1; relocated here by issue #181) — the role's one "do the thing"
          intent, front and centre on its workspace tab.
@@ -1007,7 +1011,7 @@
        renders the global calendar (calendar.js) scoped to _currentAssistantId:
        scheduled posts (get-social-drafts), records with scheduled_for
        (assistant-records) and completed task runs (get-calendar-activity). -->
-  <div id="maintab-calendar" class="main-tab-content hidden">
+  <div id="maintab-calendar" role="tabpanel" aria-labelledby="maintab-btn-calendar" class="main-tab-content hidden">
     <div id="assistant-calendar-host"></div>
   </div><!-- /maintab-calendar -->
 
@@ -1015,7 +1019,14 @@
        The org-wide content library (uploads/links/AI-generated media, not
        assistant-scoped). Populated by assistant-my-content.js, which reuses the
        standalone my-content.html fragment + my-content.js controller. -->
-  <div id="maintab-mycontent" class="main-tab-content hidden">
+  <div id="maintab-mycontent" role="tabpanel" aria-labelledby="maintab-btn-mycontent" class="main-tab-content hidden">
+    <!-- Shown inside one assistant, the library read as THAT assistant's — and deleting here removes
+         a picture from every assistant's posts. Say so before anything is touched (UX review,
+         2026-10-21). -->
+    <p class="mb-4 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3">
+      <span class="font-bold text-gray-900">Shared with all your assistants.</span>
+      Pictures and videos here can be used by any of them, so removing one removes it for all.
+    </p>
     <div id="mycontent-host"></div>
   </div><!-- /maintab-mycontent -->
 
@@ -1023,7 +1034,7 @@
        Support articles grounding the tier1_support_agent's Resolved answers
        (KB phase). Populated by assistant-knowledge-base.js from the kbTab
        config; articles live in kb_articles (netlify/functions/kb-articles.ts). -->
-  <div id="maintab-kb" class="main-tab-content hidden">
+  <div id="maintab-kb" role="tabpanel" aria-labelledby="maintab-btn-kb" class="main-tab-content hidden">
     <div id="kb-toolbar"></div>
     <div id="kb-editor-host"></div>
     <div id="kb-list-host"></div>
@@ -1033,7 +1044,7 @@
        The styles/tones/ideas the content assistants study and apply to every
        draft. Populated by assistant-inspo.js from the inspoTab config; items
        live in inspo_items (netlify/functions/inspo-items.ts). -->
-  <div id="maintab-inspo" class="main-tab-content hidden">
+  <div id="maintab-inspo" role="tabpanel" aria-labelledby="maintab-btn-inspo" class="main-tab-content hidden">
     <div id="inspo-toolbar"></div>
     <div id="inspo-composer-host"></div>
     <div id="inspo-list-host"></div>
@@ -1045,42 +1056,42 @@
        activation; the list is a real query and there is no point paying for it on every page load.
        (init() does fetch eagerly, but only the light summary that drives the tab badge and the
        control strip above.) -->
-  <div id="maintab-campaigns" class="main-tab-content hidden">
+  <div id="maintab-campaigns" role="tabpanel" aria-labelledby="maintab-btn-campaigns" class="main-tab-content hidden">
     <div id="campaigns-host"></div>
   </div><!-- /maintab-campaigns -->
 
   <!-- Briefs — Brand Designer only. Rendered lazily by assistant-briefs.js on first activation;
        init() fetches eagerly because the count of briefs needing a decision drives the tab badge. -->
-  <div id="maintab-briefs" class="main-tab-content hidden">
+  <div id="maintab-briefs" role="tabpanel" aria-labelledby="maintab-btn-briefs" class="main-tab-content hidden">
     <div id="briefs-host"></div>
   </div><!-- /maintab-briefs -->
 
   <!-- Website — Mystery Shopper only. Rendered lazily by assistant-site-audit.js on first activation;
        init() fetches eagerly because the count of undecided fixes drives the tab badge. -->
-  <div id="maintab-website" class="main-tab-content hidden">
+  <div id="maintab-website" role="tabpanel" aria-labelledby="maintab-btn-website" class="main-tab-content hidden">
     <div id="site-audit-host"></div>
   </div><!-- /maintab-website -->
 
   <!-- Website — Website Assistant only. Rendered lazily by assistant-site-editor.js on first activation. -->
-  <div id="maintab-sitebuilder" class="main-tab-content hidden">
+  <div id="maintab-sitebuilder" role="tabpanel" aria-labelledby="maintab-btn-sitebuilder" class="main-tab-content hidden">
     <div id="site-editor-host" data-site-host="website"></div>
   </div><!-- /maintab-sitebuilder -->
-  <div id="maintab-siteenquiries" class="main-tab-content hidden"><div id="site-enquiries-host" data-site-host="enquiries"></div></div>
-  <div id="maintab-siteorders" class="main-tab-content hidden"><div id="site-orders-host" data-site-host="orders"></div></div>
-  <div id="maintab-sitebookings" class="main-tab-content hidden"><div id="site-bookings-host" data-site-host="bookings"></div></div>
+  <div id="maintab-siteenquiries" role="tabpanel" aria-labelledby="maintab-btn-siteenquiries" class="main-tab-content hidden"><div id="site-enquiries-host" data-site-host="enquiries"></div></div>
+  <div id="maintab-siteorders" role="tabpanel" aria-labelledby="maintab-btn-siteorders" class="main-tab-content hidden"><div id="site-orders-host" data-site-host="orders"></div></div>
+  <div id="maintab-sitebookings" role="tabpanel" aria-labelledby="maintab-btn-sitebookings" class="main-tab-content hidden"><div id="site-bookings-host" data-site-host="bookings"></div></div>
 
-  <div id="maintab-email-campaigns" class="main-tab-content hidden">
+  <div id="maintab-email-campaigns" role="tabpanel" aria-labelledby="maintab-btn-email-campaigns" class="main-tab-content hidden">
     <div id="email-campaigns-host"></div>
   </div><!-- /maintab-email-campaigns -->
 
-  <div id="maintab-signals" class="main-tab-content hidden">
+  <div id="maintab-signals" role="tabpanel" aria-labelledby="maintab-btn-signals" class="main-tab-content hidden">
     <div id="signal-inbox-host"></div>
   </div><!-- /maintab-signals -->
 
   <!-- Conversations — lead roles only. Rendered lazily by assistant-lead-threads.js on first
        activation; unlike the Signal Inbox nothing here feeds a tab badge, so it fetches nothing
        until the tab is actually opened. -->
-  <div id="maintab-conversations" class="main-tab-content hidden">
+  <div id="maintab-conversations" role="tabpanel" aria-labelledby="maintab-btn-conversations" class="main-tab-content hidden">
     <div id="lead-threads-host"></div>
   </div><!-- /maintab-conversations -->
 
@@ -1089,7 +1100,7 @@
        read) and paints on activation. For most workspaces this stays empty for months by design:
        the agent will not propose on a small sample, so the empty state is diagnostic rather than
        blank — it names which evidence is missing and how far off it is. -->
-  <div id="maintab-strategy" class="main-tab-content hidden">
+  <div id="maintab-strategy" role="tabpanel" aria-labelledby="maintab-btn-strategy" class="main-tab-content hidden">
     <div id="strategy-host"></div>
   </div><!-- /maintab-strategy -->
 
@@ -1108,7 +1119,7 @@
         <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
       </button>
       <h2 id="brief-drawer-title" style="font-size:1.0625rem;font-weight:700;color:#111827;margin:0;flex:1;min-width:0">Assistant Profile</h2>
-      <span id="brief-drawer-save" style="font-size:0.75rem;font-weight:600;color:#059669;flex-shrink:0"></span>
+      <span id="brief-drawer-save" role="status" aria-live="polite" style="font-size:0.75rem;font-weight:600;color:#d6006b;flex-shrink:0"></span>
       <button type="button" onclick="window._closeBriefDrawer()" aria-label="Close"
         style="width:2rem;height:2rem;display:flex;align-items:center;justify-content:center;border-radius:0.5rem;border:none;background:none;cursor:pointer;color:#6b7280;transition:background .12s ease;flex-shrink:0"
         onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='none'">
@@ -1136,7 +1147,7 @@
     <button type="button" data-tab="problem" class="detail-tab-btn brief-card w-full text-left">
       <div class="flex items-center justify-between gap-4">
         <div>
-          <p class="text-sm font-bold text-gray-900">Mandate</p>
+          <p class="text-sm font-bold text-gray-900">What I do</p>
           <p class="text-xs text-gray-500 mt-0.5">The bottleneck this assistant was hired to solve</p>
         </div>
         <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
@@ -1146,7 +1157,7 @@
     <button type="button" data-tab="operation" class="detail-tab-btn brief-card w-full text-left">
       <div class="flex items-center justify-between gap-4">
         <div>
-          <p class="text-sm font-bold text-gray-900">Operational Setup</p>
+          <p id="opcard-operation-title" class="text-sm font-bold text-gray-900">When and how I post</p>
           <p id="opcard-operation-sub" class="text-xs text-gray-500 mt-0.5">Trigger, content source and posting schedule</p>
         </div>
         <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
@@ -1156,7 +1167,7 @@
     <button type="button" data-tab="strategy" class="detail-tab-btn brief-card w-full text-left">
       <div class="flex items-center justify-between gap-4">
         <div>
-          <p id="opcard-strategy-title" class="text-sm font-bold text-gray-900">Creative Brief</p>
+          <p id="opcard-strategy-title" class="text-sm font-bold text-gray-900">What I post about</p>
           <p id="opcard-strategy-sub" class="text-xs text-gray-500 mt-0.5">Objective, audience, voice and content pillars</p>
         </div>
         <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
@@ -1176,7 +1187,7 @@
     <button type="button" data-tab="rules" class="detail-tab-btn brief-card w-full text-left">
       <div class="flex items-center justify-between gap-4">
         <div>
-          <p class="text-sm font-bold text-gray-900">Rules</p>
+          <p class="text-sm font-bold text-gray-900">Do’s and don’ts</p>
           <p class="text-xs text-gray-500 mt-0.5">Strict rules, assistant rules and learned directives</p>
         </div>
         <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
@@ -1186,7 +1197,7 @@
     <button type="button" data-tab="guardrails" class="detail-tab-btn brief-card w-full text-left">
       <div class="flex items-center justify-between gap-4">
         <div>
-          <p class="text-sm font-bold text-gray-900">Brand Safety &amp; Legal</p>
+          <p class="text-sm font-bold text-gray-900">Safety and legal</p>
           <p class="text-xs text-gray-500 mt-0.5">Knowledge base and AI disclosure</p>
         </div>
         <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
@@ -1210,7 +1221,7 @@
   <div id="tab-problem" class="detail-tab-content space-y-6">
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-6">
-        <h3 class="text-lg font-bold text-gray-900">Mandate</h3>
+        <h3 class="text-lg font-bold text-gray-900">What I do</h3>
         <p class="text-sm text-gray-500 mt-1">What bottleneck or time-drain were you trying to solve? This shapes everything your assistant prioritises.</p>
       </div>
       <!-- Role-specific quick-start suggestions (populated by _renderMandateSuggestions() in
@@ -1223,7 +1234,7 @@
       <div>
         <div class="flex items-center justify-between mb-1">
           <label class="block text-sm font-bold text-gray-700">Your Bottleneck <span class="text-red-500">*</span></label>
-          <button type="button" onclick="window._magicWand('problem_statement','edit_problem', this)" title="AI optimize for your goals" class="goal-wand-btn inline-flex items-center gap-1 text-xs font-bold text-emerald-600 hover:text-emerald-700 cursor-pointer">
+          <button type="button" onclick="window._magicWand('problem_statement','edit_problem', this)" title="AI optimize for your goals" class="goal-wand-btn inline-flex items-center gap-1 text-xs font-bold text-emerald-800 hover:text-emerald-700 cursor-pointer">
             <img src="/images/BeMoreSwan_SwanAI.png" alt="Optimise with Be More Swan AI" class="ai-wand-img shrink-0">
           </button>
         </div>
@@ -1239,7 +1250,7 @@
   <div id="tab-operation" class="detail-tab-content hidden space-y-6">
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-6">
-        <h3 class="text-lg font-bold text-gray-900">Operational Setup</h3>
+        <h3 id="operation-heading" class="text-lg font-bold text-gray-900">When and how I post</h3>
         <p id="operation-intro" class="text-sm text-gray-500 mt-1">When does your assistant run, and where does it get its content from?</p>
       </div>
       <div class="space-y-6">
@@ -1252,15 +1263,15 @@
         <div>
           <label class="block text-sm font-bold text-gray-700 mb-2">Trigger / Schedule</label>
           <div class="space-y-2">
-            <label class="flex items-start gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-400 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition">
+            <label class="flex items-start gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-200 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition">
               <input type="radio" name="edit_trigger" value="on_demand" class="mt-0.5 text-emerald-700 focus:ring-emerald-700">
               <span><span class="font-semibold text-gray-800 text-sm">On Demand</span><br><span class="text-xs text-gray-500">I trigger it manually when I need content.</span></span>
             </label>
-            <label class="flex items-start gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-400 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition">
+            <label class="flex items-start gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-200 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition">
               <input type="radio" name="edit_trigger" value="reactive" class="mt-0.5 text-emerald-700 focus:ring-emerald-700">
               <span><span class="font-semibold text-gray-800 text-sm">Reactive</span><br><span class="text-xs text-gray-500">It runs automatically when a new brief or data arrives.</span></span>
             </label>
-            <label class="flex items-start gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-400 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition">
+            <label class="flex items-start gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-200 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition">
               <input type="radio" name="edit_trigger" value="scheduled" class="mt-0.5 text-emerald-700 focus:ring-emerald-700">
               <span><span class="font-semibold text-gray-800 text-sm">Scheduled</span><br><span class="text-xs text-gray-500">It runs on a fixed recurring schedule.</span></span>
             </label>
@@ -1269,15 +1280,15 @@
         <div>
           <label class="block text-sm font-bold text-gray-700 mb-2">Content Source</label>
           <div class="space-y-2">
-            <label class="flex items-start gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-400 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition">
+            <label class="flex items-start gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-200 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition">
               <input type="radio" name="edit_source" value="client_provided" class="mt-0.5 text-emerald-700 focus:ring-emerald-700">
               <span><span class="font-semibold text-gray-800 text-sm">Client Provided</span><br><span class="text-xs text-gray-500">I supply the drafts, data, or notes — the assistant processes it.</span></span>
             </label>
-            <label class="flex items-start gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-400 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition">
+            <label class="flex items-start gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-200 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition">
               <input type="radio" name="edit_source" value="assistant_generated" class="mt-0.5 text-emerald-700 focus:ring-emerald-700">
               <span><span class="font-semibold text-gray-800 text-sm">Assistant Generated</span><br><span class="text-xs text-gray-500">The assistant researches and writes everything independently.</span></span>
             </label>
-            <label class="flex items-start gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-400 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition">
+            <label class="flex items-start gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-200 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition">
               <input type="radio" name="edit_source" value="hybrid" class="mt-0.5 text-emerald-700 focus:ring-emerald-700">
               <span><span class="font-semibold text-gray-800 text-sm">Hybrid</span><br><span class="text-xs text-gray-500">A mix — I provide direction, the assistant fills the gaps.</span></span>
             </label>
@@ -1407,7 +1418,7 @@
           <div class="flex items-center gap-3">
             <label for="autonomous-media-cap" class="text-sm font-bold text-gray-700">Monthly AI media cap</label>
             <input id="autonomous-media-cap" type="number" min="0" step="1" onchange="window._saveAutonomousMediaCap()"
-              class="w-24 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+              class="w-24 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none">
             <span id="autonomous-media-cap-hint" class="text-xs text-gray-400">Most AI images or videos this assistant may make on its own each month.</span>
           </div>
         </div>
@@ -1521,7 +1532,7 @@
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-5">
         <h3 class="text-lg font-bold text-gray-900">Business Information &amp; Brand Knowledge</h3>
-        <p class="text-sm text-gray-500 mt-1">Your business details and any documents or links added in <a href="#" onclick="window.loadView('assets')" class="text-emerald-600 hover:underline font-medium">Business Information</a> are automatically applied to this assistant.</p>
+        <p class="text-sm text-gray-500 mt-1">Your business details and any documents or links added in <a href="#" onclick="window.loadView('assets')" class="text-emerald-800 hover:underline font-medium">Business Information</a> are automatically applied to this assistant.</p>
       </div>
       <div id="business-knowledge-content">
         <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading brand knowledge…</div>
@@ -1537,16 +1548,16 @@
         <div>
           <label class="block text-sm font-bold text-gray-700 mb-2">Primary Objective</label>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <label class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-400 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition text-sm font-medium text-gray-800">
+            <label class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-200 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition text-sm font-medium text-gray-800">
               <input type="radio" name="edit_objective" value="brand_awareness" class="text-emerald-700 focus:ring-emerald-700"> Brand Awareness
             </label>
-            <label class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-400 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition text-sm font-medium text-gray-800">
+            <label class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-200 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition text-sm font-medium text-gray-800">
               <input type="radio" name="edit_objective" value="lead_generation" class="text-emerald-700 focus:ring-emerald-700"> Lead Generation
             </label>
-            <label class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-400 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition text-sm font-medium text-gray-800">
+            <label class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-200 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition text-sm font-medium text-gray-800">
               <input type="radio" name="edit_objective" value="direct_sales" class="text-emerald-700 focus:ring-emerald-700"> Direct Sales
             </label>
-            <label class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-400 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition text-sm font-medium text-gray-800">
+            <label class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-emerald-200 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 transition text-sm font-medium text-gray-800">
               <input type="radio" name="edit_objective" value="community_engagement" class="text-emerald-700 focus:ring-emerald-700"> Community &amp; Engagement
             </label>
           </div>
@@ -1554,7 +1565,7 @@
         <div>
           <div class="flex items-center justify-between mb-1">
             <label for="edit_core_message" class="block text-sm font-bold text-gray-700" data-explain="core-message">Core Message</label>
-            <button type="button" onclick="window._magicWand('core_message','edit_core_message', this)" title="AI optimize for your goals" class="goal-wand-btn inline-flex items-center gap-1 text-xs font-bold text-emerald-600 hover:text-emerald-700 cursor-pointer">
+            <button type="button" onclick="window._magicWand('core_message','edit_core_message', this)" title="AI optimize for your goals" class="goal-wand-btn inline-flex items-center gap-1 text-xs font-bold text-emerald-800 hover:text-emerald-700 cursor-pointer">
               <img src="/images/BeMoreSwan_SwanAI.png" alt="Optimise with Be More Swan AI" class="ai-wand-img shrink-0">
             </button>
           </div>
@@ -1579,7 +1590,7 @@
         <div>
           <div class="flex items-center justify-between mb-1">
             <label for="edit_audience" class="block text-sm font-bold text-gray-700" data-explain="target-audience">Target Audience</label>
-            <button type="button" onclick="window._magicWand('target_audience','edit_audience', this)" title="AI optimize for your goals" class="goal-wand-btn inline-flex items-center gap-1 text-xs font-bold text-emerald-600 hover:text-emerald-700 cursor-pointer">
+            <button type="button" onclick="window._magicWand('target_audience','edit_audience', this)" title="AI optimize for your goals" class="goal-wand-btn inline-flex items-center gap-1 text-xs font-bold text-emerald-800 hover:text-emerald-700 cursor-pointer">
               <img src="/images/BeMoreSwan_SwanAI.png" alt="Optimise with Be More Swan AI" class="ai-wand-img shrink-0">
             </button>
           </div>
@@ -1589,7 +1600,7 @@
         <div>
           <div class="flex items-center justify-between mb-1">
             <label for="edit_tone" class="block text-sm font-bold text-gray-700" data-explain="brand-voice">Brand Voice &amp; Tone</label>
-            <button type="button" onclick="window._magicWand('tone_of_voice','edit_tone', this)" title="AI optimize for your goals" class="goal-wand-btn inline-flex items-center gap-1 text-xs font-bold text-emerald-600 hover:text-emerald-700 cursor-pointer">
+            <button type="button" onclick="window._magicWand('tone_of_voice','edit_tone', this)" title="AI optimize for your goals" class="goal-wand-btn inline-flex items-center gap-1 text-xs font-bold text-emerald-800 hover:text-emerald-700 cursor-pointer">
               <img src="/images/BeMoreSwan_SwanAI.png" alt="Optimise with Be More Swan AI" class="ai-wand-img shrink-0">
             </button>
           </div>
@@ -1598,7 +1609,7 @@
         <div>
           <div class="flex items-center justify-between mb-1">
             <label for="edit_pillars" class="block text-sm font-bold text-gray-700" data-explain="content-pillars">Content Pillars / Core Topics</label>
-            <button type="button" onclick="window._magicWand('content_pillars','edit_pillars', this)" title="AI optimize for your goals" class="goal-wand-btn inline-flex items-center gap-1 text-xs font-bold text-emerald-600 hover:text-emerald-700 cursor-pointer">
+            <button type="button" onclick="window._magicWand('content_pillars','edit_pillars', this)" title="AI optimize for your goals" class="goal-wand-btn inline-flex items-center gap-1 text-xs font-bold text-emerald-800 hover:text-emerald-700 cursor-pointer">
               <img src="/images/BeMoreSwan_SwanAI.png" alt="Optimise with Be More Swan AI" class="ai-wand-img shrink-0">
             </button>
           </div>
@@ -1803,7 +1814,7 @@
         <h3 class="text-lg font-bold text-gray-900">Synced actions</h3>
         <p class="text-sm text-gray-500 mt-1">The tools this assistant can plug into. Connect one and switch on the action you want — or see what's coming soon. Connections are shared across your workspace and credentials are encrypted, never visible to anyone.</p>
       </div>
-      <span id="platforms-save-status" class="text-sm font-bold text-emerald-600 shrink-0 transition-all"></span>
+      <span id="platforms-save-status" class="text-sm font-bold text-emerald-800 shrink-0 transition-all"></span>
     </div>
 
     <!-- AC2.1.3: Workspace chat panel — rendered by integrations.js after auto-responder generation -->
@@ -1880,7 +1891,7 @@
           <p id="assistant-rules-subtitle" class="text-sm text-gray-500 mt-1">Custom rules for this assistant. Anything you add here is written directly into this assistant's brief and shapes everything it produces.</p>
         </div>
         <div class="flex items-center gap-3 shrink-0">
-          <span id="assistant-rules-status" class="text-sm font-bold text-emerald-600 transition-all"></span>
+          <span id="assistant-rules-status" class="text-sm font-bold text-emerald-800 transition-all"></span>
           <button type="button" id="btn-copy-rules" onclick="window._openCopyRules()" style="display:none"
             class="btn-utility inline-flex items-center gap-1.5 text-sm font-bold border px-3 py-1.5 rounded-lg transition cursor-pointer">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
@@ -1957,7 +1968,7 @@
     <!-- Knowledge base & brand context -->
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-6">
-        <h3 class="text-lg font-bold text-gray-900">Brand Safety &amp; Legal</h3>
+        <h3 class="text-lg font-bold text-gray-900">Safety and legal</h3>
         <p class="text-sm text-gray-500 mt-1">Background context that protects your brand from compliance risk. For hard constraints, see the Rules section.</p>
       </div>
       <div>
@@ -1996,7 +2007,7 @@
         </button>
       </div>
       <div id="autonomous-on-msg" class="hidden mt-4 flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-800">
-        <svg class="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        <svg class="w-4 h-4 shrink-0 mt-0.5 text-emerald-800" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
         <span>When your content hub is empty, this assistant will still prepare <strong>draft posts</strong> (text-only or AI-assisted media) and send them to your <strong>Review</strong> for approval — they are never published on their own. AI-media drafts carry a <strong>"Created by"</strong> pill naming this assistant, so you can spot them at a glance.</span>
       </div>
       <div id="autonomous-off-msg" class="mt-4 flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
@@ -2027,7 +2038,7 @@
       </div>
       <div id="assistant-notif-prefs-loading" class="text-sm text-gray-400">Loading preferences…</div>
       <div id="assistant-notif-prefs-list" class="hidden divide-y divide-gray-100"></div>
-      <p id="assistant-notif-prefs-saved" class="hidden text-xs text-emerald-600 font-semibold mt-3">✓ Preference saved</p>
+      <p id="assistant-notif-prefs-saved" class="hidden text-xs text-emerald-800 font-semibold mt-3">✓ Preference saved</p>
     </div>
 
     <!-- Review-alert cadence: how urgently to chase approvals for this assistant's drafts.
@@ -2039,21 +2050,21 @@
       </div>
       <div id="review-cadence-options" class="space-y-3">
         <label class="flex items-start gap-3 cursor-pointer">
-          <input type="radio" name="review-cadence" value="immediate" class="mt-1 h-4 w-4 text-emerald-600 border-gray-300 focus:ring-emerald-500">
+          <input type="radio" name="review-cadence" value="immediate" class="mt-1 h-4 w-4 text-emerald-800 border-gray-300 focus:ring-emerald-700">
           <span>
             <span class="block text-sm font-semibold text-gray-900">Immediate</span>
             <span class="block text-xs text-gray-400 leading-snug">Alert me as soon as a pending post enters its final 12-hour approval window.</span>
           </span>
         </label>
         <label class="flex items-start gap-3 cursor-pointer">
-          <input type="radio" name="review-cadence" value="red_urgency_only" class="mt-1 h-4 w-4 text-emerald-600 border-gray-300 focus:ring-emerald-500">
+          <input type="radio" name="review-cadence" value="red_urgency_only" class="mt-1 h-4 w-4 text-emerald-800 border-gray-300 focus:ring-emerald-700">
           <span>
             <span class="block text-sm font-semibold text-gray-900">Urgent only</span>
             <span class="block text-xs text-gray-400 leading-snug">Only alert me for posts at risk of missing their publish window.</span>
           </span>
         </label>
         <label class="flex items-start gap-3 cursor-pointer">
-          <input type="radio" name="review-cadence" value="daily_digest" class="mt-1 h-4 w-4 text-emerald-600 border-gray-300 focus:ring-emerald-500">
+          <input type="radio" name="review-cadence" value="daily_digest" class="mt-1 h-4 w-4 text-emerald-800 border-gray-300 focus:ring-emerald-700">
           <span>
             <span class="block text-sm font-semibold text-gray-900">Daily digest</span>
             <span class="block text-xs text-gray-400 leading-snug">Skip instant alerts — I'll review pending posts from my daily approvals summary. Posts not approved before their cut-off are never auto-published.</span>
@@ -2082,7 +2093,7 @@
   </aside><!-- /brief-drawer -->
 
   <!-- ── MAIN TAB: Goals & Automation ───────────────────────────────── -->
-  <div id="maintab-goals" class="main-tab-content hidden">
+  <div id="maintab-goals" role="tabpanel" aria-labelledby="maintab-btn-goals" class="main-tab-content hidden">
 
   <!-- ── Goals (SMART Goals — Feature 1) ───── -->
   <div id="tab-goals" class="space-y-6 mb-8">
@@ -2141,7 +2152,7 @@
           <div class="sm:col-span-3">
             <label for="goal-title" data-explain="goal-name" class="block text-sm font-bold text-gray-700 mb-1">Goal Name</label>
             <input id="goal-title" type="text" maxlength="120" placeholder="e.g. Reach wholesale buyers before the Q4 launch"
-              class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+              class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none transition">
             <p class="text-xs text-gray-400 mt-1">A short name so you can tell your goals apart at a glance.</p>
           </div>
           <div class="sm:col-span-3">
@@ -2149,7 +2160,7 @@
             <!-- disabled: variants matter here — the Objective select is disabled in edit mode, and
                  without them it stayed white and looked clickable. Both variants are already in the
                  compiled style.css (the Target Metric select below uses them), so no Tailwind rebuild. -->
-            <select id="goal-objective" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition disabled:bg-gray-50 disabled:text-gray-400">
+            <select id="goal-objective" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none transition disabled:bg-gray-50 disabled:text-gray-400">
               <option value="">Select an objective…</option>
               <option value="awareness">Grow my Audience (Awareness)</option>
               <option value="engagement">Increase Interaction (Engagement)</option>
@@ -2159,7 +2170,7 @@
           </div>
           <div class="sm:col-span-3">
             <label for="goal-metric" data-explain="goal-metric" class="block text-sm font-bold text-gray-700 mb-1">Target Metric</label>
-            <select id="goal-metric" disabled class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition disabled:bg-gray-50 disabled:text-gray-400">
+            <select id="goal-metric" disabled class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none transition disabled:bg-gray-50 disabled:text-gray-400">
               <option value="">Select an objective first…</option>
             </select>
             <p id="goal-metric-help" class="text-xs text-gray-400 mt-1"></p>
@@ -2167,16 +2178,16 @@
           <div>
             <label for="goal-target" data-explain="goal-target-value" class="block text-sm font-bold text-gray-700 mb-1">Target Value</label>
             <input id="goal-target" type="number" min="1" step="any" placeholder="e.g. 20000"
-              class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+              class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none transition">
           </div>
           <div>
             <label for="goal-date" data-explain="goal-target-date" class="block text-sm font-bold text-gray-700 mb-1">Target Date</label>
             <input id="goal-date" type="date"
-              class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+              class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none transition">
           </div>
           <div class="flex flex-col justify-end">
             <label class="inline-flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-              <input id="goal-primary" type="checkbox" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed">
+              <input id="goal-primary" type="checkbox" class="rounded border-gray-300 text-emerald-800 focus:ring-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed">
               Primary goal
             </label>
             <!-- Shown when a user-reported metric is selected. The primary goal is the one this
@@ -2205,7 +2216,7 @@
             </div>
             <textarea id="goal-rationale" rows="3" maxlength="600"
               placeholder="e.g. We're launching a wholesale range in Q4 and need independent retailers to discover us. Most of our current followers are direct consumers, so we need content that speaks to buyers."
-              class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition"></textarea>
+              class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none transition"></textarea>
             <p class="text-xs text-gray-400 mt-1">Your assistant reads this when drafting, and uses it to choose topics, formats and calls to action. The more context, the better the content.</p>
           </div>
         </div>
@@ -2244,27 +2255,27 @@
 </div>
 
 <!-- ── Modal: Copy rules from another assistant ─────────────────── -->
-<div id="modal-copy-rules" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+<div id="modal-copy-rules" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
     <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-emerald-50">
       <div class="flex items-center gap-3">
-        <div class="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+        <div class="w-9 h-9 rounded-xl bg-emerald-700 text-white flex items-center justify-center shrink-0">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
         </div>
         <div>
           <h3 class="font-extrabold text-gray-900">Copy rules from another assistant</h3>
-          <p class="text-xs text-emerald-600 mt-0.5">Adds a copy of the source rules to this assistant — the source is unchanged</p>
+          <p class="text-xs text-emerald-800 mt-0.5">Adds a copy of the source rules to this assistant — the source is unchanged</p>
         </div>
       </div>
       <button onclick="document.getElementById('modal-copy-rules').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
     <div class="px-6 py-6 space-y-4">
       <div>
         <label for="copy-rules-source" class="block text-sm font-bold text-gray-700 mb-1">Source assistant</label>
-        <select id="copy-rules-source" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition bg-white">
+        <select id="copy-rules-source" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none transition bg-white">
           <option value="">Loading assistants…</option>
         </select>
       </div>
@@ -2273,7 +2284,7 @@
     </div>
     <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-between bg-gray-50/50 rounded-b-2xl">
       <button onclick="document.getElementById('modal-copy-rules').classList.add('hidden')" type="button"
-        class="px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Cancel</button>
+        class="btn-secondary px-4 py-2.5 text-sm font-bold rounded-lg border transition cursor-pointer">Cancel</button>
       <button id="btn-copy-rules-confirm" onclick="window._confirmCopyRules()" type="button"
         class="btn-utility px-6 py-2.5 text-sm font-bold rounded-lg shadow transition cursor-pointer flex items-center gap-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
@@ -2284,7 +2295,7 @@
 </div>
 
 <!-- ── Modal: Tuning Session (Epic 3.1) — correct an output → learned directive ─── -->
-<div id="modal-tuning" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+<div id="modal-tuning" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full overflow-hidden flex flex-col max-h-[90vh]">
     <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-indigo-50">
       <div class="flex items-center gap-3">
@@ -2297,7 +2308,7 @@
         </div>
       </div>
       <button onclick="window._closeTuningSession()" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2322,7 +2333,7 @@
     </div>
     <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3 bg-gray-50/50">
       <button id="tuning-cancel-btn" onclick="window._closeTuningSession()" type="button"
-        class="px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Cancel</button>
+        class="btn-secondary px-4 py-2.5 text-sm font-bold rounded-lg border transition cursor-pointer">Cancel</button>
       <button id="tuning-submit-btn" onclick="window._submitTuning()" type="button"
         class="btn-primary px-6 py-2.5 text-sm font-bold rounded-lg shadow transition cursor-pointer">Submit correction</button>
       <!-- Post-submit actions (hidden until a directive is created) -->
@@ -2335,12 +2346,12 @@
 </div>
 
 <!-- ── Modal: Tuning post picker (Epic 3.1 — action-bar / Runbook entry) ─── -->
-<div id="modal-tuning-picker" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+<div id="modal-tuning-picker" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
     <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-indigo-50">
       <h3 class="font-extrabold text-gray-900">Choose a post to tune</h3>
       <button onclick="document.getElementById('modal-tuning-picker').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2351,7 +2362,7 @@
 </div>
 
 <!-- ── Modal: Review Progress (SMART Goals US2.2) ───────────────── -->
-<div id="modal-review-progress" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+<div id="modal-review-progress" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
     <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
       <div class="min-w-0">
@@ -2359,7 +2370,7 @@
         <p class="text-xs text-gray-500 mt-0.5">Actual performance against the trajectory needed to hit your target.</p>
       </div>
       <button onclick="document.getElementById('modal-review-progress').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2367,7 +2378,7 @@
       <div>
         <label for="review-goal-select" class="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-wide">Goal</label>
         <select id="review-goal-select" onchange="window._renderReviewChart(Number(this.value))"
-          class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition"></select>
+          class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none transition"></select>
       </div>
       <div id="review-status-banner"></div>
       <!-- Trendline vs trajectory chart (dependency-free SVG) — AC2.2.2 -->
@@ -2384,15 +2395,15 @@
 </div>
 
 <!-- ── Modal: Magic Wand suggestion (US3.2 — goal-aware field rewrite) ─── -->
-<div id="modal-wand" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+<div id="modal-wand" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
     <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-emerald-50">
       <div>
         <h3 class="font-extrabold text-gray-900">AI Suggestion</h3>
-        <p id="wand-field-label" class="text-xs text-emerald-600 mt-0.5"></p>
+        <p id="wand-field-label" class="text-xs text-emerald-800 mt-0.5"></p>
       </div>
       <button onclick="document.getElementById('modal-wand').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2401,14 +2412,14 @@
       <div id="wand-suggestion" style="min-height:64px" class="text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg p-3"></div>
     </div>
     <div class="px-6 py-4 border-t border-gray-100 bg-gray-50/50 rounded-b-2xl flex items-center justify-end gap-3">
-      <button onclick="document.getElementById('modal-wand').classList.add('hidden')" type="button" class="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Dismiss</button>
+      <button onclick="document.getElementById('modal-wand').classList.add('hidden')" type="button" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border transition cursor-pointer">Dismiss</button>
       <button id="wand-accept" type="button" class="btn-primary px-5 py-2 text-sm font-bold rounded-lg shadow transition cursor-pointer">Accept Suggestion</button>
     </div>
   </div>
 </div>
 
 <!-- ── Modal: One-Click Fix (SMART Goals US-03 — diagnosis + strategy diff + apply) ─── -->
-<div id="modal-strategy-fix" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+<div id="modal-strategy-fix" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
     <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-emerald-50">
       <div class="min-w-0">
@@ -2416,7 +2427,7 @@
         <p class="text-xs text-emerald-700 mt-0.5">Why this goal is slipping — and the strategy change to fix it.</p>
       </div>
       <button onclick="document.getElementById('modal-strategy-fix').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2424,14 +2435,14 @@
       <div class="flex items-center justify-center py-10 text-sm text-gray-400">Analysing your strategy…</div>
     </div>
     <div id="strategy-fix-footer" class="px-6 py-4 border-t border-gray-100 bg-gray-50/50 rounded-b-2xl flex items-center justify-end gap-3 hidden">
-      <button onclick="document.getElementById('modal-strategy-fix').classList.add('hidden')" type="button" class="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Dismiss</button>
+      <button onclick="document.getElementById('modal-strategy-fix').classList.add('hidden')" type="button" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border transition cursor-pointer">Dismiss</button>
       <button id="strategy-fix-accept" type="button" class="btn-primary px-5 py-2 text-sm font-bold rounded-lg shadow transition cursor-pointer">Accept &amp; Update Strategy</button>
     </div>
   </div>
 </div>
 
 <!-- ── Modal: Be More Swan Safe Content Benchmark (read-only detail) ─── -->
-<div id="modal-safety-benchmark" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+<div id="modal-safety-benchmark" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
     <div class="px-6 py-5 border-b border-indigo-100 bg-indigo-100/60 flex items-center justify-between gap-4 sticky top-0">
       <div class="flex items-center gap-3">
@@ -2444,7 +2455,7 @@
         </div>
       </div>
       <button onclick="document.getElementById('modal-safety-benchmark').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-indigo-400 hover:bg-indigo-100 hover:text-indigo-700 transition cursor-pointer shrink-0">
+        class="p-2 rounded-lg text-indigo-400 hover:bg-indigo-100 hover:text-indigo-700 transition cursor-pointer shrink-0" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2476,7 +2487,7 @@
 </div>
 
 <!-- ── Modal: Suggest a Safety Rule ─────────────────────────────── -->
-<div id="modal-safety-feedback" class="fixed inset-0 bg-gray-900/60 hidden z-[51] flex items-center justify-center p-4 backdrop-blur-sm">
+<div id="modal-safety-feedback" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-[51] flex items-center justify-center p-4 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
     <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-indigo-50">
       <div class="flex items-center gap-3">
@@ -2489,7 +2500,7 @@
         </div>
       </div>
       <button onclick="document.getElementById('modal-safety-feedback').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2506,14 +2517,14 @@
           class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition resize-none"></textarea>
       </div>
       <p id="safety-feedback-error" class="hidden text-sm text-red-600 font-medium"></p>
-      <p id="safety-feedback-success" class="hidden text-sm text-emerald-600 font-medium flex items-center gap-2">
+      <p id="safety-feedback-success" class="hidden text-sm text-emerald-800 font-medium flex items-center gap-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
         Thank you — your suggestion has been submitted for review.
       </p>
     </div>
     <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-between bg-gray-50/50 rounded-b-2xl">
       <button onclick="document.getElementById('modal-safety-feedback').classList.add('hidden')" type="button"
-        class="px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Cancel</button>
+        class="btn-secondary px-4 py-2.5 text-sm font-bold rounded-lg border transition cursor-pointer">Cancel</button>
       <button id="btn-safety-submit" onclick="window._submitSafetyFeedback()" type="button"
         class="btn-primary px-6 py-2.5 text-sm font-bold rounded-lg shadow transition cursor-pointer flex items-center gap-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
@@ -2524,7 +2535,7 @@
 </div>
 
 <!-- ── Connect modal (moved from the standalone Connections page) ─────── -->
-<div id="modal-connect" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm">
+<div id="modal-connect" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm">
   <div class="bg-white w-full sm:rounded-2xl sm:max-w-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
     <div id="modal-platform-header" class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
       <div class="flex items-center gap-4">
@@ -2534,7 +2545,7 @@
           <p id="modal-platform-desc" class="text-sm text-gray-500 mt-0.5"></p>
         </div>
       </div>
-      <button onclick="document.getElementById('modal-connect').classList.add('hidden')" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" type="button">
+      <button onclick="document.getElementById('modal-connect').classList.add('hidden')" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" type="button" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2548,7 +2559,7 @@
       <div>
         <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">Enter your credentials</h3>
         <div class="flex items-center gap-2 mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-800">
-          <svg class="w-4 h-4 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+          <svg class="w-4 h-4 text-emerald-800 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
           <span>Your token is encrypted before storage. No one at Be More Swan can ever read it.</span>
         </div>
         <form id="connect-form" class="space-y-4" onsubmit="window._intSubmit(event)">
@@ -2558,14 +2569,14 @@
             <label id="handle-label" for="conn-handle" class="block text-sm font-bold text-gray-700 mb-1"></label>
             <p id="handle-help" class="text-xs text-gray-500 mb-2"></p>
             <input type="text" id="conn-handle" autocomplete="off" spellcheck="false"
-              class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600 outline-none transition">
+              class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none transition">
           </div>
           <div>
             <label id="token-label" for="conn-token" class="block text-sm font-bold text-gray-700 mb-1"></label>
             <p id="token-help" class="text-xs text-gray-500 mb-2"></p>
             <div class="relative">
               <input type="password" id="conn-token" required autocomplete="off" spellcheck="false"
-                class="w-full border border-gray-300 rounded-lg p-3 pr-12 text-sm font-mono focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600 outline-none transition">
+                class="w-full border border-gray-300 rounded-lg p-3 pr-12 text-sm font-mono focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none transition">
               <button type="button" id="btn-toggle-token" onclick="window._intToggleToken()"
                 class="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-gray-600 transition cursor-pointer" title="Show / hide token">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
@@ -2578,7 +2589,7 @@
     </div>
     <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3 bg-gray-50/50 rounded-b-2xl">
       <button onclick="document.getElementById('modal-connect').classList.add('hidden')" type="button"
-        class="px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Cancel</button>
+        class="btn-secondary px-4 py-2.5 text-sm font-bold rounded-lg border transition cursor-pointer">Cancel</button>
       <button id="btn-connect-submit" onclick="window._intSubmit(event)" type="button"
         class="btn-primary px-6 py-2.5 text-sm font-bold rounded-lg shadow transition cursor-pointer flex items-center gap-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
@@ -2593,7 +2604,7 @@
      Meta-side setup (Business account, linked Page, admin access) instead of
      landing on an unhelpful Facebook error page. Driven by integrations.js
      (_intOpenPreConnect). -->
-<div id="modal-preconnect" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm">
+<div id="modal-preconnect" data-dialog class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm">
   <div class="bg-white w-full sm:rounded-2xl sm:max-w-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
     <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
       <div class="flex items-center gap-4">
@@ -2603,7 +2614,7 @@
           <p id="preconnect-intro" class="text-sm text-gray-500 mt-0.5"></p>
         </div>
       </div>
-      <button onclick="document.getElementById('modal-preconnect').classList.add('hidden')" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" type="button">
+      <button onclick="document.getElementById('modal-preconnect').classList.add('hidden')" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" type="button" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2615,11 +2626,11 @@
         <label for="preconnect-tester-url" class="block text-xs font-bold text-gray-700 mt-3 mb-1">Your Facebook profile link</label>
         <div class="flex flex-col sm:flex-row gap-2">
           <input id="preconnect-tester-url" type="url" inputmode="url" autocomplete="off" placeholder="https://www.facebook.com/your.name"
-            class="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-white">
+            class="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:outline-none bg-white">
           <button id="btn-preconnect-tester" type="button" onclick="window._intRequestMetaTester()"
             class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Request access</button>
         </div>
-        <p class="text-xs text-gray-600 mt-2">Open <a href="https://www.facebook.com/me" target="_blank" rel="noopener" class="text-emerald-600 hover:underline font-semibold">facebook.com/me</a> while signed in and copy the address it lands on. Use your personal login, not your business Page's link.</p>
+        <p class="text-xs text-gray-600 mt-2">Open <a href="https://www.facebook.com/me" target="_blank" rel="noopener" class="text-emerald-800 hover:underline font-semibold">facebook.com/me</a> while signed in and copy the address it lands on. Use your personal login, not your business Page's link.</p>
         <p id="preconnect-tester-status" class="text-sm mt-2" role="status" aria-live="polite"></p>
       </div>
       <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">Set this up in Meta first</h3>
@@ -2628,42 +2639,15 @@
     </div>
     <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3 bg-gray-50/50 rounded-b-2xl">
       <button onclick="document.getElementById('modal-preconnect').classList.add('hidden')" type="button"
-        class="px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Cancel</button>
+        class="btn-secondary px-4 py-2.5 text-sm font-bold rounded-lg border transition cursor-pointer">Cancel</button>
       <a id="btn-preconnect-continue" href="#"
         class="btn-primary px-6 py-2.5 text-sm font-bold rounded-lg shadow transition cursor-pointer inline-block"></a>
     </div>
   </div>
 </div>
 
-<!-- ── Disconnect confirmation modal ───────────────────────────────── -->
-<div id="modal-disconnect" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-  <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6" onclick="event.stopPropagation()">
-    <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center text-red-600 text-2xl mb-4">⚠️</div>
-    <h3 class="text-xl font-bold text-gray-900 mb-2">Disconnect this platform?</h3>
-    <p class="text-gray-600 text-sm mb-6">This will permanently delete the stored credentials and <strong>pause any assistants</strong> currently posting to this platform. You can reconnect at any time.</p>
-    <div class="flex gap-3 justify-end">
-      <button onclick="document.getElementById('modal-disconnect').classList.add('hidden')" class="px-4 py-2 font-bold text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer" type="button">Keep it</button>
-      <button id="btn-confirm-disconnect" class="btn-destructive px-4 py-2 font-bold rounded-lg cursor-pointer" type="button">Yes, Disconnect</button>
-    </div>
-  </div>
-</div>
-
-<!-- US-AUD-4.2.1: Revoke All confirmation modal (SC4) -->
-<div id="modal-revoke-all" class="fixed inset-0 bg-gray-900/70 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-  <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
-    <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center text-red-600 text-2xl mb-4">🔒</div>
-    <h3 class="text-xl font-bold text-gray-900 mb-2">Revoke all connections?</h3>
-    <p class="text-gray-600 text-sm mb-6">This will <strong>permanently delete all stored credentials</strong> for every member of your workspace and pause all connected assistants. This cannot be undone.</p>
-    <div class="flex gap-3 justify-end">
-      <button onclick="document.getElementById('modal-revoke-all').classList.add('hidden')"
-        class="px-4 py-2 font-bold text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer" type="button">Cancel</button>
-      <button id="btn-confirm-revoke-all"
-        class="btn-destructive px-4 py-2 font-bold rounded-lg cursor-pointer" type="button">
-        Yes, Revoke All
-      </button>
-    </div>
-  </div>
-</div>
+<!-- Disconnect now uses /dialogs.js confirmModal (integrations.js _intPromptDisconnect). So does
+     "Revoke all connections" (window._revokeAllConnections, below). -->
 
 <script>
 // Issue #65: header "More actions" menu (Pause Assistant / Archive) — click to toggle,
@@ -2684,24 +2668,22 @@
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
 })();
 
-// US-AUD-4.2.1 SC4: Revoke all connections for the org
-window._revokeAllConnections = function () {
-  document.getElementById('modal-revoke-all').classList.remove('hidden');
-};
-
-document.getElementById('btn-confirm-revoke-all')?.addEventListener('click', async function () {
-  const btn = document.getElementById('btn-confirm-revoke-all');
-  btn.textContent = 'Revoking…';
-  btn.disabled = true;
+// US-AUD-4.2.1 SC4: Revoke all connections for the org. Confirmed through /dialogs.js (focus held,
+// Escape cancels, focus returned) — it used to be a hand-built modal with none of that.
+window._revokeAllConnections = async function () {
+  const ok = await window.confirmModal(
+    'This <strong>permanently deletes all stored credentials</strong> for every member of your workspace and pauses all connected assistants. This cannot be undone.',
+    { title: 'Revoke all connections?', confirmLabel: 'Yes, revoke all', cancelLabel: 'Cancel' },
+  );
+  if (!ok) return;
+  const fb = document.getElementById('revoke-all-feedback');
   try {
     const res = await fetch('/.netlify/functions/revoke-connections', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ scope: 'org' }),
     });
-    const data = await res.json();
-    document.getElementById('modal-revoke-all').classList.add('hidden');
-    const fb = document.getElementById('revoke-all-feedback');
+    const data = await res.json().catch(() => ({}));
     if (res.ok) {
       fb.textContent = `✓ All connections revoked (${data.revoked} total). All assistant integrations have been paused.`;
       fb.classList.remove('hidden');
@@ -2711,13 +2693,9 @@ document.getElementById('btn-confirm-revoke-all')?.addEventListener('click', asy
       fb.classList.remove('hidden');
     }
   } catch {
-    document.getElementById('modal-revoke-all').classList.add('hidden');
     window.showToast?.('Network error. Please try again.', { icon: '⚠️' });
-  } finally {
-    btn.textContent = 'Yes, Revoke All';
-    btn.disabled = false;
   }
-});
+};
 
 // SC5: Single-connection revocation — called from the platform card's "Disconnect" button
 window._revokeConnection = async function (connectionId, onSuccess) {
@@ -2752,7 +2730,26 @@ window._revokeConnection = async function (connectionId, onSuccess) {
     transition: color .15s ease, border-color .15s ease;
   }
   .main-tab-btn:hover { color: #111827; border-bottom-color: #d1d5db; }
-  .main-tab-btn.active-tab { color: #059669; border-bottom-color: #10b981; }
+  /* Brand pink, not the green this was hard-coded to: deep pink text (neon on white is 3.8:1, too
+     faint for text), neon pink underline. */
+  .main-tab-btn.active-tab { color: #d6006b; border-bottom-color: #ff007f; }
+  /* The selected column's underline follows aria-selected, so look and announced state cannot
+     disagree. (border-emerald-700 is not in the compiled style.css.) */
+  .detail-rq-col[aria-selected="true"] { border-bottom-color: #ff007f; }
+  /* A tab strip wider than the screen fades at the edge that has more, so the tabs past it read as
+     "scroll for more" rather than not existing. .is-clipped-* is kept current by assistants.js. */
+  .tab-scroller.is-clipped-end { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent); }
+  .tab-scroller.is-clipped-start.is-clipped-end { -webkit-mask-image: linear-gradient(to right, transparent, #000 2.5rem, #000 calc(100% - 2.5rem), transparent); mask-image: linear-gradient(to right, transparent, #000 2.5rem, #000 calc(100% - 2.5rem), transparent); }
+  .tab-scroller.is-clipped-start:not(.is-clipped-end) { -webkit-mask-image: linear-gradient(to right, transparent, #000 2.5rem); mask-image: linear-gradient(to right, transparent, #000 2.5rem); }
+  /* Phones: tighter tab gaps so more tabs fit, and the small toggles and the rename pencil grow to a
+     44px touch target (they were 20–24px tall). */
+  @media (max-width: 639px) {
+    .tab-scroller > nav[role="tablist"] { column-gap: 1.25rem; }
+    .metrics-period-btn, .activity-tf-btn { min-height: 44px; min-width: 44px; }
+    .detail-name-edit { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+  }
+  .main-tab-btn:focus-visible, .detail-rq-col:focus-visible, #btn-back-assistants:focus-visible,
+  .activity-tf-btn:focus-visible, .metrics-period-btn:focus-visible { outline: 2px solid #ff007f; outline-offset: 2px; border-radius: 4px; }
 
   /* Operating File card rows */
   .brief-card {
@@ -2766,9 +2763,9 @@ window._revokeConnection = async function (connectionId, onSuccess) {
     box-shadow: 0 1px 3px rgba(0,0,0,.06);
   }
   .brief-card:hover {
-    border-color: #6ee7b7;
-    box-shadow: 0 2px 8px rgba(16,185,129,.1);
-    background: #f0fdf4;
+    border-color: #ffb3d1;
+    box-shadow: 0 2px 8px rgba(255,0,127,.1);
+    background: #fff0f5;
   }
   /* hide detail-tab-content panels until drawer is open — they render inside the drawer */
   .detail-tab-content { display: none !important; }

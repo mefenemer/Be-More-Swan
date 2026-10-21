@@ -51,26 +51,29 @@ const registry = read('src/components/assistant-dashboard-registry.js');
 const regEntry = (role: string) => span(registry, `    ${role}: {`, '\n    },\n', `the ${role} registry entry`);
 const routeOf = (role: string) => span(orchestrator, `    ${role}: {`, '        parseResponse: parseStructuredReply,', `the ${role} route`);
 
-const PROFILE = (strategyCard: string) => ['Mandate', 'Operational Setup', strategyCard, 'Connections', 'Rules', 'Brand Safety & Legal', 'Notifications'];
+// Renamed to plain words 2026-10-21 (owner): Mandate, Operational Setup, Creative Brief, Rules,
+// Brand Safety & Legal.
+const PROFILE = (strategyCard: string) => ['What I do', strategyCard === 'Brand Knowledge' ? 'When and how I work' : 'When and how I post', strategyCard, 'Connections', 'Do’s and don’ts', 'Safety and legal', 'Notifications'];
 
 const ROLES = [
     {
         role: 'social_media_manager', helper: 'socialSurfaces', kind: 'posts', queue: 'Posts',
         columns: ['Review', 'Scheduled', 'Posted', 'Needs attention', 'Archived'],
-        tabs: ['Calendar', 'Inspo', 'My Content', 'Goals', 'Activity'],
-        profile: PROFILE('Creative Brief'),
+        // "Goals" is labelled "Results" on every role (2026-10-21).
+        tabs: ['Calendar', 'Inspo', 'My Content', 'Results', 'Activity'],
+        profile: PROFILE('What I post about'),
     },
     {
         role: 'blog_writer', helper: 'blogSurfaces', kind: 'blog', queue: 'Blogs',
         columns: ['Review', 'Scheduled', 'Posted', 'Needs attention', 'Archived'],
-        tabs: ['Calendar', 'Inspo', 'My Content', 'Goals', 'Activity'],
+        tabs: ['Calendar', 'Inspo', 'My Content', 'Results', 'Activity'],
         profile: PROFILE('Brand Knowledge'),
     },
     {
         role: 'newsletter_editor', helper: 'emailSurfaces', kind: 'emails', queue: 'Emails',
         // "Sent" is the Posted column relabelled for this role (assistants.js setText … 'Sent').
         columns: ['Review', 'Approved', 'Scheduled', 'Sent', 'Needs attention', 'Archived'],
-        tabs: ['Campaigns', 'Calendar', 'Goals', 'Activity'],
+        tabs: ['Campaigns', 'Calendar', 'Results', 'Activity'],
         profile: PROFILE('Brand Knowledge'),
     },
 ];
@@ -80,6 +83,9 @@ const TAB_ON_PAGE: Record<string, (reg: string) => boolean> = {
     Inspo: (reg) => /inspoTab:\s*\{[\s\S]*?label:\s*'Inspo'/.test(reg),
     'My Content': (reg) => /myContentTab:\s*\{\s*label:\s*'My Content'/.test(reg),
     Goals: () => page.includes('data-maintab="goals"') && page.includes('>Goals</button>'),
+    Results: () => page.includes('data-maintab="goals"')
+        && read('assistants.js').includes("const goalsTab = cfg.goalsTab || { label: 'Results', bringsResults: true };")
+        && read('assistants.js').includes("setText('maintab-btn-goals', goalsTab.label || 'Goals');"),
     Activity: () => page.includes('data-maintab="activity"') && page.includes('>Activity</button>'),
     Campaigns: (reg) => /emailCampaignsTab:\s*true/.test(reg) && page.includes('<span id="email-campaigns-tab-label">Campaigns</span>'),
 };
@@ -90,6 +96,8 @@ const COLUMN_ON_PAGE = (col: string) => col === 'Sent'
 
 const PROFILE_ON_PAGE = (card: string) => card === 'Brand Knowledge'
     ? read('assistants.js').includes("setText('opcard-strategy-title', 'Brand Knowledge')")
+    : card === 'When and how I work'
+    ? read('assistants.js').includes("setText('opcard-operation-title', 'When and how I work')")
     : page.includes(`font-bold text-gray-900">${card.replace('&', '&amp;')}</p>`);
 
 for (const r of ROLES) {
@@ -133,7 +141,14 @@ for (const r of ROLES) {
     check('it forbids inventing places and changing existing work', () => {
         assert.ok(/Never name a tab, section, button or setting that is not listed/.test(surfaces));
         assert.ok(/never tell the user a section does not exist/.test(surfaces));
-        assert.ok(/you cannot change them from this chat/.test(surfaces));
+        // The social chat CAN act on existing posts now (src/utils/chat-post-action.ts) — but only by
+        // proposing a card the user confirms. The others still cannot touch existing work.
+        if (r.helper === 'socialSurfaces') {
+            assert.ok(/only that click changes anything/.test(surfaces), 'the social chat must say the user\'s click acts, not the chat');
+            assert.ok(/never say a post HAS been approved, rejected, retried or moved/.test(surfaces));
+        } else {
+            assert.ok(/you cannot change them from this chat/.test(surfaces));
+        }
     });
 }
 

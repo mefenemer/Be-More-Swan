@@ -389,7 +389,7 @@ export async function sendFromUser(db: Db, args: {
             ? 'A person from the Be More Swan team can call you back. Leave your number with the button below and we will be in touch.'
             : campaignId
                 ? 'Noted. I will follow this in everything I draft for this campaign from now on. To talk it through, open my chat.'
-                : 'Noted — I will see this when we talk in chat. For a rule I follow in everything I draft, add it to my Rules tab.',
+                : 'Noted — I will see this when we talk in chat. For a rule I follow in everything I draft, add it to my Do’s and don’ts card in Assistant Profile.',
         link: wantsACall
             ? { assistantId: a.id, callback: true, label: 'Request a call back' }
             : { assistantId: a.id, chat: true, label: 'Open chat' },

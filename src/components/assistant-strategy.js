@@ -563,7 +563,7 @@
       <div class="mb-4 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
         <p class="text-xs text-amber-800">
           <strong>Switched off for this assistant.</strong> It won’t suggest anything new until you turn Strategy Proposals
-          back on in Assistant Profile &rsaquo; Operational Setup. Anything already here can still be used or turned down.
+          back on in Assistant Profile &rsaquo; When and how I post. Anything already here can still be used or turned down.
         </p>
       </div>` : ''}
 

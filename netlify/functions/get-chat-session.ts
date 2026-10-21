@@ -16,6 +16,7 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, chatMessages, chatSessions, masterAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { refreshPostActionCards } from '../../src/utils/chat-post-action';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 function json(statusCode: number, body: unknown) {
@@ -79,6 +80,8 @@ export default withLambda(async (event) => {
             createdAt: session.createdAt,
             updatedAt: session.updatedAt,
         },
-        messages,
+        // Stored post-action cards are re-checked against their posts, so one already acted on
+        // says so instead of offering a button the endpoint would refuse. Never throws.
+        messages: await refreshPostActionCards(db, orgId, session.aiAssistantId, messages),
     });
 });

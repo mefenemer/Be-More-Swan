@@ -57,6 +57,11 @@
  *                //   'social_drafts' (scheduled_posts) | 'blog_posts'. See assistant-data-hub.js.
  *   cfg.kbTab    // → optional Knowledge Base tab config (assistant-knowledge-base.js);
  *                //   only tier1_support_agent has one — { label, description }
+ *   cfg.goalsTab // → optional { label, bringsResults }. Every role defaults to
+ *                //   { label: 'Results', bringsResults: true }: the Goals tab is called "Results"
+ *                //   and holds the Goal Progress, Performance Metrics and Autopilot cards, above the
+ *                //   goals (owner, 2026-10-21 — trialled on Social Media, then rolled out). A role
+ *                //   with hideGoals still gets the tab, with its cards and no goals section.
  *   cfg.inspoTab // → optional Inspo tab config (assistant-inspo.js); the content roles
  *                //   (social_media_manager, blog_writer) only — { label, description }
  *   cfg.myContentTab // → optional My Content tab config (assistant-my-content.js); the content

@@ -215,7 +215,7 @@ const clsOf = (hay: string, marker: string) => {
 check('both actions carry the Adjust schedule pill, not a text-link style', () => {
     for (const [name, marker] of [
         ['Check again now', 'id="btn-refresh-goals"'],
-        ['Manage goals', "_activateMainTab('goals')"],
+        ['Manage goals', "_openGoalsList()"],
     ] as const) {
         const cls = clsOf(GOALS_HDR, marker);
         assert.deepStrictEqual(
@@ -230,7 +230,7 @@ check('both actions carry the Adjust schedule pill, not a text-link style', () =
 check('the actions sit inside the Goal Progress panel, not above it', () => {
     assert.ok(GOALS_HDR.includes('Goal Progress</h3>'), 'the title is not inside the panel');
     assert.ok(GOALS_HDR.includes('id="btn-refresh-goals"'), 'Check again now is outside the card');
-    assert.ok(GOALS_HDR.includes("_activateMainTab('goals')"), 'Manage goals is outside the card');
+    assert.ok(GOALS_HDR.includes("_openGoalsList()"), 'Manage goals is outside the card');
 });
 
 check('they stay in the header\'s right-hand group', () => {

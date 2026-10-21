@@ -47,6 +47,9 @@ export interface SnapshotItem {
     text: string | null;
     /** Optional extra, e.g. "sent to 412 people". */
     extra?: string | null;
+    /** The row's id, shown as "#123" so the chat can name the exact post in a post_action_proposal.
+     *  Posts only: the blog and email chats have no action that takes one. */
+    ref?: number | null;
 }
 
 export interface SnapshotSection { title: string; items: SnapshotItem[]; total: number }
@@ -70,6 +73,7 @@ function line(p: SnapshotItem, stateWords: Record<string, string>, tz?: string |
     const gist = String(p.text ?? '').replace(/\s+/g, ' ').trim();
     const quoted = gist ? `"${gist.length > TEXT_MAX ? `${gist.slice(0, TEXT_MAX)}…` : gist}"` : '(no text yet)';
     return `- ${[
+        p.ref != null ? `#${p.ref}` : null,
         p.when ? fmtWhen(p.when, tz) : 'no date yet',
         p.where || null,
         stateWords[p.status] ?? p.status,
@@ -127,9 +131,9 @@ export async function buildPostsSnapshot(db: Db, organisationId: number, aiAssis
         );
         const booked = inArray(scheduledPosts.status, [...BOOKED_STATUSES]);
         const failed = and(inArray(scheduledPosts.status, [...ATTENTION_STATUSES]), gte(scheduledPosts.publishDate, since(RECENT_DAYS)));
-        const cols = { platform: scheduledPosts.platform, status: scheduledPosts.status, publishDate: scheduledPosts.publishDate, caption: scheduledPosts.caption };
-        type Row = { platform: string; status: string; publishDate: Date; caption: string | null };
-        const map = (r: Row): SnapshotItem => ({ when: r.publishDate, where: platformName(r.platform), status: r.status, text: r.caption });
+        const cols = { id: scheduledPosts.id, platform: scheduledPosts.platform, status: scheduledPosts.status, publishDate: scheduledPosts.publishDate, caption: scheduledPosts.caption };
+        type Row = { id: number; platform: string; status: string; publishDate: Date; caption: string | null };
+        const map = (r: Row): SnapshotItem => ({ ref: r.id, when: r.publishDate, where: platformName(r.platform), status: r.status, text: r.caption });
         const col = (where: SQL | undefined, order: SQL, title: string) => column(
             db.select({ n: sql<number>`count(*)::int` }).from(scheduledPosts).where(and(scope, where)),
             db.select(cols).from(scheduledPosts).where(and(scope, where)).orderBy(order).limit(SNAPSHOT_LIMIT),
