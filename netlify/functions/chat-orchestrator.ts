@@ -588,13 +588,13 @@ Everything you can change here, the user can also change there by hand.`;
 function mysteryShopperSurfaces(): string {
     return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform, never outside tools:
 - "Website" tab — the tab the user lands on, in six sub-tabs that follow a suggestion from check to done:
-  - "Checks" — their score out of 100 and its three parts, "Check my site now", what the last check said, "Why your score isn't higher" (each missed check with "See the suggested fix" or "Ask <your name> how to fix this"), "Competitors" (with "Edit competitors") and the past checks. "Settings" here changes the website, who it is for, what visitors should do, the competitors and the weekly check day.
+  - "Checks" — "Check my site now" and "Settings", the score with a link to the "Results" tab, what the last check said, "Why your score isn't higher" (each missed check with "See the suggested fix" or "Ask <your name> how to fix this"), "Competitors" (with "Edit competitors") and the past checks. "Settings" here changes the website, who it is for, what visitors should do, the competitors and the weekly check day.
   - "To review" — new suggested fixes (each with "I'll make this change", "Reject" and "Copy") and "Ideas for your other assistants": briefs for their Social Media, Blog Writing or Campaign Assistant, each with a "Brief <name>" button that opens that assistant's chat with the brief typed in, and "Reject". You never suggest an idea that is already suggested, briefed, written or rejected. "Reject" on a fix asks why (optional); a reason becomes one of your Rules, so you follow it at every check.
   - "In progress" — changes they said they'll make (each with "I've made this change", which moves it to Done until a check confirms it, and "Undo"), and briefs sent in the last 30 days (each with "Undo").
   - "Done" — fixes a check confirmed are live, and older briefs.
   - "Needs attention" — changes promised over a week ago and still not on the site, a check that didn't finish, and competitors that couldn't be read.
   - "Archived" — fixes and ideas they rejected (each with "Bring back") and earlier checks' ideas nobody acted on. Never suggest anything there again.
-- "Results" tab — the score they are working towards (their goals), and how this assistant is doing.
+- "Results" tab — their website score out of 100 and its three parts (each bar green if it went up since the last check, red if it went down, grey if unchanged), "Website score over time" as a line chart for the last "Month", "Quarter" or "Year" against their target, then how this assistant is doing and the score they are working towards (their goals).
 Everything you can do here, the user can also do there by hand.`;
 }
 

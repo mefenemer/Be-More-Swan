@@ -23,7 +23,7 @@
 // say "I've made this change" (status 'done', verified_run_id NULL): a check can't always see the
 // change — a long testimonial is read only in part — and the next check that can see it confirms it.
 
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { aiAssistants, contentRules, siteAuditBriefs, siteAuditFixes, siteAuditRuns, siteAudits } from '../../db/schema';
@@ -106,6 +106,24 @@ export default withLambda(async (event) => {
             .from(siteAuditRuns)
             .where(and(eq(siteAuditRuns.auditId, audit.id), eq(siteAuditRuns.status, 'done')))
             .orderBy(desc(siteAuditRuns.id)).limit(1);
+
+        // The score over the last year, oldest first, for the Results tab's line chart — every check
+        // that scored ('done') or kept its score ('unchanged'). And the three parts from the check
+        // before the latest, so each bar can say whether it went up or down.
+        const history = (await db.select({
+            id: siteAuditRuns.id, status: siteAuditRuns.status, score: siteAuditRuns.overallScore,
+            at: sql<Date>`coalesce(${siteAuditRuns.finishedAt}, ${siteAuditRuns.createdAt})`,
+            lenses: sql<Record<string, { score: number | null }> | null>`${siteAuditRuns.scores} -> 'lenses'`,
+        }).from(siteAuditRuns).where(and(
+            eq(siteAuditRuns.auditId, audit.id),
+            inArray(siteAuditRuns.status, ['done', 'unchanged']),
+            sql`${siteAuditRuns.overallScore} IS NOT NULL`,
+            sql`${siteAuditRuns.createdAt} > now() - interval '366 days'`,
+        )).orderBy(asc(siteAuditRuns.id)).limit(400));
+        const scored = history.filter((h) => h.status === 'done' && h.lenses);
+        const previousLenses = latest && scored.length > 1 && scored[scored.length - 1].id === latest.id
+            ? scored[scored.length - 2].lenses : null;
+        const scoreHistory = history.map((h) => ({ at: h.at, score: h.score }));
         // Fixes from runs that finished. A run swept as stuck after writing its fixes never showed
         // its report, so its fixes must not appear either.
         // plainLocation: rows saved before 2026-10-18 can carry a field name ("pricingAndGuarantees").
@@ -181,7 +199,7 @@ export default withLambda(async (event) => {
         const { lastHashes: _h, ...auditOut } = audit;
         return json(200, {
             audit: auditOut, runs, latest: latest ?? null, fixes, vocab, team, stalled, nextCheck, nextPages,
-            pastIdeas, briefs, briefsAvailable,
+            pastIdeas, briefs, briefsAvailable, scoreHistory, previousLenses,
         });
     }
 

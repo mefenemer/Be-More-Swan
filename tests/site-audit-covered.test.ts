@@ -143,6 +143,39 @@ check('an unusable lens reply is tried once more, with more room, before it is s
     assert.match(run, /const LENS_RETRY_MAX_TOKENS = 4000;/);
 });
 
+console.log('\nThe score on the Results tab (owner, 2026-10-21)');
+
+check('the score card lives in the Results tab; Checks keeps Check my site now and Settings', () => {
+    const tab = read('src/components/assistant-site-audit.js');
+    assert.match(tab, /host\.id = 'site-audit-results-host';[\s\S]{0,120}panel\.prepend\(host\);/);
+    assert.match(tab, /host\.innerHTML = card\(scoreBlock\(audit, latest\)\) \+ card\(trendCardHtml\(audit\)\);/);
+    const checks = tab.slice(tab.indexOf('function checksPanel('), tab.indexOf('function render()'));
+    assert.ok(!checks.includes('scoreBlock('), 'the score card is not on Checks any more');
+    assert.ok(checks.includes('data-sa-run') && checks.includes('data-sa-settings-open') && checks.includes('data-sa-open-results'));
+    assert.match(tab, /String\(window\._currentAssistantId\) !== String\(state\.assistantId\)\) return;/, 'never paints into another assistant');
+    assert.match(tab, /e\.target\.closest\('#site-audit-host, #site-audit-results-host'\)/, 'its buttons are handled');
+});
+
+check('each bar is green if it went up since the last check, red if down — with an arrow and the change in words', () => {
+    const tab = read('src/components/assistant-site-audit.js');
+    assert.match(tab, /const TREND = \{ up: '#15803d', down: '#dc2626', flat: '#9ca3af' \};/);
+    assert.match(tab, /`\$\{d > 0 \? '▲ \+' : '▼ '\}\$\{Math\.abs\(d\)\} since last check`/, 'never colour alone');
+    const api = read('netlify/functions/site-audits.ts');
+    assert.match(api, /previousLenses = latest && scored\.length > 1 && scored\[scored\.length - 1\]\.id === latest\.id/);
+});
+
+check('the score over time: month, quarter or year, one line against the target, hover and a table view', () => {
+    const tab = read('src/components/assistant-site-audit.js');
+    assert.match(tab, /const RANGES = \[\['month', 'Month', 31\], \['quarter', 'Quarter', 92\], \['year', 'Year', 366\]\];/);
+    assert.match(tab, /stroke-width="2" stroke-linejoin="round"/);
+    assert.match(tab, /Target \$\{esc\(target\)\}/);
+    assert.match(tab, /box\.onpointermove = /);
+    assert.match(tab, /Show as a table/);
+    const api = read('netlify/functions/site-audits.ts');
+    assert.match(api, /inArray\(siteAuditRuns\.status, \['done', 'unchanged'\]\)[\s\S]{0,160}interval '366 days'/);
+    assert.match(api, /pastIdeas, briefs, briefsAvailable, scoreHistory, previousLenses,/);
+});
+
 console.log('\nThe Website tab and My Assistants');
 
 check('competitors can be edited from their own card', () => {
