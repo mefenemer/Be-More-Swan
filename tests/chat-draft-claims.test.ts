@@ -165,7 +165,9 @@ const orchestrator = readFileSync(new URL('../netlify/functions/chat-orchestrato
 check('the orchestrator still calls the guard on the social route', () => {
     assert.ok(orchestrator.includes('replyClaimsPostSaved(content)'), 'guard call is gone');
     assert.ok(
-        /route === ROUTES\.social_media_manager && replyClaimsPostSaved/.test(orchestrator),
+        // `!postActionReq` exempts a post-action turn, whose reply describes a confirm card
+        // (src/utils/chat-post-action.ts) rather than a draft; every drafting turn is still guarded.
+        /route === ROUTES\.social_media_manager && !postActionReq && replyClaimsPostSaved/.test(orchestrator),
         'the guard is no longer scoped to the social route',
     );
     assert.ok(orchestrator.includes('honestDraftReply(breach)'), 'the false reply is no longer replaced');

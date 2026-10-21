@@ -720,6 +720,67 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // Post action card (Social Media chat) → the endpoints the Posts tab's own buttons call:
+    // approve-post, reject-post, retry-failed-post, reschedule-post-chat. A cross-post is acted on
+    // row by row as the tab does it (reject-post takes the group itself; a reschedule moves the named
+    // row by the user's words, then lines the others up on the time that resolved to). Their refusals
+    // are passed through in the server's own words — a disconnected account, an open compliance
+    // warning, a time already passed are settled on the post, which the card offers to open.
+    function postActionCall(fn, body) {
+      return fetch(`/.netlify/functions/${fn}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) return data;
+        const why = data.error || data.message
+          || (data.pastSchedule ? 'Its posting time has already passed — open the post to pick a new one.' : `That didn’t work (HTTP ${res.status}).`);
+        const needsPost = res.status === 409 || res.status === 422;
+        throw new Error(needsPost ? `${why} Open the post to sort that out.` : why);
+      });
+    }
+
+    async function onPostAction(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const ids = Array.isArray(d.postIds) && d.postIds.length ? d.postIds : [d.postId];
+      try {
+        let message = 'Done.';
+        if (d.action === 'approve') {
+          for (const id of ids) {
+            // The tab bakes any text overlays into the picture before approving; so does this.
+            if (typeof window.gpApplyOverlaysBeforeApprove === 'function') await window.gpApplyOverlaysBeforeApprove(id);
+            await postActionCall('approve-post', { postId: id, action: 'approve' });
+          }
+          message = 'Approved — it’s in the "Scheduled" column.';
+        } else if (d.action === 'reject') {
+          const r = await postActionCall('reject-post', { postId: d.postId, feedbackText: d.reason, applyAsRule: d.applyAsRule === true });
+          message = r.revisionQueued ? 'Rejected. A replacement is being written — it will appear in "Review".' : 'Rejected.';
+        } else if (d.action === 'retry') {
+          for (const id of ids) await postActionCall('retry-failed-post', { postId: id });
+          message = 'Back in the queue — it goes out on the next publishing run.';
+        } else if (d.action === 'reschedule') {
+          const [first, ...rest] = ids;
+          const r = await postActionCall('reschedule-post-chat', { postId: first, instruction: d.when });
+          for (const id of rest) await postActionCall('reschedule-post-chat', { postId: id, rescheduleAt: r.scheduledFor });
+          message = r.confirmation || 'Moved.';
+        } else {
+          throw new Error('Unknown action.');
+        }
+        respond({ ok: true, message });
+      } catch (err) {
+        respond({ ok: false, error: err.message });
+      }
+      // Whatever happened, a row may have changed (a group can half-succeed): repaint the tab behind
+      // the chat so it shows the truth.
+      window.detailRqRefresh?.();
+      window._detailRqRefreshColumnCounts?.();
+      if (typeof window.rqLoadItems === 'function') window.rqLoadItems();
+      document.dispatchEvent(new CustomEvent('posts:changed', { detail: { assistantId } }));
+    }
+
     // Mystery Shopper cards → site-audits.ts, the same actions as the Website tab's buttons. Each
     // dispatches `siteaudit:changed` so the tab behind the chat reloads.
     function siteAuditPost(payload) {
@@ -1203,6 +1264,7 @@
     container.addEventListener('campaign:taskUpdate', onCampaignTaskUpdate);
     container.addEventListener('campaign:saveLearning', onCampaignSaveLearning);
     container.addEventListener('brief:create', onBriefCreate);
+    container.addEventListener('post:action', onPostAction);
     container.addEventListener('brief:review', onBriefReview);
     container.addEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
     container.addEventListener('siteaudit:check', onSiteAuditCheck);
@@ -1262,6 +1324,7 @@
         container.removeEventListener('campaign:taskUpdate', onCampaignTaskUpdate);
         container.removeEventListener('campaign:saveLearning', onCampaignSaveLearning);
         container.removeEventListener('brief:create', onBriefCreate);
+        container.removeEventListener('post:action', onPostAction);
         container.removeEventListener('brief:review', onBriefReview);
         container.removeEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
         container.removeEventListener('siteaudit:check', onSiteAuditCheck);

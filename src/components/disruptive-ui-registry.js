@@ -2828,6 +2828,90 @@
   }
 
   register('social_post_draft', renderSocialPostDraftCard);
+
+  // ── Built-in: Post Action Proposal Card (Social Media chat) ────────────────
+  // { type: 'post_action_proposal', action: 'approve'|'reject'|'retry'|'reschedule', postId,
+  //   postIds, platforms, status, publishDate, timezone, text, reason, when, blocked }
+  //
+  // The chat's hands on a post that already exists — the twin of the Posts tab's Approve, Reject,
+  // "Try again" and Reschedule. Every fact on it was read from the database by the orchestrator
+  // (src/utils/chat-post-action.ts), not written by the model. The click dispatches `post:action`;
+  // chat-session.js calls the same endpoints the tab does, so the tab's gates (a disconnected
+  // account, an open compliance warning, a time in the past) stop it here too — and when one does,
+  // the card says so and offers the post itself, where that is settled.
+  const POST_ACTION_COPY = {
+    approve: { head: 'Approve this post', button: 'Approve', busy: 'Approving…' },
+    reject: { head: 'Reject this post', button: 'Reject post', busy: 'Rejecting…' },
+    retry: { head: 'Try this post again', button: 'Try again now', busy: 'Putting it back in the queue…' },
+    reschedule: { head: 'Move this post', button: 'Move it', busy: 'Moving…' },
+  };
+
+  function renderPostActionProposalCard(ui, esc) {
+    const copy = POST_ACTION_COPY[ui.action];
+    const postId = Number(ui.postId);
+    if (!copy || !Number.isInteger(postId)) return null;
+    const ids = (Array.isArray(ui.postIds) ? ui.postIds : []).map(Number).filter(Number.isInteger);
+    const labels = (Array.isArray(ui.platforms) ? ui.platforms : []).map(socialPlatformLabel).filter(Boolean);
+    let when = '';
+    if (ui.publishDate) {
+      const opts = { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' };
+      try { when = new Date(ui.publishDate).toLocaleString('en-GB', ui.timezone ? { ...opts, timeZone: ui.timezone } : opts); }
+      catch { when = new Date(ui.publishDate).toLocaleString('en-GB', opts); }
+    }
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const canOpen = typeof window.openPostReview === 'function';
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      <p class="text-xs text-gray-500 mt-2">#${postId}${labels.length ? ` · ${esc(labels.join(', '))}` : ''}${when ? ` · ${esc(when)}` : ''}</p>
+      ${ui.text ? `<p class="text-sm text-gray-900 mt-1 break-words">“${esc(ui.text)}”</p>` : ''}
+      ${blocked ? `<p class="text-sm text-amber-800 mt-3">${esc(blocked)}</p>` : ''}
+      ${!blocked && ui.action === 'reschedule' ? `<p class="text-sm text-gray-700 mt-3"><span class="font-bold">New time:</span> ${esc(ui.when || '')}</p>
+        <p class="text-xs text-gray-500 mt-1">The exact time is worked out when you press ${esc(copy.button)}, and said back to you here.</p>` : ''}
+      ${!blocked && ui.action === 'reject' ? `
+        <label class="block text-xs font-bold text-gray-700 mt-3" for="pap-reason-${postId}">What’s wrong with it</label>
+        <textarea id="pap-reason-${postId}" data-pap-reason rows="2" maxlength="500" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.reason || '')}</textarea>
+        <label class="flex items-start gap-2 text-xs text-gray-700 mt-2">
+          <input type="checkbox" data-pap-rule checked class="mt-0.5">
+          <span>Keep this as a rule for future posts, and write a replacement.</span>
+        </label>` : ''}
+      ${!blocked && ui.action === 'approve' ? '<p class="text-xs text-gray-600 mt-3">It’s booked into a free slot in your posting schedule.</p>' : ''}
+      ${!blocked && ui.action === 'retry' ? '<p class="text-xs text-gray-600 mt-3">It goes back in the queue and publishes on the next run. If the same problem is still there, it will fail again — open the post to see why it stopped.</p>' : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-pap-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>
+        <button type="button" data-pap-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+        ${canOpen ? `<button type="button" data-pap-open class="btn-swan-link px-1 py-2 text-sm font-bold">Open the post</button>` : ''}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-pap-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-pap-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-pap-go], [data-pap-cancel], [data-pap-reason], [data-pap-rule]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-pap-open]')) { window.openPostReview?.(postId); return; }
+      if (e.target.closest('[data-pap-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-pap-go]')) return;
+      const reason = el.querySelector('[data-pap-reason]')?.value.trim() || '';
+      if (ui.action === 'reject' && !reason) { say('Say what’s wrong with it first — it steers the replacement.', 'error'); return; }
+      setBusy(true);
+      say(copy.busy);
+      el.dispatchEvent(new CustomEvent('post:action', {
+        bubbles: true,
+        detail: {
+          action: ui.action, postId, postIds: ids.length ? ids : [postId], when: ui.when || null,
+          reason, applyAsRule: !!el.querySelector('[data-pap-rule]')?.checked,
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Done.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('post_action_proposal', renderPostActionProposalCard);
   register('SocialPostDraftCard', renderSocialPostDraftCard);
 
   // ── Built-in: Blog Post Draft Card ──────────────────────────────────────────

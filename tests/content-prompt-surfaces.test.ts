@@ -133,7 +133,14 @@ for (const r of ROLES) {
     check('it forbids inventing places and changing existing work', () => {
         assert.ok(/Never name a tab, section, button or setting that is not listed/.test(surfaces));
         assert.ok(/never tell the user a section does not exist/.test(surfaces));
-        assert.ok(/you cannot change them from this chat/.test(surfaces));
+        // The social chat CAN act on existing posts now (src/utils/chat-post-action.ts) — but only by
+        // proposing a card the user confirms. The others still cannot touch existing work.
+        if (r.helper === 'socialSurfaces') {
+            assert.ok(/only that click changes anything/.test(surfaces), 'the social chat must say the user\'s click acts, not the chat');
+            assert.ok(/never say a post HAS been approved, rejected, retried or moved/.test(surfaces));
+        } else {
+            assert.ok(/you cannot change them from this chat/.test(surfaces));
+        }
     });
 }
 

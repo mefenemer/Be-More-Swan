@@ -61,6 +61,7 @@ const HANDOFF_TARGETS_PROMPT = HANDOFF_TARGETS.map((t) => `"${t}"`).join(' | ');
 import { loadProductsBlock } from '../../src/utils/org-products';
 import { buildTeamActivityBlock } from '../../src/utils/team-activity';
 import { buildBlogSnapshot, buildEmailsSnapshot, buildPostsSnapshot } from '../../src/utils/content-snapshot';
+import { postActionFromUiElement, resolvePostActionProposal, type PostActionCard } from '../../src/utils/chat-post-action';
 import { attachmentLine, buildAttachmentsBlock, readAttachments, saveAttachments, type AcceptedAttachment } from '../../src/utils/chat-attachments';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { BRIEF_PURPOSES, BRIEF_ASPECT_RATIOS, REJECT_REASONS, SOURCE_SPECS } from '../../src/config/visual-brief-vocab';
@@ -614,7 +615,7 @@ function socialSurfaces(): string {
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
-EXISTING POSTS — you can see your posts (below) but you cannot change them from this chat: you cannot approve, edit, reschedule, delete or publish a post that already exists. If asked to, say so, and tell them which column of the "Posts" tab it is in so they can open it there. You CAN write a new version as a fresh draft if they want one.`;
+EXISTING POSTS — you can act on the posts listed below, each named by its "#" number, in four ways: approve one waiting in "Review" (it is booked into a posting slot), reject one (say what is wrong; the user can let you write a replacement and keep the reason as a rule), try again one in "Needs attention" (it goes back in the queue and publishes on the next run), or move one in "Review" or "Scheduled" to another time. To do any of them, emit a post_action_proposal naming the post's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say a post HAS been approved, rejected, retried or moved — say the card is there to confirm. One post per reply. If you cannot tell which post they mean, ask, quoting the candidates. You cannot edit an existing post's words, publish one immediately, or delete one: for those, tell them which column of the "Posts" tab it is in so they can open it there. You CAN write a new version as a fresh draft if they want one.`;
 }
 
 // ── Blog Writer and Email Marketing: their own dashboard surfaces ─────────────
@@ -2274,6 +2275,15 @@ NEVER say a post has been drafted, written, saved, scheduled or queued for revie
     "replacesPrevious": true | false  // true ONLY when this revises the draft from your previous reply${canCard ? `,
     "cardHeadline": "<the branded card's single line of type — see BRAND CARDS above>"` : ''}
   }
+}
+
+OR, to act on a post that already exists (see EXISTING POSTS), uiElement is instead:
+{
+  "type": "post_action_proposal",
+  "action": "approve" | "reject" | "retry" | "reschedule",
+  "postId": <the number after # in YOUR POSTS RIGHT NOW>,
+  "reason": "<reject only: what is wrong with it, in the user's words>" | null,
+  "when": "<reschedule only: the new time exactly as the user said it, e.g. 'next Friday at 3pm'>" | null
 }`,
             ].filter(Boolean).join('\n\n');
         },
@@ -2838,6 +2848,23 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // up front (rather than inside persistHubRecords) so the same records list can also
         // stamp a hubLink onto the uiElement below — the transcript then carries its own
         // "where did this go" pointer, and it round-trips through uiElementJson on reload.
+        // An action on a post that already exists (src/utils/chat-post-action.ts). Checked against
+        // the database and rebuilt from the rows, so the card shows the post as it really is and
+        // can only name one of this assistant's own posts. Writes nothing: the user's click on the
+        // card calls the same endpoints the Posts tab does. Not while drafting INTO an open post —
+        // that conversation is about the words of one post, not its fate.
+        let postAction: PostActionCard | null = null;
+        const postActionReq = route === ROUTES.social_media_manager && !draftTarget ? postActionFromUiElement(uiElement) : null;
+        if (postActionReq) {
+            postAction = await resolvePostActionProposal(db, orgId, session.aiAssistantId, postActionReq, snapshotTz);
+            uiElement = postAction;
+            // No card means the post is not one of ours. The model's reply introduces a card, so it
+            // would point at nothing; say what happened instead.
+            if (!postAction) {
+                content = 'I couldn’t find that post among this assistant’s posts, so I haven’t set anything up. Which one do you mean? You can also open it on the "Posts" tab.';
+            }
+        }
+
         const hubRecords = hubRecordsFromUiElement(uiElement);
         let hubLink = hubLinkFromRecords(hubRecords);
 
@@ -2939,7 +2966,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         const modelReply = content;
         let suppressed: DraftClaimFailure | null = null;
 
-        if (route === ROUTES.social_media_manager && replyClaimsPostSaved(content) && !alreadyApologised) {
+        // A post-action turn is not a drafting turn: "approve it and it's scheduled" describes the
+        // card, and the card is the backing — the user's click is what does it.
+        if (route === ROUTES.social_media_manager && !postActionReq && replyClaimsPostSaved(content) && !alreadyApologised) {
             let breach: DraftClaimFailure | null = null;
             if (draftTarget) breach = 'not_saved_here';                      // saving here is wrong by design
             else if (persistedPosts?.length === 0) breach = 'persist_failed'; // valid draft, the write threw
