@@ -158,7 +158,7 @@
     thumbs: {}, bookings: null, timetable: null,
     words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
     importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false,
-    dataSig: null, noteShown: null, focusSection: null, focusEditor: false, setupStep: null, setupSkipped: false, adding: null, previewFull: false, focusSel: null, busy: false, trigger: null, noteAt: null,
+    dataSig: null, noteShown: null, focusSection: null, focusEditor: false, setupStep: null, setupSkipped: false, adding: null, previewFull: false, focusSel: null, busy: false, trigger: null, noteAt: null, refocus: null, undo: null,
   };
 
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -237,6 +237,7 @@
       state.data = await post({ action: 'apply', assistantId: state.assistantId, ops });
       state.version++;
       state.publishNote = null;
+      state.undo = null;
       state.note = (state.data.warnings || []).length ? { text: state.data.warnings.join(' '), tone: 'warn' } : { text: 'Saved.', tone: 'ok' };
       if (done) done();
     } catch (err) {
@@ -252,6 +253,7 @@
     state.busy = true;
     const b = state.trigger;
     state.noteAt = anchorOf(b);
+    state.refocus = state.noteAt;
     if (b) { b.disabled = true; b.setAttribute('aria-busy', 'true'); }
     return () => {
       state.busy = false;
@@ -327,7 +329,7 @@
   function noteHtml() {
     if (!state.note) return '';
     const cls = state.note.tone === 'error' ? 'text-red-600' : state.note.tone === 'warn' ? 'text-amber-800' : 'text-green-700';
-    return `<p class="text-xs font-semibold ${cls}">${esc(state.note.text)}${state.note.billing ? ` ${btn('data-site-billing', 'See plans')}` : ''}</p>`;
+    return `<p class="text-xs font-semibold ${cls}">${esc(state.note.text)}${state.note.billing ? ` ${btn('data-site-billing', 'See plans')}` : ''}${state.note.undo && state.undo ? ` ${btn('data-site-undo', 'Undo')}` : ''}</p>`;
   }
 
   function sectionSummary(s) {
@@ -1594,11 +1596,22 @@
       const at = a && (a.closest('li') || a.parentElement);
       if (at) {
         const cls = state.note.tone === 'error' ? 'text-red-600' : state.note.tone === 'warn' ? 'text-amber-800' : 'text-green-700';
-        at.insertAdjacentHTML('beforeend', `<p data-site-beside class="w-full basis-full text-xs font-semibold mt-1 ${cls}"><span aria-hidden="true">${esc(state.note.text)}</span>${state.note.billing ? ` ${btn('data-site-billing', 'See plans')}` : ''}</p>`);
+        at.insertAdjacentHTML('beforeend', `<p data-site-beside class="w-full basis-full text-xs font-semibold mt-1 ${cls}"><span aria-hidden="true">${esc(state.note.text)}</span>${state.note.billing ? ` ${btn('data-site-billing', 'See plans')}` : ''}${state.note.undo && state.undo ? ` ${btn('data-site-undo data-beside', 'Undo')}` : ''}</p>`);
         beside = true;
       }
     }
-    if (state.note && state.note !== state.noteShown) state.noteAt = null;
+    if (state.note && state.note !== state.noteShown) {
+      state.noteAt = null;
+      // The repaint replaced the button that was pressed: focus the same one again (or, after a
+      // removal, its Undo), unless something above already moved focus on purpose.
+      const want = state.refocus;
+      state.refocus = null;
+      const lost = !document.activeElement || document.activeElement === document.body || !document.activeElement.isConnected;
+      if (want && lost) {
+        const el = host.querySelector(`${want}[data-beside]`) || host.querySelector(want);
+        if (el && !el.disabled) el.focus({ preventScroll: true });
+      }
+    }
     state.focusRow = null;
     if (state.note && state.note !== state.noteShown && !beside) {
       const n = host.querySelector('[data-site-block="note"]');
@@ -2027,12 +2040,52 @@
       return;
     }
 
+    // Undo the last removal: put the section back where it was, or the page back (at the end of the
+    // menu) with its sections, search text and menu setting. Any other change in between ends it.
+    if (t('[data-site-undo]')) {
+      const u = state.undo;
+      if (!u) return;
+      state.undo = null;
+      if (u.kind === 'section') {
+        if (!def().pages.some((x) => x.id === u.pageId)) { say('That page has gone, so the section can\'t go back.', 'error'); return; }
+        await apply([{ op: 'add_section', pageId: u.pageId, index: u.index, section: u.section }], () => {
+          state.pageId = u.pageId; state.editing = null;
+          const back = page().sections[u.index];
+          state.focusSection = back ? back.id : null;
+          state.note = { text: 'Section put back.', tone: 'ok' };
+        });
+        return;
+      }
+      const before = new Set(def().pages.map((x) => x.id));
+      await apply([{ op: 'add_page', title: u.page.title, slug: u.page.slug }]);
+      const np = def().pages.find((x) => !before.has(x.id));
+      if (!np) return;   // refused (e.g. the plan's pages are full) — the note says why
+      await apply([
+        { op: 'update_page', pageId: np.id, seo: u.page.seo, hideFromMenu: !!u.page.hideFromMenu },
+        ...u.page.sections.map((x) => ({ op: 'add_section', pageId: np.id, section: { type: x.type, props: x.props, look: x.look || {} } })),
+      ], () => {
+        state.pageId = np.id; state.previewPath = pathOf(np); state.editing = null;
+        state.note = { text: `Page "${np.title}" put back, at the end of your menu.`, tone: 'ok' };
+        state.noteAt = `[data-site-page="${CSS.escape(np.id)}"]`;
+        state.refocus = state.noteAt;
+      });
+      return;
+    }
     const mv = t('[data-site-move]');
     if (mv) { await apply([{ op: 'move_section', pageId: p.id, sectionId: mv.dataset.siteMove, toIndex: Number(mv.dataset.to) }]); return; }
     const rs = t('[data-site-remove-section]');
     if (rs) {
       const ok = typeof window.confirmModal === 'function' ? await window.confirmModal('This section is removed from your draft.', { title: 'Remove this section?', confirmLabel: 'Remove', cancelLabel: 'Keep it' }) : true;
-      if (ok) await apply([{ op: 'remove_section', pageId: p.id, sectionId: rs.dataset.siteRemoveSection }]);
+      if (!ok) return;
+      const at = p.sections.findIndex((x) => x.id === rs.dataset.siteRemoveSection);
+      const gone = p.sections[at];
+      const near = p.sections[at + 1] || p.sections[at - 1];
+      await apply([{ op: 'remove_section', pageId: p.id, sectionId: gone.id }], () => {
+        state.undo = { kind: 'section', pageId: p.id, index: at, section: JSON.parse(JSON.stringify({ type: gone.type, props: gone.props, look: gone.look || {} })) };
+        state.note = { text: `Removed the ${TYPE_LABEL[gone.type] || 'section'} section.`, tone: 'ok', undo: true };
+        state.noteAt = near ? `[data-site-edit="${CSS.escape(near.id)}"]` : '[data-site-add-open]:not([data-at])';
+        state.refocus = '[data-site-undo]';
+      });
       return;
     }
     if (t('[data-site-add-page]')) {
@@ -2045,7 +2098,15 @@
     }
     if (t('[data-site-remove-page]')) {
       const ok = typeof window.confirmModal === 'function' ? await window.confirmModal(`"${p.title}" and its sections are removed from your draft.`, { title: 'Remove this page?', confirmLabel: 'Remove page', cancelLabel: 'Keep it' }) : true;
-      if (ok) { await apply([{ op: 'remove_page', pageId: p.id }]); state.pageId = null; state.previewPath = '/'; render(); }
+      if (!ok) return;
+      const copy = JSON.parse(JSON.stringify(p));
+      await apply([{ op: 'remove_page', pageId: p.id }], () => {
+        state.undo = { kind: 'page', page: copy };
+        state.note = { text: `Removed the page "${copy.title}".`, tone: 'ok', undo: true };
+        state.pageId = null; state.previewPath = '/';
+        state.noteAt = '[data-site-page]';
+        state.refocus = '[data-site-undo]';
+      });
       return;
     }
     if (t('[data-site-page-save]')) {

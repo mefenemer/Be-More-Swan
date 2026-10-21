@@ -254,6 +254,22 @@ check('import nudges: set-up asks for their current site, a starter prompt, and 
     assert.match(card, /_activateMainTab\?\.\('sitebuilder'\)/);
 });
 
+check('removing a section or page can be undone, and focus comes back after a repaint', () => {
+    const rs = editor.slice(editor.indexOf("const rs = t('[data-site-remove-section]');"), editor.indexOf("if (t('[data-site-add-page]'))"));
+    assert.match(rs, /state\.undo = \{ kind: 'section', pageId: p\.id, index: at,/);
+    assert.match(rs, /undo: true/);
+    const rp = editor.slice(editor.indexOf("if (t('[data-site-remove-page]'))"), editor.indexOf("if (t('[data-site-remove-page]'))") + 900);
+    assert.match(rp, /state\.undo = \{ kind: 'page', page: copy \}/);
+    const undo = editor.slice(editor.indexOf("if (t('[data-site-undo]'))"), editor.indexOf("const mv = t('[data-site-move]');"));
+    assert.match(undo, /op: 'add_section', pageId: u\.pageId, index: u\.index/);
+    assert.match(undo, /op: 'add_page', title: u\.page\.title, slug: u\.page\.slug/);
+    assert.match(editor, /btn\('data-site-undo', 'Undo'\)/);
+    const apply = editor.slice(editor.indexOf('async function apply('), editor.indexOf('function markBusy('));
+    assert.match(apply, /state\.undo = null;/, 'any other change ends the chance to undo');
+    assert.match(editor, /state\.refocus = state\.noteAt;/);
+    assert.match(editor, /if \(want && lost\)/);
+});
+
 check('the chat never publishes (step 3a: a click on the Website tab), and nothing spends without saying so', () => {
     assert.ok(!/action: 'publish'/.test(read('src/components/chat-session.js')));
     assert.match(chat, /You cannot publish, take the site offline or choose its address/);
