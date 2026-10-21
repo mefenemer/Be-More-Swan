@@ -35,6 +35,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { gatewayGenerateGrounded } from '../lib/ai-gateway';
 import { parseModelJson } from './model-json';
+import { FACT_LOCATION_VALUES } from './post-quality-review';
 
 /**
  * Wall-clock budget for one verification. Generous on purpose: a real run measured ~124s, and this
@@ -49,6 +50,7 @@ export const VERIFY_DEADLINE_MS = 240_000;
 export type VerificationOutcome =
     | { outcome: 'sourced'; sourceUrl: string; note: string; searchCount: number }
     | { outcome: 'rewrite'; before: string; after: string; reason: string; searchCount: number }
+    | { outcome: 'records'; reason: string; fixWhere: string | null; after: string | null; searchCount: number }
     | { outcome: 'inconclusive'; reason: string; searchCount: number };
 
 /**
@@ -74,10 +76,16 @@ export function matchesSearchedUrl(candidate: string, searched: string[]): strin
     return null;
 }
 
-function buildPrompt(warning: string, caption: string, platform: string): string {
-    return `A compliance reviewer flagged this social post. Establish whether the flagged claim
-can be substantiated, using web search.
-
+function buildPrompt(warning: string, caption: string, platform: string, declaredFacts: string): string {
+    return `A compliance reviewer flagged this social post. Settle the warning: either it is about
+the business's OWN records (answer from the facts below, no search needed), or it is about an
+external claim (establish whether it can be substantiated, using web search).
+${declaredFacts ? `
+The business's own declared facts. Each is tagged [Edited in: …] — the screen where it is changed:
+"""
+${declaredFacts}
+"""
+` : ''}
 The warning:
 """
 ${warning}
@@ -88,13 +96,20 @@ The caption:
 ${caption}
 """
 
-Search for a credible, primary source for the specific factual claim the warning is about.
+FIRST decide which kind of warning this is. If it is about the business's own records — a price,
+link, product, offer or detail it declares itself, an inconsistency between two of its declared
+facts, or a link pointing at the wrong site — DO NOT search. The web cannot settle what this
+business charges; its own records can, and the business is the only one who can change them. Use
+"records": say plainly what is wrong (quote the values) and which record to change.
+
+Otherwise, search for a credible, primary source for the specific factual claim the warning is about.
 Prefer original research, official statistics, regulatory guidance, or the company's own published
 figures. A blog post restating someone else's number is not a source; find what it cites.
 
 Then return ONLY a JSON object, no markdown:
 {
-  "outcome": "sourced" | "rewrite" | "inconclusive",
+  "outcome": "records" | "sourced" | "rewrite" | "inconclusive",
+  "fixWhere": "<records only: the [Edited in: …] place to change, copied exactly, without brackets>",
   "sourceUrl": "<the exact URL of the supporting page, from your search results>",
   "note": "<one sentence: what the source says and how it supports the claim>",
   "rewrittenCaption": "<the full caption with the unsupportable claim removed or softened>",
@@ -108,8 +123,12 @@ Rules:
   the unsupported claim removed, or softened to something defensible ("many small businesses juggle
   a stack of subscriptions" rather than a fabricated statistic). Preserve the author's voice, the
   structure, and everything the warning did not concern. Keep it suitable for ${platform}.
-- Use "inconclusive" only when the warning is not about a checkable external fact at all (for
-  example a required disclosure, or an internal pricing decision only this business can confirm).
+- For "records", reason is one or two plain sentences to the business owner: what disagrees or is
+  wrong, and what to change where. If the caption itself states the out-of-date value, ALSO give
+  rewrittenCaption using the value from the record that wins (the catalogue wins on prices and
+  links); otherwise omit rewrittenCaption.
+- Use "inconclusive" only when the warning is neither about the business's own records nor a
+  checkable external fact (for example a required disclosure).
 - Never claim you verified something you did not.`;
 }
 
@@ -121,22 +140,27 @@ export async function runWarningVerification(args: {
     warning: string;
     caption: string;
     platform: string;
+    /** The business's labelled declared facts (post-quality-review.ts loadDeclaredFacts). */
+    declaredFacts?: string;
     /** Override only for tests; production callers should take the default. */
     deadlineMs?: number;
 }): Promise<VerificationOutcome> {
     const { warning, caption, platform } = args;
+    const declaredFacts = args.declaredFacts || '';
 
     const gw = await gatewayGenerateGrounded({
-        system: 'You are a fact-checker for marketing copy. You search before you answer, you cite only pages you actually found, and you say plainly when something cannot be substantiated. Respond with valid JSON only.',
-        messages: [{ role: 'user', content: buildPrompt(warning, caption, platform) }],
+        system: 'You are a fact-checker for marketing copy. A warning about the business\'s own records you answer from those records; an external claim you search before you answer, citing only pages you actually found. You say plainly when something cannot be substantiated. Respond with valid JSON only.',
+        messages: [{ role: 'user', content: buildPrompt(warning, caption, platform, declaredFacts) }],
         maxTokens: 2000,
         deadlineMs: args.deadlineMs ?? VERIFY_DEADLINE_MS,
     });
 
     const parsed = parseModelJson<{
-        outcome?: string; sourceUrl?: string; note?: string; rewrittenCaption?: string; reason?: string;
+        outcome?: string; sourceUrl?: string; note?: string; rewrittenCaption?: string; reason?: string; fixWhere?: string;
     }>(gw.text);
     if (!parsed) throw new Error('The assistant did not return a readable answer.');
+
+    if (parsed.outcome === 'records') return recordsOutcome(parsed, caption, gw.searchCount);
 
     // ── The grounding check ──────────────────────────────────────────────────────────────
     // Everything above is the model's opinion. This is where it gets held to the evidence.
@@ -184,6 +208,29 @@ export async function runWarningVerification(args: {
         outcome: 'inconclusive',
         reason: (parsed.reason || 'This needs a human judgement.').slice(0, 500),
         searchCount: gw.searchCount,
+    };
+}
+
+/**
+ * Shape a "fix it in your records" answer. Exported for tests.
+ *
+ * `fixWhere` drives a deep link in the panel, so only a place from FACT_LOCATIONS survives — a
+ * screen the model made up would send the person nowhere. The reason still stands without it.
+ */
+export function recordsOutcome(
+    parsed: { reason?: string; fixWhere?: string; rewrittenCaption?: string },
+    caption: string,
+    searchCount: number,
+): Extract<VerificationOutcome, { outcome: 'records' }> {
+    const where = (parsed.fixWhere || '').replace(/^\[?\s*Edited in:\s*/i, '').replace(/\]$/, '').trim();
+    const after = (parsed.rewrittenCaption || '').trim();
+    return {
+        outcome: 'records',
+        reason: (parsed.reason || 'This is about your own records, not something the web can confirm.').slice(0, 600),
+        fixWhere: FACT_LOCATION_VALUES.includes(where) ? where : null,
+        // A "rewrite" that changes nothing is no rewrite.
+        after: after && after !== caption ? after : null,
+        searchCount,
     };
 }
 

@@ -1,6 +1,6 @@
 // netlify/functions/verify-compliance-warning-background.ts
-// Do the actual work of settling ONE compliance warning: search the web for a real source, or
-// propose a rewrite that drops the claim.
+// Do the actual work of settling ONE compliance warning: point at the business's own record that
+// needs changing, search the web for a real source, or propose a rewrite that drops the claim.
 //
 // The `-background` suffix is load-bearing. Netlify answers the trigger with 202 immediately and
 // gives this up to 15 minutes, so the verification is not bounded by the 26-second budget of the
@@ -20,6 +20,7 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts } from '../../db/schema';
 import {
+    loadDeclaredFacts,
     readCachedReview,
     recordVerification,
     type WarningVerification,
@@ -64,6 +65,7 @@ export default withLambda(async (event) => {
             id: scheduledPosts.id,
             caption: scheduledPosts.caption,
             platform: scheduledPosts.platform,
+            assistantId: scheduledPosts.assistantId,
             qualityReview: scheduledPosts.qualityReview,
         })
         .from(scheduledPosts)
@@ -82,13 +84,20 @@ export default withLambda(async (event) => {
     const caption = post.caption || '';
     let verification: WarningVerification;
     try {
+        // The business's own records, labelled with where each is edited — so a warning about a
+        // stale price or a staging link is answered from them ("change it under …") instead of
+        // four web searches that cannot know what this business charges.
+        const declaredFacts = await loadDeclaredFacts(db, post.assistantId);
         const result = await runWarningVerification({
             warning,
             caption,
             platform: post.platform || 'instagram',
+            declaredFacts,
         });
         const finishedAt = new Date().toISOString();
-        verification = result.outcome === 'sourced'
+        verification = result.outcome === 'records'
+            ? { status: 'records', reason: result.reason, fixWhere: result.fixWhere, before: result.after ? caption : null, after: result.after, searchCount: result.searchCount, finishedAt }
+            : result.outcome === 'sourced'
             ? { status: 'sourced', sourceUrl: result.sourceUrl, note: result.note, searchCount: result.searchCount, finishedAt }
             : result.outcome === 'rewrite'
                 ? { status: 'rewrite', before: result.before, after: result.after, reason: result.reason, searchCount: result.searchCount, finishedAt }

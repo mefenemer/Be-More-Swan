@@ -72,7 +72,7 @@ export interface WarningDisposition {
 }
 
 /**
- * An assistant-led verification of ONE warning — what "AI Resolve" produced, or is still producing.
+ * An assistant-led verification of ONE warning — what "Ask ⟨assistant⟩ to resolve" produced, or is still producing.
  *
  * This is a PROPOSAL, never a disposition. Nothing here clears a warning: the human still presses
  * "Use this source" or "Save this version", which goes through the normal disposition path so the
@@ -84,6 +84,8 @@ export type WarningVerification =
     | { status: 'running'; startedAt: string; userId: number }
     | { status: 'sourced'; sourceUrl: string; note: string; searchCount: number; finishedAt: string }
     | { status: 'rewrite'; before: string; after: string; reason: string; searchCount: number; finishedAt: string }
+    /** About the business's own records: what to change, where (a FACT_LOCATIONS value or null), and an optional corrected caption. */
+    | { status: 'records'; reason: string; fixWhere: string | null; before: string | null; after: string | null; searchCount: number; finishedAt: string }
     | { status: 'inconclusive'; reason: string; searchCount: number; finishedAt: string }
     | { status: 'failed'; error: string; finishedAt: string };
 
@@ -198,38 +200,86 @@ export interface ReviewablePost {
 }
 
 /**
- * The org's OWN declared facts, pulled out of the blueprint so the reviewer can check a claim
- * against them instead of flagging it as unverifiable.
+ * Where each declared fact is EDITED, in the words the UI uses. Every fact line the reviewer and
+ * the verifier see carries one of these, so a warning about the business's own records can say
+ * "update it under ⟨place⟩" instead of "the wider product list" — which is how the reviewer once
+ * described a stale £99 that lived in a box nobody could find (2026-10-20).
  *
- * This is what stopped "Post states pricing 'starting from £29/mo' — verify this is current"
- * appearing on every pricing post. The prices are declared in the assistant's own onboarding
- * answers (`service_offerings`), so the assistant already knows them — the reviewer just never
- * saw them, and a reviewer with no facts can only ever say "I can't confirm this".
- *
- * Deliberately narrow: only fields the business stated about ITSELF, which are therefore the
- * authority on their own pricing, offers and objection-handling. A claim NOT covered here is still
- * flagged — this removes false positives, it does not soften the check.
+ * ⚠️ The verifier only accepts a `fixWhere` that is one of these values, and the panel maps each
+ * one to a deep link (workspace.html, _prqFixWhereLink). Rename a screen → change it here AND there.
  */
-function collectKnownFacts(sections: Record<string, { content: Record<string, unknown> }>): string {
-    const answers = (sections['6-onboarding']?.content?.answers ?? {}) as Record<string, unknown>;
-    const org = (sections['5-org-context']?.content ?? {}) as Record<string, unknown>;
+export const FACT_LOCATIONS = {
+    catalogue: 'Business Information ▸ Products & Services',
+    profile: 'Business Information ▸ Business Profile',
+    briefMessage: "the assistant's Creative Brief ▸ Objective & Message",
+    briefSales: "the assistant's Creative Brief ▸ Sales Context",
+} as const;
+export type FactLocation = typeof FACT_LOCATIONS[keyof typeof FACT_LOCATIONS];
+export const FACT_LOCATION_VALUES: readonly string[] = Object.values(FACT_LOCATIONS);
+
+/**
+ * The business's declared facts as one labelled block: the assistant's own brief (from its latest
+ * blueprint) plus the workspace catalogue.
+ *
+ * Two lists of prices used to arrive as equals — the brief's free-text "Products & Services" box
+ * and the Business Information catalogue — and when one went stale the reviewer could only flag
+ * "these conflict" on every post. The catalogue is the structured, maintained list, so when it
+ * exists it WINS on prices and links; the brief's box is passed as older notes. Each line says
+ * where it is edited ([[FACT_LOCATIONS]]).
+ *
+ * Why the reviewer gets these at all: "Post states pricing 'starting from £29/mo' — verify this is
+ * current" used to appear on every pricing post, because a reviewer with no facts can only ever say
+ * "I can't confirm this". Deliberately narrow: only fields the business stated about ITSELF. A
+ * claim NOT covered here is still flagged — this removes false positives, it does not soften it.
+ */
+export function composeDeclaredFacts(
+    sections: Record<string, { content: Record<string, unknown> }> | null | undefined,
+    productFacts: string,
+): string {
+    const answers = (sections?.['6-onboarding']?.content?.answers ?? {}) as Record<string, unknown>;
+    const org = (sections?.['5-org-context']?.content ?? {}) as Record<string, unknown>;
+    const hasCatalogue = Boolean(productFacts);
 
     const parts: string[] = [];
-    const add = (label: string, value: unknown) => {
+    const add = (where: string, label: string, value: unknown, cap = 800) => {
         const s = typeof value === 'string' ? value.trim() : '';
-        if (s) parts.push(`${label}: ${s}`);
+        if (s) parts.push(`[Edited in: ${where}] ${label}: ${s.slice(0, cap)}`);
     };
 
-    add('Products, services and prices', answers.service_offerings);
-    add('Standard offer / incentive', answers.incentive);
-    add('Approved answers to objections (including price)', answers.sales_objections);
-    add('Core message', answers.core_message);
-    add('Business', org.businessName);
-    add('What the business does', org.businessDescription);
-    add('Website', org.website);
+    if (hasCatalogue) {
+        parts.push(`[Edited in: ${FACT_LOCATIONS.catalogue}] ${productFacts}`);
+        parts.push(`(The catalogue above is the source of truth for prices and product links. Where the notes below disagree with it, the catalogue wins and the notes are out of date.)`);
+    }
+    add(FACT_LOCATIONS.briefSales,
+        hasCatalogue ? 'Older notes on products, services and prices' : 'Products, services and prices',
+        answers.service_offerings);
+    add(FACT_LOCATIONS.briefMessage, 'Standard offer / incentive', answers.incentive);
+    add(FACT_LOCATIONS.briefSales, 'Approved answers to objections (including price)', answers.sales_objections);
+    add(FACT_LOCATIONS.briefMessage, 'Core message', answers.core_message);
+    add(FACT_LOCATIONS.profile, 'Business', org.businessName);
+    add(FACT_LOCATIONS.profile, 'What the business does', org.businessDescription);
+    add(FACT_LOCATIONS.profile, 'Website', org.website);
 
-    // Free text from onboarding — cap it so a verbose answer can't crowd out the caption.
-    return parts.join('\n').slice(0, 2500);
+    // Capped so a verbose answer can't crowd the caption out of the prompt.
+    return parts.join('\n').slice(0, 5000);
+}
+
+/**
+ * The same labelled facts, loaded from scratch for one assistant — for callers that are not already
+ * holding its blueprint (the warning verifier). Never throws: no facts is an empty string.
+ */
+export async function loadDeclaredFacts(db: Db, assistantId: number | null | undefined): Promise<string> {
+    if (!assistantId) return '';
+    try {
+        const [bp] = await db.select({ sections: aiBlueprints.sections }).from(aiBlueprints)
+            .where(eq(aiBlueprints.assistantId, assistantId)).orderBy(desc(aiBlueprints.compiledAt)).limit(1);
+        const [owner] = await db.select({ orgId: aiAssistants.organisationId }).from(aiAssistants)
+            .where(eq(aiAssistants.id, assistantId)).limit(1);
+        const productFacts = owner ? renderProductFacts(await loadOrgProducts(db, owner.orgId)) : '';
+        return composeDeclaredFacts(bp?.sections as Record<string, { content: Record<string, unknown> }> | undefined, productFacts);
+    } catch {
+        return '';
+    }
 }
 
 export interface RunReviewOptions {
@@ -278,6 +328,7 @@ export async function runQualityReview(
     let brandVoice = 'professional';
     let contentRulesText = '';
     let knownFacts = '';
+    let blueprintSections: Record<string, { content: Record<string, unknown> }> | null = null;
     if (post.assistantId) {
         const [bp] = await db
             .select({ sections: aiBlueprints.sections })
@@ -296,17 +347,18 @@ export async function runQualityReview(
             const rules = (s4?.rules ?? []) as unknown[];
             // Payload shape unchanged for assistants that HAVE rules — only the guard moves.
             if (rules.length > 0) contentRulesText = JSON.stringify(s4);
-            knownFacts = collectKnownFacts(sections);
+            blueprintSections = sections;
         }
         // The workspace catalogue (Business Information ▸ Products & Services) — a listed price is
         // the business's own, so the reviewer stops flagging it; a price NOT listed still gets
         // flagged, which is how an invented one is caught. Never throws.
+        let productFacts = '';
         try {
             const [owner] = await db.select({ orgId: aiAssistants.organisationId }).from(aiAssistants)
                 .where(eq(aiAssistants.id, post.assistantId)).limit(1);
-            const productFacts = owner ? renderProductFacts(await loadOrgProducts(db, owner.orgId)) : '';
-            if (productFacts) knownFacts = [knownFacts, productFacts].filter(Boolean).join('\n');
+            productFacts = owner ? renderProductFacts(await loadOrgProducts(db, owner.orgId)) : '';
         } catch { /* no products is no change */ }
+        knownFacts = composeDeclaredFacts(blueprintSections, productFacts);
     }
 
     const caption = post.caption || '';
@@ -334,7 +386,14 @@ business's domain than the caption implies.
 When you flag an offer, price, discount, trial or guarantee because it is NOT among the declared
 facts, say so in plain terms and end that warning with: "If it's real, add it under Business
 Information ▸ Products & Services, or mark this warning as sourced." — so the person knows where
-to declare it once instead of being asked again on every post.${
+to declare it once instead of being asked again on every post.
+
+Each declared fact below is tagged [Edited in: …] — the screen where the business changes it. When
+a warning is about the business's OWN records (a stated price, link or offer that is wrong, out of
+date, or disagrees with another declared fact), name the place to fix it using that tag's exact
+wording, and quote the conflicting values. Never describe a source vaguely ("the wider product
+list", "the business facts"). If the caption agrees with the catalogue, an out-of-date note
+elsewhere is NOT a reason to warn about this post.${
     withSuggestions ? '' : `
 
 Do NOT return a suggestions field — no written style advice is wanted on this pass. This is about
