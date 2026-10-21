@@ -164,8 +164,8 @@ const bctx = (results: unknown[][]) => { const f = fakeDb(results); return { f, 
         assert.ok(src.includes("return recent ? 'asked_recently' : null;") && src.includes("if (out) return 'opted_out';"));
         assert.ok(read('db/z-review-requests.sql').includes('CREATE UNIQUE INDEX IF NOT EXISTS review_requests_booking_uq'));
     });
-    await check('Business Information: approve / decline waiting reviews, and the asking settings', () => {
-        const ui = read('assets.html');
+    await check('Audience ▸ Reviews: approve / decline waiting reviews, and the asking settings', () => {
+        const ui = read('audience.html');
         assert.ok(ui.includes('id="rv-pending"') && ui.includes('data-rv-approve') && ui.includes('id="rq-bookings"') && ui.includes('id="rq-google"'));
         const api = read('netlify/functions/org-reviews.ts');
         assert.ok(api.includes("eq(orgReviews.status, 'pending'))).returning()") && api.includes('saveReviewRequestSettings(db, orgId, r.value)'));

@@ -182,7 +182,7 @@ export interface MenuProps { heading: string | null; intro: string | null; group
 export interface GalleryImage extends Image { caption: string | null; }
 export interface GalleryProps { heading: string | null; intro: string | null; layout: 'square' | 'natural'; images: GalleryImage[]; }
 /**
- * Reviews from Business Information ▸ Reviews (org_reviews) — the customers' words, never typed into
+ * Reviews from Audience ▸ Reviews (org_reviews) — the customers' words, never typed into
  * the site. `reviewIds` chooses which to quote, in order; empty = the newest. The summary ("4.8 ★
  * from 23 reviews") is always the honest average of every review recorded, hidden ones included.
  */

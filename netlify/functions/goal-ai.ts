@@ -13,6 +13,7 @@
 //                                                        goalId: it runs BEFORE the goal is saved.
 // The LLM only ever sees a hidden prompt assembled here (goal + trajectory + current brief).
 
+import { loadOfferingsText } from '../../src/utils/org-products';
 import { Handler } from '@netlify/functions';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
@@ -243,12 +244,14 @@ export default withLambda(async (event) => {
             /^\d{4}-\d{2}-\d{2}$/.test(date) ? `Target date: ${date}` : '',
         ].filter(Boolean).join('\n');
 
+        // Business Information ▸ Products & Services — the one place products and prices live.
+        const offerings = await loadOfferingsText(db, orgId, actx.service_offerings);
         const business = [
             `Role: ${assistant.role ?? 'assistant'}`,
             actx.target_audience ? `Audience: ${actx.target_audience}` : '',
             actx.content_pillars ? `Content strategy: ${actx.content_pillars}` : '',
             actx.problem_statement ? `Their bottleneck: ${actx.problem_statement}` : '',
-            actx.service_offerings ? `Products & services: ${actx.service_offerings}` : '',
+            offerings ? `Products & services: ${offerings}` : '',
         ].filter(Boolean).join('\n');
 
         // Written in the USER'S voice, because it lands in a textarea they own and will edit —

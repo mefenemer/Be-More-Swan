@@ -25,8 +25,9 @@
     <nav id="bizinfo-tabs" class="-mb-px flex gap-x-6" aria-label="Business information tabs">
       <button type="button" class="bizinfo-tab active" data-tab="profile">Business Profile</button>
       <button type="button" class="bizinfo-tab" data-tab="products">Products &amp; Services</button>
-      <button type="button" class="bizinfo-tab" data-tab="hours">Hours, Location &amp; Bookings</button>
-      <button type="button" class="bizinfo-tab" data-tab="reviews">Reviews</button>
+      <button type="button" class="bizinfo-tab" data-tab="hours">Hours &amp; Location</button>
+      <!-- Shown only for a business that takes bookings ("What does your business offer?"). -->
+      <button type="button" class="bizinfo-tab hidden" data-tab="bookings">Bookings</button>
       <button type="button" class="bizinfo-tab" data-tab="legal">Legal &amp; Billing</button>
       <button type="button" class="bizinfo-tab" data-tab="team">Team Members</button>
       <button type="button" class="bizinfo-tab" data-tab="assets">Brand Assets</button>
@@ -233,10 +234,14 @@
          Assistant's chat (offer_profile card), through the same PATCH. -->
     <div id="op-offer" class="hidden mb-5 border border-gray-200 bg-gray-50 rounded-xl px-4 py-3">
       <p class="text-sm font-bold text-gray-900">What does your business offer?</p>
-      <p class="text-xs text-gray-500 mt-0.5">We only show the fields that fit. Untick both if neither applies.</p>
-      <div class="flex flex-col sm:flex-row sm:flex-wrap gap-x-6 gap-y-1.5 mt-2">
-        <label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" data-op-offer value="bookings"> People book time with us (appointments, classes or tables)</label>
-        <label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" data-op-offer value="menu"> We serve food or drink</label>
+      <p class="text-xs text-gray-500 mt-0.5">Tick all that apply. We only show the fields and tabs that fit, and your assistants work from it.</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 mt-2">
+        <label class="inline-flex items-start gap-2 text-sm"><input type="checkbox" data-op-offer value="products" class="mt-1"> We sell products (physical or digital)</label>
+        <label class="inline-flex items-start gap-2 text-sm"><input type="checkbox" data-op-offer value="services" class="mt-1"> We provide services (consulting, trades, coaching, agencies)</label>
+        <label class="inline-flex items-start gap-2 text-sm"><input type="checkbox" data-op-offer value="subscriptions" class="mt-1"> We sell software or subscriptions</label>
+        <label class="inline-flex items-start gap-2 text-sm"><input type="checkbox" data-op-offer value="bookings" class="mt-1"> People book time with us (appointments, classes, tables or events)</label>
+        <label class="inline-flex items-start gap-2 text-sm"><input type="checkbox" data-op-offer value="visits" class="mt-1"> Customers visit us (a shop, venue or studio)</label>
+        <label class="inline-flex items-start gap-2 text-sm"><input type="checkbox" data-op-offer value="menu" class="mt-1"> We serve food or drink</label>
       </div>
       <p id="op-offer-note" class="text-xs mt-1.5"></p>
     </div>
@@ -382,7 +387,10 @@
       const f = document.createElement('div');
       f.id = 'op-editor';
       f.className = 'border-2 border-emerald-200 bg-emerald-50/30 rounded-xl p-4 mb-3';
-      const v = p || { kind: 'product' };
+      // A new item starts as what this business mostly sells: a service when it ticked services but
+      // not products, and priced "a month" when it sells subscriptions (offer-profile.ts).
+      const v = p || { kind: offers('services') && !offers('products') ? 'service' : 'product',
+        ...(offers('subscriptions') ? { priceType: 'fixed', priceUnit: 'a month' } : {}) };
       const field = (id, label, value, opts) => `<div class="${opts && opts.wide ? 'sm:col-span-2' : ''}">
           <label for="${id}"${opts && opts.explain ? ` data-explain="${opts.explain}"` : ''} class="block text-sm font-semibold text-gray-700 mb-1">${label}</label>
           ${opts && opts.area
@@ -440,7 +448,7 @@
             <input id="op-price-unit" type="text" maxlength="30" value="${esc(v.priceUnit || '')}" placeholder="per hour (optional)" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm">
           </div>
           <input id="op-price-text" type="text" maxlength="120" value="${esc(t === 'text' ? (v.price || '') : '')}" placeholder="e.g. £15 a month, first month free" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm mt-2 ${t === 'text' ? '' : 'hidden'}">
-          <p class="text-xs text-gray-500 mt-1">Only a fixed price can be bought online from your website.</p>
+          ${offers('products') || !offer ? '<p class="text-xs text-gray-500 mt-1">Only a fixed price can be bought online from your website.</p>' : ''}
         </div>
         <div id="op-duration-row" class="${v.kind === 'service' ? '' : 'hidden'}">
           <label for="op-duration" class="block text-sm font-semibold text-gray-700 mb-1">How long it takes (minutes)</label>
@@ -623,10 +631,12 @@
   </script>
   </div><!-- /panel: products -->
 
-  <!-- ══ Opening hours & bookings (docs/booking-plan.md) ════════════════════
-       The business's opening hours live HERE — not in a widget — so the website's booking section
-       (and later an "Open now" badge) all read one set. Booking rules and who/what can be booked sit
-       beside them. Services are Products & Services with a length. API: booking-settings.ts. -->
+  <!-- ══ Opening hours (Hours & Location) and Bookings (docs/booking-plan.md) ═══════════════════
+       The business's opening hours live HERE — not in a widget — so the website's booking section and
+       its "Open now" badge all read one set. Bookings (rules, who/what can be booked, your calendar)
+       are their own tab, shown only to a business that takes bookings (offer-profile.ts); Hours &
+       Location only to one that customers visit or book. Both tabs are ONE settings record
+       (booking-settings.ts), driven by the one script at the end of the Bookings panel. -->
   <div class="bizinfo-tab-panel hidden" data-panel="hours">
   <section id="bh-section" class="mb-8">
     <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
@@ -651,13 +661,16 @@
       <p class="text-xs text-gray-500">Bank holidays, holidays, days off — nobody can book these.</p>
       <div id="bh-closures" class="mt-2 space-y-2"></div>
       <button type="button" id="bh-closure-add" class="btn-utility text-xs font-bold px-2.5 py-1 rounded mt-2">+ Add a closed day</button>
+      <p id="bh-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3 mt-3"></p>
+      <div class="flex items-center justify-end gap-3 mt-4"><span id="bh-saved" class="text-sm text-emerald-700 font-semibold hidden">Saved</span>
+        <button type="button" id="bh-save" class="btn-primary text-sm font-bold px-4 py-2 rounded-md">Save hours &amp; location</button></div>
     </div>
+  </section>
+  </div><!-- /panel: hours -->
 
-    <!-- The booking parts of this tab (data-bh-bookings) show only for a business that takes
-         bookings — "What does your business offer?" on Products & Services (offer-profile.ts).
-         This card's Save also saves the hours above, so without bookings only the rules hide. -->
-    <div id="bh-rules-card" class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
-      <div data-bh-bookings>
+  <div class="bizinfo-tab-panel hidden" data-panel="bookings">
+  <section id="bk-section" class="mb-8">
+    <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
       <h2 class="text-lg font-bold text-gray-900">Booking rules</h2>
       <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">How bookings from your website work. Services and their length come from Products &amp; Services.</p>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
@@ -673,13 +686,13 @@
         <div class="sm:col-span-2"><label for="bh-policy" class="block text-sm font-semibold text-gray-700 mb-1">Cancellation policy (optional)</label>
           <textarea id="bh-policy" rows="2" maxlength="500" placeholder="e.g. Please give us 24 hours' notice if you can't make it." class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></textarea></div>
       </div>
-      </div>
-      <p id="bh-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3 mt-3"></p>
-      <div class="flex items-center justify-end gap-3 mt-4"><span id="bh-saved" class="text-sm text-emerald-700 font-semibold hidden">Saved</span>
-        <button type="button" id="bh-save" class="btn-primary text-sm font-bold px-4 py-2 rounded-md">Save hours, location &amp; rules</button></div>
+      <p class="text-xs text-gray-500 mt-3">Bookings are only offered inside your opening hours, on the Hours &amp; Location tab.</p>
+      <p id="bk-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3 mt-3"></p>
+      <div class="flex items-center justify-end gap-3 mt-4"><span id="bk-saved" class="text-sm text-emerald-700 font-semibold hidden">Saved</span>
+        <button type="button" id="bk-save" class="btn-primary text-sm font-bold px-4 py-2 rounded-md">Save booking rules</button></div>
     </div>
 
-    <div data-bh-bookings class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6">
+    <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div><h2 class="text-lg font-bold text-gray-900">Who or what can be booked</h2>
           <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">Your team, tables or seating areas, rooms. Leave this empty if it's just you — then one booking is taken at a time.</p></div>
@@ -690,7 +703,7 @@
     </div>
 
     <!-- Your calendar (docs/booking-plan.md phase 3; calendar-sync.ts, booking-calendar-feed.ts) — no sign-in. -->
-    <div data-bh-bookings class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
+    <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
       <h2 class="text-lg font-bold text-gray-900">Your calendar</h2>
       <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">Works with Google, Outlook and Apple calendars.</p>
       <div id="cal-ms" class="hidden mt-4 border border-gray-200 rounded-xl p-4 bg-gray-50"></div>
@@ -733,13 +746,16 @@
   <script>
   (function () {
     const API = '/.netlify/functions/booking-settings';
-    const panel = document.querySelector('.bizinfo-tab-panel[data-panel="hours"]');
-    if (!panel) return;
+    // One settings record, two tabs: opening hours + location on Hours & Location, the rest on Bookings.
+    const hoursPanel = document.querySelector('.bizinfo-tab-panel[data-panel="hours"]');
+    const bookPanel = document.querySelector('.bizinfo-tab-panel[data-panel="bookings"]');
+    if (!hoursPanel || !bookPanel) return;
+    const panels = [hoursPanel, bookPanel];
     const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const DAYS = [['mon', 'Monday'], ['tue', 'Tuesday'], ['wed', 'Wednesday'], ['thu', 'Thursday'], ['fri', 'Friday'], ['sat', 'Saturday'], ['sun', 'Sunday']];
     const INTERVALS = [5, 10, 15, 20, 30, 45, 60, 90, 120];
     const KINDS = [['staff', 'A person'], ['table', 'A table or seating area'], ['room', 'A room'], ['other', 'Something else']];
-    const $ = (id) => panel.querySelector('#' + id);
+    const $ = (id) => document.getElementById(id);
     let data = { settings: {}, resources: [], services: [] };
     let closures = [];
 
@@ -774,7 +790,7 @@
     }
     function renderRules() {
       const st = data.settings;
-      panel.querySelectorAll('input[name="bh-mode"]').forEach(r => { r.checked = r.value === (st.mode || 'request'); });
+      bookPanel.querySelectorAll('input[name="bh-mode"]').forEach(r => { r.checked = r.value === (st.mode || 'request'); });
       $('bh-tz').value = st.timezone || 'Europe/London';
       $('bh-notice').value = Math.round((st.minNoticeMinutes ?? 120) / 60);
       $('bh-advance').value = st.maxAdvanceDays ?? 60;
@@ -853,7 +869,7 @@
 
     function collectHours() {
       const out = {};
-      panel.querySelectorAll('[data-day]').forEach(row => {
+      hoursPanel.querySelectorAll('[data-day]').forEach(row => {
         if (!row.querySelector('[data-open]').checked) return;
         const g = (a) => row.querySelector(a).value;
         const periods = [{ start: g('[data-s1]'), end: g('[data-e1]') }];
@@ -863,7 +879,7 @@
       return out;
     }
     function collectClosures() {
-      return [...panel.querySelectorAll('[data-closure]')].map(row => ({ date: row.querySelector('[data-cdate]').value, note: row.querySelector('[data-cnote]').value })).filter(c => c.date);
+      return [...hoursPanel.querySelectorAll('[data-closure]')].map(row => ({ date: row.querySelector('[data-cdate]').value, note: row.querySelector('[data-cnote]').value })).filter(c => c.date);
     }
 
     async function load() {
@@ -874,13 +890,14 @@
       } catch (e) { $('bh-error').textContent = 'Your opening hours could not be loaded. Please refresh and try again.'; $('bh-error').classList.remove('hidden'); }
     }
 
-    async function save() {
-      const err = $('bh-error'); err.classList.add('hidden');
-      const btn = $('bh-save'); btn.disabled = true;
+    // Either tab's Save sends the whole record; the message shows beside the button pressed.
+    async function save(which) {
+      const err = $(which + '-error'); err.classList.add('hidden');
+      const btn = $(which + '-save'); btn.disabled = true;
       try {
         const body = {
           timezone: $('bh-tz').value.trim(), weeklyHours: collectHours(), closures: collectClosures(),
-          mode: (panel.querySelector('input[name="bh-mode"]:checked') || {}).value || 'request',
+          mode: (bookPanel.querySelector('input[name="bh-mode"]:checked') || {}).value || 'request',
           minNoticeMinutes: Math.round(Number($('bh-notice').value || 0) * 60), maxAdvanceDays: Number($('bh-advance').value || 60),
           slotIntervalMinutes: Number($('bh-interval').value), bufferMinutes: Number($('bh-buffer').value || 0),
           tableMinutes: Number($('bh-table').value || 90), maxPartySize: Number($('bh-party').value || 8),
@@ -891,13 +908,13 @@
         data.settings = { ...data.settings, ...settings };
         closures = (settings.closures || []).slice();
         renderClosures();
-        $('bh-saved').classList.remove('hidden'); setTimeout(() => $('bh-saved').classList.add('hidden'), 2500);
+        $(which + '-saved').classList.remove('hidden'); setTimeout(() => $(which + '-saved').classList.add('hidden'), 2500);
       } catch (e) { err.textContent = e.message; err.classList.remove('hidden'); }
       btn.disabled = false;
     }
 
     async function saveResource(id) {
-      const row = panel.querySelector(`[data-res="${id}"]`);
+      const row = bookPanel.querySelector(`[data-res="${id}"]`);
       const ticks = [...row.querySelectorAll('[data-rsvc]')];
       const chosen = ticks.filter(t => t.checked).map(t => Number(t.value));
       const body = { id, name: row.querySelector('[data-rname]').value, kind: row.querySelector('[data-rkind]').value, capacity: Number(row.querySelector('[data-rcap]').value || 1),
@@ -906,10 +923,11 @@
       catch (e) { $('bh-res-error').textContent = e.message; $('bh-res-error').classList.remove('hidden'); }
     }
 
-    panel.addEventListener('click', async (e) => {
+    async function onClick(e) {
       const t = e.target.closest('button');
       if (!t) return;
-      if (t.id === 'bh-save') return save();
+      if (t.id === 'bh-save') return save('bh');
+      if (t.id === 'bk-save') return save('bk');
       // ── Your calendar ──
       if (t.id === 'cal-copy') {
         const v = $('cal-feed').value;
@@ -972,232 +990,42 @@
         try { await call('DELETE', null, '?id=' + Number(t.dataset.rdelete)); data.resources = data.resources.filter(x => x.id !== Number(t.dataset.rdelete)); renderResources(); }
         catch (err) { $('bh-res-error').textContent = err.message; $('bh-res-error').classList.remove('hidden'); }
       }
-    });
-    panel.addEventListener('change', (e) => {
+    }
+    panels.forEach((p) => p.addEventListener('click', onClick));
+    hoursPanel.addEventListener('change', (e) => {
       if (e.target.matches('[data-open]')) e.target.closest('[data-day]').querySelector('[data-times]').classList.toggle('opacity-40', !e.target.checked);
     });
 
-    // Bookings only for a business that takes them (Products & Services ▸ "What does your business
-    // offer?"). Until that's known the tab shows everything, as it always did.
+    // Which of the two tabs this business sees (Products & Services ▸ "What does your business
+    // offer?", offer-profile.ts): Bookings only when it takes bookings; Hours & Location when
+    // customers visit it or book it. Hiding a tab never deletes what is saved on it.
     function applyOffer(o) {
       if (!o) return;
-      const on = o.offers.includes('bookings');
-      panel.querySelectorAll('[data-bh-bookings]').forEach((el) => el.classList.toggle('hidden', !on));
-      // The rules card keeps its Save (it saves the hours too) — as a plain bar when the rules are hidden.
-      $('bh-rules-card').classList.toggle('bg-white', on);
-      $('bh-rules-card').classList.toggle('border', on);
-      $('bh-rules-card').classList.toggle('shadow-sm', on);
-      $('bh-rules-card').classList.toggle('p-6', on);
-      $('bh-save').textContent = on ? 'Save hours, location & rules' : 'Save hours & location';
-      const tab = document.querySelector('.bizinfo-tab[data-tab="hours"]');
-      if (tab) tab.textContent = on ? 'Hours, Location & Bookings' : 'Hours & Location';
+      const books = o.offers.includes('bookings');
+      const hours = books || o.offers.includes('visits');
+      const tab = (name) => document.querySelector(`.bizinfo-tab[data-tab="${name}"]`);
+      tab('bookings')?.classList.toggle('hidden', !books);
+      tab('hours')?.classList.toggle('hidden', !hours);
+      // Never leave someone looking at a tab that just went away.
+      const open = document.querySelector('.bizinfo-tab.active');
+      if (open && open.classList.contains('hidden')) tab('products')?.click();
     }
     document.addEventListener('bizinfo:offer', (e) => applyOffer(e.detail));
 
     let loaded = false;
     const maybeLoad = () => {
-      if (loaded || panel.classList.contains('hidden')) return;
+      if (loaded || panels.every((p) => p.classList.contains('hidden'))) return;
       loaded = true;
       load();
-      window.BizOffer?.get().then(applyOffer);
     };
-    new MutationObserver(maybeLoad).observe(panel, { attributes: true, attributeFilter: ['class'] });
+    panels.forEach((p) => new MutationObserver(maybeLoad).observe(p, { attributes: true, attributeFilter: ['class'] }));
     maybeLoad();
+    // The tabs themselves follow the answer from the start, not only once one is opened.
+    window.BizOffer?.get().then(applyOffer);
   })();
   </script>
-  </div><!-- /panel: hours -->
+  </div><!-- /panel: bookings -->
 
-  <!-- ══ Reviews (db/z-reviews.sql, src/utils/reviews.ts) ══════════════════════
-       The business's real reviews, word for word, recorded ONCE: the website's reviews section and its
-       search data read them from here. Hiding a review stops it being quoted but keeps it in the
-       average (DMCC Act 2024 — no misleading scores); only deleting removes it. API: org-reviews.ts. -->
-  <div class="bizinfo-tab-panel hidden" data-panel="reviews">
-  <section class="mb-8">
-    <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
-      <h2 class="text-lg font-bold text-gray-900">Reviews</h2>
-      <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">Real reviews from your customers — from Google, Facebook, an email or a card. Copy them word for word and say where they came from; your website quotes them from here. Never add a review you made up or paid for: it's against UK law.</p>
-      <p id="rv-summary" class="text-sm font-semibold text-gray-800 mt-3"></p>
-      <div id="rv-pending" class="hidden mt-4 bg-amber-50 border border-amber-200 rounded-xl p-4"></div>
-
-      <form id="rv-form" class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4 border border-gray-200 rounded-xl p-4" novalidate>
-        <p id="rv-form-title" class="sm:col-span-2 text-sm font-bold text-gray-900">Add a review</p>
-        <input type="hidden" id="rv-id">
-        <div><label for="rv-name" class="block text-sm font-semibold text-gray-700 mb-1">Their name</label>
-          <input id="rv-name" maxlength="80" placeholder="e.g. Sarah K." class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
-        <div><label for="rv-detail" class="block text-sm font-semibold text-gray-700 mb-1">About them (optional)</label>
-          <input id="rv-detail" maxlength="80" placeholder="e.g. Leeds, or Wedding, June 2026" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
-        <div><label for="rv-rating" class="block text-sm font-semibold text-gray-700 mb-1">Stars</label>
-          <select id="rv-rating" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm bg-white">
-            <option value="5">★★★★★ 5</option><option value="4">★★★★☆ 4</option><option value="3">★★★☆☆ 3</option><option value="2">★★☆☆☆ 2</option><option value="1">★☆☆☆☆ 1</option><option value="">No stars given</option></select></div>
-        <div><label for="rv-date" class="block text-sm font-semibold text-gray-700 mb-1">When (optional)</label>
-          <input id="rv-date" type="date" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
-        <div><label for="rv-source" class="block text-sm font-semibold text-gray-700 mb-1">Where they left it</label>
-          <select id="rv-source" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm bg-white">
-            <option value="google">Google</option><option value="facebook">Facebook</option><option value="trustpilot">Trustpilot</option><option value="tripadvisor">Tripadvisor</option><option value="checkatrade">Checkatrade</option><option value="yell">Yell</option><option value="direct" selected>Sent to us directly (email, card, message)</option><option value="website">Our website</option><option value="other">Somewhere else</option></select></div>
-        <div><label for="rv-url" class="block text-sm font-semibold text-gray-700 mb-1">Link to it (optional)</label>
-          <input id="rv-url" type="url" placeholder="https://…" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
-        <div class="sm:col-span-2"><label for="rv-body" class="block text-sm font-semibold text-gray-700 mb-1">What they said, word for word</label>
-          <textarea id="rv-body" rows="4" maxlength="2000" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></textarea></div>
-        <p id="rv-error" class="hidden sm:col-span-2 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3"></p>
-        <div class="sm:col-span-2 flex items-center justify-end gap-2">
-          <button type="button" id="rv-cancel" class="btn-secondary border text-sm font-bold px-4 py-2 rounded-md hidden">Cancel</button>
-          <button type="submit" id="rv-save" class="btn-primary text-sm font-bold px-4 py-2 rounded-md">Add review</button></div>
-      </form>
-
-      <div id="rv-list" class="space-y-2 mt-5"></div>
-      <p class="text-xs text-gray-500 mt-3">Hidden reviews aren't quoted on your website but still count in your average, so it stays honest. Tip: you can also paste several reviews into your Website Assistant's chat and it will set them out for you to check.</p>
-    </div>
-
-    <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
-      <h2 class="text-lg font-bold text-gray-900">Ask customers for a review</h2>
-      <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">One friendly email, sent once, after someone's visit or order through your website. They write the review on your own site; you approve it before it appears. Nobody is asked twice in 30 days, and anyone can say "don't ask me again".</p>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-        <label class="sm:col-span-2 inline-flex items-center gap-2 text-sm"><input type="checkbox" id="rq-bookings"> Ask after a booking from my website</label>
-        <div><label for="rq-booking-delay" class="block text-sm font-semibold text-gray-700 mb-1">When</label>
-          <select id="rq-booking-delay" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm bg-white">
-            <option value="2">2 hours after it ends</option><option value="24">The next day</option><option value="48">2 days after</option><option value="72">3 days after</option><option value="168">A week after</option></select></div>
-        <div></div>
-        <label class="sm:col-span-2 inline-flex items-center gap-2 text-sm"><input type="checkbox" id="rq-orders"> Ask after an order from my website</label>
-        <div><label for="rq-order-delay" class="block text-sm font-semibold text-gray-700 mb-1">Days after the order (time for it to arrive)</label>
-          <input id="rq-order-delay" type="number" min="1" max="30" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
-        <div class="sm:col-span-2"><label for="rq-google" class="block text-sm font-semibold text-gray-700 mb-1">Your Google review link (optional)</label>
-          <input id="rq-google" type="url" placeholder="https://g.page/r/…/review" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm">
-          <p class="text-xs text-gray-500 mt-1">If you add it, every customer is also offered it — whatever they thought. (Google doesn't allow sending only happy customers.) Find it in your Google Business Profile under "Ask for reviews".</p></div>
-      </div>
-      <p id="rq-stats" class="text-xs text-gray-500 mt-3"></p>
-      <p id="rq-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3 mt-3"></p>
-      <div class="flex items-center justify-end gap-3 mt-4"><span id="rq-saved" class="text-sm text-emerald-700 font-semibold hidden">Saved</span>
-        <button type="button" id="rq-save" class="btn-primary text-sm font-bold px-4 py-2 rounded-md">Save</button></div>
-    </div>
-  </section>
-
-  <script>
-  (function () {
-    const API = '/.netlify/functions/org-reviews';
-    const panel = document.querySelector('.bizinfo-tab-panel[data-panel="reviews"]');
-    if (!panel) return;
-    const $ = (id) => panel.querySelector('#' + id);
-    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    const SOURCES = { google: 'Google', facebook: 'Facebook', trustpilot: 'Trustpilot', tripadvisor: 'Tripadvisor', checkatrade: 'Checkatrade', yell: 'Yell', direct: 'Sent directly', website: 'Our website', other: 'Elsewhere' };
-    let data = { reviews: [], summary: null, pending: [], settings: {}, asked: { sent: 0, answered: 0 } };
-
-    async function call(method, body, query) {
-      const res = await fetch(API + (query || ''), { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(d.error || 'Something went wrong. Please try again.');
-      return d;
-    }
-    const stars = (n) => n ? `<span class="text-amber-500" aria-label="${n} out of 5 stars">${'★'.repeat(n)}${'☆'.repeat(5 - n)}</span>` : '<span class="text-gray-400">No stars</span>';
-
-    function renderAsking() {
-      const st = data.settings || {};
-      $('rq-bookings').checked = !!st.askAfterBookings; $('rq-orders').checked = !!st.askAfterOrders;
-      $('rq-booking-delay').value = String(st.bookingDelayHours || 24); $('rq-order-delay').value = st.orderDelayDays || 7;
-      $('rq-google').value = st.googleReviewUrl || '';
-      const a = data.asked || {};
-      $('rq-stats').textContent = (st.askAfterBookings || st.askAfterOrders) ? `In the last 30 days: ${a.sent || 0} asked, ${a.answered || 0} answered.` : 'Off — nobody is being asked.';
-      const p = data.pending || [];
-      $('rv-pending').classList.toggle('hidden', !p.length);
-      $('rv-pending').innerHTML = p.length ? `<p class="text-sm font-bold text-amber-900">Waiting for you (${p.length})</p>
-        <p class="text-xs text-amber-900 mt-0.5">Customers sent these from your review emails. Approve to show them. Decline only one that isn't genuine, is offensive or isn't about you — to keep a genuine one off your site, approve it and then hide it (it still counts in your average).</p>
-        ${p.map((r) => `<div class="bg-white border border-amber-200 rounded-lg p-3 mt-2">
-          <div class="flex flex-wrap items-center gap-2 text-sm">${stars(r.rating)} <span class="font-bold text-gray-900">${esc(r.authorName)}</span><span class="text-xs text-gray-500">· ${esc(r.reviewedOn || '')}</span></div>
-          <p class="text-sm text-gray-700 mt-1 whitespace-pre-line">${esc(r.body)}</p>
-          <div class="flex flex-wrap gap-2 mt-2"><button type="button" data-rv-approve="${r.id}" class="btn-primary text-xs font-bold px-2.5 py-1 rounded">Approve</button>
-            <button type="button" data-rv-decline="${r.id}" class="btn-utility text-xs font-bold px-2.5 py-1 rounded">Decline</button></div></div>`).join('')}` : '';
-    }
-    function render() {
-      renderAsking();
-      const s = data.summary;
-      $('rv-summary').textContent = data.reviews.length
-        ? (s ? `Average ${s.average.toFixed(1)} out of 5 from ${s.rated} rated review${s.rated === 1 ? '' : 's'}${data.reviews.length > s.rated ? ` (${data.reviews.length} in all)` : ''}.` : `${data.reviews.length} review${data.reviews.length === 1 ? '' : 's'}, none with stars.`)
-        : '';
-      $('rv-list').innerHTML = data.reviews.length ? data.reviews.map((r) => `
-        <div class="border border-gray-200 rounded-xl p-4 ${r.status === 'hidden' ? 'bg-gray-50' : ''}">
-          <div class="flex flex-wrap items-center gap-2 text-sm">${stars(r.rating)} <span class="font-bold text-gray-900">${esc(r.authorName)}</span>${r.authorDetail ? `<span class="text-gray-500">${esc(r.authorDetail)}</span>` : ''}
-            <span class="text-xs text-gray-500">· ${esc(SOURCES[r.source] || 'Elsewhere')}${r.reviewedOn ? ` · ${esc(r.reviewedOn)}` : ''}</span>
-            ${r.status === 'hidden' ? '<span class="text-xs font-bold text-gray-600 bg-gray-200 rounded px-1.5 py-0.5">Hidden</span>' : ''}</div>
-          <p class="text-sm text-gray-700 mt-1 whitespace-pre-line">${esc(r.body)}</p>
-          <div class="flex flex-wrap gap-2 mt-2">
-            <button type="button" data-rv-edit="${r.id}" class="btn-utility text-xs font-bold px-2.5 py-1 rounded">Edit</button>
-            <button type="button" data-rv-toggle="${r.id}" class="btn-utility text-xs font-bold px-2.5 py-1 rounded">${r.status === 'hidden' ? 'Show on website' : 'Hide from website'}</button>
-            <button type="button" data-rv-delete="${r.id}" class="btn-utility text-xs font-bold px-2.5 py-1 rounded">Delete</button>
-          </div>
-        </div>`).join('') : '<p class="text-sm text-gray-500">No reviews yet. Add your first one above.</p>';
-    }
-    function fill(r) {
-      $('rv-id').value = r ? r.id : '';
-      $('rv-name').value = r ? r.authorName : ''; $('rv-detail').value = r ? (r.authorDetail || '') : '';
-      $('rv-rating').value = r ? (r.rating ? String(r.rating) : '') : '5'; $('rv-date').value = r ? (r.reviewedOn || '') : '';
-      $('rv-source').value = r ? r.source : 'direct'; $('rv-url').value = r ? (r.sourceUrl || '') : ''; $('rv-body').value = r ? r.body : '';
-      $('rv-form-title').textContent = r ? 'Edit review' : 'Add a review';
-      $('rv-save').textContent = r ? 'Save changes' : 'Add review';
-      $('rv-cancel').classList.toggle('hidden', !r);
-      $('rv-error').classList.add('hidden');
-    }
-    async function load() {
-      try { data = await call('GET'); render(); }
-      catch (err) { $('rv-list').innerHTML = `<p class="text-sm text-red-600">${esc(err.message)}</p>`; }
-    }
-
-    $('rv-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const id = Number($('rv-id').value) || null;
-      const body = { authorName: $('rv-name').value, authorDetail: $('rv-detail').value, rating: $('rv-rating').value || null, reviewedOn: $('rv-date').value, source: $('rv-source').value, sourceUrl: $('rv-url').value, body: $('rv-body').value };
-      $('rv-save').disabled = true; $('rv-error').classList.add('hidden');
-      try {
-        if (id) await call('PATCH', { id, ...body }); else await call('POST', body);
-        fill(null); await load();
-      } catch (err) { $('rv-error').textContent = err.message; $('rv-error').classList.remove('hidden'); }
-      finally { $('rv-save').disabled = false; }
-    });
-    panel.addEventListener('click', async (e) => {
-      const t = (sel) => e.target.closest(sel);
-      if (t('#rv-cancel')) { fill(null); return; }
-      if (t('#rq-save')) {
-        $('rq-error').classList.add('hidden'); $('rq-save').disabled = true;
-        try {
-          await call('PUT', { askAfterBookings: $('rq-bookings').checked, askAfterOrders: $('rq-orders').checked, bookingDelayHours: Number($('rq-booking-delay').value), orderDelayDays: Number($('rq-order-delay').value || 7), googleReviewUrl: $('rq-google').value });
-          await load();
-          $('rq-saved').classList.remove('hidden'); setTimeout(() => $('rq-saved').classList.add('hidden'), 2500);
-        } catch (err) { $('rq-error').textContent = err.message; $('rq-error').classList.remove('hidden'); }
-        finally { $('rq-save').disabled = false; }
-        return;
-      }
-      const ap = t('[data-rv-approve]');
-      const dc = t('[data-rv-decline]');
-      if (ap || dc) {
-        if (dc) {
-          const ok = typeof window.confirmModal === 'function' ? await window.confirmModal('Only decline a review that isn\'t genuine, is offensive or isn\'t about your business. It won\'t be shown or counted. Hiding bad reviews to look better is against UK consumer law.', { title: 'Decline this review?', confirmLabel: 'Decline', cancelLabel: 'Keep it' }) : true;
-          if (!ok) return;
-        }
-        try { await call('PATCH', { id: Number((ap || dc).dataset[ap ? 'rvApprove' : 'rvDecline']), decision: ap ? 'approve' : 'decline' }); await load(); }
-        catch (err) { window.alertModal ? window.alertModal(err.message) : null; }
-        return;
-      }
-      const ed = t('[data-rv-edit]');
-      if (ed) { fill(data.reviews.find((r) => r.id === Number(ed.dataset.rvEdit))); $('rv-form').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
-      const tg = t('[data-rv-toggle]');
-      if (tg) {
-        const r = data.reviews.find((x) => x.id === Number(tg.dataset.rvToggle));
-        try { await call('PATCH', { id: r.id, status: r.status === 'hidden' ? 'published' : 'hidden' }); await load(); } catch (err) { window.alertModal ? window.alertModal(err.message) : null; }
-        return;
-      }
-      const del = t('[data-rv-delete]');
-      if (del) {
-        const ok = typeof window.confirmModal === 'function' ? await window.confirmModal('It is removed for good, from your website and your average rating. To stop quoting it but keep it counted, hide it instead.', { title: 'Delete this review?', confirmLabel: 'Delete', cancelLabel: 'Keep it' }) : true;
-        if (!ok) return;
-        try { await call('DELETE', null, `?id=${Number(del.dataset.rvDelete)}`); await load(); } catch (err) { window.alertModal ? window.alertModal(err.message) : null; }
-      }
-    });
-
-    let loaded = false;
-    const maybeLoad = () => { if (loaded || panel.classList.contains('hidden')) return; loaded = true; load(); };
-    new MutationObserver(maybeLoad).observe(panel, { attributes: true, attributeFilter: ['class'] });
-    maybeLoad();
-  })();
-  </script>
-  </div><!-- /panel: reviews -->
 
   <!-- ══ Legal & Billing ════════════════════════════════════════════════════ -->
   <div class="bizinfo-tab-panel hidden" data-panel="legal">

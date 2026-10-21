@@ -11,6 +11,7 @@
 //
 // Schedule: "0 7 * * *" (07:00 UTC daily — just after draft-horizon-fill at 06:00).
 
+import { loadOfferingsText } from '../../src/utils/org-products';
 import { usualPostingFor } from '../../src/utils/campaign-usual-posting';
 import { Handler } from '@netlify/functions';
 import { and, eq, desc, sql, inArray } from 'drizzle-orm';
@@ -59,7 +60,8 @@ export default withLambda(async (event) => {
         const ctx = (assistant.onboardingContext as Record<string, unknown>) ?? {};
 
         // Need offerings to build a conversion post around; otherwise there's nothing to convert toward.
-        const serviceOfferings = (ctx.service_offerings as string) ?? '';
+        // Products come from Business Information ▸ Products & Services (src/utils/org-products.ts).
+        const serviceOfferings = await loadOfferingsText(db, assistant.organisationId, ctx.service_offerings);
         if (!serviceOfferings.trim()) { skipped.no_offerings++; continue; }
 
         // Respect cadence — don't schedule for on-demand assistants.

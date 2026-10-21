@@ -1,4 +1,4 @@
-// src/utils/reviews.ts — Business Information ▸ Reviews: what may be saved, the honest average, and
+// src/utils/reviews.ts — Audience ▸ Reviews: what may be saved, the honest average, and
 // what a website's reviews section needs. db/z-reviews.sql. tests/reviews.test.ts.
 //
 // A review is the customer's words, word for word: the checks here tidy spacing, never wording.
@@ -125,8 +125,8 @@ export async function reviewsForPrompt(db: Db, orgId: number): Promise<string> {
     const pendingLine = waiting.length
         ? ` Waiting for their approval (sent in by customers; for a review_decisions card): ${waiting.map((r) => `reviewId ${r.id} — ${r.authorName}${r.rating ? `, ${r.rating}★` : ''}: "${r.body.replace(/\s+/g, ' ').slice(0, 160)}${r.body.length > 160 ? '…' : ''}"`).join('; ')}.`
         : '';
-    if (!rows.length) return (pendingLine ? pendingLine.trim() + ' ' : '') + 'They have no reviews in Business Information yet — a reviews section needs them (Business Information ▸ Reviews, or they can paste reviews to you and you offer a reviews_add card).';
+    if (!rows.length) return (pendingLine ? pendingLine.trim() + ' ' : '') + 'They have no reviews in Audience ▸ Reviews yet — a reviews section needs them (Audience ▸ Reviews, or they can paste reviews to you and you offer a reviews_add card).';
     const s = reviewSummary(rows);
     const shown = rows.filter((r) => r.status === 'published').slice(0, 30);
-    return `Their reviews (Business Information ▸ Reviews; for a reviews section's reviewIds)${s ? `, average ${s.average} from ${s.rated} rated` : ''}: ${shown.map((r) => `reviewId ${r.id} — ${r.authorName}${r.rating ? `, ${r.rating}★` : ''}, ${r.source}: "${r.body.replace(/\s+/g, ' ').slice(0, 80)}${r.body.length > 80 ? '…' : ''}"`).join('; ')}${rows.length > shown.length ? ` (and ${rows.length - shown.length} more, some hidden)` : ''}.${pendingLine}`;
+    return `Their reviews (Audience ▸ Reviews; for a reviews section's reviewIds)${s ? `, average ${s.average} from ${s.rated} rated` : ''}: ${shown.map((r) => `reviewId ${r.id} — ${r.authorName}${r.rating ? `, ${r.rating}★` : ''}, ${r.source}: "${r.body.replace(/\s+/g, ' ').slice(0, 80)}${r.body.length > 80 ? '…' : ''}"`).join('; ')}${rows.length > shown.length ? ` (and ${rows.length - shown.length} more, some hidden)` : ''}.${pendingLine}`;
 }

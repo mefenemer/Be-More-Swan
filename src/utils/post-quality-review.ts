@@ -246,13 +246,10 @@ export function composeDeclaredFacts(
         if (s) parts.push(`[Edited in: ${where}] ${label}: ${s.slice(0, cap)}`);
     };
 
-    if (hasCatalogue) {
-        parts.push(`[Edited in: ${FACT_LOCATIONS.catalogue}] ${productFacts}`);
-        parts.push(`(The catalogue above is the source of truth for prices and product links. Where the notes below disagree with it, the catalogue wins and the notes are out of date.)`);
-    }
-    add(FACT_LOCATIONS.briefSales,
-        hasCatalogue ? 'Older notes on products, services and prices' : 'Products, services and prices',
-        answers.service_offerings);
+    // Products and prices are kept in ONE place (owner, 2026-10-21). The brief's old free-text box
+    // is read only while the catalogue is empty, as notes waiting to be moved across.
+    if (hasCatalogue) parts.push(`[Edited in: ${FACT_LOCATIONS.catalogue}] ${productFacts}`);
+    else add(FACT_LOCATIONS.briefSales, 'Older notes on products, services and prices (not yet moved into Products & Services)', answers.service_offerings);
     add(FACT_LOCATIONS.briefMessage, 'Standard offer / incentive', answers.incentive);
     add(FACT_LOCATIONS.briefSales, 'Approved answers to objections (including price)', answers.sales_objections);
     add(FACT_LOCATIONS.briefMessage, 'Core message', answers.core_message);

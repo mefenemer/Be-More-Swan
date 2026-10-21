@@ -3,7 +3,7 @@
 // /_form with _k=review or _k=review_stop (the sites host forwards only /_form, /_buy and /_book).
 // tests/review-requests.test.ts.
 //
-// No script. The review they send is saved as 'pending' in Business Information ▸ Reviews and the
+// No script. The review they send is saved as 'pending' in Audience ▸ Reviews and the
 // owner is told; it appears on the site only once the owner approves it. They must agree, in words,
 // that it may be shown with their name. The Google link (if the owner set one) is offered to every
 // customer alike on the thank-you page.
@@ -124,13 +124,13 @@ async function tellOwner(b: ReviewCtx, review: typeof orgReviews.$inferSelect, c
     const stars = review.rating ? `${review.rating}★` : 'no stars';
     await createNotification(b.db, 'site_review_received', {
         userId: owner.userId, assistantId: b.site.aiAssistantId ?? undefined, category: 'suggested_action',
-        context: { assistant: { name: owner.name }, review: { who: review.authorName, stars, next: 'Approve it in Business Information ▸ Reviews to show it on your website.' } },
+        context: { assistant: { name: owner.name }, review: { who: review.authorName, stars, next: 'Approve it in Audience ▸ Reviews to show it on your website.' } },
         metadata: { assistantId: b.site.aiAssistantId, reviewId: review.id },
     }).catch((err) => console.error('[site-review] notification failed', err));
     if (owner.email) {
         await sendEmail({
             to: owner.email, subject: `New review from ${review.authorName} (${stars})`,
-            html: `<p><strong>${esc(review.authorName)}</strong>${customer && customer !== review.authorName ? ` (${esc(customer)})` : ''} left a review — ${esc(stars)}:</p><blockquote>${esc(review.body).replace(/\n/g, '<br>')}</blockquote><p>It isn't on your website yet. Approve it in Business Information ▸ Reviews.</p>`,
+            html: `<p><strong>${esc(review.authorName)}</strong>${customer && customer !== review.authorName ? ` (${esc(customer)})` : ''} left a review — ${esc(stars)}:</p><blockquote>${esc(review.body).replace(/\n/g, '<br>')}</blockquote><p>It isn't on your website yet. Approve it in Audience ▸ Reviews.</p>`,
         }).catch((err: unknown) => console.error('[site-review] owner email failed', err instanceof Error ? err.message : err));
     }
 }

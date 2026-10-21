@@ -108,7 +108,7 @@ check('the honest average, and in the search data as an AggregateRating', () => 
 check('with no reviews it is absent live and explained in the preview', () => {
     const empty = { ...live, reviews: { summary: null, byId: {}, latest: [] } };
     assert.ok(!renderSitePage(site({}), '/', empty).html.includes('id="r1"'));
-    assert.ok(renderSitePage(site({}), '/', { ...empty, preview: true }).html.includes('Business Information ▸ Reviews'));
+    assert.ok(renderSitePage(site({}), '/', { ...empty, preview: true }).html.includes('Audience ▸ Reviews'));
 });
 
 console.log('\nDrafts and wiring');
@@ -119,9 +119,9 @@ check('a whole-site draft never adds a reviews section', () => {
     ] }] }, site({}), 5);
     assert.ok(d && !d.definition.pages.some((p) => p.sections.some((s) => s.type === 'reviews')));
 });
-check('Business Information, the API, the editor, the chat and both renderers are wired', () => {
-    const ui = read('assets.html');
-    assert.ok(ui.includes('data-tab="reviews">Reviews</button>') && ui.includes("const API = '/.netlify/functions/org-reviews'") && ui.includes('id="rv-body"'));
+check('Audience ▸ Reviews, the API, the editor, the chat and both renderers are wired', () => {
+    const ui = read('audience.html');
+    assert.ok(ui.includes('data-aud-tab="reviews">Reviews</button>') && ui.includes("const API = '/.netlify/functions/org-reviews'") && ui.includes('id="rv-body"'));
     const api = read('netlify/functions/org-reviews.ts');
     assert.ok(api.includes('requireTenant') && api.includes('eq(orgReviews.organisationId, orgId)'));
     const editor = read('src/components/assistant-site-editor.js');

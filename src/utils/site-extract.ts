@@ -542,3 +542,242 @@ export function describeChanges(changes: SiteChange[]): string[] {
         return `${label} removed: "${c.before}"`;
     });
 }
+
+// ── Import my current site (site-import.ts) ───────────────────────────────────────────────────
+// A second reading of the same HTML, for a different job: not "what would a buyer judge" but "what
+// is on this page, in order, so it can become sections of the owner's new site". Still PURE, still
+// fed by the one fetcher (site-fetch.ts). It returns the page's own words and pictures as BLOCKS —
+// never HTML or styles: nothing of the old site's markup can reach the new one.
+
+export type ImportBlock =
+    | { kind: 'heading'; level: number; text: string }
+    | { kind: 'text'; text: string }
+    | { kind: 'item'; text: string }
+    | { kind: 'quote'; text: string }
+    | { kind: 'button'; text: string; href: string | null }
+    | { kind: 'image'; src: string; alt: string; altFromSite: boolean };
+
+export interface ImportPage {
+    url: string;
+    /** <title>, og:title — for the page's search title. */
+    title: string | null;
+    description: string | null;
+    /** The site's menu, same host only, in menu order. */
+    navLinks: SiteLink[];
+    blocks: ImportBlock[];
+    /** Words in the blocks (what was actually read). */
+    words: number;
+    contact: { emails: string[]; phones: string[]; address: string | null; locality: string | null };
+    siteName: string | null;
+    logo: { src: string; alt: string } | null;
+    hasForm: boolean;
+    /** Which builder made the page, from its generator tag or tell-tale markup. */
+    builder: 'wix' | 'squarespace' | 'wordpress' | 'webflow' | 'square' | 'other';
+}
+
+export const IMPORT_LIMITS = { blocks: 160, images: 40, navLinks: 20 } as const;
+
+/** Lines every builder adds that are not the owner's content (Wix's "top of page", cookie buttons…). */
+const IMPORT_NOISE = /^(top of page|bottom of page|skip to (main )?content|use tab to navigate.*|powered by .*|created with .*|proudly created with .*|©.*|copyright\b.*|all rights reserved\.?|back to top|scroll( down)?|menu|close|open menu|search|log ?in|sign ?in|cart|basket|(view )?cart \(\d+\)|\d+ items?|accept( all)?( cookies)?|decline|reject( all)?|cookie (settings|policy|preferences)|manage (cookies|preferences)|share|tweet|pin it|previous|next|play video|0)$/i;
+
+const PRICE_TEST = new RegExp(PRICE.source, 'i');
+/** Whether a piece of text states a price. Prices live in Business Information, never on the site's text. */
+export function statesPrice(text: string): boolean { return PRICE_TEST.test(text); }
+
+/** A builder's resized picture → the original (Wix's /v1/fill/…, Squarespace's ?format=300w). */
+export function fullSizeImageUrl(src: string): string {
+    try {
+        const u = new URL(src);
+        if (/(^|\.)wixstatic\.com$/.test(u.hostname)) {
+            // Wix serves any size of the original from one address; ask for a sensible one, not the camera's.
+            const m = u.pathname.match(/^(\/media\/[^/]+)\/v1\/[a-z]+\/[^/]+\/(.+)$/);
+            if (m) return `${u.origin}${m[1]}/v1/fit/w_1600,h_1600,q_85/${m[2]}`;
+        }
+        if (/squarespace-cdn\.com$/.test(u.hostname)) { u.searchParams.set('format', '1500w'); return u.toString(); }
+        return u.toString();
+    } catch { return src; }
+}
+
+function largestFromSrcset(srcset: string | undefined): string | null {
+    if (!srcset) return null;
+    let best: { url: string; w: number } | null = null;
+    for (const part of srcset.split(',')) {
+        const [url, size] = part.trim().split(/\s+/);
+        if (!url) continue;
+        const w = size ? parseFloat(size) * (size.endsWith('x') ? 1000 : 1) : 0;
+        if (!best || w > best.w) best = { url, w };
+    }
+    return best?.url ?? null;
+}
+
+/** A file name or "image" is not a description. */
+function realAlt(alt: string | undefined): string {
+    const a = clean(alt);
+    if (!a || a.length < 3) return '';
+    if (/\.(jpe?g|png|webp|gif|svg|heic)$/i.test(a) || /^(img|image|dsc|photo|pic|untitled|screenshot)[\s_-]?\d*$/i.test(a) || /^[\w-]{16,}$/.test(a)) return '';
+    return a;
+}
+
+function detectBuilder(html: string, $: cheerio.CheerioAPI): ImportPage['builder'] {
+    const gen = ($('meta[name="generator"]').attr('content') ?? '').toLowerCase();
+    if (gen.includes('wix') || /static\.wixstatic\.com|wix-thunderbolt/.test(html)) return 'wix';
+    if (gen.includes('squarespace') || /squarespace-cdn\.com|static1\.squarespace\.com/.test(html)) return 'squarespace';
+    if (gen.includes('square online') || /editmysite\.com|square-online/.test(html)) return 'square';
+    if (gen.includes('wordpress') || /\/wp-content\//.test(html)) return 'wordpress';
+    if (gen.includes('webflow') || /webflow\.(js|css)|data-wf-page/.test(html)) return 'webflow';
+    return 'other';
+}
+
+/** The owner's page as ordered blocks of their own words and pictures. `url` is the FINAL url. */
+export function readImportPage(html: string, url: string): ImportPage {
+    const $ = cheerio.load(html);
+    const base = safeUrl(url);
+    const builder = detectBuilder(html, $);
+
+    // Facts from structured data, before scripts go.
+    let siteName: string | null = null;
+    let ldPhone: string | null = null;
+    let ldEmail: string | null = null;
+    let address: string | null = null;
+    let locality: string | null = null;
+    walkLd(readJsonLd($), (o) => {
+        const t = String(Array.isArray(o['@type']) ? o['@type'][0] : o['@type'] ?? '');
+        if (!siteName && typeof o.name === 'string' && t && !/^(WebPage|WebSite|BreadcrumbList|ListItem|Question|Answer|ImageObject|PostalAddress|Offer|Product|Review|Rating|AggregateRating|Person)$/.test(t)) siteName = clean(o.name);
+        if (!ldPhone && typeof o.telephone === 'string') ldPhone = clean(o.telephone);
+        if (!ldEmail && typeof o.email === 'string') ldEmail = clean(o.email).replace(/^mailto:/i, '');
+        if (t === 'PostalAddress' && !address) {
+            const parts = [o.streetAddress, o.addressLocality, o.addressRegion, o.postalCode].map((x) => (typeof x === 'string' ? clean(x) : '')).filter(Boolean);
+            if (parts.length >= 2) address = parts.join(', ');
+            if (typeof o.addressLocality === 'string') locality = clean(o.addressLocality) || null;
+        }
+    });
+    siteName = siteName || orNull(clean($('meta[property="og:site_name"]').attr('content')));
+
+    $('script, style, noscript, template, svg, iframe, link').remove();
+    // Cookie and consent banners are the builder's, not the owner's.
+    $('[id*="cookie" i], [class*="cookie" i], [id*="consent" i], [class*="consent" i]').remove();
+
+    const emails = new Set<string>();
+    const phones = new Set<string>();
+    if (ldEmail) emails.add(ldEmail);
+    if (ldPhone) phones.add(ldPhone);
+    $('a[href^="mailto:" i]').each((_, el) => { const e = clean(($(el).attr('href') ?? '').slice(7).split('?')[0]); if (/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(e)) emails.add(decodeURIComponent(e).toLowerCase()); });
+    $('a[href^="tel:" i]').each((_, el) => {
+        const p = clean(decodeURIComponent(($(el).attr('href') ?? '').slice(4)));
+        // "01423 000000" and "01423000000" are one number.
+        if (/\d{6,}/.test(p.replace(/\D/g, '')) && ![...phones].some((x) => x.replace(/\D/g, '') === p.replace(/\D/g, ''))) phones.add(p);
+    });
+    if (!address) {
+        const a = clean($('address').first().text());
+        if (a.length >= 8 && a.length <= 200) address = a;
+    }
+
+    // The menu: links in <nav> or the header, same host, in order.
+    const navLinks: SiteLink[] = [];
+    const seenNav = new Set<string>();
+    $('nav a[href], header a[href], [role="navigation"] a[href]').each((_, el) => {
+        if (navLinks.length >= IMPORT_LIMITS.navLinks) return;
+        const href = absolutise($(el).attr('href') ?? '', base);
+        if (!href || !base) return;
+        let u: URL;
+        try { u = new URL(href); } catch { return; }
+        if (u.host.replace(/^www\./, '') !== base.host.replace(/^www\./, '')) return;
+        u.hash = '';
+        const key = u.toString();
+        const text = clean($(el).text()) || clean($(el).attr('aria-label'));
+        if (seenNav.has(key) || !text || text.length > 40) return;
+        seenNav.add(key);
+        navLinks.push({ text, href: key });
+    });
+
+    // The logo: the header's picture that says it is one, else the header's first picture.
+    let logo: ImportPage['logo'] = null;
+    const headerImgs = $('header img, [id*="header" i] img').toArray();
+    const logoEl = headerImgs.find((el) => /logo/i.test(`${$(el).attr('class') ?? ''} ${$(el).attr('id') ?? ''} ${$(el).attr('alt') ?? ''} ${$(el).attr('src') ?? ''}`)) ?? headerImgs[0];
+    if (logoEl) {
+        const src = absolutise(largestFromSrcset($(logoEl).attr('srcset')) ?? $(logoEl).attr('src') ?? $(logoEl).attr('data-src') ?? '', base);
+        if (src && /^https?:/.test(src)) logo = { src: fullSizeImageUrl(src), alt: realAlt($(logoEl).attr('alt')) || `${siteName ?? 'Business'} logo` };
+    }
+
+    const hasForm = $('form').length > 0;
+    // The page's own content: no menus, header, footer or forms (a form's labels are not content).
+    // A <header> inside the main content or an article is that page's own title area (WordPress puts
+    // the H1 there), so only the SITE's header and footer go.
+    $('header, footer').filter((_, el) => $(el).closest('main, article').length === 0).remove();
+    $('nav, form, [role="navigation"], [role="banner"], [role="contentinfo"], #SITE_HEADER, #SITE_FOOTER').remove();
+    const root = $('main').length ? $('main').first() : $('body');
+
+    const blocks: ImportBlock[] = [];
+    const seenText = new Set<string>();
+    const seenImg = new Set<string>();
+    let lastHeading: string | null = null;
+    const addText = (kind: 'text' | 'item' | 'quote', raw: string) => {
+        const text = clean(raw);
+        if (!text || text.length < 2 || IMPORT_NOISE.test(text) || !/[a-z0-9]/i.test(text)) return;
+        const k = normaliseText(text);
+        if (seenText.has(k)) return;   // builders draw a block twice (desktop and phone layouts)
+        seenText.add(k);
+        blocks.push({ kind, text });
+    };
+    const addImage = (el: AnyNode) => {
+        const $el = $(el);
+        const w = Number($el.attr('width')), h = Number($el.attr('height'));
+        if ((w && w < 80) || (h && h < 80)) return;   // icons and tracking pixels
+        const raw = largestFromSrcset($el.attr('srcset') ?? $el.attr('data-srcset')) ?? $el.attr('data-src') ?? $el.attr('data-image') ?? $el.attr('src') ?? '';
+        const abs = absolutise(raw, base);
+        if (!abs || !/^https?:/.test(abs) || /\.svg(\?|$)/i.test(abs)) return;
+        const src = fullSizeImageUrl(abs);
+        if (seenImg.has(src) || seenImg.size >= IMPORT_LIMITS.images) return;
+        seenImg.add(src);
+        const alt = realAlt($el.attr('alt'));
+        blocks.push({ kind: 'image', src, alt: alt || lastHeading || siteName || 'A picture from our website', altFromSite: !!alt });
+    };
+    const walk = (node: AnyNode) => {
+        if (blocks.length >= IMPORT_LIMITS.blocks || node.type !== 'tag') return;
+        const name = node.name;
+        if (/^h[1-6]$/.test(name)) {
+            const t = blockText(node);
+            if (t && !IMPORT_NOISE.test(t) && /[a-z0-9]/i.test(t)) {
+                const k = normaliseText(t);
+                if (!seenText.has(k)) { seenText.add(k); blocks.push({ kind: 'heading', level: Number(name[1]), text: t }); }
+                lastHeading = t.slice(0, LIMITS_ALT);
+            }
+            $(node).find('img').each((_, im) => addImage(im));
+            return;
+        }
+        if (name === 'img') { addImage(node); return; }
+        if (name === 'blockquote') { addText('quote', blockText(node)); return; }
+        if (name === 'li') { addText('item', blockText(node)); $(node).find('img').each((_, im) => addImage(im)); return; }
+        if (name === 'a' || name === 'button') {
+            const $el = $(node);
+            const text = clean($el.text()) || clean($el.attr('aria-label'));
+            const cls = `${$el.attr('class') ?? ''} ${$el.attr('id') ?? ''}`;
+            if (text && text.length <= 40 && (name === 'button' || $el.attr('role') === 'button' || BUTTONISH.test(cls))) {
+                const href = absolutise($el.attr('href') ?? '', base);
+                if (!IMPORT_NOISE.test(text)) blocks.push({ kind: 'button', text, href });
+                $el.find('img').each((_, im) => addImage(im));
+                return;
+            }
+        }
+        const ownText = node.children.some((c) => c.type === 'text' && /\S{2,}/.test((c as unknown as { data: string }).data));
+        const hasBlockChild = node.children.some((c) => c.type === 'tag' && (BLOCK_TAGS.has(c.name) || c.name === 'img'));
+        if (['p', 'figcaption', 'dd', 'dt', 'td', 'th', 'summary'].includes(name) || (ownText && !hasBlockChild)) {
+            addText('text', blockText(node));
+            $(node).find('img').each((_, im) => addImage(im));
+            return;
+        }
+        for (const c of node.children) walk(c);
+    };
+    for (const c of root.get(0)?.children ?? []) walk(c);
+
+    const words = blocks.reduce((n, b) => n + (b.kind === 'image' ? 0 : b.text.split(' ').filter((w) => /[a-z0-9]/i.test(w)).length), 0);
+    return {
+        url,
+        title: orNull(clean($('title').first().text())) ?? orNull(clean($('meta[property="og:title"]').attr('content'))),
+        description: orNull(clean($('meta[name="description"]').attr('content'))),
+        navLinks, blocks, words,
+        contact: { emails: [...emails].slice(0, 3), phones: [...phones].slice(0, 3), address, locality },
+        siteName, logo, hasForm, builder,
+    };
+}
+const LIMITS_ALT = 150;

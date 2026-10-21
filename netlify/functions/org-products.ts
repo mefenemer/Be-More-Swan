@@ -5,6 +5,9 @@
 // GET                         → { products: [...], offer: { offers, answered } }   every row, active first,
 //                                                      in the business's order; offer = which kinds of field
 //                                                      the tab shows (src/utils/offer-profile.ts)
+// POST   { action: 'split_notes', text } → { items: [{ name, price, kind }] }   a PREVIEW of the old
+//                                                      free-text notes as rows (offerings-import.ts) —
+//                                                      nothing is saved; each accepted row is a normal POST
 // PATCH  { offer: [kinds] }    → { offer }             the owner's answer to "What does your business offer?"
 //
 // Prices are STRUCTURED (db/z-product-pricing.sql, src/utils/product-price.ts): priceType + priceAmount
@@ -29,6 +32,7 @@ import { cleanDeposit, cleanPrice, priceFromText } from '../../src/utils/product
 import { cleanAllergens, cleanDietary } from '../../src/utils/product-dietary';
 import { siteAssetUrl } from '../../src/utils/site-hosting';
 import { cleanOffers, loadOfferProfile, saveOfferProfile } from '../../src/utils/offer-profile';
+import { splitOfferingNotes } from '../../src/utils/offerings-import';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { contentAssets } from '../../db/schema';
 
@@ -163,6 +167,10 @@ export default withLambda(async (event) => {
         if (method !== 'DELETE') {
             try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON.' }); }
             if (!body || typeof body !== 'object' || Array.isArray(body)) return json(400, { error: 'Invalid body.' });
+        }
+
+        if (method === 'POST' && body.action === 'split_notes') {
+            return json(200, { items: splitOfferingNotes(body.text) });
         }
 
         if (method === 'POST') {

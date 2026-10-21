@@ -8,8 +8,11 @@ import { resolveBaseUrl } from './base-url';
 
 const DISPATCH_TIMEOUT_MS = 5_000;
 
-/** Resolves true when the platform accepted the job. Never throws. `request` is the user's brief. */
-export async function triggerSiteDraft(siteId: number, request: string | null): Promise<boolean> {
+/**
+ * Resolves true when the platform accepted the job. Never throws. `request` is the user's brief;
+ * `job.import` runs "Import my current site" instead (what to read is in its site_imports row).
+ */
+export async function triggerSiteDraft(siteId: number, request: string | null, job: { import?: boolean } = {}): Promise<boolean> {
     const secret = process.env.CRON_TRIGGER_SECRET;
     const baseUrl = resolveBaseUrl();
     if (!secret || !baseUrl) {
@@ -22,7 +25,7 @@ export async function triggerSiteDraft(siteId: number, request: string | null): 
         const res = await fetch(`${baseUrl}/.netlify/functions/draft-site-background`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secret}` },
-            body: JSON.stringify({ siteId, request }),
+            body: JSON.stringify({ siteId, request, import: job.import === true }),
             signal: controller.signal,
         });
         if (res.status !== 202 && !res.ok) {

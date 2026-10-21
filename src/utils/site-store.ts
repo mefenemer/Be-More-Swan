@@ -34,6 +34,7 @@ import { buildFillPrompt, siteFromFillReply } from './site-template-fill';
 import { KEEP_VERSIONS, sameDefinition, siteOrigin, siteSlugProblem, slugFromHost } from './site-hosting';
 import { assemblePlacement, buildPlacementPrompt, MAX_WORDS_CHARS, readPlan, tidyWords, wordsToBlocks, type WordsPlan, type WordsProposal } from './site-words';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
+import { describeImportForChat, importView, loadImport } from './site-import-store';
 
 type Db = ReturnType<typeof getDb>;
 export type SiteRow = typeof sites.$inferSelect;
@@ -447,5 +448,6 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
     if (Number(newEnquiries)) lines.push(`${newEnquiries} enquiry message(s) from the website's contact form are waiting on the Enquiries tab. You cannot read or answer them — the owner replies by email.`);
     const holes = placeholdersIn(d);
     if (holes.length) lines.push(`Parts still in [square brackets] for the owner to fill in: ${holes.slice(0, 8).map((h) => `${h.text} (${h.pageTitle})`).join(', ')}.`);
+    lines.push(describeImportForChat(importView(await loadImport(db, site.id)), drafting));
     return lines.join('\n');
 }

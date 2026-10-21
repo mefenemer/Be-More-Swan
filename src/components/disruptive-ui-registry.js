@@ -1866,6 +1866,97 @@
   }
   register('site_draft_request', renderSiteDraftRequestCard);
 
+  // { type: 'site_import_request', url } — "Import my current site" (sites.ts `import`, the same action
+  // as the Website tab's "Read my site"). The owner confirms the site is theirs and chooses what happens
+  // to its pictures HERE — the assistant never decides either. It makes a draft to review; nothing is
+  // replaced until they choose "Use this as my draft".
+  function renderSiteImportRequestCard(ui, esc) {
+    const url = typeof ui.url === 'string' ? ui.url.replace(/\s+/g, '').slice(0, 500) : '';
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    const name = `si-pics-${Math.random().toString(36).slice(2, 8)}`;
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Import your current site</p>
+      <label class="block text-xs font-bold text-gray-700 mt-2">Address
+        <input data-si-url class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1" value="${esc(url)}" placeholder="yourbusiness.co.uk"></label>
+      <fieldset class="mt-2"><legend class="text-xs font-bold text-gray-700">Its pictures</legend>
+        <label class="flex items-start gap-2 text-xs text-gray-700 mt-1"><input type="radio" name="${name}" value="copy"> <span>Copy them into my picture library and use them</span></label>
+        <label class="flex items-start gap-2 text-xs text-gray-700 mt-1"><input type="radio" name="${name}" value="skip"> <span>Leave them out</span></label>
+      </fieldset>
+      <label class="flex items-start gap-2 text-xs text-gray-700 mt-2"><input type="checkbox" data-si-own> <span>This website belongs to my business, and I have the right to use its words and pictures.</span></label>
+      <p class="text-xs text-gray-600 mt-2">Your own words are laid out unchanged; prices aren't copied (they belong in Business Information). You'll see the result before it replaces anything. Uses 1 task, only if a draft is made.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-si-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Read my site</button>
+        <button type="button" data-si-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-si-status></p>`;
+    const status = el.querySelector('[data-si-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button, input').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-si-cancel]')) { setBusy(true); say('Not started.'); return; }
+      if (!e.target.closest('[data-si-go]')) return;
+      const address = el.querySelector('[data-si-url]').value.trim();
+      const pick = el.querySelector(`input[name="${name}"]:checked`);
+      if (!address) { say('Type your website\'s address.', 'error'); return; }
+      if (!pick) { say('Choose what happens to your pictures.', 'error'); return; }
+      if (!el.querySelector('[data-si-own]').checked) { say('Tick the box to say this website is yours — only import your own site.', 'error'); return; }
+      setBusy(true);
+      say('Starting…');
+      el.dispatchEvent(new CustomEvent('site:import', {
+        bubbles: true,
+        detail: {
+          url: address, pictures: pick.value, ownSite: true,
+          respond({ ok, error }) {
+            if (!ok) { setBusy(false); say(error || 'The import couldn\'t be started.', 'error'); return; }
+            say('Reading your site — the imported draft appears on the Website tab in a minute or two, and you\'ll be notified. Nothing has changed yet.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('site_import_request', renderSiteImportRequestCard);
+
+  // { type: 'site_import_decision', decision: 'use' | 'discard' } — the owner's decision on an imported
+  // draft (sites.ts import_accept / import_discard, the Website tab's two buttons).
+  function renderSiteImportDecisionCard(ui) {
+    const use = ui.decision === 'use';
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Your imported site</p>
+      <p class="text-xs text-gray-700 mt-2">${use
+        ? 'Replace your current draft with the imported pages. Your design stays, and nothing goes live until you publish.'
+        : 'Throw the imported pages away. Your current draft stays as it is; any copied pictures stay in your library.'}</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-sid-go class="${use ? 'btn-primary' : 'btn-destructive'} px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">${use ? 'Use this as my draft' : 'Discard it'}</button>
+        <button type="button" data-sid-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sid-status></p>`;
+    const status = el.querySelector('[data-sid-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-sid-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-sid-go]')) return;
+      setBusy(true);
+      say(use ? 'Using it…' : 'Discarding…');
+      el.dispatchEvent(new CustomEvent('site:importDecision', {
+        bubbles: true,
+        detail: {
+          decision: use ? 'use' : 'discard',
+          respond({ ok, error }) {
+            if (!ok) { setBusy(false); say(error || 'That didn\'t work — nothing changed.', 'error'); return; }
+            say(use ? 'Done — the imported pages are your draft. See the preview on the Website tab.' : 'Discarded. Your draft is unchanged.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('site_import_decision', renderSiteImportDecisionCard);
+
   // { type: 'site_words', pageId, attachmentId?, quote?, note? } — the owner's OWN words onto a page,
   // word for word (sites.ts `words` → site-words.ts). The card never carries their words for the
   // model to retype: it names an attached document, or quotes their own message (checked server-side).
@@ -1956,7 +2047,7 @@
       ${typeof settings.whatsapp === 'string' && settings.whatsapp.trim() ? `<p class="text-xs text-gray-700 mt-1">WhatsApp: ${esc(settings.whatsapp)}</p>` : ''}
       ${settings.mode ? `<p class="text-xs text-gray-700 mt-2">${settings.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}</p>` : ''}
       ${section ? `<p class="text-xs text-gray-700 mt-1">Adds a ${esc(kinds[section.kind] || 'booking')} section to your site.</p>` : ''}
-      <p class="text-xs text-gray-600 mt-2">Saved to Business Information ▸ Hours, location &amp; bookings, where you can change it any time. Uses no tasks.</p>
+      <p class="text-xs text-gray-600 mt-2">Saved to Business Information (Hours &amp; Location, and Bookings), where you can change it any time. Uses no tasks.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-bs-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Set up bookings</button>
         <button type="button" data-bs-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
@@ -1988,7 +2079,15 @@
   // { type: 'offer_profile', summary, offers } — "What does your business offer?" in Business
   // Information ▸ Products & Services (src/utils/offer-profile.ts), after the owner's click:
   // org-products.ts PATCH { offer }, the same call as the tab's tick boxes.
-  const OFFER_LABELS = { bookings: 'People book time with us (appointments, classes or tables)', menu: 'We serve food or drink' };
+  // Same wording and order as src/utils/offer-profile.ts OFFER_LABELS.
+  const OFFER_LABELS = {
+    products: 'We sell products (physical or digital)',
+    services: 'We provide services (consulting, trades, coaching, agencies)',
+    subscriptions: 'We sell software or subscriptions',
+    bookings: 'People book time with us (appointments, classes, tables or events)',
+    visits: 'Customers visit us (a shop, venue or studio)',
+    menu: 'We serve food or drink',
+  };
   function renderOfferProfileCard(ui, esc) {
     const offers = Array.isArray(ui.offers) ? ui.offers.filter((k) => OFFER_LABELS[k]) : [];
     const el = document.createElement('div');
@@ -2051,7 +2150,7 @@
 
   // { type: 'reviews_add', summary, reviews: [{ authorName, authorDetail, rating, body, source, reviewedOn }] }
   // Reviews the owner pasted, set out for them to check WORD FOR WORD before they are saved to
-  // Business Information ▸ Reviews (org-reviews.ts, the same checks as the form there).
+  // Audience ▸ Reviews (org-reviews.ts, the same checks as the form there).
   const RV_SOURCES = { google: 'Google', facebook: 'Facebook', trustpilot: 'Trustpilot', tripadvisor: 'Tripadvisor', checkatrade: 'Checkatrade', yell: 'Yell', direct: 'Sent directly', website: 'Their website', other: 'Elsewhere' };
   function renderReviewsAddCard(ui, esc) {
     const reviews = (Array.isArray(ui.reviews) ? ui.reviews : []).filter((r) => r && typeof r === 'object' && typeof r.body === 'string' && r.body.trim()).slice(0, 50)
@@ -2065,7 +2164,7 @@
         <div class="bg-white border border-gray-200 rounded-lg p-3">
           <p class="text-xs"><span class="text-amber-500">${r.rating ? '★'.repeat(r.rating) + '☆'.repeat(5 - r.rating) : 'No stars'}</span> <strong>${esc(r.authorName || '(no name)')}</strong>${r.authorDetail ? ` · ${esc(r.authorDetail)}` : ''} <span class="text-gray-500">· ${esc(RV_SOURCES[r.source])}${r.reviewedOn ? ` · ${esc(r.reviewedOn)}` : ''}</span></p>
           <p class="text-xs text-gray-700 mt-1 whitespace-pre-line">${esc(r.body)}</p></div>`).join('')}</div>
-      <p class="text-xs text-gray-600 mt-2">Check each one matches what the customer wrote, word for word. They're saved to Business Information ▸ Reviews, where you can edit or hide them.</p>
+      <p class="text-xs text-gray-600 mt-2">Check each one matches what the customer wrote, word for word. They're saved to Audience ▸ Reviews, where you can edit or hide them.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-rv-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${reviews.length ? '' : 'disabled'}>Add ${reviews.length} review${reviews.length === 1 ? '' : 's'}</button>
         <button type="button" data-rv-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
@@ -2085,7 +2184,7 @@
           reviews,
           respond({ ok, error }) {
             if (!ok) { setBusy(false); say(error || 'They couldn\'t be saved — nothing was added.', 'error'); return; }
-            say('Added to Business Information ▸ Reviews.');
+            say('Added to Audience ▸ Reviews.');
           },
         },
       }));
@@ -2142,7 +2241,7 @@
 
   // { type: 'review_decisions', summary, decisions: [{ reviewId, decision: approve|decline, reason }] }
   // Approve / decline reviews customers sent in — org-reviews.ts PATCH { id, decision }, the same as
-  // Business Information ▸ Reviews. Decline is only for a review that isn't genuine, is offensive or
+  // Audience ▸ Reviews. Decline is only for a review that isn't genuine, is offensive or
   // isn't about the business; the server refuses one already dealt with.
   const RD_REASON = { not_genuine: 'not genuine', offensive: 'offensive', not_about_us: 'not about you' };
   function renderReviewDecisionsCard(ui, esc) {
@@ -2175,7 +2274,7 @@
           decisions,
           respond({ ok, error, done }) {
             if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved.', 'error'); return; }
-            say(`Done — ${done} review${done === 1 ? '' : 's'} updated in Business Information ▸ Reviews.`);
+            say(`Done — ${done} review${done === 1 ? '' : 's'} updated in Audience ▸ Reviews.`);
           },
         },
       }));

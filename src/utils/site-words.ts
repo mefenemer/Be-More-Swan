@@ -165,7 +165,7 @@ export interface WordsPreviewItem { label: string; text: string; }
 export interface WordsProposal { summary: string; ops: SiteOperation[]; preview: WordsPreviewItem[]; }
 
 /** Text-section bodies of at most LIMITS.textBody, split between blocks (never inside one, unless one block alone is too long). */
-function chunkBodies(blocks: string[]): string[] {
+export function chunkBodies(blocks: string[]): string[] {
     const out: string[] = [];
     let cur = '';
     const push = () => { if (cur) out.push(cur); cur = ''; };

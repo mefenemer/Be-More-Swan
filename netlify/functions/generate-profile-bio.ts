@@ -9,6 +9,7 @@
 //
 // Migration-free: everything lives in the existing onboarding_context JSONB column.
 
+import { loadOfferingsText } from '../../src/utils/org-products';
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
 import { logMessageUsage } from '../../src/utils/ai-usage';
@@ -91,7 +92,8 @@ export default withLambda(async (event) => {
     const contentPillars = Array.isArray(onboarding.content_pillars)
         ? (onboarding.content_pillars as string[]).join(', ')
         : (onboarding.content_pillars as string) ?? '';
-    const serviceOfferings = (onboarding.service_offerings as string) ?? '';
+    // Business Information ▸ Products & Services — the one place products and prices live.
+    const serviceOfferings = await loadOfferingsText(db, organisationId, onboarding.service_offerings);
     const existingBio = (onboarding.business_bio as string) ?? '';
 
     const blueprintContext = [

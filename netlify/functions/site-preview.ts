@@ -16,6 +16,7 @@ import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
 import { renderSitePage } from '../../src/utils/site-render';
 import { applySiteOperation } from '../../src/utils/site-definition';
 import { definitionOf, maxPagesFor } from '../../src/utils/site-store';
+import { importedDefinition } from '../../src/utils/site-import-store';
 import { loadSiteForms } from '../../src/utils/site-forms';
 import { loadSiteProducts } from '../../src/utils/site-shop';
 import { loadSiteReviews } from '../../src/utils/reviews';
@@ -57,13 +58,19 @@ export default withLambda(async (event) => {
     // The template gallery: this site AS IF the template were applied — with the business's own name,
     // town, logo and switched-on features — never saved (site-templates.ts, the editor's gallery).
     const templateId = typeof q.template === 'string' ? q.template : null;
-    if (templateId) {
+    // "Import my current site": the imported draft waiting for their review, never saved by looking.
+    const fromImport = q.import === '1';
+    if (fromImport) {
+        const imported = await importedDefinition(db, row.site.id, maxPages);
+        if (!imported) return page(404, '<p>There\'s no imported site to show.</p>');
+        definition = imported;
+    } else if (templateId) {
         const tried = applySiteOperation(definition, { op: 'apply_template', templateId, mode: q.mode === 'design' ? 'design' : 'full', keepColours: q.keepColours === '1' }, { maxPages });
         if (!tried.ok) return page(404, '<p>That template isn\'t available.</p>');
         definition = tried.definition;
     }
     const path = typeof q.path === 'string' && q.path.startsWith('/') ? q.path : '/';
-    const self = (p: string) => `/.netlify/functions/site-preview?assistantId=${id}${templateId ? `&template=${encodeURIComponent(templateId)}${q.mode === 'design' ? '&mode=design' : ''}${q.keepColours === '1' ? '&keepColours=1' : ''}` : ''}&path=${encodeURIComponent(p)}`;
+    const self = (p: string) => `/.netlify/functions/site-preview?assistantId=${id}${fromImport ? '&import=1' : ''}${templateId ? `&template=${encodeURIComponent(templateId)}${q.mode === 'design' ? '&mode=design' : ''}${q.keepColours === '1' ? '&keepColours=1' : ''}` : ''}&path=${encodeURIComponent(p)}`;
     const rendered = renderSitePage(definition, path, {
         origin: 'https://preview.invalid',
         preview: true,

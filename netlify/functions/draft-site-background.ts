@@ -1,12 +1,14 @@
 // netlify/functions/draft-site-background.ts
 // The Website Assistant's draft worker: writes a whole site with the model (src/utils/site-store.ts
-// runSiteDraft). Woken by sites.ts `draft` through triggerSiteDraft. A background function because a
+// runSiteDraft), or — with `import: true` — reads their current site into a draft for review
+// (src/utils/site-import-store.ts runSiteImport). Woken by sites.ts `draft` through triggerSiteDraft. A background function because a
 // whole site is one long model call — past the 26 s a synchronous function gets (memory:
 // blog-ai-draft-never-worked-in-prod). runSiteDraft never throws and always ends the draft.
 
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { runSiteDraft } from '../../src/utils/site-store';
+import { runSiteImport } from '../../src/utils/site-import-store';
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -24,13 +26,16 @@ export default withLambda(async (event) => {
 
     let siteId = 0;
     let request: string | null = null;
+    let isImport = false;
     try {
         const b = JSON.parse(event.body || '{}');
         siteId = Number(b.siteId);
         request = typeof b.request === 'string' ? b.request : null;
+        isImport = b.import === true;
     } catch { /* handled below */ }
     if (!Number.isInteger(siteId) || siteId <= 0) return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'siteId required.' }) };
 
-    await runSiteDraft(getDb(), siteId, request);
+    if (isImport) await runSiteImport(getDb(), siteId);
+    else await runSiteDraft(getDb(), siteId, request);
     return { statusCode: 200, body: JSON.stringify({ ok: true }) };
 });

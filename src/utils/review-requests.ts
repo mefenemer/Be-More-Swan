@@ -1,6 +1,6 @@
 // src/utils/review-requests.ts — asking customers for a review after a booking or a website order.
 // db/z-review-requests.sql. Sent by send-review-requests.ts (hourly); answered on the business's own
-// site (site-review.ts); approved in Business Information ▸ Reviews (org-reviews.ts).
+// site (site-review.ts); approved in Audience ▸ Reviews (org-reviews.ts).
 // tests/review-requests.test.ts.
 //
 // The rules, all enforced here:

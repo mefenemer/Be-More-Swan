@@ -1074,7 +1074,8 @@ export const WAND_REWRITABLE_FIELDS: Record<string, string> = {
     ...TUNABLE_BRIEF_FIELDS,
     core_message: 'Core Message',
     problem_statement: 'Your Bottleneck',
-    service_offerings: 'Products & Services',
+    // NOT service_offerings: products and prices live only in Business Information ▸ Products &
+    // Services (src/utils/org-products.ts), so nothing may rewrite the old free-text box.
 };
 
 // Fields Autonomous mode (US3.3) may auto-adjust: the Magic Wand set PLUS posting frequency.

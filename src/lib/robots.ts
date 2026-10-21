@@ -50,6 +50,7 @@ export interface Crawler { token: string; userAgent: string }
 export const CRAWLERS = {
     leadDiscovery: { token: OUR_TOKEN, userAgent: USER_AGENTS.leadDiscovery },
     mysteryShopper: { token: 'bemoreswan-mysteryshopper', userAgent: USER_AGENTS.mysteryShopper },
+    siteImport: { token: 'bemoreswan-siteimport', userAgent: USER_AGENTS.siteImport },
 } as const satisfies Record<string, Crawler>;
 
 interface Rule { path: string; allow: boolean }
@@ -128,31 +129,34 @@ export function parseRobots(text: string, ourToken: string = OUR_TOKEN): Rule[] 
  *
  * The tie-break matters: `Allow: /contact` alongside `Disallow: /contact` is a site owner carving out
  * an exception, and resolving it the other way would ignore the more specific intent.
+ *
+ * `*` matches any run of characters and a trailing `$` anchors the end, as Google and RFC 9309 read
+ * them. ⚠️ Until 2026-10-21 a `*` was read as "the prefix before it", so Squarespace's default
+ * `Disallow: /*?author=*` became `Disallow: /` and EVERY Squarespace site refused us — the Mystery
+ * Shopper and "Import my current site" alike. `path` may carry the query string (`/blog?author=x`).
  */
 export function robotsAllowsPath(rules: Rule[] | null, path: string): boolean {
     if (!rules || !rules.length) return true;
 
-    let best: Rule | null = null;
+    let best: { length: number; allow: boolean } | null = null;
     for (const rule of rules) {
         const pattern = rule.path;
         if (!pattern) continue;
-
-        // A trailing `$` anchors the match to the end of the path — the one wildcard form common
-        // enough to be worth supporting (`Disallow: /*.pdf$`).
-        const anchored = pattern.endsWith('$');
-        const body = anchored ? pattern.slice(0, -1) : pattern;
-        // A leading `*` or an internal one is treated as a literal prefix up to the wildcard: we
-        // match what we understand and ignore the rest, which biases towards fetching.
-        const prefix = body.split('*')[0];
-
-        const hit = anchored && !body.includes('*') ? path === body : path.startsWith(prefix);
-        if (!hit) continue;
-
-        if (!best || prefix.length > best.path.length || (prefix.length === best.path.length && rule.allow)) {
-            best = { path: prefix, allow: rule.allow };
-        }
+        if (!patternMatches(pattern, path)) continue;
+        // Specificity is the pattern's length, as written (Google's longest-match rule).
+        const length = pattern.length;
+        if (!best || length > best.length || (length === best.length && rule.allow)) best = { length, allow: rule.allow };
     }
     return best ? best.allow : true;
+}
+
+/** A robots.txt path pattern against a path: `*` = anything, a trailing `$` = the end of the path. */
+function patternMatches(pattern: string, path: string): boolean {
+    const anchored = pattern.endsWith('$');
+    const body = anchored ? pattern.slice(0, -1) : pattern;
+    if (!body.includes('*')) return anchored ? path === body : path.startsWith(body);
+    const re = new RegExp(`^${body.split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}${anchored ? '$' : ''}`);
+    return re.test(path);
 }
 
 /**

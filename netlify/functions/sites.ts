@@ -36,6 +36,14 @@
 //   calendar  { assistantId, from, to }       → the Calendar tab: hours, free times, classes, bookings
 //   split_preview { assistantId }             → the pages split_pages WOULD make (nothing saved), for
 //                                               the "Several pages" approval; or why it can't
+//   import    { assistantId, url, ownSite: true, pictures: copy|skip }
+//                                             → "Import my current site" (site-import.ts): read their
+//                                               old site into a DRAFT for review (1 task, only once a
+//                                               draft exists). The editor's button and the chat's
+//                                               site_import_request card both send this.
+//   import_accept  { assistantId }            → "Use this as my draft": the imported site replaces the
+//                                               draft (never the live site)
+//   import_discard { assistantId }            → throw the imported draft away (pictures stay in the library)
 //
 // domain_add { assistantId, domain } · domain_check · domain_remove → their own domain (site-domains.ts),
 // owner or admin only.
@@ -48,7 +56,7 @@ import { bookingCalendar, cleanRange, MAX_CALENDAR_DAYS } from '../../src/utils/
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
-import { aiAssistants } from '../../db/schema';
+import { aiAssistants, organisations } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
@@ -94,6 +102,8 @@ import {
     proposeOwnWords, publishBlocker, publishSite, restoreVersionToDraft, setSiteAddress, unpublishSite, DRAFT_TIMEOUT_MS, type SiteRow,
 } from '../../src/utils/site-store';
 import { triggerSiteDraft } from '../../src/utils/trigger-site-draft';
+import { acceptImport, discardImport, importView, loadImport, startSiteImport } from '../../src/utils/site-import-store';
+import { cleanImportUrl } from '../../src/utils/site-import';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -129,7 +139,13 @@ export default withLambda(async (event) => {
         const { definition, warnings } = definitionOf(s, maxPages);
         const ownDomain = await currentDomain(db, s.id);
         const drafting = !!s.draftingAt && Date.now() - new Date(s.draftingAt).getTime() < DRAFT_TIMEOUT_MS;
+        // "Import my current site": what is being read, or waiting for their review (site-import-store.ts).
+        const imp = importView(await loadImport(db, s.id));
+        // A read whose worker never answered: say so rather than "Reading your site…" for ever.
+        if (imp && imp.status === 'reading' && !drafting) Object.assign(imp, { status: 'failed', message: 'The import didn\'t finish. Nothing was charged — try again.' });
+        const [orgRow] = await db.select({ websiteUrl: organisations.websiteUrl }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
         return {
+            import: imp, importSuggestUrl: orgRow?.websiteUrl ?? null,
             site: {
                 id: s.id, status: s.status, credit: s.credit, drafting, draftNote: s.draftNote, updatedAt: s.updatedAt,
                 // Their own domain once it's live; the bemoreswan.site address redirects there.
@@ -158,7 +174,7 @@ export default withLambda(async (event) => {
                 .orderBy(asc(orgProducts.sortOrder), asc(orgProducts.id)))
                 .map((r) => ({ id: r.id, name: r.name, kind: r.kind, price: r.price, buyable: buyablePence(r) !== null,
                     imageUrl: r.imageAssetId ? siteAssetUrl(resolveBaseUrl(event.headers as Record<string, string | undefined>) || 'https://bemoreswan.com', r.imageAssetId) : null })),
-            // Business Information ▸ Reviews — the customers' words, for the reviews section's picker.
+            // Audience ▸ Reviews — the customers' words, for the reviews section's picker.
             reviews: await (async () => {
                 const rows = await db.select({ id: orgReviews.id, authorName: orgReviews.authorName, rating: orgReviews.rating, body: orgReviews.body, status: orgReviews.status, source: orgReviews.source, reviewedOn: orgReviews.reviewedOn })
                     .from(orgReviews).where(and(eq(orgReviews.organisationId, orgId), inArray(orgReviews.status, ['published', 'hidden'])))
@@ -227,6 +243,30 @@ export default withLambda(async (event) => {
         }
         site = (await loadOrCreateSite(db, { orgId, assistantId: assistant.id, userId }));
         return json(202, await view(site));
+    }
+
+    if (action === 'import') {
+        // Only their OWN site: importing someone else's would copy their words and pictures.
+        if (body.ownSite !== true) return json(400, { error: 'Only import a website that belongs to your business. Tick the box to say it\'s yours.' });
+        const url = cleanImportUrl(body.url);
+        if (!url) return json(400, { error: 'That doesn\'t look like a web address. Try something like yourbusiness.co.uk.' });
+        if (body.pictures !== 'copy' && body.pictures !== 'skip') return json(400, { error: 'Choose whether to copy the pictures from your site into your library, or leave them out.' });
+        if (site.status === 'suspended') return json(409, { error: 'This site has been taken offline by Be More Swan.' });
+        const r = await startSiteImport(db, site, { url, pictures: body.pictures, userId });
+        if (!r.ok) return json(r.status, { error: r.error });
+        site = await loadOrCreateSite(db, { orgId, assistantId: assistant.id, userId });
+        return json(202, await view(site));
+    }
+
+    if (action === 'import_accept') {
+        const r = await acceptImport(db, site, maxPages);
+        if (!r.ok) return json(r.status, { error: r.error });
+        return json(200, await view(r.site, ['Your imported site is now your draft. Nothing is live until you publish.', ...r.warnings]));
+    }
+
+    if (action === 'import_discard') {
+        await discardImport(db, site.id);
+        return json(200, await view(site));
     }
 
     if (action === 'address') {
@@ -477,7 +517,7 @@ export default withLambda(async (event) => {
             if (!r.ok) return json(400, { error: r.error });
             site = r.site;
         }
-        return json(200, await view(site, ['Bookings are set up. Change your hours and rules any time in Business Information ▸ Hours, location & bookings.']));
+        return json(200, await view(site, ['Bookings are set up. Change your hours any time in Business Information ▸ Hours & Location, and your booking rules under Bookings.']));
     }
 
     if (action === 'orders') {

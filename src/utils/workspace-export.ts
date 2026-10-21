@@ -91,6 +91,8 @@ export const WORKSPACE_TABLES: Record<string, any> = {
     // The Website Assistant: the site's definition (draft and settings) and messages from its contact form.
     websites: s.sites,
     websiteEnquiries: s.siteEnquiries,
+    // An imported draft of their old site waiting for review (site-import.ts), if any.
+    websiteImports: s.siteImports,
     websiteOrders: s.siteOrders,
     bookings: s.bookings,
     bookingSettings: s.bookingSettings,

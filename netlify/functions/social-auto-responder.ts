@@ -3,6 +3,7 @@
 // POST { assistantId }  — generates Messenger greeting, Messenger auto-reply, Instagram DM auto-reply.
 // Stores draft in aiAssistants.configuration.autoResponderDraft.
 
+import { loadOfferingsText } from '../../src/utils/org-products';
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
 import { logMessageUsage } from '../../src/utils/ai-usage';
@@ -52,7 +53,9 @@ export default withLambda(async (event) => {
 
     // US-SMM (AC7): the objection playbook + offerings let the assistant draft replies to sales
     // enquiries in DMs. These are staged for the user to review, not auto-sent.
-    const serviceOfferings = (ctx.service_offerings as string) ?? '';
+    // Products and prices come from Business Information (the one place they're kept); the old
+    // free-text box only while the catalogue is empty — src/utils/org-products.ts.
+    const serviceOfferings = await loadOfferingsText(db, organisationId, ctx.service_offerings);
     const salesObjections  = (ctx.sales_objections  as string) ?? '';
 
     // Include blueprint sections in the prompt (AC: full context)

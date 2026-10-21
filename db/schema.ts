@@ -5756,6 +5756,30 @@ export const siteVersions = pgTable("site_versions", {
   uniqueIndex("site_versions_site_version_uq").on(t.siteId, t.version),
 ]);
 
+// "Import my current site" (db/z-site-import.sql, src/utils/site-import.ts): one per site. While
+// status is 'reading' the worker is reading their old site; 'ready' holds the imported DRAFT the owner
+// reviews — it replaces sites.draft only when they press "Use this as my draft"; 'failed' says why
+// (e.g. we could only read a little of a JavaScript-only site). Never published from here.
+export const siteImports = pgTable("site_imports", {
+  id: serial().primaryKey(),
+  siteId: integer("site_id").notNull().references(() => sites.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  sourceUrl: text("source_url").notNull(),
+  pictures: text().notNull().default("skip"),
+  status: text().notNull().default("reading"),
+  definition: jsonb(),
+  report: jsonb(),
+  message: text(),
+  requestedBy: integer("requested_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("site_imports_site_uq").on(t.siteId),
+  index("site_imports_org_idx").on(t.organisationId),
+  check("site_imports_status_check", sql`${t.status} IN ('reading','ready','failed')`),
+  check("site_imports_pictures_check", sql`${t.pictures} IN ('copy','skip')`),
+]);
+
 // A message from a site's contact section (db/z-website-forms.sql). Not a sign-up: nothing here
 // touches the Audience.
 export const siteEnquiries = pgTable("site_enquiries", {

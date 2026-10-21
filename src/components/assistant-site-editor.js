@@ -18,7 +18,11 @@
  *
  * ── What this tab may not do ─────────────────────────────────────────────────
  * Publish without a click, or with [placeholders] left (the server refuses those too).
- * Spend without a click: only "Draft my whole site" uses a task, and it says so first.
+ * Spend without a click: only "Draft my whole site" and "Import my current site" use a task, and say so first.
+ *
+ * "Import my current site" (site-import.ts, sites.ts import / import_accept / import_discard — the same
+ * actions as the chat's site_import_request and site_import_decision cards): reads their old site into
+ * a DRAFT shown beside the current one; it replaces the draft only on "Use this as my draft".
  *
  * Handlers are bound to `document` once, at load, never from render. Server values are escaped.
  */
@@ -73,7 +77,7 @@
       { k: 'serviceIds', kind: 'servicePick', label: 'Which services can be booked' },
       { k: 'askStaff', kind: 'checkbox', label: 'Let people choose who they book with (or "anyone available")' },
       { k: 'buttonLabel', kind: 'text', label: 'Button text' }],
-    // Reviews: quoted from Business Information ▸ Reviews (the customers' words, never typed here).
+    // Reviews: quoted from Audience ▸ Reviews (the customers' words, never typed here).
     reviews: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
       { k: 'reviewIds', kind: 'reviewPick', label: 'Which reviews to quote' },
       { k: 'limit', kind: 'select', label: 'When none are ticked, show the newest', options: [[3, '3 reviews'], [6, '6 reviews'], [9, '9 reviews'], [12, '12 reviews']] },
@@ -153,6 +157,7 @@
     enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false,
     thumbs: {}, bookings: null, timetable: null,
     words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
+    importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false,
   };
 
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -320,7 +325,7 @@
         ${line(b.ready, b.ready ? `Hours: ${esc(b.hours)}` : 'No opening hours yet')}
         ${line(!!b.visitAddress, b.visitAddress ? `Address: ${esc(b.visitAddress.split('\n').join(', '))}` : 'No address yet (no directions button)')}
         ${line(!!(st.phone || st.email || b.whatsapp), [st.phone && `Phone ${esc(st.phone)}`, b.whatsapp && `WhatsApp ${esc(b.whatsapp)}`, st.email && `Email ${esc(st.email)}`].filter(Boolean).join(' · ') || 'No phone, WhatsApp or email yet')}</ul>
-        <p class="text-xs text-gray-500 mt-1">Change them once and every page updates. ${btn('data-site-open-hours', 'Hours, location & bookings')}</p>`;
+        <p class="text-xs text-gray-500 mt-1">Change them once and every page updates. ${btn('data-site-open-hours', 'Hours & location')}</p>`;
     }
     if (f.kind === 'servicePick' && state.editing && state.editing.props.kind === 'class') {
       // Classes and events: any Business Information product can be a class; dates are on the timetable.
@@ -335,7 +340,7 @@
     if (f.kind === 'servicePick') {
       const b = state.data.booking || {};
       const chosen = new Set((Array.isArray(value) ? value : []).map(Number));
-      const hoursNote = `<p class="text-xs ${b.ready ? 'text-gray-500' : 'text-amber-800 font-semibold'} mt-2">${b.ready ? `Opening hours: ${esc(b.hours)}.` : 'Set your opening hours first — booking only shows on your site once they are set.'} ${btn('data-site-open-hours', 'Hours, location & bookings')}</p>`;
+      const hoursNote = `<p class="text-xs ${b.ready ? 'text-gray-500' : 'text-amber-800 font-semibold'} mt-2">${b.ready ? `Opening hours: ${esc(b.hours)}.` : 'Set your opening hours first — booking only shows on your site once they are set.'} ${btn('data-site-open-hours', 'Hours & location')}</p>`;
       if (!(b.services || []).length) return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p><p class="text-xs text-gray-500">None of your Products &amp; Services has a length yet. Give a service a length (e.g. 45 minutes) in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} to offer it here. (Tables don't need one.)</p>${hoursNote}`;
       return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
         <div class="space-y-1 mt-1">${b.services.map((x) => `<label class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 text-xs cursor-pointer">
@@ -399,7 +404,7 @@
               <span class="block text-gray-600 truncate">${esc(r.body)}</span></span></label>`).join('')}</div>
           <p class="text-xs text-gray-500 mt-1">Tick none to show your newest reviews automatically.</p>`
           : '<p class="text-xs text-gray-500 mt-1">You haven\'t added any reviews yet.</p>'}
-        <p class="text-xs text-gray-500 mt-2">Add, edit or hide reviews in ${btn('data-site-open-reviews', 'Business Information ▸ Reviews')} — or paste them into this chat.</p>`;
+        <p class="text-xs text-gray-500 mt-2">Add, edit or hide reviews in ${btn('data-site-open-reviews', 'Audience ▸ Reviews')} — or paste them into this chat.</p>`;
     }
     if (f.kind === 'gallery') {
       const list = Array.isArray(value) ? value : [];
@@ -1002,7 +1007,7 @@
   function bookingsPanel() {
     const b = state.data.booking || {};
     const head = card(`<p class="text-sm font-black text-gray-900">Bookings</p>
-      <p class="text-xs text-gray-500 mt-1">${b.ready ? `Opening hours: ${esc(b.hours)}. ${b.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}` : 'Set your opening hours to take bookings on your site.'} ${btn('data-site-open-hours', 'Hours, location & bookings')}</p>
+      <p class="text-xs text-gray-500 mt-1">${b.ready ? `Opening hours: ${esc(b.hours)}. ${b.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}` : 'Set your opening hours to take bookings on your site.'} ${btn('data-site-open-hours', 'Hours & location')}</p>
       <p class="text-xs text-gray-500 mt-1">Add a "Bookings" section to a page to show it on your website.</p>`);
     const list = state.bookings;
     const tt = timetableCard();
@@ -1071,7 +1076,7 @@
           </li>`;
         }).join('')}</ul>`;
     return card(`<p class="text-sm font-black text-gray-900">Availability</p>
-      <p class="text-xs text-gray-500 mt-1">Appointments and tables are booked within your opening hours (Business Information ▸ Hours, location &amp; bookings). Here, add dates with a number of places — classes, events, workshops, tours, open days. Show them with a Bookings section set to "Classes and events"; people book places, and join a waitlist when it's full. Your Calendar tab shows all of it together.</p>${form}${rows}`);
+      <p class="text-xs text-gray-500 mt-1">Appointments and tables are booked within your opening hours (Business Information ▸ Hours &amp; Location). Here, add dates with a number of places — classes, events, workshops, tours, open days. Show them with a Bookings section set to "Classes and events"; people book places, and join a waitlist when it's full. Your Calendar tab shows all of it together.</p>${form}${rows}`);
   }
   function readSessionForm(scope) {
     const o = {};
@@ -1086,11 +1091,12 @@
   }
 
   function previewHtml() {
-    const src = `/.netlify/functions/site-preview?assistantId=${encodeURIComponent(state.assistantId)}&path=${encodeURIComponent(state.previewPath)}&v=${state.version}`;
+    const showImport = state.previewImport && state.data.import && state.data.import.status === 'ready';
+    const src = `/.netlify/functions/site-preview?assistantId=${encodeURIComponent(state.assistantId)}${showImport ? '&import=1' : ''}&path=${encodeURIComponent(state.previewPath)}&v=${state.version}`;
     const width = state.device === 'mobile' ? '390px' : '100%';
     return card(`
       <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <p class="text-sm font-black text-gray-900">Preview <span class="text-xs font-semibold text-gray-500">— ${state.data.site.status === 'published' ? 'your draft' : 'not live yet'}</span></p>
+        <p class="text-sm font-black text-gray-900">Preview <span class="text-xs font-semibold text-gray-500">— ${showImport ? 'your imported site (not your draft yet)' : state.data.site.status === 'published' ? 'your draft' : 'not live yet'}</span></p>
         <div class="flex gap-1">${btn(`data-site-device="desktop"`, 'Desktop', state.device === 'desktop')}${btn(`data-site-device="mobile"`, 'Phone', state.device === 'mobile')}</div>
       </div>
       <div class="bg-gray-100 rounded-lg p-2" style="overflow:auto"> <iframe data-site-preview title="Preview of your website" src="${esc(src)}" style="display:block;margin:0 auto;width:${width};height:720px;border:0;background:#fff;border-radius:8px"></iframe></div>`);
@@ -1104,6 +1110,7 @@
   // whole draft, so it should never sit under every panel looking like a next step (owner, 2026-10-16).
   function draftCard(where) {
     const s = state.data.site;
+    if (s.drafting && state.data.import && state.data.import.status === 'reading') return '';
     if (s.drafting) return card('<p class="text-sm font-semibold text-indigo-700">Drafting your whole site — this takes a minute or two. You can leave this page; you\'ll be notified when it\'s ready.</p>');
     const who = esc(state.assistantName || 'Your Website Assistant');
     const form = `
@@ -1124,6 +1131,74 @@
       ${form}
       <div class="mt-3">${btn('data-site-draft', 'Replace my draft', false)}</div>
     </details>`;
+  }
+
+  // ── Import my current site (site-import.ts) ───────────────────────────────
+  // Their old site, read into a DRAFT they review here before it replaces anything. Their words are
+  // carried over unchanged; prices stay in Business Information; pictures only if they say so.
+  function importCard(where) {
+    const imp = state.data.import;
+    const s = state.data.site;
+    const who = esc(state.assistantName || 'Your Website Assistant');
+    if (imp && imp.status === 'reading' && s.drafting) {
+      return card(`<p class="text-sm font-semibold text-indigo-700">Reading your site at ${esc(imp.sourceUrl)} — this takes a minute or two. You can leave this page; you'll be notified when the imported draft is ready to look at.</p>`, 'border-indigo-200');
+    }
+    if (imp && imp.status === 'ready') return importReviewCard(imp);
+    const f = state.importForm;
+    const url = f.url != null ? f.url : (imp && imp.sourceUrl) || state.data.importSuggestUrl || '';
+    const failed = imp && imp.status === 'failed' ? `<div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-3">
+        <p class="text-xs font-semibold text-amber-800">${esc(imp.message || 'The import didn\'t work.')}</p>
+        ${importPagesList(imp.report)}
+        <div class="flex flex-wrap gap-2 mt-2">${btn('data-site-import-words', 'Add your own words instead')}${btn('data-site-import-discard', 'Dismiss')}</div></div>` : '';
+    const form = `
+      ${failed}
+      <label class="block text-xs font-bold text-gray-700 mt-3">Your current website's address
+        <input data-site-import-url class="${inputCls} mt-1" inputmode="url" autocomplete="url" placeholder="e.g. yourbusiness.co.uk" value="${esc(url)}"></label>
+      <fieldset class="mt-3"><legend class="text-xs font-bold text-gray-700">Its pictures</legend>
+        <label class="flex items-start gap-2 text-xs text-gray-700 mt-1"><input type="radio" name="site-import-pictures" value="copy" ${f.pictures === 'copy' ? 'checked' : ''}> <span>Copy them into my picture library and use them on my new site</span></label>
+        <label class="flex items-start gap-2 text-xs text-gray-700 mt-1"><input type="radio" name="site-import-pictures" value="skip" ${f.pictures === 'skip' ? 'checked' : ''}> <span>Leave them out — I'll choose pictures myself</span></label>
+      </fieldset>
+      <label class="flex items-start gap-2 text-xs text-gray-700 mt-3"><input type="checkbox" data-site-import-own ${f.own ? 'checked' : ''}> <span>This website belongs to my business, and I have the right to use its words and pictures.</span></label>
+      ${f.error ? `<p class="text-xs font-semibold text-red-600 mt-2">${esc(f.error)}</p>` : ''}
+      <div class="mt-3">${btn('data-site-import-go', 'Read my site', where === 'start')}</div>
+      <p class="text-xs text-gray-500 mt-2">${who} reads your home page and the pages in its menu (up to ${esc(state.data.maxPages)} on your plan) and lays your own words out as your new site. Nothing is reworded or made up — anything missing is left in [square brackets] for you. Prices aren't copied; they belong in Business Information. You see the result before it replaces anything. Uses 1 task, only if a draft is made.</p>`;
+    if (where === 'start') {
+      return card(`<p class="text-sm font-black text-gray-900">Already have a website?</p>
+        <p class="text-xs text-gray-500 mt-1">Bring it over from Wix, Squarespace, WordPress or anywhere else.</p>${form}`, 'border-indigo-200');
+    }
+    return `<details class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+      <summary class="text-sm font-black text-gray-900 cursor-pointer">Import my current site</summary>${form}</details>`;
+  }
+
+  function importPagesList(report) {
+    if (!report || !report.pages || !report.pages.length) return '';
+    return `<ul class="mt-2 space-y-1">${report.pages.map((p) => `<li class="text-xs text-gray-700">${esc(p.title)} — ${p.read ? `${esc(p.words)} words read` : `<span class="text-amber-800">${esc(p.note || 'not read')}</span>`}</li>`).join('')}</ul>`;
+  }
+
+  function importReviewCard(imp) {
+    const r = imp.report || {};
+    const pics = r.pictures || {};
+    const list = (title, items, tone) => (items && items.length ? `<details class="mt-2"><summary class="text-xs font-bold ${tone || 'text-gray-800'} cursor-pointer">${title}</summary><ul class="mt-1 space-y-1 list-disc pl-5">${items.slice(0, 30).map((x) => `<li class="text-xs text-gray-700">${esc(typeof x === 'string' ? x : x.title)}</li>`).join('')}</ul></details>` : '');
+    const contact = r.contact || {};
+    return card(`
+      <p class="text-sm font-black text-gray-900">Your imported site is ready to look at</p>
+      <p class="text-xs text-gray-500 mt-1">From ${esc(imp.sourceUrl)}: ${esc(imp.pages.length)} page${imp.pages.length === 1 ? '' : 's'}, ${esc(r.wordsRead || 0)} words of yours, laid out as sections — unchanged. Your current draft hasn't changed.</p>
+      ${importPagesList(r)}
+      <p class="text-xs text-gray-700 mt-2">${pics.choice === 'copy' ? `Pictures: ${esc(pics.copied || 0)} copied into your library${pics.failed ? `, ${esc(pics.failed)} couldn't be copied` : ''}.` : 'Pictures: left out, as you chose — add your own with "Choose picture".'}</p>
+      ${pics.undescribed ? `<p class="text-xs font-semibold text-amber-800 mt-1">${esc(pics.undescribed)} picture${pics.undescribed === 1 ? '' : 's'} had no description on your old site, so each is described by the heading near it — check them, for people using screen readers.</p>` : ''}
+      ${contact.email || contact.phone ? `<p class="text-xs text-gray-700 mt-1">Contact details found: ${esc([contact.email, contact.phone].filter(Boolean).join(' · '))}.</p>` : ''}
+      ${r.placeholders ? `<p class="text-xs font-semibold text-amber-800 mt-1">${esc(r.placeholders)} part${r.placeholders === 1 ? '' : 's'} in [square brackets] to fill in before you publish.</p>` : ''}
+      ${list(`Prices we found (${(r.prices || []).length}) — not copied: add them in Business Information ▸ Products & Services`, r.prices, 'text-amber-800')}
+      ${list(`Left out as menus or notices (${(r.leftOut || []).length}) — check nothing important is here`, r.leftOut)}
+      ${list(`Didn't fit on its page (${(r.notCarried || []).length})`, r.notCarried, 'text-amber-800')}
+      ${list(`Pages in your menu not imported — your plan has ${esc(state.data.maxPages)} pages (${(r.notImported || []).length})`, r.notImported)}
+      ${r.hadForm ? '<p class="text-xs text-gray-500 mt-2">Your old site had a form. Enquiries from the new contact form come to you on the Enquiries tab; for an email sign-up, add a sign-up section with one of your forms.</p>' : ''}
+      <div class="flex flex-wrap gap-2 mt-3">
+        ${btn('data-site-import-preview', state.previewImport ? 'Show my current draft' : 'Preview the imported site', !state.previewImport)}
+        ${btn('data-site-import-use', 'Use this as my draft', state.previewImport)}
+        ${btn('data-site-import-discard', 'Discard')}
+      </div>
+      <p class="text-xs text-gray-500 mt-2">"Use this as my draft" replaces your current draft with the imported pages, keeping your design. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing goes live until you publish.'}</p>`, 'border-indigo-200');
   }
 
   // ── Publish ────────────────────────────────────────────────────────────────
@@ -1222,13 +1297,14 @@
       <div class="grid gap-4 lg:grid-cols-2">
         <div class="space-y-4 min-w-0">
           ${featuresOn() ? '' : featuresCard(true)}
+          ${state.data.import || isFresh() ? importCard('start') : ''}
           ${isFresh() && !def().settings.template ? templatesCard(true) : ''}
           ${isFresh() || state.data.site.drafting || (def().settings.template && !state.data.site.publishedVersion) ? draftCard('start') : ''}
           ${publishCard()}
           ${placeholdersCard()}
           <div class="flex flex-wrap gap-2">${tabs}</div>
           ${noteHtml()}
-          ${state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : state.panel === 'templates' ? templatesCard(false) : detailsPanel() + draftCard('again')}
+          ${state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : state.panel === 'templates' ? templatesCard(false) : detailsPanel() + draftCard('again') + (state.data.import || isFresh() ? '' : importCard('again'))}
         </div>
         <div class="min-w-0">${previewHtml()}</div>
       </div>`;
@@ -1405,7 +1481,7 @@
       return;
     }
     if (t('[data-site-open-products]')) { window._bizinfoInitialTab = 'products'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
-    if (t('[data-site-open-reviews]')) { window._bizinfoInitialTab = 'reviews'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
+    if (t('[data-site-open-reviews]')) { window._audienceInitialTab = 'reviews'; if (typeof window.loadView === 'function') window.loadView('audience'); return; }
     if (t('[data-site-open-hours]')) { window._bizinfoInitialTab = 'hours'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
     const sAdd = t('[data-session-add]');
     if (sAdd) {
@@ -1662,6 +1738,53 @@
       await publishAction({ action: 'restore', version: Number(rv.dataset.siteRestore) }, `Version ${rv.dataset.siteRestore} is now your draft. Publish to make it live.`);
       return;
     }
+    // ── Import my current site ──
+    if (t('[data-site-import-go]')) {
+      keepImportForm(hostOf(e));
+      const f = state.importForm;
+      f.error = !String(f.url || '').trim() ? 'Type your website\'s address.' : !f.pictures ? 'Choose what happens to your pictures.' : !f.own ? 'Tick the box to say this website is yours — only import your own site.' : null;
+      if (f.error) { render(); return; }
+      try {
+        state.data = await post({ action: 'import', assistantId: state.assistantId, url: f.url, ownSite: true, pictures: f.pictures });
+        state.previewImport = false;
+        say(null);
+      } catch (err) { f.error = err.message; }
+      schedulePoll();
+      rerender();
+      return;
+    }
+    if (t('[data-site-import-preview]')) { state.previewImport = !state.previewImport; state.previewPath = '/'; state.version++; render(); return; }
+    if (t('[data-site-import-words]')) {
+      Object.assign(state.words, { open: true, pageId: page().id, error: null, proposal: null });
+      state.panel = 'pages';
+      render();
+      return;
+    }
+    if (t('[data-site-import-use]')) {
+      const ok = typeof window.confirmModal === 'function'
+        ? await window.confirmModal(`Your current draft is replaced with the ${state.data.import.pages.length} imported page${state.data.import.pages.length === 1 ? '' : 's'}. Your design stays. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing goes live until you publish.'}`, { title: 'Use the imported site as your draft?', confirmLabel: 'Use this as my draft', cancelLabel: 'Not now' })
+        : true;
+      if (!ok) return;
+      try {
+        state.data = await post({ action: 'import_accept', assistantId: state.assistantId });
+        state.previewImport = false; state.previewPath = '/'; state.version++;
+        state.pageId = def().pages[0].id;
+        state.note = { text: (state.data.warnings || []).join(' ') || 'Your imported site is now your draft.', tone: 'ok' };
+      } catch (err) { say(err.message, 'error'); }
+      rerender();
+      return;
+    }
+    if (t('[data-site-import-discard]')) {
+      if (state.data.import && state.data.import.status === 'ready' && typeof window.confirmModal === 'function'
+        && !(await window.confirmModal('The imported pages are thrown away. Your current draft stays as it is, and any pictures that were copied stay in your library.', { title: 'Discard the imported site?', confirmLabel: 'Discard', cancelLabel: 'Keep it' }))) return;
+      try {
+        state.data = await post({ action: 'import_discard', assistantId: state.assistantId });
+        state.previewImport = false; state.version++;
+        state.importForm = { url: null, own: false, pictures: null, error: null };
+      } catch (err) { say(err.message, 'error'); }
+      rerender();
+      return;
+    }
     if (t('[data-site-draft]')) {
       const ok = typeof window.confirmModal === 'function'
         ? await window.confirmModal(def().settings.template
@@ -1678,6 +1801,19 @@
       rerender();
     }
   });
+
+  /** What they typed in the import form, kept across re-renders (a poll redraws the tab). */
+  function keepImportForm(host) {
+    if (!host) return;
+    const u = host.querySelector('[data-site-import-url]');
+    const o = host.querySelector('[data-site-import-own]');
+    const p = host.querySelector('input[name="site-import-pictures"]:checked');
+    if (u) state.importForm.url = u.value;
+    if (o) state.importForm.own = o.checked;
+    if (p) state.importForm.pictures = p.value;
+  }
+  document.addEventListener('input', (e) => { if (e.target.closest && e.target.closest('[data-site-import-url]')) keepImportForm(hostOf(e)); });
+  document.addEventListener('change', (e) => { if (e.target.closest && e.target.closest('[data-site-import-own], input[name="site-import-pictures"]')) keepImportForm(hostOf(e)); });
 
   // The words file: picked, or dropped on the box (bound once, like every handler here).
   document.addEventListener('change', (e) => {
@@ -1721,7 +1857,8 @@
     init({ assistantId, assistantName }) {
       clearTimeout(state.pollTimer);
       Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false, domainChecked: false, domainTyped: null,
-        words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' } });
+        words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
+        importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false });
       load();
     },
     // surface: 'website' (pages, design, details, preview) or 'enquiries' | 'orders' | 'bookings',
