@@ -68,6 +68,11 @@ check('a long assistant name still fits a phone: "Suggest a name" collapses to t
     assert.match(page, /id="btn-generate-name"[^>]*aria-label="Suggest a name"/, 'the button keeps its name for screen readers');
 });
 
+check('the Goal Progress header wraps on a phone instead of pushing the Results tab sideways', () => {
+    const at = page.indexOf('id="goal-progress-panel"');
+    assert.match(page.slice(at, at + 600), /<div class="flex flex-wrap items-center justify-between gap-2 mb-4">/);
+});
+
 console.log('\nDialogs');
 
 const PAGE_DIALOGS = ['modal-copy-rules', 'modal-tuning', 'modal-tuning-picker', 'modal-review-progress', 'modal-wand',

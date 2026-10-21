@@ -354,9 +354,11 @@
          rounded-2xl radius, so on the outer wrapper its corners wouldn't line up. min-height gives the spinner room while the
          body is still empty (p-6 around nothing is shorter than the spinner). -->
     <div id="goal-progress-panel" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6" style="min-height:92px">
-      <div class="flex items-center justify-between mb-4">
+      <!-- flex-wrap: with "Check again now" showing, the title and both buttons are wider than a
+           375px phone and pushed the whole Results tab sideways (prod check, 2026-10-21). -->
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
         <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Goal Progress</h3>
-        <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center gap-2">
           <!-- "Check again now" — goals.latest_value is a CACHE, refreshed by a background sweep that
                runs hourly at best and once a day on the entry tier. Without this button a figure the
                user knows to be wrong is indistinguishable from a broken feature, and there is nothing

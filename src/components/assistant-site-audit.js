@@ -51,6 +51,8 @@
     rendered: false,
     settingsOpen: false,
     range: 'month',        // the Results tab's score chart: month | quarter | year
+    pastOpen: false,       // "View past checks"
+    whyOpen: false,        // "Why your score isn't higher" expanded
     tab: 'checks',         // the sub-tab: checks | review | progress | done | attention | archived
     historyShown: 20,      // client-paged: "Show more" adds HISTORY_PAGE
     note: null,          // { text, tone }
@@ -431,9 +433,13 @@
     if (!failed.length) return '';
     const fixes = state.data?.fixes || [];
     const fixFor = (lens) => fixes.find((f) => f.lens === lens && (f.status === 'open' || f.status === 'accepted'));
-    return `
-      <h3 class="text-sm font-black text-gray-900">Why your score isn't higher</h3>
-      <p class="text-xs text-gray-500 mt-1">What a buyer's eye looks for and didn't find, most important first. This list is worked out afresh at every check: there's nothing to tick off — once your page passes one, it simply drops off the list at the next check and the score goes up. The suggested fixes are what move through In progress to Done.</p>
+    // Collapsible (owner, 2026-10-21); closed by default, its open state kept across re-renders.
+    return `<details data-sa-why ${state.whyOpen ? 'open' : ''}>
+      <summary class="cursor-pointer list-none flex items-center justify-between gap-2">
+        <h3 class="text-sm font-black text-gray-900">Why your score isn't higher <span class="text-xs font-semibold text-gray-500">(${failed.length})</span></h3>
+        <span class="text-xs font-semibold text-gray-500" aria-hidden="true">${state.whyOpen ? 'Hide' : 'Show'}</span>
+      </summary>
+      <p class="text-xs text-gray-500 mt-2">What a buyer's eye looks for and didn't find, most important first. This list is worked out afresh at every check: there's nothing to tick off — once your page passes one, it simply drops off the list at the next check and the score goes up. The suggested fixes are what move through In progress to Done.</p>
       <ul class="mt-3 space-y-2">${failed.slice(0, 10).map((o, i) => {
         const [w, cls] = WEIGHT_WORDS[o.weight] || IMPACT.medium;
         const lens = (LENSES.find((l) => l[0] === o.lens) || [null, ''])[1];
@@ -445,31 +451,7 @@
             ? `<button type="button" data-sa-goto-fix="${esc(fx.id)}" class="mt-2 btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">See the suggested fix</button>`
             : `<button type="button" data-sa-ask="${i}" class="mt-2 btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Ask ${esc(state.assistantName || 'your Mystery Shopper')} how to fix this</button>`}
         </li>`;
-      }).join('')}</ul>`;
-  }
-
-  function competitorsBlock(audit, latest) {
-    const comps = audit.competitorUrls || [];
-    // The addresses are edited in Settings; the card says so with a button that opens it at them
-    // (owner, 2026-10-21: "we need to be able to edit the competitor urls" — it was possible, but
-    // nothing on this card led there).
-    const edit = `<button type="button" data-sa-edit-competitors class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">${comps.length ? 'Edit competitors' : 'Add competitors'}</button>`;
-    const head = `<div class="flex flex-wrap items-center justify-between gap-2"><h3 class="text-sm font-black text-gray-900">Competitors</h3>${edit}</div>`;
-    if (!comps.length) {
-      return `${head}<p class="text-xs text-gray-500 mt-1">Add up to three and every check compares you side by side — and tells you when they change their headline, prices or offer.</p>`;
-    }
-    const changes = (latest?.report?.competitorChanges || []);
-    const unread = (latest?.report?.competitorsUnread || []);
-    return `
-      ${head}
-      <ul class="mt-2 space-y-2">${comps.map((u) => {
-        const c = changes.find((x) => x.url === u);
-        const miss = unread.find((x) => x.url === u);
-        return `<li class="text-xs text-gray-700"><span class="font-bold">${esc(host(u))}</span>
-          ${miss ? `<span class="text-amber-700"> — not read last time: ${esc(miss.message)}</span>`
-            : c && c.changes && c.changes.length ? `<ul class="list-disc pl-5 mt-1">${c.changes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`
-            : '<span class="text-gray-500"> — no change spotted at the last check</span>'}</li>`;
-      }).join('')}</ul>`;
+      }).join('')}</ul></details>`;
   }
 
   const SOURCE_WORDS = { idea: 'An idea from a check', stalled_fix: 'To post the new wording while your website change waits', chat: 'From your chat' };
@@ -667,31 +649,28 @@
   function checksPanel(audit, latest) {
     const run = inFlight();
     const runs = state.data?.runs || [];
+    const lastAt = latest ? (latest.finishedAt || latest.createdAt) : null;
     return `
-      ${card(`
-        <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
-          <div>
-            <p class="text-sm font-black text-gray-900 break-all">${esc(host(audit.url))}</p>
-            ${audit.conversionGoal ? `<p class="text-xs text-gray-500">Visitors should: ${esc(audit.conversionGoal)}</p>` : ''}
-          </div>
-          <div class="flex flex-wrap items-center gap-2">
-            <button type="button" data-sa-run ${run ? 'disabled' : ''} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Check my site now</button>
-            <button type="button" data-sa-settings-open class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition">Settings</button>
-          </div>
+      <!-- Buttons only, no card (owner, 2026-10-21): the score is on the Results tab, competitors are
+           in Settings. The run button's title keeps the one thing a spend button must say — what it
+           costs. While a check runs, the line under the buttons says so. -->
+      <div>
+        <div class="flex flex-wrap items-center gap-2">
+          <button type="button" data-sa-run ${run ? 'disabled' : ''} title="A check that re-scores uses 1 task. If nothing on your site or your competitors' sites has changed, the score stands and nothing is used." class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Check my site now</button>
+          <button type="button" data-sa-settings-open aria-expanded="${state.settingsOpen}" class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition">Settings</button>
+          ${runs.length ? `<button type="button" data-sa-past-checks aria-expanded="${state.pastOpen}" class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition">${state.pastOpen ? 'Hide past checks' : 'View past checks'}</button>` : ''}
         </div>
-        <p class="text-sm text-gray-700">Score: <strong class="text-gray-900">${audit.currentScore === null ? '—' : esc(audit.currentScore)}/100</strong> · target ${esc(audit.targetScore)} <button type="button" data-sa-open-results class="link text-xs font-semibold ml-1">See it on the Results tab</button></p>
-        <div class="mt-3">${statusLine(audit, latest)}</div>
-        <p class="text-xs text-gray-400 mt-2">A check that re-scores uses 1 task. If nothing on your site or your competitors' sites has changed, the score stands and nothing is used.</p>`)}
+        ${run ? `<div class="mt-2">${statusLine(audit, latest)}</div>` : ''}
+      </div>
       ${goalBlock(audit)}
       ${state.settingsOpen ? card(`<h3 class="text-sm font-black text-gray-900 mb-3">Settings</h3>${settingsForm(audit)}`) : ''}
+      ${state.pastOpen && runs.length ? card(`<h3 class="text-sm font-black text-gray-900">Past checks</h3><ul class="mt-2 space-y-1 list-disc pl-5">${runs.map((r) => `
+        <li class="text-xs text-gray-600">${esc(when(r.createdAt))} · ${esc(KIND_WORDS[r.kind] || r.kind)} · ${esc(RUN_WORDS[r.status] || r.status)}${r.overallScore !== null && r.overallScore !== undefined ? ` · ${esc(r.overallScore)}/100` : ''}${r.error ? ` — ${esc(r.error)}` : ''}</li>`).join('')}</ul>`) : ''}
       ${latest?.report?.summary ? card(`
-        <h3 class="text-sm font-black text-gray-900">What the last check said</h3>
+        <div class="flex flex-wrap items-baseline justify-between gap-2"><h3 class="text-sm font-black text-gray-900">What the last check said</h3>${lastAt ? `<span class="text-xs text-gray-500">${esc(when(lastAt))}</span>` : ''}</div>
         <p class="text-sm text-gray-700 mt-2">${esc(latest.report.summary)}</p>
         ${(latest.report.partialLenses || []).length ? `<p class="text-xs text-amber-700 mt-2">The ${esc(latest.report.partialLenses.map((k) => (LENSES.find((l) => l[0] === k) || [k, k])[1]).join(' and '))} part didn't come back from the AI in a usable form this time, so it was scored on the automatic checks alone (the ones that don't need AI) and may read lower than it should. Nothing extra was charged, and the next check tries it again.</p>` : ''}`) : ''}
-      ${latest ? card(missingBlock(latest) || '<p class="text-xs text-gray-500">Every check passed at the last look.</p>') : ''}
-      ${card(competitorsBlock(audit, latest))}
-      ${runs.length ? card(`<h3 class="text-sm font-black text-gray-900">Past checks</h3><ul class="mt-2 space-y-1">${runs.map((r) => `
-        <li class="text-xs text-gray-600">${esc(when(r.createdAt))} · ${esc(KIND_WORDS[r.kind] || r.kind)} · ${esc(RUN_WORDS[r.status] || r.status)}${r.overallScore !== null && r.overallScore !== undefined ? ` · ${esc(r.overallScore)}/100` : ''}${r.error ? ` — ${esc(r.error)}` : ''}</li>`).join('')}</ul>`) : ''}`;
+      ${latest ? card(missingBlock(latest) || '<p class="text-xs text-gray-500">Every check passed at the last look.</p>') : ''}`;
   }
 
   function render() {
@@ -788,7 +767,6 @@
 
     const rng = t('[data-sa-range]');
     if (rng) { state.range = rng.dataset.saRange; renderResults(state.data?.audit, state.data?.latest); return; }
-    if (t('[data-sa-open-results]')) { window._activateMainTab?.('goals'); document.getElementById('site-audit-results-host')?.scrollIntoView({ block: 'start' }); return; }
     const sub = t('[data-sa-subtab]');
     if (sub) { state.tab = sub.dataset.saSubtab; state.historyShown = HISTORY_PAGE; render(); return; }
     const goFix = t('[data-sa-goto-fix]');
@@ -807,6 +785,7 @@
       if (o) openChatWithBrief({ id: state.assistantId }, `My last website check says: "${o.label}". How do I fix that on my site?`);
       return;
     }
+    if (t('[data-sa-past-checks]')) { state.pastOpen = !state.pastOpen; render(); return; }
     if (t('[data-sa-settings-open]')) { state.settingsOpen = !state.settingsOpen; if (state.settingsOpen) state.tab = 'checks'; render(); return; }
     if (t('[data-sa-edit-competitors]')) {
       state.settingsOpen = true;
@@ -963,6 +942,16 @@
     try { await navigator.clipboard.writeText(draft); } catch { /* best effort */ }
     window.location.href = `assistant-chat.html?assistantId=${encodeURIComponent(who.id)}`;
   }
+
+  // "Why your score isn't higher" opens and closes as a <details>; remember which, so a poll or a
+  // click elsewhere that redraws the tab doesn't fold it back up. `toggle` doesn't bubble: capture it.
+  document.addEventListener('toggle', (e) => {
+    const d = e.target;
+    if (!d.matches || !d.matches('#site-audit-host [data-sa-why]')) return;
+    state.whyOpen = d.open;
+    const label = d.querySelector('summary [aria-hidden]');
+    if (label) label.textContent = d.open ? 'Hide' : 'Show';
+  }, true);
 
   document.addEventListener('siteaudit:changed', (e) => {
     const id = e.detail && e.detail.assistantId;
