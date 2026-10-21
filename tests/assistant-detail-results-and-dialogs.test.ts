@@ -61,6 +61,13 @@ check('My Content says it is shared before anything can be deleted', () => {
     assert.match(tab, /Shared with all your assistants\./);
 });
 
+check('a long assistant name still fits a phone: "Suggest a name" collapses to the swan', () => {
+    assert.match(page, /<span class="detail-suggest-name-label">Suggest a name<\/span>/);
+    const phone = page.slice(page.indexOf('@media (max-width: 639px)'), page.indexOf('@media (max-width: 639px)') + 1500);
+    assert.match(phone, /\.detail-suggest-name-label \{ display: none; \}/);
+    assert.match(page, /id="btn-generate-name"[^>]*aria-label="Suggest a name"/, 'the button keeps its name for screen readers');
+});
+
 console.log('\nDialogs');
 
 const PAGE_DIALOGS = ['modal-copy-rules', 'modal-tuning', 'modal-tuning-picker', 'modal-review-progress', 'modal-wand',
