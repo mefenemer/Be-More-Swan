@@ -12,6 +12,7 @@ import { socialFeedForPrompt } from './site-social-feed';
 import { reviewsForPrompt } from './reviews';
 import { and, desc, eq, inArray, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
+import { describeOfferProfile, loadOfferProfile } from './offer-profile';
 import { aiAssistants, contentAssets, organisations, orgProducts, siteEnquiries, sites, siteVersions, users } from '../../db/schema';
 import { buyablePence } from './product-price';
 import { listSignupForms } from './site-forms';
@@ -423,6 +424,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
     lines.push(catalogue.length
         ? `Their Business Information products (for productIds in a products or menu section): ${catalogue.slice(0, 40).map((p) => `${p.name} (productId ${p.id}, ${p.price ?? 'no price shown'}${buyablePence(p) !== null ? ', can be bought online' : ''}${dietaryWords(p.dietary) ? `, ${dietaryWords(p.dietary)}` : ''})`).join('; ')}.`
         : 'They have no products in Business Information yet — a products section needs them (Business Information ▸ Products & Services).');
+    lines.push(describeOfferProfile(await loadOfferProfile(db, orgId)));
     const bk = await loadBookingSetup(db, orgId).catch(() => null);
     if (bk) {
         lines.push(Object.keys(bk.settings.weeklyHours).length

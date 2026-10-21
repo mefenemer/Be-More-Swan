@@ -5506,6 +5506,16 @@ export const orgReviews = pgTable("org_reviews", {
   check("org_reviews_status_check", sql`${t.status} IN ('published','hidden','pending','declined')`),
 ]);
 
+// ── What the business offers (db/z-org-offer-profile.sql; src/utils/offer-profile.ts) ──────────────
+// Decides which product fields and booking sections Business Information shows. No row = not
+// answered (guessed from the business's data); an empty array = answered "neither".
+export const orgOfferProfile = pgTable("org_offer_profile", {
+  organisationId: integer("organisation_id").primaryKey().references(() => organisations.id, { onDelete: "cascade" }),
+  offers: text().array().notNull().default(sql`'{}'::text[]`),
+  updatedBy: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // ── Asking customers for reviews (db/z-review-requests.sql) ──────────────────────────────────────
 export const reviewSettings = pgTable("review_settings", {
   id: serial().primaryKey(),

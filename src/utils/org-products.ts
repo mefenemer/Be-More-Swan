@@ -17,6 +17,7 @@
 // yields no block, and every caller carries on exactly as it did before products existed.
 
 import { ALLERGENS_MAX, dietaryWords } from './product-dietary';
+import { describeOfferProfile, loadAnsweredOffer } from './offer-profile';
 import { and, asc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { orgProducts } from '../../db/schema';
@@ -131,5 +132,10 @@ export async function loadOrgProducts(db: Db, organisationId: number): Promise<O
 
 /** Load + render in one call — what most seams want. Never throws; null when there is nothing to add. */
 export async function loadProductsBlock(db: Db, organisationId: number, businessName?: string | null): Promise<string | null> {
-    return renderProductsBlock(await loadOrgProducts(db, organisationId), businessName);
+    // Plus what the business offers — only once the OWNER has said (a guess must not steer every
+    // assistant), so none of them asks a software company about its menu (offer-profile.ts).
+    const [products, offer] = await Promise.all([loadOrgProducts(db, organisationId), loadAnsweredOffer(db, organisationId)]);
+    const block = renderProductsBlock(products, businessName);
+    const line = offer ? describeOfferProfile(offer) : '';
+    return [block, line].filter(Boolean).join('\n') || null;
 }

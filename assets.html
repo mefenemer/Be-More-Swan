@@ -228,6 +228,18 @@
       <button type="button" id="op-add" class="btn-primary text-sm font-bold flex items-center gap-1 px-3 py-1.5 rounded-md transition-colors shrink-0">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>Add Product or Service</button>
     </div>
+    <!-- "What does your business offer?" (src/utils/offer-profile.ts) — decides which fields the
+         editor below and the Hours tab show. Saved straight away; also settable from the Website
+         Assistant's chat (offer_profile card), through the same PATCH. -->
+    <div id="op-offer" class="hidden mb-5 border border-gray-200 bg-gray-50 rounded-xl px-4 py-3">
+      <p class="text-sm font-bold text-gray-900">What does your business offer?</p>
+      <p class="text-xs text-gray-500 mt-0.5">We only show the fields that fit. Untick both if neither applies.</p>
+      <div class="flex flex-col sm:flex-row sm:flex-wrap gap-x-6 gap-y-1.5 mt-2">
+        <label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" data-op-offer value="bookings"> People book time with us (appointments, classes or tables)</label>
+        <label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" data-op-offer value="menu"> We serve food or drink</label>
+      </div>
+      <p id="op-offer-note" class="text-xs mt-1.5"></p>
+    </div>
     <div id="op-error" class="hidden mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3"></div>
     <div id="op-editor-slot"></div>
     <div id="op-list" class="space-y-3">
@@ -242,14 +254,58 @@
   <script>
   (function () {
     const API = '/.netlify/functions/org-products';
+    // What the business offers, for any tab that shows fields by it (the Hours tab). get() resolves
+    // once — from this tab's own load when it ran first, else from its own GET of the same endpoint.
+    window.BizOffer = window.BizOffer || (() => {
+      let value = null; let pending = null;
+      return {
+        get() {
+          if (value) return Promise.resolve(value);
+          return pending || (pending = fetch(API).then((r) => r.ok ? r.json() : {}).then((d) => d.offer || null).catch(() => null)
+            .then((o) => { if (o && !value) value = o; return value; }));
+        },
+        set(o) { value = o; document.dispatchEvent(new CustomEvent('bizinfo:offer', { detail: o })); },
+      };
+    })();
     const listEl = document.getElementById('op-list');
     if (!listEl) return;
     const slot = document.getElementById('op-editor-slot');
     const errEl = document.getElementById('op-error');
     const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     let products = [];
+    // { offers: ['bookings'|'menu'], answered } — null until loaded. Shared with the Hours tab
+    // through window.BizOffer and a 'bizinfo:offer' event.
+    let offer = null;
 
     const showError = (msg) => { errEl.textContent = msg || ''; errEl.classList.toggle('hidden', !msg); };
+    const offers = (k) => !!offer && offer.offers.includes(k);
+
+    function renderOffer() {
+      const box = document.getElementById('op-offer');
+      if (!box || !offer) return;
+      box.classList.remove('hidden');
+      box.querySelectorAll('[data-op-offer]').forEach((c) => { c.checked = offers(c.value); });
+      const note = document.getElementById('op-offer-note');
+      note.className = `text-xs mt-1.5 ${offer.answered ? 'text-gray-500' : 'text-amber-700'}`;
+      note.textContent = offer.answered ? '' : 'We guessed this from your business details. Tick what\'s true and it\'s saved.';
+      window.BizOffer.set(offer);
+    }
+
+    /**
+     * Which optional groups of fields this product shows. A group the business doesn't use stays in
+     * the form, only hidden — so saving never clears a value — and a product that already HAS a
+     * value in it (an allergen, a deposit) shows the group anyway, so nothing typed in disappears.
+     */
+    function applyGroups(f) {
+      if (!f) return;
+      const kind = (f.querySelector('input[name="op-kind"]:checked') || {}).value;
+      const val = (id) => (f.querySelector('#' + id) || {}).value || '';
+      const bookings = offers('bookings') || !!val('op-duration') || !!val('op-deposit-type');
+      const menu = offers('menu') || !!val('op-allergens') || !!f.querySelector('[data-op-diet]:checked');
+      f.querySelector('#op-duration-row').classList.toggle('hidden', !(bookings && kind === 'service'));
+      f.querySelector('[data-op-group="bookings"]').classList.toggle('hidden', !bookings);
+      f.querySelector('[data-op-group="menu"]').classList.toggle('hidden', !menu);
+    }
     async function call(method, body, query) {
       const res = await fetch(API + (query || ''), {
         method, headers: body ? { 'Content-Type': 'application/json' } : undefined,
@@ -306,9 +362,12 @@
 
     async function load() {
       try {
-        products = (await call('GET')).products || [];
+        const data = await call('GET');
+        products = data.products || [];
+        offer = data.offer || null;
         showError('');
         render();
+        renderOffer();
       } catch (e) {
         listEl.innerHTML = '';
         showError('Your products could not be loaded right now. Please refresh and try again.');
@@ -361,6 +420,7 @@
         </div>`;
       if (anchor) anchor.replaceWith(f); else slot.appendChild(f);
       f.dataset.id = p ? String(p.id) : '';
+      applyGroups(f);
       f.querySelector('#op-name').focus();
     }
     // The price, structured (src/utils/product-price.ts): how it is shown, the amount, an optional unit.
@@ -387,13 +447,13 @@
           <input id="op-duration" type="number" min="5" max="1440" step="5" value="${esc(v.durationMinutes || '')}" placeholder="e.g. 45" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm">
           <p class="text-xs text-gray-500 mt-1">Used when people book it.</p>
         </div>
-        <div class="sm:col-span-2">
+        <div class="sm:col-span-2" data-op-group="menu">
           <p class="block text-sm font-semibold text-gray-700 mb-1">Dietary (for food — optional)</p>
           <div class="flex flex-wrap gap-x-4 gap-y-1">${[['vegetarian', 'Vegetarian (V)'], ['vegan', 'Vegan (VG)'], ['gluten_free', 'Gluten-free (GF)'], ['dairy_free', 'Dairy-free (DF)'], ['contains_nuts', 'Contains nuts (N)'], ['spicy', 'Spicy (🌶)']].map(([k, l]) => `<label class="inline-flex items-center gap-1.5 text-sm"><input type="checkbox" data-op-diet value="${k}" ${Array.isArray(v.dietary) && v.dietary.includes(k) ? 'checked' : ''}> ${l}</label>`).join('')}</div>
           <input id="op-allergens" type="text" maxlength="200" value="${esc(v.allergens || '')}" placeholder="Allergens, in your words — e.g. Contains: milk, egg, sesame" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm mt-2">
           <p class="text-xs text-gray-500 mt-1">Shown on your website's menus with a key, and "ask us about allergens". Only tick what's true — your assistants repeat it as you state it.</p>
         </div>
-        <div>
+        <div data-op-group="bookings">
           <label for="op-deposit-type" class="block text-sm font-semibold text-gray-700 mb-1">Deposit when booked online (optional)</label>
           <select id="op-deposit-type" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm bg-white">
             <option value="" ${!v.depositType ? 'selected' : ''}>No deposit</option>
@@ -414,6 +474,19 @@
       if (!open) return;
       open.remove();
       render(); // puts back the card an in-place edit replaced
+    }
+
+    // A tick saves at once — there's no Save button for one question.
+    async function saveOffer() {
+      const ticked = [...document.querySelectorAll('[data-op-offer]:checked')].map((c) => c.value);
+      try {
+        offer = (await call('PATCH', { offer: ticked })).offer;
+        showError('');
+      } catch (err) {
+        showError(err.message);
+      }
+      renderOffer();
+      applyGroups(document.getElementById('op-editor'));
     }
 
     async function save() {
@@ -474,7 +547,8 @@
     // Bound on the section, which this script owns for the life of the page (never re-rendered).
     const section = listEl.closest('section');
     // Show the price boxes that fit the choice; services also ask how long they take.
-    section.addEventListener('change', (e) => {
+    section.addEventListener('change', async (e) => {
+      if (e.target.matches('[data-op-offer]')) return saveOffer();
       const f = document.getElementById('op-editor');
       if (!f) return;
       if (e.target.id === 'op-price-type') {
@@ -482,7 +556,7 @@
         f.querySelector('#op-price-amount-row').classList.toggle('hidden', !(t === 'fixed' || t === 'from'));
         f.querySelector('#op-price-text').classList.toggle('hidden', t !== 'text');
       }
-      if (e.target.name === 'op-kind') f.querySelector('#op-duration-row').classList.toggle('hidden', e.target.value !== 'service');
+      if (e.target.name === 'op-kind') applyGroups(f);
       if (e.target.id === 'op-deposit-type') {
         const t = e.target.value;
         f.querySelector('#op-deposit-amount-row').classList.toggle('hidden', !t);
@@ -579,7 +653,11 @@
       <button type="button" id="bh-closure-add" class="btn-utility text-xs font-bold px-2.5 py-1 rounded mt-2">+ Add a closed day</button>
     </div>
 
-    <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
+    <!-- The booking parts of this tab (data-bh-bookings) show only for a business that takes
+         bookings — "What does your business offer?" on Products & Services (offer-profile.ts).
+         This card's Save also saves the hours above, so without bookings only the rules hide. -->
+    <div id="bh-rules-card" class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
+      <div data-bh-bookings>
       <h2 class="text-lg font-bold text-gray-900">Booking rules</h2>
       <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">How bookings from your website work. Services and their length come from Products &amp; Services.</p>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
@@ -595,12 +673,13 @@
         <div class="sm:col-span-2"><label for="bh-policy" class="block text-sm font-semibold text-gray-700 mb-1">Cancellation policy (optional)</label>
           <textarea id="bh-policy" rows="2" maxlength="500" placeholder="e.g. Please give us 24 hours' notice if you can't make it." class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></textarea></div>
       </div>
+      </div>
       <p id="bh-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3 mt-3"></p>
       <div class="flex items-center justify-end gap-3 mt-4"><span id="bh-saved" class="text-sm text-emerald-700 font-semibold hidden">Saved</span>
         <button type="button" id="bh-save" class="btn-primary text-sm font-bold px-4 py-2 rounded-md">Save hours, location &amp; rules</button></div>
     </div>
 
-    <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6">
+    <div data-bh-bookings class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div><h2 class="text-lg font-bold text-gray-900">Who or what can be booked</h2>
           <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">Your team, tables or seating areas, rooms. Leave this empty if it's just you — then one booking is taken at a time.</p></div>
@@ -611,7 +690,7 @@
     </div>
 
     <!-- Your calendar (docs/booking-plan.md phase 3; calendar-sync.ts, booking-calendar-feed.ts) — no sign-in. -->
-    <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
+    <div data-bh-bookings class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
       <h2 class="text-lg font-bold text-gray-900">Your calendar</h2>
       <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">Works with Google, Outlook and Apple calendars.</p>
       <div id="cal-ms" class="hidden mt-4 border border-gray-200 rounded-xl p-4 bg-gray-50"></div>
@@ -898,8 +977,30 @@
       if (e.target.matches('[data-open]')) e.target.closest('[data-day]').querySelector('[data-times]').classList.toggle('opacity-40', !e.target.checked);
     });
 
+    // Bookings only for a business that takes them (Products & Services ▸ "What does your business
+    // offer?"). Until that's known the tab shows everything, as it always did.
+    function applyOffer(o) {
+      if (!o) return;
+      const on = o.offers.includes('bookings');
+      panel.querySelectorAll('[data-bh-bookings]').forEach((el) => el.classList.toggle('hidden', !on));
+      // The rules card keeps its Save (it saves the hours too) — as a plain bar when the rules are hidden.
+      $('bh-rules-card').classList.toggle('bg-white', on);
+      $('bh-rules-card').classList.toggle('border', on);
+      $('bh-rules-card').classList.toggle('shadow-sm', on);
+      $('bh-rules-card').classList.toggle('p-6', on);
+      $('bh-save').textContent = on ? 'Save hours, location & rules' : 'Save hours & location';
+      const tab = document.querySelector('.bizinfo-tab[data-tab="hours"]');
+      if (tab) tab.textContent = on ? 'Hours, Location & Bookings' : 'Hours & Location';
+    }
+    document.addEventListener('bizinfo:offer', (e) => applyOffer(e.detail));
+
     let loaded = false;
-    const maybeLoad = () => { if (loaded || panel.classList.contains('hidden')) return; loaded = true; load(); };
+    const maybeLoad = () => {
+      if (loaded || panel.classList.contains('hidden')) return;
+      loaded = true;
+      load();
+      window.BizOffer?.get().then(applyOffer);
+    };
     new MutationObserver(maybeLoad).observe(panel, { attributes: true, attributeFilter: ['class'] });
     maybeLoad();
   })();

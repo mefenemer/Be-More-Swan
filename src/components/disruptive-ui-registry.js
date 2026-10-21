@@ -1985,6 +1985,47 @@
   }
   register('booking_setup', renderBookingSetupCard);
 
+  // { type: 'offer_profile', summary, offers } — "What does your business offer?" in Business
+  // Information ▸ Products & Services (src/utils/offer-profile.ts), after the owner's click:
+  // org-products.ts PATCH { offer }, the same call as the tab's tick boxes.
+  const OFFER_LABELS = { bookings: 'People book time with us (appointments, classes or tables)', menu: 'We serve food or drink' };
+  function renderOfferProfileCard(ui, esc) {
+    const offers = Array.isArray(ui.offers) ? ui.offers.filter((k) => OFFER_LABELS[k]) : [];
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">What your business offers · Approval needed</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <ul class="mt-2 space-y-0.5">${Object.keys(OFFER_LABELS).map((k) => `<li class="text-xs text-gray-700">${offers.includes(k) ? '✓' : '✗'} ${esc(OFFER_LABELS[k])}</li>`).join('')}</ul>
+      <p class="text-xs text-gray-600 mt-2">Business Information then shows only the fields that fit. Nothing you've typed is lost. Change it any time under Products &amp; Services.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-op-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save this</button>
+        <button type="button" data-op-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-op-status></p>`;
+    const status = el.querySelector('[data-op-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-op-cancel]')) { setBusy(true); say('Not changed.'); return; }
+      if (!e.target.closest('[data-op-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('site:offerProfile', {
+        bubbles: true,
+        detail: {
+          offers,
+          respond({ ok, error }) {
+            if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved — nothing was changed.', 'error'); return; }
+            say('Saved — Business Information now shows the fields that fit.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('offer_profile', renderOfferProfileCard);
+
   // ── Request a call back (src/utils/callback-request.ts) ───────────────────────────────────────
   // Shown when the customer asks the chat for a call or a person. It only OPENS the Help & Support
   // form — the chat never books a call. No time is promised (owner, 2026-10-19).
