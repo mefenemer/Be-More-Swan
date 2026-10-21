@@ -1663,7 +1663,7 @@
   // { type: 'site_audit_fix_update', decisions: [{ fixId, status: 'accepted'|'dismissed'|'open'|'done' }] }
   // "done" is the user's "I've made this change"; a later check confirms it (site-audits.ts).
   function renderSiteAuditFixUpdateCard(ui, esc) {
-    const WORDS = { accepted: "I'll make this change", dismissed: 'Not for us', open: 'Undecided again', done: "I've made this change" };
+    const WORDS = { accepted: "I'll make this change", dismissed: 'Reject', open: 'Undecided again', done: "I've made this change" };
     const decisions = (Array.isArray(ui.decisions) ? ui.decisions : [])
       .map((d) => ({ fixId: Number(d && d.fixId), status: d && d.status }))
       .filter((d) => Number.isInteger(d.fixId) && d.fixId > 0 && Object.prototype.hasOwnProperty.call(WORDS, d.status))

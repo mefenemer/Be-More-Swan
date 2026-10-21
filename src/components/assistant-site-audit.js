@@ -69,9 +69,12 @@
   const ROLE_FALLBACK = { social_media_manager: 'Social Media Assistant', blog_writer: 'Blog Writing Assistant', campaign_orchestrator: 'Campaign Assistant' };
   const roleLabel = (k) => (window.RoleLabels && window.RoleLabels.get && window.RoleLabels.get(k)) || ROLE_FALLBACK[k] || 'assistant';
   const teamFor = (roleKey) => (state.data?.team || []).find((a) => a.roleKey === roleKey) || null;
-  const briefs = () => state.data?.briefs || [];
+  // site_audit_briefs holds briefs sent AND ideas the user rejected (source 'rejected_idea'): both take
+  // an idea off To review. Only real briefs are "with your other assistants".
+  const allBriefs = () => state.data?.briefs || [];
+  const briefs = () => allBriefs().filter((b) => b.source !== 'rejected_idea');
   /** The recorded brief for one of a check's ideas, or for a fix's "say it meanwhile" nudge. */
-  const ideaBrief = (runId, i) => briefs().find((b) => b.source === 'idea' && b.runId === runId && b.handoffIndex === i) || null;
+  const ideaBrief = (runId, i) => allBriefs().find((b) => (b.source === 'idea' || b.source === 'rejected_idea') && b.runId === runId && b.handoffIndex === i) || null;
   const fixBrief = (fixId) => briefs().find((b) => b.source === 'stalled_fix' && b.fixId === fixId) || null;
   /** Same words as src/utils/site-audit-briefs.ts stalledFixBrief — what History records as briefed. */
   const stalledFixBrief = (afterText) => `Please draft a post that leads with this message: "${afterText}". It is how we now describe what we do, and our website will say the same soon. Keep any [placeholders] for me to fill in.`;
@@ -243,7 +246,7 @@
                <button type="button" data-sa-fix="${esc(f.id)}" data-status="done" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">I've made this change</button>
                <button type="button" data-sa-fix="${esc(f.id)}" data-status="open" class="text-xs text-gray-500 underline">Undo</button>`
             : `<button type="button" data-sa-fix="${esc(f.id)}" data-status="accepted" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">I'll make this change</button>
-               <button type="button" data-sa-fix="${esc(f.id)}" data-status="dismissed" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">Not for us</button>`}
+               <button type="button" data-sa-reject-fix="${esc(f.id)}" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">Reject</button>`}
           <button type="button" data-sa-copy="${esc(f.id)}" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Copy</button>
         </div>
       </div>`;
@@ -275,6 +278,7 @@
         ${who
           ? `<button type="button" data-sa-handoff="${i}" data-run="${esc(runId)}" class="mt-2 btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Brief ${esc(who.name)}</button>`
           : `<p class="text-xs text-gray-500 mt-2">For a ${esc(roleLabel(h.target))} — you don't have one yet.</p>`}
+        <button type="button" data-sa-reject-idea="${i}" data-run="${esc(runId)}" class="mt-2 btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Reject</button>
       </div>`;
   }
 
@@ -306,7 +310,7 @@
     const fixFor = (lens) => fixes.find((f) => f.lens === lens && (f.status === 'open' || f.status === 'accepted'));
     return `
       <h3 class="text-sm font-black text-gray-900">Why your score isn't higher</h3>
-      <p class="text-xs text-gray-500 mt-1">What a buyer's eye looks for and didn't find, most important first. Each one fixed raises the score at the next check.</p>
+      <p class="text-xs text-gray-500 mt-1">What a buyer's eye looks for and didn't find, most important first. This list is worked out afresh at every check: there's nothing to tick off — once your page passes one, it simply drops off the list at the next check and the score goes up. The suggested fixes are what move through In progress to Done.</p>
       <ul class="mt-3 space-y-2">${failed.slice(0, 10).map((o, i) => {
         const [w, cls] = WEIGHT_WORDS[o.weight] || IMPACT.medium;
         const lens = (LENSES.find((l) => l[0] === o.lens) || [null, ''])[1];
@@ -358,9 +362,9 @@
       return `
         <li class="border border-gray-200 rounded-xl p-4">
           <div class="flex flex-wrap items-center gap-2">
-            ${confirmed ? pill('Live on your site', 'bg-green-50 text-green-700') : live ? pill('You marked this done', 'bg-green-50 text-green-700') : pill('Not for us', 'bg-gray-100 text-gray-600')}
+            ${confirmed ? pill('Live on your site', 'bg-green-50 text-green-700') : live ? pill('You marked this done', 'bg-green-50 text-green-700') : pill('Rejected', 'bg-gray-100 text-gray-600')}
             <span class="text-xs font-bold text-gray-900">${esc(f.location || 'Page')}</span>
-            <span class="text-[10px] text-gray-500">${confirmed ? `Confirmed by a check ${esc(when(f.updatedAt))}` : live ? `Marked done ${esc(when(f.updatedAt))}` : `Dismissed ${esc(when(f.updatedAt))}`} · suggested ${esc(when(f.createdAt))}</span>
+            <span class="text-[10px] text-gray-500">${confirmed ? `Confirmed by a check ${esc(when(f.updatedAt))}` : live ? `Marked done ${esc(when(f.updatedAt))}` : `Rejected ${esc(when(f.updatedAt))}`} · suggested ${esc(when(f.createdAt))}</span>
           </div>
           <div class="grid gap-2 mt-2 md:grid-cols-2">
             <div class="bg-gray-50 rounded-lg p-2"><p class="text-[10px] font-bold text-gray-500 uppercase">${live ? 'Was' : 'On your site'}</p><p class="text-xs text-gray-700 mt-0.5 break-words">${esc(f.beforeText)}</p></div>
@@ -369,6 +373,19 @@
           ${confirmed ? '' : live
             ? `<button type="button" data-sa-fix="${esc(f.id)}" data-status="accepted" class="mt-2 text-xs text-gray-500 underline">Not done after all</button>`
             : `<button type="button" data-sa-fix="${esc(f.id)}" data-status="open" class="mt-2 text-xs text-gray-500 underline">Bring back</button>`}
+        </li>`;
+    }
+    if (e.kind === 'rejected') {
+      const b = e.b;
+      return `
+        <li class="border border-gray-200 rounded-xl p-4">
+          <div class="flex flex-wrap items-center gap-2">
+            ${pill('Rejected', 'bg-gray-100 text-gray-600')}
+            ${b.title ? `<span class="text-xs font-bold text-gray-900">${esc(b.title)}</span>` : ''}
+            <span class="text-[10px] text-gray-500">Idea for a ${esc(roleLabel(b.targetRole))} · rejected ${esc(when(b.createdAt))}</span>
+          </div>
+          <p class="text-xs text-gray-700 mt-2">${esc(b.brief)}</p>
+          <button type="button" data-sa-unbrief="${esc(b.id)}" class="mt-2 text-xs text-gray-500 underline">Bring back</button>
         </li>`;
     }
     if (e.kind === 'brief') {
@@ -437,6 +454,7 @@
       },
       archived: [
         ...fixes.filter((f) => f.status === 'dismissed').map((f) => ({ kind: 'fix', at: f.updatedAt, f })),
+        ...allBriefs().filter((x) => x.source === 'rejected_idea').map((x) => ({ kind: 'rejected', at: x.createdAt, b: x })),
         ...pastIdeas,
       ].sort(byNew),
     };
@@ -518,7 +536,7 @@
   function archivedPanel(b) {
     return card(`
       <h3 class="text-sm font-black text-gray-900">Archived</h3>
-      <p class="text-xs text-gray-500 mt-1">Fixes you said weren't for you ("Bring back" returns one to To review), and ideas from earlier checks that nobody acted on.</p>
+      <p class="text-xs text-gray-500 mt-1">Fixes and ideas you rejected ("Bring back" returns one to To review), and ideas from earlier checks that nobody acted on. ${esc(state.assistantName || 'Your Mystery Shopper')} doesn't suggest what you rejected again.</p>
       ${b.archived.length ? list(b.archived.slice(0, state.historyShown)) : `<div class="mt-3">${empty('Nothing archived.')}</div>`}
       ${b.archived.length > state.historyShown ? `<button type="button" data-sa-history-more class="mt-3 text-xs text-gray-500 underline">Show more (${b.archived.length - state.historyShown} older)</button>` : ''}`);
   }
@@ -546,7 +564,7 @@
       ${latest?.report?.summary ? card(`
         <h3 class="text-sm font-black text-gray-900">What the last check said</h3>
         <p class="text-sm text-gray-700 mt-2">${esc(latest.report.summary)}</p>
-        ${(latest.report.partialLenses || []).length ? `<p class="text-xs text-amber-700 mt-2">Part of this check couldn't be completed (${esc(latest.report.partialLenses.map((k) => (LENSES.find((l) => l[0] === k) || [k, k])[1]).join(', '))}), so that part was scored on the automatic checks only.</p>` : ''}`) : ''}
+        ${(latest.report.partialLenses || []).length ? `<p class="text-xs text-amber-700 mt-2">The ${esc(latest.report.partialLenses.map((k) => (LENSES.find((l) => l[0] === k) || [k, k])[1]).join(' and '))} part didn't come back from the AI in a usable form this time, so it was scored on the automatic checks alone (the ones that don't need AI) and may read lower than it should. Nothing extra was charged, and the next check tries it again.</p>` : ''}`) : ''}
       ${latest ? card(missingBlock(latest) || '<p class="text-xs text-gray-500">Every check passed at the last look.</p>') : ''}
       ${card(competitorsBlock(audit, latest))}
       ${runs.length ? card(`<h3 class="text-sm font-black text-gray-900">Past checks</h3><ul class="mt-2 space-y-1">${runs.map((r) => `
@@ -684,6 +702,33 @@
       try {
         await post({ action: 'fix', fixId: Number(fix.dataset.saFix), status: fix.dataset.status });
         say(null);
+      } catch (err) { say(err.message, 'error'); }
+      await load();
+      return;
+    }
+
+    const rejectFix = t('[data-sa-reject-fix]');
+    if (rejectFix) {
+      // Why, optionally: a reason becomes one of this assistant's Rules, which every check reads —
+      // so "we never show prices on the homepage" stops the whole kind of suggestion, not just this one.
+      const reason = typeof window.promptModal === 'function'
+        ? await window.promptModal(`${esc(state.assistantName || 'Your Mystery Shopper')} won't suggest this change again. If you say why, it keeps that in mind for every future check too (it's added to its Rules, where you can change it).`, { title: 'Reject this suggestion?', confirmLabel: 'Reject', cancelLabel: 'Keep it', multiline: true, placeholder: 'Why not? (optional) e.g. we never show prices on the homepage' })
+        : '';
+      if (reason === null) return;   // "Keep it"
+      rejectFix.disabled = true;
+      try {
+        const res = await post({ action: 'fix', fixId: Number(rejectFix.dataset.saRejectFix), status: 'dismissed', reason: String(reason || '').trim() });
+        say(res.ruleId ? 'Rejected — it\'s in Archived, and your reason is now one of its Rules.' : 'Rejected — it\'s in Archived.');
+      } catch (err) { say(err.message, 'error'); }
+      await load();
+      return;
+    }
+    const rejectIdea = t('[data-sa-reject-idea]');
+    if (rejectIdea) {
+      rejectIdea.disabled = true;
+      try {
+        await post({ action: 'brief', assistantId: state.assistantId, source: 'rejected_idea', runId: Number(rejectIdea.dataset.run), handoffIndex: Number(rejectIdea.dataset.saRejectIdea) });
+        say('Rejected — it\'s in Archived, and won\'t be suggested again.');
       } catch (err) { say(err.message, 'error'); }
       await load();
       return;

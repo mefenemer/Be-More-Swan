@@ -8,7 +8,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { coveredBlock, normaliseIdea, sameIdea, type CoveredItem } from '../src/utils/site-audit-covered';
-import { buildSummaryPrompt, sanitiseSummary, type SummaryInput } from '../src/utils/site-audit-prompts';
+import { buildSummaryPrompt, rejectedFixesBlock, sanitiseSummary, type SummaryInput } from '../src/utils/site-audit-prompts';
 
 let passed = 0;
 let total = 0;
@@ -93,6 +93,54 @@ check('the check run loads what is covered before it writes ideas', () => {
     const mod = read('src/utils/site-audit-covered.ts');
     for (const t of ['siteAuditRuns', 'siteAuditBriefs', 'scheduledPosts', 'blogPosts', 'campaigns']) assert.ok(mod.includes(`from(${t})`), t);
     assert.strictEqual(coveredBlock([]), '');
+});
+
+console.log('\nRejecting, and learning from it (owner, 2026-10-21)');
+
+check('a rejected fix is listed to every later check, which must not suggest it again', () => {
+    const block = rejectedFixesBlock([{ location: 'Pricing', beforeText: 'No hidden tiers.', afterText: 'Plans start at £29/month' }]);
+    assert.match(String(block), /<rejected_by_owner>[\s\S]*Never suggest them again[\s\S]*Pricing: "No hidden tiers\." → "Plans start at £29\/month"/);
+    assert.strictEqual(rejectedFixesBlock([]), null);
+    // briefBlock is shared by every lens prompt and the summary prompt; the summary is the easy one to build here.
+    const p = buildSummaryPrompt(input({ brief: { url: 'https://example.com/', icp: null, conversionGoal: null, productsBlock: null, rulesBlock: null, rejectedBlock: block } as SummaryInput['brief'] })).user;
+    assert.ok(p.includes('<rejected_by_owner>'), 'the brief carries it');
+    assert.match(read('src/utils/site-audit-prompts.ts'), /brief\.rejectedBlock \? `\\n\$\{brief\.rejectedBlock\}` : ''/);
+    const run = read('src/utils/site-audit.ts');
+    assert.match(run, /eq\(siteAuditFixes\.status, 'dismissed'\)[\s\S]{0,120}limit\(15\)\);/);
+    assert.match(run, /productsBlock, rulesBlock, rejectedBlock \}/);
+});
+
+check('a reason given when rejecting a fix becomes one of the Mystery Shopper\'s Rules', () => {
+    const api = read('netlify/functions/site-audits.ts');
+    assert.match(api, /if \(status === 'dismissed' && reason\)[\s\S]{0,600}db\.insert\(contentRules\)[\s\S]{0,200}ruleText: `Website suggestions: \$\{reason\}`/);
+    assert.match(api, /origin: 'rejection_feedback'/);
+    const tab = read('src/components/assistant-site-audit.js');
+    assert.match(tab, /data-sa-reject-fix="\$\{esc\(f\.id\)\}"[^>]*>Reject</);
+    assert.match(tab, /window\.promptModal\([\s\S]{0,400}multiline: true/);
+    assert.match(tab, /status: 'dismissed', reason:/);
+});
+
+check('an idea can be rejected: recorded as a rejected_idea, moved to Archived, never suggested again', () => {
+    const tab = read('src/components/assistant-site-audit.js');
+    assert.match(tab, /data-sa-reject-idea="\$\{i\}" data-run="\$\{esc\(runId\)\}"[^>]*>Reject</);
+    assert.match(tab, /source: 'rejected_idea', runId:/);
+    assert.match(tab, /archived: \[[\s\S]*source === 'rejected_idea'\)\.map\(\(x\) => \(\{ kind: 'rejected'/);
+    assert.match(tab, /const briefs = \(\) => allBriefs\(\)\.filter\(\(b\) => b\.source !== 'rejected_idea'\);/, 'a rejection is not a brief');
+    const api = read('netlify/functions/site-audits.ts');
+    assert.match(api, /const BRIEF_SOURCES = \['idea', 'stalled_fix', 'chat', 'rejected_idea'\] as const;/);
+    assert.match(api, /if \(!who && source !== 'rejected_idea'\)/);
+    assert.match(api, /code === '23514' && source === 'rejected_idea'/, 'before the SQL is applied it says so instead of a 500');
+    const sql = read('db/z-mystery-shopper-rejected-ideas.sql');
+    assert.match(sql, /CHECK \(source IN \('idea', 'stalled_fix', 'chat', 'rejected_idea'\)\)/);
+    assert.match(sql, /site_audit_briefs_rejected_idea_uq/);
+    assert.match(read('src/utils/site-audit-covered.ts'), /b\.source === 'rejected_idea' \? 'rejected by the owner'/);
+    assert.match(read('src/utils/site-audit-snapshot.ts'), /Ideas for other assistants they rejected/);
+});
+
+check('an unusable lens reply is tried once more, with more room, before it is scored on code checks alone', () => {
+    const run = read('src/utils/site-audit.ts');
+    assert.match(run, /for \(const maxTokens of \[LENS_MAX_TOKENS, LENS_RETRY_MAX_TOKENS\]\)/);
+    assert.match(run, /const LENS_RETRY_MAX_TOKENS = 4000;/);
 });
 
 console.log('\nThe Website tab and My Assistants');
