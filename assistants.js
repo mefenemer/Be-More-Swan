@@ -3966,7 +3966,8 @@ window._detailRqBlogAct = async function (btn, action) {
     const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); } };
     if (errEl) errEl.classList.add('hidden');
 
-    if (action === 'open') { window.openBlogStudio?.({ assistantId: window._currentAssistantId, postId: id }); return; }
+    // intent:'review' — Blog Studio puts its decision bar up if the post is still undecided.
+    if (action === 'open') { window.openBlogStudio?.({ assistantId: window._currentAssistantId, postId: id, intent: 'review' }); return; }
     if (action === 'showSchedule') { card.querySelector('.rq-sched-row')?.classList.remove('hidden'); return; }
 
     // Archive — blog-posts.ts DELETE sets status='archived' (org-scoped; published posts blocked).

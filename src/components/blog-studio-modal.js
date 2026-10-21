@@ -13,7 +13,8 @@
  * whichever surface opened the modal.
  *
  * Public API (attached to window):
- *   openBlogStudio({ assistantId?, postId? })  — open the modal; postId loads an existing draft.
+ *   openBlogStudio({ assistantId?, postId?, intent? })  — open the modal; postId loads an existing draft.
+ *     intent:'review' puts the Approve / Pick a time / Reject bar on screen while the post is undecided.
  *   closeBlogStudio()                          — close + tear down the editor.
  *   blogStudioAvailable(assistants)            — gate helper: true iff an active Blog Writer exists.
  *
@@ -84,7 +85,8 @@
   }
 
   var BUSY_BUTTONS = ['bs-approve', 'bs-pick-time', 'bs-publish', 'bs-schedule',
-    'bs-unschedule', 'bs-unpublish', 'bs-repush', 'bs-discard', 'bs-reject-go'];
+    'bs-unschedule', 'bs-unpublish', 'bs-repush', 'bs-discard', 'bs-reject-go',
+    'bs-decide-approve', 'bs-decide-time', 'bs-decide-reject'];
 
   // Whole-modal busy state for the long-running lifecycle actions (publish). Shows the shared pink
   // busy spinner (window.bmsBusy, dialogs.js — it replaced the OS wait cursor) and disables every button in the footer, so a second click cannot fire a second publish
@@ -244,6 +246,21 @@
     // when they overrun.
     + '.bs-pending{display:block;font-size:11px;color:#b45309;margin-top:4px;}'
     + '.bs-hidden{display:none !important;}'
+    // The decision bar (intent:'review'). The approve step was section 6 of 8, collapsed, under the
+    // editor — on a phone, a long scroll from the post it decides. Sticky at the top of the editor
+    // column on a wide screen; pinned to the bottom of the screen on a narrow one, where the columns
+    // stack and "the top of the editor" is below the eight sections.
+    + '.bs-decide{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;'
+    + 'background:#fff;border:1px solid #f9a8d4;border-radius:12px;padding:10px 12px;margin-bottom:10px;box-shadow:0 4px 12px rgba(17,24,39,.08);}'
+    + '.bs-decide-q{font-size:14px;font-weight:600;color:#111827;}'
+    + '@media (max-width:860px){'
+    + '.bs-decide{position:fixed;left:0;right:0;bottom:0;top:auto;margin:0;border-radius:12px 12px 0 0;border-width:1px 0 0;'
+    + 'padding:10px 16px calc(10px + env(safe-area-inset-bottom));box-shadow:0 -4px 16px rgba(17,24,39,.12);}'
+    + '.bs-decide .bs-btn{min-height:44px;}'
+    // Room under the last section so the bar never covers it.
+    + '#bms-blog-backdrop.bs-deciding .bms-blog-panel{padding-bottom:150px;}}'
+    // Page mode keeps the sidebar from 768px; the pinned bar must start beside it, not under it.
+    + '@media (min-width:768px) and (max-width:860px){#bms-blog-backdrop.bs-page .bs-decide{left:var(--sidebar-w,16rem);}}'
     // Explanatory prose. Used wherever a control's job isn't self-evident from its label — the
     // feature-image slot being the case that prompted it.
     + '.bs-help{font-size:12px;color:#6b7280;line-height:1.5;margin:0 0 10px;}'
@@ -578,6 +595,16 @@
     + '      </details>'
     + '    </div>'
     + '    <div>'
+    // The buttons here do nothing of their own: each presses its twin in "Approve & publish", so
+    // there is one set of handlers (and one feature-image nudge, one busy state) for both.
+    + '      <div id="bs-decide" class="bs-decide bs-hidden" role="region" aria-label="Decide on this draft">'
+    + '        <span class="bs-decide-q">Waiting for you \u2014 how should it go out?</span>'
+    + '        <div class="bs-row">'
+    + '          <button type="button" id="bs-decide-approve" class="bs-btn bs-btn-primary">Approve</button>'
+    + '          <button type="button" id="bs-decide-time" class="bs-btn bs-btn-ghost">Pick a time</button>'
+    + '          <button type="button" id="bs-decide-reject" class="bs-btn bs-btn-danger bs-hidden">Reject\u2026</button>'
+    + '        </div>'
+    + '      </div>'
     + '      <div class="bs-actionbar">'
     + '        <span id="bs-readout" class="bs-chip">0 words · under a minute read</span>'
     + '        <div class="bs-row">'
@@ -790,6 +817,7 @@
     el('bs-schedule-picker').classList.add('bs-hidden');
     el('bs-schedule-at').value = '';
     syncRejectButton(null);
+    syncDecideBar(null);
     setStatus('bs-save-status', 'Creating…');
     api('blog-posts', { method: 'POST', body: JSON.stringify({ title: 'Untitled draft', assistantId: state.assistantId }) }).then(function (res) {
       if (!res.ok) { setBanner('bs-action-status', 'Could not create a draft: ' + ((res.body && res.body.error) || 'please try again.'), 'error'); return; }
@@ -961,6 +989,29 @@
 
   // Reject is for judging something the ASSISTANT wrote. The author's own draft has nobody to teach,
   // so it gets Archive, as before.
+  // Statuses that still wait on the author's decision — the Blogs tab's Review column, plus an
+  // approved post that was never booked (Needs attention).
+  var UNDECIDED = ['draft', 'pending_approval', 'in_review', 'approved'];
+
+  // Show the decision bar only when the post was opened to be reviewed and is still undecided. Call
+  // after syncRejectButton: its Reject mirrors whether the real Reject button is offered.
+  function syncDecideBar(post) {
+    var show = !!(state.reviewIntent && post && UNDECIDED.indexOf(post.status) !== -1);
+    el('bs-decide').classList.toggle('bs-hidden', !show);
+    el('bms-blog-backdrop').classList.toggle('bs-deciding', show);
+    el('bs-decide-reject').classList.toggle('bs-hidden', el('bs-reject').classList.contains('bs-hidden'));
+    // Reviewing is reading: start with every section folded (media is open by default), so the
+    // post and the bar are what is on screen.
+    if (show) Array.prototype.forEach.call(document.querySelectorAll('#bms-blog-backdrop .bs-sec[open]'), function (d) { d.open = false; });
+  }
+
+  // Plain words for the status banner on open — it used to print the raw value ("pending_approval").
+  var STATUS_WORDS = {
+    draft: 'Draft', pending_approval: 'Waiting for you', in_review: 'Waiting for you', approved: 'Approved, not booked yet',
+    scheduled: 'Scheduled', publishing: 'Publishing now', published: 'Live', failed: 'Didn\u2019t publish',
+    paused: 'Paused', archived: 'Archived', rejected: 'Turned down',
+  };
+
   function syncRejectButton(post) {
     var show = !!(post && post.assistantId != null && post.generationReason && REJECTABLE.indexOf(post.status) !== -1);
     el('bs-reject').classList.toggle('bs-hidden', !show);
@@ -1001,8 +1052,9 @@
       openWorkspace(post.id, post.title || 'Untitled draft', post.bodyMarkdown || '', post);
       setStatus('bs-save-status', 'Saved');
       syncRejectButton(post);
+      syncDecideBar(post);
       autoGenerateSeo(post);
-      if (post.status) setBanner('bs-action-status', 'Status: ' + post.status);
+      if (post.status) setBanner('bs-action-status', 'Status: ' + (STATUS_WORDS[post.status] || post.status));
       // A post already on the calendar can be pulled back off it.
       if (post.status === 'scheduled') el('bs-unschedule').classList.remove('bs-hidden');
       // A live post can be taken back off the site.
@@ -1928,6 +1980,16 @@
       el('bs-schedule-picker').classList.add('bs-hidden');
     });
 
+    // The decision bar presses the real buttons. Pick a time and Reject open a form that lives in
+    // "Approve & publish", so that section opens and comes into view first.
+    function openPublishSection() {
+      var sec = document.querySelector('[data-bs-sec="publish"]');
+      if (sec) { sec.open = true; sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    }
+    el('bs-decide-approve').addEventListener('click', function () { el('bs-approve').click(); });
+    el('bs-decide-time').addEventListener('click', function () { openPublishSection(); el('bs-pick-time').click(); });
+    el('bs-decide-reject').addEventListener('click', function () { openPublishSection(); el('bs-reject').click(); });
+
     // Archive — drafts only; blog-posts DELETE refuses a published post. That endpoint no longer
     // destroys the row (it sets status='archived'), so this must not warn about permanence.
     el('bs-discard').addEventListener('click', async function () {
@@ -2009,6 +2071,7 @@
         if (res.ok && res.body.post) {
           setBanner('bs-action-status', 'Approved — scheduled for ' + new Date(res.body.post.publishDate).toLocaleString());
           el('bs-unschedule').classList.remove('bs-hidden');
+          syncDecideBar(res.body.post);
           notifyChanged();   // leaves Review for Scheduled — both counts move
         } else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not schedule this post.', 'error');
       });
@@ -2029,6 +2092,7 @@
           setBanner('bs-action-status', 'Scheduled for ' + new Date(res.body.post.publishDate).toLocaleString());
           el('bs-schedule-picker').classList.add('bs-hidden');
           el('bs-unschedule').classList.remove('bs-hidden');
+          syncDecideBar(res.body.post);
           notifyChanged();   // manual date — same lifecycle move as approve
         } else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not schedule this post.', 'error');
       });
@@ -2566,6 +2630,7 @@
     opts = opts || {};
     inject();
     state.assistantId = opts.assistantId != null ? opts.assistantId : null;
+    state.reviewIntent = opts.intent === 'review';
     var bd = el('bms-blog-backdrop');
     // Page mode only inside the workspace — it needs a header and a sidebar to sit beside.
     var inWorkspace = !!document.getElementById('sidebar-container');

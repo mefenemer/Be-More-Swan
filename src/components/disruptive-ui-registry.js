@@ -2975,7 +2975,7 @@
     const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
     const setBusy = (b) => el.querySelectorAll('[data-bap-go], [data-bap-cancel], [data-bap-reason], [data-bap-rule], [data-bap-redraft]').forEach((x) => { x.disabled = b; });
     el.addEventListener('click', (e) => {
-      if (e.target.closest('[data-bap-open]')) { window.openBlogStudio?.({ postId }); return; }
+      if (e.target.closest('[data-bap-open]')) { window.openBlogStudio?.({ postId, intent: 'review' }); return; }
       if (e.target.closest('[data-bap-cancel]')) { setBusy(true); say('Left as it is.'); return; }
       if (!e.target.closest('[data-bap-go]')) return;
       const reason = el.querySelector('[data-bap-reason]')?.value.trim() || '';
