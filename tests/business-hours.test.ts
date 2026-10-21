@@ -147,7 +147,7 @@ check('with nothing to show it is absent from the live site, and explained in th
     const liveHtml = renderSitePage(site({}, {}), '/', empty).html;
     assert.ok(!liveHtml.includes('id="hr1"'));
     const preview = renderSitePage(site({}, {}), '/', { ...empty, preview: true }).html;
-    assert.ok(preview.includes('Hours, Location &amp; Bookings'));
+    assert.ok(preview.includes('Hours &amp; Location'));
 });
 check('a closed day today shows Closed even inside the usual hours', () => {
     const html = renderSitePage(site(), '/', { ...live, business: { ...business, closures: [{ date: '2026-10-14' }] } }).html;

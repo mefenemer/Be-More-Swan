@@ -490,11 +490,20 @@
                   <p class="text-xs text-gray-500 mb-2">Why should they take that action right now? What do they get?</p>
                   <input type="text" id="val_incentive" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm bg-white" placeholder="e.g., Get the first month free, No obligation, Instant access to the toolkit.">
                 </div>
-                <div>
-                  <label for="val_offerings" class="block text-sm font-bold text-gray-700 mb-1" data-explain="service-offerings">Your Service Offerings (Optional):</label>
-                  <p class="text-xs text-gray-500 mb-2">List the specific things people can buy or book — courses, discovery calls, packages. Your assistant weaves these naturally into the schedule and writes occasional direct "work with me" posts around them.</p>
-                  <p class="text-xs text-gray-400 mb-2">Leave this blank and your assistant won't schedule any "work with me" posts — there'd be nothing to point people toward. You can add it later.</p>
-                  <textarea id="val_offerings" class="auto-expand-textarea w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm bg-white" placeholder="e.g., 1:1 coaching (£500/mo), Free 15-min discovery call, Self-paced course (£199)."></textarea>
+                <!-- What you sell — saved straight into Business Information ▸ Products & Services, the ONE
+                     place products and prices are kept for every assistant (owner, 2026-10-21). This was
+                     its own free-text box (service_offerings), which drifted from the real list. -->
+                <div id="ob-products">
+                  <p class="block text-sm font-bold text-gray-700 mb-1" data-explain="service-offerings">What you sell (Optional):</p>
+                  <p class="text-xs text-gray-500 mb-2">The things people can buy or book — courses, discovery calls, packages. They're saved to <strong>Business Information ▸ Products &amp; Services</strong>, the one list all your assistants use for names and prices. Your assistant weaves them in naturally and writes occasional direct "work with me" posts around them.</p>
+                  <p class="text-xs text-gray-400 mb-2">With nothing listed, your assistant won't schedule any "work with me" posts. You can add them later.</p>
+                  <ul id="ob-products-list" class="space-y-1 text-sm text-gray-800 mb-2"></ul>
+                  <div class="flex flex-col sm:flex-row gap-2">
+                    <input type="text" id="ob-product-name" maxlength="120" placeholder="e.g. 1:1 coaching" aria-label="Name" class="flex-1 border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm bg-white">
+                    <input type="text" id="ob-product-price" maxlength="120" placeholder="Price, e.g. £500 a month" aria-label="Price" class="sm:w-48 border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm bg-white">
+                    <button type="button" id="ob-product-add" class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg">Add</button>
+                  </div>
+                  <p id="ob-products-error" class="hidden text-xs text-red-600 font-semibold mt-1"></p>
                 </div>
                 <div>
                   <label for="val_objections" class="block text-sm font-bold text-gray-700 mb-1" data-explain="sales-objections">Sales Objections Playbook (Optional):</label>
@@ -1900,7 +1909,6 @@
       incentive: document.getElementById('val_incentive')?.value || null,
       target_audience: document.getElementById('val_audience')?.value || null,
       content_pillars: document.getElementById('val_pillars')?.value || null,
-      service_offerings: document.getElementById('val_offerings')?.value || null,
       sales_objections: document.getElementById('val_objections')?.value || null,
       tone_of_voice: document.getElementById('val_tone')?.value || null,
       // The posting schedule the engine actually runs on. collectPostingSchedule() returns all four
@@ -2430,6 +2438,40 @@
     </div>
   </div>
 </div>
+<script>
+// "What you sell" → Business Information ▸ Products & Services (netlify/functions/org-products.ts),
+// one item at a time, saved as it is added — the same list and checks as that page.
+(function () {
+  var API = '/.netlify/functions/org-products';
+  var list = document.getElementById('ob-products-list');
+  if (!list) return;
+  var err = document.getElementById('ob-products-error');
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function render(products) {
+    var active = (products || []).filter(function (p) { return p.status === 'active'; });
+    list.innerHTML = active.map(function (p) { return '<li>✓ ' + esc(p.name) + (p.price ? ' <span class="text-gray-500">— ' + esc(p.price) + '</span>' : '') + '</li>'; }).join('');
+  }
+  function load() { fetch(API).then(function (r) { return r.ok ? r.json() : {}; }).then(function (d) { render(d.products); }).catch(function () {}); }
+  function add() {
+    var nameEl = document.getElementById('ob-product-name');
+    var priceEl = document.getElementById('ob-product-price');
+    var name = nameEl.value.trim();
+    if (!name) { nameEl.focus(); return; }
+    var btn = document.getElementById('ob-product-add');
+    btn.disabled = true; err.classList.add('hidden');
+    fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'product', name: name, price: priceEl.value.trim() }) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { if (!r.ok) throw new Error(d.error || 'That could not be added.'); }); })
+      .then(function () { nameEl.value = ''; priceEl.value = ''; nameEl.focus(); load(); })
+      .catch(function (e) { err.textContent = e.message; err.classList.remove('hidden'); })
+      .then(function () { btn.disabled = false; });
+  }
+  document.getElementById('ob-product-add').addEventListener('click', add);
+  ['ob-product-name', 'ob-product-price'].forEach(function (id) {
+    document.getElementById(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+  });
+  load();
+})();
+</script>
 <script>
 (function () {
   var panel = document.getElementById('help-widget-panel');

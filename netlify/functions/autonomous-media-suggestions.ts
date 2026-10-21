@@ -13,6 +13,7 @@
 //
 // Schedule: "0 7 * * *" (07:00 UTC daily), after draft-horizon-fill (06:00). Also POSTable for tests.
 
+import { loadOfferingsText } from '../../src/utils/org-products';
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
 import { and, eq, gte, lte, sql, inArray, isNotNull } from 'drizzle-orm';
@@ -119,6 +120,8 @@ export default withLambda(async (event) => {
         const org = {
             name: a.orgName, industry: a.orgIndustry, businessDescription: a.orgDescription,
             targetAudience: a.orgAudience, websiteUrl: a.orgWebsite,
+            // Business Information ▸ Products & Services — the one place products and prices live.
+            offerings: await loadOfferingsText(db, a.organisationId, (a.onboardingContext as { service_offerings?: unknown } | null)?.service_offerings),
         };
         // Nothing to write ABOUT: a post guessed from the business name is worse than no post.
         if (!hasUsableBrief(org, a.onboardingContext)) { skippedNoBrief++; continue; }

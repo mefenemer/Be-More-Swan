@@ -177,8 +177,8 @@ const RETURN_DESTINATIONS: Record<string, { tab: string; rqStatus?: string }> = 
 const STANDALONE_RETURNS: Record<string, string> = {
     integrations: '/integrations.html',
     blogstudio: '/blog-studio.html',
-    // Business Information ▸ Hours, Location & Bookings ▸ Your calendar (the Outlook calendar connect).
-    bookings: '/workspace.html?view=assets&tab=hours',
+    // Business Information ▸ Bookings ▸ Your calendar (the Outlook calendar connect).
+    bookings: '/workspace.html?view=assets&tab=bookings',
 };
 
 function buildState(payload: object): string {

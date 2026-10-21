@@ -897,7 +897,7 @@ function _renderPillarChips() {
 // AI-wand fields), so they're rendered as textareas that expand to keep everything visible —
 // no inner scrollbar, no truncation. Heights must be recomputed when a hidden tab is revealed,
 // since scrollHeight is 0 while the panel is display:none.
-const _AUTOGROW_FIELDS = ['edit_problem', 'edit_core_message', 'edit_audience', 'edit_tone', 'edit_pillars', 'edit_offerings', 'edit_objections'];
+const _AUTOGROW_FIELDS = ['edit_problem', 'edit_core_message', 'edit_audience', 'edit_tone', 'edit_pillars', 'edit_objections'];
 
 function _autoGrowField(el) {
     if (!el) return;
@@ -6138,7 +6138,8 @@ function _detailHydrate(data) {
     _detailSetVal('edit_pillars', Array.isArray(ctx.content_pillars) ? ctx.content_pillars.join(', ') : (ctx.content_pillars || ''));
     _renderPillarChips();
     // Sales context — feeds the auto-responder objection playbook (P4) and DM drafting.
-    _detailSetVal('edit_offerings', ctx.service_offerings || '');
+    // Products & Services are SHOWN from Business Information, not edited here (one place).
+    _renderOfferingsBox(ctx);
     _detailSetVal('edit_objections', ctx.sales_objections || '');
     // Reference style link + per-platform hashtag/algorithm strategy (parity with onboarding).
     _detailSetVal('edit_reference_url', ctx.reference_style_url || '');
@@ -6821,7 +6822,6 @@ function _detailCollect(currentData) {
         target_audience: document.getElementById('edit_audience')?.value || '',
         tone_of_voice: document.getElementById('edit_tone')?.value || '',
         content_pillars: _parsePillars(document.getElementById('edit_pillars')?.value),
-        service_offerings: document.getElementById('edit_offerings')?.value || '',
         sales_objections: document.getElementById('edit_objections')?.value || '',
         reference_style_url: document.getElementById('edit_reference_url')?.value || '',
         platform_strategy: _collectPlatformStrategy(currentData.context?.platform_strategy),
@@ -7017,6 +7017,14 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // ── Load assistant data ───────────────────────────────────────
     let currentData = {};
     let saveTimeout = null;
+
+    // The Creative Brief's old free-text products box, cleared once its notes are moved into (or
+    // deleted in favour of) Business Information ▸ Products & Services. Through the normal save.
+    window._detailClearOfferingNotes = async function () {
+        currentData.context = { ...(currentData.context || {}), service_offerings: '' };
+        await persistChanges();
+        _renderOfferingsBox(currentData.context);
+    };
 
     async function persistChanges() {
         _detailSetSaveStatus('Saving…', 'text-gray-400');
@@ -11359,7 +11367,7 @@ function _buildTelemetrySvg(actual, trajectory) {
 // Feature 3 — Premium AI Optimization (recommendations, magic wand, autonomous)
 // ══════════════════════════════════════════════════════════════════
 const GOAL_AI_API = '/.netlify/functions/goal-ai';
-const _WAND_FIELD_LABELS = { tone_of_voice: 'Brand Voice', target_audience: 'Target Audience', content_pillars: 'Content Strategy', core_message: 'Core Message', problem_statement: 'Your Bottleneck', service_offerings: 'Products & Services' };
+const _WAND_FIELD_LABELS = { tone_of_voice: 'Brand Voice', target_audience: 'Target Audience', content_pillars: 'Content Strategy', core_message: 'Core Message', problem_statement: 'Your Bottleneck' };
 
 function _openUpgrade(msg) {
     if (typeof window.openUpgradeModal === 'function') {
@@ -11958,3 +11966,109 @@ window._toggleAutonomous = async function () {
         _applyAutonomousToggleState(currentlyOn);
     }
 };
+
+// ── Creative Brief ▸ Sales Context ▸ Products & Services ─────────────────────────────────────────
+// Products and prices are kept in ONE place: Business Information ▸ Products & Services, which every
+// assistant reads (src/utils/org-products.ts). This box SHOWS that list and links to it. It used to
+// be its own free-text field (service_offerings) that drifted from the real list (a stale £99 beside
+// £69, 2026-10-20). Old notes stay visible until moved across — split into rows the owner checks
+// (org-products.ts split_notes → offerings-import.ts), each saved as a normal product — or deleted.
+// Assistants read them only while the catalogue is empty.
+const _OFFER_API = '/.netlify/functions/org-products';
+const _offEsc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let _offeringsNotes = '';
+
+async function _renderOfferingsBox(ctx) {
+    const list = document.getElementById('edit-offerings-list');
+    if (!list) return;
+    _offeringsNotes = String((ctx && ctx.service_offerings) || '').trim();
+    let active = [];
+    try {
+        const res = await fetch(_OFFER_API);
+        active = res.ok ? ((await res.json()).products || []).filter((p) => p.status === 'active') : [];
+    } catch { /* shown as empty */ }
+    list.innerHTML = active.length
+        ? active.slice(0, 12).map((p) => `<li>${_offEsc(p.name)}${p.price ? ` <span class="text-gray-500">— ${_offEsc(p.price)}</span>` : ''}</li>`).join('')
+            + (active.length > 12 ? `<li class="text-gray-500">and ${active.length - 12} more</li>` : '')
+        : '<li class="text-gray-500">Nothing listed yet. Add what you sell there and every assistant uses it.</li>';
+    const legacy = document.getElementById('edit-offerings-legacy');
+    legacy.classList.toggle('hidden', !_offeringsNotes);
+    document.getElementById('edit-offerings-legacy-text').textContent = _offeringsNotes;
+    document.getElementById('edit-offerings-legacy-why').textContent = active.length
+        ? 'Your assistants no longer use these — Products & Services has your list. Move anything missing across, then delete them.'
+        : 'Your assistants use these only until Products & Services has something in it. Move them across so prices live in one place.';
+    document.getElementById('edit-offerings-import').classList.add('hidden');
+}
+
+function _offeringsGoToCatalogue() {
+    window._bizinfoInitialTab = 'products';
+    if (typeof window.loadView === 'function') window.loadView('assets');
+}
+
+async function _offeringsPreviewImport() {
+    const host = document.getElementById('edit-offerings-import');
+    host.classList.remove('hidden');
+    host.innerHTML = '<p class="text-xs text-gray-500">Reading your notes…</p>';
+    let items = [];
+    try {
+        const res = await fetch(_OFFER_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'split_notes', text: _offeringsNotes }) });
+        items = res.ok ? ((await res.json()).items || []) : [];
+    } catch { /* falls through to the empty message */ }
+    if (!items.length) { host.innerHTML = '<p class="text-xs text-red-600">Nothing to move could be read from these notes. Add them in Products & Services instead.</p>'; return; }
+    host.innerHTML = `
+      <p class="text-xs font-semibold text-gray-700">Check each one — untick anything you don't sell any more.</p>
+      <div class="space-y-2 mt-2">${items.map((it, i) => `
+        <div class="flex flex-wrap items-center gap-2 bg-white border border-amber-100 rounded-lg p-2" data-off-row="${i}">
+          <input type="checkbox" data-off-keep checked aria-label="Add this one">
+          <input type="text" data-off-name maxlength="120" value="${_offEsc(it.name)}" aria-label="Name" class="flex-1 min-w-[10rem] px-2 py-1 rounded border border-gray-300 text-sm">
+          <input type="text" data-off-price maxlength="120" value="${_offEsc(it.price)}" placeholder="Price (optional)" aria-label="Price" class="w-36 px-2 py-1 rounded border border-gray-300 text-sm">
+          <select data-off-kind aria-label="Product or service" class="px-2 py-1 rounded border border-gray-300 text-sm bg-white">
+            <option value="product" ${it.kind !== 'service' ? 'selected' : ''}>Product</option>
+            <option value="service" ${it.kind === 'service' ? 'selected' : ''}>Service</option>
+          </select>
+        </div>`).join('')}</div>
+      <div class="flex flex-wrap gap-2 mt-2">
+        <button type="button" id="edit-offerings-import-go" class="btn-primary px-3 py-1.5 text-sm font-bold rounded-md">Add to Products &amp; Services</button>
+        <button type="button" id="edit-offerings-import-cancel" class="btn-secondary px-3 py-1.5 text-sm font-bold rounded-md border">Cancel</button>
+      </div>
+      <p id="edit-offerings-import-status" class="text-xs mt-1.5"></p>`;
+}
+
+async function _offeringsRunImport(btn) {
+    const rows = [...document.querySelectorAll('#edit-offerings-import [data-off-row]')]
+        .filter((r) => r.querySelector('[data-off-keep]').checked)
+        .map((r) => ({ name: r.querySelector('[data-off-name]').value.trim(), price: r.querySelector('[data-off-price]').value.trim(), kind: r.querySelector('[data-off-kind]').value }))
+        .filter((r) => r.name);
+    const status = document.getElementById('edit-offerings-import-status');
+    btn.disabled = true;
+    let added = 0;
+    for (const r of rows) {
+        try {
+            const res = await fetch(_OFFER_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(r) });
+            if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Could not be added.');
+            added++;
+        } catch (err) {
+            // Stop at the first refusal: what was added stays, the notes stay, and the reason shows.
+            status.className = 'text-xs mt-1.5 text-red-600';
+            status.textContent = `${added} added. "${r.name}" couldn't be: ${err.message} Your notes are kept.`;
+            btn.disabled = false;
+            return;
+        }
+    }
+    // Everything ticked is in the catalogue — the notes have done their job.
+    await window._detailClearOfferingNotes?.();
+    window.showToast?.(`${added} added to Products & Services`, { icon: '✓' });
+}
+
+document.addEventListener('click', async (e) => {
+    const t = e.target.closest('button');
+    if (!t) return;
+    if (t.id === 'edit-offerings-open') return _offeringsGoToCatalogue();
+    if (t.id === 'edit-offerings-move') return _offeringsPreviewImport();
+    if (t.id === 'edit-offerings-import-cancel') { document.getElementById('edit-offerings-import').classList.add('hidden'); return; }
+    if (t.id === 'edit-offerings-import-go') return _offeringsRunImport(t);
+    if (t.id === 'edit-offerings-clear') {
+        const ok = await window.confirmModal?.('Your assistants stop using these notes. Anything not in Products &amp; Services is gone from their view.', { title: 'Delete these notes?', confirmLabel: 'Delete', cancelLabel: 'Keep' });
+        if (ok) await window._detailClearOfferingNotes?.();
+    }
+});

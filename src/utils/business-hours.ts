@@ -2,7 +2,7 @@
 // The website's "Opening hours & contact" section (site-render.ts) and its search data.
 // tests/business-hours.test.ts.
 //
-// The hours are the ones in Business Information ▸ Hours, Location & Bookings (booking_settings),
+// The hours are the ones in Business Information ▸ Hours & Location (booking_settings),
 // the same ones bookings use — set once, used everywhere.
 
 import { addDays, DAY_KEYS, dayOf, formatTime, toMinutes, utcToZoned, type DayKey } from './booking-time';

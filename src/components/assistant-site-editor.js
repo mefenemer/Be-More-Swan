@@ -77,7 +77,7 @@
       { k: 'serviceIds', kind: 'servicePick', label: 'Which services can be booked' },
       { k: 'askStaff', kind: 'checkbox', label: 'Let people choose who they book with (or "anyone available")' },
       { k: 'buttonLabel', kind: 'text', label: 'Button text' }],
-    // Reviews: quoted from Business Information ▸ Reviews (the customers' words, never typed here).
+    // Reviews: quoted from Audience ▸ Reviews (the customers' words, never typed here).
     reviews: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
       { k: 'reviewIds', kind: 'reviewPick', label: 'Which reviews to quote' },
       { k: 'limit', kind: 'select', label: 'When none are ticked, show the newest', options: [[3, '3 reviews'], [6, '6 reviews'], [9, '9 reviews'], [12, '12 reviews']] },
@@ -325,7 +325,7 @@
         ${line(b.ready, b.ready ? `Hours: ${esc(b.hours)}` : 'No opening hours yet')}
         ${line(!!b.visitAddress, b.visitAddress ? `Address: ${esc(b.visitAddress.split('\n').join(', '))}` : 'No address yet (no directions button)')}
         ${line(!!(st.phone || st.email || b.whatsapp), [st.phone && `Phone ${esc(st.phone)}`, b.whatsapp && `WhatsApp ${esc(b.whatsapp)}`, st.email && `Email ${esc(st.email)}`].filter(Boolean).join(' · ') || 'No phone, WhatsApp or email yet')}</ul>
-        <p class="text-xs text-gray-500 mt-1">Change them once and every page updates. ${btn('data-site-open-hours', 'Hours, location & bookings')}</p>`;
+        <p class="text-xs text-gray-500 mt-1">Change them once and every page updates. ${btn('data-site-open-hours', 'Hours & location')}</p>`;
     }
     if (f.kind === 'servicePick' && state.editing && state.editing.props.kind === 'class') {
       // Classes and events: any Business Information product can be a class; dates are on the timetable.
@@ -340,7 +340,7 @@
     if (f.kind === 'servicePick') {
       const b = state.data.booking || {};
       const chosen = new Set((Array.isArray(value) ? value : []).map(Number));
-      const hoursNote = `<p class="text-xs ${b.ready ? 'text-gray-500' : 'text-amber-800 font-semibold'} mt-2">${b.ready ? `Opening hours: ${esc(b.hours)}.` : 'Set your opening hours first — booking only shows on your site once they are set.'} ${btn('data-site-open-hours', 'Hours, location & bookings')}</p>`;
+      const hoursNote = `<p class="text-xs ${b.ready ? 'text-gray-500' : 'text-amber-800 font-semibold'} mt-2">${b.ready ? `Opening hours: ${esc(b.hours)}.` : 'Set your opening hours first — booking only shows on your site once they are set.'} ${btn('data-site-open-hours', 'Hours & location')}</p>`;
       if (!(b.services || []).length) return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p><p class="text-xs text-gray-500">None of your Products &amp; Services has a length yet. Give a service a length (e.g. 45 minutes) in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} to offer it here. (Tables don't need one.)</p>${hoursNote}`;
       return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
         <div class="space-y-1 mt-1">${b.services.map((x) => `<label class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 text-xs cursor-pointer">
@@ -404,7 +404,7 @@
               <span class="block text-gray-600 truncate">${esc(r.body)}</span></span></label>`).join('')}</div>
           <p class="text-xs text-gray-500 mt-1">Tick none to show your newest reviews automatically.</p>`
           : '<p class="text-xs text-gray-500 mt-1">You haven\'t added any reviews yet.</p>'}
-        <p class="text-xs text-gray-500 mt-2">Add, edit or hide reviews in ${btn('data-site-open-reviews', 'Business Information ▸ Reviews')} — or paste them into this chat.</p>`;
+        <p class="text-xs text-gray-500 mt-2">Add, edit or hide reviews in ${btn('data-site-open-reviews', 'Audience ▸ Reviews')} — or paste them into this chat.</p>`;
     }
     if (f.kind === 'gallery') {
       const list = Array.isArray(value) ? value : [];
@@ -1007,7 +1007,7 @@
   function bookingsPanel() {
     const b = state.data.booking || {};
     const head = card(`<p class="text-sm font-black text-gray-900">Bookings</p>
-      <p class="text-xs text-gray-500 mt-1">${b.ready ? `Opening hours: ${esc(b.hours)}. ${b.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}` : 'Set your opening hours to take bookings on your site.'} ${btn('data-site-open-hours', 'Hours, location & bookings')}</p>
+      <p class="text-xs text-gray-500 mt-1">${b.ready ? `Opening hours: ${esc(b.hours)}. ${b.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}` : 'Set your opening hours to take bookings on your site.'} ${btn('data-site-open-hours', 'Hours & location')}</p>
       <p class="text-xs text-gray-500 mt-1">Add a "Bookings" section to a page to show it on your website.</p>`);
     const list = state.bookings;
     const tt = timetableCard();
@@ -1076,7 +1076,7 @@
           </li>`;
         }).join('')}</ul>`;
     return card(`<p class="text-sm font-black text-gray-900">Availability</p>
-      <p class="text-xs text-gray-500 mt-1">Appointments and tables are booked within your opening hours (Business Information ▸ Hours, location &amp; bookings). Here, add dates with a number of places — classes, events, workshops, tours, open days. Show them with a Bookings section set to "Classes and events"; people book places, and join a waitlist when it's full. Your Calendar tab shows all of it together.</p>${form}${rows}`);
+      <p class="text-xs text-gray-500 mt-1">Appointments and tables are booked within your opening hours (Business Information ▸ Hours &amp; Location). Here, add dates with a number of places — classes, events, workshops, tours, open days. Show them with a Bookings section set to "Classes and events"; people book places, and join a waitlist when it's full. Your Calendar tab shows all of it together.</p>${form}${rows}`);
   }
   function readSessionForm(scope) {
     const o = {};
@@ -1481,7 +1481,7 @@
       return;
     }
     if (t('[data-site-open-products]')) { window._bizinfoInitialTab = 'products'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
-    if (t('[data-site-open-reviews]')) { window._bizinfoInitialTab = 'reviews'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
+    if (t('[data-site-open-reviews]')) { window._audienceInitialTab = 'reviews'; if (typeof window.loadView === 'function') window.loadView('audience'); return; }
     if (t('[data-site-open-hours]')) { window._bizinfoInitialTab = 'hours'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
     const sAdd = t('[data-session-add]');
     if (sAdd) {

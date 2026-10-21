@@ -36,6 +36,11 @@ export interface AutonomousOrgFacts {
     businessDescription?: string | null;
     targetAudience?: string | null;
     websiteUrl?: string | null;
+    /**
+     * What the business sells, from Business Information ▸ Products & Services (org-products.ts
+     * loadOfferingsText). When the caller passes it — even '' — it replaces the old free-text box.
+     */
+    offerings?: string | null;
 }
 
 function text(v: unknown, max = 1200): string {
@@ -92,7 +97,7 @@ export function briefLines(org: AutonomousOrgFacts, onboardingContext: unknown):
         ['Industry', text(org.industry, 120)],
         ['Who the posts are for', text(c.target_audience) || text(org.targetAudience)],
         ['Core message', text(c.core_message)],
-        ['Services and offers', text(c.service_offerings)],
+        ['Services and offers', text(org.offerings !== undefined ? org.offerings : c.service_offerings)],
         ['Incentive / offer', text(c.incentive, 600)],
         ['Call to action', text(c.cta, 300)],
         ['Website', text(org.websiteUrl, 200)],
@@ -107,7 +112,7 @@ export function briefLines(org: AutonomousOrgFacts, onboardingContext: unknown):
 export function hasUsableBrief(org: AutonomousOrgFacts, onboardingContext: unknown): boolean {
     const c = (onboardingContext ?? {}) as Ctx;
     return Boolean(
-        text(org.businessDescription) || text(c.core_message) || text(c.service_offerings)
+        text(org.businessDescription) || text(c.core_message) || text(org.offerings !== undefined ? org.offerings : c.service_offerings)
         || parsePillars(c.content_pillars).length,
     );
 }

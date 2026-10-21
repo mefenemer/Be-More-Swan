@@ -12,7 +12,7 @@
       <h1 class="text-3xl font-extrabold text-gray-900">Audience</h1>
       <p class="text-gray-500 mt-1">Everyone who has agreed to hear from you — shared by every assistant you hire.</p>
     </div>
-    <div class="flex flex-wrap items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2" data-aud-people-only>
       <button type="button" id="aud-form-btn"
         class="btn-secondary flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-colors border cursor-pointer">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
@@ -36,6 +36,15 @@
     </div>
   </div>
 
+  <!-- People | Reviews. Reviews moved here from Business Information (owner, 2026-10-21). A one-shot
+       window._audienceInitialTab (or ?view=audience&tab=reviews) opens straight on a tab. -->
+  <div class="border-b border-gray-200 mb-6">
+    <nav id="aud-tabs" class="-mb-px flex gap-x-6" aria-label="Audience tabs">
+      <button type="button" class="aud-tab is-active" data-aud-tab="people">People</button>
+      <button type="button" class="aud-tab" data-aud-tab="reviews">Reviews</button>
+    </nav>
+  </div>
+
   <!-- Two columns, like the studios: who you are looking at (segments, tags) on the left, the
        people on the right. Plain CSS rather than Tailwind utilities because style.css is prebuilt
        and has no arbitrary-width grid or lg:sticky compiled. The sidebar only sticks at desktop
@@ -57,9 +66,12 @@
     .aud-sort { cursor: pointer; user-select: none; }
     .aud-sort:hover { color: var(--color-gray-800, #1f2937); }
     .aud-group-row td { background: var(--color-gray-50, #f9fafb); }
+    .aud-tab { padding: .75rem .25rem; font-size: .875rem; font-weight: 600; color: #6b7280; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
+    .aud-tab:hover { color: #374151; border-bottom-color: #d1d5db; }
+    .aud-tab.is-active { color: #059669; border-bottom-color: #10b981; }
   </style>
 
-  <div class="aud-layout">
+  <div class="aud-layout" data-aud-panel="people">
 
     <!-- ── Left: who you're looking at ─────────────────────────────────── -->
     <aside class="aud-side space-y-4" aria-label="Segments and tags">
@@ -287,6 +299,220 @@
       </div>
     </div>
   </div>
+
+  <!-- ══ Audience ▸ Reviews (db/z-reviews.sql, src/utils/reviews.ts) ═══════════════
+       Moved here from Business Information (owner, 2026-10-21): the people who hear from you and
+       what they say about you, in one place — review requests go to the same customers, under the
+       same opt-outs.
+       The business's real reviews, word for word, recorded ONCE: the website's reviews section and its
+       search data read them from here. Hiding a review stops it being quoted but keeps it in the
+       average (DMCC Act 2024 — no misleading scores); only deleting removes it. API: org-reviews.ts. -->
+  <div class="hidden" data-aud-panel="reviews">
+  <section class="mb-8">
+    <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
+      <h2 class="text-lg font-bold text-gray-900">Reviews</h2>
+      <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">Real reviews from your customers — from Google, Facebook, an email or a card. Copy them word for word and say where they came from; your website quotes them from here. Never add a review you made up or paid for: it's against UK law.</p>
+      <p id="rv-summary" class="text-sm font-semibold text-gray-800 mt-3"></p>
+      <div id="rv-pending" class="hidden mt-4 bg-amber-50 border border-amber-200 rounded-xl p-4"></div>
+
+      <form id="rv-form" class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4 border border-gray-200 rounded-xl p-4" novalidate>
+        <p id="rv-form-title" class="sm:col-span-2 text-sm font-bold text-gray-900">Add a review</p>
+        <input type="hidden" id="rv-id">
+        <div><label for="rv-name" class="block text-sm font-semibold text-gray-700 mb-1">Their name</label>
+          <input id="rv-name" maxlength="80" placeholder="e.g. Sarah K." class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
+        <div><label for="rv-detail" class="block text-sm font-semibold text-gray-700 mb-1">About them (optional)</label>
+          <input id="rv-detail" maxlength="80" placeholder="e.g. Leeds, or Wedding, June 2026" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
+        <div><label for="rv-rating" class="block text-sm font-semibold text-gray-700 mb-1">Stars</label>
+          <select id="rv-rating" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm bg-white">
+            <option value="5">★★★★★ 5</option><option value="4">★★★★☆ 4</option><option value="3">★★★☆☆ 3</option><option value="2">★★☆☆☆ 2</option><option value="1">★☆☆☆☆ 1</option><option value="">No stars given</option></select></div>
+        <div><label for="rv-date" class="block text-sm font-semibold text-gray-700 mb-1">When (optional)</label>
+          <input id="rv-date" type="date" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
+        <div><label for="rv-source" class="block text-sm font-semibold text-gray-700 mb-1">Where they left it</label>
+          <select id="rv-source" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm bg-white">
+            <option value="google">Google</option><option value="facebook">Facebook</option><option value="trustpilot">Trustpilot</option><option value="tripadvisor">Tripadvisor</option><option value="checkatrade">Checkatrade</option><option value="yell">Yell</option><option value="direct" selected>Sent to us directly (email, card, message)</option><option value="website">Our website</option><option value="other">Somewhere else</option></select></div>
+        <div><label for="rv-url" class="block text-sm font-semibold text-gray-700 mb-1">Link to it (optional)</label>
+          <input id="rv-url" type="url" placeholder="https://…" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
+        <div class="sm:col-span-2"><label for="rv-body" class="block text-sm font-semibold text-gray-700 mb-1">What they said, word for word</label>
+          <textarea id="rv-body" rows="4" maxlength="2000" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></textarea></div>
+        <p id="rv-error" class="hidden sm:col-span-2 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3"></p>
+        <div class="sm:col-span-2 flex items-center justify-end gap-2">
+          <button type="button" id="rv-cancel" class="btn-secondary border text-sm font-bold px-4 py-2 rounded-md hidden">Cancel</button>
+          <button type="submit" id="rv-save" class="btn-primary text-sm font-bold px-4 py-2 rounded-md">Add review</button></div>
+      </form>
+
+      <div id="rv-list" class="space-y-2 mt-5"></div>
+      <p class="text-xs text-gray-500 mt-3">Hidden reviews aren't quoted on your website but still count in your average, so it stays honest. Tip: you can also paste several reviews into your Website Assistant's chat and it will set them out for you to check.</p>
+    </div>
+
+    <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
+      <h2 class="text-lg font-bold text-gray-900">Ask customers for a review</h2>
+      <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">One friendly email, sent once, after someone's visit or order through your website. They write the review on your own site; you approve it before it appears. Nobody is asked twice in 30 days, and anyone can say "don't ask me again".</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+        <label class="sm:col-span-2 inline-flex items-center gap-2 text-sm"><input type="checkbox" id="rq-bookings"> Ask after a booking from my website</label>
+        <div><label for="rq-booking-delay" class="block text-sm font-semibold text-gray-700 mb-1">When</label>
+          <select id="rq-booking-delay" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm bg-white">
+            <option value="2">2 hours after it ends</option><option value="24">The next day</option><option value="48">2 days after</option><option value="72">3 days after</option><option value="168">A week after</option></select></div>
+        <div></div>
+        <label class="sm:col-span-2 inline-flex items-center gap-2 text-sm"><input type="checkbox" id="rq-orders"> Ask after an order from my website</label>
+        <div><label for="rq-order-delay" class="block text-sm font-semibold text-gray-700 mb-1">Days after the order (time for it to arrive)</label>
+          <input id="rq-order-delay" type="number" min="1" max="30" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
+        <div class="sm:col-span-2"><label for="rq-google" class="block text-sm font-semibold text-gray-700 mb-1">Your Google review link (optional)</label>
+          <input id="rq-google" type="url" placeholder="https://g.page/r/…/review" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm">
+          <p class="text-xs text-gray-500 mt-1">If you add it, every customer is also offered it — whatever they thought. (Google doesn't allow sending only happy customers.) Find it in your Google Business Profile under "Ask for reviews".</p></div>
+      </div>
+      <p id="rq-stats" class="text-xs text-gray-500 mt-3"></p>
+      <p id="rq-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3 mt-3"></p>
+      <div class="flex items-center justify-end gap-3 mt-4"><span id="rq-saved" class="text-sm text-emerald-700 font-semibold hidden">Saved</span>
+        <button type="button" id="rq-save" class="btn-primary text-sm font-bold px-4 py-2 rounded-md">Save</button></div>
+    </div>
+  </section>
+
+  <script>
+  (function () {
+    const API = '/.netlify/functions/org-reviews';
+    const panel = document.querySelector('[data-aud-panel="reviews"]');
+    if (!panel) return;
+    const $ = (id) => panel.querySelector('#' + id);
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const SOURCES = { google: 'Google', facebook: 'Facebook', trustpilot: 'Trustpilot', tripadvisor: 'Tripadvisor', checkatrade: 'Checkatrade', yell: 'Yell', direct: 'Sent directly', website: 'Our website', other: 'Elsewhere' };
+    let data = { reviews: [], summary: null, pending: [], settings: {}, asked: { sent: 0, answered: 0 } };
+
+    async function call(method, body, query) {
+      const res = await fetch(API + (query || ''), { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || 'Something went wrong. Please try again.');
+      return d;
+    }
+    const stars = (n) => n ? `<span class="text-amber-500" aria-label="${n} out of 5 stars">${'★'.repeat(n)}${'☆'.repeat(5 - n)}</span>` : '<span class="text-gray-400">No stars</span>';
+
+    function renderAsking() {
+      const st = data.settings || {};
+      $('rq-bookings').checked = !!st.askAfterBookings; $('rq-orders').checked = !!st.askAfterOrders;
+      $('rq-booking-delay').value = String(st.bookingDelayHours || 24); $('rq-order-delay').value = st.orderDelayDays || 7;
+      $('rq-google').value = st.googleReviewUrl || '';
+      const a = data.asked || {};
+      $('rq-stats').textContent = (st.askAfterBookings || st.askAfterOrders) ? `In the last 30 days: ${a.sent || 0} asked, ${a.answered || 0} answered.` : 'Off — nobody is being asked.';
+      const p = data.pending || [];
+      $('rv-pending').classList.toggle('hidden', !p.length);
+      $('rv-pending').innerHTML = p.length ? `<p class="text-sm font-bold text-amber-900">Waiting for you (${p.length})</p>
+        <p class="text-xs text-amber-900 mt-0.5">Customers sent these from your review emails. Approve to show them. Decline only one that isn't genuine, is offensive or isn't about you — to keep a genuine one off your site, approve it and then hide it (it still counts in your average).</p>
+        ${p.map((r) => `<div class="bg-white border border-amber-200 rounded-lg p-3 mt-2">
+          <div class="flex flex-wrap items-center gap-2 text-sm">${stars(r.rating)} <span class="font-bold text-gray-900">${esc(r.authorName)}</span><span class="text-xs text-gray-500">· ${esc(r.reviewedOn || '')}</span></div>
+          <p class="text-sm text-gray-700 mt-1 whitespace-pre-line">${esc(r.body)}</p>
+          <div class="flex flex-wrap gap-2 mt-2"><button type="button" data-rv-approve="${r.id}" class="btn-primary text-xs font-bold px-2.5 py-1 rounded">Approve</button>
+            <button type="button" data-rv-decline="${r.id}" class="btn-utility text-xs font-bold px-2.5 py-1 rounded">Decline</button></div></div>`).join('')}` : '';
+    }
+    function render() {
+      renderAsking();
+      const s = data.summary;
+      $('rv-summary').textContent = data.reviews.length
+        ? (s ? `Average ${s.average.toFixed(1)} out of 5 from ${s.rated} rated review${s.rated === 1 ? '' : 's'}${data.reviews.length > s.rated ? ` (${data.reviews.length} in all)` : ''}.` : `${data.reviews.length} review${data.reviews.length === 1 ? '' : 's'}, none with stars.`)
+        : '';
+      $('rv-list').innerHTML = data.reviews.length ? data.reviews.map((r) => `
+        <div class="border border-gray-200 rounded-xl p-4 ${r.status === 'hidden' ? 'bg-gray-50' : ''}">
+          <div class="flex flex-wrap items-center gap-2 text-sm">${stars(r.rating)} <span class="font-bold text-gray-900">${esc(r.authorName)}</span>${r.authorDetail ? `<span class="text-gray-500">${esc(r.authorDetail)}</span>` : ''}
+            <span class="text-xs text-gray-500">· ${esc(SOURCES[r.source] || 'Elsewhere')}${r.reviewedOn ? ` · ${esc(r.reviewedOn)}` : ''}</span>
+            ${r.status === 'hidden' ? '<span class="text-xs font-bold text-gray-600 bg-gray-200 rounded px-1.5 py-0.5">Hidden</span>' : ''}</div>
+          <p class="text-sm text-gray-700 mt-1 whitespace-pre-line">${esc(r.body)}</p>
+          <div class="flex flex-wrap gap-2 mt-2">
+            <button type="button" data-rv-edit="${r.id}" class="btn-utility text-xs font-bold px-2.5 py-1 rounded">Edit</button>
+            <button type="button" data-rv-toggle="${r.id}" class="btn-utility text-xs font-bold px-2.5 py-1 rounded">${r.status === 'hidden' ? 'Show on website' : 'Hide from website'}</button>
+            <button type="button" data-rv-delete="${r.id}" class="btn-utility text-xs font-bold px-2.5 py-1 rounded">Delete</button>
+          </div>
+        </div>`).join('') : '<p class="text-sm text-gray-500">No reviews yet. Add your first one above.</p>';
+    }
+    function fill(r) {
+      $('rv-id').value = r ? r.id : '';
+      $('rv-name').value = r ? r.authorName : ''; $('rv-detail').value = r ? (r.authorDetail || '') : '';
+      $('rv-rating').value = r ? (r.rating ? String(r.rating) : '') : '5'; $('rv-date').value = r ? (r.reviewedOn || '') : '';
+      $('rv-source').value = r ? r.source : 'direct'; $('rv-url').value = r ? (r.sourceUrl || '') : ''; $('rv-body').value = r ? r.body : '';
+      $('rv-form-title').textContent = r ? 'Edit review' : 'Add a review';
+      $('rv-save').textContent = r ? 'Save changes' : 'Add review';
+      $('rv-cancel').classList.toggle('hidden', !r);
+      $('rv-error').classList.add('hidden');
+    }
+    async function load() {
+      try { data = await call('GET'); render(); }
+      catch (err) { $('rv-list').innerHTML = `<p class="text-sm text-red-600">${esc(err.message)}</p>`; }
+    }
+
+    $('rv-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = Number($('rv-id').value) || null;
+      const body = { authorName: $('rv-name').value, authorDetail: $('rv-detail').value, rating: $('rv-rating').value || null, reviewedOn: $('rv-date').value, source: $('rv-source').value, sourceUrl: $('rv-url').value, body: $('rv-body').value };
+      $('rv-save').disabled = true; $('rv-error').classList.add('hidden');
+      try {
+        if (id) await call('PATCH', { id, ...body }); else await call('POST', body);
+        fill(null); await load();
+      } catch (err) { $('rv-error').textContent = err.message; $('rv-error').classList.remove('hidden'); }
+      finally { $('rv-save').disabled = false; }
+    });
+    panel.addEventListener('click', async (e) => {
+      const t = (sel) => e.target.closest(sel);
+      if (t('#rv-cancel')) { fill(null); return; }
+      if (t('#rq-save')) {
+        $('rq-error').classList.add('hidden'); $('rq-save').disabled = true;
+        try {
+          await call('PUT', { askAfterBookings: $('rq-bookings').checked, askAfterOrders: $('rq-orders').checked, bookingDelayHours: Number($('rq-booking-delay').value), orderDelayDays: Number($('rq-order-delay').value || 7), googleReviewUrl: $('rq-google').value });
+          await load();
+          $('rq-saved').classList.remove('hidden'); setTimeout(() => $('rq-saved').classList.add('hidden'), 2500);
+        } catch (err) { $('rq-error').textContent = err.message; $('rq-error').classList.remove('hidden'); }
+        finally { $('rq-save').disabled = false; }
+        return;
+      }
+      const ap = t('[data-rv-approve]');
+      const dc = t('[data-rv-decline]');
+      if (ap || dc) {
+        if (dc) {
+          const ok = typeof window.confirmModal === 'function' ? await window.confirmModal('Only decline a review that isn\'t genuine, is offensive or isn\'t about your business. It won\'t be shown or counted. Hiding bad reviews to look better is against UK consumer law.', { title: 'Decline this review?', confirmLabel: 'Decline', cancelLabel: 'Keep it' }) : true;
+          if (!ok) return;
+        }
+        try { await call('PATCH', { id: Number((ap || dc).dataset[ap ? 'rvApprove' : 'rvDecline']), decision: ap ? 'approve' : 'decline' }); await load(); }
+        catch (err) { window.alertModal ? window.alertModal(err.message) : null; }
+        return;
+      }
+      const ed = t('[data-rv-edit]');
+      if (ed) { fill(data.reviews.find((r) => r.id === Number(ed.dataset.rvEdit))); $('rv-form').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+      const tg = t('[data-rv-toggle]');
+      if (tg) {
+        const r = data.reviews.find((x) => x.id === Number(tg.dataset.rvToggle));
+        try { await call('PATCH', { id: r.id, status: r.status === 'hidden' ? 'published' : 'hidden' }); await load(); } catch (err) { window.alertModal ? window.alertModal(err.message) : null; }
+        return;
+      }
+      const del = t('[data-rv-delete]');
+      if (del) {
+        const ok = typeof window.confirmModal === 'function' ? await window.confirmModal('It is removed for good, from your website and your average rating. To stop quoting it but keep it counted, hide it instead.', { title: 'Delete this review?', confirmLabel: 'Delete', cancelLabel: 'Keep it' }) : true;
+        if (!ok) return;
+        try { await call('DELETE', null, `?id=${Number(del.dataset.rvDelete)}`); await load(); } catch (err) { window.alertModal ? window.alertModal(err.message) : null; }
+      }
+    });
+
+    let loaded = false;
+    const maybeLoad = () => { if (loaded || panel.classList.contains('hidden')) return; loaded = true; load(); };
+    new MutationObserver(maybeLoad).observe(panel, { attributes: true, attributeFilter: ['class'] });
+    maybeLoad();
+  })();
+  </script>
+  </div><!-- /aud panel: reviews -->
+
+  <script>
+  // People | Reviews tabs. The header's contact buttons belong to People only.
+  (function () {
+    const tabs = Array.from(document.querySelectorAll('#aud-tabs .aud-tab'));
+    const panels = Array.from(document.querySelectorAll('[data-aud-panel]'));
+    if (!tabs.length) return;
+    function activate(name) {
+      tabs.forEach((t) => t.classList.toggle('is-active', t.dataset.audTab === name));
+      // style.display too: .aud-layout's own display:grid outranks the `hidden` class.
+      panels.forEach((p) => { const off = p.dataset.audPanel !== name; p.classList.toggle('hidden', off); p.style.display = off ? 'none' : ''; });
+      document.querySelector('[data-aud-people-only]')?.classList.toggle('hidden', name !== 'people');
+    }
+    tabs.forEach((t) => t.addEventListener('click', () => activate(t.dataset.audTab)));
+    const wanted = window._audienceInitialTab;
+    window._audienceInitialTab = null;
+    if (wanted && tabs.some((t) => t.dataset.audTab === wanted)) activate(wanted);
+  })();
+  </script>
 
   <!-- Export to Excel. Fields are ticked here and remembered per browser; the file is built in the
        browser (src/components/xlsx-writer.js) from the same filtered list the table shows, paged

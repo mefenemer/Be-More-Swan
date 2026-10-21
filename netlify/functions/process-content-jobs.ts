@@ -43,7 +43,7 @@ import { fitForPlatform, isShortForm, type BrandHashtags } from '../../src/utils
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { operationalSetupLines } from '../../src/utils/operational-setup';
 import { renderBlueprintPrompt } from '../../src/utils/blueprint-prompt';
-import { loadProductsBlock } from '../../src/utils/org-products';
+import { loadOfferingsText, loadProductsBlock } from '../../src/utils/org-products';
 import { campaignDirectiveForJob } from '../../src/utils/campaign-job-directive';
 import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
 import { resolvePostingSchedule } from '../../src/config/posting-cadence';
@@ -523,7 +523,9 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
 
         // US-SMM (AC7): conversion pathways. Offerings are woven in naturally on normal posts;
         // a 'conversion' job produces a direct "path-to-working-with-me" post built around them.
-        const serviceOfferings = (answers['service_offerings'] as string) || '';
+        // From Business Information ▸ Products & Services, the one place products and prices live;
+        // the old free-text answer only while the catalogue is empty (src/utils/org-products.ts).
+        const serviceOfferings = await loadOfferingsText(db, job.organisation_id, answers['service_offerings']);
         const isConversionPost = job.trigger_type === 'conversion';
         const conversionBlock = serviceOfferings
             ? (isConversionPost

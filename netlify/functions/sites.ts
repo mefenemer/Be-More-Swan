@@ -174,7 +174,7 @@ export default withLambda(async (event) => {
                 .orderBy(asc(orgProducts.sortOrder), asc(orgProducts.id)))
                 .map((r) => ({ id: r.id, name: r.name, kind: r.kind, price: r.price, buyable: buyablePence(r) !== null,
                     imageUrl: r.imageAssetId ? siteAssetUrl(resolveBaseUrl(event.headers as Record<string, string | undefined>) || 'https://bemoreswan.com', r.imageAssetId) : null })),
-            // Business Information ▸ Reviews — the customers' words, for the reviews section's picker.
+            // Audience ▸ Reviews — the customers' words, for the reviews section's picker.
             reviews: await (async () => {
                 const rows = await db.select({ id: orgReviews.id, authorName: orgReviews.authorName, rating: orgReviews.rating, body: orgReviews.body, status: orgReviews.status, source: orgReviews.source, reviewedOn: orgReviews.reviewedOn })
                     .from(orgReviews).where(and(eq(orgReviews.organisationId, orgId), inArray(orgReviews.status, ['published', 'hidden'])))
@@ -517,7 +517,7 @@ export default withLambda(async (event) => {
             if (!r.ok) return json(400, { error: r.error });
             site = r.site;
         }
-        return json(200, await view(site, ['Bookings are set up. Change your hours and rules any time in Business Information ▸ Hours, location & bookings.']));
+        return json(200, await view(site, ['Bookings are set up. Change your hours any time in Business Information ▸ Hours & Location, and your booking rules under Bookings.']));
     }
 
     if (action === 'orders') {

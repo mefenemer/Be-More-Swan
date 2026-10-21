@@ -2047,7 +2047,7 @@
       ${typeof settings.whatsapp === 'string' && settings.whatsapp.trim() ? `<p class="text-xs text-gray-700 mt-1">WhatsApp: ${esc(settings.whatsapp)}</p>` : ''}
       ${settings.mode ? `<p class="text-xs text-gray-700 mt-2">${settings.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}</p>` : ''}
       ${section ? `<p class="text-xs text-gray-700 mt-1">Adds a ${esc(kinds[section.kind] || 'booking')} section to your site.</p>` : ''}
-      <p class="text-xs text-gray-600 mt-2">Saved to Business Information ▸ Hours, location &amp; bookings, where you can change it any time. Uses no tasks.</p>
+      <p class="text-xs text-gray-600 mt-2">Saved to Business Information (Hours &amp; Location, and Bookings), where you can change it any time. Uses no tasks.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-bs-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Set up bookings</button>
         <button type="button" data-bs-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
@@ -2079,7 +2079,15 @@
   // { type: 'offer_profile', summary, offers } — "What does your business offer?" in Business
   // Information ▸ Products & Services (src/utils/offer-profile.ts), after the owner's click:
   // org-products.ts PATCH { offer }, the same call as the tab's tick boxes.
-  const OFFER_LABELS = { bookings: 'People book time with us (appointments, classes or tables)', menu: 'We serve food or drink' };
+  // Same wording and order as src/utils/offer-profile.ts OFFER_LABELS.
+  const OFFER_LABELS = {
+    products: 'We sell products (physical or digital)',
+    services: 'We provide services (consulting, trades, coaching, agencies)',
+    subscriptions: 'We sell software or subscriptions',
+    bookings: 'People book time with us (appointments, classes, tables or events)',
+    visits: 'Customers visit us (a shop, venue or studio)',
+    menu: 'We serve food or drink',
+  };
   function renderOfferProfileCard(ui, esc) {
     const offers = Array.isArray(ui.offers) ? ui.offers.filter((k) => OFFER_LABELS[k]) : [];
     const el = document.createElement('div');
@@ -2142,7 +2150,7 @@
 
   // { type: 'reviews_add', summary, reviews: [{ authorName, authorDetail, rating, body, source, reviewedOn }] }
   // Reviews the owner pasted, set out for them to check WORD FOR WORD before they are saved to
-  // Business Information ▸ Reviews (org-reviews.ts, the same checks as the form there).
+  // Audience ▸ Reviews (org-reviews.ts, the same checks as the form there).
   const RV_SOURCES = { google: 'Google', facebook: 'Facebook', trustpilot: 'Trustpilot', tripadvisor: 'Tripadvisor', checkatrade: 'Checkatrade', yell: 'Yell', direct: 'Sent directly', website: 'Their website', other: 'Elsewhere' };
   function renderReviewsAddCard(ui, esc) {
     const reviews = (Array.isArray(ui.reviews) ? ui.reviews : []).filter((r) => r && typeof r === 'object' && typeof r.body === 'string' && r.body.trim()).slice(0, 50)
@@ -2156,7 +2164,7 @@
         <div class="bg-white border border-gray-200 rounded-lg p-3">
           <p class="text-xs"><span class="text-amber-500">${r.rating ? '★'.repeat(r.rating) + '☆'.repeat(5 - r.rating) : 'No stars'}</span> <strong>${esc(r.authorName || '(no name)')}</strong>${r.authorDetail ? ` · ${esc(r.authorDetail)}` : ''} <span class="text-gray-500">· ${esc(RV_SOURCES[r.source])}${r.reviewedOn ? ` · ${esc(r.reviewedOn)}` : ''}</span></p>
           <p class="text-xs text-gray-700 mt-1 whitespace-pre-line">${esc(r.body)}</p></div>`).join('')}</div>
-      <p class="text-xs text-gray-600 mt-2">Check each one matches what the customer wrote, word for word. They're saved to Business Information ▸ Reviews, where you can edit or hide them.</p>
+      <p class="text-xs text-gray-600 mt-2">Check each one matches what the customer wrote, word for word. They're saved to Audience ▸ Reviews, where you can edit or hide them.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-rv-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${reviews.length ? '' : 'disabled'}>Add ${reviews.length} review${reviews.length === 1 ? '' : 's'}</button>
         <button type="button" data-rv-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
@@ -2176,7 +2184,7 @@
           reviews,
           respond({ ok, error }) {
             if (!ok) { setBusy(false); say(error || 'They couldn\'t be saved — nothing was added.', 'error'); return; }
-            say('Added to Business Information ▸ Reviews.');
+            say('Added to Audience ▸ Reviews.');
           },
         },
       }));
@@ -2233,7 +2241,7 @@
 
   // { type: 'review_decisions', summary, decisions: [{ reviewId, decision: approve|decline, reason }] }
   // Approve / decline reviews customers sent in — org-reviews.ts PATCH { id, decision }, the same as
-  // Business Information ▸ Reviews. Decline is only for a review that isn't genuine, is offensive or
+  // Audience ▸ Reviews. Decline is only for a review that isn't genuine, is offensive or
   // isn't about the business; the server refuses one already dealt with.
   const RD_REASON = { not_genuine: 'not genuine', offensive: 'offensive', not_about_us: 'not about you' };
   function renderReviewDecisionsCard(ui, esc) {
@@ -2266,7 +2274,7 @@
           decisions,
           respond({ ok, error, done }) {
             if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved.', 'error'); return; }
-            say(`Done — ${done} review${done === 1 ? '' : 's'} updated in Business Information ▸ Reviews.`);
+            say(`Done — ${done} review${done === 1 ? '' : 's'} updated in Audience ▸ Reviews.`);
           },
         },
       }));

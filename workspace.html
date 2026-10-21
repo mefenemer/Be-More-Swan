@@ -3933,10 +3933,12 @@ function formatCurrency(amount, currency) {
       // billing view reads this to open Change Plan on the tier they actually asked for.
       const changePlanParam = qs.get('changePlan');
       if (viewParam === 'billing' && changePlanParam) window._billingInitialChangePlan = changePlanParam;
-      // ?view=assets&tab=hours — Business Information on a given tab (e.g. back from connecting the
+      // ?view=assets&tab=bookings — Business Information on a given tab (e.g. back from connecting the
       // Outlook calendar). Only a plain tab name is lifted; assets.html ignores one it doesn't have.
       const tabParam = qs.get('tab');
       if (viewParam === 'assets' && tabParam && /^[a-z]{2,20}$/.test(tabParam)) window._bizinfoInitialTab = tabParam;
+      // ?view=audience&tab=reviews — Audience on its Reviews tab (Reviews moved there 2026-10-21).
+      if (viewParam === 'audience' && tabParam && /^[a-z]{2,20}$/.test(tabParam)) window._audienceInitialTab = tabParam;
       // ?view=partner&payoutToken=… — the link in "Confirm your new payout details". The Partner page
       // asks the signed-in partner to press Confirm (src/utils/partner-payouts.ts).
       const payoutTokenParam = qs.get('payoutToken');
@@ -5887,7 +5889,7 @@ function formatCurrency(amount, currency) {
 <!-- One pillar splitter for the profile and the post writer (see the file). Before assistants.js. -->
 <script src="/src/public/content-pillars.js"></script>
 <script src="/src/public/assistant-sectors.js"></script>
-<script src="/assistants.js?v=20261012-crosspost"></script>
+<script src="/assistants.js?v=20261021-products"></script>
 <script src="/help.js"></script>
 <script src="/my-content.js?v=20261012-created-by"></script>
 <!-- Shared Audience view (audience.html). Org-scoped; reads no assistant context. -->
@@ -6449,11 +6451,11 @@ function rqOriginPill(draft) {
         case 'on_demand':     return P(`Created by ${who}`, 'bg-violet-100 text-violet-700');
         case 'scheduled':     return P(`Autopilot · ${who}`, 'bg-indigo-100 text-indigo-700');
         // Made by the weekly conversion scheduler (schedule-conversion-posts.ts): one direct
-        // "here's how to work with me" post built from the assistant's service offerings, at most
+        // "here's how to work with me" post built from Business Information ▸ Products & Services, at most
         // once every 7 days, between the value-first posts. Named on hover, because the pill alone
         // reads like a post type nobody asked for.
         case 'conversion':    return P('Conversion post',   'bg-amber-100 text-amber-700',
-            `${who} writes one of these a week: a direct “how to work with me” post built from your service offerings, with a clear call to action. The rest of your posts stay value-first. Review it like any other draft.`);
+            `${who} writes one of these a week: a direct “how to work with me” post built from what you list in Business Information ▸ Products & Services, with a clear call to action. The rest of your posts stay value-first. Review it like any other draft.`);
         case 'orchestration': return P(draft.handoffFrom ? `Hand-off from ${draft.handoffFrom}` : 'Team hand-off',
                                                            'bg-teal-100 text-teal-700');
         // A person typed this one. ownerLabel is "Jane Smith" for a teammate's post; its absence

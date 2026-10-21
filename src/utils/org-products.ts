@@ -131,11 +131,54 @@ export async function loadOrgProducts(db: Db, organisationId: number): Promise<O
 }
 
 /** Load + render in one call — what most seams want. Never throws; null when there is nothing to add. */
+/** What an assistant is told when the catalogue is empty — so it knows the page exists and where. */
+export const NO_PRODUCTS_BLOCK = `<products_and_services>
+The business has not listed any products or services yet. They are kept in ONE place: Business Information ▸ Products & Services. Do not name a product or quote a price. If the user mentions something they sell, suggest they add it there — you cannot add it for them.
+</products_and_services>`;
+
 export async function loadProductsBlock(db: Db, organisationId: number, businessName?: string | null): Promise<string | null> {
     // Plus what the business offers — only once the OWNER has said (a guess must not steer every
     // assistant), so none of them asks a software company about its menu (offer-profile.ts).
     const [products, offer] = await Promise.all([loadOrgProducts(db, organisationId), loadAnsweredOffer(db, organisationId)]);
-    const block = renderProductsBlock(products, businessName);
+    // An empty catalogue still gets a block: every assistant must know where products live, or it
+    // sends the owner to the old free-text boxes that no longer hold them (owner, 2026-10-21).
+    const block = renderProductsBlock(products, businessName) ?? NO_PRODUCTS_BLOCK;
     const line = offer ? describeOfferProfile(offer) : '';
     return [block, line].filter(Boolean).join('\n') || null;
+}
+
+// ── Short form, for prompts that only need to NAME what is on offer ─────────────────────────────
+// Products and prices are kept in ONE place — this catalogue (owner, 2026-10-21). The onboarding
+// form and the Creative Brief used to keep their own free-text "Products & Services" box
+// (`service_offerings`), and the two drifted: a £99 there beside £69 here. That box is no longer
+// written; what a workspace already typed into it is read ONLY while its catalogue is empty, and
+// labelled as old notes, so nobody's drafting goes blank before they move it across (the Creative
+// Brief offers "Move these into Products & Services").
+
+/** "Name (price); Name (price)" — or '' for an empty list. Pure. */
+export function renderOfferingsLine(products: OrgProduct[] | null | undefined, maxChars = 1500): string {
+    return (products ?? [])
+        .filter((p) => oneLine(p?.name, PRODUCT_LIMITS.name))
+        .map((p) => {
+            const price = oneLine(p.price, PRODUCT_LIMITS.price);
+            return `${oneLine(p.name, PRODUCT_LIMITS.name)}${price ? ` (${price})` : ''}`;
+        })
+        .join('; ')
+        .slice(0, maxChars);
+}
+
+/**
+ * What the business sells as one short line, from the catalogue. `legacyNotes` is the assistant's
+ * old free-text box, used only when the catalogue is empty. Pure — the loader below feeds it.
+ */
+export function offeringsText(products: OrgProduct[] | null | undefined, legacyNotes?: unknown): string {
+    const line = renderOfferingsLine(products);
+    if (line) return line;
+    const legacy = typeof legacyNotes === 'string' ? legacyNotes.replace(/\s+/g, ' ').trim().slice(0, 1500) : '';
+    return legacy ? `${legacy} (older notes — not yet in Business Information ▸ Products & Services)` : '';
+}
+
+/** offeringsText from the database. Never throws: no catalogue and no notes is ''. */
+export async function loadOfferingsText(db: Db, organisationId: number, legacyNotes?: unknown): Promise<string> {
+    return offeringsText(await loadOrgProducts(db, organisationId), legacyNotes);
 }

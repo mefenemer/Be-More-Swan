@@ -119,7 +119,7 @@ export interface RenderContext {
     booking?: SiteRenderBooking | null;
     /** Opening hours and where to find the business (Business Information) — the hours section and search data. */
     business?: SiteRenderBusiness | null;
-    /** Business Information ▸ Reviews (reviews.ts loadSiteReviews); null = no reviews section. */
+    /** Audience ▸ Reviews (reviews.ts loadSiteReviews); null = no reviews section. */
     reviews?: SiteRenderReviews | null;
     /** Posts published through Be More Swan (site-social-feed.ts loadSiteSocialFeed); null = no social section. */
     socialFeed?: SiteRenderSocialFeed | null;
@@ -409,7 +409,7 @@ ${formButton(p.buttonLabel)}
             const chosen = (p.reviewIds.length ? p.reviewIds : (data?.latest ?? []).slice(0, p.limit)).map((id) => data?.byId[id]).filter(Boolean) as SiteRenderReview[];
             const sum = p.showSummary && data?.summary ? data.summary : null;
             if (!chosen.length && !sum) return formState.preview
-                ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Reviews section: add your reviews in Business Information ▸ Reviews. Until then it doesn't appear on your live site.</p></div></section>` : '';
+                ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Reviews section: add your reviews in Audience ▸ Reviews. Until then it doesn't appear on your live site.</p></div></section>` : '';
             const card = (r: SiteRenderReview) => `<figure class="card rv">${r.rating ? `<p>${stars(r.rating)}</p>` : ''}<blockquote>${paragraphs(r.body)}</blockquote><figcaption><strong>${esc(r.authorName)}</strong>${r.authorDetail ? `, ${esc(r.authorDetail)}` : ''}<br><span class="fine">${r.sourceUrl ? `<a href="${esc(r.sourceUrl)}" rel="noopener">${esc(r.sourceLabel)}</a>` : esc(r.sourceLabel)}${r.reviewedOn ? ` · ${esc(monthYear(r.reviewedOn))}` : ''}</span></figcaption></figure>`;
             const summary = sum ? `<p class="rsum">${stars(Math.round(sum.average))} <strong>${sum.average.toFixed(1)} out of 5</strong> <span class="fine">from ${sum.rated} rated review${sum.rated === 1 ? '' : 's'}</span></p>` : '';
             return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${summary}${chosen.length ? `<div class="grid">${chosen.map(card).join('')}</div>` : ''}</div></section>`;
@@ -476,7 +476,7 @@ ${closed.length ? `<p class="fine">${closed.map((c) => `Closed ${esc(formatDate(
             const addressHtml = p.showAddress && info?.visitAddress ? `<address>${info.visitAddress.split('\n').map(esc).join('<br>')}</address>` : '';
             if (!hoursHtml && !addressHtml && !buttons.length) {
                 return formState.preview
-                    ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Opening hours section: add your hours and where to find you in Business Information ▸ Hours, Location &amp; Bookings, and a phone or email in the Website tab's Business details. Until then it doesn't appear on your live site.</p></div></section>`
+                    ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Opening hours section: add your hours and where to find you in Business Information ▸ Hours &amp; Location, and a phone or email in the Website tab's Business details. Until then it doesn't appear on your live site.</p></div></section>`
                     : '';
             }
             return `<section${cls} id="${esc(s.id)}"><div class="w n">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? paragraphs(p.intro) : ''}${hoursHtml}${addressHtml}${buttons.length ? `<p>${buttons.join('')}</p>` : ''}</div></section>`;

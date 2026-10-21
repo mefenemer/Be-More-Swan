@@ -28,7 +28,7 @@ check('a separate grant on the same Azure app: calendar scope, Outlook\'s client
     assert.strictEqual(envVarPrefix('outlook_calendar'), 'OUTLOOK');
     assert.strictEqual(envVarPrefix('gmail'), 'GMAIL');
     const oauth = read('netlify/functions/oauth-integrations.ts');
-    assert.ok(oauth.includes("bookings: '/workspace.html?view=assets&tab=hours'"), 'back to Business Information ▸ Hours');
+    assert.ok(oauth.includes("bookings: '/workspace.html?view=assets&tab=bookings'"), 'back to Business Information ▸ Bookings');
     assert.ok(oauth.includes("${standalone.includes('?') ? '&' : '?'}connected="));
     assert.ok(oauth.includes("if (provider === 'outlook_calendar') await forgetMicrosoft(db, ctx.organisationId);"));
     assert.ok(read('src/utils/workspace-integrations.ts').includes("scope: provider === 'outlook_calendar' ? OUTLOOK_CALENDAR_SCOPE : OUTLOOK_SCOPE,"), 'refresh re-sends the right scope');

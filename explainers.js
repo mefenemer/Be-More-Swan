@@ -134,9 +134,9 @@
       example: 'e.g. "How you started, your founding story, FAQ answers."'
     },
     'service-offerings': {
-      term: 'Service Offerings',
+      term: 'What you sell',
       emoji: '🛒',
-      plain: "The actual things people can buy or book from you — courses, calls, packages. Listing them lets your assistant weave them naturally into posts instead of guessing.",
+      plain: "The actual things people can buy or book from you — courses, calls, packages. They're kept in one place, Business Information ▸ Products & Services, and every assistant uses that list, so names and prices never disagree.",
       example: 'e.g. "1:1 coaching (£500/mo), free discovery call, online course."'
     },
     'sales-objections': {

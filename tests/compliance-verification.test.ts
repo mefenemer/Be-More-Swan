@@ -172,16 +172,14 @@ const SECTIONS = {
 check('every declared fact says where it is edited', () => {
     const f = composeDeclaredFacts(SECTIONS, '- The Busywork Buster (product) — £69');
     assert.ok(f.includes(`[Edited in: ${FACT_LOCATIONS.catalogue}] - The Busywork Buster (product) — £69`));
-    assert.ok(f.includes(`[Edited in: ${FACT_LOCATIONS.briefSales}] Older notes on products, services and prices: Tier 2 £99/mo`));
     assert.ok(f.includes(`[Edited in: ${FACT_LOCATIONS.briefMessage}] Standard offer / incentive: First month free`));
     assert.ok(f.includes(`[Edited in: ${FACT_LOCATIONS.profile}] Website: https://bemoreswan.com`));
 });
 
-check('with a catalogue, the catalogue wins on prices; without one, the brief is the price list', () => {
-    assert.ok(composeDeclaredFacts(SECTIONS, '- X (product) — £1').includes('the catalogue wins'));
+check('products and prices come from ONE place: the brief\'s old box only while the catalogue is empty', () => {
+    assert.ok(!composeDeclaredFacts(SECTIONS, '- X (product) — £1').includes('£99'));
     const noCat = composeDeclaredFacts(SECTIONS, '');
-    assert.ok(noCat.includes('] Products, services and prices: Tier 2 £99/mo'));
-    assert.ok(!noCat.includes('catalogue wins'));
+    assert.ok(noCat.includes(`[Edited in: ${FACT_LOCATIONS.briefSales}] Older notes on products, services and prices (not yet moved into Products & Services): Tier 2 £99/mo`));
     assert.strictEqual(composeDeclaredFacts(null, ''), '');
 });
 

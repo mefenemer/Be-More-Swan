@@ -1,5 +1,5 @@
 // netlify/functions/org-reviews.ts
-// Business Information ▸ Reviews. The business's real reviews, word for word (src/utils/reviews.ts).
+// Audience ▸ Reviews. The business's real reviews, word for word (src/utils/reviews.ts).
 //
 //   GET                              → { reviews, summary, pending, settings, asked }
 //   PUT    { ...settings }           → { settings }    asking customers for reviews (review-requests.ts)

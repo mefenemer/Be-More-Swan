@@ -875,7 +875,7 @@
       } catch (err) { respond({ ok: false, error: `${done ? `${done} saved, then: ` : ''}${err.message}` }); }
     }
 
-    // "Add N reviews" on a reviews_add card — org-reviews.ts, the same checks as Business Information ▸ Reviews.
+    // "Add N reviews" on a reviews_add card — org-reviews.ts, the same checks as Audience ▸ Reviews.
     function onReviewsAdd(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};

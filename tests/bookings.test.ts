@@ -215,7 +215,7 @@ check('decisions only from a state where they make sense; the customer is told',
 
 check('Business Information owns hours, rules and resources; services are Products & Services with a length', () => {
     const ui = read('assets.html');
-    assert.ok(ui.includes('data-tab="hours">Hours, Location &amp; Bookings') && ui.includes("const API = '/.netlify/functions/booking-settings'"));
+    assert.ok(ui.includes('data-tab="hours">Hours &amp; Location') && ui.includes('data-tab="bookings">Bookings') && ui.includes("const API = '/.netlify/functions/booking-settings'"));
     const api = read('netlify/functions/booking-settings.ts');
     assert.ok(api.includes('cleanBookingSettings(body)') && api.includes('cleanResource(body, false)'));
     // GET, POST count, PATCH, DELETE — and the calendar PATCH's ownership check and re-read (phase 3).
