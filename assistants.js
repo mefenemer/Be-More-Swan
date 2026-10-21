@@ -899,6 +899,28 @@ function _renderPillarChips() {
 // since scrollHeight is 0 while the panel is display:none.
 const _AUTOGROW_FIELDS = ['edit_problem', 'edit_core_message', 'edit_audience', 'edit_tone', 'edit_pillars', 'edit_objections'];
 
+// The Website Assistant's editor (src/components/assistant-site-editor.js, ~2,000 lines) is loaded the
+// first time a Website Assistant needs it, not on every workspace page. Calls made while it loads run
+// in order once it has (init before activate). media-picker.js and dialogs.js stay on the page: the
+// chat and the asset library use them too.
+let _siteEditorLoading = null;
+function siteEditor(fn) {
+    if (window.AssistantSiteEditor) { fn(window.AssistantSiteEditor); return; }
+    if (!_siteEditorLoading) {
+        _siteEditorLoading = new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = '/src/components/assistant-site-editor.js';
+            s.onload = () => resolve(window.AssistantSiteEditor);
+            s.onerror = () => { _siteEditorLoading = null; s.remove(); reject(new Error('The website editor didn\'t load.')); };
+            document.head.appendChild(s);
+        });
+    }
+    _siteEditorLoading.then((ed) => ed && fn(ed)).catch((err) => {
+        const host = document.querySelector('[data-site-host="website"]');
+        if (host && !host.children.length) host.innerHTML = `<p class="text-sm text-gray-700 text-center p-5">${err.message} Reload the page to try again.</p>`;
+    });
+}
+
 function _autoGrowField(el) {
     if (!el) return;
     el.style.height = 'auto';
@@ -959,11 +981,11 @@ window._activateMainTab = function(name) {
     // Website (Mystery Shopper) likewise — init() already fetched for the badge.
     if (name === 'website') window.AssistantSiteAudit?.activate();
     // Website (Website Assistant) — the editor and preview; init() already fetched the site.
-    if (name === 'sitebuilder') window.AssistantSiteEditor?.activate('website');
+    if (name === 'sitebuilder') siteEditor((ed) => ed.activate('website'));
     // …and what the site brings in, each its own tab, rendered by the same editor.
-    if (name === 'siteenquiries') window.AssistantSiteEditor?.activate('enquiries');
-    if (name === 'siteorders') window.AssistantSiteEditor?.activate('orders');
-    if (name === 'sitebookings') window.AssistantSiteEditor?.activate('bookings');
+    if (name === 'siteenquiries') siteEditor((ed) => ed.activate('enquiries'));
+    if (name === 'siteorders') siteEditor((ed) => ed.activate('orders'));
+    if (name === 'sitebookings') siteEditor((ed) => ed.activate('bookings'));
     // Conversations already fetched at init() — its thread total feeds the tab's own count, so it
     // cannot wait for the tab to be opened. activate() repaints from that result rather than
     // refetching. (This comment used to say the opposite and was stale: the prefetch landed when
@@ -5853,7 +5875,7 @@ function _applyDashboardRegistry(data) {
     toggle('maintab-btn-sitebookings', !!siteEditorTab);
     if (siteEditorTab) {
         setText('sitebuilder-tab-label', siteEditorTab.label || 'Website');
-        window.AssistantSiteEditor?.init({ assistantId: data.id, assistantName: data.name });
+        siteEditor((ed) => ed.init({ assistantId: data.id, assistantName: data.name }));
     }
 
     const siteAuditTab = cfg.siteAuditTab;

@@ -19,6 +19,33 @@ window.escapeHtml = function (s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 };
 
+/**
+ * Keyboard focus for a dialog built elsewhere (the template viewer, the media picker, the website
+ * preview full screen): focus moves to `first` (or the first control), Tab and Shift+Tab wrap inside
+ * `root`, and release() puts focus back where it was before the dialog opened.
+ */
+window.holdDialogFocus = function (root, first) {
+  const before = document.activeElement;
+  const SEL = 'button:not([disabled]),[href],input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+  const controls = () => [...root.querySelectorAll(SEL)].filter((el) => el.offsetParent !== null);
+  const onKey = (e) => {
+    if (e.key !== 'Tab') return;
+    const list = controls();
+    if (!list.length) return;
+    const a = list[0];
+    const z = list[list.length - 1];
+    const inside = root.contains(document.activeElement);
+    if (e.shiftKey && (!inside || document.activeElement === a)) { e.preventDefault(); z.focus(); }
+    else if (!e.shiftKey && (!inside || document.activeElement === z)) { e.preventDefault(); a.focus(); }
+  };
+  document.addEventListener('keydown', onKey, true);
+  (first || controls()[0])?.focus();
+  return () => {
+    document.removeEventListener('keydown', onKey, true);
+    if (before && before.isConnected && typeof before.focus === 'function') before.focus();
+  };
+};
+
 // Lightweight, dependency-free toast. Inline styles on purpose: arbitrary
 // Tailwind classes aren't in the prebuilt style.css, so they'd no-op here.
 window.showToast = function (message, opts = {}) {

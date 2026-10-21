@@ -137,7 +137,9 @@
     let closed = false;
     const msg = $('[data-mp-msg]');
     const say = (text, bad) => { msg.textContent = text || ''; msg.className = `text-xs font-semibold px-5 mt-2 ${bad ? 'text-red-600' : 'text-gray-600'}`; };
-    const close = () => { closed = true; back.remove(); document.removeEventListener('keydown', onKey); document.removeEventListener('paste', onPaste); };
+    // Focus goes into the picker and comes back to the button that opened it (dialogs.js holdDialogFocus).
+    const release = window.holdDialogFocus ? window.holdDialogFocus(back, $('[data-mp-close]')) : () => {};
+    const close = () => { closed = true; back.remove(); document.removeEventListener('keydown', onKey); document.removeEventListener('paste', onPaste); release(); };
     const done = $('[data-mp-done]');
     const refreshDone = () => {
       if (!done) return;
@@ -308,8 +310,8 @@
       if (!res.ok) { say(res.body && res.body.error === 'insufficient_credits' ? creditMessage(res.body) : (res.body && (res.body.message || res.body.error)) || 'It couldn\'t be created. Please try again.', true); return; }
       say('Choose the one you like — it\'s saved to your library.');
       const jobId = res.body.jobId;
-      aiGrid.innerHTML = (res.body.images || []).map((im) => `
-        <button type="button" data-mp-ai-pick="${esc(im.index)}" data-job="${esc(jobId)}" data-url="${esc(im.url)}" class="border border-gray-200 rounded-lg overflow-hidden hover:border-gray-400">
+      aiGrid.innerHTML = (res.body.images || []).map((im, i, all) => `
+        <button type="button" aria-label="Use picture ${i + 1} of ${all.length}" data-mp-ai-pick="${esc(im.index)}" data-job="${esc(jobId)}" data-url="${esc(im.url)}" class="border border-gray-200 rounded-lg overflow-hidden hover:border-gray-400">
           <img src="${esc(im.url)}" alt="" style="width:100%;height:120px;object-fit:cover;display:block"></button>`).join('');
     }
     aiGrid.addEventListener('click', async (e) => {

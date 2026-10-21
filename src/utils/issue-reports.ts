@@ -1,7 +1,7 @@
 // src/utils/issue-reports.ts
 // Shared constants/helpers for the testing-phase "Report an Issue" feature.
 
-import { eq, or, inArray, sql } from 'drizzle-orm';
+import { eq, or, and, lt, inArray, isNull, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { users, issueReports, issueReportMessages } from '../../db/schema';
 import { createNotification } from './notify';
@@ -243,4 +243,49 @@ export async function triggerProdDeploy(): Promise<void> {
     } catch (e) {
         console.error('[issue-reports] prod deploy hook unreachable:', e instanceof Error ? e.message : e);
     }
+}
+
+// A merge is a two-step handshake: the runner claims it (dev_merge_status 'queued' → 'merging',
+// stamping dev_runner_heartbeat) and only later POSTs the result to flip it to 'merged'/'failed'.
+// If the runner dies mid-merge (crash, machine offline, a network blip on the result POST) the
+// row is stranded in 'merging' forever, and request-merge refuses to re-queue a merge that is
+// "in progress". A `gh pr merge` takes seconds and the runner sends no heartbeat while merging,
+// so a claim older than STALE_MERGE_MINS means the runner is gone. This resets those rows to
+// 'ready' so a super-admin can request the merge again; the runner treats an already-merged PR
+// as success, so a merge that landed but was never reported resolves cleanly on the retry.
+export const STALE_MERGE_MINS = 15;
+
+export function isMergeClaimStale(heartbeat: Date | string | null | undefined, now = Date.now()): boolean {
+    return !heartbeat || now - new Date(heartbeat).getTime() > STALE_MERGE_MINS * 60_000;
+}
+
+export async function reclaimStaleMerges(db: Db): Promise<number> {
+    // One UPDATE … RETURNING, so two concurrent callers can't both reclaim (and announce) a row.
+    const reclaimed = await db.update(issueReports).set({
+        devMergeStatus: 'ready',
+        devMergeResult: `Auto-reclaimed: the runner stopped responding before it confirmed the merge (no heartbeat for ${STALE_MERGE_MINS}+ min).`,
+        devRunnerId: null,
+        devRunnerHeartbeat: null,
+        updatedAt: new Date(),
+    }).where(and(
+        eq(issueReports.devMergeStatus, 'merging'),
+        or(
+            isNull(issueReports.devRunnerHeartbeat),
+            lt(issueReports.devRunnerHeartbeat, new Date(Date.now() - STALE_MERGE_MINS * 60_000)),
+        ),
+    )).returning({ id: issueReports.id });
+    if (reclaimed.length === 0) return 0;
+
+    await db.insert(issueReportMessages).values(reclaimed.map(({ id }) => ({
+        issueId: id,
+        authorType: 'admin',
+        authorId: null,
+        body: '♻️ Merge reclaimed — the developer runner went away before confirming the merge, so it was un-stuck automatically. Check the pull request, then request the merge to staging again.',
+        status: null,
+    })));
+
+    // A stranded merge also held back the staging rebuild for every merge that finished
+    // alongside it (the hook only fires once nothing is queued/merging), so try it now.
+    await triggerStagingDeployIfDrained(db);
+    return reclaimed.length;
 }

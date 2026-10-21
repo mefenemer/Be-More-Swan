@@ -4,8 +4,8 @@
  *
  * Left: the site — Pages (each page's sections: edit, move, remove, add), Design (colours, font,
  * corners, logo) and Details (business details, footer, menu). Right: the live preview, rendered by
- * the real renderer (site-preview.ts) in desktop or phone width. "Draft my whole site" asks the
- * assistant for a complete first draft (1 task).
+ * the real renderer (site-preview.ts) in desktop or phone width. "Write my site" ("Write the words"
+ * on a template, "Replace my draft" later) asks the assistant for a complete draft (1 task).
  *
  * Backed by netlify/functions/sites.ts — the SAME actions the chat cards call (chat-session.js →
  * site:apply / site:draft). Every change is a typed operation that the server passes through the one
@@ -18,7 +18,7 @@
  *
  * ── What this tab may not do ─────────────────────────────────────────────────
  * Publish without a click, or with [placeholders] left (the server refuses those too).
- * Spend without a click: only "Draft my whole site" and "Import my current site" use a task, and say so first.
+ * Spend without a click: only "Write my site" and "Import my current site" use a task, and say so first.
  *
  * "Import my current site" (site-import.ts, sites.ts import / import_accept / import_discard — the same
  * actions as the chat's site_import_request and site_import_decision cards): reads their old site into
@@ -139,7 +139,7 @@
     const what = v.video ? 'video' : 'picture';
     return `<div class="flex flex-wrap items-center gap-3 mt-1">
         ${src ? thumbHtml(src, v.video, 96, 64)
-          : `<span class="inline-flex items-center justify-center text-xs text-gray-400 border border-dashed border-gray-300 rounded-lg" style="width:96px;height:64px">No ${allowVideo ? 'picture or video' : 'picture'}</span>`}
+          : `<span class="inline-flex items-center justify-center text-xs text-gray-500 border border-dashed border-gray-300 rounded-lg" style="width:96px;height:64px">No ${allowVideo ? 'picture or video' : 'picture'}</span>`}
         ${btn(`${attrs.pick}`, src ? `Change ${what}` : (allowVideo ? 'Choose picture or video' : 'Choose picture'), !src)}
         ${src ? btn(`${attrs.clear}`, 'Remove') : ''}
       </div>`;
@@ -158,6 +158,7 @@
     thumbs: {}, bookings: null, timetable: null,
     words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
     importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false,
+    dataSig: null, noteShown: null, focusSection: null, focusEditor: false, setupStep: null, setupSkipped: false, adding: null, previewFull: false, focusSel: null, busy: false, trigger: null, noteAt: null, refocus: null, undo: null,
   };
 
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -177,7 +178,7 @@
   async function post(payload) {
     const res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(payload) });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+    if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (HTTP ${res.status}).`), { status: res.status });
     return data;
   }
 
@@ -211,9 +212,13 @@
     } catch (err) {
       state.loadError = err.message;
     }
+    // The drafting poll re-reads every 5s: repaint (and reload the preview) only when something changed.
+    const sig = state.loadError || JSON.stringify(state.data);
+    const same = state.loaded && sig === state.dataSig;
+    state.dataSig = sig;
     state.loaded = true;
-    state.version++;
-    rerender();
+    if (state.data) paintTabBadges();
+    if (!same) { keepEditing(); state.version++; rerender(); }
     schedulePoll();
   }
 
@@ -223,16 +228,67 @@
   }
 
   async function apply(ops, done) {
+    // One change at a time: a second tap on Add, Save or ↑/↓ while one is on its way is dropped, so it
+    // can't send the same change twice or move a section by a stale position.
+    if (state.busy) return;
+    const release = markBusy();
+    keepEditing();
     try {
       state.data = await post({ action: 'apply', assistantId: state.assistantId, ops });
       state.version++;
       state.publishNote = null;
+      state.undo = null;
       state.note = (state.data.warnings || []).length ? { text: state.data.warnings.join(' '), tone: 'warn' } : { text: 'Saved.', tone: 'ok' };
       if (done) done();
     } catch (err) {
       state.note = { text: err.message, tone: 'error' };
     }
+    release();
     rerender();
+  }
+
+  /** The button that was pressed, disabled and marked busy until the request is answered; the note
+   *  that follows is shown beside it (afterPaint), not only above the tabs. */
+  function markBusy() {
+    state.busy = true;
+    const b = state.trigger;
+    state.noteAt = anchorOf(b);
+    state.refocus = state.noteAt;
+    if (b) { b.disabled = true; b.setAttribute('aria-busy', 'true'); }
+    return () => {
+      state.busy = false;
+      if (b && b.isConnected) { b.disabled = false; b.removeAttribute('aria-busy'); }
+    };
+  }
+  /** A selector that finds the same button again after a repaint: its first data- attribute. */
+  function anchorOf(b) {
+    const a = b && [...b.attributes].find((x) => x.name.startsWith('data-') && x.name !== 'data-to');
+    return a ? `[${a.name}${a.value ? `="${CSS.escape(a.value)}"` : ''}]` : null;
+  }
+
+  // ── The open section form ──────────────────────────────────────────────────
+  // What was typed lives in the form until Save; these keep it across a repaint and stop it being
+  // thrown away by a click elsewhere without asking.
+  const formOf = () => document.querySelector(`[data-site-host="${state.surface}"] [data-site-section-form]`);
+  const formSig = () => JSON.stringify([state.editing.props, state.editing.look, state.editing.toPageId || null]);
+  /** Copy the open form into state.editing, so a repaint (the drafting poll, another save) keeps it. */
+  function keepEditing() {
+    const form = state.editing && formOf();
+    if (form) syncEditing(form);
+  }
+  /** True when the form differs from how it was when it opened (state.editing.base, set on first paint). */
+  function editorChanged() {
+    if (!state.editing) return false;
+    keepEditing();
+    return state.editing.base != null && formSig() !== state.editing.base;
+  }
+  /** Before closing the form some other way than Save: ask, if anything in it changed. */
+  async function leaveEditor() {
+    if (!editorChanged()) return true;
+    if (typeof window.confirmModal !== 'function') return true;
+    const what = TYPE_LABEL[state.editing.type] || 'section';
+    return window.confirmModal(`Your changes to this ${esc(what)} section haven't been saved. They're lost if you leave it now.`,
+      { title: 'Leave without saving?', confirmLabel: 'Leave without saving', cancelLabel: 'Keep editing' });
   }
 
   /** Publish-card actions: same response shape as get/apply, so the whole tab refreshes from it. */
@@ -250,12 +306,30 @@
 
   // ── Render ─────────────────────────────────────────────────────────────────
   function card(inner, extra = '') { return `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 ${extra}">${inner}</div>`; }
-  const btn = (attrs, label, primary) => `<button type="button" ${attrs} class="${primary ? 'btn-primary' : 'btn-secondary border'} px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">${label}</button>`;
+  // While a new site is being set up, only the current step's button is the main (pink) one.
+  let quietPrimary = false;
+  const btn = (attrs, label, primary) => `<button type="button" ${attrs} class="${primary && !quietPrimary ? 'btn-primary' : 'btn-secondary border'} sb-tap px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">${label}</button>`;
+  // Rules the prebuilt style.css has no utilities for, added here once: every button at least 44px
+  // square at phone width (WCAG 2.5.5); what shows only on narrow or wide screens; the preview full screen.
+  if (!document.getElementById('sb-tap-style')) {
+    const st = document.createElement('style');
+    st.id = 'sb-tap-style';
+    st.textContent = [
+      '@media (max-width: 639px) { .sb-tap { min-height: 44px; min-width: 44px; } [data-sb-wide-only] { display: none !important; } }',
+      '@media (min-width: 1024px) { [data-sb-narrow-only] { display: none !important; } }',
+      'iframe[data-site-preview] { max-width: 100%; }',
+      '[data-sb-full] { position: fixed; inset: 0; z-index: 10500; background: #fff; overflow: auto; }',
+      '[data-sb-full] > div { height: 100%; display: flex; flex-direction: column; padding: 8px !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }',
+      '[data-sb-full] [data-sb-frame-box] { flex: 1; min-height: 0; }',
+      '[data-sb-full] iframe[data-site-preview] { height: 100% !important; }',
+    ].join('\n');
+    document.head.appendChild(st);
+  }
 
   function noteHtml() {
     if (!state.note) return '';
     const cls = state.note.tone === 'error' ? 'text-red-600' : state.note.tone === 'warn' ? 'text-amber-800' : 'text-green-700';
-    return `<p class="text-xs font-semibold ${cls} mt-3">${esc(state.note.text)}</p>`;
+    return `<p class="text-xs font-semibold ${cls}">${esc(state.note.text)}${state.note.billing ? ` ${btn('data-site-billing', 'See plans')}` : ''}${state.note.undo && state.undo ? ` ${btn('data-site-undo', 'Undo')}` : ''}</p>`;
   }
 
   function sectionSummary(s) {
@@ -282,6 +356,16 @@
     note.hidden = n < max * 0.85;
     note.className = `text-xs mt-1 ${n > max ? 'text-amber-800 font-bold' : 'text-gray-500'}`;
     note.textContent = n > max ? `Too long by ${n - max} character${n - max === 1 ? '' : 's'} — it would be shortened to fit. Trim it here so it ends where you want.` : `${n} / ${max} characters`;
+  }
+
+  /** "Needed" under a picture's description box while it is empty — kept in step by markAlt as they type. */
+  const altHint = (alt) => `<p data-alt-hint class="text-xs font-bold text-amber-800 mt-1" ${alt ? 'hidden' : ''}>Needed — a few words on what it shows. Without them the picture is left out.</p>`;
+  function markAlt(el) {
+    const empty = !el.value.trim();
+    el.classList.toggle('border-amber-500', empty);
+    if (empty) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid');
+    const hint = el.nextElementSibling;
+    if (hint && hint.hasAttribute('data-alt-hint')) hint.hidden = !empty;
   }
 
   function fieldHtml(f, value) {
@@ -313,7 +397,7 @@
       return `<p class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
         ${pictureHtml(v, { pick: `data-site-pick="${esc(f.k)}"`, clear: `data-site-pick-clear="${esc(f.k)}"` }, !!f.video)}
         <input type="hidden" name="${name}-asset" value="${esc(v.assetId || '')}"><input type="hidden" name="${name}-video" value="${v.video ? '1' : ''}">
-        <input name="${name}-alt" class="${inputCls} mt-2 ${has && !v.alt ? 'border-amber-500' : ''}" placeholder="What the picture shows — e.g. Our roastery in Leeds (needed)" value="${esc(v.alt || '')}">
+        <input name="${name}-alt" ${has ? `data-alt-needed aria-required="true" ${v.alt ? '' : 'aria-invalid="true"'}` : ''} class="${inputCls} mt-2 ${has && !v.alt ? 'border-amber-500' : ''}" placeholder="What the picture shows — e.g. Our roastery in Leeds (needed)" value="${esc(v.alt || '')}">${has ? altHint(v.alt) : ''}
         <details class="mt-1" ${!v.assetId && v.url ? 'open' : ''}><summary class="text-xs text-gray-500 cursor-pointer">Use a web address instead</summary>
           <input name="${name}-url" class="${inputCls} mt-1" placeholder="https://… picture address" value="${esc(v.assetId ? '' : (v.url || ''))}"></details>`;
     }
@@ -408,19 +492,20 @@
     }
     if (f.kind === 'gallery') {
       const list = Array.isArray(value) ? value : [];
-      return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)} <span class="font-normal text-gray-500">(${list.length} of 24)</span></p>
+      const missing = list.filter((im) => !im.alt).length;
+      return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)} <span class="font-normal text-gray-500">(${list.length} of 24)</span>${missing ? ` <span class="text-amber-800">· ${missing} still need${missing === 1 ? 's' : ''} a description</span>` : ''}</p>
         <div data-gallery class="space-y-2 mt-1">${list.map((im, i) => {
           const src = im.assetId ? thumbOf(im.assetId) : (im.url || '');
           return `<div class="flex gap-3 border border-gray-200 rounded-lg p-2" data-gallery-item>
             <input type="hidden" data-g-asset value="${esc(im.assetId || '')}"><input type="hidden" data-g-url value="${esc(im.assetId ? '' : (im.url || ''))}"><input type="hidden" data-g-video value="${im.video ? '1' : ''}">
             ${src ? thumbHtml(src, im.video, 72, 72) : '<span style="width:72px;height:72px;flex-shrink:0" class="bg-gray-100 rounded-lg"></span>'}
             <div class="flex-1 min-w-0">
-              <input data-g-alt class="${inputCls} ${im.alt ? '' : 'border-amber-500'}" placeholder="What the picture shows (needed)" value="${esc(im.alt || '')}">
-              <input data-g-caption class="${inputCls} mt-1" placeholder="Caption under it (optional)" value="${esc(im.caption || '')}">
-              <div class="flex gap-3 mt-1 text-xs">
-                ${i > 0 ? `<button type="button" data-gallery-move="${i}" data-to="${i - 1}" class="text-gray-600 underline">Move up</button>` : ''}
-                ${i < list.length - 1 ? `<button type="button" data-gallery-move="${i}" data-to="${i + 1}" class="text-gray-600 underline">Move down</button>` : ''}
-                <button type="button" data-gallery-remove="${i}" class="text-gray-500 underline">Remove</button>
+              <input data-g-alt data-alt-needed aria-required="true" ${im.alt ? '' : 'aria-invalid="true"'} aria-label="Picture ${i + 1}: what it shows (needed)" class="${inputCls} ${im.alt ? '' : 'border-amber-500'}" placeholder="What the picture shows (needed)" value="${esc(im.alt || '')}">${altHint(im.alt)}
+              <input data-g-caption aria-label="Picture ${i + 1}: caption (optional)" class="${inputCls} mt-1" placeholder="Caption under it (optional)" value="${esc(im.caption || '')}">
+              <div class="flex flex-wrap gap-1 mt-1">
+                ${i > 0 ? btn(`data-gallery-move="${i}" data-to="${i - 1}"`, 'Move up') : ''}
+                ${i < list.length - 1 ? btn(`data-gallery-move="${i}" data-to="${i + 1}"`, 'Move down') : ''}
+                ${btn(`data-gallery-remove="${i}"`, 'Remove')}
               </div>
             </div>
           </div>`;
@@ -440,7 +525,7 @@
         <div data-menu-groups class="space-y-2 mt-1">${groups.map((g, gi) => `
           <div class="border border-gray-200 rounded-lg p-3" data-menu-group>
             <div class="flex items-center gap-2"><input data-menu-title class="${inputCls}" placeholder="Group name — e.g. Starters, Cuts & colour (optional)" value="${esc(g.title || '')}">
-              ${groups.length > 1 ? `<button type="button" data-menu-group-remove="${gi}" class="text-xs text-gray-500 underline whitespace-nowrap">Remove group</button>` : ''}</div>
+              ${groups.length > 1 ? btn(`data-menu-group-remove="${gi}"`, '<span class="whitespace-nowrap">Remove group</span>') : ''}</div>
             <div class="grid gap-1 mt-2 sm:grid-cols-2">${list.map((p) => {
               const mine = owner[p.id] === gi;
               const elsewhere = p.id in owner && !mine;
@@ -449,7 +534,7 @@
                 <span class="font-bold">${esc(p.name)}</span><span class="text-gray-500">${esc(p.price || 'No price shown')}</span>${elsewhere ? '<span>(in another group)</span>' : ''}</label>`;
             }).join('')}</div>
           </div>`).join('')}</div>
-        <button type="button" data-menu-group-add class="text-xs text-gray-600 underline mt-2">+ Add a group</button>
+        <div class="mt-2">${btn('data-menu-group-add', '+ Add a group')}</div>
         <p class="text-xs text-gray-500 mt-2">Items appear in Business Information order. Change a name, price or description in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} — the menu follows. Nothing on a menu is bought online; use a Products for sale section for that.</p>`;
     }
     if (f.kind === 'items') {
@@ -459,11 +544,11 @@
         <div data-items="${esc(f.k)}" class="space-y-2">${list.map((it, i) => `
           <div class="border border-gray-200 rounded-lg p-3" data-item>
             ${f.fields.map(([k, kind, label]) => kind === 'textarea'
-              ? `<textarea data-item-field="${esc(k)}" rows="2" class="${inputCls} mt-1" placeholder="${esc(label)}"${limitAttr(itemMax(k))}>${esc(it[k] || '')}</textarea>${limitNote(itemMax(k))}`
-              : `<input data-item-field="${esc(k)}" class="${inputCls} mt-1" placeholder="${esc(label)}"${limitAttr(itemMax(k))} value="${esc(it[k] || '')}">${limitNote(itemMax(k))}`).join('')}
-            <button type="button" data-item-remove="${i}" class="text-xs text-gray-500 underline mt-1">Remove</button>
+              ? `<textarea data-item-field="${esc(k)}" aria-label="${esc(f.label)} ${i + 1}: ${esc(label)}" rows="2" class="${inputCls} mt-1" placeholder="${esc(label)}"${limitAttr(itemMax(k))}>${esc(it[k] || '')}</textarea>${limitNote(itemMax(k))}`
+              : `<input data-item-field="${esc(k)}" aria-label="${esc(f.label)} ${i + 1}: ${esc(label)}" class="${inputCls} mt-1" placeholder="${esc(label)}"${limitAttr(itemMax(k))} value="${esc(it[k] || '')}">${limitNote(itemMax(k))}`).join('')}
+            <div class="mt-1">${btn(`data-item-remove="${i}"`, 'Remove')}</div>
           </div>`).join('')}</div>
-        <button type="button" data-item-add="${esc(f.k)}" class="text-xs text-gray-600 underline mt-2">+ Add another</button>`;
+        <div class="mt-2">${btn(`data-item-add="${esc(f.k)}"`, '+ Add another')}</div>`;
     }
     return '';
   }
@@ -557,7 +642,7 @@
     return card(`
       <form data-site-section-form>
         <div class="flex items-center justify-between"><p class="text-sm font-black text-gray-900">${e.sectionId ? 'Edit' : 'Add'} ${esc(TYPE_LABEL[e.type])}</p>
-          <button type="button" data-site-edit-cancel class="text-xs text-gray-500 underline">Cancel</button></div>
+          ${btn('data-site-edit-cancel', 'Cancel')}</div>
         ${FORMS[e.type].map((f) => fieldHtml(f, e.props[f.k])).join('')}
         ${lookHtml(e)}
         <div class="mt-4">${btn('data-site-section-save type="submit"', e.sectionId ? 'Save section' : 'Add section', true).replace('type="button" ', '')}</div>
@@ -570,7 +655,7 @@
   const SWAN = '/images/BeMoreSwan_SwanAI.png';
   function swanBtn(pageId, sectionId) {
     return `<button type="button" data-site-ask="${esc(sectionId)}" data-page="${esc(pageId)}" title="Ask ${esc(state.assistantName || 'your assistant')} to change this" aria-label="Ask for a change to this section"
-      class="btn-secondary border px-2 py-1 rounded-lg inline-flex items-center"><img src="${SWAN}" alt="" style="width:18px;height:18px;object-fit:contain"></button>`;
+      class="btn-secondary border sb-tap px-2 py-1 rounded-lg inline-flex items-center justify-center"><img src="${SWAN}" alt="" style="width:18px;height:18px;object-fit:contain"></button>`;
   }
   async function askForChange(pageId, sectionId) {
     const pg = def().pages.find((x) => x.id === pageId);
@@ -605,13 +690,43 @@
     }
   }
 
+  /** What each kind of section is for, in the owner's words — shown when adding one. */
+  const TYPE_INFO = {
+    hero: ['👋', 'The big opening: a headline, a line under it, buttons and a picture'],
+    features: ['✨', 'A few short points side by side — what you offer, or why choose you'],
+    steps: ['🔢', 'How it works, step by step'],
+    text: ['📝', 'A heading and paragraphs, with a picture beside them if you like'],
+    faq: ['❓', 'Questions people ask, with your answers'],
+    testimonials: ['💬', 'What customers have said about you'],
+    cta: ['👉', 'A short nudge with one button — book, call or buy'],
+    contact: ['✉️', 'A form visitors fill in to send you a message'],
+    signup: ['📨', 'One of your sign-up forms, to grow your email list'],
+    products: ['🛍️', 'Things to buy, from Business Information'],
+    booking: ['📅', 'Let people book appointments, tables or classes'],
+    hours: ['🕒', 'Opening hours, where to find you and contact buttons'],
+    menu: ['📋', 'A price list or menu, from Business Information'],
+    gallery: ['🖼️', 'Your own pictures and videos in a grid'],
+    reviews: ['⭐', 'Quotes from your customer reviews'],
+    social_feed: ['📣', 'Your latest posts published through Be More Swan'],
+  };
+  function addPickerHtml(here) {
+    const types = state.data.vocab.sectionTypes.filter((t) => typeAllowed(t) && FORMS[t]);
+    return `<li data-site-add-picker class="border border-gray-300 rounded-lg p-3 bg-gray-50">
+      <div class="flex items-center justify-between gap-2"><p class="text-xs font-black text-gray-900">What would you like to add${here ? ' here' : ''}?</p>${btn('data-site-add-close', 'Cancel')}</div>
+      <div class="grid gap-2 sm:grid-cols-2 mt-2">${types.map((t) => `<button type="button" data-site-new-section="${esc(t)}" class="sb-tap text-left bg-white border border-gray-200 rounded-lg p-2 hover:shadow-sm flex gap-2 items-start">
+          <span aria-hidden="true" style="font-size:18px;line-height:1.2">${(TYPE_INFO[t] || ['➕'])[0]}</span>
+          <span class="min-w-0"><span class="block text-xs font-bold text-gray-900">${esc(TYPE_LABEL[t] || t)}</span><span class="block text-xs text-gray-500">${esc((TYPE_INFO[t] || ['', ''])[1])}</span></span></button>`).join('')}</div></li>`;
+  }
+
   function pagesPanel() {
     const d = def();
     const p = page();
-    const pageTabs = d.pages.map((x) => `<button type="button" data-site-page="${esc(x.id)}" class="px-3 py-1.5 text-xs font-bold rounded-lg border ${x.id === p.id ? 'btn-primary' : 'btn-secondary'}">${esc(x.title)}</button>`).join(' ');
+    const pageTabs = d.pages.map((x) => `<button type="button" data-site-page="${esc(x.id)}" aria-pressed="${x.id === p.id}" class="sb-tap px-3 py-1.5 text-xs font-bold rounded-lg border ${x.id === p.id ? 'btn-primary' : 'btn-secondary'}">${esc(x.title)}</button>`).join(' ');
+    const adding = state.adding && state.adding.pageId === p.id ? state.adding : null;
     const sections = p.sections.map((s, i) => `
+      ${i > 0 ? (adding && adding.at === i ? addPickerHtml(true) : `<li class="flex justify-center">${btn(`data-site-add-open data-at="${i}" aria-label="Add a section here, after ${esc(TYPE_LABEL[p.sections[i - 1].type])}"`, '+ Add here')}</li>`) : ''}
       <li class="border border-gray-200 rounded-lg p-3 flex flex-wrap items-center justify-between gap-2">
-        <div class="min-w-0"><p class="text-xs font-bold text-gray-900">${esc(TYPE_LABEL[s.type])}${s.look && s.look.menuLabel && d.structure === 'one_page' ? ` <span class="font-semibold text-indigo-700">· In the menu as “${esc(s.look.menuLabel)}”</span>` : ''}</p><p class="text-xs text-gray-500 truncate">${esc(sectionSummary(s))}</p></div>
+        <div class="min-w-0"><p class="text-xs font-bold text-gray-900">${esc(TYPE_LABEL[s.type])}${s.look && s.look.menuLabel && d.structure === 'one_page' ? ` <span class="font-semibold text-emerald-800">· In the menu as “${esc(s.look.menuLabel)}”</span>` : ''}</p><p class="text-xs text-gray-500 truncate">${esc(sectionSummary(s))}</p></div>
         <div class="flex flex-wrap gap-1">
           ${swanBtn(p.id, s.id)}
           ${btn(`data-site-edit="${esc(s.id)}"`, 'Edit')}
@@ -627,10 +742,10 @@
     return `
       ${card(`
         <div class="flex flex-wrap gap-2 items-center">${pageTabs}
-          ${d.pages.length < state.data.maxPages ? btn('data-site-add-page', '+ Page') : `<span class="text-xs text-gray-500">${esc(state.data.maxPages)} of ${esc(state.data.maxPages)} pages on your plan</span>`}</div>
+          ${d.pages.length < state.data.maxPages ? btn('data-site-add-page', '+ Page') : `<span class="text-xs text-gray-500">${esc(state.data.maxPages)} of ${esc(state.data.maxPages)} pages on your plan — the most it includes.</span> ${btn('data-site-billing', 'See plans')}`}</div>
         <p class="text-sm font-black text-gray-900 mt-4 mb-3">Sections on ${esc(p.title)}</p>
-        <ul class="space-y-2">${sections || '<li class="text-xs text-gray-500">No sections yet.</li>'}</ul>
-        <div class="flex flex-wrap gap-2 items-center mt-4"><select data-site-new-type class="${inputCls}" style="max-width:220px">${state.data.vocab.sectionTypes.filter(typeAllowed).map((t) => `<option value="${esc(t)}">${esc(TYPE_LABEL[t] || t)}</option>`).join('')}</select>${btn('data-site-new-section', 'Add a section')}</div>`)}
+        <ul class="space-y-2">${sections || (adding ? '' : '<li class="text-xs text-gray-500">No sections yet.</li>')}${adding && adding.at == null ? addPickerHtml(false) : ''}</ul>
+        ${adding && adding.at == null ? '' : `<div class="mt-4">${btn('data-site-add-open', '+ Add a section')}</div>`}`)}
       ${state.editing ? editorHtml() : ''}
       ${wordsCard(p)}
       ${card(`
@@ -668,7 +783,7 @@
       return card(`<div class="flex flex-wrap items-center justify-between gap-2">
         <div><p class="text-sm font-black text-gray-900">Have your own words for this page?</p>
         <p class="text-xs text-gray-500 mt-1">Paste them in or drop in a Word document or PDF — they're placed on the page exactly as you wrote them.</p></div>
-        ${btn('data-site-words-open', 'Add your own words', true)}</div>`);
+        ${btn('data-site-words-open', 'Add your own words')}</div>`);
     }
     return card(`
       <p class="text-sm font-black text-gray-900">Add your own words to "${esc(p.title)}"</p>
@@ -786,7 +901,7 @@
     }
     return card(`<p class="text-sm font-black text-gray-900">Choose a template</p>
       <p class="text-xs text-gray-500 mt-1">Each one is shown with your name. Pick one to start from — you can change everything afterwards, or try another later.</p>
-      <div class="flex flex-wrap gap-3 mt-3">${list.map((t) => tplCard(t, 260)).join('')}</div>`, 'border-indigo-200');
+      <div class="flex flex-wrap gap-3 mt-3">${list.map((t) => tplCard(t, 260)).join('')}</div>`, 'border-emerald-200');
   }
 
   /** The full-size look at one template, and the choice to use it. Built per open; its handlers live on it. */
@@ -821,21 +936,36 @@
         </div>
         <div class="flex-1 bg-gray-100 p-3" style="min-height:0;overflow:auto"><iframe title="Preview of the ${esc(t.name)} template" src="${esc(tplSrc(t.id, view))}" style="display:block;margin:0 auto;width:${view.device === 'mobile' ? '390px' : '100%'};height:100%;border:0;background:#fff;border-radius:8px"></iframe></div>
         <div class="flex flex-wrap items-center justify-end gap-2 px-5 py-3 border-t border-gray-100">
-          <p class="text-xs text-gray-500 mr-auto">${view.mode === 'full' ? 'Pictures are free stock photos to swap for your own. Words in [square brackets] are for you to fill in before you publish.' : 'Your pages, words and pictures stay exactly as they are; only the look changes.'}</p>
+          <p data-tpl-note class="text-xs text-gray-500 mr-auto">${view.mode === 'full' ? 'Pictures are free stock photos to swap for your own. Words in [square brackets] are for you to fill in before you publish.' : 'Your pages, words and pictures stay exactly as they are; only the look changes.'}</p>
           <button type="button" data-tpl-use class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">${view.mode === 'full' ? `Use ${esc(t.name)}` : `Use this design`}</button>
         </div></div>`;
     };
     paint();
+    // Device, mode and colours change the frame and the words under it — the dialog isn't rebuilt.
+    const update = () => {
+      const frame = back.querySelector('iframe');
+      const src = tplSrc(t.id, view);
+      if (frame.getAttribute('src') !== src) frame.setAttribute('src', src);
+      frame.style.width = view.device === 'mobile' ? '390px' : '100%';
+      back.querySelectorAll('[data-tpl-device]').forEach((b) => {
+        const on = b.dataset.tplDevice === view.device;
+        b.className = `px-2 py-1 text-xs font-bold rounded-lg border ${on ? 'btn-primary' : 'btn-secondary'}`;
+        b.setAttribute('aria-pressed', String(on));
+      });
+      back.querySelector('[data-tpl-note]').textContent = view.mode === 'full' ? 'Pictures are free stock photos to swap for your own. Words in [square brackets] are for you to fill in before you publish.' : 'Your pages, words and pictures stay exactly as they are; only the look changes.';
+      back.querySelector('[data-tpl-use]').textContent = view.mode === 'full' ? `Use ${t.name}` : 'Use this design';
+    };
     document.body.appendChild(back);
+    const release = window.holdDialogFocus ? window.holdDialogFocus(back, back.querySelector('[data-tpl-close]')) : () => {};
     const onKey = (e) => { if (e.key === 'Escape') close(); };
-    const close = () => { back.remove(); document.removeEventListener('keydown', onKey); };
+    const close = () => { back.remove(); document.removeEventListener('keydown', onKey); release(); };
     document.addEventListener('keydown', onKey);
     back.addEventListener('click', async (e) => {
       if (e.target === back || e.target.closest('[data-tpl-close]')) { close(); return; }
       const sw = e.target.closest('[data-tpl-switch]');
       if (sw) { close(); openTemplate(sw.dataset.tplSwitch); return; }
       const dv = e.target.closest('[data-tpl-device]');
-      if (dv) { view.device = dv.dataset.tplDevice; paint(); return; }
+      if (dv) { view.device = dv.dataset.tplDevice; update(); return; }
       if (e.target.closest('[data-tpl-use]')) {
         if (view.mode === 'full' && !fresh) {
           const ok = await window.confirmModal(`Your pages are replaced with the <strong>${esc(t.name)}</strong> template's layout. Your live site doesn't change until you publish, and earlier published versions are kept.`, { title: 'Start again from this template?', confirmLabel: 'Start again', cancelLabel: 'Keep my pages' });
@@ -849,8 +979,8 @@
       }
     });
     back.addEventListener('change', (e) => {
-      if (e.target.name === 'tpl-mode') { view.mode = e.target.value; paint(); }
-      if (e.target.matches('[data-tpl-keep]')) { view.keepColours = e.target.checked; paint(); }
+      if (e.target.name === 'tpl-mode') { view.mode = e.target.value; update(); }
+      if (e.target.matches('[data-tpl-keep]')) { view.keepColours = e.target.checked; update(); }
     });
   }
   function openTemplateGallery() {
@@ -867,8 +997,9 @@
         <button type="button" data-tpl-close class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Close</button></div>
       <div class="p-5 overflow-y-auto" style="min-height:0"><div class="flex flex-wrap gap-4 justify-center">${list.map((t) => tplCard(t, 270)).join('')}</div></div></div>`;
     document.body.appendChild(back);
+    const release = window.holdDialogFocus ? window.holdDialogFocus(back, back.querySelector('[data-tpl-close]')) : () => {};
     const onKey = (e) => { if (e.key === 'Escape') close(); };
-    const close = () => { back.remove(); document.removeEventListener('keydown', onKey); };
+    const close = () => { back.remove(); document.removeEventListener('keydown', onKey); release(); };
     document.addEventListener('keydown', onKey);
     back.addEventListener('click', (e) => {
       if (e.target === back || e.target.closest('[data-tpl-close]')) { close(); return; }
@@ -903,7 +1034,7 @@
       <p class="text-sm font-black text-gray-900">${first ? 'First, choose what your website does' : 'What your website does'}</p>
       <p class="text-xs text-gray-500 mt-1">Untick what you don't need: it's hidden here, ${esc(state.assistantName || 'your assistant')} won't suggest it, and its tab disappears. You can switch it back on any time.</p>
       <div class="grid gap-2 sm:grid-cols-2 mt-3">${list.map((f) => `<label class="flex items-center gap-2 text-xs text-gray-800"><input type="checkbox" data-site-feature="${esc(f.key)}" ${featureOn(f.key) ? 'checked' : ''}> ${esc(f.label)}</label>`).join('')}</div>
-      <div class="mt-3">${btn('data-site-features-save', first ? 'Use these' : 'Save', true)}</div>`, first ? 'border-indigo-200' : '');
+      <div class="mt-3">${btn('data-site-features-save', first ? 'Use these' : 'Save', true)}</div>`, first ? 'border-emerald-200' : '');
   }
 
   function detailsPanel() {
@@ -922,16 +1053,16 @@
 
   function enquiriesPanel() {
     const list = state.enquiries;
-    if (!list) return card('<p class="text-sm text-gray-400 text-center">Loading enquiries…</p>');
+    if (!list) return card('<p class="text-sm text-gray-500 text-center">Loading enquiries…</p>');
     if (!list.length) return card(`<p class="text-sm font-black text-gray-900">Enquiries</p><p class="text-xs text-gray-500 mt-1">Messages people send from a contact form on your site appear here, and in your email. Add a "Contact form" section to a page to start receiving them.</p>`);
     const shown = list.slice(0, state.enquiryShown);
     return card(`
       <p class="text-sm font-black text-gray-900">Enquiries</p>
       <p class="text-xs text-gray-500 mt-1 mb-3">Sent from the contact forms on your site. Each one was also emailed to you — reply to them directly. Anyone who ticked "Send me news and offers" is added to your Audience; anyone else only if they tell you they'd like your emails.</p>
       <ul class="space-y-2">${shown.map((q) => `
-        <li class="border ${q.status === 'new' ? 'border-indigo-200' : 'border-gray-200'} rounded-lg p-3">
+        <li class="border ${q.status === 'new' ? 'border-emerald-200' : 'border-gray-200'} rounded-lg p-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <p class="text-xs font-bold text-gray-900">${esc(q.name)} ${q.status === 'new' ? '<span class="text-xs font-bold text-indigo-700">· New</span>' : ''}</p>
+            <p class="text-xs font-bold text-gray-900">${esc(q.name)} ${q.status === 'new' ? '<span class="text-xs font-bold text-emerald-800">· New</span>' : ''}</p>
             <p class="text-xs text-gray-500">${esc(new Date(q.createdAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }))}${q.pagePath ? ` · ${esc(q.pagePath)}` : ''}</p>
           </div>
           <p class="text-xs text-gray-600 mt-1"><a class="underline" href="mailto:${esc(q.email)}">${esc(q.email)}</a>${q.phone ? ` · <a class="underline" href="tel:${esc(q.phone)}">${esc(q.phone)}</a>` : ''}</p>
@@ -975,7 +1106,7 @@
   function ordersPanel() {
     const list = state.orders;
     const top = paymentsCard();
-    if (!list) return top + card('<p class="text-sm text-gray-400 text-center">Loading orders…</p>');
+    if (!list) return top + card('<p class="text-sm text-gray-500 text-center">Loading orders…</p>');
     if (!list.length) return top + card('<p class="text-sm font-black text-gray-900">Orders</p><p class="text-xs text-gray-500 mt-1">When someone buys from your site, the order appears here and in your email.</p>');
     const shown = list.slice(0, state.orderShown);
     return top + card(`
@@ -983,9 +1114,9 @@
       <ul class="space-y-2 mt-3">${shown.map((o) => {
         const a = o.shippingAddress && o.shippingAddress.address;
         const addr = a ? [o.shippingAddress.name, a.line1, a.line2, a.city, a.postal_code].filter(Boolean).join(', ') : '';
-        return `<li class="border ${o.status === 'paid' ? 'border-indigo-200' : 'border-gray-200'} rounded-lg p-3">
+        return `<li class="border ${o.status === 'paid' ? 'border-emerald-200' : 'border-gray-200'} rounded-lg p-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <p class="text-xs font-bold text-gray-900">${esc(o.quantity)} × ${esc(o.itemName)} · ${esc(money(o.amountTotal, o.currency))} ${o.status === 'paid' ? '<span class="text-xs font-bold text-indigo-700">· New</span>' : ''}</p>
+            <p class="text-xs font-bold text-gray-900">${esc(o.quantity)} × ${esc(o.itemName)} · ${esc(money(o.amountTotal, o.currency))} ${o.status === 'paid' ? '<span class="text-xs font-bold text-emerald-800">· New</span>' : ''}</p>
             <p class="text-xs text-gray-500">${esc(new Date(o.createdAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }))}</p>
           </div>
           <p class="text-xs text-gray-600 mt-1">${esc(o.customerName || '')}${o.customerEmail ? ` · <a class="underline" href="mailto:${esc(o.customerEmail)}">${esc(o.customerEmail)}</a>` : ''}</p>
@@ -1003,7 +1134,7 @@
   }
 
   // ── Bookings (bookings.ts) ─────────────────────────────────────────────────
-  const BOOKING_TONE = { awaiting_payment: ['Paying the deposit…', 'text-gray-500'], pending: ['Waiting for you', 'text-indigo-700'], confirmed: ['Confirmed', 'text-green-700'], declined: ['Declined', 'text-gray-500'], cancelled: ['Cancelled', 'text-gray-500'] };
+  const BOOKING_TONE = { awaiting_payment: ['Paying the deposit…', 'text-gray-500'], pending: ['Waiting for you', 'text-emerald-800'], confirmed: ['Confirmed', 'text-green-700'], declined: ['Declined', 'text-gray-500'], cancelled: ['Cancelled', 'text-gray-500'] };
   function bookingsPanel() {
     const b = state.data.booking || {};
     const head = card(`<p class="text-sm font-black text-gray-900">Bookings</p>
@@ -1011,7 +1142,7 @@
       <p class="text-xs text-gray-500 mt-1">Add a "Bookings" section to a page to show it on your website.</p>`);
     const list = state.bookings;
     const tt = timetableCard();
-    if (!list) return head + tt + card('<p class="text-sm text-gray-400 text-center">Loading bookings…</p>');
+    if (!list) return head + tt + card('<p class="text-sm text-gray-500 text-center">Loading bookings…</p>');
     if (!list.length) return head + tt + card('<p class="text-xs text-gray-500">No bookings yet. They appear here, and in your email, as they come in.</p>');
     const now = Date.now();
     const order = (x) => (x.status === 'pending' ? 0 : 1);
@@ -1021,7 +1152,7 @@
       if (x.status === 'cancelled') label = x.cancelledBy === 'customer' ? 'Cancelled by them' : 'Cancelled by you';
       if (x.moved && x.status !== 'cancelled') label += ' · moved by them';
       const past = new Date(x.startsAt).getTime() < now;
-      return `<li class="border ${x.status === 'pending' ? 'border-indigo-200' : 'border-gray-200'} rounded-lg p-3 ${past ? 'opacity-70' : ''}">
+      return `<li class="border ${x.status === 'pending' ? 'border-emerald-200' : 'border-gray-200'} rounded-lg p-3 ${past ? 'opacity-70' : ''}">
         <div class="flex flex-wrap items-center justify-between gap-2"><p class="text-xs font-bold text-gray-900">${esc(x.when)}</p><span class="text-xs font-bold ${tone}">${esc(label)}</span></div>
         <p class="text-xs text-gray-800 mt-1">${esc(x.what)} · ${esc(x.customerName)}${x.reminded ? ' <span class="text-gray-500">· reminder sent</span>' : ''}</p>
         <p class="text-xs text-gray-600 mt-1"><a class="underline" href="mailto:${esc(x.customerEmail)}">${esc(x.customerEmail)}</a>${x.customerPhone ? ` · <a class="underline" href="tel:${esc(x.customerPhone)}">${esc(x.customerPhone)}</a>` : ''}</p>
@@ -1063,7 +1194,7 @@
         <div class="md:col-span-2">${btn('data-session-add', 'Add these dates', true)}</div></div>`
       : `<p class="text-xs text-gray-500 mt-2">First add your classes or events (with their prices) in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')}.</p>`;
     const now = Date.now();
-    const rows = !tt ? '<p class="text-xs text-gray-400 mt-3">Loading…</p>'
+    const rows = !tt ? '<p class="text-xs text-gray-500 mt-3">Loading…</p>'
       : !tt.length ? '<p class="text-xs text-gray-500 mt-3">No dates added yet.</p>'
         : `<ul class="space-y-2 mt-3">${tt.map((x) => {
           const past = new Date(x.endsAt).getTime() < now;
@@ -1090,16 +1221,84 @@
     rerender();
   }
 
-  function previewHtml() {
+  // The preview card is painted once and then kept: its header is rewritten and the frame's width
+  // set on each render, but the frame reloads only when its address changes (the draft changed, or
+  // another page / the import is shown) — not on every click.
+  function previewHeadHtml(showImport) {
+    return `<div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <p class="text-sm font-black text-gray-900">Preview <span class="text-xs font-semibold text-gray-500">— ${showImport ? 'your imported site (not your draft yet)' : state.data.site.status === 'published' ? 'your draft' : 'not live yet'}</span></p>
+        <div class="flex gap-1" data-sb-wide-only>${btn(`data-site-device="desktop" aria-pressed="${state.device === 'desktop'}"`, 'Desktop', state.device === 'desktop')}${btn(`data-site-device="mobile" aria-pressed="${state.device === 'mobile'}"`, 'Phone', state.device === 'mobile')}</div>
+        ${state.previewFull ? btn('data-site-preview-close', 'Close preview', true) : ''}
+      </div>`;
+  }
+  function paintPreview(slot) {
     const showImport = state.previewImport && state.data.import && state.data.import.status === 'ready';
     const src = `/.netlify/functions/site-preview?assistantId=${encodeURIComponent(state.assistantId)}${showImport ? '&import=1' : ''}&path=${encodeURIComponent(state.previewPath)}&v=${state.version}`;
-    const width = state.device === 'mobile' ? '390px' : '100%';
-    return card(`
-      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <p class="text-sm font-black text-gray-900">Preview <span class="text-xs font-semibold text-gray-500">— ${showImport ? 'your imported site (not your draft yet)' : state.data.site.status === 'published' ? 'your draft' : 'not live yet'}</span></p>
-        <div class="flex gap-1">${btn(`data-site-device="desktop"`, 'Desktop', state.device === 'desktop')}${btn(`data-site-device="mobile"`, 'Phone', state.device === 'mobile')}</div>
-      </div>
-      <div class="bg-gray-100 rounded-lg p-2" style="overflow:auto"> <iframe data-site-preview title="Preview of your website" src="${esc(src)}" style="display:block;margin:0 auto;width:${width};height:720px;border:0;background:#fff;border-radius:8px"></iframe></div>`);
+    let frame = slot.querySelector('iframe[data-site-preview]');
+    if (!frame) {
+      slot.innerHTML = card(`<div data-site-preview-head></div>
+      <div data-sb-frame-box class="bg-gray-100 rounded-lg p-2" style="overflow:auto"><iframe data-site-preview title="Preview of your website" style="display:block;margin:0 auto;height:min(720px, 70vh);border:0;background:#fff;border-radius:8px"></iframe></div>`);
+      frame = slot.querySelector('iframe[data-site-preview]');
+    }
+    slot.toggleAttribute('data-sb-full', !!state.previewFull);
+    if (state.previewFull) { slot.setAttribute('role', 'dialog'); slot.setAttribute('aria-modal', 'true'); slot.setAttribute('aria-label', 'Preview of your website'); }
+    else { slot.removeAttribute('role'); slot.removeAttribute('aria-modal'); slot.removeAttribute('aria-label'); }
+    const head = slot.querySelector('[data-site-preview-head]');
+    const headHtml = previewHeadHtml(showImport);
+    if (head._html !== headHtml) { head.innerHTML = headHtml; head._html = headHtml; }
+    // Phone: 390px wide, or the whole box on a screen narrower than that (no sideways scroll).
+    frame.style.width = state.device === 'mobile' ? 'min(390px, 100%)' : '100%';
+    if (frame.dataset.src !== src) { frame.dataset.src = src; frame.src = src; }
+  }
+
+  /** The preview full screen (narrow screens, where it sits below everything else) — and back. */
+  let previewRelease = null;
+  function setPreviewFull(on) {
+    if (!!state.previewFull === !!on) return;
+    state.previewFull = !!on;
+    document.body.style.overflow = on ? 'hidden' : '';
+    rerender();
+    const host = document.querySelector('[data-site-host="website"]');
+    if (on) {
+      const close = host && host.querySelector('[data-site-preview-close]');
+      previewRelease = window.holdDialogFocus && close ? window.holdDialogFocus(close.closest('[data-sb-full]'), close) : null;
+      if (!previewRelease && close) close.focus();
+    } else {
+      if (previewRelease) previewRelease();
+      previewRelease = null;
+      // The button that opened it was repainted since, so focus its replacement.
+      if (!host || !host.contains(document.activeElement)) host?.querySelector('[data-site-preview-full]')?.focus();
+    }
+  }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.previewFull) setPreviewFull(false); });
+
+  // ── A new site's first steps (UI review 2026-10-21) ─────────────────────────
+  // One at a time and numbered, each with one main button: what the website does → a template or
+  // their current site (or neither) → the words. A step already done can be gone back to.
+  function setupStep() {
+    if (state.setupStep) return state.setupStep;
+    if (!featuresOn()) return 1;
+    if (!def().settings.template && !state.data.import && !state.setupSkipped) return 2;
+    return 3;
+  }
+  function setupStepsHtml(step) {
+    const who = esc(state.assistantName || 'your assistant');
+    const steps = [[1, 'Choose what your website does'], [2, 'Pick a template, or bring your site'], [3, `Let ${who} write it`]];
+    return card(`<p class="text-sm font-black text-gray-900">Set up your website <span class="text-xs font-semibold text-gray-500">— step ${step} of 3</span></p>
+      <ol class="flex flex-wrap gap-2 mt-2" aria-label="Setting up your website">${steps.map(([n, label]) => {
+        const done = n < step;
+        const now = n === step;
+        const dot = `<span aria-hidden="true" class="inline-flex items-center justify-center rounded-full font-black ${now ? 'btn-primary' : done ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}" style="width:22px;height:22px;font-size:11px;flex-shrink:0">${done ? '✓' : n}</span>`;
+        const inner = `${dot}<span class="text-xs font-bold ${now ? 'text-gray-900' : 'text-gray-500'}">${esc(label)}</span>`;
+        return `<li ${now ? 'aria-current="step"' : ''}>${done
+          ? `<button type="button" data-site-setup-step="${n}" class="sb-tap flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-gray-50" aria-label="Step ${n}, done: ${esc(label)}. Go back to it">${inner}</button>`
+          : `<span class="flex items-center gap-2 px-2 py-1">${inner}<span class="sr-only">${now ? ' (this step)' : ' (to do)'}</span></span>`}</li>`;
+      }).join('')}</ol>`, 'border-emerald-200');
+  }
+  function setupSkipHtml() {
+    return card(`<p class="text-sm font-black text-gray-900">Or start without either</p>
+      <p class="text-xs text-gray-500 mt-1">${esc(state.assistantName || 'Your assistant')} writes your site from your business details instead. You can try a template any time from the Templates tab.</p>
+      <div class="mt-3">${btn('data-site-setup-skip', 'Skip this step')}</div>`);
   }
 
   // A new site: nothing written yet beyond the starter (never published, two sections at most).
@@ -1111,7 +1310,7 @@
   function draftCard(where) {
     const s = state.data.site;
     if (s.drafting && state.data.import && state.data.import.status === 'reading') return '';
-    if (s.drafting) return card('<p class="text-sm font-semibold text-indigo-700">Drafting your whole site — this takes a minute or two. You can leave this page; you\'ll be notified when it\'s ready.</p>');
+    if (s.drafting) return card('<p class="text-sm font-semibold text-emerald-800">Drafting your whole site — this takes a minute or two. You can leave this page; you\'ll be notified when it\'s ready.</p>');
     const who = esc(state.assistantName || 'Your Website Assistant');
     const form = `
       <textarea data-site-draft-request rows="2" class="${inputCls} mt-3" placeholder="Anything to include? e.g. a page for each service, a friendly tone, mention free delivery"></textarea>
@@ -1121,9 +1320,9 @@
         ${def().settings.template ? `<p class="text-sm font-black text-gray-900">Let ${who} write the words</p>
         <p class="text-xs text-gray-500 mt-1">It rewrites every section of your template for your business, from your details, products and set-up answers — the layout, pictures and design stay as they are. Anything it doesn't know stays in [square brackets] for you. Uses 1 task.</p>`
         : `<p class="text-sm font-black text-gray-900">Let ${who} write your site</p>
-        <p class="text-xs text-gray-500 mt-1">It writes every page from your business details, products and set-up answers, using only the things you ticked above. You then change anything you like. Uses 1 task.</p>`}
+        <p class="text-xs text-gray-500 mt-1">It writes every page from your business details, products and set-up answers, using only the things you chose for your website. You then change anything you like. Uses 1 task.</p>`}
         ${form}
-        <div class="mt-3">${btn('data-site-draft', def().settings.template ? 'Write the words' : 'Write my site', true)}</div>`, 'border-indigo-200');
+        <div class="mt-3">${btn('data-site-draft', def().settings.template ? 'Write the words' : 'Write my site', true)}</div>`, 'border-emerald-200');
     }
     return `<details class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
       <summary class="text-sm font-black text-gray-900 cursor-pointer">Start again from scratch</summary>
@@ -1141,7 +1340,7 @@
     const s = state.data.site;
     const who = esc(state.assistantName || 'Your Website Assistant');
     if (imp && imp.status === 'reading' && s.drafting) {
-      return card(`<p class="text-sm font-semibold text-indigo-700">Reading your site at ${esc(imp.sourceUrl)} — this takes a minute or two. You can leave this page; you'll be notified when the imported draft is ready to look at.</p>`, 'border-indigo-200');
+      return card(`<p class="text-sm font-semibold text-emerald-800">Reading your site at ${esc(imp.sourceUrl)} — this takes a minute or two. You can leave this page; you'll be notified when the imported draft is ready to look at.</p>`, 'border-emerald-200');
     }
     if (imp && imp.status === 'ready') return importReviewCard(imp);
     const f = state.importForm;
@@ -1164,7 +1363,7 @@
       <p class="text-xs text-gray-500 mt-2">${who} reads your home page and the pages in its menu (up to ${esc(state.data.maxPages)} on your plan) and lays your own words out as your new site. Nothing is reworded or made up — anything missing is left in [square brackets] for you. Prices aren't copied; they belong in Business Information. You see the result before it replaces anything. Uses 1 task, only if a draft is made.</p>`;
     if (where === 'start') {
       return card(`<p class="text-sm font-black text-gray-900">Already have a website?</p>
-        <p class="text-xs text-gray-500 mt-1">Bring it over from Wix, Squarespace, WordPress or anywhere else.</p>${form}`, 'border-indigo-200');
+        <p class="text-xs text-gray-500 mt-1">Bring it over from Wix, Squarespace, WordPress or anywhere else.</p>${form}`, 'border-emerald-200');
     }
     return `<details class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
       <summary class="text-sm font-black text-gray-900 cursor-pointer">Import my current site</summary>${form}</details>`;
@@ -1198,7 +1397,7 @@
         ${btn('data-site-import-use', 'Use this as my draft', state.previewImport)}
         ${btn('data-site-import-discard', 'Discard')}
       </div>
-      <p class="text-xs text-gray-500 mt-2">"Use this as my draft" replaces your current draft with the imported pages, keeping your design. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing goes live until you publish.'}</p>`, 'border-indigo-200');
+      <p class="text-xs text-gray-500 mt-2">"Use this as my draft" replaces your current draft with the imported pages, keeping your design. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing goes live until you publish.'}</p>`, 'border-emerald-200');
   }
 
   // ── Publish ────────────────────────────────────────────────────────────────
@@ -1231,14 +1430,15 @@
         ${live ? `<a href="${esc(s.url)}" target="_blank" rel="noopener" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">View live site</a>${btn('data-site-unpublish', 'Take offline')}` : ''}
         ${s.publishedVersion ? btn('data-site-versions', state.versions ? 'Hide earlier versions' : 'Earlier versions') : ''}
       </div>
-      ${s.publishBlocker && s.slug ? `<p class="text-xs font-semibold text-amber-800 mt-2">${esc(s.publishBlocker)}</p>` : ''}`;
+      ${s.publishBlocker ? `<p class="text-xs font-semibold text-amber-800 mt-2">${esc(s.publishBlocker)}</p>` : ''}`;
     const versions = state.versions ? `<ul class="mt-3 space-y-1">${state.versions.length ? state.versions.map((v) => `
         <li class="flex flex-wrap items-center justify-between gap-2 text-xs border border-gray-200 rounded-lg px-3 py-2">
           <span>Version ${esc(v.version)} · ${esc(new Date(v.publishedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }))} · ${esc(v.pages)} page${v.pages === 1 ? '' : 's'}${v.version === s.publishedVersion && live ? ' · <strong>live</strong>' : ''}</span>
           ${btn(`data-site-restore="${esc(v.version)}"`, 'Copy into my draft')}
         </li>`).join('') : '<li class="text-xs text-gray-500">No earlier versions.</li>'}</ul>
         <p class="text-xs text-gray-500 mt-1">Copying a version replaces your draft with it. Your live site only changes when you publish.</p>` : '';
-    return card(`${status}${address}${actions}${versions}${pnote}${s.slug ? domainBlock() : ''}`, live ? 'border-green-200' : '');
+    const credit = s.credit ? '<p class="text-xs text-gray-500 mt-2">The bottom of every page says “Made with Be More Swan”, linking to us, beside “Report this site”.</p>' : '';
+    return card(`${status}${address}${actions}${credit}${versions}${pnote}${s.slug ? domainBlock() : ''}`, live ? 'border-green-200' : '');
   }
 
   // ── Their own domain (site-domains.ts) ─────────────────────────────────────────────────────
@@ -1261,7 +1461,7 @@
       ? `<p class="text-xs text-gray-700 mt-3">Where you bought <strong>${esc(d.altDomain || d.domain)}</strong>, open its <strong>DNS</strong> settings and add:</p>
          <div class="overflow-x-auto mt-1"><table class="text-xs w-full border border-gray-200 rounded-lg" style="border-collapse:separate">
            <tr class="bg-gray-50 text-gray-600"><th class="text-left px-2 py-1">Type</th><th class="text-left px-2 py-1">Name / Host</th><th class="text-left px-2 py-1">Value / Points to</th></tr>
-           ${(d.records || []).map((r) => `<tr><td class="px-2 py-1 font-bold">${esc(r.type)}</td><td class="px-2 py-1 font-mono">${esc(r.name)}</td><td class="px-2 py-1 font-mono">${esc(r.value)} <button type="button" data-site-copy="${esc(r.value)}" class="underline text-gray-500 ml-1">Copy</button></td></tr>
+           ${(d.records || []).map((r) => `<tr><td class="px-2 py-1 font-bold">${esc(r.type)}</td><td class="px-2 py-1 font-mono">${esc(r.name)}</td><td class="px-2 py-1 font-mono">${esc(r.value)} <span class="ml-1">${btn(`data-site-copy="${esc(r.value)}"`, 'Copy')}</span></td></tr>
              <tr><td></td><td colspan="2" class="px-2 pb-1 text-gray-500">${esc(r.note)}</td></tr>`).join('')}
          </table></div>
          <p class="text-xs text-gray-500 mt-1">Some providers call Name "Host" and want it left blank or "@" for the bare domain. Changes can take from a few minutes to a few hours.</p>`
@@ -1278,36 +1478,197 @@
     if (!list.length) return '';
     return `<div class="bg-amber-50 border border-amber-200 rounded-2xl p-4">
       <p class="text-sm font-bold text-amber-800">${list.length} part${list.length === 1 ? '' : 's'} in [square brackets] to fill in with your real details before you publish</p>
-      <ul class="mt-2 space-y-1 list-disc pl-5">${list.slice(0, 8).map((x) => `<li class="text-xs text-amber-800">${esc(x.pageTitle)}: ${esc(x.text)}</li>`).join('')}</ul></div>`;
+      <p class="text-xs text-amber-800 mt-1">Tap one to go to it.</p>
+      <ul class="mt-2 flex flex-wrap gap-2">${list.slice(0, 8).map((x, i) => `<li>${btn(`data-site-fix="${i}"`, `${esc(x.pageTitle)}: ${esc(x.text)}`)}</li>`).join('')}</ul>
+      ${list.length > 8 ? `<p class="text-xs text-amber-800 mt-2">and ${esc(list.length - 8)} more.</p>` : ''}</div>`;
+  }
+
+  // ── Painting ───────────────────────────────────────────────────────────────
+  // render() builds the tab as named blocks and paints them into wrappers that stay. A `keep` block
+  // (the template galleries, full of live previews) is rewritten only when its HTML changed; the rest
+  // are rewritten each time, keeping what was typed into a box the server hasn't changed since — so a
+  // click, a save or the drafting poll no longer wipes a half-typed page title or draft request.
+  // The section form is left out: syncEditing keeps it in state.editing, by position.
+  const KEEP_TYPED = 'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=file]),textarea,select';
+  function fieldKey(el) {
+    if (el.closest('[data-site-section-form]')) return null;
+    if (el.name) return `name=${el.name}`;
+    const a = [...el.attributes].find((x) => x.name.startsWith('data-') && x.name !== 'data-max');
+    return a ? `${a.name}=${a.value}` : null;
+  }
+  const defaultOf = (el) => (el.tagName === 'SELECT' ? ([...el.options].find((o) => o.defaultSelected) || el.options[0] || { value: '' }).value : el.defaultValue);
+  function writeKeepingTyped(el, html) {
+    const typed = new Map();
+    const count = new Map();
+    let focus = null;
+    el.querySelectorAll(KEEP_TYPED).forEach((c) => {
+      const k = fieldKey(c);
+      if (!k) return;
+      count.set(k, (count.get(k) || 0) + 1);
+      if (c.value !== defaultOf(c)) typed.set(k, { value: c.value, was: defaultOf(c) });
+      if (c === document.activeElement) focus = { k, from: c.selectionStart, to: c.selectionEnd };
+    });
+    el.innerHTML = html;
+    el.querySelectorAll(KEEP_TYPED).forEach((c) => {
+      const k = fieldKey(c);
+      if (!k || count.get(k) !== 1) return;
+      const t = typed.get(k);
+      if (t && defaultOf(c) === t.was) { c.value = t.value; if (c.dataset.max) updateLenNote(c); }
+      if (focus && focus.k === k) {
+        c.focus({ preventScroll: true });
+        try { if (focus.from != null) c.setSelectionRange(focus.from, focus.to); } catch { /* a select or colour box */ }
+      }
+    });
+  }
+  /** blocks: [key, html, { keep, live, attrs }] in order (attrs: set on the wrapper when it is made). An empty block is hidden; a `live` one (the note)
+   *  stays in the page, empty and zero-height, so screen readers announce what is said in it. */
+  function paintBlocks(parent, blocks) {
+    const want = new Set(blocks.map(([key]) => key));
+    [...parent.children].forEach((el) => { if (!want.has(el.dataset.siteBlock)) el.remove(); });
+    let prev = null;
+    for (const [key, html, opts = {}] of blocks) {
+      let el = [...parent.children].find((x) => x.dataset.siteBlock === key);
+      if (!el) {
+        el = document.createElement('div');
+        el.dataset.siteBlock = key;
+        if (opts.live) { el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); }
+        Object.entries(opts.attrs || {}).forEach(([k, v]) => el.setAttribute(k, v));
+      }
+      const at = prev ? prev.nextSibling : parent.firstChild;
+      if (el !== at) parent.insertBefore(el, at);
+      if (!opts.keep || el._html !== html) { writeKeepingTyped(el, html); el._html = html; }
+      if (opts.live) el.style.marginTop = html ? '' : '0';
+      else el.hidden = !html;
+      prev = el;
+    }
+  }
+  /** Ties each label to the box after it (for/id) and names boxes that have only a placeholder, so a
+   *  screen reader says what each box is for. One pass after painting covers every field helper. */
+  let fieldSeq = 0;
+  function nameFields(root) {
+    root.querySelectorAll('label:not([for])').forEach((l) => {
+      if (l.querySelector('input,select,textarea')) return;
+      const n = l.nextElementSibling;
+      const box = n && (n.matches('input,select,textarea') ? n : n.querySelector('input:not([type=hidden]),select,textarea'));
+      if (!box) return;
+      if (!box.id) box.id = `sb-field-${++fieldSeq}`;
+      l.htmlFor = box.id;
+    });
+    root.querySelectorAll('input[placeholder]:not([aria-label]),textarea[placeholder]:not([aria-label])').forEach((c) => {
+      if (!c.labels || !c.labels.length) c.setAttribute('aria-label', c.placeholder);
+    });
+  }
+  /** After painting: the saved section back in view, and a new note where it can be seen — the note
+   *  sits above the tabs, far from a Save at the bottom of a long form. */
+  function afterPaint(host) {
+    nameFields(host);
+    const form = state.editing && host.querySelector('[data-site-section-form]');
+    if (form && state.editing.base == null) { syncEditing(form); state.editing.base = formSig(); }
+    // Edit / Add a section: the form opens below the section list — bring it into view, focused.
+    if (state.focusEditor) {
+      state.focusEditor = false;
+      if (form) {
+        form.scrollIntoView({ block: 'start' });
+        const first = form.querySelector('input:not([type=hidden]),textarea,select');
+        (first || form.querySelector('button')).focus({ preventScroll: true });
+      }
+    }
+    if (state.focusSel) {
+      const el = host.querySelector(state.focusSel);
+      state.focusSel = null;
+      if (el) {
+        el.scrollIntoView({ block: 'start' });
+        const box = el.matches('input,textarea,select') ? el : el.querySelector('input:not([type=hidden]),textarea,select');
+        if (box) box.focus({ preventScroll: true });
+      }
+    }
+    if (state.focusSection) {
+      const row = host.querySelector(`[data-site-edit="${CSS.escape(state.focusSection)}"]`);
+      state.focusRow = state.focusSection;
+      state.focusSection = null;
+      if (row) { row.scrollIntoView({ block: 'center' }); row.focus({ preventScroll: true }); }
+    }
+    let beside = false;
+    if (state.note && state.note !== state.noteShown && state.noteAt) {
+      // Said again beside the button that was pressed (the live note above the tabs is what a
+      // screen reader announces, so this copy is hidden from it).
+      const a = host.querySelector(state.focusRow ? `[data-site-edit="${CSS.escape(state.focusRow)}"]` : state.noteAt);
+      const at = a && (a.closest('li') || a.parentElement);
+      if (at) {
+        const cls = state.note.tone === 'error' ? 'text-red-600' : state.note.tone === 'warn' ? 'text-amber-800' : 'text-green-700';
+        at.insertAdjacentHTML('beforeend', `<p data-site-beside class="w-full basis-full text-xs font-semibold mt-1 ${cls}"><span aria-hidden="true">${esc(state.note.text)}</span>${state.note.billing ? ` ${btn('data-site-billing', 'See plans')}` : ''}${state.note.undo && state.undo ? ` ${btn('data-site-undo data-beside', 'Undo')}` : ''}</p>`);
+        beside = true;
+      }
+    }
+    if (state.note && state.note !== state.noteShown) {
+      state.noteAt = null;
+      // The repaint replaced the button that was pressed: focus the same one again (or, after a
+      // removal, its Undo), unless something above already moved focus on purpose.
+      const want = state.refocus;
+      state.refocus = null;
+      const lost = !document.activeElement || document.activeElement === document.body || !document.activeElement.isConnected;
+      if (want && lost) {
+        const el = host.querySelector(`${want}[data-beside]`) || host.querySelector(want);
+        if (el && !el.disabled) el.focus({ preventScroll: true });
+      }
+    }
+    state.focusRow = null;
+    if (state.note && state.note !== state.noteShown && !beside) {
+      const n = host.querySelector('[data-site-block="note"]');
+      const r = n && n.getBoundingClientRect();
+      if (r && (r.top < 0 || r.bottom > window.innerHeight)) {
+        if (typeof window.showToast === 'function') window.showToast(state.note.text, { icon: state.note.tone === 'ok' ? '✅' : '⚠️' });
+        else n.scrollIntoView({ block: 'center' });
+      }
+    }
+    state.noteShown = state.note;
   }
 
   function render() {
     const host = document.querySelector(`[data-site-host="${state.surface}"]`);
     if (!host) return;
-    if (!state.loaded) { host.innerHTML = card('<p class="text-sm text-gray-400 text-center">Loading your website…</p>'); return; }
-    if (state.loadError && !state.data) { host.innerHTML = card(`<p class="text-sm font-bold text-gray-700 text-center">Could not load your website</p><p class="text-xs text-gray-500 mt-2 text-center">${esc(state.loadError)}</p>`); return; }
+    if (!state.loaded) { host.innerHTML = card('<p class="text-sm text-gray-500 text-center">Loading your website…</p>'); return; }
+    if (state.loadError && !state.data) { host.innerHTML = card(`<p class="text-sm font-bold text-gray-700 text-center">Could not load your website</p><p class="text-xs text-gray-500 mt-2 text-center">${esc(state.loadError)}</p><div class="mt-3 text-center">${btn('data-site-retry', 'Try again', true)}</div>`); return; }
     paintTabBadges();
     if (state.surface !== 'website') {
       const body = state.surface === 'enquiries' ? enquiriesPanel() : state.surface === 'orders' ? ordersPanel() : bookingsPanel();
-      host.innerHTML = `<div class="max-w-4xl space-y-4">${noteHtml()}${body}</div>`;
+      if (!host.querySelector(':scope > [data-site-surface]')) host.innerHTML = '<div data-site-surface class="max-w-4xl space-y-4"></div>';
+      paintBlocks(host.firstElementChild, [['note', noteHtml(), { live: true }], ['body', body]]);
+      afterPaint(host);
       return;
     }
-    const tabs = [['pages', 'Pages'], ['design', 'Design'], ['templates', 'Templates'], ['details', 'Details']].map(([k, l]) => btn(`data-site-panel="${k}"`, esc(l), state.panel === k)).join(' ');
-    host.innerHTML = `
-      <div class="grid gap-4 lg:grid-cols-2">
-        <div class="space-y-4 min-w-0">
-          ${featuresOn() ? '' : featuresCard(true)}
-          ${state.data.import || isFresh() ? importCard('start') : ''}
-          ${isFresh() && !def().settings.template ? templatesCard(true) : ''}
-          ${isFresh() || state.data.site.drafting || (def().settings.template && !state.data.site.publishedVersion) ? draftCard('start') : ''}
-          ${publishCard()}
-          ${placeholdersCard()}
-          <div class="flex flex-wrap gap-2">${tabs}</div>
-          ${noteHtml()}
-          ${state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : state.panel === 'templates' ? templatesCard(false) : detailsPanel() + draftCard('again') + (state.data.import || isFresh() ? '' : importCard('again'))}
-        </div>
-        <div class="min-w-0">${previewHtml()}</div>
-      </div>`;
+    const tabs = [['pages', 'Pages'], ['design', 'Design'], ['templates', 'Templates'], ['details', 'Details']].map(([k, l]) => btn(`data-site-panel="${k}" aria-pressed="${state.panel === k}"`, esc(l), state.panel === k)).join(' ');
+    if (!host.querySelector(':scope > [data-site-layout]')) {
+      host.innerHTML = '<div data-site-layout class="grid gap-4 lg:grid-cols-2"><div class="space-y-4 min-w-0"></div><div class="min-w-0"></div></div>';
+    }
+    const layout = host.firstElementChild;
+    const s = state.data.site;
+    const fresh = isFresh();
+    const step = fresh ? setupStep() : 0;
+    // During set-up the panel below is for looking around: its buttons give way to the step's.
+    quietPrimary = fresh && !state.editing;
+    const panel = state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : state.panel === 'templates' ? templatesCard(false) : detailsPanel() + draftCard('again') + (state.data.import || fresh ? '' : importCard('again'));
+    quietPrimary = false;
+    paintBlocks(layout.firstElementChild, [
+      ['setup', fresh ? setupStepsHtml(step) : ''],
+      ['features', (fresh ? step === 1 : !featuresOn()) ? featuresCard(true) : ''],
+      ['templates', step === 2 && !def().settings.template ? templatesCard(true) : '', { keep: true }],
+      ['import', state.data.import || step === 2 ? importCard('start') : ''],
+      ['setup-skip', step === 2 && !state.data.import ? setupSkipHtml() : ''],
+      ['draft', (fresh ? step === 3 || s.drafting : s.drafting || (def().settings.template && !s.publishedVersion)) ? draftCard('start') : ''],
+      // Nothing to publish until there is a draft.
+      ['publish', fresh ? '' : publishCard()],
+      ['placeholders', placeholdersCard()],
+      ['tabs', `<div class="flex flex-wrap gap-2">${tabs}</div>`],
+      ['note', noteHtml(), { live: true }],
+      [`panel-${state.panel}`, panel, { keep: state.panel === 'templates' }],
+      // Narrow screens: the preview is below everything, so a button that stays in reach opens it.
+      // Sticky on the wrapper itself — inside it, it could only stick within its own height.
+      ['preview-jump', btn('data-site-preview-full style="box-shadow:0 4px 14px rgba(0,0,0,.15)"', 'Preview my site'),
+        { attrs: { 'data-sb-narrow-only': '', style: 'position:sticky;bottom:12px;z-index:5;display:flex;justify-content:flex-end' } }],
+    ]);
+    paintPreview(layout.lastElementChild);
+    afterPaint(host);
   }
 
   // The counts on the Enquiries / Orders / Bookings tabs — visible from every tab.
@@ -1322,7 +1683,8 @@
     const d = state.data || {};
     // Orders and Bookings tabs follow what the website does.
     const show = (id, on) => { const b = document.getElementById(id); if (b) { b.classList.toggle('hidden', !on); b.style.display = on ? '' : 'none'; } };
-    if (state.data) { show('maintab-btn-siteorders', featureOn('shop')); show('maintab-btn-sitebookings', featureOn('bookings')); }
+    // The Calendar tab is this assistant's bookings calendar (assistant-calendar.js), so it goes with them.
+    if (state.data) { show('maintab-btn-siteorders', featureOn('shop')); show('maintab-btn-sitebookings', featureOn('bookings')); show('maintab-btn-calendar', featureOn('bookings')); }
     set('site-enquiries-badge', d.newEnquiries || 0);
     set('site-orders-badge', d.newOrders || 0);
     set('site-bookings-badge', (d.booking && d.booking.waiting) || 0);
@@ -1341,6 +1703,22 @@
     const form = e.target.closest && e.target.closest('[data-site-section-form]');
     if (!form || !state.assistantId) return;
     e.preventDefault();
+    if (state.busy) return;
+    // A picture with no description would be left out by the server: stop here and say so, beside Save.
+    const noAlt = [...form.querySelectorAll('[data-alt-needed]')].filter((x) => !x.value.trim());
+    if (noAlt.length) {
+      noAlt.forEach(markAlt);
+      let msg = form.querySelector('[data-site-form-error]');
+      if (!msg) {
+        form.querySelector('[data-site-section-save]').insertAdjacentHTML('afterend', '<p data-site-form-error role="alert" class="text-xs font-semibold text-red-600 mt-2"></p>');
+        msg = form.querySelector('[data-site-form-error]');
+      }
+      msg.textContent = `${noAlt.length === 1 ? 'A picture still needs' : `${noAlt.length} pictures still need`} a few words on what ${noAlt.length === 1 ? 'it shows' : 'they show'} before you save.`;
+      noAlt[0].scrollIntoView({ block: 'center' });
+      noAlt[0].focus({ preventScroll: true });
+      return;
+    }
+    state.trigger = e.submitter || form.querySelector('[data-site-section-save]');
     const ed = state.editing;
     const props = readForm(form, ed.type);
     const look = readLook(form);
@@ -1349,21 +1727,49 @@
     const ops = ed.sectionId
       ? [{ op: 'update_section', pageId: ed.pageId, sectionId: ed.sectionId, props, look },
         ...(moving ? [{ op: 'move_section', pageId: ed.pageId, sectionId: ed.sectionId, toPageId, toIndex: 99 }] : [])]
-      : [{ op: 'add_section', pageId: moving ? toPageId : ed.pageId, section: { type: ed.type, props, look } }];
-    await apply(ops, () => { state.editing = null; if (moving) state.pageId = toPageId; });
+      : [{ op: 'add_section', pageId: moving ? toPageId : ed.pageId, section: { type: ed.type, props, look }, ...(ed.index != null && !moving ? { index: ed.index } : {}) }];
+    await apply(ops, () => {
+      state.editing = null;
+      if (moving) state.pageId = toPageId;
+      const sections = (page() || { sections: [] }).sections;
+      const added = ed.index != null && !moving ? sections[ed.index] : sections[sections.length - 1];
+      state.focusSection = ed.sectionId || (added || {}).id || null;
+    });
   });
 
   document.addEventListener('click', async (e) => {
     if (!state.assistantId || !hostOf(e)) return;
     const t = (sel) => e.target.closest(sel);
     const p = page();
+    state.trigger = t('button');
+    if (t('[data-site-billing]')) { window.loadView?.('billing'); return; }
+    if (t('[data-site-retry]')) { state.loaded = false; state.loadError = null; render(); load(); return; }
+    const fix = t('[data-site-fix]');
+    if (fix) {
+      // A [placeholder]: open where it is — its section's form, the page's details, or Details.
+      const x = (state.data.placeholders || [])[Number(fix.dataset.siteFix)];
+      if (!x || !(await leaveEditor())) return;
+      state.editing = null;
+      const pg = def().pages.find((q) => q.id === x.pageId);
+      const sec = pg && x.sectionId && pg.sections.find((q) => q.id === x.sectionId);
+      if (!pg || x.pageTitle === 'Site details') { state.panel = 'details'; state.focusSel = '[data-site-block^="panel-"]'; render(); return; }
+      state.panel = 'pages'; state.pageId = pg.id; state.previewPath = pathOf(pg);
+      if (sec && FORMS[sec.type]) {
+        state.editing = { pageId: pg.id, sectionId: sec.id, type: sec.type, props: JSON.parse(JSON.stringify(sec.props)), look: { ...LOOK_DEFAULT, ...(sec.look || {}) } };
+        state.focusEditor = true;
+      } else state.focusSel = '[data-site-page-title]';
+      render();
+      return;
+    }
 
     const panel = t('[data-site-panel]');
     if (panel) {
       const want = panel.dataset.sitePanel;
       // Enquiries, Orders and Bookings are tabs of their own now.
       if (want === 'enquiries' || want === 'orders' || want === 'bookings') { window._activateMainTab?.(`site${want}`); return; }
-      state.panel = want; state.editing = null;
+      if (want !== state.panel && !(await leaveEditor())) return;
+      if (want !== state.panel) state.editing = null;
+      state.panel = want;
       render();
       return;
     }
@@ -1413,17 +1819,55 @@
       return;
     }
     const pg = t('[data-site-page]');
-    if (pg) { state.pageId = pg.dataset.sitePage; state.editing = null; state.previewPath = pathOf(page()); render(); return; }
+    if (pg) {
+      if (pg.dataset.sitePage !== p.id && !(await leaveEditor())) return;
+      if (pg.dataset.sitePage !== p.id) state.editing = null;
+      state.pageId = pg.dataset.sitePage; state.previewPath = pathOf(page()); render(); return;
+    }
+    if (t('[data-site-preview-full]')) { setPreviewFull(true); return; }
+    if (t('[data-site-preview-close]')) { setPreviewFull(false); return; }
     const dev = t('[data-site-device]');
     if (dev) { state.device = dev.dataset.siteDevice; render(); return; }
-    if (t('[data-site-edit-cancel]')) { state.editing = null; render(); return; }
+    if (t('[data-site-edit-cancel]')) {
+      if (!(await leaveEditor())) return;
+      const was = state.editing && state.editing.sectionId;
+      state.editing = null; state.focusSection = was || null; render(); return;
+    }
 
     const edit = t('[data-site-edit]');
-    if (edit) { const s = p.sections.find((x) => x.id === edit.dataset.siteEdit); state.editing = { pageId: p.id, sectionId: s.id, type: s.type, props: JSON.parse(JSON.stringify(s.props)), look: { ...LOOK_DEFAULT, ...(s.look || {}) } }; render(); return; }
-    if (t('[data-site-new-section]')) {
-      const type = document.querySelector('[data-site-new-type]').value;
+    if (edit) {
+      const s = p.sections.find((x) => x.id === edit.dataset.siteEdit);
+      if (state.editing && state.editing.sectionId === s.id) { state.focusEditor = true; render(); return; }
+      if (!(await leaveEditor())) return;
+      state.editing = { pageId: p.id, sectionId: s.id, type: s.type, props: JSON.parse(JSON.stringify(s.props)), look: { ...LOOK_DEFAULT, ...(s.look || {}) } };
+      state.focusEditor = true;
+      render();
+      return;
+    }
+    const addOpen = t('[data-site-add-open]');
+    if (addOpen) {
+      state.adding = { pageId: p.id, at: addOpen.dataset.at != null ? Number(addOpen.dataset.at) : null };
+      render();
+      // The clicked button was replaced by the repaint, so find the tab again from the document.
+      document.querySelector('[data-site-host="website"] [data-site-add-picker] [data-site-new-section]')?.focus();
+      return;
+    }
+    if (t('[data-site-add-close]')) {
+      const at = state.adding && state.adding.at;
+      state.adding = null;
+      render();
+      document.querySelector(`[data-site-host="website"] ${at != null ? `[data-site-add-open][data-at="${at}"]` : '[data-site-add-open]:not([data-at])'}`)?.focus();
+      return;
+    }
+    const newSection = t('[data-site-new-section]');
+    if (newSection) {
+      const type = newSection.dataset.siteNewSection;
       if (!FORMS[type]) return;   // a type this editor has no form for — nothing to open
-      state.editing = { pageId: p.id, sectionId: null, type, props: JSON.parse(JSON.stringify(BLANK[type] || {})), look: { ...LOOK_DEFAULT } };
+      if (!(await leaveEditor())) return;
+      const index = state.adding && state.adding.pageId === p.id ? state.adding.at : null;
+      state.adding = null;
+      state.editing = { pageId: p.id, sectionId: null, type, index, props: JSON.parse(JSON.stringify(BLANK[type] || {})), look: { ...LOOK_DEFAULT } };
+      state.focusEditor = true;
       render();
       return;
     }
@@ -1596,12 +2040,52 @@
       return;
     }
 
+    // Undo the last removal: put the section back where it was, or the page back (at the end of the
+    // menu) with its sections, search text and menu setting. Any other change in between ends it.
+    if (t('[data-site-undo]')) {
+      const u = state.undo;
+      if (!u) return;
+      state.undo = null;
+      if (u.kind === 'section') {
+        if (!def().pages.some((x) => x.id === u.pageId)) { say('That page has gone, so the section can\'t go back.', 'error'); return; }
+        await apply([{ op: 'add_section', pageId: u.pageId, index: u.index, section: u.section }], () => {
+          state.pageId = u.pageId; state.editing = null;
+          const back = page().sections[u.index];
+          state.focusSection = back ? back.id : null;
+          state.note = { text: 'Section put back.', tone: 'ok' };
+        });
+        return;
+      }
+      const before = new Set(def().pages.map((x) => x.id));
+      await apply([{ op: 'add_page', title: u.page.title, slug: u.page.slug }]);
+      const np = def().pages.find((x) => !before.has(x.id));
+      if (!np) return;   // refused (e.g. the plan's pages are full) — the note says why
+      await apply([
+        { op: 'update_page', pageId: np.id, seo: u.page.seo, hideFromMenu: !!u.page.hideFromMenu },
+        ...u.page.sections.map((x) => ({ op: 'add_section', pageId: np.id, section: { type: x.type, props: x.props, look: x.look || {} } })),
+      ], () => {
+        state.pageId = np.id; state.previewPath = pathOf(np); state.editing = null;
+        state.note = { text: `Page "${np.title}" put back, at the end of your menu.`, tone: 'ok' };
+        state.noteAt = `[data-site-page="${CSS.escape(np.id)}"]`;
+        state.refocus = state.noteAt;
+      });
+      return;
+    }
     const mv = t('[data-site-move]');
     if (mv) { await apply([{ op: 'move_section', pageId: p.id, sectionId: mv.dataset.siteMove, toIndex: Number(mv.dataset.to) }]); return; }
     const rs = t('[data-site-remove-section]');
     if (rs) {
       const ok = typeof window.confirmModal === 'function' ? await window.confirmModal('This section is removed from your draft.', { title: 'Remove this section?', confirmLabel: 'Remove', cancelLabel: 'Keep it' }) : true;
-      if (ok) await apply([{ op: 'remove_section', pageId: p.id, sectionId: rs.dataset.siteRemoveSection }]);
+      if (!ok) return;
+      const at = p.sections.findIndex((x) => x.id === rs.dataset.siteRemoveSection);
+      const gone = p.sections[at];
+      const near = p.sections[at + 1] || p.sections[at - 1];
+      await apply([{ op: 'remove_section', pageId: p.id, sectionId: gone.id }], () => {
+        state.undo = { kind: 'section', pageId: p.id, index: at, section: JSON.parse(JSON.stringify({ type: gone.type, props: gone.props, look: gone.look || {} })) };
+        state.note = { text: `Removed the ${TYPE_LABEL[gone.type] || 'section'} section.`, tone: 'ok', undo: true };
+        state.noteAt = near ? `[data-site-edit="${CSS.escape(near.id)}"]` : '[data-site-add-open]:not([data-at])';
+        state.refocus = '[data-site-undo]';
+      });
       return;
     }
     if (t('[data-site-add-page]')) {
@@ -1614,7 +2098,15 @@
     }
     if (t('[data-site-remove-page]')) {
       const ok = typeof window.confirmModal === 'function' ? await window.confirmModal(`"${p.title}" and its sections are removed from your draft.`, { title: 'Remove this page?', confirmLabel: 'Remove page', cancelLabel: 'Keep it' }) : true;
-      if (ok) { await apply([{ op: 'remove_page', pageId: p.id }]); state.pageId = null; state.previewPath = '/'; render(); }
+      if (!ok) return;
+      const copy = JSON.parse(JSON.stringify(p));
+      await apply([{ op: 'remove_page', pageId: p.id }], () => {
+        state.undo = { kind: 'page', page: copy };
+        state.note = { text: `Removed the page "${copy.title}".`, tone: 'ok', undo: true };
+        state.pageId = null; state.previewPath = '/';
+        state.noteAt = '[data-site-page]';
+        state.refocus = '[data-site-undo]';
+      });
       return;
     }
     if (t('[data-site-page-save]')) {
@@ -1640,6 +2132,9 @@
     const tplOpen = t('[data-tpl-open]');
     if (tplOpen) { openTemplate(tplOpen.dataset.tplOpen); return; }
     if (t('[data-site-split]')) { await backToPages(); return; }
+    const stepBack = t('[data-site-setup-step]');
+    if (stepBack) { state.setupStep = Number(stepBack.dataset.siteSetupStep); render(); return; }
+    if (t('[data-site-setup-skip]')) { state.setupSkipped = true; state.setupStep = null; render(); return; }
     if (t('[data-site-features-save]')) {
       const host = hostOf(e);
       const features = [...host.querySelectorAll('[data-site-feature]:checked')].map((x) => x.dataset.siteFeature);
@@ -1650,7 +2145,7 @@
         const ok = await window.confirmModal(`Your site already has: ${inUse.map((f) => `<strong>${esc(f.label)}</strong>`).join(', ')}. Those sections stay where they are until you remove them — switching off only stops new ones being added or suggested.`, { title: 'Switch these off?', confirmLabel: 'Switch off', cancelLabel: 'Keep them on' });
         if (!ok) { rerender(); return; }
       }
-      await apply([{ op: 'set_settings', settings: { features } }]);
+      await apply([{ op: 'set_settings', settings: { features } }], () => { state.setupStep = null; });
       return;
     }
     if (t('[data-site-combine]')) {
@@ -1792,11 +2287,16 @@
             : `Your Website Assistant writes every page again, replacing your current draft. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing is live yet.'} This uses 1 task.`,
           { title: def().settings.template ? 'Write the words?' : 'Draft your whole site?', confirmLabel: def().settings.template ? 'Write the words' : 'Draft my site', cancelLabel: 'Not now' })
         : true;
-      if (!ok) return;
+      if (!ok || state.busy) return;
+      const release = markBusy();
       try {
         state.data = await post({ action: 'draft', assistantId: state.assistantId, request: hostOf(e).querySelector('[data-site-draft-request]').value });
-        say(null);
-      } catch (err) { say(err.message, 'error'); }
+        state.note = null;
+      } catch (err) {
+        // Out of tasks (402): said straight away, with the way to more.
+        state.note = { text: err.message, tone: 'error', billing: err.status === 402 };
+      }
+      release();
       schedulePoll();
       rerender();
     }
@@ -1836,6 +2336,7 @@
   });
   document.addEventListener('input', (e) => {
     if (e.target.matches && e.target.matches('[data-max]')) updateLenNote(e.target);
+    if (e.target.matches && e.target.matches('[data-alt-needed]')) markAlt(e.target);
   });
   document.addEventListener('dragover', (e) => { if (e.target.closest && e.target.closest('[data-site-words-drop]')) e.preventDefault(); });
   document.addEventListener('drop', (e) => {
@@ -1858,17 +2359,19 @@
       clearTimeout(state.pollTimer);
       Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false, domainChecked: false, domainTyped: null,
         words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
-        importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false });
+        importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false, dataSig: null, noteShown: null, focusSection: null, setupStep: null, setupSkipped: false, adding: null });
       load();
     },
     // surface: 'website' (pages, design, details, preview) or 'enquiries' | 'orders' | 'bookings',
     // each its own tab. A list re-reads every time its tab is opened.
     activate(surface) {
+      setPreviewFull(false);
+      // Leaving the Website tab keeps an open section form, with what was typed, for coming back.
+      if (state.surface === 'website') keepEditing();
       // A note ("Saved.") belongs to the tab it was said on.
       if ((surface || 'website') !== state.surface) state.note = null;
       state.surface = surface || 'website';
       state.rendered = true;
-      state.editing = null;
       if (state.surface === 'enquiries') { state.enquiries = null; state.enquiryShown = 20; loadEnquiries(); }
       if (state.surface === 'orders') { state.orders = null; state.orderShown = 20; loadOrders(); }
       if (state.surface === 'bookings') { state.bookings = null; loadBookings(); }

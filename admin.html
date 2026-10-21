@@ -5120,7 +5120,7 @@ function priorityBadge(p) {
 }
 async function api(url, opts) {
   const r = await fetch(url, opts);
-  if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d.error || r.statusText || `Request failed (HTTP ${r.status}).`); }
+  if (!r.ok) { const d = await r.json().catch(()=>({})); const err = new Error(d.error || r.statusText || `Request failed (HTTP ${r.status}).`); err.data = d; throw err; }
   return r.json();
 }
 
@@ -6120,9 +6120,16 @@ function _irMergeCard(i) {
     chip = ['bg-indigo-100 text-indigo-700', 'Queued'];
     inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Merge requested — the developer runner will merge this within ~15s…</div>${prLink}`;
   } else if (ms === 'merging') {
-    chip = ['bg-indigo-100 text-indigo-700', 'Merging…'];
-    const who = i.devRunnerId ? `<div class="text-xs text-indigo-600">🖥 Runner <b>${_esc(i.devRunnerId)}</b> is merging${_irRunnerElapsed(i) ? ` · ${_irRunnerElapsed(i)}` : ''}</div>` : '';
-    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Merging to staging…</div>${who}${prLink}`;
+    // A merge takes seconds; a claim that has outlived IR_RUNNER_STALL_MS means the runner
+    // died mid-merge. The server reclaims it on the next list load, and super-admins can
+    // force a re-queue from here meanwhile.
+    const stalled = _irRunnerStalled(i) || !i.devRunnerHeartbeat;
+    const forceBtn = (isSuper && stalled)
+      ? `<button onclick="requestMerge(${i.id}, true)" class="btn-secondary w-full px-4 py-2.5 border-2 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔁</span> Force re-queue (runner unresponsive)</button>`
+      : '';
+    chip = stalled ? ['bg-amber-100 text-amber-800', 'Merging — stalled?'] : ['bg-indigo-100 text-indigo-700', 'Merging…'];
+    const who = i.devRunnerId ? `<div class="text-xs ${stalled ? 'text-amber-700' : 'text-indigo-600'}">🖥 Runner <b>${_esc(i.devRunnerId)}</b> ${stalled ? 'claimed the merge but has gone quiet' : 'is merging'}${_irRunnerElapsed(i) ? ` · ${_irRunnerElapsed(i)}` : ''}</div>` : '';
+    inner = `<div class="flex items-center gap-2 text-sm font-semibold ${stalled ? 'text-amber-700' : 'text-indigo-700'}"><span class="animate-pulse">●</span> ${stalled ? 'Merge appears stuck' : 'Merging to staging…'}</div>${who}${prLink}${forceBtn}`;
   } else if (ms === 'conflict_queued') {
     chip = ['bg-indigo-100 text-indigo-700', 'Queued'];
     inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Investigation requested — the developer runner will resolve the conflict within ~15s…</div>${prLink}`;
@@ -6188,18 +6195,24 @@ function _irProdCard(i) {
     </div>`;
 }
 
-async function requestMerge(id) {
-  if (!(await window.confirmModal('The developer runner will merge the pull request and the issue will move to “Fixed & Ready to Test”.', { title: 'Merge this fix to the staging branch now?' }))) return;
+async function requestMerge(id, force) {
+  const ok = force
+    ? await window.confirmModal('The previous attempt looks stuck. This resets it and hands the pull request back to the developer runner — if it already merged, the runner just confirms it.', { title: 'Force re-queue this merge?' })
+    : await window.confirmModal('The developer runner will merge the pull request and the issue will move to “Fixed & Ready to Test”.', { title: 'Merge this fix to the staging branch now?' });
+  if (!ok) return;
   const btn = event?.target?.closest('button');
-  if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
+  if (btn) { btn.disabled = true; btn.textContent = force ? 'Re-queuing…' : 'Requesting…'; }
   try {
     await api(`${IR_API}?id=${id}&action=request-merge`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(force ? { force: true } : {}),
     });
     await openIssuePanel(id);
     if (!document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
   } catch (e) {
     if (btn) { btn.disabled = false; }
+    // The server flags a stuck-but-not-forced merge with canForce; offer the forced retry.
+    if (!force && e?.data?.canForce) return requestMerge(id, true);
     window.showToast?.(e.message, { icon: '⚠️' });
   }
 }

@@ -115,7 +115,8 @@ async function main() {
         assert.ok(mp.includes("a.status !== 'rejected'") && mp.includes('window.gpUploadContentAsset'));
         assert.ok(mp.includes("document.removeEventListener('paste', onPaste)"), 'listeners go when the window closes');
         const ws = read('workspace.html');
-        assert.ok(ws.indexOf('/src/components/media-picker.js') > 0 && ws.indexOf('/src/components/media-picker.js') < ws.indexOf('/src/components/assistant-site-editor.js'));
+        // The picker is on the page; the editor that uses it is loaded later, on demand (assistants.js siteEditor).
+        assert.ok(ws.includes('<script src="/src/components/media-picker.js"></script>') && !ws.includes('<script src="/src/components/assistant-site-editor.js">'));
     });
 
     console.log('\nAdd your own words');

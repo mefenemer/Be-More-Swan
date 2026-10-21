@@ -407,31 +407,61 @@ async function processIssue(issue) {
   }
 }
 
+// Ask GitHub whether a PR/branch is actually in the MERGED state. Source of truth for
+// "did the merge land", independent of `gh pr merge`'s own exit code.
+function prIsMerged(target) {
+  const v = run('gh', ['pr', 'view', target, '--json', 'state', '--jq', '.state'], { cwd: REPO });
+  return v.ok && v.stdout.trim().toUpperCase() === 'MERGED';
+}
+
 // Merge an already-produced fix PR into staging with `gh pr merge`, then report back.
-// Runs against the remote PR — no worktree/checkout needed. Branch cleanup is best-effort
-// and never fails the merge.
+// Runs against the remote PR — no worktree/checkout needed.
+//
+// The merge is only treated as done once GitHub confirms the PR is MERGED (not merely
+// that `gh pr merge` returned 0), and the runner does not move on to the next queued
+// issue until that confirmation lands. A PR that's already merged (e.g. a prior attempt
+// merged it but died before reporting) is reported as success, so the server-side
+// stale-merge reclaim + re-request resolves any half-completed merge cleanly.
+//
+// Reporting is split from the merge itself on purpose: a genuine merge failure reports
+// ok:false, but a failure to *report* a merge that actually landed must NOT be recorded
+// as a failed merge — it's logged and left for the server to reclaim + re-confirm.
 async function processMerge(job) {
   const id = job.id;
   const target = job.prUrl || job.branch;
+  let outcome = '';
   try {
     if (!target) throw new Error('No pull request URL or branch to merge.');
     log(`#${id} merging ${target} into ${BASE_BRANCH}…`);
     git(['fetch', 'origin', '--quiet']);
 
-    const m = run('gh', ['pr', 'merge', target, '--merge'], { cwd: REPO });
-    const outcome = (m.stdout || m.stderr || '').trim();
-    if (!m.ok) throw new Error(outcome || 'gh pr merge failed');
-
-    // Best-effort: delete the merged branch on the remote. Ignore failures.
-    if (job.branch) git(['push', 'origin', '--delete', job.branch]);
-
-    log(`#${id} ✓ merged to ${BASE_BRANCH}`);
-    await reportMerge(id, { ok: true, outcome: outcome || `Merged ${target} into ${BASE_BRANCH}.` });
-    log(`#${id} ✓ merge reported`);
+    if (prIsMerged(target)) {
+      outcome = `Pull request ${target} was already merged into ${BASE_BRANCH}.`;
+      log(`#${id} PR already merged — confirming.`);
+    } else {
+      const m = run('gh', ['pr', 'merge', target, '--merge'], { cwd: REPO });
+      outcome = (m.stdout || m.stderr || '').trim();
+      if (!m.ok) throw new Error(outcome || 'gh pr merge failed');
+      // Verify the merge actually landed before treating it as complete.
+      if (!prIsMerged(target)) {
+        throw new Error(`gh reported success but the pull request is not in a MERGED state.\n${outcome}`);
+      }
+    }
   } catch (e) {
     log(`#${id} ✖ merge failed: ${e.message}`);
     await reportMerge(id, { ok: false, outcome: e.message })
       .catch((re) => log(`#${id} ✖ could not report merge failure: ${re.message}`));
+    return;
+  }
+
+  // Confirmed merged. Best-effort branch cleanup, then report success (apiFetch retries).
+  if (job.branch) git(['push', 'origin', '--delete', job.branch]);
+  log(`#${id} ✓ merged to ${BASE_BRANCH}`);
+  try {
+    await reportMerge(id, { ok: true, outcome: outcome || `Merged ${target} into ${BASE_BRANCH}.` });
+    log(`#${id} ✓ merge reported`);
+  } catch (e) {
+    log(`#${id} ⚠ merge landed but reporting it failed: ${e.message} — the server will reclaim and re-confirm it.`);
   }
 }
 

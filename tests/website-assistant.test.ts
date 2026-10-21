@@ -164,9 +164,9 @@ check('dashboard entry: own tab and metrics, no social modules, no queue, Data H
 check('the page has the tab, its panel and the script; every branch routes to them', () => {
     assert.match(read('assistant-detail.html'), /id="maintab-btn-sitebuilder" data-maintab="sitebuilder"/);
     assert.match(read('assistant-detail.html'), /<div id="maintab-sitebuilder" class="main-tab-content hidden">\s*<div id="site-editor-host" data-site-host="website"><\/div>/);
-    assert.match(read('workspace.html'), /<script src="\/src\/components\/assistant-site-editor\.js"><\/script>/);
+    assert.match(assistants, /s\.src = '\/src\/components\/assistant-site-editor\.js';/, 'loaded on demand by siteEditor()');
     assert.match(assistants, /toggle\('maintab-btn-sitebuilder', !!siteEditorTab\)/);
-    assert.match(assistants, /if \(name === 'sitebuilder'\) window\.AssistantSiteEditor\?\.activate\('website'\);/);
+    assert.match(assistants, /if \(name === 'sitebuilder'\) siteEditor\(\(ed\) => ed\.activate\('website'\)\);/);
     assert.match(assistants, /if \(source === 'site'\)[\s\S]{0,100}_loadSiteMetrics\(assistantId\)/);
     assert.match(assistants, /_detailRulesScope === 'site'/);
 });
@@ -174,7 +174,7 @@ check('the page has the tab, its panel and the script; every branch routes to th
 check('every name the chat quotes is on the Website tab', () => {
     const at = chat.indexOf('function websiteAssistantSurfaces()');
     const surfaces = chat.slice(at, chat.indexOf('\n}', at));
-    for (const n of ['"Website" tab', '"Pages"', '"Design"', '"Details"', '"Edit"', '"↑"', '"↓"', '"Remove"', '"Add a section"', '"+ Page"', '"Preview"', '"Desktop"', '"Phone"', '"Draft my whole site"']) {
+    for (const n of ['"Website" tab', '"Pages"', '"Design"', '"Details"', '"Edit"', '"↑"', '"↓"', '"Remove"', '"Add a section"', '"+ Page"', '"Preview"', '"Desktop"', '"Phone"', '"Templates"', '"Add your own words"', '"Start again from scratch"', '"Replace my draft"', '"Import my current site"', '"Write my site"', '"Write the words"', '"Publish"', '"Publish changes"', '"View live site"', '"Take offline"']) {
         assert.ok(surfaces.includes(n), `surfaces: ${n}`);
         assert.ok(editor.includes(n.replace(/^"|"( tab)?$/g, '')), `editor: ${n}`);
     }
@@ -190,6 +190,84 @@ check('chat cards are registered, dispatch events the session handles, and call 
     for (const a of ["action: 'apply'", "action: 'draft'"]) assert.ok(session.includes(a) && editor.includes(a), a);
     assert.match(session, /new CustomEvent\('site:changed'/);
     assert.match(editor, /document\.addEventListener\('site:changed'/);
+});
+
+check('the chat is told publishing exists, and the welcome names a real button', () => {
+    const at = chat.indexOf('function websiteAssistantSurfaces()');
+    const surfaces = chat.slice(at, chat.indexOf('\n}', at));
+    assert.ok(!/coming soon/i.test(surfaces), 'surfaces must not say publishing is coming soon');
+    const welcome = read('src/components/assistant-welcome-messages.js');
+    assert.ok(!welcome.includes('Draft my whole site'));
+    assert.ok(welcome.includes('“Write my site”') && editor.includes("'Write my site'"));
+});
+
+check('a draft with no tasks left is refused before it starts, with a way to more', () => {
+    const api = read('netlify/functions/sites.ts');
+    const draft = api.slice(api.indexOf("if (action === 'draft')"), api.indexOf("if (action === 'import')"));
+    assert.ok(draft.indexOf('hasTaskCapacity(db, orgId)') > -1 && draft.indexOf('hasTaskCapacity(db, orgId)') < draft.indexOf('claimDraft('));
+    assert.match(draft, /json\(402, \{ error: TASK_LIMIT_MESSAGE/);
+    assert.match(editor, /billing: err\.status === 402/);
+    assert.match(editor, /data-site-billing/);
+});
+
+check('the section form: asks before losing changes, opens in view, one save at a time', () => {
+    for (const marker of ["if (t('[data-site-edit-cancel]')) {", 'if (want !== state.panel && !(await leaveEditor())) return;', "if (pg.dataset.sitePage !== p.id && !(await leaveEditor())) return;"]) {
+        const at = editor.indexOf(marker);
+        assert.ok(at > -1, marker);
+        assert.ok(editor.slice(at, at + 200).includes('leaveEditor()'), marker);
+    }
+    assert.match(editor, /title: 'Leave without saving\?'/);
+    assert.match(editor, /state\.focusEditor = true;/);
+    assert.match(editor, /form\.scrollIntoView\(/);
+    const apply = editor.slice(editor.indexOf('async function apply('), editor.indexOf('function markBusy('));
+    assert.match(apply, /if \(state\.busy\) return;/);
+    assert.match(apply, /markBusy\(\)/);
+    assert.match(editor, /setAttribute\('aria-busy', 'true'\)/);
+    assert.match(editor, /data-site-beside[^>]*><span aria-hidden="true">/);
+});
+
+check('UX quick wins: placeholders go to where they are, plan limit and load failure have a next step', () => {
+    assert.match(editor, /btn\(`data-site-fix="\$\{i\}"`/);
+    const fix = editor.slice(editor.indexOf("const fix = t('[data-site-fix]');"), editor.indexOf("const fix = t('[data-site-fix]');") + 1400);
+    assert.match(fix, /leaveEditor\(\)/);
+    assert.match(fix, /state\.focusEditor = true/);
+    assert.match(editor, /pages on your plan — the most it includes\.<\/span> \$\{btn\('data-site-billing', 'See plans'\)\}/);
+    assert.match(editor, /btn\('data-site-retry', 'Try again', true\)/);
+    assert.match(editor, /show\('maintab-btn-calendar', featureOn\('bookings'\)\)/);
+    assert.match(editor, /if \(s\.credit\)|s\.credit \?/);
+    assert.match(editor, /Made with Be More Swan/);
+    assert.match(editor, /'min\(390px, 100%\)'/);
+});
+
+check('import nudges: set-up asks for their current site, a starter prompt, and a card that only opens the Publish card', () => {
+    const schemas = read('src/public/assistant-onboarding-schemas.js');
+    assert.match(schemas, /key: 'currentWebsite',\s*label: 'Do you already have a website\?'/);
+    assert.match(read('src/utils/site-store.ts'), /currentSite: 'currentWebsite'/);
+    const api = read('netlify/functions/sites.ts');
+    assert.match(api, /importSuggestUrl: setupSiteUrl\(\) \?\? orgRow\?\.websiteUrl \?\? null/);
+    assert.match(read('src/components/assistant-starter-prompts.js'), /'Bring over my current website/);
+    assert.match(read('src/utils/site-store.ts'), /Can they press Publish now: .*publishBlocker\(site, d\)/);
+    assert.ok(chat.includes('"type": "site_publish_open"'));
+    assert.ok(cards.includes("register('site_publish_open', renderSitePublishOpenCard)"));
+    const card = cards.slice(cards.indexOf('function renderSitePublishOpenCard'), cards.indexOf("register('site_publish_open'"));
+    assert.ok(!/action: 'publish'|CustomEvent\('site:/.test(card), 'the card never publishes or sends a site action');
+    assert.match(card, /_activateMainTab\?\.\('sitebuilder'\)/);
+});
+
+check('removing a section or page can be undone, and focus comes back after a repaint', () => {
+    const rs = editor.slice(editor.indexOf("const rs = t('[data-site-remove-section]');"), editor.indexOf("if (t('[data-site-add-page]'))"));
+    assert.match(rs, /state\.undo = \{ kind: 'section', pageId: p\.id, index: at,/);
+    assert.match(rs, /undo: true/);
+    const rp = editor.slice(editor.indexOf("if (t('[data-site-remove-page]'))"), editor.indexOf("if (t('[data-site-remove-page]'))") + 900);
+    assert.match(rp, /state\.undo = \{ kind: 'page', page: copy \}/);
+    const undo = editor.slice(editor.indexOf("if (t('[data-site-undo]'))"), editor.indexOf("const mv = t('[data-site-move]');"));
+    assert.match(undo, /op: 'add_section', pageId: u\.pageId, index: u\.index/);
+    assert.match(undo, /op: 'add_page', title: u\.page\.title, slug: u\.page\.slug/);
+    assert.match(editor, /btn\('data-site-undo', 'Undo'\)/);
+    const apply = editor.slice(editor.indexOf('async function apply('), editor.indexOf('function markBusy('));
+    assert.match(apply, /state\.undo = null;/, 'any other change ends the chance to undo');
+    assert.match(editor, /state\.refocus = state\.noteAt;/);
+    assert.match(editor, /if \(want && lost\)/);
 });
 
 check('the chat never publishes (step 3a: a click on the Website tab), and nothing spends without saying so', () => {

@@ -70,7 +70,7 @@
       working: 'Tell me what a picture is for and I’ll put options in front of you to choose from',
     },
     website_assistant: {
-      working: 'Open the Website tab and press “Draft my whole site” — or just tell me in chat what your site should say',
+      working: 'Open the Website tab and press “Write my site” (or “Import my current site” if you already have one) — or just tell me in chat what your site should say',
     },
     mystery_shopper: {
       working: 'I’m reading your website the way a buyer would — your first score and what to fix will be on the Website tab shortly',
