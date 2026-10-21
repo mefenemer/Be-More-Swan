@@ -8,7 +8,8 @@
 //
 // Behind a netlify.toml rewrite:  /api/widget/*  →  /.netlify/functions/widget-api
 //   GET /api/widget/:key/config          → { theme, badgeEnabled, name }
-//   GET /api/widget/:key/posts[?limit=&cursor=]  → { posts: [summary + author/tags/date], nextCursor }
+//   GET /api/widget/:key/posts[?limit=&cursor=&tag=&month=]  → { posts: [summary + author/tags/date], nextCursor }
+//   GET /api/widget/:key/facets          → { categories, months } — what a reader can filter by
 //   GET /api/widget/:key/posts/:slug     → { post: {...payload, aiAssisted, hookVariants, abState} }
 
 import { HandlerEvent } from '@netlify/functions';
@@ -18,7 +19,8 @@ import { widgetConfigs, blogPosts, organisations } from '../../db/schema';
 import { resolveInlineMedia, resolveFeatureImageUrl } from '../../src/utils/blog-media-resolve';
 import { isAiAssisted } from '../../src/utils/blog-ai-assisted';
 import { pageSize, parseCursor } from '../../src/utils/blog-list-paging';
-import { listPublishedPosts } from '../../src/utils/blog-list-query';
+import { listPublishedPosts, listBlogFacets } from '../../src/utils/blog-list-query';
+import { parseBlogFilter } from '../../src/utils/blog-filters';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const CORS = {
@@ -79,7 +81,8 @@ export default withLambda(async (event: HandlerEvent) => {
 
         // The query is shared with the hosted index (/b/:key, blog-page.ts) so the two lists
         // cannot disagree about which posts exist or in what order — see blog-list-query.ts.
-        const { posts: page, nextCursor } = await listPublishedPosts(db, orgId, { size, cursorId });
+        const filter = parseBlogFilter(qs);
+        const { posts: page, nextCursor } = await listPublishedPosts(db, orgId, { size, cursorId, filter });
         const posts = page.map((p) => ({
             ...p,
             // The byline. Already selected above with the config, so it costs no extra query —
@@ -88,6 +91,10 @@ export default withLambda(async (event: HandlerEvent) => {
             author: cfg.orgName || null,
         }));
         return json(200, { posts, nextCursor }, true);
+    }
+
+    if (resource === 'facets' && !slug) {
+        return json(200, await listBlogFacets(db, orgId), true);
     }
 
     if (resource === 'posts' && slug) {

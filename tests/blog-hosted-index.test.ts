@@ -73,7 +73,7 @@ check('blog-page tries the index before the permalink, and 404s unknown keys', (
     const render = fn.slice(fn.indexOf('async function renderIndex('), fn.indexOf('export default'));
     assert.match(render, /if \(!cfg \|\| cfg\.status !== 'active'\) return notFound\('blog'\)/);
     assert.match(render, /if \(cursorId && !posts\.length\) return notFound\('blog'\)/);
-    assert.match(render, /robots: cursorId \? 'noindex,follow' : 'index,follow'/);
+    assert.match(render, /robots: cursorId \|\| isFiltered\(filter\) \? 'noindex,follow' : 'index,follow'/);
 });
 
 // ── the document ────────────────────────────────────────────────────────────
@@ -134,9 +134,10 @@ check('thumbnail, date and excerpt render when present, and are omitted when not
     assert.match(html, /<img src="https:\/\/cdn\.example\/a\.jpg" alt="A loaf" loading="lazy">/);
     assert.match(html, /<time datetime="2026-10-01T09:00:00.000Z">1 October 2026<\/time>/);
     assert.match(html, /<p class="excerpt">Start here\.<\/p>/);
-    assert.equal((html.match(/<img /g) || []).length, 1, 'the image-less post gets a text-only card');
+    assert.equal((html.match(/<img /g) || []).length, 1, 'the image-less post gets no broken <img>');
     assert.equal((html.match(/class="excerpt"/g) || []).length, 1, 'an empty excerpt renders nothing');
-    assert.match(html, /class="card text-only"/);
+    // ...but a placeholder plate in the same box (owner, 2026-10-20), so the grid keeps one rhythm.
+    assert.equal((html.match(/class="thumb__plate bms-plate"/g) || []).length, 1);
 });
 
 check('an empty blog says so, with no pager', () => {

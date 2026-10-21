@@ -742,6 +742,7 @@
     stopAiDraftPoll();
     state.contentChanged = false;   // a fresh post, and the list behind is current for it
     state.postId = postId;
+    state.hasFeature = null;   // unknown until loadFeature() answers for THIS post
     el('bs-workspace').classList.remove('bs-hidden');
     el('bs-title').value = title;
     if (state.editor && state.editor.destroy) state.editor.destroy();  // re-open safety: no leaked listeners
@@ -1279,6 +1280,9 @@
   // ── Feature / inline media (reuses content-assets + generate-ai-image + pexels-search) ─────────
   var mediaEls;
   function renderFeature(feature) {
+    // Read by confirmFeatureImage() before Publish / Approve / Schedule. null until blog-media
+    // answers: a failed load must not nag about an image the post may well have.
+    state.hasFeature = !!(feature && feature.url);
     if (feature && feature.url) {
       mediaEls.preview.className = 'bs-feature-preview';
       mediaEls.preview.innerHTML = '<img src="' + feature.url + '" alt="">';
@@ -1642,6 +1646,29 @@
     return true;
   }
 
+  // No feature image? Ask once, before the post is committed to going out. It is a nudge, never a
+  // gate: the reader's site shows a placeholder plate instead (widget.js / blog-seo.ts), so
+  // "Continue without one" is a real answer. "Add one" opens the Feature image section and stops.
+  // Resolves true to carry on, false to stop.
+  function confirmFeatureImage() {
+    if (state.hasFeature !== false || typeof window.choiceModal !== 'function') return Promise.resolve(true);
+    return window.choiceModal(
+      'Posts with a feature image look far better on your blog and in The Swan Index, and when they are shared. '
+        + 'Without one, readers see a plain placeholder instead.',
+      [
+        { value: 'add', label: 'Add a feature image', description: 'Pick or drop one in the Feature image section.' },
+        { value: 'skip', label: 'Continue without one', description: 'A placeholder is shown in its place.' },
+      ],
+      { title: 'This post has no feature image', cancelLabel: 'Cancel' },
+    ).then(function (choice) {
+      if (choice === 'add') {
+        var sec = document.querySelector('[data-bs-sec="feature"]');
+        if (sec) { sec.open = true; sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      }
+      return choice === 'skip';
+    });
+  }
+
   function flushDraft() {
     if (!state.postId || !state.editor) return Promise.resolve();
     return api('save-blog-draft', { method: 'POST', body: JSON.stringify({
@@ -1841,8 +1868,9 @@
     // every state this screen can still act on, so keeping it up (as it used to, with a green banner
     // and a live Unpublish button) invited the author to undo the thing they had just asked for. The
     // toast carries the confirmation the banner used to.
-    el('bs-publish').addEventListener('click', function () {
+    el('bs-publish').addEventListener('click', async function () {
       if (!state.postId || blockedAsEmpty()) return;
+      if (!(await confirmFeatureImage())) return;
       setBanner('bs-action-status', 'Publishing…');
       setBusy(true);
       flushDraft().then(function () {
@@ -1954,8 +1982,9 @@
     });
 
     // Approve & schedule — the assistant picks the next free cadence slot (no manual date).
-    el('bs-approve').addEventListener('click', function () {
+    el('bs-approve').addEventListener('click', async function () {
       if (!state.postId || blockedAsEmpty()) return;
+      if (!(await confirmFeatureImage())) return;
       setBanner('bs-action-status', 'Scheduling…');
       flushDraft().then(function () {
         return api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, action: 'approve' }) });
@@ -1968,10 +1997,11 @@
       });
     });
 
-    el('bs-schedule').addEventListener('click', function () {
+    el('bs-schedule').addEventListener('click', async function () {
       if (!state.postId || blockedAsEmpty()) return;
       var iso = localToISO(el('bs-schedule-at').value);
       if (!iso) { setBanner('bs-action-status', 'Pick a date & time.', 'error'); return; }
+      if (!(await confirmFeatureImage())) return;
       setBanner('bs-action-status', 'Scheduling…');
       flushDraft().then(function () {
         return api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, publishDate: iso }) });

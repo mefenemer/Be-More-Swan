@@ -156,4 +156,44 @@ check('a stalled run cannot spin forever', () => {
     assert.match(ui, /poll: 1/, 'the panel polls for the result rather than waiting on one response');
 });
 
+
+// ── Warnings about the business's OWN records (2026-10-20) ─────────────────────────────────────
+// A stale £99 in the brief beside £69 in the catalogue, and product links on the staging domain,
+// both came back "Needs your judgement" after four web searches. The web cannot say what a business
+// charges; its records can. These lock the labelled facts and the "fix it here" answer.
+import { composeDeclaredFacts, FACT_LOCATIONS } from '../src/utils/post-quality-review';
+import { recordsOutcome } from '../src/utils/compliance-verification';
+
+const SECTIONS = {
+    '6-onboarding': { content: { answers: { service_offerings: 'Tier 2 £99/mo', incentive: 'First month free' } } },
+    '5-org-context': { content: { businessName: 'Be More Swan', website: 'https://bemoreswan.com' } },
+};
+
+check('every declared fact says where it is edited', () => {
+    const f = composeDeclaredFacts(SECTIONS, '- The Busywork Buster (product) — £69');
+    assert.ok(f.includes(`[Edited in: ${FACT_LOCATIONS.catalogue}] - The Busywork Buster (product) — £69`));
+    assert.ok(f.includes(`[Edited in: ${FACT_LOCATIONS.briefSales}] Older notes on products, services and prices: Tier 2 £99/mo`));
+    assert.ok(f.includes(`[Edited in: ${FACT_LOCATIONS.briefMessage}] Standard offer / incentive: First month free`));
+    assert.ok(f.includes(`[Edited in: ${FACT_LOCATIONS.profile}] Website: https://bemoreswan.com`));
+});
+
+check('with a catalogue, the catalogue wins on prices; without one, the brief is the price list', () => {
+    assert.ok(composeDeclaredFacts(SECTIONS, '- X (product) — £1').includes('the catalogue wins'));
+    const noCat = composeDeclaredFacts(SECTIONS, '');
+    assert.ok(noCat.includes('] Products, services and prices: Tier 2 £99/mo'));
+    assert.ok(!noCat.includes('catalogue wins'));
+    assert.strictEqual(composeDeclaredFacts(null, ''), '');
+});
+
+check('a records answer keeps only a real place to fix it, tolerating the tag wording', () => {
+    const ok = recordsOutcome({ reason: 'r', fixWhere: `[Edited in: ${FACT_LOCATIONS.catalogue}]` }, 'cap', 0);
+    assert.strictEqual(ok.fixWhere, FACT_LOCATIONS.catalogue);
+    assert.strictEqual(recordsOutcome({ reason: 'r', fixWhere: 'Settings ▸ Pricing' }, 'cap', 0).fixWhere, null);
+});
+
+check('a records rewrite that changes nothing is dropped', () => {
+    assert.strictEqual(recordsOutcome({ rewrittenCaption: 'cap' }, 'cap', 0).after, null);
+    assert.strictEqual(recordsOutcome({ rewrittenCaption: 'Now £69' }, 'Now £99', 0).after, 'Now £69');
+});
+
 console.log(`\n${passed} passed, 0 failed\n`);

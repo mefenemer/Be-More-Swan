@@ -19,6 +19,7 @@ import { definitionOf, maxPagesFor } from '../../src/utils/site-store';
 import { loadSiteForms } from '../../src/utils/site-forms';
 import { loadSiteProducts } from '../../src/utils/site-shop';
 import { loadSiteReviews } from '../../src/utils/reviews';
+import { loadSiteSocialFeed } from '../../src/utils/site-social-feed';
 import { bookableSessions } from '../../src/utils/class-sessions';
 import { bookingSummary, businessSummary } from '../../src/utils/bookings';
 import { siteAssetUrl } from '../../src/utils/site-hosting';
@@ -76,6 +77,7 @@ export default withLambda(async (event) => {
         booking: { ...await bookingSummary(db, ctx.organisationId), sessions: await bookableSessions(db, ctx.organisationId, new Date(), [], 60) },
         business: await businessSummary(db, ctx.organisationId),
         reviews: await loadSiteReviews(db, ctx.organisationId, definition),
+        socialFeed: await loadSiteSocialFeed(db, ctx.organisationId, definition),
     });
     return page(rendered.status, rendered.html);
 });

@@ -298,6 +298,30 @@ img { max-width: 100%; height: auto; display: block; }
 .byline a { text-decoration: underline; text-underline-offset: 0.2em; text-decoration-thickness: 1px; }
 .article__hero { margin: 0 0 clamp(2rem, 5vw, 3.5rem); }
 .article__hero img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+/* No feature image: the same ruled "TSI" plate the cards use, at hero size (owner, 2026-10-20). */
+.article__hero--empty { aspect-ratio: 16 / 9; border: 1px solid var(--rule); position: relative; }
+.article__hero--empty::after {
+  content: attr(data-label); position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--serif); font-size: var(--step-4, 3rem); color: var(--rule); letter-spacing: -0.02em;
+}
+
+/* Reader filters on the lists: section + month, a plain GET form. */
+.filters { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin: 1.25rem 0 0; }
+.filters select, .filters button {
+  font: inherit; font-size: var(--step--1); padding: 0.5rem 0.75rem; border: 1px solid var(--rule);
+  border-radius: 0; background: var(--paper); color: var(--ink); max-width: 100%;
+}
+.filters a { font-size: var(--step--1); text-decoration: underline; text-underline-offset: 0.2em; }
+
+/* Share row under an article. */
+.bms-share { max-width: var(--measure); margin: 2.5rem auto 0; padding-top: 1.25rem; border-top: 1px solid var(--rule); }
+.bms-share__label { display: block; font-size: var(--step--1); color: var(--muted); margin: 0 0 0.6rem;
+  text-transform: uppercase; letter-spacing: 0.09em; }
+.bms-share__row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.bms-share__btn { font: inherit; font-size: var(--step--1); line-height: 1; padding: 0.55rem 0.9rem;
+  border: 1px solid var(--rule); background: none; color: var(--ink); text-decoration: none; cursor: pointer; }
+.bms-share__btn:hover, .bms-share__btn:focus-visible { border-color: var(--ink); }
 
 .prose { max-width: var(--measure); margin: 0 auto; font-family: var(--serif); font-size: var(--step-1); line-height: 1.62; }
 .prose > * + * { margin-top: 1.35em; }

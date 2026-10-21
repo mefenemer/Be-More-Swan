@@ -2,7 +2,10 @@
 // Business Information ▸ Products & Services. Org-wide: every assistant reads these
 // (src/utils/org-products.ts), so they belong to the workspace, not to any one assistant.
 //
-// GET                         → { products: [...] }   every row, active first, in the business's order
+// GET                         → { products: [...], offer: { offers, answered } }   every row, active first,
+//                                                      in the business's order; offer = which kinds of field
+//                                                      the tab shows (src/utils/offer-profile.ts)
+// PATCH  { offer: [kinds] }    → { offer }             the owner's answer to "What does your business offer?"
 //
 // Prices are STRUCTURED (db/z-product-pricing.sql, src/utils/product-price.ts): priceType + priceAmount
 // (pence) + priceUnit, or the owner's own words (priceType 'text' + price). `price` is then written by
@@ -25,6 +28,7 @@ import { PRODUCT_LIMITS } from '../../src/utils/org-products';
 import { cleanDeposit, cleanPrice, priceFromText } from '../../src/utils/product-price';
 import { cleanAllergens, cleanDietary } from '../../src/utils/product-dietary';
 import { siteAssetUrl } from '../../src/utils/site-hosting';
+import { cleanOffers, loadOfferProfile, saveOfferProfile } from '../../src/utils/offer-profile';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { contentAssets } from '../../db/schema';
 
@@ -151,7 +155,8 @@ export default withLambda(async (event) => {
                 .orderBy(desc(sql`${orgProducts.status} = 'active'`), asc(orgProducts.sortOrder), asc(orgProducts.id));
             // The picture's link, for the editor's thumbnail (the same signed link sites and emails use).
             const base = resolveBaseUrl(event.headers as Record<string, string | undefined>) || 'https://bemoreswan.com';
-            return json(200, { products: products.map((p) => ({ ...p, imageUrl: p.imageAssetId ? siteAssetUrl(base, p.imageAssetId) : null })) });
+            const offer = await loadOfferProfile(db, orgId);
+            return json(200, { products: products.map((p) => ({ ...p, imageUrl: p.imageAssetId ? siteAssetUrl(base, p.imageAssetId) : null })), offer });
         }
 
         let body: Record<string, unknown> = {};
@@ -173,6 +178,17 @@ export default withLambda(async (event) => {
                 organisationId: orgId, createdBy: ctx.userId ?? null, status: 'active', sortOrder: maxOrder + 1,
             }).returning(COLUMNS);
             return json(201, { product });
+        }
+
+        if (method === 'PATCH' && Object.prototype.hasOwnProperty.call(body, 'offer')) {
+            const offers = cleanOffers(body.offer);
+            if (!offers) return json(400, { error: 'offer must be a list.' });
+            try {
+                return json(200, { offer: await saveOfferProfile(db, orgId, offers, ctx.userId ?? null) });
+            } catch (err) {
+                console.error('[org-products] offer save failed — is db/z-org-offer-profile.sql applied?', err);
+                return json(503, { error: 'That choice could not be saved just yet. Please try again later.' });
+            }
         }
 
         if (method === 'PATCH') {

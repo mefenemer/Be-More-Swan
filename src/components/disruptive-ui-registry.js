@@ -1753,15 +1753,19 @@
   // change and refuses the whole batch if any one would break a rule.
 
   // Plain words for each change — never the internal page or section ids the operations carry.
-  const SITE_SECTION_WORDS = { hero: 'top (hero)', features: 'features', steps: 'steps', text: 'text', faq: 'questions', testimonials: 'testimonials', cta: 'call-to-action' };
+  const SITE_SECTION_WORDS = { hero: 'top (hero)', features: 'features', steps: 'steps', text: 'text', faq: 'questions', testimonials: 'testimonials', cta: 'call-to-action', social_feed: 'latest social posts' };
   const SITE_PROP_WORDS = { headline: 'headline', subheadline: 'line under the headline', eyebrow: 'small label', primaryCta: 'main button', secondaryCta: 'second button',
-    image: 'picture', heading: 'heading', intro: 'introduction', items: 'items', body: 'text', button: 'button', layout: 'layout' };
+    image: 'picture', heading: 'heading', intro: 'introduction', items: 'items', body: 'text', button: 'button', layout: 'layout',
+    platforms: 'platforms shown', count: 'number of posts', enabled: 'on/off' };
   const SITE_OP_WORDS = {
     add_page: (o) => `Add a page: “${o.title || ''}”`,
     update_page: (o) => (o.title ? `Rename a page to “${o.title}”` : o.hideFromMenu === true ? 'Hide a page from the menu' : o.hideFromMenu === false ? 'Show a page in the menu' : o.seo ? 'Update a page\'s search title and description' : 'Update a page'),
     remove_page: () => 'Remove a page',
     add_section: (o) => `Add a ${SITE_SECTION_WORDS[(o.section || {}).type] || 'new'} section`,
     update_section: (o) => {
+      // The social posts section's switch, said as what it does.
+      const keys = Object.keys(o.props || {});
+      if (keys.length === 1 && keys[0] === 'enabled' && !o.look) return o.props.enabled ? 'Switch the social posts section on' : 'Switch the social posts section off (kept, not shown)';
       const words = Object.keys(o.props || {}).map((k) => SITE_PROP_WORDS[k] || k);
       const look = o.look || {};
       if (look.menuLabel) words.push(`menu label (“${look.menuLabel}”)`);
@@ -1773,7 +1777,7 @@
     apply_template: (o) => (o.mode === 'full' ? `Start again with the ${o.templateId} template (replaces your pages)` : `Use the ${o.templateId} template's design (your words and pictures stay)`),
     split_pages: () => 'Split the home page back into separate pages, one per menu entry',
     remove_section: () => 'Remove a section',
-    move_section: () => 'Move a section',
+    move_section: (o) => (o.toPageId && o.toPageId !== o.pageId ? 'Move a section to another page' : 'Move a section'),
     set_theme: () => 'Change the design (colours, lettering or corners)',
     set_settings: (o) => {
       const f = o.settings && Array.isArray(o.settings.features) ? o.settings.features : null;
@@ -1980,6 +1984,47 @@
     return el;
   }
   register('booking_setup', renderBookingSetupCard);
+
+  // { type: 'offer_profile', summary, offers } — "What does your business offer?" in Business
+  // Information ▸ Products & Services (src/utils/offer-profile.ts), after the owner's click:
+  // org-products.ts PATCH { offer }, the same call as the tab's tick boxes.
+  const OFFER_LABELS = { bookings: 'People book time with us (appointments, classes or tables)', menu: 'We serve food or drink' };
+  function renderOfferProfileCard(ui, esc) {
+    const offers = Array.isArray(ui.offers) ? ui.offers.filter((k) => OFFER_LABELS[k]) : [];
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">What your business offers · Approval needed</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <ul class="mt-2 space-y-0.5">${Object.keys(OFFER_LABELS).map((k) => `<li class="text-xs text-gray-700">${offers.includes(k) ? '✓' : '✗'} ${esc(OFFER_LABELS[k])}</li>`).join('')}</ul>
+      <p class="text-xs text-gray-600 mt-2">Business Information then shows only the fields that fit. Nothing you've typed is lost. Change it any time under Products &amp; Services.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-op-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save this</button>
+        <button type="button" data-op-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-op-status></p>`;
+    const status = el.querySelector('[data-op-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-op-cancel]')) { setBusy(true); say('Not changed.'); return; }
+      if (!e.target.closest('[data-op-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('site:offerProfile', {
+        bubbles: true,
+        detail: {
+          offers,
+          respond({ ok, error }) {
+            if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved — nothing was changed.', 'error'); return; }
+            say('Saved — Business Information now shows the fields that fit.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('offer_profile', renderOfferProfileCard);
 
   // ── Request a call back (src/utils/callback-request.ts) ───────────────────────────────────────
   // Shown when the customer asks the chat for a call or a person. It only OPENS the Help & Support

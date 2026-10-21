@@ -168,7 +168,7 @@ check('every other adapter still declares a cred path', () => {
     }
 });
 
-const SECTION_KEYS = ['operations', 'growth', 'money', 'people', 'technology', 'culture', 'lifestyle'];
+const SECTION_KEYS = ['operations', 'growth', 'money', 'people', 'technology', 'culture', 'wellbeing', 'lifestyle'];
 
 check('section guessing matches on the key, and declines rather than guessing wrong', () => {
     assert.equal(guessSection(['Growth', 'saas'], SECTION_KEYS), 'growth');
@@ -184,12 +184,19 @@ check('the tags an AI actually writes now reach a section', () => {
     assert.equal(guessSection(['hiring'], SECTION_KEYS), 'people');
     assert.equal(guessSection(['cashflow'], SECTION_KEYS), 'money');
     assert.equal(guessSection(['automation'], SECTION_KEYS), 'technology');
-    assert.equal(guessSection(['burnout'], SECTION_KEYS), 'lifestyle');
+    assert.equal(guessSection(['burnout'], SECTION_KEYS), 'wellbeing');
+    assert.equal(guessSection(['founder life'], SECTION_KEYS), 'lifestyle');
     // The retired keys are aliases of their successors, so old tags still land.
     assert.equal(guessSection(['capital'], SECTION_KEYS), 'money');
     assert.equal(guessSection(['systems'], SECTION_KEYS), 'technology');
     // Whole words only — an alias must never match as a substring.
     assert.equal(guessSection(['aisle'], SECTION_KEYS), null, '"ai" must not match inside another word');
+});
+
+check('the section matching the most tags wins; a tie goes to the masthead order', () => {
+    // Kudzu's real tags, 2026-10-20: "hr" alone used to send this to People.
+    assert.equal(guessSection(['small business', 'employee wellness', 'mental health', 'burnout', 'hr', 'leadership'], SECTION_KEYS), 'wellbeing');
+    assert.equal(guessSection(['hiring', 'burnout'], SECTION_KEYS), 'people', 'one each — People is earlier');
 });
 
 check('no alias is claimed by two sections', () => {

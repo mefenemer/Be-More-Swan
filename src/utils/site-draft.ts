@@ -169,7 +169,8 @@ export function siteFromDraftReply(raw: unknown, current: SiteDefinition, maxPag
     settings.features = current.settings.features;
     // Prices are the owner's alone: a draft never puts things up for sale (step 3c), nor lists them;
     // and the pictures in a gallery, or the reviews quoted, are the owner's choice, never a draft's.
-    const DRAFT_NEVER = ['products', 'menu', 'gallery', 'reviews'];
+    // A social feed is added when they ask for one (editor or chat), not slipped into a draft.
+    const DRAFT_NEVER = ['products', 'menu', 'gallery', 'reviews', 'social_feed'];
     const pages = (r.pages as unknown[]).map((pg) => {
         if (!pg || typeof pg !== 'object') return pg;
         const o = pg as { sections?: unknown };

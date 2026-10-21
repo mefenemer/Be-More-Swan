@@ -26,7 +26,7 @@
   const API = '/.netlify/functions/sites';
   const POLL_MS = 5000;
 
-  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale', booking: 'Bookings', hours: 'Opening hours & contact', menu: 'Menu / price list', gallery: 'Gallery', reviews: 'Reviews' };
+  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale', booking: 'Bookings', hours: 'Opening hours & contact', menu: 'Menu / price list', gallery: 'Gallery', reviews: 'Reviews', social_feed: 'Latest social posts' };
   /** The edit form for each section type — the props the gate accepts (site-definition.ts cleanSection). */
   const FORMS = {
     hero: [
@@ -78,6 +78,13 @@
       { k: 'reviewIds', kind: 'reviewPick', label: 'Which reviews to quote' },
       { k: 'limit', kind: 'select', label: 'When none are ticked, show the newest', options: [[3, '3 reviews'], [6, '6 reviews'], [9, '9 reviews'], [12, '12 reviews']] },
       { k: 'showSummary', kind: 'checkbox', label: 'Show your average rating (counts every review, including hidden ones)' }],
+    // Latest social posts (owner 2026-10-20): ONLY posts published through Be More Swan, read when the
+    // page is drawn. The section chooses platforms, how many, whether it is on, and which page it is on.
+    social_feed: [{ k: 'enabled', kind: 'checkbox', label: 'Show this on my website (untick to switch it off without losing it)' },
+      { k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
+      { k: 'platforms', kind: 'platformPick', label: 'Which platforms' },
+      { k: 'count', kind: 'select', label: 'How many posts', options: [[3, '3 posts'], [4, '4 posts'], [6, '6 posts'], [8, '8 posts'], [9, '9 posts'], [12, '12 posts']] },
+      { k: '_page', kind: 'pagePick', label: 'Show it on' }],
     // Gallery: the owner's own pictures, each with what it shows (needed) and an optional caption.
     gallery: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
       { k: 'layout', kind: 'select', label: 'Layout', options: [['square', 'Even squares (pictures are cropped to fit)'], ['natural', 'Each picture at its own shape']] },
@@ -105,6 +112,7 @@
     booking: { kind: 'appointment', heading: 'Book an appointment', serviceIds: [], askStaff: false, buttonLabel: '' },
     hours: { heading: 'Opening hours', intro: '', showHours: true, showAddress: true, showContact: true },
     reviews: { heading: 'What our customers say', intro: '', reviewIds: [], limit: 6, showSummary: true },
+    social_feed: { enabled: true, heading: 'Latest from us', intro: '', platforms: [], count: 6 },
     gallery: { heading: 'Gallery', intro: '', layout: 'square', images: [] },
     menu: { heading: 'Prices', intro: '', groups: [{ title: '', productIds: [] }], showDescriptions: true, showDurations: false, note: '' },
   };
@@ -247,6 +255,7 @@
 
   function sectionSummary(s) {
     const p = s.props;
+    if (s.type === 'social_feed') return `${p.enabled === false ? 'Switched off · ' : ''}${p.heading || 'Latest posts'} · ${p.count} post${p.count === 1 ? '' : 's'}`;
     return p.headline || p.heading || (p.items && p.items[0] && (p.items[0].title || p.items[0].q || p.items[0].name)) || (p.body || '').slice(0, 60) || '';
   }
 
@@ -353,6 +362,28 @@
           : '<p class="text-xs text-gray-500 mt-1">You haven\'t added any products or services yet.</p>'}
         <p class="text-xs text-gray-500 mt-2">Add products, or change a name, price or picture, in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} — every page and checkout follows. Only fixed prices can be bought online.</p>`;
     }
+    if (f.kind === 'platformPick') {
+      // Every platform; the count beside each is what has been published through Be More Swan —
+      // the only posts this section can show. None ticked = all of them.
+      const so = state.data.social || { platforms: [], published: [] };
+      const chosen = new Set(Array.isArray(value) ? value : []);
+      const countOf = (k) => { const x = so.published.find((p) => p.platform === k); return x ? x.posts : 0; };
+      return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
+        <div class="flex flex-wrap gap-2 mt-1">${so.platforms.map((p) => `
+          <label class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 text-xs cursor-pointer">
+            <input type="checkbox" data-platform-pick value="${esc(p.key)}" ${chosen.has(p.key) ? 'checked' : ''}>
+            <span class="font-bold text-gray-900">${esc(p.label)}</span><span class="text-gray-500">${esc(countOf(p.key))} published</span>
+          </label>`).join('')}</div>
+        <p class="text-xs text-gray-500 mt-1">Tick none to show posts from every platform. Only posts published through Be More Swan appear — newest first, each linking to the post itself.</p>
+        ${so.published.length ? '' : '<p class="text-xs text-amber-800 mt-1">Nothing has been published through Be More Swan yet, so this section stays off your live site until something is.</p>'}`;
+    }
+    if (f.kind === 'pagePick') {
+      // Which page the section is on. Saving moves it there (move_section with toPageId).
+      const pages = def().pages;
+      if (pages.length < 2) return '';
+      const current = state.editing.toPageId || state.editing.pageId;
+      return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</label><select name="${name}" class="${inputCls}">${pages.map((pg) => `<option value="${esc(pg.id)}" ${pg.id === current ? 'selected' : ''}>${esc(pg.title)}</option>`).join('')}</select>`;
+    }
     if (f.kind === 'reviewPick') {
       const rv = state.data.reviews || { list: [], summary: null };
       const chosen = (Array.isArray(value) ? value : []).map(Number);
@@ -453,6 +484,8 @@
         props[f.k] = [...form.querySelectorAll('[data-service-pick]:checked')].map((el) => Number(el.value));
       } else if (f.kind === 'reviewPick') {
         props[f.k] = [...form.querySelectorAll('[data-review-pick]:checked')].map((el) => Number(el.value));
+      } else if (f.kind === 'platformPick') {
+        props[f.k] = [...form.querySelectorAll('[data-platform-pick]:checked')].map((el) => el.value);
       } else if (f.kind === 'gallery') {
         props[f.k] = [...form.querySelectorAll('[data-gallery-item]')].map((row) => {
           const assetId = Number(row.querySelector('[data-g-asset]').value) || null;
@@ -480,7 +513,7 @@
 
   // ── How a section looks (site-definition.ts SectionLook — a closed set of choices) ──────────
   const LOOK_DEFAULT = { background: 'auto', columns: 'auto', menuLabel: null };
-  const GRID_TYPES = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery', 'reviews'];
+  const GRID_TYPES = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery', 'reviews', 'social_feed'];
   function lookHtml(e) {
     const l = e.look || LOOK_DEFAULT;
     const onePage = def().structure === 'one_page';
@@ -502,8 +535,15 @@
     return out;
   }
   /** Keep what is typed in the open form (props AND look) across a re-render. */
+  /** The "Show it on" page choice — not a prop: saving moves the section there. */
+  function readPagePick(form) {
+    const el = form.querySelector('[name="f-_page"]');
+    return el ? el.value : null;
+  }
   function syncEditing(form) {
     state.editing.props = readForm(form, state.editing.type);
+    const to = readPagePick(form);
+    if (to) state.editing.toPageId = to;
     state.editing.look = { ...(state.editing.look || LOOK_DEFAULT), ...readLook(form) };
   }
 
@@ -1228,10 +1268,13 @@
     const ed = state.editing;
     const props = readForm(form, ed.type);
     const look = readLook(form);
-    const op = ed.sectionId
-      ? { op: 'update_section', pageId: ed.pageId, sectionId: ed.sectionId, props, look }
-      : { op: 'add_section', pageId: ed.pageId, section: { type: ed.type, props, look } };
-    await apply([op], () => { state.editing = null; });
+    const toPageId = readPagePick(form);
+    const moving = toPageId && toPageId !== ed.pageId;
+    const ops = ed.sectionId
+      ? [{ op: 'update_section', pageId: ed.pageId, sectionId: ed.sectionId, props, look },
+        ...(moving ? [{ op: 'move_section', pageId: ed.pageId, sectionId: ed.sectionId, toPageId, toIndex: 99 }] : [])]
+      : [{ op: 'add_section', pageId: moving ? toPageId : ed.pageId, section: { type: ed.type, props, look } }];
+    await apply(ops, () => { state.editing = null; if (moving) state.pageId = toPageId; });
   });
 
   document.addEventListener('click', async (e) => {

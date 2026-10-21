@@ -12458,7 +12458,7 @@ async function _swanRenderQueue() {
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2 flex-wrap mb-1">
               ${_swanBadge(p.status)}
-              ${p.sectionLabel ? `<span class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">${_swanEsc(p.sectionLabel)}</span>` : '<span class="text-[11px] font-bold text-amber-600 uppercase tracking-wide">No section</span>'}
+              ${p.sectionLabel ? `<span class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">${_swanEsc(p.sectionLabel)}</span>` : `<span class="text-[11px] font-bold text-amber-600 uppercase tracking-wide">${p.status === 'live' || p.status === 'featured' ? 'No section — hidden from the site' : 'No section'}</span>`}
               ${p.editorScore ? `<span class="text-[11px] font-bold text-gray-500">${'★'.repeat(p.editorScore)}</span>` : ''}
               ${orphaned ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">Author's post is ${_swanEsc(p.sourceStatus)}</span>` : ''}
               ${_swanSafetyPill(p.safetyCheck)}
@@ -12503,7 +12503,7 @@ async function openSwanRead(id) {
     if (p.section && !sectionList.some((sx) => sx.key === p.section)) {
       sectionList.push({ key: p.section, label: `${p.sectionLabel || p.section} (retired)` });
     }
-    const sectionOpts = ['<option value="">— no section —</option>']
+    const sectionOpts = ['<option value="">— choose a section —</option>']
       .concat(sectionList.map((sx) =>
         `<option value="${_swanEsc(sx.key)}"${sx.key === p.section ? ' selected' : ''}>${_swanEsc(sx.label)}</option>`))
       .join('');
@@ -12554,6 +12554,7 @@ async function openSwanRead(id) {
       <div class="border-t border-gray-100 pt-4 grid sm:grid-cols-2 gap-4">
         <div>
           <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Section</label>
+          <p class="text-[11px] text-gray-400 mb-1.5">Required — a piece only appears on the site once it has one.</p>
           ${sectionsKnown
             ? `<select id="swan-read-section" class="w-full text-sm border border-gray-300 rounded-lg p-2">${sectionOpts}</select>`
             : `<p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">Section list unavailable — reload to change it. Saving now will leave the current section as it is.</p>`}
@@ -12611,6 +12612,14 @@ async function swanDecide(id, status) {
     dek: document.getElementById('swan-read-dek')?.value ?? undefined,
   };
   if (status) payload.status = status;
+
+  // No section, no site (owner, 2026-10-20). The server refuses it too (admin-swan-index.ts) — this
+  // just says so before the round trip, next to the control that fixes it.
+  if ((status === 'live' || status === 'featured') && payload.section === '') {
+    window.showToast?.('Choose a section first — a piece only appears on The Swan Index once it has one.', { icon: '⚠️' });
+    document.getElementById('swan-read-section')?.focus();
+    return;
+  }
 
   // Declining is the one decision an author feels, and the note is what makes it answerable.
   if (status === 'rejected' && !String(payload.editorNote || '').trim()) {

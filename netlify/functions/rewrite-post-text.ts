@@ -1,5 +1,5 @@
 // netlify/functions/rewrite-post-text.ts
-// Targeted rewrites of a post's OWN words — tone, hashtags, grammar — returned to the caller.
+// Targeted rewrites of a post's OWN words — tone, hashtags, grammar, shorter, longer — returned to the caller.
 //
 // The quick actions in step 1 used to go through request-post-changes, which is a different
 // operation wearing the same clothes: it CANCELS the draft (status 'cancelled') and queues a job
@@ -12,7 +12,7 @@
 // editing. request-post-changes remains the right endpoint for the free-text "Regenerate" box,
 // where redrafting from scratch IS the request.
 //
-// POST { postId, action:'tone'|'hashtags'|'grammar', tone? } → { caption? , hashtags? }
+// POST { postId, action:'tone'|'hashtags'|'grammar'|'shorter'|'longer', tone? } → { caption? , hashtags? }
 
 import { HandlerEvent } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
@@ -33,8 +33,8 @@ import { stripCodeFences } from '../../src/utils/model-json';
 const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_CAPTION_CHARS = 5000;
 
-type Action = 'tone' | 'hashtags' | 'grammar';
-const VALID: Action[] = ['tone', 'hashtags', 'grammar'];
+type Action = 'tone' | 'hashtags' | 'grammar' | 'shorter' | 'longer';
+const VALID: Action[] = ['tone', 'hashtags', 'grammar', 'shorter', 'longer'];
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -42,7 +42,7 @@ const json = (statusCode: number, body: unknown) => ({
 
 /** Which field each action is allowed to touch. Hashtags must never rewrite the caption behind the user. */
 const FIELD: Record<Action, 'caption' | 'hashtags'> = {
-    tone: 'caption', grammar: 'caption', hashtags: 'hashtags',
+    tone: 'caption', grammar: 'caption', hashtags: 'hashtags', shorter: 'caption', longer: 'caption',
 };
 
 function directive(action: Action, tone: string, limit: number): string {
@@ -52,6 +52,17 @@ function directive(action: Action, tone: string, limit: number): string {
                 + `the same language, and roughly the same length. Stay within ${limit} characters.`;
         case 'grammar':
             return 'Fix grammar, spelling and flow. Do NOT change the meaning, the tone, the language or the length.';
+        // Shorter / Longer change the LENGTH and nothing else. Longer is the risky one: the easy way to
+        // add words is to add facts, and a model padding a post invents a statistic, a customer or a
+        // price the owner never said. So it may only develop what the post already says.
+        case 'shorter':
+            return 'Rewrite the caption noticeably shorter — roughly half its current length — keeping the core message, '
+                + 'the tone, the language and any call to action. Cut repetition and filler first. Add nothing new.';
+        case 'longer':
+            return 'Rewrite the caption noticeably longer — roughly half as long again — keeping the same message, tone and '
+                + 'language. Develop the points the post already makes (an example of the same point, the why behind it, '
+                + 'a clearer close). Do NOT invent facts, figures, names, prices, quotes, offers or claims that are not in '
+                + `the original. Stay within ${limit} characters.`;
         case 'hashtags':
             return 'Write a better set of hashtags for this post and platform. Return ONLY the hashtags, space separated, '
                 + 'each starting with #. No caption, no explanation. Between 3 and 8 of them.';

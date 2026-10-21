@@ -833,6 +833,22 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // "Save this" on an offer_profile card → org-products.ts PATCH { offer }, the same call as the
+    // tick boxes on Business Information ▸ Products & Services.
+    function onOfferProfile(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/org-products', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ offer: Array.isArray(d.offers) ? d.offers : [] }),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+        respond({ ok: true });
+        document.dispatchEvent(new CustomEvent('bizinfo:offer', { detail: data.offer }));
+      }).catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     // "Add" on a class_sessions card — sites.ts `session_add`, the same checks as the Website tab's Timetable.
     function onClassSessions(e) {
       const d = e.detail || {};
@@ -1181,6 +1197,7 @@
     container.addEventListener('site:bookingSetup', onBookingSetup);
     container.addEventListener('site:reviewsAdd', onReviewsAdd);
     container.addEventListener('site:classSessions', onClassSessions);
+    container.addEventListener('site:offerProfile', onOfferProfile);
     container.addEventListener('site:reviewDecisions', onReviewDecisions);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
@@ -1238,6 +1255,7 @@
         container.removeEventListener('site:reviewsAdd', onReviewsAdd);
         container.removeEventListener('site:classSessions', onClassSessions);
         container.removeEventListener('site:reviewDecisions', onReviewDecisions);
+        container.removeEventListener('site:offerProfile', onOfferProfile);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
         container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);

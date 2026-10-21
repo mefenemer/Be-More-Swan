@@ -17,6 +17,7 @@
 import { directionsUrl, openingHoursSpecification, openStatus, upcomingClosures, weekRows, whatsappUrl } from './business-hours';
 import { formatDate } from './booking-time';
 import type { SiteRenderReview, SiteRenderReviews } from './reviews';
+import type { SiteRenderSocialFeed, SiteRenderSocialPost } from './site-social-feed';
 import type { SessionView } from './class-sessions';
 import { dietaryKey, dietaryMarks, dietaryWords } from './product-dietary';
 import type { WeeklyHours } from './booking-availability';
@@ -120,6 +121,8 @@ export interface RenderContext {
     business?: SiteRenderBusiness | null;
     /** Business Information ▸ Reviews (reviews.ts loadSiteReviews); null = no reviews section. */
     reviews?: SiteRenderReviews | null;
+    /** Posts published through Be More Swan (site-social-feed.ts loadSiteSocialFeed); null = no social section. */
+    socialFeed?: SiteRenderSocialFeed | null;
     /** "Now", for the Open-now badge (tests pass a fixed time). */
     now?: Date;
     /**
@@ -215,6 +218,7 @@ section{padding:var(--sp) 0}.alt{background:${tint ?? 'rgba(0,0,0,.035)'}}
 .ft{border-top:1px solid rgba(0,0,0,.08);padding:28px 0;font-size:.85rem;opacity:.85}.ft .w{display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:space-between}.ft a{color:inherit}
 .pv{background:#111;color:#fff;text-align:center;font-size:.85rem;padding:8px}
 .stars{color:#f59e0b;letter-spacing:1px}.stars .off{color:rgba(0,0,0,.15)}.rv{margin:0}.rv blockquote{margin:8px 0}.rv figcaption{font-size:.95rem}.rsum{margin:8px 0 0}
+.sp{margin:0;padding:0;overflow:hidden;display:flex;flex-direction:column}.sp img,.sp video{width:100%;aspect-ratio:1/1;object-fit:cover;margin:0;border-radius:0}.sp .spb{padding:18px 20px 20px;display:flex;flex-direction:column;gap:8px;flex:1}.sp .spt{margin:0;white-space:normal}.sp .spt p{margin:0 0 .5em}.sp .spl{margin-top:auto;font-size:.9rem;display:flex;flex-wrap:wrap;gap:4px 12px}
 .gal{gap:12px}@media(max-width:699px){.gal{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(min-width:700px){.gal{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}}.gi{margin:0}.gi a{display:block}.gi img{display:block;width:100%;border-radius:var(--r)}.gal.sq img{aspect-ratio:1/1;object-fit:cover}.gal.nat{align-items:start}.gi figcaption{font-size:.85rem;margin-top:6px;opacity:.8}
 .dm{font-size:.75rem;font-weight:700;letter-spacing:.02em;opacity:.75;white-space:nowrap}.al{font-style:italic}
 .menu{list-style:none;padding:0;margin:8px 0 0}.menu li{padding:10px 0;border-bottom:1px solid rgba(0,0,0,.08)}.mi{display:flex;align-items:baseline;gap:8px}.mn{font-weight:600}.mt{font-weight:400;font-size:.85rem;opacity:.7;white-space:nowrap}.ml{flex:1;min-width:16px;border-bottom:1px dotted currentColor;opacity:.35}.mp{font-weight:700;white-space:nowrap}.md{margin:4px 0 0;font-size:.92rem;opacity:.8}.mnote{margin-top:20px}.tt+h3{margin-top:24px}
@@ -259,6 +263,17 @@ function logoSrc(theme: SiteTheme): string {
 }
 /** Set per render call — forms are drawn live, or switched off in the preview. */
 let reviewsData: SiteRenderReviews | null = null;
+/** Set per render call — the social posts a social_feed section may show. */
+let socialFeedData: SiteRenderSocialFeed | null = null;
+/** Which posts a social_feed section shows: those that went to one of its platforms (none ticked = all), newest first. */
+export function feedPostsFor(feed: SiteRenderSocialFeed | null | undefined, platforms: string[], count: number): SiteRenderSocialPost[] {
+    const all = feed?.posts ?? [];
+    const wanted = platforms.length ? all
+        .filter((p) => p.links.some((l) => platforms.includes(l.platform)))
+        .map((p) => ({ ...p, links: p.links.filter((l) => platforms.includes(l.platform)) })) : all;
+    return wanted.slice(0, Math.max(1, Math.min(12, count)));
+}
+const shortDate = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Europe/London' });
 const stars = (n: number) => `<span class="stars" role="img" aria-label="${n} out of 5 stars">${'★'.repeat(n)}<span class="off">${'★'.repeat(5 - n)}</span></span>`;
 const monthYear = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 let business: { info: SiteRenderBusiness | null; now: Date; settings: SiteDefinition['settings'] | null } = { info: null, now: new Date(0), settings: null };
@@ -398,6 +413,23 @@ ${formButton(p.buttonLabel)}
             const card = (r: SiteRenderReview) => `<figure class="card rv">${r.rating ? `<p>${stars(r.rating)}</p>` : ''}<blockquote>${paragraphs(r.body)}</blockquote><figcaption><strong>${esc(r.authorName)}</strong>${r.authorDetail ? `, ${esc(r.authorDetail)}` : ''}<br><span class="fine">${r.sourceUrl ? `<a href="${esc(r.sourceUrl)}" rel="noopener">${esc(r.sourceLabel)}</a>` : esc(r.sourceLabel)}${r.reviewedOn ? ` · ${esc(monthYear(r.reviewedOn))}` : ''}</span></figcaption></figure>`;
             const summary = sum ? `<p class="rsum">${stars(Math.round(sum.average))} <strong>${sum.average.toFixed(1)} out of 5</strong> <span class="fine">from ${sum.rated} rated review${sum.rated === 1 ? '' : 's'}</span></p>` : '';
             return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${summary}${chosen.length ? `<div class="grid">${chosen.map(card).join('')}</div>` : ''}</div></section>`;
+        }
+        case 'social_feed': {
+            // Posts published through Be More Swan, read when the page is drawn — never typed into the site.
+            const p = s.props;
+            if (!p.enabled) return formState.preview
+                ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Social posts section: switched off, so it doesn't appear on your live site. Edit it to switch it back on.</p></div></section>` : '';
+            const posts = feedPostsFor(socialFeedData, p.platforms, p.count);
+            if (!posts.length) return formState.preview
+                ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Social posts section: nothing published through Be More Swan${p.platforms.length ? ' to the platforms it shows' : ''} yet. Until there is, it doesn't appear on your live site.</p></div></section>` : '';
+            const card = (post: SiteRenderSocialPost) => {
+                const where = post.links.map((l) => l.label).join(', ');
+                const src = post.media ? imageSrc({ url: '', assetId: post.media.assetId }) : '';
+                const media = src ? mediaHtml({ alt: `Picture from our ${where} post`, video: post.media!.video }, src, 'lazy') : '';
+                const links = post.links.map((l) => (l.url ? `<a href="${esc(l.url)}" rel="noopener">See it on ${esc(l.label)}</a>` : `<span>On ${esc(l.label)}</span>`)).join('');
+                return `<article class="card sp">${media}<div class="spb"><p class="fine">${esc(shortDate(post.publishedAt))}</p>${post.caption ? `<div class="spt">${paragraphs(post.caption)}</div>` : ''}<p class="spl">${links}</p></div></article>`;
+            };
+            return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}<div class="grid">${posts.map(card).join('')}</div></div></section>`;
         }
         case 'gallery': {
             const p = s.props;
@@ -615,6 +647,7 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
     assetUrlOf = ctx.assetUrl ?? (() => null);
     const page = findPage(def, path);
     reviewsData = ctx.reviews ?? null;
+    socialFeedData = ctx.socialFeed ?? null;
     business = { info: ctx.business ?? null, now: ctx.now ?? new Date(), settings: def.settings };
     formState = { preview: ctx.preview, forms: ctx.forms ?? {}, renderedAt: ctx.renderedAt ?? Date.now(), path: page ? (page.slug ? `/${page.slug}` : '/') : '/', canSell: ctx.canSell === true, products: ctx.products ?? {}, booking: ctx.booking ?? null };
     if (!page) {

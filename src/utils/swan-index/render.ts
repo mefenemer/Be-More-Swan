@@ -7,6 +7,9 @@
 
 import { escHtml } from '../blog-seo';
 import { socialEntries, type SocialsMap } from './socials';
+import { shareBarHtml, SHARE_SCRIPT } from '../blog-share';
+import { monthLabel } from '../blog-filters';
+import { readBeaconScript, READ_PATH } from './reads';
 import {
     STYLESHEET, MOTION_SCRIPT, FONT_CSS_URL, FONT_ORIGINS,
     MASTHEAD, PUBLICATION_NAME, PUBLICATION_TAGLINE, POWERED_BY_HTML,
@@ -460,6 +463,30 @@ export interface ListData {
     pageUrl: string;
     baseUrl: string;
     robots: string;
+    /** Canonical when it differs from pageUrl — a filtered list points at the unfiltered one. */
+    canonicalUrl?: string;
+    /** The reader's filter bar: months with posts, and what is selected. Omit for none. */
+    filters?: { months: Array<{ value: string; count: number }>; section: string | null; month: string | null } | null;
+}
+
+/**
+ * Section + month, as a plain GET form to /latest (which reads both), so it works with JavaScript
+ * off; with it on, changing a menu submits.
+ */
+function filterForm(d: ListData): string {
+    const f = d.filters;
+    if (!f) return '';
+    const filtered = !!(f.section || f.month);
+    const sectionOpts = `<option value="">All sections</option>` + d.sections.map((s) =>
+        `<option value="${escHtml(s.key)}"${s.key === f.section ? ' selected' : ''}>${escHtml(s.label)}</option>`).join('');
+    const monthOpts = `<option value="">All dates</option>` + f.months.map((m) =>
+        `<option value="${escHtml(m.value)}"${m.value === f.month ? ' selected' : ''}>${escHtml(monthLabel(m.value))} (${m.count})</option>`).join('');
+    return `<form class="filters" method="get" action="${escHtml(d.base)}/latest" role="search" aria-label="Filter the index">
+          <label><span class="visually-hidden">Section</span><select name="section" onchange="this.form.submit()">${sectionOpts}</select></label>
+          ${f.months.length ? `<label><span class="visually-hidden">Month</span><select name="month" onchange="this.form.submit()">${monthOpts}</select></label>` : ''}
+          <noscript><button type="submit">Show</button></noscript>
+          ${filtered ? `<a href="${escHtml(d.base)}/latest">Clear filters</a>` : ''}
+        </form>`;
 }
 
 export function renderList(d: ListData): string {
@@ -468,11 +495,12 @@ export function renderList(d: ListData): string {
         <div>
           <h1 class="serif section__title">${escHtml(d.heading)}</h1>
           ${d.standfirst ? `<p class="dek">${escHtml(d.standfirst)}</p>` : ''}
+          ${filterForm(d)}
         </div>
       </div>
       ${d.items.length
         ? `<ul class="index-list">${d.items.map((c) => indexRow(c, d.base)).join('')}</ul>`
-        : `<p class="dek">Nothing here yet.</p>`}
+        : `<p class="dek">${d.filters?.month || d.filters?.section ? 'Nothing matches these filters.' : 'Nothing here yet.'}</p>`}
     </div></section>`;
 
     return renderShell({
@@ -480,7 +508,7 @@ export function renderList(d: ListData): string {
             title: `${d.heading} — ${PUBLICATION_NAME}`,
             description: d.standfirst || PUBLICATION_TAGLINE,
             pageUrl: d.pageUrl,
-            canonicalUrl: d.pageUrl,
+            canonicalUrl: d.canonicalUrl || d.pageUrl,
             robots: d.robots,
         },
         sections: d.sections,
@@ -548,12 +576,18 @@ export interface ArticleData {
     /** More by the same author. */
     more: SwanCard[];
     baseUrl: string;
+    /** When set, the page counts its readers (src/utils/swan-index/reads.ts). Omit in tests/previews. */
+    readBeacon?: { handle: string; slug: string } | null;
 }
 
 export function renderArticle(d: ArticleData): string {
+    // No feature image → the ruled "TSI" plate the cards already use (owner, 2026-10-20).
     const hero = d.imageUrl
         ? `<figure class="wrap article__hero"><img src="${escHtml(d.imageUrl)}" alt="${escHtml(d.imageAlt || d.title)}"></figure>`
-        : '';
+        : `<figure class="wrap article__hero"><div class="article__hero--empty" data-label="TSI" aria-hidden="true"></div></figure>`;
+    // Readers share the page they are reading — the republication carries the author's credit and
+    // its rel=canonical already sends search engines to the original.
+    const share = shareBarHtml(d.pageUrl, d.title);
 
     const kick = [d.sectionLabel, formatDate(d.liveAt)].filter(Boolean).map(String);
 
@@ -581,14 +615,16 @@ export function renderArticle(d: ArticleData): string {
         </div>
       </header>
       ${hero}
-      <div class="wrap"><div class="prose">${d.bodyHtml}</div></div>
+      <div class="wrap"><div class="prose">${d.bodyHtml}</div>${share}</div>
       <div class="wrap"><div class="provenance">
         ${firstPublished}
         ${aiLine}
         <p>${POWERED_BY_HTML}</p>
       </div></div>
     </article>
-    ${moreBlock}`;
+    ${moreBlock}
+    ${share ? SHARE_SCRIPT : ''}
+    ${d.readBeacon ? readBeaconScript(`${d.base}${READ_PATH}`, d.readBeacon.handle, d.readBeacon.slug) : ''}`;
 
     return renderShell({
         head: {

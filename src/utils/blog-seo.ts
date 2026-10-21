@@ -14,6 +14,8 @@
 
 import { BLOG_AI_NOTICE } from './blog-ai-assisted';
 import { findBlogFont, googleFontUrl, GOOGLE_FONT_ORIGINS } from '../config/blog-fonts';
+import { placeholderPlateHtml, PLATE_CSS, shareBarHtml, SHARE_CSS, SHARE_SCRIPT } from './blog-share';
+import { monthLabel, type BlogFacets, type BlogListFilter } from './blog-filters';
 
 // ── escaping ───────────────────────────────────────────────────────────────────────────────────
 // HTML text/attribute escape. Applied to every interpolated value except bodyHtml, which is the
@@ -310,9 +312,12 @@ export function renderBlogPage(d: BlogPageData): string {
         ? `<time datetime="${escHtml(d.publishedAt)}">${escHtml(new Date(d.publishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }))}</time>`
         : '';
     const byline = d.authorName ? `<span>By ${escHtml(d.authorName)}</span>` : '';
+    // No feature image → the placeholder plate (owner, 2026-10-20), so a post never opens bare.
     const hero = d.imageUrl
         ? `<img class="hero" src="${escHtml(d.imageUrl)}" alt="${escHtml(d.imageAlt || d.title)}">`
-        : '';
+        : placeholderPlateHtml(heading, 'hero hero--plate');
+    // Share the post's canonical home (the customer's own page) when there is one, else this page.
+    const share = shareBarHtml(d.canonicalUrl || d.pageUrl, heading);
     const badge = (d.aiAssisted && d.badgeEnabled)
         ? `<p class="ai-badge">✨ ${escHtml(BLOG_AI_NOTICE)}</p>`
         : '';
@@ -347,8 +352,11 @@ export function renderBlogPage(d: BlogPageData): string {
       .tags li { font-size: .8rem; color: #666; background: #f2f2f2; border-radius: 999px; padding: .25rem .75rem; }
       .back { margin: 0 0 1.5rem; font-size: .95rem; }
       .back a { color: #d6006e; text-decoration: none; }
+      .hero--plate { aspect-ratio: 16 / 9; height: auto; }
+      ${PLATE_CSS}
+      ${SHARE_CSS}
       @media (prefers-color-scheme: dark) {
-        body { color: #e8e8e8; background: #131313; }
+        body { color: #e8e8e8; background: #131313; --share-rule: #2a2a2a; --share-muted: #9a9a9a; --plate-a: #1c1c1c; --plate-b: #262626; --plate-ink: #ff5aa8; }
         .back a { color: #ff5aa8; }
         .meta, .ai-badge, .tags li, article figure figcaption { color: #9a9a9a; }
         .ai-badge { background: #1c1c1c; border-color: #2a2a2a; }
@@ -366,7 +374,9 @@ export function renderBlogPage(d: BlogPageData): string {
       ${badge}
       <article>${body}</article>
       ${tagList}
+      ${share}
     </main>
+    ${share ? SHARE_SCRIPT : ''}
     ${beacon}
   </body>
 </html>`;
@@ -400,6 +410,35 @@ export interface BlogIndexPageData {
     /** The customer's own site (http/https only), shown as "← Back to <site>". */
     homeUrl?: string | null;
     theme?: BlogPageData['theme'];
+    /** What a reader can filter by, and what they have filtered by. Omit for no filter bar. */
+    facets?: BlogFacets | null;
+    filter?: BlogListFilter | null;
+    /** The index's own path (no query), the filter form's action. */
+    indexPath?: string;
+}
+
+/**
+ * The filter bar: a plain GET form, so it works with JavaScript off (the "Show" button); with it
+ * on, changing a menu submits. Hidden when there is nothing to choose between.
+ */
+function filterFormHtml(d: BlogIndexPageData): string {
+    const f = d.facets;
+    const cur = d.filter || { tag: null, month: null };
+    if (!f || !d.indexPath) return '';
+    const filtered = !!(cur.tag || cur.month);
+    if (f.categories.length < 2 && f.months.length < 2 && !filtered) return '';
+    const opts = (list: BlogFacets['categories'], current: string | null, all: string, label: (v: string) => string) =>
+        `<option value="">${escHtml(all)}</option>` + list.map((o) =>
+            `<option value="${escHtml(o.value)}"${o.value === current ? ' selected' : ''}>${escHtml(label(o.value))} (${o.count})</option>`).join('');
+    const cats = f.categories.length
+        ? `<label><span class="sr">Category</span><select name="tag" onchange="this.form.submit()">${opts(f.categories, cur.tag, 'All categories', (v) => v)}</select></label>` : '';
+    const months = f.months.length
+        ? `<label><span class="sr">Month</span><select name="month" onchange="this.form.submit()">${opts(f.months, cur.month, 'All dates', monthLabel)}</select></label>` : '';
+    return `<form class="filters" method="get" action="${escHtml(d.indexPath)}" role="search" aria-label="Filter posts">`
+        + cats + months
+        + `<noscript><button type="submit">Show</button></noscript>`
+        + (filtered ? `<a class="clear" href="${escHtml(d.indexPath)}">Clear filters</a>` : '')
+        + `</form>`;
 }
 
 /** Only http(s) URLs become links — a stored "javascript:" value must never reach an href. */
@@ -453,19 +492,21 @@ export function renderBlogIndexPage(d: BlogIndexPageData): string {
 
     const cards = d.posts.map((p) => {
         const href = escHtml(d.postHref(p.slug));
+        // No image → the placeholder plate in the same 16:9 box, so the grid keeps one rhythm.
         const img = p.imageUrl
             ? `<a class="thumb" href="${href}" tabindex="-1" aria-hidden="true"><img src="${escHtml(p.imageUrl)}" alt="${escHtml(p.imageAlt || p.title)}" loading="lazy"></a>`
-            : '';
+            : `<a class="thumb" href="${href}" tabindex="-1" aria-hidden="true">${placeholderPlateHtml(p.title, 'thumb__plate')}</a>`;
         const date = p.publishedAt
             ? `<time datetime="${escHtml(p.publishedAt)}">${escHtml(new Date(p.publishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }))}</time>`
             : '';
         const excerptP = p.excerpt ? `<p class="excerpt">${escHtml(p.excerpt)}</p>` : '';
-        return `<li class="card${p.imageUrl ? '' : ' text-only'}">${img}<div class="body">${date}<h2><a href="${href}">${escHtml(p.title)}</a></h2>${excerptP}</div></li>`;
+        return `<li class="card">${img}<div class="body">${date}<h2><a href="${href}">${escHtml(p.title)}</a></h2>${excerptP}</div></li>`;
     }).join('\n        ');
 
+    const filtered = !!(d.filter?.tag || d.filter?.month);
     const list = d.posts.length
         ? `<ul class="posts">\n        ${cards}\n      </ul>`
-        : `<p class="empty">No posts yet. Check back soon.</p>`;
+        : `<p class="empty">${filtered ? 'No posts match these filters.' : 'No posts yet. Check back soon.'}</p>`;
     const nav = [
         d.firstHref ? `<a href="${escHtml(d.firstHref)}">← Latest posts</a>` : '',
         d.olderHref ? `<a rel="next" href="${escHtml(d.olderHref)}">Older posts →</a>` : '',
@@ -505,8 +546,17 @@ export function renderBlogIndexPage(d: BlogIndexPageData): string {
       .empty { color: #666; }
       .pager { display: flex; justify-content: space-between; gap: 1rem; margin: 3rem 0 0; font-size: 1rem; }
       .pager a[rel="next"] { margin-left: auto; }
+      .thumb { text-decoration: none; }
+      .thumb__plate { width: 100%; height: 100%; }
+      ${PLATE_CSS}
+      .filters { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin: -1rem 0 2rem; }
+      .filters select { font: inherit; font-size: .95rem; padding: .5rem .7rem; border: 1px solid #ddd; border-radius: 8px; background: #fff; color: inherit; max-width: 100%; }
+      .filters button { font: inherit; padding: .5rem .9rem; border-radius: 8px; border: 1px solid #ddd; background: none; cursor: pointer; }
+      .filters .clear { font-size: .95rem; text-decoration: none; }
+      .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
       @media (prefers-color-scheme: dark) {
-        body { color: #e8e8e8; background: #131313; }
+        body { color: #e8e8e8; background: #131313; --plate-a: #1c1c1c; --plate-b: #262626; --plate-ink: #ff5aa8; }
+        .filters select { background: #1a1a1a; border-color: #2a2a2a; }
         a { color: #ff5aa8; }
         .card { background: #1a1a1a; border-color: #2a2a2a; }
         .thumb { background: #222; }
@@ -519,6 +569,7 @@ export function renderBlogIndexPage(d: BlogIndexPageData): string {
     <main>
       ${home}
       <h1>Blog</h1>
+      ${filterFormHtml(d)}
       ${list}
       ${pager}
     </main>
