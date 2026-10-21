@@ -78,7 +78,8 @@ export async function buildSiteAuditSnapshot(db: Db, orgId: number, assistantId:
             + `${audit.baselineScore !== null ? ` (first check: ${audit.baselineScore})` : ''}; target ${audit.targetScore}.`
             + (lensText ? ` ${lensText}.` : ''));
         const report = latestDone.report as { summary?: string; competitorChanges?: Array<{ url: string; changes: string[] }>; handoffs?: Handoff[] } | null;
-        const waitingIdeas = (report?.handoffs ?? []).filter((_, i) => !briefed.some((b) => b.source === 'idea' && b.runId === latestDone.id && b.handoffIndex === i));
+        // Briefed or rejected — either way it is no longer waiting.
+        const waitingIdeas = (report?.handoffs ?? []).filter((_, i) => !briefed.some((b) => (b.source === 'idea' || b.source === 'rejected_idea') && b.runId === latestDone.id && b.handoffIndex === i));
         if (waitingIdeas.length) {
             lines.push('Ideas that check had for other assistants, not yet briefed (the "Ideas for your other assistants" section of the Website tab):');
             for (const h of waitingIdeas) lines.push(`- for the ${h.target}: ${clip(h.title, 80)} — ${clip(h.brief, 240)}`);
@@ -100,7 +101,7 @@ export async function buildSiteAuditSnapshot(db: Db, orgId: number, assistantId:
 
     const fixes = await db.select({
         id: siteAuditFixes.id, location: siteAuditFixes.location, before: siteAuditFixes.beforeText, after: siteAuditFixes.afterText,
-        status: siteAuditFixes.status, updatedAt: siteAuditFixes.updatedAt,
+        status: siteAuditFixes.status, verifiedRunId: siteAuditFixes.verifiedRunId, updatedAt: siteAuditFixes.updatedAt,
     }).from(siteAuditFixes)
         .innerJoin(siteAuditRuns, eq(siteAuditRuns.id, siteAuditFixes.runId))
         .where(and(eq(siteAuditFixes.auditId, audit.id), eq(siteAuditRuns.status, 'done')))
@@ -119,13 +120,19 @@ export async function buildSiteAuditSnapshot(db: Db, orgId: number, assistantId:
     }
     // What has changed — the Website tab's "History". Lets the chat answer "what have we changed?".
     if (done.length) {
-        lines.push('Fixes a later check confirmed are live (History):');
-        for (const f of done.slice(0, 8)) lines.push(`- ${f.id} — ${f.location || 'Page'} — was "${clip(f.before, 100)}", now "${clip(f.after, 140)}" (confirmed ${day(f.updatedAt)})`);
+        lines.push('Fixes that are done (Done tab):');
+        for (const f of done.slice(0, 8)) lines.push(`- ${f.id} — ${f.location || 'Page'} — was "${clip(f.before, 100)}", now "${clip(f.after, 140)}" (${f.verifiedRunId !== null ? 'a check confirmed it' : 'they marked it done; no check has confirmed it yet'} ${day(f.updatedAt)})`);
     }
-    if (dismissed.length) lines.push(`Fixes they turned down ("Not for us", in History — "Bring back" or a site_audit_fix_update "open" restores one): ${dismissed.slice(0, 8).map((f) => `${f.id} (${f.location || 'Page'})`).join(', ')}.`);
-    if (briefed.length) {
-        lines.push('Briefs already sent to their other assistants (History) — do not suggest these again:');
-        for (const b of briefed) lines.push(`- ${day(b.createdAt)} to ${b.targetName || b.targetRole}: ${clip(b.title || b.brief, 120)}`);
+    if (dismissed.length) lines.push(`Fixes they rejected ("Reject", in the Archived tab — "Bring back" or a site_audit_fix_update "open" restores one). Never suggest these again: ${dismissed.slice(0, 8).map((f) => `${f.id} (${f.location || 'Page'})`).join(', ')}.`);
+    const sent = briefed.filter((b) => b.source !== 'rejected_idea');
+    const turnedDown = briefed.filter((b) => b.source === 'rejected_idea');
+    if (sent.length) {
+        lines.push('Briefs already sent to their other assistants (In progress, then Done) — do not suggest these again:');
+        for (const b of sent) lines.push(`- ${day(b.createdAt)} to ${b.targetName || b.targetRole}: ${clip(b.title || b.brief, 120)}`);
+    }
+    if (turnedDown.length) {
+        lines.push('Ideas for other assistants they rejected (Archived) — never suggest these, or anything like them, again:');
+        for (const b of turnedDown) lines.push(`- ${day(b.createdAt)}, for the ${b.targetRole}: ${clip(b.title || b.brief, 120)}`);
     }
 
     // Who a hand-off can go to. A target role nobody has hired cannot take one.

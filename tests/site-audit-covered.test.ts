@@ -8,7 +8,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { coveredBlock, normaliseIdea, sameIdea, type CoveredItem } from '../src/utils/site-audit-covered';
-import { buildSummaryPrompt, sanitiseSummary, type SummaryInput } from '../src/utils/site-audit-prompts';
+import { buildSummaryPrompt, rejectedFixesBlock, sanitiseSummary, type SummaryInput } from '../src/utils/site-audit-prompts';
 
 let passed = 0;
 let total = 0;
@@ -93,6 +93,87 @@ check('the check run loads what is covered before it writes ideas', () => {
     const mod = read('src/utils/site-audit-covered.ts');
     for (const t of ['siteAuditRuns', 'siteAuditBriefs', 'scheduledPosts', 'blogPosts', 'campaigns']) assert.ok(mod.includes(`from(${t})`), t);
     assert.strictEqual(coveredBlock([]), '');
+});
+
+console.log('\nRejecting, and learning from it (owner, 2026-10-21)');
+
+check('a rejected fix is listed to every later check, which must not suggest it again', () => {
+    const block = rejectedFixesBlock([{ location: 'Pricing', beforeText: 'No hidden tiers.', afterText: 'Plans start at £29/month' }]);
+    assert.match(String(block), /<rejected_by_owner>[\s\S]*Never suggest them again[\s\S]*Pricing: "No hidden tiers\." → "Plans start at £29\/month"/);
+    assert.strictEqual(rejectedFixesBlock([]), null);
+    // briefBlock is shared by every lens prompt and the summary prompt; the summary is the easy one to build here.
+    const p = buildSummaryPrompt(input({ brief: { url: 'https://example.com/', icp: null, conversionGoal: null, productsBlock: null, rulesBlock: null, rejectedBlock: block } as SummaryInput['brief'] })).user;
+    assert.ok(p.includes('<rejected_by_owner>'), 'the brief carries it');
+    assert.match(read('src/utils/site-audit-prompts.ts'), /brief\.rejectedBlock \? `\\n\$\{brief\.rejectedBlock\}` : ''/);
+    const run = read('src/utils/site-audit.ts');
+    assert.match(run, /eq\(siteAuditFixes\.status, 'dismissed'\)[\s\S]{0,120}limit\(15\)\);/);
+    assert.match(run, /productsBlock, rulesBlock, rejectedBlock \}/);
+});
+
+check('a reason given when rejecting a fix becomes one of the Mystery Shopper\'s Rules', () => {
+    const api = read('netlify/functions/site-audits.ts');
+    assert.match(api, /if \(status === 'dismissed' && reason\)[\s\S]{0,600}db\.insert\(contentRules\)[\s\S]{0,200}ruleText: `Website suggestions: \$\{reason\}`/);
+    assert.match(api, /origin: 'rejection_feedback'/);
+    const tab = read('src/components/assistant-site-audit.js');
+    assert.match(tab, /data-sa-reject-fix="\$\{esc\(f\.id\)\}"[^>]*>Reject</);
+    assert.match(tab, /window\.promptModal\([\s\S]{0,400}multiline: true/);
+    assert.match(tab, /status: 'dismissed', reason:/);
+});
+
+check('an idea can be rejected: recorded as a rejected_idea, moved to Archived, never suggested again', () => {
+    const tab = read('src/components/assistant-site-audit.js');
+    assert.match(tab, /data-sa-reject-idea="\$\{i\}" data-run="\$\{esc\(runId\)\}"[^>]*>Reject</);
+    assert.match(tab, /source: 'rejected_idea', runId:/);
+    assert.match(tab, /archived: \[[\s\S]*source === 'rejected_idea'\)\.map\(\(x\) => \(\{ kind: 'rejected'/);
+    assert.match(tab, /const briefs = \(\) => allBriefs\(\)\.filter\(\(b\) => b\.source !== 'rejected_idea'\);/, 'a rejection is not a brief');
+    const api = read('netlify/functions/site-audits.ts');
+    assert.match(api, /const BRIEF_SOURCES = \['idea', 'stalled_fix', 'chat', 'rejected_idea'\] as const;/);
+    assert.match(api, /if \(!who && source !== 'rejected_idea'\)/);
+    assert.match(api, /code === '23514' && source === 'rejected_idea'/, 'before the SQL is applied it says so instead of a 500');
+    const sql = read('db/z-mystery-shopper-rejected-ideas.sql');
+    assert.match(sql, /CHECK \(source IN \('idea', 'stalled_fix', 'chat', 'rejected_idea'\)\)/);
+    assert.match(sql, /site_audit_briefs_rejected_idea_uq/);
+    assert.match(read('src/utils/site-audit-covered.ts'), /b\.source === 'rejected_idea' \? 'rejected by the owner'/);
+    assert.match(read('src/utils/site-audit-snapshot.ts'), /Ideas for other assistants they rejected/);
+});
+
+check('an unusable lens reply is tried once more, with more room, before it is scored on code checks alone', () => {
+    const run = read('src/utils/site-audit.ts');
+    assert.match(run, /for \(const maxTokens of \[LENS_MAX_TOKENS, LENS_RETRY_MAX_TOKENS\]\)/);
+    assert.match(run, /const LENS_RETRY_MAX_TOKENS = 4000;/);
+});
+
+console.log('\nThe score on the Results tab (owner, 2026-10-21)');
+
+check('the score card lives in the Results tab; Checks keeps Check my site now and Settings', () => {
+    const tab = read('src/components/assistant-site-audit.js');
+    assert.match(tab, /host\.id = 'site-audit-results-host';[\s\S]{0,120}panel\.prepend\(host\);/);
+    assert.match(tab, /host\.innerHTML = card\(scoreBlock\(audit, latest\)\) \+ card\(trendCardHtml\(audit\)\);/);
+    const checks = tab.slice(tab.indexOf('function checksPanel('), tab.indexOf('function render()'));
+    assert.ok(!checks.includes('scoreBlock('), 'the score card is not on Checks any more');
+    assert.ok(checks.includes('data-sa-run') && checks.includes('data-sa-settings-open') && checks.includes('data-sa-open-results'));
+    assert.match(tab, /String\(window\._currentAssistantId\) !== String\(state\.assistantId\)\) return;/, 'never paints into another assistant');
+    assert.match(tab, /e\.target\.closest\('#site-audit-host, #site-audit-results-host'\)/, 'its buttons are handled');
+});
+
+check('each bar is green if it went up since the last check, red if down — with an arrow and the change in words', () => {
+    const tab = read('src/components/assistant-site-audit.js');
+    assert.match(tab, /const TREND = \{ up: '#15803d', down: '#dc2626', flat: '#9ca3af' \};/);
+    assert.match(tab, /`\$\{d > 0 \? '▲ \+' : '▼ '\}\$\{Math\.abs\(d\)\} since last check`/, 'never colour alone');
+    const api = read('netlify/functions/site-audits.ts');
+    assert.match(api, /previousLenses = latest && scored\.length > 1 && scored\[scored\.length - 1\]\.id === latest\.id/);
+});
+
+check('the score over time: month, quarter or year, one line against the target, hover and a table view', () => {
+    const tab = read('src/components/assistant-site-audit.js');
+    assert.match(tab, /const RANGES = \[\['month', 'Month', 31\], \['quarter', 'Quarter', 92\], \['year', 'Year', 366\]\];/);
+    assert.match(tab, /stroke-width="2" stroke-linejoin="round"/);
+    assert.match(tab, /Target \$\{esc\(target\)\}/);
+    assert.match(tab, /box\.onpointermove = /);
+    assert.match(tab, /Show as a table/);
+    const api = read('netlify/functions/site-audits.ts');
+    assert.match(api, /inArray\(siteAuditRuns\.status, \['done', 'unchanged'\]\)[\s\S]{0,160}interval '366 days'/);
+    assert.match(api, /pastIdeas, briefs, briefsAvailable, scoreHistory, previousLenses,/);
 });
 
 console.log('\nThe Website tab and My Assistants');

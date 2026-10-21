@@ -12,19 +12,21 @@
 //   calendar   { assistantId, from, to }             → checks that ran in the window (calendar.js)
 //   run        { assistantId }                       → queue a check (baseline the first time); returns runId
 //   run_status { runId }                             → poll a check
-//   fix        { fixId, status: 'accepted'|'dismissed'|'open' }
+//   fix        { fixId, status: 'accepted'|'dismissed'|'open'|'done' }
 //   brief      { assistantId, source: 'idea', runId, handoffIndex }   → a "Brief <name>" click: the
 //              { assistantId, source: 'stalled_fix', fixId }            suggestion is actioned and moves
 //              { assistantId, source: 'chat', target, title?, brief }   to History (site_audit_briefs)
 //   unbrief    { briefId }                           → undo a brief that was clicked by mistake
 //
-// 'done' is never set here: a fix is done when a later check no longer finds the old text on the
-// page (site-audit.ts fixesNowDone). That is the whole "proves the fix landed" promise.
+// A check marks a fix done when the old text has gone or the suggested text is on the page
+// (site-audit.ts fixesNowDone) and records which run proved it (verified_run_id). The user can also
+// say "I've made this change" (status 'done', verified_run_id NULL): a check can't always see the
+// change — a long testimonial is read only in part — and the next check that can see it confirms it.
 
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
-import { aiAssistants, siteAuditBriefs, siteAuditFixes, siteAuditRuns, siteAudits } from '../../db/schema';
+import { aiAssistants, contentRules, siteAuditBriefs, siteAuditFixes, siteAuditRuns, siteAudits } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { MYSTERY_SHOPPER_ROLE_KEY } from '../../src/constants/roles';
@@ -40,7 +42,10 @@ const STALLED_DAYS = 7;
 import { triggerSiteAudit } from '../../src/utils/trigger-site-audit';
 import { stalledFixBrief } from '../../src/utils/site-audit-briefs';
 
-const BRIEF_SOURCES = ['idea', 'stalled_fix', 'chat'] as const;
+// 'rejected_idea' is not a brief: it records an idea the user turned down, so it leaves To review for
+// Archived and later checks are told not to suggest it again (site-audit-covered.ts). Needs
+// db/z-mystery-shopper-rejected-ideas.sql (the table's CHECK lists the sources).
+const BRIEF_SOURCES = ['idea', 'stalled_fix', 'chat', 'rejected_idea'] as const;
 /** Postgres: relation does not exist — db/z-mystery-shopper-briefs.sql not applied yet. */
 const isMissingTable = (err: unknown) => (err as { code?: string })?.code === '42P01'
     || /site_audit_briefs/.test(String((err as Error)?.message ?? '')) && /does not exist/.test(String((err as Error)?.message ?? ''));
@@ -49,7 +54,7 @@ function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-const USER_FIX_STATUSES = ['accepted', 'dismissed', 'open'] as const;
+const USER_FIX_STATUSES = ['accepted', 'dismissed', 'open', 'done'] as const;
 
 /** Run fields the screens need — never `pages`, which is large and for the server's own comparisons. */
 const RUN_SUMMARY = {
@@ -101,6 +106,24 @@ export default withLambda(async (event) => {
             .from(siteAuditRuns)
             .where(and(eq(siteAuditRuns.auditId, audit.id), eq(siteAuditRuns.status, 'done')))
             .orderBy(desc(siteAuditRuns.id)).limit(1);
+
+        // The score over the last year, oldest first, for the Results tab's line chart — every check
+        // that scored ('done') or kept its score ('unchanged'). And the three parts from the check
+        // before the latest, so each bar can say whether it went up or down.
+        const history = (await db.select({
+            id: siteAuditRuns.id, status: siteAuditRuns.status, score: siteAuditRuns.overallScore,
+            at: sql<Date>`coalesce(${siteAuditRuns.finishedAt}, ${siteAuditRuns.createdAt})`,
+            lenses: sql<Record<string, { score: number | null }> | null>`${siteAuditRuns.scores} -> 'lenses'`,
+        }).from(siteAuditRuns).where(and(
+            eq(siteAuditRuns.auditId, audit.id),
+            inArray(siteAuditRuns.status, ['done', 'unchanged']),
+            sql`${siteAuditRuns.overallScore} IS NOT NULL`,
+            sql`${siteAuditRuns.createdAt} > now() - interval '366 days'`,
+        )).orderBy(asc(siteAuditRuns.id)).limit(400));
+        const scored = history.filter((h) => h.status === 'done' && h.lenses);
+        const previousLenses = latest && scored.length > 1 && scored[scored.length - 1].id === latest.id
+            ? scored[scored.length - 2].lenses : null;
+        const scoreHistory = history.map((h) => ({ at: h.at, score: h.score }));
         // Fixes from runs that finished. A run swept as stuck after writing its fixes never showed
         // its report, so its fixes must not appear either.
         // plainLocation: rows saved before 2026-10-18 can carry a field name ("pricingAndGuarantees").
@@ -176,7 +199,7 @@ export default withLambda(async (event) => {
         const { lastHashes: _h, ...auditOut } = audit;
         return json(200, {
             audit: auditOut, runs, latest: latest ?? null, fixes, vocab, team, stalled, nextCheck, nextPages,
-            pastIdeas, briefs, briefsAvailable,
+            pastIdeas, briefs, briefsAvailable, scoreHistory, previousLenses,
         });
     }
 
@@ -303,12 +326,36 @@ export default withLambda(async (event) => {
             .where(and(
                 eq(siteAuditFixes.id, fixId),
                 eq(siteAuditFixes.organisationId, orgId),
-                // A verified fix stays done — the page proved it.
-                inArray(siteAuditFixes.status, ['open', 'accepted', 'dismissed']),
+                // A fix a check verified stays done — the page proved it. One the user marked done can be undone.
+                sql`(${siteAuditFixes.status} IN ('open', 'accepted', 'dismissed') OR (${siteAuditFixes.status} = 'done' AND ${siteAuditFixes.verifiedRunId} IS NULL))`,
             ))
-            .returning({ id: siteAuditFixes.id, status: siteAuditFixes.status });
-        if (!updated) return json(404, { error: 'Fix not found.' });
-        return json(200, { fix: updated });
+            .returning({ id: siteAuditFixes.id, status: siteAuditFixes.status, auditId: siteAuditFixes.auditId, afterText: siteAuditFixes.afterText });
+        if (!updated) return json(404, { error: 'Fix not found, or a check has already confirmed it.' });
+
+        // Rejecting with a reason teaches the assistant: the reason becomes one of its Rules, which every
+        // check reads (loadAssistantRulesBlock → brief.rulesBlock), so it stops the whole kind of
+        // suggestion. Rejected fixes themselves are also listed to every later check (site-audit.ts).
+        // Best-effort: the rejection stands even if the rule can't be saved.
+        let ruleId: number | null = null;
+        const reason = typeof body.reason === 'string' ? body.reason.replace(/\s+/g, ' ').trim().slice(0, 500) : '';
+        if (status === 'dismissed' && reason) {
+            try {
+                const [audit] = await db.select({ assistantId: siteAudits.aiAssistantId }).from(siteAudits)
+                    .where(and(eq(siteAudits.id, updated.auditId), eq(siteAudits.organisationId, orgId))).limit(1);
+                if (audit) {
+                    const [rule] = await db.insert(contentRules).values({
+                        assistantId: audit.assistantId, workspaceId: orgId,
+                        ruleText: `Website suggestions: ${reason}`,
+                        note: `Said when rejecting the suggestion "${updated.afterText.slice(0, 200)}"`,
+                        createdByUserId: userId, isActive: true, origin: 'rejection_feedback',
+                    }).returning({ id: contentRules.id });
+                    ruleId = rule?.id ?? null;
+                }
+            } catch (err) {
+                console.error('[site-audits] rejection reason not saved as a rule', err instanceof Error ? err.message : err);
+            }
+        }
+        return json(200, { fix: { id: updated.id, status: updated.status }, ruleId });
     }
 
     if (action === 'brief') {
@@ -327,7 +374,7 @@ export default withLambda(async (event) => {
         let runId: number | null = null;
         let handoffIndex: number | null = null;
         let fixId: number | null = null;
-        if (source === 'idea') {
+        if (source === 'idea' || source === 'rejected_idea') {
             runId = Number(body.runId);
             handoffIndex = Number(body.handoffIndex);
             if (!Number.isInteger(runId) || runId <= 0 || !Number.isInteger(handoffIndex) || handoffIndex < 0) return json(400, { error: 'runId and handoffIndex required.' });
@@ -360,16 +407,21 @@ export default withLambda(async (event) => {
             sql`(${aiAssistants.configuration} ->> 'type') = ${target}`,
             sql`${aiAssistants.lifecycleStatus} <> 'archived'`,
         )).orderBy(aiAssistants.id).limit(1);
-        if (!who) return json(400, { error: 'You don\'t have that assistant yet.' });
+        // A rejection goes to nobody, so it needs no assistant in that role.
+        if (!who && source !== 'rejected_idea') return json(400, { error: 'You don\'t have that assistant yet.' });
 
         try {
             const [row] = await db.insert(siteAuditBriefs).values({
                 auditId: audit.id, organisationId: orgId, source, runId, handoffIndex, fixId,
-                targetRole: target, targetAssistantId: who.id, targetName: who.name, title, brief, briefedBy: userId,
+                targetRole: target, targetAssistantId: who?.id ?? null, targetName: who?.name ?? null, title, brief, briefedBy: userId,
             }).onConflictDoNothing().returning();
             // Already actioned (a second click, or the other surface got there first) — not an error.
-            return json(200, { brief: row ?? null, already: !row, assistantId: who.id });
+            return json(200, { brief: row ?? null, already: !row, assistantId: who?.id ?? null });
         } catch (err) {
+            // Before db/z-mystery-shopper-rejected-ideas.sql the table's CHECK refuses the new source.
+            if ((err as { code?: string })?.code === '23514' && source === 'rejected_idea') {
+                return json(503, { error: 'Rejecting ideas isn\'t switched on yet — it needs a database update.', code: 'REJECT_UNAVAILABLE' });
+            }
             if (!isMissingTable(err)) throw err;
             return json(503, { error: 'Briefs can\'t be recorded yet — the chat still opened.', code: 'BRIEFS_UNAVAILABLE' });
         }

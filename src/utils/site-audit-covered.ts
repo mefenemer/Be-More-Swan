@@ -29,7 +29,7 @@ export interface CoveredItem {
     target: HandoffTarget;
     /** What it is called — the idea's title, the brief's title, the post's opening, the article's title. */
     text: string;
-    how: 'suggested before' | 'briefed' | 'already written';
+    how: 'suggested before' | 'briefed' | 'already written' | 'rejected by the owner';
 }
 
 const DAYS = 90;
@@ -50,7 +50,7 @@ export async function loadAlreadyCovered(db: Db, organisationId: number, auditId
             .from(siteAuditRuns)
             .where(and(eq(siteAuditRuns.auditId, auditId), eq(siteAuditRuns.status, 'done'), gte(siteAuditRuns.createdAt, since())))
             .orderBy(desc(siteAuditRuns.id)).limit(PER_SOURCE)),
-        safe('briefs', () => db.select({ target: siteAuditBriefs.targetRole, title: siteAuditBriefs.title, brief: siteAuditBriefs.brief })
+        safe('briefs', () => db.select({ source: siteAuditBriefs.source, target: siteAuditBriefs.targetRole, title: siteAuditBriefs.title, brief: siteAuditBriefs.brief })
             .from(siteAuditBriefs)
             .where(and(eq(siteAuditBriefs.auditId, auditId), eq(siteAuditBriefs.organisationId, organisationId)))
             .orderBy(desc(siteAuditBriefs.id)).limit(PER_SOURCE)),
@@ -78,7 +78,8 @@ export async function loadAlreadyCovered(db: Db, organisationId: number, auditId
         const handoffs = ((r.report ?? {}) as { handoffs?: Array<{ target: HandoffTarget; title: string }> }).handoffs ?? [];
         for (const h of handoffs) if (h?.target && h.title) out.push({ target: h.target, text: gist(h.title), how: 'suggested before' });
     }
-    for (const b of briefs) out.push({ target: b.target as HandoffTarget, text: gist(b.title || b.brief), how: 'briefed' });
+    // A rejected idea is in the same table (source 'rejected_idea'): never suggest it again either.
+    for (const b of briefs) out.push({ target: b.target as HandoffTarget, text: gist(b.title || b.brief), how: b.source === 'rejected_idea' ? 'rejected by the owner' : 'briefed' });
     for (const p of posts) out.push({ target: 'social_media_manager', text: gist(p.caption), how: 'already written' });
     for (const a of articles) out.push({ target: 'blog_writer', text: gist(a.title), how: 'already written' });
     for (const c of camps) out.push({ target: 'campaign_orchestrator', text: gist(c.objective), how: 'already written' });

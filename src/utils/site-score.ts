@@ -307,6 +307,23 @@ export function isGrounded(quote: string, page: SitePage): boolean {
     return corpus(page).includes(q);
 }
 
+/** Words only — punctuation, dashes and quote marks don't decide whether a rewrite went live. */
+const wordRun = (s: string): string => ` ${normaliseText(s).replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `;
+
+/**
+ * Is the suggested rewrite now on the page? The parts outside [placeholders] must each be there;
+ * the owner fills the brackets with their own words. Needed because a suggestion that ADDS to the
+ * old wording keeps the old wording on the page: "Start Your Free Trial" → "Start Your Free Trial —
+ * No Card Required" was live on bemoreswan.com and never marked done (2026-10-21).
+ */
+export function suggestionIsLive(suggested: string, page: SitePage): boolean {
+    const parts = suggested.split(/\[[^\]]*\]/).map(wordRun).filter((p) => p.trim().split(' ').length >= 2);
+    const total = parts.reduce((n, p) => n + p.trim().split(' ').length, 0);
+    if (total < 3) return false;
+    const c = wordRun(corpus(page));
+    return parts.every((p) => c.includes(p));
+}
+
 export interface SuggestedFix {
     lens: Lens;
     location: string;

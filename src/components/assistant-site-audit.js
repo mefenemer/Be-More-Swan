@@ -50,6 +50,7 @@
     loadError: null,
     rendered: false,
     settingsOpen: false,
+    range: 'month',        // the Results tab's score chart: month | quarter | year
     tab: 'checks',         // the sub-tab: checks | review | progress | done | attention | archived
     historyShown: 20,      // client-paged: "Show more" adds HISTORY_PAGE
     note: null,          // { text, tone }
@@ -69,9 +70,12 @@
   const ROLE_FALLBACK = { social_media_manager: 'Social Media Assistant', blog_writer: 'Blog Writing Assistant', campaign_orchestrator: 'Campaign Assistant' };
   const roleLabel = (k) => (window.RoleLabels && window.RoleLabels.get && window.RoleLabels.get(k)) || ROLE_FALLBACK[k] || 'assistant';
   const teamFor = (roleKey) => (state.data?.team || []).find((a) => a.roleKey === roleKey) || null;
-  const briefs = () => state.data?.briefs || [];
+  // site_audit_briefs holds briefs sent AND ideas the user rejected (source 'rejected_idea'): both take
+  // an idea off To review. Only real briefs are "with your other assistants".
+  const allBriefs = () => state.data?.briefs || [];
+  const briefs = () => allBriefs().filter((b) => b.source !== 'rejected_idea');
   /** The recorded brief for one of a check's ideas, or for a fix's "say it meanwhile" nudge. */
-  const ideaBrief = (runId, i) => briefs().find((b) => b.source === 'idea' && b.runId === runId && b.handoffIndex === i) || null;
+  const ideaBrief = (runId, i) => allBriefs().find((b) => (b.source === 'idea' || b.source === 'rejected_idea') && b.runId === runId && b.handoffIndex === i) || null;
   const fixBrief = (fixId) => briefs().find((b) => b.source === 'stalled_fix' && b.fixId === fixId) || null;
   /** Same words as src/utils/site-audit-briefs.ts stalledFixBrief — what History records as briefed. */
   const stalledFixBrief = (afterText) => `Please draft a post that leads with this message: "${afterText}". It is how we now describe what we do, and our website will say the same soon. Keep any [placeholders] for me to fill in.`;
@@ -177,18 +181,28 @@
       </form>`;
   }
 
+  // Trend colours for the three bars (validated: dataviz validate_palette, light surface). Never the
+  // only cue: each bar also says ▲/▼ and by how much, in text.
+  const TREND = { up: '#15803d', down: '#dc2626', flat: '#9ca3af' };
+
   function scoreBlock(audit, latest) {
     const score = audit.currentScore;
     const lenses = latest?.scores?.lenses || {};
+    const prev = state.data?.previousLenses || null;
     const delta = (score !== null && audit.baselineScore !== null && score !== audit.baselineScore)
       ? `${score > audit.baselineScore ? '+' : ''}${score - audit.baselineScore} since your first check` : '';
     const bars = LENSES.map(([k, label, help]) => {
       const l = lenses[k];
       const v = l && l.score !== null && l.score !== undefined ? l.score : null;
+      const p = prev && prev[k] && prev[k].score !== null && prev[k].score !== undefined ? prev[k].score : null;
+      // Up green, down red, unchanged (or nothing to compare with) grey — against the check before.
+      const d = v !== null && p !== null ? v - p : null;
+      const dir = d === null || d === 0 ? 'flat' : d > 0 ? 'up' : 'down';
+      const change = d === null ? 'first check' : d === 0 ? 'no change' : `${d > 0 ? '▲ +' : '▼ '}${Math.abs(d)} since last check`;
       return `
         <div title="${esc(help)}">
-          <div class="flex justify-between text-xs"><span class="font-bold text-gray-700">${esc(label)}</span><span class="text-gray-600">${v === null ? 'not scored' : esc(v)}${l && l.partial ? ' · partly checked' : ''}</span></div>
-          <div class="h-2 bg-gray-100 rounded-full mt-1"><div class="h-2 rounded-full bg-indigo-500" style="width:${v === null ? 0 : Math.max(2, Math.min(100, v))}%"></div></div>
+          <div class="flex justify-between gap-2 text-xs"><span class="font-bold text-gray-700">${esc(label)}</span><span class="text-gray-600 whitespace-nowrap">${v === null ? 'not scored' : esc(v)}${l && l.partial ? ' · partly checked' : ''} <span class="text-gray-500">· ${esc(change)}</span></span></div>
+          <div class="h-2 bg-gray-100 rounded-full mt-1"><div class="h-2 rounded-full" style="background:${TREND[dir]};width:${v === null ? 0 : Math.max(2, Math.min(100, v))}%"></div></div>
         </div>`;
     }).join('');
     return `
@@ -198,8 +212,120 @@
           <p class="text-4xl font-black text-gray-900 mt-1">${score === null ? '—' : esc(score)}<span class="text-base font-bold text-gray-400">/100</span></p>
           <p class="text-xs text-gray-500 mt-1">Target ${esc(audit.targetScore)}${delta ? ` · ${esc(delta)}` : ''}</p>
         </div>
-        <div class="flex-1 min-w-[160px] space-y-3">${bars}</div>
-      </div>`;
+        <div class="flex-1 min-w-[200px] space-y-3">${bars}</div>
+      </div>
+      <p class="text-[11px] text-gray-500 mt-3"><span style="color:${TREND.up}">▲</span> green: up since the last check · <span style="color:${TREND.down}">▼</span> red: down · grey: no change</p>`;
+  }
+
+  // ── Score over time (the Results tab) ──────────────────────────────────────
+  // One series, so no legend: the card's title names it. Line 2px, points r=4 with a 2px surface
+  // ring, hairline grid, the target as a reference line; a crosshair snaps to the nearest check and
+  // a tooltip reads it. A table view carries every value for anyone who can't use the chart.
+  const RANGES = [['month', 'Month', 31], ['quarter', 'Quarter', 92], ['year', 'Year', 366]];
+  const LINE = '#d6006b';
+  const fmtDay = (d) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  function historyIn(days) {
+    const from = Date.now() - days * 864e5;
+    return (state.data?.scoreHistory || []).filter((h) => h.score !== null && new Date(h.at).getTime() >= from);
+  }
+  function trendCardHtml(audit) {
+    const range = RANGES.find((r) => r[0] === state.range) || RANGES[0];
+    const pts = historyIn(range[2]);
+    return `
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h3 class="text-sm font-black text-gray-900">Website score over time</h3>
+        <div class="flex items-center gap-0.5 p-0.5 rounded-lg bg-gray-100" role="group" aria-label="Time range">${RANGES.map(([k, l]) => `
+          <button type="button" data-sa-range="${k}" aria-pressed="${state.range === k}" class="metrics-period-btn px-2.5 py-1 text-xs font-bold rounded-md transition ${state.range === k ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}">${l}</button>`).join('')}</div>
+      </div>
+      <p class="text-xs text-gray-500 mt-1">Every check in the last ${esc(range[1].toLowerCase())}, out of 100. The line across is your target (${esc(audit.targetScore)}).</p>
+      ${pts.length
+        ? `<div data-sa-chart class="relative mt-3" style="height:220px" tabindex="0" aria-label="Website score over the last ${esc(range[1].toLowerCase())}: ${pts.length} check${pts.length === 1 ? '' : 's'}, from ${esc(pts[0].score)} to ${esc(pts[pts.length - 1].score)}"></div>
+           ${pts.length === 1 ? '<p class="text-xs text-gray-500 mt-1">One check so far in this range — the line appears from the next one.</p>' : ''}
+           <details class="mt-2"><summary class="text-xs text-gray-500 cursor-pointer">Show as a table</summary>
+             <table class="mt-2 text-xs w-full"><thead><tr class="text-left text-gray-500"><th class="py-1 font-semibold">Check</th><th class="py-1 font-semibold">Score</th></tr></thead>
+             <tbody>${pts.slice().reverse().map((h) => `<tr class="border-t border-gray-100"><td class="py-1 text-gray-700">${esc(when(h.at))}</td><td class="py-1 text-gray-900 font-semibold">${esc(h.score)}</td></tr>`).join('')}</tbody></table></details>`
+        : `<p class="text-sm text-gray-500 mt-3">No checks in the last ${esc(range[1].toLowerCase())}. Run one from the Website tab's Checks.</p>`}`;
+  }
+
+  let chartObserver = null;
+  /** Draw into the chart box at its real width (it is 0 while the Results tab is hidden). */
+  function drawChart(box) {
+    const range = RANGES.find((r) => r[0] === state.range) || RANGES[0];
+    const pts = historyIn(range[2]);
+    const W = box.clientWidth;
+    if (!W || !pts.length) return;
+    const H = 220, L = 30, R = 12, T = 12, B = 26;
+    const t0 = Date.now() - range[2] * 864e5, t1 = Date.now();
+    const x = (d) => L + ((new Date(d).getTime() - t0) / (t1 - t0)) * (W - L - R);
+    const y = (v) => T + (1 - v / 100) * (H - T - B);
+    const target = state.data?.audit?.targetScore;
+    const grid = [0, 25, 50, 75, 100].map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#eceae4" stroke-width="1"/><text x="${L - 6}" y="${y(v) + 3}" text-anchor="end" font-size="10" fill="#787263">${v}</text>`).join('');
+    const ticks = [t0, (t0 + t1) / 2, t1].map((t, i) => `<text x="${x(t)}" y="${H - 8}" text-anchor="${['start', 'middle', 'end'][i]}" font-size="10" fill="#787263">${esc(fmtDay(t))}</text>`).join('');
+    const tgt = Number.isFinite(target) ? `<line x1="${L}" x2="${W - R}" y1="${y(target)}" y2="${y(target)}" stroke="${LINE}" stroke-opacity="0.35" stroke-width="1"/><text x="${W - R}" y="${y(target) - 4}" text-anchor="end" font-size="10" fill="#5c564b">Target ${esc(target)}</text>` : '';
+    const path = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.at).toFixed(1)},${y(p.score).toFixed(1)}`).join(' ');
+    const dots = pts.map((p) => `<circle cx="${x(p.at)}" cy="${y(p.score)}" r="4" fill="${LINE}" stroke="#ffffff" stroke-width="2"/>`).join('');
+    const last = pts[pts.length - 1];
+    const endLabel = `<text x="${Math.min(x(last.at) + 8, W - R)}" y="${y(last.score) - 8}" text-anchor="${x(last.at) + 40 > W - R ? 'end' : 'start'}" font-size="11" font-weight="700" fill="#1f1e1b">${esc(last.score)}</text>`;
+    box.innerHTML = `<svg width="${W}" height="${H}" role="img" aria-hidden="true" style="display:block;overflow:visible">${grid}${tgt}${ticks}
+        ${pts.length > 1 ? `<path d="${path}" fill="none" stroke="${LINE}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` : ''}${dots}${endLabel}
+        <line data-x-hair x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="#787263" stroke-width="1" visibility="hidden"/></svg>
+      <div data-tip class="absolute pointer-events-none bg-white border border-gray-200 rounded-lg shadow-sm px-2 py-1 text-xs" style="display:none"></div>`;
+    const hair = box.querySelector('[data-x-hair]');
+    const tip = box.querySelector('[data-tip]');
+    const show = (i) => {
+      const p = pts[i];
+      const px = x(p.at);
+      hair.setAttribute('x1', px); hair.setAttribute('x2', px); hair.setAttribute('visibility', 'visible');
+      tip.textContent = '';
+      const strong = document.createElement('strong'); strong.textContent = `${p.score}/100`;
+      tip.append(strong, document.createTextNode(` · ${when(p.at)}`));
+      tip.style.display = '';
+      tip.style.left = `${Math.max(0, Math.min(W - tip.offsetWidth, px - tip.offsetWidth / 2))}px`;
+      tip.style.top = `${Math.max(0, y(p.score) - 36)}px`;
+      box.dataset.at = String(i);
+    };
+    const nearest = (cx) => pts.reduce((best, p, i) => (Math.abs(x(p.at) - cx) < Math.abs(x(pts[best].at) - cx) ? i : best), 0);
+    box.onpointermove = (e) => show(nearest(e.clientX - box.getBoundingClientRect().left));
+    box.onpointerleave = () => { hair.setAttribute('visibility', 'hidden'); tip.style.display = 'none'; };
+    // Keyboard: arrows step through the checks (the table view has them all too).
+    box.onkeydown = (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      const cur = box.dataset.at ? Number(box.dataset.at) : pts.length - 1;
+      show(Math.max(0, Math.min(pts.length - 1, cur + (e.key === 'ArrowRight' ? 1 : -1))));
+    };
+    box.onblur = box.onpointerleave;
+  }
+
+  /**
+   * The Results tab's Mystery Shopper cards: the score and its three parts, then the score over time.
+   * They live in the main Results tab (owner, 2026-10-21) — the Website tab's Checks keeps "Check my
+   * site now" and Settings. The host is made at the top of the Results panel the first time.
+   */
+  function renderResults(audit, latest) {
+    // Only on this assistant's own page: a poll that lands after navigating away must not paint
+    // into another assistant's Results tab.
+    if (String(window._currentAssistantId) !== String(state.assistantId)) return;
+    const panel = document.getElementById('maintab-goals');
+    if (!panel) return;
+    let host = document.getElementById('site-audit-results-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'site-audit-results-host';
+      host.className = 'space-y-4 mb-8';
+      panel.prepend(host);
+    }
+    if (!audit) { host.innerHTML = ''; return; }
+    host.innerHTML = card(scoreBlock(audit, latest)) + card(trendCardHtml(audit));
+    const box = host.querySelector('[data-sa-chart]');
+    if (chartObserver) chartObserver.disconnect();
+    if (box) {
+      drawChart(box);
+      if (typeof ResizeObserver === 'function') {
+        chartObserver = new ResizeObserver(() => drawChart(box));
+        chartObserver.observe(box);
+      }
+    }
   }
 
   function statusLine(audit, latest) {
@@ -239,10 +365,11 @@
         ${(state.data?.stalled || []).includes(f.id) ? stalledNudge(f) : ''}
         <div class="flex flex-wrap items-center gap-2 mt-3">
           ${accepted
-            ? `<span class="text-xs font-semibold text-green-700">You said you'll make this change — the next check confirms it.</span>
+            ? `<span class="text-xs font-semibold text-green-700">You said you'll make this change. Made it? Tell us here, or the next check will spot it.</span>
+               <button type="button" data-sa-fix="${esc(f.id)}" data-status="done" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">I've made this change</button>
                <button type="button" data-sa-fix="${esc(f.id)}" data-status="open" class="text-xs text-gray-500 underline">Undo</button>`
             : `<button type="button" data-sa-fix="${esc(f.id)}" data-status="accepted" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">I'll make this change</button>
-               <button type="button" data-sa-fix="${esc(f.id)}" data-status="dismissed" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">Not for us</button>`}
+               <button type="button" data-sa-reject-fix="${esc(f.id)}" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">Reject</button>`}
           <button type="button" data-sa-copy="${esc(f.id)}" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Copy</button>
         </div>
       </div>`;
@@ -274,6 +401,7 @@
         ${who
           ? `<button type="button" data-sa-handoff="${i}" data-run="${esc(runId)}" class="mt-2 btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Brief ${esc(who.name)}</button>`
           : `<p class="text-xs text-gray-500 mt-2">For a ${esc(roleLabel(h.target))} — you don't have one yet.</p>`}
+        <button type="button" data-sa-reject-idea="${i}" data-run="${esc(runId)}" class="mt-2 btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Reject</button>
       </div>`;
   }
 
@@ -305,7 +433,7 @@
     const fixFor = (lens) => fixes.find((f) => f.lens === lens && (f.status === 'open' || f.status === 'accepted'));
     return `
       <h3 class="text-sm font-black text-gray-900">Why your score isn't higher</h3>
-      <p class="text-xs text-gray-500 mt-1">What a buyer's eye looks for and didn't find, most important first. Each one fixed raises the score at the next check.</p>
+      <p class="text-xs text-gray-500 mt-1">What a buyer's eye looks for and didn't find, most important first. This list is worked out afresh at every check: there's nothing to tick off — once your page passes one, it simply drops off the list at the next check and the score goes up. The suggested fixes are what move through In progress to Done.</p>
       <ul class="mt-3 space-y-2">${failed.slice(0, 10).map((o, i) => {
         const [w, cls] = WEIGHT_WORDS[o.weight] || IMPACT.medium;
         const lens = (LENSES.find((l) => l[0] === o.lens) || [null, ''])[1];
@@ -351,18 +479,36 @@
     if (e.kind === 'fix') {
       const f = e.f;
       const live = f.status === 'done';
+      // Done by a check (verifiedRunId) or by the user's "I've made this change" — which the next
+      // check that can see the change confirms.
+      const confirmed = live && f.verifiedRunId != null;
       return `
         <li class="border border-gray-200 rounded-xl p-4">
           <div class="flex flex-wrap items-center gap-2">
-            ${live ? pill('Live on your site', 'bg-green-50 text-green-700') : pill('Not for us', 'bg-gray-100 text-gray-600')}
+            ${confirmed ? pill('Live on your site', 'bg-green-50 text-green-700') : live ? pill('You marked this done', 'bg-green-50 text-green-700') : pill('Rejected', 'bg-gray-100 text-gray-600')}
             <span class="text-xs font-bold text-gray-900">${esc(f.location || 'Page')}</span>
-            <span class="text-[10px] text-gray-500">${live ? `Confirmed ${esc(when(f.updatedAt))}` : `Dismissed ${esc(when(f.updatedAt))}`} · suggested ${esc(when(f.createdAt))}</span>
+            <span class="text-[10px] text-gray-500">${confirmed ? `Confirmed by a check ${esc(when(f.updatedAt))}` : live ? `Marked done ${esc(when(f.updatedAt))}` : `Rejected ${esc(when(f.updatedAt))}`} · suggested ${esc(when(f.createdAt))}</span>
           </div>
           <div class="grid gap-2 mt-2 md:grid-cols-2">
             <div class="bg-gray-50 rounded-lg p-2"><p class="text-[10px] font-bold text-gray-500 uppercase">${live ? 'Was' : 'On your site'}</p><p class="text-xs text-gray-700 mt-0.5 break-words">${esc(f.beforeText)}</p></div>
             <div class="bg-indigo-50/60 rounded-lg p-2"><p class="text-[10px] font-bold text-indigo-700 uppercase">${live ? 'Now' : 'Suggested'}</p><p class="text-xs text-gray-900 mt-0.5 break-words">${esc(f.afterText)}</p></div>
           </div>
-          ${live ? '' : `<button type="button" data-sa-fix="${esc(f.id)}" data-status="open" class="mt-2 text-xs text-gray-500 underline">Bring back</button>`}
+          ${confirmed ? '' : live
+            ? `<button type="button" data-sa-fix="${esc(f.id)}" data-status="accepted" class="mt-2 text-xs text-gray-500 underline">Not done after all</button>`
+            : `<button type="button" data-sa-fix="${esc(f.id)}" data-status="open" class="mt-2 text-xs text-gray-500 underline">Bring back</button>`}
+        </li>`;
+    }
+    if (e.kind === 'rejected') {
+      const b = e.b;
+      return `
+        <li class="border border-gray-200 rounded-xl p-4">
+          <div class="flex flex-wrap items-center gap-2">
+            ${pill('Rejected', 'bg-gray-100 text-gray-600')}
+            ${b.title ? `<span class="text-xs font-bold text-gray-900">${esc(b.title)}</span>` : ''}
+            <span class="text-[10px] text-gray-500">Idea for a ${esc(roleLabel(b.targetRole))} · rejected ${esc(when(b.createdAt))}</span>
+          </div>
+          <p class="text-xs text-gray-700 mt-2">${esc(b.brief)}</p>
+          <button type="button" data-sa-unbrief="${esc(b.id)}" class="mt-2 text-xs text-gray-500 underline">Bring back</button>
         </li>`;
     }
     if (e.kind === 'brief') {
@@ -431,6 +577,7 @@
       },
       archived: [
         ...fixes.filter((f) => f.status === 'dismissed').map((f) => ({ kind: 'fix', at: f.updatedAt, f })),
+        ...allBriefs().filter((x) => x.source === 'rejected_idea').map((x) => ({ kind: 'rejected', at: x.createdAt, b: x })),
         ...pastIdeas,
       ].sort(byNew),
     };
@@ -512,7 +659,7 @@
   function archivedPanel(b) {
     return card(`
       <h3 class="text-sm font-black text-gray-900">Archived</h3>
-      <p class="text-xs text-gray-500 mt-1">Fixes you said weren't for you ("Bring back" returns one to To review), and ideas from earlier checks that nobody acted on.</p>
+      <p class="text-xs text-gray-500 mt-1">Fixes and ideas you rejected ("Bring back" returns one to To review), and ideas from earlier checks that nobody acted on. ${esc(state.assistantName || 'Your Mystery Shopper')} doesn't suggest what you rejected again.</p>
       ${b.archived.length ? list(b.archived.slice(0, state.historyShown)) : `<div class="mt-3">${empty('Nothing archived.')}</div>`}
       ${b.archived.length > state.historyShown ? `<button type="button" data-sa-history-more class="mt-3 text-xs text-gray-500 underline">Show more (${b.archived.length - state.historyShown} older)</button>` : ''}`);
   }
@@ -532,15 +679,15 @@
             <button type="button" data-sa-settings-open class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition">Settings</button>
           </div>
         </div>
-        ${scoreBlock(audit, latest)}
-        <div class="mt-4">${statusLine(audit, latest)}</div>
+        <p class="text-sm text-gray-700">Score: <strong class="text-gray-900">${audit.currentScore === null ? '—' : esc(audit.currentScore)}/100</strong> · target ${esc(audit.targetScore)} <button type="button" data-sa-open-results class="link text-xs font-semibold ml-1">See it on the Results tab</button></p>
+        <div class="mt-3">${statusLine(audit, latest)}</div>
         <p class="text-xs text-gray-400 mt-2">A check that re-scores uses 1 task. If nothing on your site or your competitors' sites has changed, the score stands and nothing is used.</p>`)}
       ${goalBlock(audit)}
       ${state.settingsOpen ? card(`<h3 class="text-sm font-black text-gray-900 mb-3">Settings</h3>${settingsForm(audit)}`) : ''}
       ${latest?.report?.summary ? card(`
         <h3 class="text-sm font-black text-gray-900">What the last check said</h3>
         <p class="text-sm text-gray-700 mt-2">${esc(latest.report.summary)}</p>
-        ${(latest.report.partialLenses || []).length ? `<p class="text-xs text-amber-700 mt-2">Part of this check couldn't be completed (${esc(latest.report.partialLenses.map((k) => (LENSES.find((l) => l[0] === k) || [k, k])[1]).join(', '))}), so that part was scored on the automatic checks only.</p>` : ''}`) : ''}
+        ${(latest.report.partialLenses || []).length ? `<p class="text-xs text-amber-700 mt-2">The ${esc(latest.report.partialLenses.map((k) => (LENSES.find((l) => l[0] === k) || [k, k])[1]).join(' and '))} part didn't come back from the AI in a usable form this time, so it was scored on the automatic checks alone (the ones that don't need AI) and may read lower than it should. Nothing extra was charged, and the next check tries it again.</p>` : ''}`) : ''}
       ${latest ? card(missingBlock(latest) || '<p class="text-xs text-gray-500">Every check passed at the last look.</p>') : ''}
       ${card(competitorsBlock(audit, latest))}
       ${runs.length ? card(`<h3 class="text-sm font-black text-gray-900">Past checks</h3><ul class="mt-2 space-y-1">${runs.map((r) => `
@@ -561,6 +708,7 @@
     const typed = [...el.querySelectorAll('[data-sa-settings] [name]')].map((f) => f.value);
 
     const audit = state.data?.audit;
+    renderResults(audit, state.data?.latest);
     if (!audit) {
       el.innerHTML = card(`
         <h3 class="text-base font-black text-gray-900">Which website should ${esc(state.assistantName || 'your Mystery Shopper')} check?</h3>
@@ -626,10 +774,21 @@
     await load();
   });
 
+  // The chart is drawn at its box's width, which is 0 while the Results tab is hidden. The resize
+  // observer catches it opening; this catches it too, in case the observer is late or absent.
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest || !e.target.closest('[data-maintab="goals"]')) return;
+    setTimeout(() => { const box = document.querySelector('#site-audit-results-host [data-sa-chart]'); if (box) drawChart(box); }, 0);
+  });
+
   document.addEventListener('click', async (e) => {
-    if (!state.assistantId || !e.target.closest('#site-audit-host')) return;
+    // The Website tab, and the cards this tab puts in the Results tab.
+    if (!state.assistantId || !e.target.closest('#site-audit-host, #site-audit-results-host')) return;
     const t = (sel) => e.target.closest(sel);
 
+    const rng = t('[data-sa-range]');
+    if (rng) { state.range = rng.dataset.saRange; renderResults(state.data?.audit, state.data?.latest); return; }
+    if (t('[data-sa-open-results]')) { window._activateMainTab?.('goals'); document.getElementById('site-audit-results-host')?.scrollIntoView({ block: 'start' }); return; }
     const sub = t('[data-sa-subtab]');
     if (sub) { state.tab = sub.dataset.saSubtab; state.historyShown = HISTORY_PAGE; render(); return; }
     const goFix = t('[data-sa-goto-fix]');
@@ -678,6 +837,33 @@
       try {
         await post({ action: 'fix', fixId: Number(fix.dataset.saFix), status: fix.dataset.status });
         say(null);
+      } catch (err) { say(err.message, 'error'); }
+      await load();
+      return;
+    }
+
+    const rejectFix = t('[data-sa-reject-fix]');
+    if (rejectFix) {
+      // Why, optionally: a reason becomes one of this assistant's Rules, which every check reads —
+      // so "we never show prices on the homepage" stops the whole kind of suggestion, not just this one.
+      const reason = typeof window.promptModal === 'function'
+        ? await window.promptModal(`${esc(state.assistantName || 'Your Mystery Shopper')} won't suggest this change again. If you say why, it keeps that in mind for every future check too (it's added to its Rules, where you can change it).`, { title: 'Reject this suggestion?', confirmLabel: 'Reject', cancelLabel: 'Keep it', multiline: true, placeholder: 'Why not? (optional) e.g. we never show prices on the homepage' })
+        : '';
+      if (reason === null) return;   // "Keep it"
+      rejectFix.disabled = true;
+      try {
+        const res = await post({ action: 'fix', fixId: Number(rejectFix.dataset.saRejectFix), status: 'dismissed', reason: String(reason || '').trim() });
+        say(res.ruleId ? 'Rejected — it\'s in Archived, and your reason is now one of its Rules.' : 'Rejected — it\'s in Archived.');
+      } catch (err) { say(err.message, 'error'); }
+      await load();
+      return;
+    }
+    const rejectIdea = t('[data-sa-reject-idea]');
+    if (rejectIdea) {
+      rejectIdea.disabled = true;
+      try {
+        await post({ action: 'brief', assistantId: state.assistantId, source: 'rejected_idea', runId: Number(rejectIdea.dataset.run), handoffIndex: Number(rejectIdea.dataset.saRejectIdea) });
+        say('Rejected — it\'s in Archived, and won\'t be suggested again.');
       } catch (err) { say(err.message, 'error'); }
       await load();
       return;

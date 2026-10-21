@@ -34,6 +34,11 @@ export interface AuditBrief {
      * the public taster, which has no assistant, needs none.
      */
     rulesBlock?: string | null;
+    /**
+     * Suggestions the owner rejected (rejectedFixesBlock), or null. Learning from a rejection: never
+     * suggest the same change, or one that does the same thing, again.
+     */
+    rejectedBlock?: string | null;
 }
 
 /** Max suggested fixes per lens — the summary picks three across all lenses. */
@@ -88,6 +93,7 @@ function briefBlock(brief: AuditBrief): string {
         `</brief>`,
         brief.productsBlock ? `\n${brief.productsBlock}` : '',
         brief.rulesBlock ? `\n${brief.rulesBlock}\nEvery suggested rewrite and every hand-off brief must follow these rules.` : '',
+        brief.rejectedBlock ? `\n${brief.rejectedBlock}` : '',
     ].join('\n');
 }
 
@@ -131,6 +137,13 @@ export function buildLensPrompt(
     }
     parts.push(rubricBlock(lens), EVIDENCE_RULES, LENS_OUTPUT);
     return { system: systemPrompt(LENS_ROLE[lens]), user: parts.join('\n\n') };
+}
+
+/** The owner's rejected website suggestions, for every later check's brief. Empty → null. */
+export function rejectedFixesBlock(rows: Array<{ location: string | null; beforeText: string; afterText: string }>): string | null {
+    if (!rows.length) return null;
+    const lines = rows.slice(0, 15).map((r) => `- ${r.location ? `${r.location}: ` : ''}"${r.beforeText.slice(0, 120)}" → "${r.afterText.slice(0, 160)}"`);
+    return `<rejected_by_owner>\nThe owner rejected these suggested changes. Never suggest them again, or a different wording of the same change in the same place:\n${lines.join('\n')}\n</rejected_by_owner>`;
 }
 
 // ── The summary ─────────────────────────────────────────────────────────────────────────────

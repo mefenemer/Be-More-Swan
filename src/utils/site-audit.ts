@@ -31,13 +31,13 @@ import { createNotification } from './notify';
 import { loadProductsBlock } from './org-products';
 import { loadAlreadyCovered, type CoveredItem } from './site-audit-covered';
 import {
-    buildLensPrompt, buildSummaryPrompt, sanitiseSummary, type AuditBrief, type Handoff, type Priority,
+    buildLensPrompt, buildSummaryPrompt, rejectedFixesBlock, sanitiseSummary, type AuditBrief, type Handoff, type Priority,
 } from './site-audit-prompts';
 import {
     describeChanges, diffSitePages, extractSitePage, pickSecondaryPages, siteContentHash, normaliseText, type SitePage,
 } from './site-extract';
 import {
-    groundFixes, isGrounded, sanitiseRubricAnswers, scoreAudit, type AuditScore, type Lens, type RubricAnswer, type SuggestedFix,
+    groundFixes, isGrounded, sanitiseRubricAnswers, scoreAudit, suggestionIsLive, type AuditScore, type Lens, type RubricAnswer, type SuggestedFix,
 } from './site-score';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
 
@@ -134,6 +134,8 @@ export type AuditOutcome =
 export const SITE_KEY = 'site';
 
 const LENS_MAX_TOKENS = 2000;
+/** The second try of a lens whose first reply was unusable (most often cut off at the limit). */
+const LENS_RETRY_MAX_TOKENS = 4000;
 const SUMMARY_MAX_TOKENS = 1200;
 
 /** Merge a competitor's pricing/about pages into its homepage read: pricing, proof and FAQ only. */
@@ -211,20 +213,26 @@ export async function runAuditCore(input: AuditInput, deps: AuditDeps): Promise<
 
     const lenses: Lens[] = readable.length ? ['clarity', 'compete', 'ai'] : ['clarity', 'ai'];
     const results = await Promise.all(lenses.map(async (lens) => {
-        try {
-            const prompt = buildLensPrompt(lens, input.brief, own.page,
-                readable.map((r, i) => ({ page: r.page, changes: competitorChanges[i].changes })));
-            const raw = parseModelJson<{ answers?: unknown; fixes?: unknown }>(
-                await deps.callModel({ ...prompt, maxTokens: LENS_MAX_TOKENS }));
-            if (!raw) return null;
-            const a = sanitiseRubricAnswers(raw.answers, lens, own.page);
-            const f = groundFixes(raw.fixes, lens, own.page);
-            if (!a.answers.length) return null;   // a reply with no usable answer is a failed lens
-            return { lens, answers: a.answers, fixes: f.fixes, dropped: a.dropped + f.dropped };
-        } catch (err) {
-            console.error('[site-audit] lens call failed', { lens, message: err instanceof Error ? err.message : String(err) });
-            return null;
+        const prompt = buildLensPrompt(lens, input.brief, own.page,
+            readable.map((r, i) => ({ page: r.page, changes: competitorChanges[i].changes })));
+        // Two tries. "Part of this check couldn't be completed (AI search readiness)" was the first
+        // try's reply coming back unusable — most likely cut off: that lens asks 14 questions and
+        // quotes the most evidence, and a reply cut at the token limit is not valid JSON. The second
+        // try has more room. Only when both fail is the lens scored on the code checks alone.
+        for (const maxTokens of [LENS_MAX_TOKENS, LENS_RETRY_MAX_TOKENS]) {
+            try {
+                const raw = parseModelJson<{ answers?: unknown; fixes?: unknown }>(
+                    await deps.callModel({ ...prompt, maxTokens }));
+                if (!raw) { console.error('[site-audit] lens reply unusable', { lens, maxTokens }); continue; }
+                const a = sanitiseRubricAnswers(raw.answers, lens, own.page);
+                const f = groundFixes(raw.fixes, lens, own.page);
+                if (!a.answers.length) { console.error('[site-audit] lens reply had no usable answer', { lens, maxTokens }); continue; }
+                return { lens, answers: a.answers, fixes: f.fixes, dropped: a.dropped + f.dropped };
+            } catch (err) {
+                console.error('[site-audit] lens call failed', { lens, maxTokens, message: err instanceof Error ? err.message : String(err) });
+            }
         }
+        return null;
     }));
 
     const answered = results.filter((r): r is NonNullable<typeof r> => r !== null);
@@ -263,10 +271,13 @@ export async function runAuditCore(input: AuditInput, deps: AuditDeps): Promise<
     };
 }
 
-/** Open or accepted fixes whose old text is gone from the page — the change landed. Pure. */
-export function fixesNowDone(open: Array<{ id: number; beforeText: string }>, page: SitePage): number[] {
+/**
+ * Fixes whose change landed: the old text is gone from the page, or the suggested text is on it
+ * (a suggestion that adds to the old wording leaves the old wording in place). Pure.
+ */
+export function fixesNowDone(open: Array<{ id: number; beforeText: string; afterText?: string | null }>, page: SitePage): number[] {
     if (page.thin) return [];   // a page we couldn't read proves nothing either way
-    return open.filter((f) => !isGrounded(f.beforeText, page)).map((f) => f.id);
+    return open.filter((f) => !isGrounded(f.beforeText, page) || (!!f.afterText && suggestionIsLive(f.afterText, page))).map((f) => f.id);
 }
 
 // ── Real dependencies ───────────────────────────────────────────────────────────────────────
@@ -358,11 +369,19 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
         // What the other assistants already have — earlier ideas, briefs, their own posts and articles —
         // so this check's ideas are new ones (owner, 2026-10-21: they were repeating every check).
         const covered = await loadAlreadyCovered(db, orgId, audit.id);
+        // ...and what the owner rejected, so a rejected change is never suggested again in other words.
+        let rejectedBlock: string | null = null;
+        try {
+            rejectedBlock = rejectedFixesBlock(await db.select({ location: siteAuditFixes.location, beforeText: siteAuditFixes.beforeText, afterText: siteAuditFixes.afterText })
+                .from(siteAuditFixes)
+                .where(and(eq(siteAuditFixes.auditId, audit.id), eq(siteAuditFixes.status, 'dismissed')))
+                .orderBy(desc(siteAuditFixes.updatedAt)).limit(15));
+        } catch { /* none */ }
 
         const kind = claimed.kind as AuditInput['kind'];
         const outcome = await runAuditCore({
             kind,
-            brief: { url: audit.url, icp: audit.icp, conversionGoal: audit.conversionGoal, productsBlock, rulesBlock },
+            brief: { url: audit.url, icp: audit.icp, conversionGoal: audit.conversionGoal, productsBlock, rulesBlock, rejectedBlock },
             competitorUrls: Array.isArray(audit.competitorUrls) ? (audit.competitorUrls as string[]) : [],
             lastHashes: (audit.lastHashes ?? {}) as Record<string, string>,
             previousPages: ((prev?.pages ?? {}) as Record<string, SitePage>),
@@ -386,12 +405,17 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
 
         // Fixes from earlier runs whose old text has gone — verified by this read. Only fixes for THIS
         // page: a homepage fix is not "done" because its wording is absent from the pricing page.
-        const open = await db.select({ id: siteAuditFixes.id, beforeText: siteAuditFixes.beforeText }).from(siteAuditFixes)
+        // Every fix for this page — the user decided on each, so none is raised again with the same old text.
+        const known = await db.select({
+            id: siteAuditFixes.id, beforeText: siteAuditFixes.beforeText, afterText: siteAuditFixes.afterText,
+            status: siteAuditFixes.status, verifiedRunId: siteAuditFixes.verifiedRunId,
+        }).from(siteAuditFixes)
             .where(and(
                 eq(siteAuditFixes.auditId, audit.id),
-                inArray(siteAuditFixes.status, ['open', 'accepted']),
                 sql`(${siteAuditFixes.pageUrl} IS NULL OR ${siteAuditFixes.pageUrl} = ${audit.url})`,
             ));
+        // Open and accepted fixes, plus ones the user marked done that no check has confirmed yet.
+        const open = known.filter((f) => f.status === 'open' || f.status === 'accepted' || (f.status === 'done' && f.verifiedRunId === null));
         const doneIds = fixesNowDone(open, outcome.pages[SITE_KEY]);
         if (doneIds.length) {
             await db.update(siteAuditFixes)
@@ -420,9 +444,12 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
                 whyItMatters: p.whyItMatters, impact: p.impact, pageUrl: audit.url,
             };
         });
-        // Don't re-raise a fix that is already on the list with the same old text.
-        const stillOpen = new Set(open.filter((o) => !doneIds.includes(o.id)).map((o) => normaliseText(o.beforeText)));
-        const fresh = rows.filter((r) => !stillOpen.has(normaliseText(r.beforeText)));
+        // Don't re-raise a fix that is already on the list with the same old text — waiting, marked
+        // done by the user (its old wording can still be on the page) or "Reject". A fix a check
+        // confirmed can come back: its old text had gone, so finding it again means it returned.
+        const decided = new Set(known.filter((o) => !(o.status === 'done' && o.verifiedRunId !== null))
+            .map((o) => normaliseText(o.beforeText)));
+        const fresh = rows.filter((r) => !decided.has(normaliseText(r.beforeText)));
         if (fresh.length) await db.insert(siteAuditFixes).values(fresh);
 
         // The success latch: done + charged in ONE update, only from 'running'.
