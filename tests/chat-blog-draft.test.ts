@@ -148,15 +148,19 @@ check('the turn normalises the draft before persisting the transcript', () => {
         /blogDraft = route === ROUTES\.blog_writer \? blogPostDraftFromUiElement/.test(orchestrator),
         'the blog uiElement is no longer normalised',
     );
+    // Anything else is dropped — except an action card on an existing article, which is not model
+    // output by then: resolveBlogActionProposal rebuilt it from the row (null when it could not).
     assert.ok(
-        /uiElement = blogDraft \? \{ type: BLOG_POST_DRAFT_TYPE, \.\.\.blogDraft \} : null/.test(orchestrator),
+        /uiElement = blogDraft \? \{ type: BLOG_POST_DRAFT_TYPE, \.\.\.blogDraft \} : blogAction;/.test(orchestrator),
         'an unusable blog draft is no longer dropped',
     );
+    assert.ok(/blogAction = await resolveBlogActionProposal\(/.test(orchestrator), 'the action card is not rebuilt from the row');
 });
 
 check('an unbacked blog claim is still replaced', () => {
     assert.ok(
-        /route === ROUTES\.blog_writer && !blogDraft && replyClaimsPostSaved\(content\)/.test(orchestrator),
+        // A turn carrying an action card is exempt: "it's booked for Friday" describes the card.
+        /route === ROUTES\.blog_writer && !blogDraft && !blogAction && replyClaimsPostSaved\(content\)/.test(orchestrator),
         'the blog claim guard is gone or no longer scoped to a draftless turn',
     );
     assert.ok(orchestrator.includes("honestDraftReply('blog_no_draft')"), 'the false reply is no longer replaced');

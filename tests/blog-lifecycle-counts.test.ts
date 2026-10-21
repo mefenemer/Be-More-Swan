@@ -57,10 +57,13 @@ check('the counts come from ONE fetch, and it happens before the early return', 
     const render = js.slice(landmark(js, 'async function _detailRqRenderBlog('),
                             landmark(js, 'window._detailRqBlogAct = '));
     // Counting per column would re-fetch the whole list once per tab — blog-posts has no status filter.
-    assert.strictEqual(render.split('/.netlify/functions/blog-posts?assistantId=').length - 1, 1,
+    // It reads through _fetchBlogPosts, the page's one shared blog-posts request (2026-10-21).
+    assert.strictEqual(render.split('_fetchBlogPosts(').length - 1, 1,
         'the renderer fetches more than once per render');
+    assert.ok(/function _fetchBlogPosts\(assistantId\) \{[\s\S]{0,400}\/\.netlify\/functions\/blog-posts\?assistantId=/.test(js),
+        'the shared request no longer reads blog-posts');
     // A column blog posts cannot occupy still has to repaint the columns they DO occupy.
-    assert.ok(landmark(render, 'blog-posts?assistantId=') < landmark(render, 'don’t have this state'),
+    assert.ok(landmark(render, '_fetchBlogPosts(') < landmark(render, 'don’t have this state'),
         'the "no such state" bail-out runs before the fetch, so the other counts never repaint');
     assert.ok(landmark(render, '_detailRqPaintBlogCounts(all)') < landmark(render, 'don’t have this state'),
         'the counts are painted after the bail-out, so they never run for that column');

@@ -352,8 +352,8 @@ You do not need a developer, a plugin, or a website rebuild. You need one line o
 
 ## Step 1: Get your embed snippet
 
-1. Open your Blog Writing Assistant and click **Write Blog Post**. This opens Blog Studio.
-2. On the left, find the **Widget** panel.
+1. Open your Blog Writing Assistant. On its **Blogs** tab, click **Blog setup**.
+2. Open the **Blog widget** section.
 3. At the bottom is your **Embed snippet**. Click **Copy**.
 
 What you copied looks like this:
@@ -413,7 +413,7 @@ To help Google find them faster, submit this address in Google Search Console:
     https://bemoreswan.com/b/wgt_your_key_here/sitemap.xml
 
 You can also connect Search Console from the assistant's **Connections** tab, or from the
-**Search performance** panel in Blog Studio — they are the same connection, so either will do. Your
+**Search performance** section of **Blog setup** on the Blogs tab — they are the same connection, so either will do. Your
 assistant will then spot posts that are losing search traffic and flag them for a refresh, and the
 Search Impressions and Organic Clicks figures on its Overview start filling in.
 

@@ -62,6 +62,9 @@ import { loadProductsBlock } from '../../src/utils/org-products';
 import { buildTeamActivityBlock } from '../../src/utils/team-activity';
 import { buildBlogSnapshot, buildEmailsSnapshot, buildPostsSnapshot } from '../../src/utils/content-snapshot';
 import { postActionFromUiElement, resolvePostActionProposal, type PostActionCard } from '../../src/utils/chat-post-action';
+import { blogActionFromUiElement, resolveBlogActionProposal, type BlogActionCard } from '../../src/utils/chat-blog-action';
+import { emailActionFromUiElement, resolveEmailActionProposal, type EmailActionCard } from '../../src/utils/chat-email-action';
+import { parseScheduleInstruction } from '../../src/utils/parse-schedule-instruction';
 import { attachmentLine, buildAttachmentsBlock, readAttachments, saveAttachments, type AcceptedAttachment } from '../../src/utils/chat-attachments';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { BRIEF_PURPOSES, BRIEF_ASPECT_RATIOS, REJECT_REASONS, SOURCE_SPECS } from '../../src/config/visual-brief-vocab';
@@ -632,7 +635,7 @@ const PROFILE_CARDS_NON_SOCIAL = `"What I do" (the job it was hired for), "When 
 
 function blogSurfaces(): string {
     return `YOUR OWN DASHBOARD — these are the tabs and buttons on YOUR page inside this platform, and the only names you may use for places in it:
-- "Blogs" tab — the page opens here. Every article you draft, in columns: "Review" (drafts waiting for the user), "Scheduled" (booked to publish), "Posted" (published), "Needs attention" (failed to publish, paused, or approved but not booked — "Pick a new time" puts it back in the queue) and "Archived". Opening an article there opens it in Blog Studio, where it is edited, given pictures and SEO, approved, scheduled or published. "Write Blog Post" at the top starts one.
+- "Blogs" tab — the page opens here. Every article you draft, in columns: "Review" (drafts waiting for the user), "Scheduled" (booked to publish), "Published" (live), "Needs attention" (failed to publish, paused, or approved but not booked — "Pick a new time" puts it back in the queue) and "Archived". Opening an article there opens it in Blog Studio, where it is edited, given pictures and SEO, approved, scheduled or published. "Write Blog Post" at the top starts one. "Blog setup" beside it holds the settings for the whole blog: Google Search Console, and the blog widget (its look, the embed snippet for the user's website, the RSS feed and the hosted blog page link).
 - "Calendar" tab — the same articles laid out by date.
 - "Inspo" tab — writing the user admires; you write in that style.
 - "My Content" tab — the pictures the user has uploaded or approved, which articles can use.
@@ -642,7 +645,7 @@ function blogSurfaces(): string {
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above, or Blog Studio. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
-EXISTING ARTICLES — you can see your articles (below) but you cannot change them from this chat: you cannot approve, edit, reschedule, delete or publish one that already exists. If asked to, say so and tell them which column of the "Blogs" tab it is in. You CAN write a new version as a fresh draft if they want one.`;
+EXISTING ARTICLES — you can act on the articles listed below, each named by its "#" number, in four ways: approve one in "Review" (you pick the time, from its posting schedule), book one for a time the user names (in "Review", "Scheduled" or "Needs attention"), take one in "Scheduled" off the schedule (it goes back to a draft), or reject one (say what is wrong; the user can let you write a replacement and keep the reason as a rule). To do any of them, emit a blog_action_proposal naming the article's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say an article HAS been approved, scheduled, unscheduled or rejected — say the card is there to confirm. One article per reply. If you cannot tell which one they mean, ask, quoting the candidates. You cannot publish one immediately, edit an existing article's words, or archive one: for those, tell them which column of the "Blogs" tab it is in so they can open it in Blog Studio. You CAN write a new version as a fresh draft if they want one.`;
 }
 
 function emailSurfaces(): string {
@@ -657,7 +660,7 @@ function emailSurfaces(): string {
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above, or the Email Studio. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
-EXISTING EMAILS — you can see your single emails (below) but you cannot change them from this chat: you cannot approve, edit, reschedule, delete or send one that already exists. If asked to, say so and tell them which column of the "Emails" tab it is in. You CAN write a new version as a fresh draft if they want one.`;
+EXISTING EMAILS — you can act on the single emails listed below, each named by its "#" number, in three ways: approve one in "Review" (it moves to "Approved" and waits there until they send or schedule it), approve one for a send time the user names (in "Review", "Approved" or "Scheduled" — it is booked to send then), or send one back to a draft (from "Review", "Approved" or "Scheduled"; it will not go out). To do any of them, emit an email_action_proposal naming the email's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say an email HAS been approved, scheduled or sent back — say the card is there to confirm. One email per reply. If you cannot tell which one they mean, ask, quoting the candidates. Only an owner or admin of the business can approve an email; if the card says they can't, that is why. You cannot send one immediately, edit an existing email's words, change who it goes to, or archive one: for those, tell them which column of the "Emails" tab it is in so they can open it in the Email Studio. You CAN write a new version as a fresh draft if they want one.`;
 }
 
 // ── Internal Data Hub persistence (Golden Rule 2) ─────────────────────────────
@@ -2141,6 +2144,14 @@ A campaign, as a plan or as finished drafts:
 }
 Campaign rules: "newsletters" is in send order and "sequenceOrder" runs 1, 2, 3… with no gaps. "sendDay" counts the day they enter as Day 1 and only goes up. "delayDaysAfterPrevious" is days since the PREVIOUS email — the first email's is sendDay − 1, every later one is its sendDay minus the previous email's sendDay. For a countdown (renewal, launch) still count forward from the day they enter, and put the countdown ("14 days before") in "role". In a plan, fill every field except bodyMarkdown, which is "".
 
+To act on a single email that already exists (see EXISTING EMAILS), uiElement is instead:
+{
+  "type": "email_action_proposal",
+  "action": "approve" | "schedule" | "reject",
+  "issueId": <the number after # in YOUR EMAILS RIGHT NOW>,
+  "when": "<schedule only: the send time exactly as the user said it, e.g. 'Tuesday at 10am'>" | null
+}
+
 A sign-up form:
 {
   "type": "audience_form_draft",
@@ -2184,7 +2195,7 @@ Write it in Markdown: a single H1 title on the first line, a short hook intro, t
 
 So: NEVER say the post has been saved, filed, added, created, scheduled, published or queued — not even loosely. Say it is ready and that they can keep it or bin it with the buttons. Never tell them to copy the text out, to paste it somewhere, or to go and re-create it themselves — the button does that, and telling them to retype work you have already done is the single worst thing you can say here.
 
-Once saved, a draft appears in this assistant's "Blogs" tab and opens in Blog Studio, where they edit it, add pictures, set its SEO, schedule it or publish it. That is the only place those things happen: you cannot schedule or publish from this chat, so if they ask, say so plainly and point at Blog Studio — after they have saved the draft, which is the step that gets it there.
+Once saved, a draft appears in this assistant's "Blogs" tab and opens in Blog Studio, where they edit it, add pictures, set its SEO, schedule it or publish it. A draft that is only on screen here cannot be approved or scheduled yet — it has to be saved first. Once it is saved and in your list below, you can offer to approve, schedule or reject it (see EXISTING ARTICLES). You can never publish one immediately from this chat: point at Blog Studio for that.
 
 ONE POST PER REPLY. The draft object holds exactly one article, so one reply can only ever offer one. If they ask for several, write the FIRST one properly and offer the next.
 
@@ -2205,6 +2216,15 @@ NEVER claim you have written a post unless THIS reply carries the draft object. 
     "bodyMarkdown": "<the complete article in Markdown, starting with the H1>",
     "tags": ["<up to 5 short topic tags>"]
   }
+}
+
+OR, to act on an article that already exists (see EXISTING ARTICLES), uiElement is instead:
+{
+  "type": "blog_action_proposal",
+  "action": "approve" | "schedule" | "unschedule" | "reject",
+  "postId": <the number after # in YOUR ARTICLES RIGHT NOW>,
+  "reason": "<reject only: what is wrong with it, in the user's words>" | null,
+  "when": "<schedule only: the time exactly as the user said it, e.g. 'Friday at 9am'>" | null
 }`,
         ].filter(Boolean).join('\n\n'),
         parseResponse: parseStructuredReply,
@@ -2860,6 +2880,27 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // card calls the same endpoints the Posts tab does. Not while drafting INTO an open post —
         // that conversation is about the words of one post, not its fate.
         let postAction: PostActionCard | null = null;
+        // The Blog Writer's twin (src/utils/chat-blog-action.ts): same checks, built from blog_posts
+        // rows; a time in the user's words is worked out here so the card shows the exact instant.
+        let blogAction: BlogActionCard | null = null;
+        const blogActionReq = route === ROUTES.blog_writer ? blogActionFromUiElement(uiElement) : null;
+        if (blogActionReq) {
+            blogAction = await resolveBlogActionProposal(db, orgId, session.aiAssistantId, blogActionReq, snapshotTz, parseScheduleInstruction);
+            uiElement = blogAction;
+            if (!blogAction) {
+                content = 'I couldn’t find that article among this assistant’s articles, so I haven’t set anything up. Which one do you mean? You can also open it on the "Blogs" tab.';
+            }
+        }
+        // And the Email Marketing assistant's (src/utils/chat-email-action.ts), the same way.
+        let emailAction: EmailActionCard | null = null;
+        const emailActionReq = route === ROUTES.newsletter_editor ? emailActionFromUiElement(uiElement) : null;
+        if (emailActionReq) {
+            emailAction = await resolveEmailActionProposal(db, orgId, session.aiAssistantId, emailActionReq, snapshotTz, parseScheduleInstruction);
+            uiElement = emailAction;
+            if (!emailAction) {
+                content = 'I couldn’t find that email among this assistant’s emails, so I haven’t set anything up. Which one do you mean? You can also open it on the "Emails" tab.';
+            }
+        }
         const postActionReq = route === ROUTES.social_media_manager && !draftTarget ? postActionFromUiElement(uiElement) : null;
         if (postActionReq) {
             postAction = await resolvePostActionProposal(db, orgId, session.aiAssistantId, postActionReq, snapshotTz);
@@ -2916,7 +2957,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // come back as a broken card with a Save button on it for as long as the transcript lives.
         const blogDraft = route === ROUTES.blog_writer ? blogPostDraftFromUiElement(uiElement) : null;
         if (route === ROUTES.blog_writer) {
-            uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft } : null;
+            // An action card on an existing article was already checked and rebuilt above — keep it.
+            uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft } : blogAction;
         }
 
         // Same contract for the newsletter route, and the same reason: uiElementJson is persisted
@@ -2943,7 +2985,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             uiElement = newsletterDraft ? { type: NEWSLETTER_ISSUE_DRAFT_TYPE, ...newsletterDraft }
                 : campaignDraft ? { type: NEWSLETTER_CAMPAIGN_DRAFT_TYPE, ...campaignDraft }
                 : formDraft ? { type: AUDIENCE_FORM_DRAFT_TYPE, ...formDraft }
-                : null;
+                // An action card on an existing email was already checked and rebuilt above — keep it.
+                : emailAction;
         }
 
         // ── Reply ↔ persistence reconciliation ────────────────────────────────────
@@ -2992,7 +3035,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // The blog route's version of the same reconciliation. It cannot fail to PERSIST (it never
         // persists), so the only unbacked claim available to it is claiming an article it did not
         // write — which is the identical bug: a confident reply about a post that does not exist.
-        if (route === ROUTES.blog_writer && !blogDraft && replyClaimsPostSaved(content) && !alreadyApologised) {
+        // An action card is the thing a "scheduled" reply is about, so it is not an unbacked claim.
+        if (route === ROUTES.blog_writer && !blogDraft && !blogAction && replyClaimsPostSaved(content) && !alreadyApologised) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked blog draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );
@@ -3002,7 +3046,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
         // And the newsletter route's. Identical shape: it never persists on the turn, so the only
         // unbacked claim available to it is claiming an issue it did not write.
-        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised) {
+        // !emailAction: a "booked for Tuesday" reply describes its action card, not an unbacked claim.
+        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised && !emailAction) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked newsletter draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );

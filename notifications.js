@@ -366,7 +366,7 @@ window.NotifKit = (function () {
         if (notif.type === 'blog_draft_ready' && meta.blogPostId) {
             return { label: 'Review draft', run: () => {
                 if (typeof window.openBlogStudio === 'function') {
-                    return window.openBlogStudio({ assistantId: meta.assistantId, postId: meta.blogPostId });
+                    return window.openBlogStudio({ assistantId: meta.assistantId, postId: meta.blogPostId, intent: 'review' });
                 }
                 window.location.href = '/blog-studio.html?postId=' + encodeURIComponent(meta.blogPostId);
             } };

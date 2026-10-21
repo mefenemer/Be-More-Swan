@@ -10,7 +10,7 @@
 //                                                  existing callers; the row is never destroyed.
 
 import { HandlerEvent } from '@netlify/functions';
-import { and, desc, eq, gte, inArray, lte, or } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lte, or, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, blogPosts } from '../../db/schema';
 import { ASSISTANT_DRAFT_REASON } from '../../src/utils/blog-ai-assisted';
@@ -85,6 +85,13 @@ export default withLambda(async (event: HandlerEvent) => {
                 publishDate: blogPosts.publishDate,
                 publishedAt: blogPosts.publishedAt,
                 updatedAt: blogPosts.updatedAt,
+                // What a list card needs to triage a draft without opening it: a short excerpt, its
+                // length, and who wrote it. Worked out here so the list never ships 200 full bodies.
+                // The excerpt source is the SEO description when there is one, else the body's
+                // opening (the card strips the Markdown).
+                excerptSource: sql<string>`coalesce(nullif(btrim(${blogPosts.metaDescription}), ''), left(${blogPosts.bodyMarkdown}, 600))`,
+                wordCount: sql<number>`case when btrim(${blogPosts.bodyMarkdown}) = '' then 0 else coalesce(array_length(regexp_split_to_array(btrim(${blogPosts.bodyMarkdown}), '\s+'), 1), 0) end`,
+                writtenByAssistant: sql<boolean>`${blogPosts.generationReason} is not null`,
             })
             .from(blogPosts)
             .where(and(

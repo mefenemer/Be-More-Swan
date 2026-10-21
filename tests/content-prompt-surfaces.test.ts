@@ -65,7 +65,8 @@ const ROLES = [
     },
     {
         role: 'blog_writer', helper: 'blogSurfaces', kind: 'blog', queue: 'Blogs',
-        columns: ['Review', 'Scheduled', 'Posted', 'Needs attention', 'Archived'],
+        // "Published" is the Posted column relabelled for this role (assistants.js setText … 'Published').
+        columns: ['Review', 'Scheduled', 'Published', 'Needs attention', 'Archived'],
         tabs: ['Calendar', 'Inspo', 'My Content', 'Results', 'Activity'],
         profile: PROFILE('Brand Knowledge'),
     },
@@ -90,8 +91,8 @@ const TAB_ON_PAGE: Record<string, (reg: string) => boolean> = {
     Campaigns: (reg) => /emailCampaignsTab:\s*true/.test(reg) && page.includes('<span id="email-campaigns-tab-label">Campaigns</span>'),
 };
 
-const COLUMN_ON_PAGE = (col: string) => col === 'Sent'
-    ? read('assistants.js').includes("setText('detail-rq-col-label-posted', 'Sent')")
+const COLUMN_ON_PAGE = (col: string) => col === 'Sent' || col === 'Published'
+    ? read('assistants.js').includes(`setText('detail-rq-col-label-posted', '${col}')`)
     : new RegExp(`class="detail-rq-col[^"]*"[\\s\\S]{0,200}?>\\s*(<span[^>]*>)?${col}\\b`).test(page);
 
 const PROFILE_ON_PAGE = (card: string) => card === 'Brand Knowledge'
@@ -141,13 +142,20 @@ for (const r of ROLES) {
     check('it forbids inventing places and changing existing work', () => {
         assert.ok(/Never name a tab, section, button or setting that is not listed/.test(surfaces));
         assert.ok(/never tell the user a section does not exist/.test(surfaces));
-        // The social chat CAN act on existing posts now (src/utils/chat-post-action.ts) — but only by
-        // proposing a card the user confirms. The others still cannot touch existing work.
+        // Every content chat CAN act on existing work now (chat-post-action.ts, chat-blog-action.ts,
+        // chat-email-action.ts) — but only by proposing a card the user confirms.
         if (r.helper === 'socialSurfaces') {
             assert.ok(/only that click changes anything/.test(surfaces), 'the social chat must say the user\'s click acts, not the chat');
             assert.ok(/never say a post HAS been approved, rejected, retried or moved/.test(surfaces));
+        } else if (r.helper === 'blogSurfaces') {
+            assert.ok(/only that click changes anything/.test(surfaces), 'the blog chat must say the user\'s click acts, not the chat');
+            assert.ok(/never say an article HAS been approved, scheduled, unscheduled or rejected/.test(surfaces));
+            assert.ok(/You cannot publish one immediately/.test(surfaces));
         } else {
-            assert.ok(/you cannot change them from this chat/.test(surfaces));
+            // Email (chat-email-action.ts, 2026-10-21): the same confirm-card rule.
+            assert.ok(/only that click changes anything/.test(surfaces), 'the email chat must say the user\'s click acts, not the chat');
+            assert.ok(/never say an email HAS been approved, scheduled or sent back/.test(surfaces));
+            assert.ok(/You cannot send one immediately/.test(surfaces));
         }
     });
 }
