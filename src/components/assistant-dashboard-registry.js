@@ -570,8 +570,10 @@
     },
 
     // Website Assistant (docs/website-assistant-plan.md). Its work is ONE site — a draft edited on the
-    // Website tab (and in chat), published in step 3. No posts, records or review queue: the preview
-    // IS its review surface. Goals hidden until publishing gives it something measurable to track.
+    // Website tab (and in chat), published from the Publish card there. No posts, records or review
+    // queue: the preview IS its review surface. Its Activity tab reads its drafts, publishes, import,
+    // enquiries, orders and bookings (src/utils/role-activity.ts websiteItems). Goals still hidden:
+    // none is measured for it yet.
     website_assistant: {
       // Fed by sites.ts `get` (routed by metricsSource in assistants.js).
       metricsSource: 'site',

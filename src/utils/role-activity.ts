@@ -12,11 +12,12 @@
 // Item shape = get-assistant-activity's (one renderer, one meaning of "Needs attention"). The
 // descriptions carry user and model text (titles, subjects); the renderer escapes them.
 
-import { and, desc, eq, gte, isNotNull } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
-    assistantRecords, blogPosts, campaignDecisions, campaignOrders, campaigns, newsletterIssues, newsletterSequences,
-    siteAuditFixes, siteAuditRuns, siteAudits, taskRuns, visualBriefOptions, visualBriefs,
+    assistantRecords, blogPosts, bookings, campaignDecisions, campaignOrders, campaigns, newsletterIssues, newsletterSequences,
+    siteAuditFixes, siteAuditRuns, siteAudits, siteEnquiries, siteImports, siteOrders, sites, siteVersions, taskLedger,
+    taskRuns, visualBriefOptions, visualBriefs,
 } from '../../db/schema';
 
 type Db = ReturnType<typeof getDb>;
@@ -32,7 +33,7 @@ const RECORD_NOUNS: Record<string, { type: string; made: string; noun: string }>
 };
 
 /** The roles this module adds rows for. Anything else gets the shared feed unchanged. */
-export const ROLE_ACTIVITY_ROLES = new Set([...Object.keys(RECORD_NOUNS), 'newsletter_editor', 'blog_writer', 'campaign_orchestrator', 'brand_designer', 'mystery_shopper']);
+export const ROLE_ACTIVITY_ROLES = new Set([...Object.keys(RECORD_NOUNS), 'newsletter_editor', 'blog_writer', 'campaign_orchestrator', 'brand_designer', 'mystery_shopper', 'website_assistant']);
 
 const clip = (s: string | null | undefined, n = 70) => {
     const t = (s ?? '').replace(/\s+/g, ' ').trim();
@@ -177,6 +178,76 @@ export async function roleActivityItems(db: Db, args: {
         for (const f of live) items.push({ id: `fix-live-${f.id}`, type: 'site_fix_live', icon: 'check-circle', description: `Confirmed your change is live: ${clip(f.location || 'a page change', 60)}.`, createdAt: f.at, status: 'success' });
     }
 
+    if (roleKey === 'website_assistant') items.push(...await websiteItems(db, { orgId, assistantId, since, limit }));
+
+    return items;
+}
+
+/**
+ * The Website Assistant: drafts and placed words (the task ledger — one row per charged piece of
+ * work), each publish, the import of their old site, and what visitors sent: enquiries, orders and
+ * bookings. Its site is one row per assistant (sites_assistant_uq).
+ */
+async function websiteItems(db: Db, args: { orgId: number; assistantId: number; since: (col: any) => any[]; limit: number }): Promise<ActivityItem[]> {
+    const { orgId, assistantId, since, limit } = args;
+    const [site] = await db.select({ id: sites.id, draftingAt: sites.draftingAt, draftNote: sites.draftNote, updatedAt: sites.updatedAt })
+        .from(sites).where(and(eq(sites.organisationId, orgId), eq(sites.aiAssistantId, assistantId))).limit(1);
+    if (!site) return [];
+    const items: ActivityItem[] = [];
+    const money = (pence: number, cur: string) => {
+        try { return new Intl.NumberFormat('en-GB', { style: 'currency', currency: cur.toUpperCase() }).format(pence / 100); } catch { return `${(pence / 100).toFixed(2)} ${cur.toUpperCase()}`; }
+    };
+
+    // The import of their old site: one row per site, saying where it got to.
+    const [imp] = await db.select({ id: siteImports.id, url: siteImports.sourceUrl, status: siteImports.status, message: siteImports.message, at: siteImports.updatedAt })
+        .from(siteImports).where(and(eq(siteImports.siteId, site.id), ...since(siteImports.updatedAt))).limit(1);
+    if (imp) {
+        const from = clip(imp.url.replace(/^https?:\/\//, ''), 50);
+        if (imp.status === 'ready') items.push({ id: `site-import-${imp.id}`, type: 'site_import', icon: 'link', description: `Read your current site (${from}) — the imported draft is waiting on the Website tab for you to use or discard.`, createdAt: imp.at, status: 'needs_input' });
+        else if (imp.status === 'failed') items.push({ id: `site-import-${imp.id}`, type: 'site_import', icon: 'alert', description: `Couldn't import ${from}: ${clip(imp.message, 90)}`, createdAt: imp.at, status: 'failed' });
+        else items.push({ id: `site-import-${imp.id}`, type: 'site_import', icon: 'link', description: `Reading your current site (${from}).`, createdAt: imp.at, status: 'in_progress' });
+    }
+
+    // Charged work. An import is charged as a site_draft too: that row is the import above, not a draft.
+    const work = await db.select({ id: taskLedger.id, kind: taskLedger.kind, at: taskLedger.createdAt })
+        .from(taskLedger).where(and(
+            eq(taskLedger.organisationId, orgId), eq(taskLedger.source, 'work'), inArray(taskLedger.kind, ['site_draft', 'site_words']),
+            eq(taskLedger.ref, String(site.id)), ...since(taskLedger.createdAt),
+        )).orderBy(desc(taskLedger.createdAt)).limit(limit);
+    for (const w of work) {
+        if (w.kind === 'site_words') { items.push({ id: `site-words-${w.id}`, type: 'site_words', icon: 'edit', description: 'Placed your own words on a page of your draft (1 task).', createdAt: w.at, status: 'success' }); continue; }
+        if (imp && imp.status === 'ready' && Math.abs(w.at.getTime() - imp.at.getTime()) < 5 * 60_000) continue;
+        items.push({ id: `site-draft-${w.id}`, type: 'site_draft', icon: 'sparkles', description: 'Wrote a draft of your whole site (1 task). Nothing went live.', createdAt: w.at, status: 'success' });
+    }
+    if (site.draftingAt) items.push({ id: `site-drafting-${site.id}`, type: 'site_draft', icon: 'sparkles', description: 'Writing a draft of your whole site now.', createdAt: site.draftingAt, status: 'in_progress' });
+    else if (site.draftNote) items.push({ id: `site-draft-note-${site.id}`, type: 'site_draft', icon: 'alert', description: `A draft didn't finish: ${clip(site.draftNote, 110)}`, createdAt: site.updatedAt, status: 'failed' });
+
+    const versions = await db.select({ id: siteVersions.id, version: siteVersions.version, at: siteVersions.publishedAt })
+        .from(siteVersions).where(and(eq(siteVersions.siteId, site.id), ...since(siteVersions.publishedAt)))
+        .orderBy(desc(siteVersions.publishedAt)).limit(limit);
+    for (const v of versions) items.push({ id: `site-pub-${v.id}`, type: 'site_publish', icon: 'rocket', description: `Your site went live — version ${v.version} published.`, createdAt: v.at, status: 'success' });
+
+    // What visitors sent. New ones need the owner; done ones are history.
+    const enquiries = await db.select({ id: siteEnquiries.id, name: siteEnquiries.name, status: siteEnquiries.status, at: siteEnquiries.createdAt })
+        .from(siteEnquiries).where(and(eq(siteEnquiries.siteId, site.id), ...since(siteEnquiries.createdAt)))
+        .orderBy(desc(siteEnquiries.createdAt)).limit(limit);
+    for (const q of enquiries) items.push({ id: `site-enq-${q.id}`, type: 'site_enquiry', icon: 'users', description: `Enquiry from ${clip(q.name, 40)} through your website${q.status === 'new' ? ' — on the Enquiries tab' : ''}.`, createdAt: q.at, status: q.status === 'new' ? 'needs_input' : 'info' });
+
+    const orders = await db.select({ id: siteOrders.id, item: siteOrders.itemName, qty: siteOrders.quantity, total: siteOrders.amountTotal, currency: siteOrders.currency, status: siteOrders.status, at: siteOrders.createdAt })
+        .from(siteOrders).where(and(eq(siteOrders.siteId, site.id), ...since(siteOrders.createdAt)))
+        .orderBy(desc(siteOrders.createdAt)).limit(limit);
+    for (const o of orders) items.push({ id: `site-order-${o.id}`, type: 'site_order', icon: 'check-circle', description: `Order paid: ${clip(o.item, 50)}${o.qty > 1 ? ` × ${o.qty}` : ''}, ${money(o.total, o.currency)}${o.status === 'paid' ? ' — on the Orders tab to send' : ''}.`, createdAt: o.at, status: o.status === 'paid' ? 'needs_input' : 'success' });
+
+    const booked = await db.select({ id: bookings.id, name: bookings.customerName, service: bookings.serviceName, status: bookings.status, at: bookings.createdAt })
+        .from(bookings).where(and(eq(bookings.organisationId, orgId), eq(bookings.siteId, site.id), ...since(bookings.createdAt)))
+        .orderBy(desc(bookings.createdAt)).limit(limit);
+    for (const b of booked) {
+        const what = b.service ? ` for ${clip(b.service, 40)}` : '';
+        items.push({ id: `site-booking-${b.id}`, type: 'site_booking', icon: 'calendar', description: b.status === 'pending'
+            ? `Booking request from ${clip(b.name, 40)}${what} — waiting for you on the Bookings tab.`
+            : `${clip(b.name, 40)} booked${what}${b.status === 'cancelled' ? ' (since cancelled)' : b.status === 'declined' ? ' (you declined it)' : b.status === 'awaiting_payment' ? ' (waiting for their deposit)' : ''}.`,
+        createdAt: b.at, status: b.status === 'pending' ? 'needs_input' : 'info' });
+    }
     return items;
 }
 
