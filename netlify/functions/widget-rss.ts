@@ -66,7 +66,7 @@ function xml(statusCode: number, body: string, cache = false) {
 }
 
 export default withLambda(async (event: HandlerEvent) => {
-    if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS, body: '' };
+    if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS };
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     // Parse the ORIGINAL (pre-rewrite) path — the rewrite is a 200, so it survives in rawUrl.

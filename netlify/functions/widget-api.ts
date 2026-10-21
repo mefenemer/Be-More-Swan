@@ -39,7 +39,7 @@ function json(statusCode: number, obj: unknown, cache = false) {
 }
 
 export default withLambda(async (event: HandlerEvent) => {
-    if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS, body: '' };
+    if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS };
     if (event.httpMethod !== 'GET') return json(405, { error: 'Method Not Allowed' });
 
     // Parse /api/widget/:key/:resource[/:slug] from the original (pre-rewrite) path.

@@ -77,7 +77,6 @@ export default withLambda(async (event: HandlerEvent) => {
                 'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
                 'Access-Control-Allow-Headers': 'Content-Type, Authorization',
             },
-            body: '',
         };
     }
 

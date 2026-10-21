@@ -25,8 +25,8 @@ export default withLambda(async (event) => {
 
         console.error(`[client-log] userId=${userId} event=${eventName} error=${error} path=${path}`);
 
-        return { statusCode: 204, body: '' };
+        return { statusCode: 204 };
     } catch {
-        return { statusCode: 204, body: '' };
+        return { statusCode: 204 };
     }
 });

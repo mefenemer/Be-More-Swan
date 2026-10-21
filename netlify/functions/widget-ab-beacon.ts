@@ -23,14 +23,14 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
 
 export default withLambda(async (event: HandlerEvent) => {
-    if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS, body: '' };
+    if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS };
     if (event.httpMethod !== 'POST') return { statusCode: 405, headers: CORS, body: '' };
 
     let body: any;
     try {
         body = JSON.parse(event.body || '{}');
     } catch {
-        return { statusCode: 204, headers: CORS, body: '' }; // beacons are fire-and-forget; never error back
+        return { statusCode: 204, headers: CORS }; // beacons are fire-and-forget; never error back
     }
 
     const { publicKey, slug } = body;
@@ -43,7 +43,7 @@ export default withLambda(async (event: HandlerEvent) => {
     const rawVariant = body.variantId;
     const variantId = (typeof rawVariant === 'string' && /^[A-Z]$/.test(rawVariant)) ? rawVariant : null;
     if (!publicKey || !slug) {
-        return { statusCode: 204, headers: CORS, body: '' };
+        return { statusCode: 204, headers: CORS };
     }
 
     try {
@@ -53,7 +53,7 @@ export default withLambda(async (event: HandlerEvent) => {
             .from(widgetConfigs)
             .where(eq(widgetConfigs.publicKey, publicKey))
             .limit(1);
-        if (!cfg || cfg.status !== 'active') return { statusCode: 204, headers: CORS, body: '' };
+        if (!cfg || cfg.status !== 'active') return { statusCode: 204, headers: CORS };
 
         const [post] = await db
             .select({ id: blogPosts.id })
@@ -64,7 +64,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 eq(blogPosts.status, 'published'),
             ))
             .limit(1);
-        if (!post) return { statusCode: 204, headers: CORS, body: '' };
+        if (!post) return { statusCode: 204, headers: CORS };
 
         // Whole-post engagement — every read, test or no test.
         await db
@@ -88,7 +88,7 @@ export default withLambda(async (event: HandlerEvent) => {
             });
 
         // Per-variant scoring — only for a post actually running a headline test.
-        if (!variantId) return { statusCode: 204, headers: CORS, body: '' };
+        if (!variantId) return { statusCode: 204, headers: CORS };
 
         await db
             .insert(blogAbStats)
@@ -113,5 +113,5 @@ export default withLambda(async (event: HandlerEvent) => {
     } catch (err) {
         console.error('[widget-ab-beacon] error:', err);
     }
-    return { statusCode: 204, headers: CORS, body: '' };
+    return { statusCode: 204, headers: CORS };
 });

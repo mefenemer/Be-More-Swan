@@ -199,7 +199,7 @@ export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod === 'POST' && /\/_read\/?$/.test(pathname)) {
         const read = parseSwanRead(event.body);
         if (read) { try { await recordSwanRead(getDb(), read); } catch (err) { console.error('[swan-index read]', err); } }
-        return { statusCode: 204, body: '' };
+        return { statusCode: 204 };
     }
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 

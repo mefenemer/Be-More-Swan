@@ -221,7 +221,7 @@ export default withLambda(async (event: HandlerEvent) => {
 
     // A link scanner pre-fetching with HEAD must never change anything.
     if (method === 'HEAD') return { statusCode: 200, body: '' };
-    if (method === 'OPTIONS') return { statusCode: 204, headers: corsHeaders(origin, 'GET, POST, OPTIONS'), body: '' };
+    if (method === 'OPTIONS') return { statusCode: 204, headers: corsHeaders(origin, 'GET, POST, OPTIONS') };
 
     const path = (event.rawUrl ? new URL(event.rawUrl).pathname : event.path || '');
     const db = getDb();
