@@ -99,7 +99,7 @@ import { buyablePence, priceDisplay } from '../../src/utils/product-price';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import {
     applySiteOperations, claimDraft, definitionOf, endDraft, hasUnpublishedChanges, listSiteVersions, loadOrCreateSite, maxPagesFor,
-    proposeOwnWords, publishBlocker, publishSite, restoreVersionToDraft, setSiteAddress, unpublishSite, DRAFT_TIMEOUT_MS, type SiteRow,
+    proposeOwnWords, publishBlocker, publishSite, restoreVersionToDraft, setSiteAddress, unpublishSite, DRAFT_TIMEOUT_MS, SITE_SETUP_KEYS, type SiteRow,
 } from '../../src/utils/site-store';
 import { triggerSiteDraft } from '../../src/utils/trigger-site-draft';
 import { acceptImport, discardImport, importView, loadImport, startSiteImport } from '../../src/utils/site-import-store';
@@ -127,7 +127,7 @@ export default withLambda(async (event) => {
     // IDOR + role guard: only THIS organisation's Website Assistant.
     const id = Number(body.assistantId);
     if (!Number.isInteger(id) || id <= 0) return json(400, { error: 'assistantId required.' });
-    const [assistant] = await db.select({ id: aiAssistants.id }).from(aiAssistants).where(and(
+    const [assistant] = await db.select({ id: aiAssistants.id, onboardingContext: aiAssistants.onboardingContext }).from(aiAssistants).where(and(
         eq(aiAssistants.id, id), eq(aiAssistants.organisationId, orgId),
         sql`(${aiAssistants.configuration} ->> 'type') = ${WEBSITE_ASSISTANT_ROLE_KEY}`,
     )).limit(1);
@@ -136,6 +136,11 @@ export default withLambda(async (event) => {
     const maxPages = await maxPagesFor(db, orgId);
     let site = await loadOrCreateSite(db, { orgId, assistantId: assistant.id, userId });
 
+    const setupSiteUrl = (): string | null => {
+        const ctx = (assistant.onboardingContext && typeof assistant.onboardingContext === 'object' ? assistant.onboardingContext : {}) as Record<string, unknown>;
+        const v = ctx[SITE_SETUP_KEYS.currentSite];
+        return typeof v === 'string' && v.trim() ? v.trim().slice(0, 500) : null;
+    };
     const view = async (s: SiteRow, extraWarnings: string[] = []) => {
         const { definition, warnings } = definitionOf(s, maxPages);
         const ownDomain = await currentDomain(db, s.id);
@@ -146,7 +151,9 @@ export default withLambda(async (event) => {
         if (imp && imp.status === 'reading' && !drafting) Object.assign(imp, { status: 'failed', message: 'The import didn\'t finish. Nothing was charged — try again.' });
         const [orgRow] = await db.select({ websiteUrl: organisations.websiteUrl }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
         return {
-            import: imp, importSuggestUrl: orgRow?.websiteUrl ?? null,
+            // The address to offer for import: their set-up answer "Do you already have a website?",
+            // else the website in Business Information.
+            import: imp, importSuggestUrl: setupSiteUrl() ?? orgRow?.websiteUrl ?? null,
             site: {
                 id: s.id, status: s.status, credit: s.credit, drafting, draftNote: s.draftNote, updatedAt: s.updatedAt,
                 // Their own domain once it's live; the bemoreswan.site address redirects there.

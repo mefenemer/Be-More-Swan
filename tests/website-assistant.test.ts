@@ -239,6 +239,21 @@ check('UX quick wins: placeholders go to where they are, plan limit and load fai
     assert.match(editor, /'min\(390px, 100%\)'/);
 });
 
+check('import nudges: set-up asks for their current site, a starter prompt, and a card that only opens the Publish card', () => {
+    const schemas = read('src/public/assistant-onboarding-schemas.js');
+    assert.match(schemas, /key: 'currentWebsite',\s*label: 'Do you already have a website\?'/);
+    assert.match(read('src/utils/site-store.ts'), /currentSite: 'currentWebsite'/);
+    const api = read('netlify/functions/sites.ts');
+    assert.match(api, /importSuggestUrl: setupSiteUrl\(\) \?\? orgRow\?\.websiteUrl \?\? null/);
+    assert.match(read('src/components/assistant-starter-prompts.js'), /'Bring over my current website/);
+    assert.match(read('src/utils/site-store.ts'), /Can they press Publish now: .*publishBlocker\(site, d\)/);
+    assert.ok(chat.includes('"type": "site_publish_open"'));
+    assert.ok(cards.includes("register('site_publish_open', renderSitePublishOpenCard)"));
+    const card = cards.slice(cards.indexOf('function renderSitePublishOpenCard'), cards.indexOf("register('site_publish_open'"));
+    assert.ok(!/action: 'publish'|CustomEvent\('site:/.test(card), 'the card never publishes or sends a site action');
+    assert.match(card, /_activateMainTab\?\.\('sitebuilder'\)/);
+});
+
 check('the chat never publishes (step 3a: a click on the Website tab), and nothing spends without saying so', () => {
     assert.ok(!/action: 'publish'/.test(read('src/components/chat-session.js')));
     assert.match(chat, /You cannot publish, take the site offline or choose its address/);

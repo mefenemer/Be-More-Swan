@@ -1918,6 +1918,34 @@
   }
   register('site_import_request', renderSiteImportRequestCard);
 
+  // { type: 'site_publish_open', blocker } — takes them to the Publish card on the Website tab. It never
+  // publishes: that is a click there (sites.ts publish), so the owner always decides what goes live.
+  function renderSitePublishOpenCard(ui, esc) {
+    const blocker = typeof ui.blocker === 'string' && ui.blocker.trim() ? ui.blocker.trim().slice(0, 400) : '';
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Publish your site</p>
+      ${blocker ? `<p class="text-xs font-semibold text-amber-800 mt-2">Before you can publish: ${esc(blocker)}</p>` : ''}
+      <p class="text-xs text-gray-600 mt-2">Publishing is a button on your Website tab, so you always decide what goes live. Nothing changes until you press it there.</p>
+      <div class="mt-3"><button type="button" data-sp-open class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Open the Publish card</button></div>`;
+    el.addEventListener('click', (e) => {
+      if (!e.target.closest('[data-sp-open]')) return;
+      window._activateMainTab?.('sitebuilder');
+      // The Website tab paints its cards as it opens; bring the Publish card into view once it is there.
+      let tries = 0;
+      const find = () => {
+        const card = document.querySelector('[data-site-host="website"] [data-site-block="publish"]:not([hidden])');
+        // Painted AND its tab showing (a card in a hidden tab can't be scrolled to).
+        if (card && card.getClientRects().length) { card.scrollIntoView({ block: 'start' }); const b = card.querySelector('button:not([disabled]), input'); if (b) b.focus({ preventScroll: true }); return; }
+        if (++tries < 20) setTimeout(find, 150);
+      };
+      find();
+    });
+    return el;
+  }
+  register('site_publish_open', renderSitePublishOpenCard);
+
   // { type: 'site_import_decision', decision: 'use' | 'discard' } — the owner's decision on an imported
   // draft (sites.ts import_accept / import_discard, the Website tab's two buttons).
   function renderSiteImportDecisionCard(ui) {

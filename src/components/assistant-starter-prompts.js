@@ -37,6 +37,7 @@
     // it proposes is the click).
     // Each one is a change it proposes as a card — nothing is applied, drafted or spent without a click.
     website_assistant: [
+      'Bring over my current website so I can start from what I have.',
       'Draft my website — a page for each of my services, and a contact page.',
       'Make the home page headline say exactly who we help.',
       'Add a questions section to the home page answering what customers ask most.',

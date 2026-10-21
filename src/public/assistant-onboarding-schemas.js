@@ -259,14 +259,23 @@
     // on Business Information ▸ Brand Assets or from this assistant's chat) are what every AI image
     // reads. These two answers only fill a guideline the workspace has left EMPTY
     // (visual-briefs.ts withSetupFallback) — the help text below must keep saying exactly that.
-    // Website Assistant (docs/website-assistant-plan.md). All three answers are read by every AI draft
-    // of the site (src/utils/site-store.ts runSiteDraft, SITE_SETUP_KEYS) — the keys must match there.
+    // Website Assistant (docs/website-assistant-plan.md). pagesWanted, siteStyle and siteGoal are read
+    // by every AI draft of the site (src/utils/site-store.ts runSiteDraft, SITE_SETUP_KEYS) — the keys
+    // must match there. currentWebsite fills "Import my current site" (sites.ts importSuggestUrl).
     // Business name, description and audience come from Business Information, not from here.
     website_assistant: [
       {
         title: 'Your website',
         description: 'Your Website Assistant writes your pages from your business details and products. Tell it anything else it should know — you can change all of it later.',
         fields: [
+          {
+            key: 'currentWebsite',
+            label: 'Do you already have a website?',
+            type: 'text',
+            required: false,
+            placeholder: 'e.g. yourbusiness.co.uk',
+            helpText: 'Optional. If you do, type its address — the Website tab offers to bring its words and pictures over, so you start from what you have.',
+          },
           {
             key: 'pagesWanted',
             label: 'Which pages do you want?',

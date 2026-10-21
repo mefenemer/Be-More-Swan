@@ -42,7 +42,7 @@ export type SiteRow = typeof sites.$inferSelect;
 /** A draft in flight longer than this is assumed dead (the worker never answered); a new one may start. */
 export const DRAFT_TIMEOUT_MS = 10 * 60 * 1000;
 /** Set-up keys (assistant-onboarding-schemas.js → website_assistant), read by the AI draft. */
-export const SITE_SETUP_KEYS = { goal: 'siteGoal', pages: 'pagesWanted', style: 'siteStyle' } as const;
+export const SITE_SETUP_KEYS = { goal: 'siteGoal', pages: 'pagesWanted', style: 'siteStyle', currentSite: 'currentWebsite' } as const;
 
 /** Pages this workspace's plan allows (Plan Features `website_pages`; decision D1: 5 on £29). */
 export async function maxPagesFor(db: Db, orgId: number): Promise<number> {
@@ -395,6 +395,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
                 ? `TAKEN OFFLINE by Be More Swan${site.suspendedReason ? ` (${site.suspendedReason})` : ''} — they cannot publish; tell them to contact Be More Swan`
                 : `private draft — not published${site.slug ? ` (address chosen: ${siteOrigin(site.slug)})` : ''}`}${drafting ? '; an AI draft of the whole site is being written right now' : ''}.`,
         'Publishing, taking the site offline, choosing its address and connecting a domain they own (like yourbusiness.co.uk — they add one or two DNS settings where they bought it, and the card shows exactly what) are buttons on the Website tab only — you cannot do them from chat; point them to the Publish card there.',
+        `Can they press Publish now: ${(() => { const b = publishBlocker(site, d); return b ? `NO — ${b}` : 'yes'; })()}`,
         `Pages: ${d.pages.length} of ${maxPages} on their plan. Layout: ${d.structure === 'one_page' ? 'ONE PAGE — the menu jumps down the home page to sections with a menu label' : 'several pages — the menu lists the pages not hidden'}.`,
         `Business: ${d.settings.siteName}${d.settings.locality ? `, ${d.settings.locality}` : ''} · email ${d.settings.email ?? 'none'} · phone ${d.settings.phone ?? 'none'} · type ${d.settings.businessType}`,
         d.settings.features
