@@ -90,7 +90,7 @@ check('the name looks editable and the swan says what it does', () => {
     assert.match(DETAIL, /title="Click to rename your assistant"/);
     assert.match(DETAIL, /class="detail-name-edit shrink-0"/);
     assert.match(DETAIL, /#detail-name-input \{ border-bottom: 2px dashed/);
-    assert.match(DETAIL, /class="ai-wand-img"> Suggest a name/);
+    assert.match(DETAIL, /class="ai-wand-img"> <span class="detail-suggest-name-label">Suggest a name<\/span>/);
 });
 
 check('the Brand Protected pill is gone', () => {
