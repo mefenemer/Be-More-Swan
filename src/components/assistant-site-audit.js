@@ -2,8 +2,9 @@
  * src/components/assistant-site-audit.js
  * The Mystery Shopper's Website tab — docs/mystery-shopper-plan.md §4.
  *
- * Shows the site's score out of 100 and its three parts, what the last check said, the suggested
- * fixes (before → after), what competitors changed, past checks, and the settings. "Check my site
+ * Six sub-tabs, following a suggestion from check to done (owner, 2026-10-21): Checks (score and its
+ * three parts, what the last check said, why the score isn't higher, competitors, past checks,
+ * settings) · To review · In progress · Done · Needs attention · Archived. "Check my site
  * now" queues a check; checks run in the background (site-audit.ts) and this tab polls until one ends.
  *
  * Backed by netlify/functions/site-audits.ts — the SAME actions the chat cards call
@@ -16,9 +17,9 @@
  *
  * ── Briefs and History ────────────────────────────────────────────────────────
  * A "Brief <name>" click opens that assistant's chat with the brief typed in AND records the brief
- * (site-audits.ts `brief` → site_audit_briefs): the idea leaves "Ideas for your other assistants" and
- * appears in "History", which also lists every fix that went live or was dismissed and every earlier
- * check's ideas — so the user can see what has changed. "Undo" puts a brief back.
+ * (site-audits.ts `brief` → site_audit_briefs): the idea leaves "Ideas for your other assistants" (To review)
+ * for In progress, and after 30 days Done. Fixes that went live are in Done, dismissed ones and
+ * earlier checks' unactioned ideas in Archived. "Undo" puts a brief back.
  *
  * Handlers are bound to `document` once, at load, never from render. Every server value is escaped.
  * ⚠️ The button and section names are quoted to the chat (chat-orchestrator.ts mysteryShopperSurfaces);
@@ -49,8 +50,7 @@
     loadError: null,
     rendered: false,
     settingsOpen: false,
-    showHistory: false,
-    historyFilter: 'all',  // 'all' | 'fixes' | 'briefs'
+    tab: 'checks',         // the sub-tab: checks | review | progress | done | attention | archived
     historyShown: 20,      // client-paged: "Show more" adds HISTORY_PAGE
     note: null,          // { text, tone }
     pollTimer: null,
@@ -224,7 +224,7 @@
     const lens = (LENSES.find((l) => l[0] === f.lens) || [null, ''])[1];
     const accepted = f.status === 'accepted';
     return `
-      <div class="border border-gray-200 rounded-xl p-4">
+      <div class="border border-gray-200 rounded-xl p-4" data-sa-fix-card="${esc(f.id)}">
         <div class="flex flex-wrap items-center gap-2">
           <span class="text-xs font-bold text-gray-900">${esc(f.location || 'Page')}</span>
           <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${impactCls}">${esc(impactLabel)}</span>
@@ -252,7 +252,7 @@
   function stalledNudge(f) {
     const done = fixBrief(f.id);
     if (done) {
-      return `<p class="mt-3 text-xs text-indigo-700">You briefed ${esc(done.targetName || 'your Social Media Assistant')} on ${esc(when(done.createdAt))} to post the new wording while this waits — it's in History.</p>`;
+      return `<p class="mt-3 text-xs text-indigo-700">You briefed ${esc(done.targetName || 'your Social Media Assistant')} on ${esc(when(done.createdAt))} to post the new wording while this waits — it's in In progress.</p>`;
     }
     const social = teamFor('social_media_manager');
     return `
@@ -277,19 +277,6 @@
       </div>`;
   }
 
-  /** The last check's ideas for the other assistants, minus any already briefed (those are in History). */
-  function handoffsBlock(latest) {
-    const handoffs = latest?.report?.handoffs || [];
-    if (!handoffs.length) return '';
-    const waiting = handoffs.map((h, i) => [h, i]).filter(([, i]) => !ideaBrief(latest.id, i));
-    return `
-      <h3 class="text-sm font-black text-gray-900">Ideas for your other assistants</h3>
-      <p class="text-xs text-gray-500 mt-1">While your website is being changed, these help in the meantime. Each opens that assistant's chat with the brief typed in — nothing is sent until you send it. Once you've briefed one it moves to History.</p>
-      <div class="space-y-3 mt-3">${waiting.length
-        ? waiting.map(([h, i]) => ideaCard(h, latest.id, i)).join('')
-        : '<p class="text-sm text-gray-500">You\'ve briefed every idea from the last check — they\'re in History below.</p>'}</div>`;
-  }
-
   /** Target reached: the weekly checks carry on; offer the next page worth working on. */
   function goalBlock(audit) {
     if (audit.status !== 'goal_met') return '';
@@ -304,34 +291,49 @@
       </div>`;
   }
 
-  function fixesBlock() {
-    const fixes = state.data?.fixes || [];
-    const waiting = fixes.filter((f) => f.status === 'open' || f.status === 'accepted');
-    const closed = fixes.filter((f) => f.status === 'done' || f.status === 'dismissed').length;
-    return `
-      <h3 class="text-sm font-black text-gray-900">Suggested fixes</h3>
-      <p class="text-xs text-gray-500 mt-1">Every "on your site now" quote was read from your page. A fix is marked done when a later check no longer finds the old wording.</p>
-      <div class="space-y-3 mt-3">${waiting.length ? waiting.map(fixCard).join('') : '<p class="text-sm text-gray-500">Nothing waiting — the next check will look again.</p>'}</div>
-      ${closed ? `<p class="text-xs text-gray-500 mt-3">${closed} done or dismissed — see History below.</p>` : ''}`;
-  }
-
+  /**
+   * "Why your score isn't higher" (was "What the score is missing", which listed the checks the page
+   * failed and left the owner with nothing to do — owner, 2026-10-21). Each line now says how much it
+   * matters and where to go: the suggested fix for that part of the score, or this assistant's chat
+   * with the question typed in.
+   */
+  const WEIGHT_WORDS = { 3: IMPACT.high, 2: IMPACT.medium, 1: IMPACT.low };
   function missingBlock(latest) {
     const failed = (latest?.scores?.outcomes || []).filter((o) => o.result === 'fail').sort((a, b) => b.weight - a.weight);
     if (!failed.length) return '';
+    const fixes = state.data?.fixes || [];
+    const fixFor = (lens) => fixes.find((f) => f.lens === lens && (f.status === 'open' || f.status === 'accepted'));
     return `
-      <h3 class="text-sm font-black text-gray-900">What the score is missing</h3>
-      <ul class="mt-2 space-y-1 list-disc pl-5">${failed.slice(0, 10).map((o) => `<li class="text-xs text-gray-700">${esc(o.label)}</li>`).join('')}</ul>`;
+      <h3 class="text-sm font-black text-gray-900">Why your score isn't higher</h3>
+      <p class="text-xs text-gray-500 mt-1">What a buyer's eye looks for and didn't find, most important first. Each one fixed raises the score at the next check.</p>
+      <ul class="mt-3 space-y-2">${failed.slice(0, 10).map((o, i) => {
+        const [w, cls] = WEIGHT_WORDS[o.weight] || IMPACT.medium;
+        const lens = (LENSES.find((l) => l[0] === o.lens) || [null, ''])[1];
+        const fx = fixFor(o.lens);
+        return `<li class="border border-gray-200 rounded-xl p-3">
+          <div class="flex flex-wrap items-center gap-2"><span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}">${esc(w)}</span><span class="text-[10px] text-gray-500">${esc(lens)}</span></div>
+          <p class="text-xs text-gray-800 mt-1">${esc(o.label)}</p>
+          ${fx
+            ? `<button type="button" data-sa-goto-fix="${esc(fx.id)}" class="mt-2 btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">See the suggested fix</button>`
+            : `<button type="button" data-sa-ask="${i}" class="mt-2 btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Ask ${esc(state.assistantName || 'your Mystery Shopper')} how to fix this</button>`}
+        </li>`;
+      }).join('')}</ul>`;
   }
 
   function competitorsBlock(audit, latest) {
     const comps = audit.competitorUrls || [];
+    // The addresses are edited in Settings; the card says so with a button that opens it at them
+    // (owner, 2026-10-21: "we need to be able to edit the competitor urls" — it was possible, but
+    // nothing on this card led there).
+    const edit = `<button type="button" data-sa-edit-competitors class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">${comps.length ? 'Edit competitors' : 'Add competitors'}</button>`;
+    const head = `<div class="flex flex-wrap items-center justify-between gap-2"><h3 class="text-sm font-black text-gray-900">Competitors</h3>${edit}</div>`;
     if (!comps.length) {
-      return `<h3 class="text-sm font-black text-gray-900">Competitors</h3><p class="text-xs text-gray-500 mt-1">Add up to three in Settings and every check compares you side by side — and tells you when they change their headline, prices or offer.</p>`;
+      return `${head}<p class="text-xs text-gray-500 mt-1">Add up to three and every check compares you side by side — and tells you when they change their headline, prices or offer.</p>`;
     }
     const changes = (latest?.report?.competitorChanges || []);
     const unread = (latest?.report?.competitorsUnread || []);
     return `
-      <h3 class="text-sm font-black text-gray-900">Competitors</h3>
+      ${head}
       <ul class="mt-2 space-y-2">${comps.map((u) => {
         const c = changes.find((x) => x.url === u);
         const miss = unread.find((x) => x.url === u);
@@ -340,25 +342,6 @@
             : c && c.changes && c.changes.length ? `<ul class="list-disc pl-5 mt-1">${c.changes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`
             : '<span class="text-gray-500"> — no change spotted at the last check</span>'}</li>`;
       }).join('')}</ul>`;
-  }
-
-  /**
-   * Everything that has happened to the suggestions, newest first: fixes that went live or were
-   * dismissed, briefs sent to other assistants, and earlier checks' ideas that nobody acted on.
-   */
-  function historyEntries() {
-    const out = [];
-    for (const f of state.data?.fixes || []) {
-      if (f.status !== 'done' && f.status !== 'dismissed') continue;
-      out.push({ kind: 'fix', at: f.updatedAt, f });
-    }
-    for (const b of briefs()) out.push({ kind: 'brief', at: b.createdAt, b });
-    const latestId = state.data?.latest?.id;
-    for (const r of state.data?.pastIdeas || []) {
-      if (r.runId === latestId) continue;   // the latest check's open ideas have their own card
-      (r.handoffs || []).forEach((h, i) => { if (!ideaBrief(r.runId, i)) out.push({ kind: 'idea', at: r.at, h, runId: r.runId, i }); });
-    }
-    return out.sort((a, b) => new Date(b.at) - new Date(a.at));
   }
 
   const SOURCE_WORDS = { idea: 'An idea from a check', stalled_fix: 'To post the new wording while your website change waits', chat: 'From your chat' };
@@ -408,31 +391,160 @@
       </li>`;
   }
 
-  function suggestionHistoryBlock() {
-    const all = historyEntries();
-    const filters = [['all', 'All'], ['fixes', 'Website fixes'], ['briefs', 'Briefs and ideas']];
-    const shown = all.filter((e) => state.historyFilter === 'all' || (state.historyFilter === 'fixes' ? e.kind === 'fix' : e.kind !== 'fix'));
-    const page = shown.slice(0, state.historyShown);
-    return `
-      <h3 class="text-sm font-black text-gray-900">History</h3>
-      <p class="text-xs text-gray-500 mt-1">Past suggestions and what happened to them — fixes that went live or that you turned down, briefs you sent to your other assistants, and ideas nobody acted on.</p>
-      ${state.data?.briefsAvailable === false ? '<p class="text-xs text-amber-700 mt-2">Briefs to your other assistants aren\'t being recorded yet, so they don\'t appear here.</p>' : ''}
-      <div class="flex flex-wrap gap-2 mt-3" role="tablist">${filters.map(([k, label]) => `
-        <button type="button" data-sa-history-filter="${k}" role="tab" aria-selected="${state.historyFilter === k}" class="px-3 py-1 rounded-full text-xs font-bold border transition ${state.historyFilter === k ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'}">${label}</button>`).join('')}
-      </div>
-      ${page.length
-        ? `<ul class="space-y-3 mt-3">${page.map(historyItem).join('')}</ul>`
-        : `<p class="text-sm text-gray-500 mt-3">${all.length ? 'Nothing of that kind yet.' : 'Nothing yet — when a fix goes live, you dismiss one, or you brief another assistant, it is listed here.'}</p>`}
-      ${shown.length > page.length ? `<button type="button" data-sa-history-more class="mt-3 text-xs text-gray-500 underline">Show more (${shown.length - page.length} older)</button>` : ''}`;
+  // ── Sub-tabs (owner, 2026-10-21) ─────────────────────────────────────────────
+  // The tab was one long stack: score, summary, fixes, ideas, what's missing, competitors, History,
+  // past checks. Now six sub-tabs that follow a suggestion from check to done, left to right, and
+  // History is split into the tabs it belongs to. Arrow keys move between them (assistants.js).
+  const SUBTABS = [['checks', 'Checks'], ['review', 'To review'], ['progress', 'In progress'], ['done', 'Done'], ['attention', 'Needs attention'], ['archived', 'Archived']];
+  const BRIEF_SETTLE_DAYS = 30;   // a brief is "in progress" while the other assistant works on it
+
+  /** Every suggestion, sorted into the sub-tab it belongs in. */
+  function buckets() {
+    const fixes = state.data?.fixes || [];
+    const stalled = new Set(state.data?.stalled || []);
+    const latest = state.data?.latest;
+    const settled = (b) => Date.now() - new Date(b.createdAt).getTime() > BRIEF_SETTLE_DAYS * 864e5;
+    const newest = (state.data?.runs || [])[0];
+    const pastIdeas = [];
+    for (const r of state.data?.pastIdeas || []) {
+      if (r.runId === latest?.id) continue;
+      (r.handoffs || []).forEach((h, i) => { if (!ideaBrief(r.runId, i)) pastIdeas.push({ kind: 'idea', at: r.at, h, runId: r.runId, i }); });
+    }
+    const byNew = (a, b) => new Date(b.at) - new Date(a.at);
+    return {
+      review: {
+        fixes: fixes.filter((f) => f.status === 'open'),
+        ideas: (latest?.report?.handoffs || []).map((h, i) => [h, i]).filter(([, i]) => !ideaBrief(latest.id, i)),
+      },
+      progress: {
+        fixes: fixes.filter((f) => f.status === 'accepted' && !stalled.has(f.id)),
+        briefs: briefs().filter((b) => !settled(b)).map((b) => ({ kind: 'brief', at: b.createdAt, b })).sort(byNew),
+      },
+      done: [
+        ...fixes.filter((f) => f.status === 'done').map((f) => ({ kind: 'fix', at: f.updatedAt, f })),
+        ...briefs().filter(settled).map((b) => ({ kind: 'brief', at: b.createdAt, b })),
+      ].sort(byNew),
+      attention: {
+        fixes: fixes.filter((f) => f.status === 'accepted' && stalled.has(f.id)),
+        run: newest && (newest.status === 'failed' || newest.status === 'unreadable') ? newest : null,
+        comps: latest?.report?.competitorsUnread || [],
+      },
+      archived: [
+        ...fixes.filter((f) => f.status === 'dismissed').map((f) => ({ kind: 'fix', at: f.updatedAt, f })),
+        ...pastIdeas,
+      ].sort(byNew),
+    };
   }
 
-  function historyBlock() {
-    const runs = state.data?.runs || [];
-    if (!runs.length) return '';
+  function counts(b) {
+    return {
+      review: b.review.fixes.length + b.review.ideas.length,
+      progress: b.progress.fixes.length + b.progress.briefs.length,
+      done: b.done.length,
+      attention: b.attention.fixes.length + (b.attention.run ? 1 : 0) + b.attention.comps.length,
+      archived: b.archived.length,
+    };
+  }
+
+  function subtabsHtml(n) {
+    const tone = { review: 'bg-amber-100 text-amber-800', attention: 'bg-red-100 text-red-700' };
+    return `<div class="tab-scroller border-b border-gray-200 overflow-x-auto overflow-y-hidden">
+      <div class="flex gap-1" role="tablist" aria-label="Your website check">${SUBTABS.map(([k, l]) => {
+        const on = state.tab === k;
+        const c = n[k] || 0;
+        return `<button type="button" role="tab" id="sa-subtab-${k}" data-sa-subtab="${k}" aria-selected="${on}" tabindex="${on ? 0 : -1}"
+          class="site-subtab px-3 py-2 text-sm whitespace-nowrap border-b-2 ${on ? 'font-bold text-emerald-800' : 'font-medium text-gray-500 hover:text-gray-700 border-transparent'}">${esc(l)}${c ? ` <span class="ml-1 text-[10px] font-black px-1.5 py-0.5 rounded-full ${tone[k] || 'bg-gray-100 text-gray-600'}">${c}</span>` : ''}</button>`;
+      }).join('')}</div></div>`;
+  }
+
+  const empty = (text) => `<p class="text-sm text-gray-500">${text}</p>`;
+  const list = (items) => `<ul class="space-y-3 mt-3">${items.map(historyItem).join('')}</ul>`;
+
+  function reviewPanel(b) {
+    const latest = state.data?.latest;
     return `
-      <button type="button" data-sa-toggle-history class="text-xs text-gray-500 underline">${state.showHistory ? 'Hide' : 'Show'} past checks (${runs.length})</button>
-      ${state.showHistory ? `<ul class="mt-2 space-y-1">${runs.map((r) => `
-        <li class="text-xs text-gray-600">${esc(when(r.createdAt))} · ${esc(KIND_WORDS[r.kind] || r.kind)} · ${esc(RUN_WORDS[r.status] || r.status)}${r.overallScore !== null && r.overallScore !== undefined ? ` · ${esc(r.overallScore)}/100` : ''}${r.error ? ` — ${esc(r.error)}` : ''}</li>`).join('')}</ul>` : ''}`;
+      ${card(`
+        <h3 class="text-sm font-black text-gray-900">Suggested fixes</h3>
+        <p class="text-xs text-gray-500 mt-1">Every "on your site now" quote was read from your page. Say you'll make the change and it moves to In progress; a later check confirms it and it moves to Done.</p>
+        <div class="space-y-3 mt-3">${b.review.fixes.length ? b.review.fixes.map(fixCard).join('') : empty('Nothing waiting — the next check will look again.')}</div>`)}
+      ${card(`
+        <h3 class="text-sm font-black text-gray-900">Ideas for your other assistants</h3>
+        <p class="text-xs text-gray-500 mt-1">While your website is being changed, these help in the meantime. Each opens that assistant's chat with the brief typed in — nothing is sent until you send it. Once you've briefed one it moves to In progress.</p>
+        <div class="space-y-3 mt-3">${b.review.ideas.length
+          ? b.review.ideas.map(([h, i]) => ideaCard(h, latest.id, i)).join('')
+          : empty(latest?.report?.handoffs?.length ? 'You’ve briefed every idea from the last check.' : 'No new ideas from the last check — what would help is already covered by your other assistants.')}</div>`)}`;
+  }
+
+  function progressPanel(b) {
+    return `
+      ${card(`
+        <h3 class="text-sm font-black text-gray-900">Changes you're making</h3>
+        <p class="text-xs text-gray-500 mt-1">The next check looks for the new wording on your site. When it's there, the fix moves to Done; if it's still missing after a week, to Needs attention.</p>
+        <div class="space-y-3 mt-3">${b.progress.fixes.length ? b.progress.fixes.map(fixCard).join('') : empty('None — say “I’ll make this change” on a fix in To review.')}</div>`)}
+      ${card(`
+        <h3 class="text-sm font-black text-gray-900">Briefs with your other assistants</h3>
+        <p class="text-xs text-gray-500 mt-1">Sent in the last ${BRIEF_SETTLE_DAYS} days. Older ones are in Done.</p>
+        ${state.data?.briefsAvailable === false ? '<p class="text-xs text-amber-700 mt-2">Briefs to your other assistants aren’t being recorded yet, so they don’t appear here.</p>' : ''}
+        ${b.progress.briefs.length ? list(b.progress.briefs) : `<div class="mt-3">${empty('None yet.')}</div>`}`)}`;
+  }
+
+  function donePanel(b) {
+    return card(`
+      <h3 class="text-sm font-black text-gray-900">Done</h3>
+      <p class="text-xs text-gray-500 mt-1">Fixes a check confirmed are live on your site, and briefs sent over ${BRIEF_SETTLE_DAYS} days ago.</p>
+      ${b.done.length ? list(b.done.slice(0, state.historyShown)) : `<div class="mt-3">${empty('Nothing yet — a fix lands here when a check finds the new wording on your site.')}</div>`}
+      ${b.done.length > state.historyShown ? `<button type="button" data-sa-history-more class="mt-3 text-xs text-gray-500 underline">Show more (${b.done.length - state.historyShown} older)</button>` : ''}`);
+  }
+
+  function attentionPanel(b) {
+    const a = b.attention;
+    const why = a.run && (a.run.status === 'unreadable'
+      ? 'Your page shows almost no text until JavaScript runs, so there was nothing to read — and many AI crawlers see the same blank page. Ask whoever built the site about server-side rendering.'
+      : (a.run.error || 'The check did not complete.'));
+    const parts = [
+      a.run ? card(`<h3 class="text-sm font-black text-gray-900">The last check didn't finish</h3><p class="text-xs text-gray-700 mt-1">${esc(when(a.run.createdAt))}: ${esc(why)}</p><p class="text-xs text-gray-500 mt-1">Nothing was charged. Try again from Checks.</p>`) : '',
+      a.fixes.length ? card(`<h3 class="text-sm font-black text-gray-900">Promised, but not on your site yet</h3><p class="text-xs text-gray-500 mt-1">Over a week since you said you'd make these changes, and the last check didn't find them.</p><div class="space-y-3 mt-3">${a.fixes.map(fixCard).join('')}</div>`) : '',
+      a.comps.length ? card(`<h3 class="text-sm font-black text-gray-900">Competitors that couldn't be read</h3><ul class="mt-2 space-y-1">${a.comps.map((c) => `<li class="text-xs text-gray-700"><span class="font-bold">${esc(host(c.url))}</span> — ${esc(c.message)}</li>`).join('')}</ul><div class="mt-3"><button type="button" data-sa-edit-competitors class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Edit competitors</button></div>`) : '',
+    ].filter(Boolean);
+    return parts.length ? parts.join('') : card(empty('Nothing needs you right now.'));
+  }
+
+  function archivedPanel(b) {
+    return card(`
+      <h3 class="text-sm font-black text-gray-900">Archived</h3>
+      <p class="text-xs text-gray-500 mt-1">Fixes you said weren't for you ("Bring back" returns one to To review), and ideas from earlier checks that nobody acted on.</p>
+      ${b.archived.length ? list(b.archived.slice(0, state.historyShown)) : `<div class="mt-3">${empty('Nothing archived.')}</div>`}
+      ${b.archived.length > state.historyShown ? `<button type="button" data-sa-history-more class="mt-3 text-xs text-gray-500 underline">Show more (${b.archived.length - state.historyShown} older)</button>` : ''}`);
+  }
+
+  function checksPanel(audit, latest) {
+    const run = inFlight();
+    const runs = state.data?.runs || [];
+    return `
+      ${card(`
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+          <div>
+            <p class="text-sm font-black text-gray-900 break-all">${esc(host(audit.url))}</p>
+            ${audit.conversionGoal ? `<p class="text-xs text-gray-500">Visitors should: ${esc(audit.conversionGoal)}</p>` : ''}
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button type="button" data-sa-run ${run ? 'disabled' : ''} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Check my site now</button>
+            <button type="button" data-sa-settings-open class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition">Settings</button>
+          </div>
+        </div>
+        ${scoreBlock(audit, latest)}
+        <div class="mt-4">${statusLine(audit, latest)}</div>
+        <p class="text-xs text-gray-400 mt-2">A check that re-scores uses 1 task. If nothing on your site or your competitors' sites has changed, the score stands and nothing is used.</p>`)}
+      ${goalBlock(audit)}
+      ${state.settingsOpen ? card(`<h3 class="text-sm font-black text-gray-900 mb-3">Settings</h3>${settingsForm(audit)}`) : ''}
+      ${latest?.report?.summary ? card(`
+        <h3 class="text-sm font-black text-gray-900">What the last check said</h3>
+        <p class="text-sm text-gray-700 mt-2">${esc(latest.report.summary)}</p>
+        ${(latest.report.partialLenses || []).length ? `<p class="text-xs text-amber-700 mt-2">Part of this check couldn't be completed (${esc(latest.report.partialLenses.map((k) => (LENSES.find((l) => l[0] === k) || [k, k])[1]).join(', '))}), so that part was scored on the automatic checks only.</p>` : ''}`) : ''}
+      ${latest ? card(missingBlock(latest) || '<p class="text-xs text-gray-500">Every check passed at the last look.</p>') : ''}
+      ${card(competitorsBlock(audit, latest))}
+      ${runs.length ? card(`<h3 class="text-sm font-black text-gray-900">Past checks</h3><ul class="mt-2 space-y-1">${runs.map((r) => `
+        <li class="text-xs text-gray-600">${esc(when(r.createdAt))} · ${esc(KIND_WORDS[r.kind] || r.kind)} · ${esc(RUN_WORDS[r.status] || r.status)}${r.overallScore !== null && r.overallScore !== undefined ? ` · ${esc(r.overallScore)}/100` : ''}${r.error ? ` — ${esc(r.error)}` : ''}</li>`).join('')}</ul>`) : ''}`;
   }
 
   function render() {
@@ -459,36 +571,13 @@
     }
 
     const latest = state.data.latest;
-    const run = inFlight();
+    const b = buckets();
+    const panel = { checks: () => checksPanel(audit, latest), review: () => reviewPanel(b), progress: () => progressPanel(b), done: () => donePanel(b), attention: () => attentionPanel(b), archived: () => archivedPanel(b) }[state.tab] || (() => checksPanel(audit, latest));
     el.innerHTML = `
       <div class="space-y-4">
-        ${card(`
-          <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
-            <div>
-              <p class="text-sm font-black text-gray-900 break-all">${esc(host(audit.url))}</p>
-              ${audit.conversionGoal ? `<p class="text-xs text-gray-500">Visitors should: ${esc(audit.conversionGoal)}</p>` : ''}
-            </div>
-            <div class="flex flex-wrap items-center gap-2">
-              <button type="button" data-sa-run ${run ? 'disabled' : ''} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Check my site now</button>
-              <button type="button" data-sa-settings-open class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition">Settings</button>
-            </div>
-          </div>
-          ${scoreBlock(audit, latest)}
-          <div class="mt-4">${statusLine(audit, latest)}</div>
-          <p class="text-xs text-gray-400 mt-2">A check that re-scores uses 1 task. If nothing on your site or your competitors' sites has changed, the score stands and nothing is used.</p>
-          ${noteHtml()}`)}
-        ${goalBlock(audit)}
-        ${state.settingsOpen ? card(`<h3 class="text-sm font-black text-gray-900 mb-3">Settings</h3>${settingsForm(audit)}`) : ''}
-        ${latest?.report?.summary ? card(`
-          <h3 class="text-sm font-black text-gray-900">What the last check said</h3>
-          <p class="text-sm text-gray-700 mt-2">${esc(latest.report.summary)}</p>
-          ${(latest.report.partialLenses || []).length ? `<p class="text-xs text-amber-700 mt-2">Part of this check couldn't be completed (${esc(latest.report.partialLenses.map((k) => (LENSES.find((l) => l[0] === k) || [k, k])[1]).join(', '))}), so that part was scored on the automatic checks only.</p>` : ''}`) : ''}
-        ${card(fixesBlock())}
-        ${latest?.report?.handoffs?.length ? card(handoffsBlock(latest)) : ''}
-        ${latest ? card(missingBlock(latest) || '<p class="text-xs text-gray-500">Every check passed at the last look.</p>') : ''}
-        ${card(competitorsBlock(audit, latest))}
-        ${card(suggestionHistoryBlock())}
-        ${(state.data.runs || []).length ? card(historyBlock()) : ''}
+        ${subtabsHtml(counts(b))}
+        ${noteHtml()}
+        <div role="tabpanel" aria-labelledby="sa-subtab-${state.tab}" class="space-y-4">${panel()}</div>
       </div>`;
     restoreTyped(el, typed);
   }
@@ -541,11 +630,35 @@
     if (!state.assistantId || !e.target.closest('#site-audit-host')) return;
     const t = (sel) => e.target.closest(sel);
 
-    if (t('[data-sa-settings-open]')) { state.settingsOpen = !state.settingsOpen; render(); return; }
+    const sub = t('[data-sa-subtab]');
+    if (sub) { state.tab = sub.dataset.saSubtab; state.historyShown = HISTORY_PAGE; render(); return; }
+    const goFix = t('[data-sa-goto-fix]');
+    if (goFix) {
+      // The fix is in To review (undecided) or In progress / Needs attention (accepted).
+      const f = (state.data?.fixes || []).find((x) => x.id === Number(goFix.dataset.saGotoFix));
+      const stalled = (state.data?.stalled || []).includes(f?.id);
+      state.tab = !f || f.status === 'open' ? 'review' : stalled ? 'attention' : 'progress';
+      render();
+      document.querySelector(`[data-sa-fix-card="${CSS.escape(String(f?.id))}"]`)?.scrollIntoView({ block: 'center' });
+      return;
+    }
+    const ask = t('[data-sa-ask]');
+    if (ask) {
+      const o = (state.data?.latest?.scores?.outcomes || []).filter((x) => x.result === 'fail').sort((a, z) => z.weight - a.weight)[Number(ask.dataset.saAsk)];
+      if (o) openChatWithBrief({ id: state.assistantId }, `My last website check says: "${o.label}". How do I fix that on my site?`);
+      return;
+    }
+    if (t('[data-sa-settings-open]')) { state.settingsOpen = !state.settingsOpen; if (state.settingsOpen) state.tab = 'checks'; render(); return; }
+    if (t('[data-sa-edit-competitors]')) {
+      state.settingsOpen = true;
+      state.tab = 'checks';
+      render();
+      const first = document.querySelector('[data-sa-settings] input[name="competitor"]');
+      first?.scrollIntoView({ block: 'center' });
+      first?.focus({ preventScroll: true });
+      return;
+    }
     if (t('[data-sa-settings-close]')) { state.settingsOpen = false; render(); return; }
-    if (t('[data-sa-toggle-history]')) { state.showHistory = !state.showHistory; render(); return; }
-    const hf = t('[data-sa-history-filter]');
-    if (hf) { state.historyFilter = hf.dataset.saHistoryFilter; state.historyShown = HISTORY_PAGE; render(); return; }
     if (t('[data-sa-history-more]')) { state.historyShown += HISTORY_PAGE; render(); return; }
 
     const run = t('[data-sa-run]');
@@ -643,7 +756,7 @@
    */
   async function briefAndOpen(who, draft, what) {
     const record = post({ action: 'brief', assistantId: state.assistantId, ...what })
-      .then(() => say(`Briefed ${who.name} — it's in History.`))
+      .then(() => say(`Briefed ${who.name} — it's in In progress.`))
       .catch((err) => say(err.message, 'error'));
     if (typeof window.openAssistantChat === 'function') {
       openChatWithBrief(who, draft);
@@ -680,7 +793,7 @@
       state.loaded = false;
       state.rendered = false;
       state.settingsOpen = false;
-      state.historyFilter = 'all';
+      state.tab = 'checks';
       state.historyShown = HISTORY_PAGE;
       state.note = null;
       // Eager: the count of undecided fixes drives the tab badge, visible from every tab.

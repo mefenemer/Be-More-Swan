@@ -29,6 +29,7 @@ import { fetchSiteHtml } from './site-fetch';
 import { parseModelJson } from './model-json';
 import { createNotification } from './notify';
 import { loadProductsBlock } from './org-products';
+import { loadAlreadyCovered, type CoveredItem } from './site-audit-covered';
 import {
     buildLensPrompt, buildSummaryPrompt, sanitiseSummary, type AuditBrief, type Handoff, type Priority,
 } from './site-audit-prompts';
@@ -100,6 +101,8 @@ export interface AuditInput {
     /** Pages from the last read, same keys — for competitor change lines. */
     previousPages: Record<string, SitePage>;
     previousScore: number | null;
+    /** What the other assistants already have, so ideas aren't repeated (site-audit-covered.ts). */
+    covered?: CoveredItem[];
 }
 
 export interface AuditReport {
@@ -235,7 +238,7 @@ export async function runAuditCore(input: AuditInput, deps: AuditDeps): Promise<
     const fixes = answered.flatMap((r) => r.fixes);
     const groundingDropped = answered.reduce((n, r) => n + r.dropped, 0);
 
-    const summaryInput = { brief: input.brief, score, previousScore: input.previousScore, fixes, competitorChanges };
+    const summaryInput = { brief: input.brief, score, previousScore: input.previousScore, fixes, competitorChanges, covered: input.covered };
     let summaryRaw: unknown = null;
     try {
         summaryRaw = parseModelJson(await deps.callModel({ ...buildSummaryPrompt(summaryInput), maxTokens: SUMMARY_MAX_TOKENS }));
@@ -352,6 +355,10 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
         let rulesBlock: string | null = null;
         try { rulesBlock = await loadAssistantRulesBlock(db, { assistantId: audit.aiAssistantId, organisationId: orgId }); } catch { /* none */ }
 
+        // What the other assistants already have — earlier ideas, briefs, their own posts and articles —
+        // so this check's ideas are new ones (owner, 2026-10-21: they were repeating every check).
+        const covered = await loadAlreadyCovered(db, orgId, audit.id);
+
         const kind = claimed.kind as AuditInput['kind'];
         const outcome = await runAuditCore({
             kind,
@@ -360,6 +367,7 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
             lastHashes: (audit.lastHashes ?? {}) as Record<string, string>,
             previousPages: ((prev?.pages ?? {}) as Record<string, SitePage>),
             previousScore: audit.currentScore,
+            covered,
         }, {
             fetchPage: fetchSitePageLive,
             callModel: async (req) => (await gatewayGenerate({
