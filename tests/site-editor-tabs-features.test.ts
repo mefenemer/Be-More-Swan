@@ -93,7 +93,7 @@ check('a click or the drafting poll no longer reloads the preview or wipes what 
     // The template galleries are rewritten only when their HTML changed.
     assert.ok(ed.includes("['templates', isFresh() && !def().settings.template ? templatesCard(true) : '', { keep: true }]"));
     // A poll with nothing new does not repaint.
-    assert.ok(/const same = state\.loaded && sig === state\.dataSig;[\s\S]{0,120}if \(!same\) \{ state\.version\+\+; rerender\(\); \}/.test(ed));
+    assert.ok(/const same = state\.loaded && sig === state\.dataSig;[\s\S]{0,120}if \(!same\) \{ keepEditing\(\); state\.version\+\+; rerender\(\); \}/.test(ed));
     // Typed text is kept unless the server changed that box; the section form keeps its own (by position).
     assert.ok(ed.includes('if (t && defaultOf(c) === t.was)') && ed.includes("if (el.closest('[data-site-section-form]')) return null;"));
 });

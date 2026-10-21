@@ -174,7 +174,7 @@ check('the page has the tab, its panel and the script; every branch routes to th
 check('every name the chat quotes is on the Website tab', () => {
     const at = chat.indexOf('function websiteAssistantSurfaces()');
     const surfaces = chat.slice(at, chat.indexOf('\n}', at));
-    for (const n of ['"Website" tab', '"Pages"', '"Design"', '"Details"', '"Edit"', '"↑"', '"↓"', '"Remove"', '"Add a section"', '"+ Page"', '"Preview"', '"Desktop"', '"Phone"', '"Draft my whole site"']) {
+    for (const n of ['"Website" tab', '"Pages"', '"Design"', '"Details"', '"Edit"', '"↑"', '"↓"', '"Remove"', '"Add a section"', '"+ Page"', '"Preview"', '"Desktop"', '"Phone"', '"Templates"', '"Add your own words"', '"Start again from scratch"', '"Replace my draft"', '"Import my current site"', '"Write my site"', '"Write the words"', '"Publish"', '"Publish changes"', '"View live site"', '"Take offline"']) {
         assert.ok(surfaces.includes(n), `surfaces: ${n}`);
         assert.ok(editor.includes(n.replace(/^"|"( tab)?$/g, '')), `editor: ${n}`);
     }
@@ -190,6 +190,40 @@ check('chat cards are registered, dispatch events the session handles, and call 
     for (const a of ["action: 'apply'", "action: 'draft'"]) assert.ok(session.includes(a) && editor.includes(a), a);
     assert.match(session, /new CustomEvent\('site:changed'/);
     assert.match(editor, /document\.addEventListener\('site:changed'/);
+});
+
+check('the chat is told publishing exists, and the welcome names a real button', () => {
+    const at = chat.indexOf('function websiteAssistantSurfaces()');
+    const surfaces = chat.slice(at, chat.indexOf('\n}', at));
+    assert.ok(!/coming soon/i.test(surfaces), 'surfaces must not say publishing is coming soon');
+    const welcome = read('src/components/assistant-welcome-messages.js');
+    assert.ok(!welcome.includes('Draft my whole site'));
+    assert.ok(welcome.includes('“Write my site”') && editor.includes("'Write my site'"));
+});
+
+check('a draft with no tasks left is refused before it starts, with a way to more', () => {
+    const api = read('netlify/functions/sites.ts');
+    const draft = api.slice(api.indexOf("if (action === 'draft')"), api.indexOf("if (action === 'import')"));
+    assert.ok(draft.indexOf('hasTaskCapacity(db, orgId)') > -1 && draft.indexOf('hasTaskCapacity(db, orgId)') < draft.indexOf('claimDraft('));
+    assert.match(draft, /json\(402, \{ error: TASK_LIMIT_MESSAGE/);
+    assert.match(editor, /billing: err\.status === 402/);
+    assert.match(editor, /data-site-billing/);
+});
+
+check('the section form: asks before losing changes, opens in view, one save at a time', () => {
+    for (const marker of ["if (t('[data-site-edit-cancel]')) {", 'if (want !== state.panel && !(await leaveEditor())) return;', "if (pg.dataset.sitePage !== p.id && !(await leaveEditor())) return;"]) {
+        const at = editor.indexOf(marker);
+        assert.ok(at > -1, marker);
+        assert.ok(editor.slice(at, at + 200).includes('leaveEditor()'), marker);
+    }
+    assert.match(editor, /title: 'Leave without saving\?'/);
+    assert.match(editor, /state\.focusEditor = true;/);
+    assert.match(editor, /form\.scrollIntoView\(/);
+    const apply = editor.slice(editor.indexOf('async function apply('), editor.indexOf('function markBusy('));
+    assert.match(apply, /if \(state\.busy\) return;/);
+    assert.match(apply, /markBusy\(\)/);
+    assert.match(editor, /setAttribute\('aria-busy', 'true'\)/);
+    assert.match(editor, /data-site-beside[^>]*><span aria-hidden="true">/);
 });
 
 check('the chat never publishes (step 3a: a click on the Website tab), and nothing spends without saying so', () => {

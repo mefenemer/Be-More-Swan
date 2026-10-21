@@ -104,6 +104,7 @@ import {
 import { triggerSiteDraft } from '../../src/utils/trigger-site-draft';
 import { acceptImport, discardImport, importView, loadImport, startSiteImport } from '../../src/utils/site-import-store';
 import { cleanImportUrl } from '../../src/utils/site-import';
+import { hasTaskCapacity, TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -236,6 +237,8 @@ export default withLambda(async (event) => {
             const blocked = await enforcePromptModeration({ text: request, userId, organisationId: orgId, source: 'sites' });
             if (blocked) return blocked;
         }
+        // Checked here as well as in the worker: out of tasks, say so now — not after "a minute or two".
+        if (!(await hasTaskCapacity(db, orgId))) return json(402, { error: TASK_LIMIT_MESSAGE, code: 'task_limit' });
         if (!(await claimDraft(db, site.id))) return json(409, { error: 'Your site is already being drafted — it will appear here in a minute or two.' });
         if (!(await triggerSiteDraft(site.id, request || null))) {
             await endDraft(db, site.id, 'The draft couldn\'t be started. Nothing was charged — try again.');

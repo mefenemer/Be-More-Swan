@@ -4,8 +4,8 @@
  *
  * Left: the site — Pages (each page's sections: edit, move, remove, add), Design (colours, font,
  * corners, logo) and Details (business details, footer, menu). Right: the live preview, rendered by
- * the real renderer (site-preview.ts) in desktop or phone width. "Draft my whole site" asks the
- * assistant for a complete first draft (1 task).
+ * the real renderer (site-preview.ts) in desktop or phone width. "Write my site" ("Write the words"
+ * on a template, "Replace my draft" later) asks the assistant for a complete draft (1 task).
  *
  * Backed by netlify/functions/sites.ts — the SAME actions the chat cards call (chat-session.js →
  * site:apply / site:draft). Every change is a typed operation that the server passes through the one
@@ -18,7 +18,7 @@
  *
  * ── What this tab may not do ─────────────────────────────────────────────────
  * Publish without a click, or with [placeholders] left (the server refuses those too).
- * Spend without a click: only "Draft my whole site" and "Import my current site" use a task, and say so first.
+ * Spend without a click: only "Write my site" and "Import my current site" use a task, and say so first.
  *
  * "Import my current site" (site-import.ts, sites.ts import / import_accept / import_discard — the same
  * actions as the chat's site_import_request and site_import_decision cards): reads their old site into
@@ -158,7 +158,7 @@
     thumbs: {}, bookings: null, timetable: null,
     words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
     importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false,
-    dataSig: null, noteShown: null, focusSection: null,
+    dataSig: null, noteShown: null, focusSection: null, focusEditor: false, busy: false, trigger: null, noteAt: null,
   };
 
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -178,7 +178,7 @@
   async function post(payload) {
     const res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(payload) });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+    if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (HTTP ${res.status}).`), { status: res.status });
     return data;
   }
 
@@ -217,7 +217,7 @@
     const same = state.loaded && sig === state.dataSig;
     state.dataSig = sig;
     state.loaded = true;
-    if (!same) { state.version++; rerender(); }
+    if (!same) { keepEditing(); state.version++; rerender(); }
     schedulePoll();
   }
 
@@ -227,6 +227,11 @@
   }
 
   async function apply(ops, done) {
+    // One change at a time: a second tap on Add, Save or ↑/↓ while one is on its way is dropped, so it
+    // can't send the same change twice or move a section by a stale position.
+    if (state.busy) return;
+    const release = markBusy();
+    keepEditing();
     try {
       state.data = await post({ action: 'apply', assistantId: state.assistantId, ops });
       state.version++;
@@ -236,7 +241,51 @@
     } catch (err) {
       state.note = { text: err.message, tone: 'error' };
     }
+    release();
     rerender();
+  }
+
+  /** The button that was pressed, disabled and marked busy until the request is answered; the note
+   *  that follows is shown beside it (afterPaint), not only above the tabs. */
+  function markBusy() {
+    state.busy = true;
+    const b = state.trigger;
+    state.noteAt = anchorOf(b);
+    if (b) { b.disabled = true; b.setAttribute('aria-busy', 'true'); }
+    return () => {
+      state.busy = false;
+      if (b && b.isConnected) { b.disabled = false; b.removeAttribute('aria-busy'); }
+    };
+  }
+  /** A selector that finds the same button again after a repaint: its first data- attribute. */
+  function anchorOf(b) {
+    const a = b && [...b.attributes].find((x) => x.name.startsWith('data-') && x.name !== 'data-to');
+    return a ? `[${a.name}${a.value ? `="${CSS.escape(a.value)}"` : ''}]` : null;
+  }
+
+  // ── The open section form ──────────────────────────────────────────────────
+  // What was typed lives in the form until Save; these keep it across a repaint and stop it being
+  // thrown away by a click elsewhere without asking.
+  const formOf = () => document.querySelector(`[data-site-host="${state.surface}"] [data-site-section-form]`);
+  const formSig = () => JSON.stringify([state.editing.props, state.editing.look, state.editing.toPageId || null]);
+  /** Copy the open form into state.editing, so a repaint (the drafting poll, another save) keeps it. */
+  function keepEditing() {
+    const form = state.editing && formOf();
+    if (form) syncEditing(form);
+  }
+  /** True when the form differs from how it was when it opened (state.editing.base, set on first paint). */
+  function editorChanged() {
+    if (!state.editing) return false;
+    keepEditing();
+    return state.editing.base != null && formSig() !== state.editing.base;
+  }
+  /** Before closing the form some other way than Save: ask, if anything in it changed. */
+  async function leaveEditor() {
+    if (!editorChanged()) return true;
+    if (typeof window.confirmModal !== 'function') return true;
+    const what = TYPE_LABEL[state.editing.type] || 'section';
+    return window.confirmModal(`Your changes to this ${esc(what)} section haven't been saved. They're lost if you leave it now.`,
+      { title: 'Leave without saving?', confirmLabel: 'Leave without saving', cancelLabel: 'Keep editing' });
   }
 
   /** Publish-card actions: same response shape as get/apply, so the whole tab refreshes from it. */
@@ -267,7 +316,7 @@
   function noteHtml() {
     if (!state.note) return '';
     const cls = state.note.tone === 'error' ? 'text-red-600' : state.note.tone === 'warn' ? 'text-amber-800' : 'text-green-700';
-    return `<p class="text-xs font-semibold ${cls}">${esc(state.note.text)}</p>`;
+    return `<p class="text-xs font-semibold ${cls}">${esc(state.note.text)}${state.note.billing ? ` ${btn('data-site-billing', 'See plans')}` : ''}</p>`;
   }
 
   function sectionSummary(s) {
@@ -1384,12 +1433,38 @@
    *  sits above the tabs, far from a Save at the bottom of a long form. */
   function afterPaint(host) {
     nameFields(host);
+    const form = state.editing && host.querySelector('[data-site-section-form]');
+    if (form && state.editing.base == null) { syncEditing(form); state.editing.base = formSig(); }
+    // Edit / Add a section: the form opens below the section list — bring it into view, focused.
+    if (state.focusEditor) {
+      state.focusEditor = false;
+      if (form) {
+        form.scrollIntoView({ block: 'start' });
+        const first = form.querySelector('input:not([type=hidden]),textarea,select');
+        (first || form.querySelector('button')).focus({ preventScroll: true });
+      }
+    }
     if (state.focusSection) {
       const row = host.querySelector(`[data-site-edit="${CSS.escape(state.focusSection)}"]`);
+      state.focusRow = state.focusSection;
       state.focusSection = null;
       if (row) { row.scrollIntoView({ block: 'center' }); row.focus({ preventScroll: true }); }
     }
-    if (state.note && state.note !== state.noteShown) {
+    let beside = false;
+    if (state.note && state.note !== state.noteShown && state.noteAt) {
+      // Said again beside the button that was pressed (the live note above the tabs is what a
+      // screen reader announces, so this copy is hidden from it).
+      const a = host.querySelector(state.focusRow ? `[data-site-edit="${CSS.escape(state.focusRow)}"]` : state.noteAt);
+      const at = a && (a.closest('li') || a.parentElement);
+      if (at) {
+        const cls = state.note.tone === 'error' ? 'text-red-600' : state.note.tone === 'warn' ? 'text-amber-800' : 'text-green-700';
+        at.insertAdjacentHTML('beforeend', `<p data-site-beside class="w-full basis-full text-xs font-semibold mt-1 ${cls}"><span aria-hidden="true">${esc(state.note.text)}</span>${state.note.billing ? ` ${btn('data-site-billing', 'See plans')}` : ''}</p>`);
+        beside = true;
+      }
+    }
+    if (state.note && state.note !== state.noteShown) state.noteAt = null;
+    state.focusRow = null;
+    if (state.note && state.note !== state.noteShown && !beside) {
       const n = host.querySelector('[data-site-block="note"]');
       const r = n && n.getBoundingClientRect();
       if (r && (r.top < 0 || r.bottom > window.innerHeight)) {
@@ -1464,6 +1539,8 @@
     const form = e.target.closest && e.target.closest('[data-site-section-form]');
     if (!form || !state.assistantId) return;
     e.preventDefault();
+    if (state.busy) return;
+    state.trigger = e.submitter || form.querySelector('[data-site-section-save]');
     const ed = state.editing;
     const props = readForm(form, ed.type);
     const look = readLook(form);
@@ -1485,13 +1562,17 @@
     if (!state.assistantId || !hostOf(e)) return;
     const t = (sel) => e.target.closest(sel);
     const p = page();
+    state.trigger = t('button');
+    if (t('[data-site-billing]')) { window.loadView?.('billing'); return; }
 
     const panel = t('[data-site-panel]');
     if (panel) {
       const want = panel.dataset.sitePanel;
       // Enquiries, Orders and Bookings are tabs of their own now.
       if (want === 'enquiries' || want === 'orders' || want === 'bookings') { window._activateMainTab?.(`site${want}`); return; }
-      state.panel = want; state.editing = null;
+      if (want !== state.panel && !(await leaveEditor())) return;
+      if (want !== state.panel) state.editing = null;
+      state.panel = want;
       render();
       return;
     }
@@ -1541,17 +1622,35 @@
       return;
     }
     const pg = t('[data-site-page]');
-    if (pg) { state.pageId = pg.dataset.sitePage; state.editing = null; state.previewPath = pathOf(page()); render(); return; }
+    if (pg) {
+      if (pg.dataset.sitePage !== p.id && !(await leaveEditor())) return;
+      if (pg.dataset.sitePage !== p.id) state.editing = null;
+      state.pageId = pg.dataset.sitePage; state.previewPath = pathOf(page()); render(); return;
+    }
     const dev = t('[data-site-device]');
     if (dev) { state.device = dev.dataset.siteDevice; render(); return; }
-    if (t('[data-site-edit-cancel]')) { state.editing = null; render(); return; }
+    if (t('[data-site-edit-cancel]')) {
+      if (!(await leaveEditor())) return;
+      const was = state.editing && state.editing.sectionId;
+      state.editing = null; state.focusSection = was || null; render(); return;
+    }
 
     const edit = t('[data-site-edit]');
-    if (edit) { const s = p.sections.find((x) => x.id === edit.dataset.siteEdit); state.editing = { pageId: p.id, sectionId: s.id, type: s.type, props: JSON.parse(JSON.stringify(s.props)), look: { ...LOOK_DEFAULT, ...(s.look || {}) } }; render(); return; }
+    if (edit) {
+      const s = p.sections.find((x) => x.id === edit.dataset.siteEdit);
+      if (state.editing && state.editing.sectionId === s.id) { state.focusEditor = true; render(); return; }
+      if (!(await leaveEditor())) return;
+      state.editing = { pageId: p.id, sectionId: s.id, type: s.type, props: JSON.parse(JSON.stringify(s.props)), look: { ...LOOK_DEFAULT, ...(s.look || {}) } };
+      state.focusEditor = true;
+      render();
+      return;
+    }
     if (t('[data-site-new-section]')) {
       const type = document.querySelector('[data-site-new-type]').value;
       if (!FORMS[type]) return;   // a type this editor has no form for — nothing to open
+      if (!(await leaveEditor())) return;
       state.editing = { pageId: p.id, sectionId: null, type, props: JSON.parse(JSON.stringify(BLANK[type] || {})), look: { ...LOOK_DEFAULT } };
+      state.focusEditor = true;
       render();
       return;
     }
@@ -1920,11 +2019,16 @@
             : `Your Website Assistant writes every page again, replacing your current draft. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing is live yet.'} This uses 1 task.`,
           { title: def().settings.template ? 'Write the words?' : 'Draft your whole site?', confirmLabel: def().settings.template ? 'Write the words' : 'Draft my site', cancelLabel: 'Not now' })
         : true;
-      if (!ok) return;
+      if (!ok || state.busy) return;
+      const release = markBusy();
       try {
         state.data = await post({ action: 'draft', assistantId: state.assistantId, request: hostOf(e).querySelector('[data-site-draft-request]').value });
-        say(null);
-      } catch (err) { say(err.message, 'error'); }
+        state.note = null;
+      } catch (err) {
+        // Out of tasks (402): said straight away, with the way to more.
+        state.note = { text: err.message, tone: 'error', billing: err.status === 402 };
+      }
+      release();
       schedulePoll();
       rerender();
     }
@@ -1992,11 +2096,12 @@
     // surface: 'website' (pages, design, details, preview) or 'enquiries' | 'orders' | 'bookings',
     // each its own tab. A list re-reads every time its tab is opened.
     activate(surface) {
+      // Leaving the Website tab keeps an open section form, with what was typed, for coming back.
+      if (state.surface === 'website') keepEditing();
       // A note ("Saved.") belongs to the tab it was said on.
       if ((surface || 'website') !== state.surface) state.note = null;
       state.surface = surface || 'website';
       state.rendered = true;
-      state.editing = null;
       if (state.surface === 'enquiries') { state.enquiries = null; state.enquiryShown = 20; loadEnquiries(); }
       if (state.surface === 'orders') { state.orders = null; state.orderShown = 20; loadOrders(); }
       if (state.surface === 'bookings') { state.bookings = null; loadBookings(); }

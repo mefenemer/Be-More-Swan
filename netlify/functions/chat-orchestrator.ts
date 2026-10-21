@@ -577,8 +577,10 @@ function brandDesignerSurfaces(): string {
 // checks each name against those files.
 function websiteAssistantSurfaces(): string {
     return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform:
-- "Website" tab — the tab the user lands on. On the left: "Pages" (each page's title, address, search title and description, and its sections, each with "Edit", "↑", "↓" and "Remove", plus "Add a section" and "+ Page"), "Design" (colours, lettering, corners, logo) and "Details" (business details and footer). On the right: the live "Preview", with "Desktop" and "Phone". "Draft my whole site" writes every page again.
-- Nothing is live yet: the site is a private draft. Publishing it is coming soon, and will always be a click the user makes on the Website tab — never something you do.
+- "Website" tab — the tab the user lands on. On the left: "Pages" (each page's title, address, search title and description, and its sections, each with "Edit", "↑", "↓" and "Remove", plus "Add a section", "+ Page" and "Add your own words"), "Design" (colours, lettering, corners, logo), "Templates" (start again from a ready-made layout) and "Details" (business details and footer, and at the bottom "Start again from scratch" with "Replace my draft"). On the right: the live "Preview", with "Desktop" and "Phone".
+- On a new site the tab starts with "Import my current site" (reads their old website into a draft to review), a choice of templates, and "Write my site" ("Write the words" once a template is chosen), which writes every page for 1 task.
+- The "Publish" card on the Website tab puts the site live at its address ("Publish"; once it is live, "Publish changes", "View live site" and "Take offline"). It refuses while any [square brackets] are left. Publishing is always a click the user makes there — never something you do; changes stay in the draft until they publish.
+- "Enquiries" tab — messages from the site's contact form. "Orders" and "Bookings" tabs appear when the site sells things or takes bookings.
 Everything you can change here, the user can also change there by hand.`;
 }
 
