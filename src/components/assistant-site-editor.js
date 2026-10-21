@@ -158,6 +158,7 @@
     thumbs: {}, bookings: null, timetable: null,
     words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
     importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false,
+    dataSig: null, noteShown: null, focusSection: null,
   };
 
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -211,9 +212,12 @@
     } catch (err) {
       state.loadError = err.message;
     }
+    // The drafting poll re-reads every 5s: repaint (and reload the preview) only when something changed.
+    const sig = state.loadError || JSON.stringify(state.data);
+    const same = state.loaded && sig === state.dataSig;
+    state.dataSig = sig;
     state.loaded = true;
-    state.version++;
-    rerender();
+    if (!same) { state.version++; rerender(); }
     schedulePoll();
   }
 
@@ -250,12 +254,20 @@
 
   // ── Render ─────────────────────────────────────────────────────────────────
   function card(inner, extra = '') { return `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 ${extra}">${inner}</div>`; }
-  const btn = (attrs, label, primary) => `<button type="button" ${attrs} class="${primary ? 'btn-primary' : 'btn-secondary border'} px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">${label}</button>`;
+  const btn = (attrs, label, primary) => `<button type="button" ${attrs} class="${primary ? 'btn-primary' : 'btn-secondary border'} sb-tap px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">${label}</button>`;
+  // At phone width every button here is at least 44px square to tap (WCAG 2.5.5). The prebuilt
+  // style.css has no min-h-[44px] or sm: variant of it, so the one rule is added here, once.
+  if (!document.getElementById('sb-tap-style')) {
+    const st = document.createElement('style');
+    st.id = 'sb-tap-style';
+    st.textContent = '@media (max-width: 639px) { .sb-tap { min-height: 44px; min-width: 44px; } }';
+    document.head.appendChild(st);
+  }
 
   function noteHtml() {
     if (!state.note) return '';
     const cls = state.note.tone === 'error' ? 'text-red-600' : state.note.tone === 'warn' ? 'text-amber-800' : 'text-green-700';
-    return `<p class="text-xs font-semibold ${cls} mt-3">${esc(state.note.text)}</p>`;
+    return `<p class="text-xs font-semibold ${cls}">${esc(state.note.text)}</p>`;
   }
 
   function sectionSummary(s) {
@@ -415,12 +427,12 @@
             <input type="hidden" data-g-asset value="${esc(im.assetId || '')}"><input type="hidden" data-g-url value="${esc(im.assetId ? '' : (im.url || ''))}"><input type="hidden" data-g-video value="${im.video ? '1' : ''}">
             ${src ? thumbHtml(src, im.video, 72, 72) : '<span style="width:72px;height:72px;flex-shrink:0" class="bg-gray-100 rounded-lg"></span>'}
             <div class="flex-1 min-w-0">
-              <input data-g-alt class="${inputCls} ${im.alt ? '' : 'border-amber-500'}" placeholder="What the picture shows (needed)" value="${esc(im.alt || '')}">
-              <input data-g-caption class="${inputCls} mt-1" placeholder="Caption under it (optional)" value="${esc(im.caption || '')}">
-              <div class="flex gap-3 mt-1 text-xs">
-                ${i > 0 ? `<button type="button" data-gallery-move="${i}" data-to="${i - 1}" class="text-gray-600 underline">Move up</button>` : ''}
-                ${i < list.length - 1 ? `<button type="button" data-gallery-move="${i}" data-to="${i + 1}" class="text-gray-600 underline">Move down</button>` : ''}
-                <button type="button" data-gallery-remove="${i}" class="text-gray-500 underline">Remove</button>
+              <input data-g-alt aria-label="Picture ${i + 1}: what it shows (needed)" class="${inputCls} ${im.alt ? '' : 'border-amber-500'}" placeholder="What the picture shows (needed)" value="${esc(im.alt || '')}">
+              <input data-g-caption aria-label="Picture ${i + 1}: caption (optional)" class="${inputCls} mt-1" placeholder="Caption under it (optional)" value="${esc(im.caption || '')}">
+              <div class="flex flex-wrap gap-1 mt-1">
+                ${i > 0 ? btn(`data-gallery-move="${i}" data-to="${i - 1}"`, 'Move up') : ''}
+                ${i < list.length - 1 ? btn(`data-gallery-move="${i}" data-to="${i + 1}"`, 'Move down') : ''}
+                ${btn(`data-gallery-remove="${i}"`, 'Remove')}
               </div>
             </div>
           </div>`;
@@ -440,7 +452,7 @@
         <div data-menu-groups class="space-y-2 mt-1">${groups.map((g, gi) => `
           <div class="border border-gray-200 rounded-lg p-3" data-menu-group>
             <div class="flex items-center gap-2"><input data-menu-title class="${inputCls}" placeholder="Group name — e.g. Starters, Cuts & colour (optional)" value="${esc(g.title || '')}">
-              ${groups.length > 1 ? `<button type="button" data-menu-group-remove="${gi}" class="text-xs text-gray-500 underline whitespace-nowrap">Remove group</button>` : ''}</div>
+              ${groups.length > 1 ? btn(`data-menu-group-remove="${gi}"`, '<span class="whitespace-nowrap">Remove group</span>') : ''}</div>
             <div class="grid gap-1 mt-2 sm:grid-cols-2">${list.map((p) => {
               const mine = owner[p.id] === gi;
               const elsewhere = p.id in owner && !mine;
@@ -449,7 +461,7 @@
                 <span class="font-bold">${esc(p.name)}</span><span class="text-gray-500">${esc(p.price || 'No price shown')}</span>${elsewhere ? '<span>(in another group)</span>' : ''}</label>`;
             }).join('')}</div>
           </div>`).join('')}</div>
-        <button type="button" data-menu-group-add class="text-xs text-gray-600 underline mt-2">+ Add a group</button>
+        <div class="mt-2">${btn('data-menu-group-add', '+ Add a group')}</div>
         <p class="text-xs text-gray-500 mt-2">Items appear in Business Information order. Change a name, price or description in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} — the menu follows. Nothing on a menu is bought online; use a Products for sale section for that.</p>`;
     }
     if (f.kind === 'items') {
@@ -459,11 +471,11 @@
         <div data-items="${esc(f.k)}" class="space-y-2">${list.map((it, i) => `
           <div class="border border-gray-200 rounded-lg p-3" data-item>
             ${f.fields.map(([k, kind, label]) => kind === 'textarea'
-              ? `<textarea data-item-field="${esc(k)}" rows="2" class="${inputCls} mt-1" placeholder="${esc(label)}"${limitAttr(itemMax(k))}>${esc(it[k] || '')}</textarea>${limitNote(itemMax(k))}`
-              : `<input data-item-field="${esc(k)}" class="${inputCls} mt-1" placeholder="${esc(label)}"${limitAttr(itemMax(k))} value="${esc(it[k] || '')}">${limitNote(itemMax(k))}`).join('')}
-            <button type="button" data-item-remove="${i}" class="text-xs text-gray-500 underline mt-1">Remove</button>
+              ? `<textarea data-item-field="${esc(k)}" aria-label="${esc(f.label)} ${i + 1}: ${esc(label)}" rows="2" class="${inputCls} mt-1" placeholder="${esc(label)}"${limitAttr(itemMax(k))}>${esc(it[k] || '')}</textarea>${limitNote(itemMax(k))}`
+              : `<input data-item-field="${esc(k)}" aria-label="${esc(f.label)} ${i + 1}: ${esc(label)}" class="${inputCls} mt-1" placeholder="${esc(label)}"${limitAttr(itemMax(k))} value="${esc(it[k] || '')}">${limitNote(itemMax(k))}`).join('')}
+            <div class="mt-1">${btn(`data-item-remove="${i}"`, 'Remove')}</div>
           </div>`).join('')}</div>
-        <button type="button" data-item-add="${esc(f.k)}" class="text-xs text-gray-600 underline mt-2">+ Add another</button>`;
+        <div class="mt-2">${btn(`data-item-add="${esc(f.k)}"`, '+ Add another')}</div>`;
     }
     return '';
   }
@@ -557,7 +569,7 @@
     return card(`
       <form data-site-section-form>
         <div class="flex items-center justify-between"><p class="text-sm font-black text-gray-900">${e.sectionId ? 'Edit' : 'Add'} ${esc(TYPE_LABEL[e.type])}</p>
-          <button type="button" data-site-edit-cancel class="text-xs text-gray-500 underline">Cancel</button></div>
+          ${btn('data-site-edit-cancel', 'Cancel')}</div>
         ${FORMS[e.type].map((f) => fieldHtml(f, e.props[f.k])).join('')}
         ${lookHtml(e)}
         <div class="mt-4">${btn('data-site-section-save type="submit"', e.sectionId ? 'Save section' : 'Add section', true).replace('type="button" ', '')}</div>
@@ -570,7 +582,7 @@
   const SWAN = '/images/BeMoreSwan_SwanAI.png';
   function swanBtn(pageId, sectionId) {
     return `<button type="button" data-site-ask="${esc(sectionId)}" data-page="${esc(pageId)}" title="Ask ${esc(state.assistantName || 'your assistant')} to change this" aria-label="Ask for a change to this section"
-      class="btn-secondary border px-2 py-1 rounded-lg inline-flex items-center"><img src="${SWAN}" alt="" style="width:18px;height:18px;object-fit:contain"></button>`;
+      class="btn-secondary border sb-tap px-2 py-1 rounded-lg inline-flex items-center justify-center"><img src="${SWAN}" alt="" style="width:18px;height:18px;object-fit:contain"></button>`;
   }
   async function askForChange(pageId, sectionId) {
     const pg = def().pages.find((x) => x.id === pageId);
@@ -608,7 +620,7 @@
   function pagesPanel() {
     const d = def();
     const p = page();
-    const pageTabs = d.pages.map((x) => `<button type="button" data-site-page="${esc(x.id)}" class="px-3 py-1.5 text-xs font-bold rounded-lg border ${x.id === p.id ? 'btn-primary' : 'btn-secondary'}">${esc(x.title)}</button>`).join(' ');
+    const pageTabs = d.pages.map((x) => `<button type="button" data-site-page="${esc(x.id)}" class="sb-tap px-3 py-1.5 text-xs font-bold rounded-lg border ${x.id === p.id ? 'btn-primary' : 'btn-secondary'}">${esc(x.title)}</button>`).join(' ');
     const sections = p.sections.map((s, i) => `
       <li class="border border-gray-200 rounded-lg p-3 flex flex-wrap items-center justify-between gap-2">
         <div class="min-w-0"><p class="text-xs font-bold text-gray-900">${esc(TYPE_LABEL[s.type])}${s.look && s.look.menuLabel && d.structure === 'one_page' ? ` <span class="font-semibold text-indigo-700">· In the menu as “${esc(s.look.menuLabel)}”</span>` : ''}</p><p class="text-xs text-gray-500 truncate">${esc(sectionSummary(s))}</p></div>
@@ -630,7 +642,7 @@
           ${d.pages.length < state.data.maxPages ? btn('data-site-add-page', '+ Page') : `<span class="text-xs text-gray-500">${esc(state.data.maxPages)} of ${esc(state.data.maxPages)} pages on your plan</span>`}</div>
         <p class="text-sm font-black text-gray-900 mt-4 mb-3">Sections on ${esc(p.title)}</p>
         <ul class="space-y-2">${sections || '<li class="text-xs text-gray-500">No sections yet.</li>'}</ul>
-        <div class="flex flex-wrap gap-2 items-center mt-4"><select data-site-new-type class="${inputCls}" style="max-width:220px">${state.data.vocab.sectionTypes.filter(typeAllowed).map((t) => `<option value="${esc(t)}">${esc(TYPE_LABEL[t] || t)}</option>`).join('')}</select>${btn('data-site-new-section', 'Add a section')}</div>`)}
+        <div class="flex flex-wrap gap-2 items-center mt-4"><select data-site-new-type aria-label="Kind of section to add" class="${inputCls}" style="max-width:220px">${state.data.vocab.sectionTypes.filter(typeAllowed).map((t) => `<option value="${esc(t)}">${esc(TYPE_LABEL[t] || t)}</option>`).join('')}</select>${btn('data-site-new-section', 'Add a section')}</div>`)}
       ${state.editing ? editorHtml() : ''}
       ${wordsCard(p)}
       ${card(`
@@ -1090,16 +1102,29 @@
     rerender();
   }
 
-  function previewHtml() {
-    const showImport = state.previewImport && state.data.import && state.data.import.status === 'ready';
-    const src = `/.netlify/functions/site-preview?assistantId=${encodeURIComponent(state.assistantId)}${showImport ? '&import=1' : ''}&path=${encodeURIComponent(state.previewPath)}&v=${state.version}`;
-    const width = state.device === 'mobile' ? '390px' : '100%';
-    return card(`
-      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+  // The preview card is painted once and then kept: its header is rewritten and the frame's width
+  // set on each render, but the frame reloads only when its address changes (the draft changed, or
+  // another page / the import is shown) — not on every click.
+  function previewHeadHtml(showImport) {
+    return `<div class="flex flex-wrap items-center justify-between gap-2 mb-3">
         <p class="text-sm font-black text-gray-900">Preview <span class="text-xs font-semibold text-gray-500">— ${showImport ? 'your imported site (not your draft yet)' : state.data.site.status === 'published' ? 'your draft' : 'not live yet'}</span></p>
         <div class="flex gap-1">${btn(`data-site-device="desktop"`, 'Desktop', state.device === 'desktop')}${btn(`data-site-device="mobile"`, 'Phone', state.device === 'mobile')}</div>
-      </div>
-      <div class="bg-gray-100 rounded-lg p-2" style="overflow:auto"> <iframe data-site-preview title="Preview of your website" src="${esc(src)}" style="display:block;margin:0 auto;width:${width};height:720px;border:0;background:#fff;border-radius:8px"></iframe></div>`);
+      </div>`;
+  }
+  function paintPreview(slot) {
+    const showImport = state.previewImport && state.data.import && state.data.import.status === 'ready';
+    const src = `/.netlify/functions/site-preview?assistantId=${encodeURIComponent(state.assistantId)}${showImport ? '&import=1' : ''}&path=${encodeURIComponent(state.previewPath)}&v=${state.version}`;
+    let frame = slot.querySelector('iframe[data-site-preview]');
+    if (!frame) {
+      slot.innerHTML = card(`<div data-site-preview-head></div>
+      <div class="bg-gray-100 rounded-lg p-2" style="overflow:auto"><iframe data-site-preview title="Preview of your website" style="display:block;margin:0 auto;height:720px;border:0;background:#fff;border-radius:8px"></iframe></div>`);
+      frame = slot.querySelector('iframe[data-site-preview]');
+    }
+    const head = slot.querySelector('[data-site-preview-head]');
+    const headHtml = previewHeadHtml(showImport);
+    if (head._html !== headHtml) { head.innerHTML = headHtml; head._html = headHtml; }
+    frame.style.width = state.device === 'mobile' ? '390px' : '100%';
+    if (frame.dataset.src !== src) { frame.dataset.src = src; frame.src = src; }
   }
 
   // A new site: nothing written yet beyond the starter (never published, two sections at most).
@@ -1261,7 +1286,7 @@
       ? `<p class="text-xs text-gray-700 mt-3">Where you bought <strong>${esc(d.altDomain || d.domain)}</strong>, open its <strong>DNS</strong> settings and add:</p>
          <div class="overflow-x-auto mt-1"><table class="text-xs w-full border border-gray-200 rounded-lg" style="border-collapse:separate">
            <tr class="bg-gray-50 text-gray-600"><th class="text-left px-2 py-1">Type</th><th class="text-left px-2 py-1">Name / Host</th><th class="text-left px-2 py-1">Value / Points to</th></tr>
-           ${(d.records || []).map((r) => `<tr><td class="px-2 py-1 font-bold">${esc(r.type)}</td><td class="px-2 py-1 font-mono">${esc(r.name)}</td><td class="px-2 py-1 font-mono">${esc(r.value)} <button type="button" data-site-copy="${esc(r.value)}" class="underline text-gray-500 ml-1">Copy</button></td></tr>
+           ${(d.records || []).map((r) => `<tr><td class="px-2 py-1 font-bold">${esc(r.type)}</td><td class="px-2 py-1 font-mono">${esc(r.name)}</td><td class="px-2 py-1 font-mono">${esc(r.value)} <span class="ml-1">${btn(`data-site-copy="${esc(r.value)}"`, 'Copy')}</span></td></tr>
              <tr><td></td><td colspan="2" class="px-2 pb-1 text-gray-500">${esc(r.note)}</td></tr>`).join('')}
          </table></div>
          <p class="text-xs text-gray-500 mt-1">Some providers call Name "Host" and want it left blank or "@" for the bare domain. Changes can take from a few minutes to a few hours.</p>`
@@ -1281,6 +1306,100 @@
       <ul class="mt-2 space-y-1 list-disc pl-5">${list.slice(0, 8).map((x) => `<li class="text-xs text-amber-800">${esc(x.pageTitle)}: ${esc(x.text)}</li>`).join('')}</ul></div>`;
   }
 
+  // ── Painting ───────────────────────────────────────────────────────────────
+  // render() builds the tab as named blocks and paints them into wrappers that stay. A `keep` block
+  // (the template galleries, full of live previews) is rewritten only when its HTML changed; the rest
+  // are rewritten each time, keeping what was typed into a box the server hasn't changed since — so a
+  // click, a save or the drafting poll no longer wipes a half-typed page title or draft request.
+  // The section form is left out: syncEditing keeps it in state.editing, by position.
+  const KEEP_TYPED = 'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=file]),textarea,select';
+  function fieldKey(el) {
+    if (el.closest('[data-site-section-form]')) return null;
+    if (el.name) return `name=${el.name}`;
+    const a = [...el.attributes].find((x) => x.name.startsWith('data-') && x.name !== 'data-max');
+    return a ? `${a.name}=${a.value}` : null;
+  }
+  const defaultOf = (el) => (el.tagName === 'SELECT' ? ([...el.options].find((o) => o.defaultSelected) || el.options[0] || { value: '' }).value : el.defaultValue);
+  function writeKeepingTyped(el, html) {
+    const typed = new Map();
+    const count = new Map();
+    let focus = null;
+    el.querySelectorAll(KEEP_TYPED).forEach((c) => {
+      const k = fieldKey(c);
+      if (!k) return;
+      count.set(k, (count.get(k) || 0) + 1);
+      if (c.value !== defaultOf(c)) typed.set(k, { value: c.value, was: defaultOf(c) });
+      if (c === document.activeElement) focus = { k, from: c.selectionStart, to: c.selectionEnd };
+    });
+    el.innerHTML = html;
+    el.querySelectorAll(KEEP_TYPED).forEach((c) => {
+      const k = fieldKey(c);
+      if (!k || count.get(k) !== 1) return;
+      const t = typed.get(k);
+      if (t && defaultOf(c) === t.was) { c.value = t.value; if (c.dataset.max) updateLenNote(c); }
+      if (focus && focus.k === k) {
+        c.focus({ preventScroll: true });
+        try { if (focus.from != null) c.setSelectionRange(focus.from, focus.to); } catch { /* a select or colour box */ }
+      }
+    });
+  }
+  /** blocks: [key, html, { keep, live }] in order. An empty block is hidden; a `live` one (the note)
+   *  stays in the page, empty and zero-height, so screen readers announce what is said in it. */
+  function paintBlocks(parent, blocks) {
+    const want = new Set(blocks.map(([key]) => key));
+    [...parent.children].forEach((el) => { if (!want.has(el.dataset.siteBlock)) el.remove(); });
+    let prev = null;
+    for (const [key, html, opts = {}] of blocks) {
+      let el = [...parent.children].find((x) => x.dataset.siteBlock === key);
+      if (!el) {
+        el = document.createElement('div');
+        el.dataset.siteBlock = key;
+        if (opts.live) { el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); }
+      }
+      const at = prev ? prev.nextSibling : parent.firstChild;
+      if (el !== at) parent.insertBefore(el, at);
+      if (!opts.keep || el._html !== html) { writeKeepingTyped(el, html); el._html = html; }
+      if (opts.live) el.style.marginTop = html ? '' : '0';
+      else el.hidden = !html;
+      prev = el;
+    }
+  }
+  /** Ties each label to the box after it (for/id) and names boxes that have only a placeholder, so a
+   *  screen reader says what each box is for. One pass after painting covers every field helper. */
+  let fieldSeq = 0;
+  function nameFields(root) {
+    root.querySelectorAll('label:not([for])').forEach((l) => {
+      if (l.querySelector('input,select,textarea')) return;
+      const n = l.nextElementSibling;
+      const box = n && (n.matches('input,select,textarea') ? n : n.querySelector('input:not([type=hidden]),select,textarea'));
+      if (!box) return;
+      if (!box.id) box.id = `sb-field-${++fieldSeq}`;
+      l.htmlFor = box.id;
+    });
+    root.querySelectorAll('input[placeholder]:not([aria-label]),textarea[placeholder]:not([aria-label])').forEach((c) => {
+      if (!c.labels || !c.labels.length) c.setAttribute('aria-label', c.placeholder);
+    });
+  }
+  /** After painting: the saved section back in view, and a new note where it can be seen — the note
+   *  sits above the tabs, far from a Save at the bottom of a long form. */
+  function afterPaint(host) {
+    nameFields(host);
+    if (state.focusSection) {
+      const row = host.querySelector(`[data-site-edit="${CSS.escape(state.focusSection)}"]`);
+      state.focusSection = null;
+      if (row) { row.scrollIntoView({ block: 'center' }); row.focus({ preventScroll: true }); }
+    }
+    if (state.note && state.note !== state.noteShown) {
+      const n = host.querySelector('[data-site-block="note"]');
+      const r = n && n.getBoundingClientRect();
+      if (r && (r.top < 0 || r.bottom > window.innerHeight)) {
+        if (typeof window.showToast === 'function') window.showToast(state.note.text, { icon: state.note.tone === 'ok' ? '✅' : '⚠️' });
+        else n.scrollIntoView({ block: 'center' });
+      }
+    }
+    state.noteShown = state.note;
+  }
+
   function render() {
     const host = document.querySelector(`[data-site-host="${state.surface}"]`);
     if (!host) return;
@@ -1289,25 +1408,29 @@
     paintTabBadges();
     if (state.surface !== 'website') {
       const body = state.surface === 'enquiries' ? enquiriesPanel() : state.surface === 'orders' ? ordersPanel() : bookingsPanel();
-      host.innerHTML = `<div class="max-w-4xl space-y-4">${noteHtml()}${body}</div>`;
+      if (!host.querySelector(':scope > [data-site-surface]')) host.innerHTML = '<div data-site-surface class="max-w-4xl space-y-4"></div>';
+      paintBlocks(host.firstElementChild, [['note', noteHtml(), { live: true }], ['body', body]]);
+      afterPaint(host);
       return;
     }
     const tabs = [['pages', 'Pages'], ['design', 'Design'], ['templates', 'Templates'], ['details', 'Details']].map(([k, l]) => btn(`data-site-panel="${k}"`, esc(l), state.panel === k)).join(' ');
-    host.innerHTML = `
-      <div class="grid gap-4 lg:grid-cols-2">
-        <div class="space-y-4 min-w-0">
-          ${featuresOn() ? '' : featuresCard(true)}
-          ${state.data.import || isFresh() ? importCard('start') : ''}
-          ${isFresh() && !def().settings.template ? templatesCard(true) : ''}
-          ${isFresh() || state.data.site.drafting || (def().settings.template && !state.data.site.publishedVersion) ? draftCard('start') : ''}
-          ${publishCard()}
-          ${placeholdersCard()}
-          <div class="flex flex-wrap gap-2">${tabs}</div>
-          ${noteHtml()}
-          ${state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : state.panel === 'templates' ? templatesCard(false) : detailsPanel() + draftCard('again') + (state.data.import || isFresh() ? '' : importCard('again'))}
-        </div>
-        <div class="min-w-0">${previewHtml()}</div>
-      </div>`;
+    if (!host.querySelector(':scope > [data-site-layout]')) {
+      host.innerHTML = '<div data-site-layout class="grid gap-4 lg:grid-cols-2"><div class="space-y-4 min-w-0"></div><div class="min-w-0"></div></div>';
+    }
+    const layout = host.firstElementChild;
+    paintBlocks(layout.firstElementChild, [
+      ['features', featuresOn() ? '' : featuresCard(true)],
+      ['import', state.data.import || isFresh() ? importCard('start') : ''],
+      ['templates', isFresh() && !def().settings.template ? templatesCard(true) : '', { keep: true }],
+      ['draft', isFresh() || state.data.site.drafting || (def().settings.template && !state.data.site.publishedVersion) ? draftCard('start') : ''],
+      ['publish', publishCard()],
+      ['placeholders', placeholdersCard()],
+      ['tabs', `<div class="flex flex-wrap gap-2">${tabs}</div>`],
+      ['note', noteHtml(), { live: true }],
+      [`panel-${state.panel}`, state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : state.panel === 'templates' ? templatesCard(false) : detailsPanel() + draftCard('again') + (state.data.import || isFresh() ? '' : importCard('again')), { keep: state.panel === 'templates' }],
+    ]);
+    paintPreview(layout.lastElementChild);
+    afterPaint(host);
   }
 
   // The counts on the Enquiries / Orders / Bookings tabs — visible from every tab.
@@ -1350,7 +1473,12 @@
       ? [{ op: 'update_section', pageId: ed.pageId, sectionId: ed.sectionId, props, look },
         ...(moving ? [{ op: 'move_section', pageId: ed.pageId, sectionId: ed.sectionId, toPageId, toIndex: 99 }] : [])]
       : [{ op: 'add_section', pageId: moving ? toPageId : ed.pageId, section: { type: ed.type, props, look } }];
-    await apply(ops, () => { state.editing = null; if (moving) state.pageId = toPageId; });
+    await apply(ops, () => {
+      state.editing = null;
+      if (moving) state.pageId = toPageId;
+      const sections = (page() || { sections: [] }).sections;
+      state.focusSection = ed.sectionId || (sections[sections.length - 1] || {}).id || null;
+    });
   });
 
   document.addEventListener('click', async (e) => {
@@ -1858,7 +1986,7 @@
       clearTimeout(state.pollTimer);
       Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false, domainChecked: false, domainTyped: null,
         words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
-        importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false });
+        importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false, dataSig: null, noteShown: null, focusSection: null });
       load();
     },
     // surface: 'website' (pages, design, details, preview) or 'enquiries' | 'orders' | 'bookings',

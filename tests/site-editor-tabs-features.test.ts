@@ -78,9 +78,37 @@ check('a swan on every section (list and preview) sends the request to the chat,
 });
 check('"Draft my whole site": up front on a new site, otherwise "Start again" folded into Details', () => {
     const ed = read('src/components/assistant-site-editor.js');
-    assert.ok(ed.includes("${isFresh() || state.data.site.drafting || (def().settings.template && !state.data.site.publishedVersion) ? draftCard('start') : ''}"), 'up front on a new site, or one started from a template');
+    assert.ok(ed.includes("['draft', isFresh() || state.data.site.drafting || (def().settings.template && !state.data.site.publishedVersion) ? draftCard('start') : '']"), 'up front on a new site, or one started from a template');
     assert.ok(ed.includes("detailsPanel() + draftCard('again')") && ed.includes('Start again from scratch'));
     assert.ok(!ed.includes('          ${draftCard()}'), 'no longer under every panel');
+});
+
+console.log('\nPainting (UI review, 2026-10-21)');
+
+check('a click or the drafting poll no longer reloads the preview or wipes what was typed', () => {
+    const ed = read('src/components/assistant-site-editor.js');
+    // The preview frame is made once; its address changes only when what it shows changed.
+    assert.ok(ed.includes("if (frame.dataset.src !== src) { frame.dataset.src = src; frame.src = src; }"));
+    assert.ok(!/host\.innerHTML = `[\s\S]{0,200}previewHtml/.test(ed), 'the whole tab is no longer one innerHTML write');
+    // The template galleries are rewritten only when their HTML changed.
+    assert.ok(ed.includes("['templates', isFresh() && !def().settings.template ? templatesCard(true) : '', { keep: true }]"));
+    // A poll with nothing new does not repaint.
+    assert.ok(/const same = state\.loaded && sig === state\.dataSig;[\s\S]{0,120}if \(!same\) \{ state\.version\+\+; rerender\(\); \}/.test(ed));
+    // Typed text is kept unless the server changed that box; the section form keeps its own (by position).
+    assert.ok(ed.includes('if (t && defaultOf(c) === t.was)') && ed.includes("if (el.closest('[data-site-section-form]')) return null;"));
+});
+
+check('labels name their boxes, buttons are 44px at phone width, and notes are announced and seen', () => {
+    const ed = read('src/components/assistant-site-editor.js');
+    assert.ok(/function nameFields\(root\)[\s\S]{0,600}l\.htmlFor = box\.id;/.test(ed));
+    assert.ok(/function afterPaint\(host\) \{\s*nameFields\(host\);/.test(ed));
+    assert.ok(ed.includes('aria-label="Picture ${i + 1}: what it shows (needed)"'));
+    assert.ok(ed.includes("'@media (max-width: 639px) { .sb-tap { min-height: 44px; min-width: 44px; } }'"));
+    assert.ok(/const btn = [^\n]*sb-tap/.test(ed), 'every btn() gets the phone tap size');
+    assert.ok(!/class="text-xs text-gray-[56]00 underline[^"]*">(Remove|\+ Add another|Cancel)/.test(ed), 'no small text-link buttons in the section form');
+    assert.ok(ed.includes("['note', noteHtml(), { live: true }]") && ed.includes("el.setAttribute('aria-live', 'polite')"));
+    assert.ok(/state\.focusSection = ed\.sectionId \|\|/.test(ed), 'after a save the edited section comes back into view');
+    assert.ok(/r\.top < 0 \|\| r\.bottom > window\.innerHeight[\s\S]{0,120}showToast\(state\.note\.text/.test(ed), 'a note out of sight is also a toast');
 });
 
 console.log(`\n${passed}/${total} passed\n`);
