@@ -708,7 +708,7 @@
        for a full-height vertical scrollbar to appear beside the tabs. Pin overflow-y closed so only
        the intended horizontal scroll survives. -->
   <div class="tab-scroller mb-8 border-b border-gray-200 overflow-x-auto overflow-y-hidden">
-    <nav class="-mb-px flex gap-x-8" role="tablist" aria-label="Assistant sections">
+    <nav class="-mb-px flex gap-x-5 sm:gap-x-8" role="tablist" aria-label="Assistant sections">
       <!-- ── Core three — the unified template, same order on every assistant ──
            Data Hub · Review Queue · Calendar. All three are ALWAYS shown
            (assistant-dashboard-registry.js gives every role a hubTab + reviewQueue);
@@ -908,6 +908,9 @@
         <!-- Subtitle + primary button copy adapt to the role's reviewQueue kind (posts vs records)
              in _applyDashboardRegistry. -->
         <p id="detail-rq-subtitle" class="text-sm text-gray-500 mt-1">Items awaiting your review — approve, edit or reject before anything is scheduled.</p>
+        <!-- Blog Writer only (_renderAutopilotCard): whether autopilot is writing more drafts. -->
+        <button type="button" id="detail-rq-autopilot-chip" style="display:none" onclick="window._activateMainTab && window._activateMainTab('goals')"
+          class="hidden mt-2 inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition cursor-pointer"></button>
       </div>
       <button type="button" id="detail-rq-primary-btn" onclick="openGeneratePostSheet()" class="btn-assistant px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer flex items-center gap-1.5">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
@@ -918,7 +921,7 @@
     <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
       <!-- Lifecycle columns -->
       <div class="tab-scroller flex gap-1 px-4 pt-3 border-b border-gray-100 overflow-x-auto" role="tablist" aria-label="Posts by stage">
-        <button type="button" role="tab" aria-controls="detail-rq-groups" aria-selected="true" tabindex="0" class="detail-rq-col px-4 py-2 text-sm font-semibold rounded-t border-b-2 text-emerald-800 whitespace-nowrap"
+        <button type="button" role="tab" aria-controls="detail-rq-groups" aria-selected="true" tabindex="0" class="detail-rq-col px-4 py-2 text-sm font-semibold rounded-t border-b-2 border-emerald-800 text-emerald-800 whitespace-nowrap"
           data-status="review" onclick="detailRqOpenStatus('review', this)">
           Review
           <span id="detail-rq-col-count-review" class="ml-1 bg-amber-100 text-amber-700 text-xs px-1.5 py-0.5 rounded-full hidden"></span>

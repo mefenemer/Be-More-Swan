@@ -86,7 +86,8 @@ await check('the tuning picker branches on the review queue SOURCE, not its kind
     // kind is 'posts' for BOTH the SMM and the Blog Writer, so it cannot be the discriminator.
     assert.match(picker, /_detailReviewQueue \|\| \{\}\)\.source === 'blog_posts'/,
         'source is what says which table the drafts are in');
-    assert.match(picker, /functions\/blog-posts\?assistantId=/, 'a Blog Writer must be offered its blogs');
+    // Through _fetchBlogPosts, the page's one shared blog-posts request.
+    assert.match(picker, /_fetchBlogPosts\(window\._currentAssistantId\)/, 'a Blog Writer must be offered its blogs');
     assert.match(picker, /functions\/get-social-drafts\?status=pending_approval/, 'and a social role its posts');
     // Both arms have to reach the SAME session opener, or one of them is a dead row.
     assert.match(picker, /window\._openTuningSession\(\{ \$\{r\.arg\}:\$\{r\.id\} \}\)/);

@@ -1203,12 +1203,13 @@ window.detailRqOpenStatus = function(statusKey, btn) {
     // Deep pink for the text — neon pink on white is 3.8:1, too faint for small text.
     const active = btn || document.querySelector(`.detail-rq-col[data-status="${statusKey}"]`);
     document.querySelectorAll('.detail-rq-col').forEach(t => {
-        t.classList.remove('border-b-2', 'text-emerald-800');
+        t.classList.remove('border-b-2', 'border-emerald-800', 'text-emerald-800');
         t.classList.add('text-gray-500');
         t.setAttribute('aria-selected', t === active ? 'true' : 'false');
         t.tabIndex = t === active ? 0 : -1;
     });
-    if (active) { active.classList.add('border-b-2', 'text-emerald-800'); active.classList.remove('text-gray-500'); }
+    // border-emerald-800 too: border-b-2 alone draws the default grey, so only the text turned pink.
+    if (active) { active.classList.add('border-b-2', 'border-emerald-800', 'text-emerald-800'); active.classList.remove('text-gray-500'); }
     return _detailRqRenderGroups(statusKey);
 };
 
@@ -1222,7 +1223,29 @@ window.detailRqOpenStatus = function(statusKey, btn) {
 // site in the product already calls this function (approve/reject/publish-now in the post modal,
 // the Create Post sheet, the caption rewrites, the notification poll), so hanging the tiles off it
 // is what makes them current everywhere rather than at eleven separate call sites.
+// ── One blog-posts read per page load ───────────────────────────────────────
+// The Blogs list, the Autopilot card, the tab badge and the Results outputs each read the same
+// `blog-posts?assistantId=` list, so opening the page fetched it four times. A request made within
+// BLOG_POSTS_SHARE_MS of another is the same request. Anything that changes a post clears it first
+// (detailRqRefresh, Blog Studio's callback, the list card's own actions), so a refresh is never stale.
+const BLOG_POSTS_SHARE_MS = 2500;
+const _blogPostsReq = {};
+function _fetchBlogPosts(assistantId) {
+    const k = String(assistantId);
+    const hit = _blogPostsReq[k];
+    if (hit && Date.now() - hit.at < BLOG_POSTS_SHARE_MS) return hit.p;
+    const p = fetch(`/.netlify/functions/blog-posts?assistantId=${assistantId}`).then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return (await res.json()).posts || [];
+    });
+    _blogPostsReq[k] = { p, at: Date.now() };
+    p.catch(() => { if (_blogPostsReq[k]?.p === p) delete _blogPostsReq[k]; });
+    return p;
+}
+function _forgetBlogPosts() { Object.keys(_blogPostsReq).forEach((k) => { delete _blogPostsReq[k]; }); }
+
 window.detailRqRefresh = function() {
+    _forgetBlogPosts();
     if (!document.getElementById('detail-rq-groups')) return;
     window._refreshAssistantMetrics?.();
     window._detailRqRefreshColumnCounts();
@@ -1236,6 +1259,7 @@ window.detailRqRefresh = function() {
 // the user switches tabs or reloads. The list card's own Archive button always refreshed; the modal
 // never did, which is exactly the mismatch a user notices.
 window._onBlogStudioChanged = function(opts) {
+    _forgetBlogPosts();
     // `focusStatus` names a column the modal wants opened as part of the refresh — Publish sends
     // 'posted', so the author lands on the tab their post just moved to instead of being left on
     // Review looking at a list it is no longer in. detailRqOpenStatus re-renders, and the blog
@@ -3746,14 +3770,35 @@ const _RQ_BLOG_STATUS_LABEL = {
     rejected: 'Turned down',
 };
 
+// A one-line taste of the article from blog-posts' excerptSource (the SEO description, or the start
+// of the Markdown body) — enough to triage a draft from the list without opening Blog Studio.
+function _rqBlogExcerpt(src) {
+    const text = String(src || '')
+        .replace(/^#{1,6}\s.*$/gm, ' ')            // headings (the H1 repeats the title)
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')       // images
+        .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')     // links → their words
+        .replace(/[*_`>~|]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return text.length > 160 ? `${text.slice(0, 160).replace(/\s+\S*$/, '')}…` : text;
+}
+
 function _detailRqBlogCard(p, statusKey) {
     const note = statusKey === 'attention' ? _RQ_BLOG_ATTENTION_NOTE[p.status] : null;
+    const excerpt = _rqBlogExcerpt(p.excerptSource);
+    const words = Number(p.wordCount) || 0;
+    const byline = [
+        p.writtenByAssistant ? `Written by ${window._currentAssistantName || 'your assistant'}` : (p.writtenByAssistant === false ? 'Written by you' : ''),
+        words ? `${words.toLocaleString('en-GB')} words` : '',
+    ].filter(Boolean).join(' · ');
     const when = p.publishDate
         ? `${p.status === 'failed' ? 'was due' : 'scheduled'} ${new Date(p.publishDate).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
         : (p.updatedAt ? `updated ${new Date(p.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : '');
     return `<div class="py-4" data-rq-blog="${p.id}">
       <div class="min-w-0">
         <p class="text-sm font-bold text-gray-900 truncate">${_rqEsc(p.title || '(untitled draft)')}</p>
+        ${excerpt ? `<p class="text-xs text-gray-600 mt-1 line-clamp-2">${_rqEsc(excerpt)}</p>` : ''}
+        ${byline ? `<p class="text-[11px] text-gray-400 mt-1">${_rqEsc(byline)}</p>` : ''}
         <div class="flex items-center gap-2 mt-2">
           <span class="text-[11px] font-bold px-2 py-0.5 rounded-full border ${p.status === 'failed' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-gray-100 text-gray-600 border-gray-200'}">${_rqEsc(_RQ_BLOG_STATUS_LABEL[p.status] || p.status)}</span>
           ${when ? `<span class="text-[11px] font-semibold text-gray-400">${_rqEsc(when)}</span>` : ''}
@@ -3936,9 +3981,7 @@ async function _detailRqRenderBlog(statusKey) {
     let all = [];
     const seq = ++_detailRqRenderSeq; // only the newest load may paint (see _detailRqRenderGroups)
     try {
-        const res = await fetch(`/.netlify/functions/blog-posts?assistantId=${aid}`);
-        if (!res.ok) throw new Error();
-        all = (await res.json()).posts || [];
+        all = await _fetchBlogPosts(aid);
         if (seq !== _detailRqRenderSeq) return;
     } catch { if (seq === _detailRqRenderSeq) _detailRqRenderError(container, statusKey); return; }
 
@@ -3969,6 +4012,8 @@ window._detailRqBlogAct = async function (btn, action) {
     // intent:'review' — Blog Studio puts its decision bar up if the post is still undecided.
     if (action === 'open') { window.openBlogStudio?.({ assistantId: window._currentAssistantId, postId: id, intent: 'review' }); return; }
     if (action === 'showSchedule') { card.querySelector('.rq-sched-row')?.classList.remove('hidden'); return; }
+    // Every other action changes the post: the next read must be a fresh one.
+    _forgetBlogPosts();
 
     // Archive — blog-posts.ts DELETE sets status='archived' (org-scoped; published posts blocked).
     // The action key stays 'delete' because the endpoint verb does; the WORDING must not, or it
@@ -4625,6 +4670,17 @@ window._renderAutopilotCard = function(data) {
         document.getElementById('autopilot-next')?.classList.add('hidden');
     }
 
+    // The Blogs tab's own one-line autopilot state. The card lives on Results, so someone working
+    // through drafts never saw whether more were coming; the chip opens Results to change it.
+    const chip = document.getElementById('detail-rq-autopilot-chip');
+    if (chip) {
+        chip.classList.toggle('hidden', !isBlog);
+        chip.style.display = isBlog ? '' : 'none';   // `hidden` loses to inline-flex in style.css
+        chip.textContent = s.active ? `Autopilot on · writing ${s.phrase}`
+            : s.kind === 'unrecognised' ? 'Autopilot isn’t running — fix the schedule'
+            : 'Autopilot off · you write each post';
+    }
+
     if (isBlog) {
         // Long-form counts come from blog_posts, which get-assistant-metrics doesn't read — it is
         // scheduledPosts-only, and _fetchAndRenderAssistantMetrics early-returns for this role
@@ -4645,9 +4701,7 @@ async function _loadBlogAutopilotStats(assistantId, scheduleActive) {
     const el = id => document.getElementById(id);
     const nextEl = el('autopilot-next');
     try {
-        const res = await fetch(`/.netlify/functions/blog-posts?assistantId=${assistantId}`);
-        if (!res.ok) return;
-        const posts = (await res.json()).posts || [];
+        const posts = await _fetchBlogPosts(assistantId);
         // Race guard: the user may have opened another assistant while this was in flight.
         if (Number(window._currentAssistantId) !== Number(assistantId)) return;
 
@@ -5189,9 +5243,9 @@ window._openTuningPicker = async function() {
             // updated rows, which is why the awaiting-review bucket is selected here rather than
             // by a query param. Same bucket as the social side: the drafts you are reviewing are
             // the outputs you have an opinion about.
-            const res = await fetch(`/.netlify/functions/blog-posts?assistantId=${window._currentAssistantId}`);
-            if (res.ok) {
-                rows = ((await res.json()).posts || [])
+            const posts = await _fetchBlogPosts(window._currentAssistantId).catch(() => null);
+            if (posts) {
+                rows = posts
                     .filter(p => p.status === 'pending_approval')
                     .map(p => ({
                         id: Number(p.id),
@@ -5842,7 +5896,7 @@ function _applyDashboardRegistry(data) {
         : rqIsRecords
         ? 'Records this assistant produced, awaiting your approval — approve, schedule or reject before anything acts on them.'
         : rqIsBlog
-            ? 'Long-form drafts awaiting your review — open in Blog Studio to edit and approve, then schedule.'
+            ? 'Long-form drafts awaiting your review — open one in Blog Studio to edit and approve it. Nothing publishes until you approve it.'
             // Says "sent to your subscribers", not "scheduled": approving an issue is the decision
             // to email real people, and the copy over the Approve button should say so.
             : rqIsNewsletter
@@ -7184,6 +7238,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     }
     window.activeAssistantId = assistantId;
     window._currentAssistantId = assistantId;
+    window._currentAssistantName = '';
 
     // ⚠️ Drop the cached outreach readiness on every entry to this page, not just on a change of
     // assistant. The banner's own CTA sends the user to Business Information via loadView, which
@@ -7415,6 +7470,8 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         }
         if (!res.ok) throw new Error('Failed to load');
         currentData = await res.json();
+        // Read by list cards that name the assistant ("Written by Bella"), outside this closure.
+        window._currentAssistantName = currentData.name || '';
 
         // Review-alert cadence for the Profile › Notifications panel (saved via
         // set-review-notif-prefs; stashed here so the panel doesn't refetch context).
@@ -8073,10 +8130,10 @@ async function _prefetchDetailRqBadge(assistantId) {
             count = ((await res.json()).records || []).length;
         } else if (rq.source === 'blog_posts') {
             // Blog Writer: count long-form drafts awaiting review.
-            const res = await fetch(`/.netlify/functions/blog-posts?assistantId=${assistantId}`);
-            if (!res.ok) return;
+            const posts = await _fetchBlogPosts(assistantId).catch(() => null);
+            if (!posts) return;
             const wanted = new Set(['draft', 'pending_approval', 'in_review']);
-            count = ((await res.json()).posts || []).filter((p) => wanted.has(p.status)).length;
+            count = posts.filter((p) => wanted.has(p.status)).length;
         } else {
             const res = await fetch(`/.netlify/functions/get-social-drafts?status=pending_approval&assistantId=${assistantId}`);
             if (!res.ok) return;
@@ -9604,6 +9661,11 @@ async function _loadBlogMetrics(assistantId) {
     // defensively: a role switch on a cached page would otherwise strand it under a draft count.
     document.getElementById('metric-value-wins')?.classList.add('hidden');
 
+    // Nothing on screen until the answer is in. The four cards used to show "—" and then, for a blog
+    // with no figures yet, get swapped for the one-card empty panel — the tab jumped as it loaded.
+    // _setMetricsEmptyState shows whichever of the two is right once we know.
+    document.getElementById('metrics-kpi-grid')?.classList.add('hidden');
+
     // The green here is deliberate — it means "going well", not a leftover brand colour. The dot
     // was colour-only, so it now names its state for screen readers too.
     const _DOT_LABEL = { up: 'Trending up', down: 'Trending down', live: 'Live' };
@@ -9731,7 +9793,7 @@ function _renderBlogReaders(readers) {
         const swanCell = !p.swan
             ? '<span class="text-gray-300" title="Not sent to The Swan Index">—</span>'
             : p.swan.url
-                ? `<a href="${esc(p.swan.url)}" target="_blank" rel="noopener" class="font-semibold text-gray-900 hover:underline">${n(p.swan.views)}</a> <span class="text-gray-400">· ${n(p.swan.reads)} engaged</span>`
+                ? `<a href="${esc(p.swan.url)}" target="_blank" rel="noopener" class="font-semibold text-gray-900 hover:underline">${n(p.swan.views)}<span class="sr-only"> (opens in new tab)</span></a> <span class="text-gray-400">· ${n(p.swan.reads)} engaged</span>`
                 : `<span class="text-gray-400">${p.swan.status === 'pending' ? 'Waiting for an editor' : 'Not on the site'}</span>`;
         return `<tr class="border-t border-gray-100">
           <td class="py-2 pr-3 min-w-0"><p class="font-semibold text-gray-900" style="overflow-wrap:break-word" title="${esc(p.title)}">${esc(p.title)}</p>
@@ -9740,6 +9802,21 @@ function _renderBlogReaders(readers) {
           <td class="py-2 px-3 text-right whitespace-nowrap text-gray-600">${secs(p.avgReadSeconds)}</td>
           ${onSwan ? `<td class="py-2 pl-3 text-right">${swanCell}</td>` : ''}
         </tr>`;
+    }).join('');
+
+    // Below sm the table had four columns in ~340px and squeezed every title to a few words a line.
+    // A phone gets one stacked block per post instead; the table is for sm and up.
+    const date = (p) => (p.publishedAt ? esc(new Date(p.publishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })) : '');
+    const stacked = readers.posts.map((p) => {
+        const swan = !onSwan ? '' : !p.swan ? '<span class="text-gray-300">Not on The Swan Index</span>'
+            : p.swan.url
+                ? `<a href="${esc(p.swan.url)}" target="_blank" rel="noopener" class="font-semibold text-gray-900 hover:underline">${n(p.swan.views)} Swan Index views<span class="sr-only"> (opens in new tab)</span></a>`
+                : `<span class="text-gray-400">Swan Index: ${p.swan.status === 'pending' ? 'waiting for an editor' : 'not on the site'}</span>`;
+        return `<li class="py-2 border-t border-gray-100">
+          <p class="font-semibold text-gray-900" style="overflow-wrap:break-word">${esc(p.title)}</p>
+          <p class="text-xs text-gray-600 mt-0.5">${date(p) ? `${date(p)} · ` : ''}<span class="font-semibold text-gray-900">${n(p.blogReads)}</span> reads · ${secs(p.avgReadSeconds)} avg</p>
+          ${swan ? `<p class="text-xs mt-0.5">${swan}</p>` : ''}
+        </li>`;
     }).join('');
 
     panel.innerHTML = `
@@ -9757,7 +9834,8 @@ function _renderBlogReaders(readers) {
           <p class="text-xs text-gray-500">views on The Swan Index · ${n(t.swanReads)} stayed 15s+ or read past halfway</p>
         </div>` : ''}
       </div>
-      <div class="overflow-x-auto">
+      <ul class="sm:hidden text-sm">${stacked}</ul>
+      <div class="hidden sm:block overflow-x-auto">
         <table class="w-full text-sm">
           <thead><tr class="text-[11px] text-gray-400 uppercase tracking-wide">
             <th class="text-left font-bold pb-1 pr-3">Post</th>
