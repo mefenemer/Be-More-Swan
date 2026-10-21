@@ -68,10 +68,11 @@ console.log('\nWords and order');
 check('"Availability", not "Timetable"; the Website tab leads with a new site\'s first steps; layout in Design', () => {
     const ed = read('src/components/assistant-site-editor.js');
     assert.ok(ed.includes('<p class="text-sm font-black text-gray-900">Availability</p>') && !ed.includes('Timetable — classes'));
-    const r = ed.slice(ed.indexOf("['features', (fresh ? step === 1 : !featuresOn()) ? featuresCard(true) : '']"));
-    assert.ok(r.indexOf("['publish', fresh ? '' : publishCard()]") > 0, 'what the website does comes before Publish');
+    // Since 2026-10-21 the order is the sub-tabs': Set up (what the website does) first, Publish last.
+    assert.ok(ed.includes("const SUBTABS = [['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];"), 'what the website does comes before Publish');
+    assert.ok(ed.includes("['features', step === 1 ? featuresCard(true) : '']"), 'a new site starts with what it does');
     assert.ok(ed.includes('return structureCard() + designCard();'), 'the layout, then the design — templates have their own tab (2026-10-18)');
-    assert.ok(ed.includes("state.panel === 'templates' ? templatesCard(false)"));
+    assert.ok(ed.includes("['templates', templatesCard(false), { keep: true }],\n      ['design', designPanel()],"), 'templates lead the Design sub-tab');
     const pages = ed.slice(ed.indexOf('  function pagesPanel() {'), ed.indexOf('  // ── "Add your own words"'));
     assert.ok(!pages.includes('structureCard()') && pages.indexOf('Sections on ${esc(p.title)}') < pages.indexOf('Page details'));
 });

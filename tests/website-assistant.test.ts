@@ -174,7 +174,9 @@ check('the page has the tab, its panel and the script; every branch routes to th
 check('every name the chat quotes is on the Website tab', () => {
     const at = chat.indexOf('function websiteAssistantSurfaces()');
     const surfaces = chat.slice(at, chat.indexOf('\n}', at));
-    for (const n of ['"Website" tab', '"Pages"', '"Design"', '"Details"', '"Edit"', '"↑"', '"↓"', '"Remove"', '"Add a section"', '"+ Page"', '"Preview"', '"Desktop"', '"Phone"', '"Templates"', '"Add your own words"', '"Start again from scratch"', '"Replace my draft"', '"Import my current site"', '"Write my site"', '"Write the words"', '"Publish"', '"Publish changes"', '"View live site"', '"Take offline"']) {
+    // "Templates" and "Details" were panel buttons until the Website tab got its four sub-tabs
+    // (Set up · Design · Pages · Publish, 2026-10-21).
+    for (const n of ['"Website" tab', '"Set up"', '"Pages"', '"Design"', '"Edit"', '"↑"', '"↓"', '"Remove"', '"Add a section"', '"+ Page"', '"Preview"', '"Desktop"', '"Phone"', '"Add your own words"', '"Start again from scratch"', '"Replace my draft"', '"Import my current site"', '"Write my site"', '"Write the words"', '"Publish"', '"Publish changes"', '"View live site"', '"Take offline"']) {
         assert.ok(surfaces.includes(n), `surfaces: ${n}`);
         assert.ok(editor.includes(n.replace(/^"|"( tab)?$/g, '')), `editor: ${n}`);
     }
