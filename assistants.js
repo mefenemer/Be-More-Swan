@@ -965,8 +965,17 @@ function _resizeBriefAutoGrow() {
 // Activate a main tab by name ('datahub' | 'goals' | 'activity'). Exposed so other code
 // (deep-links, attention CTAs, child-tab clicks) can surface the right section.
 window._activateMainTab = function(name) {
-    document.querySelectorAll('.main-tab-btn').forEach(b => b.classList.toggle('active-tab', b.dataset.maintab === name));
+    document.querySelectorAll('.main-tab-btn').forEach(b => {
+        const on = b.dataset.maintab === name;
+        b.classList.toggle('active-tab', on);
+        // The class is only the look; a screen reader reads which tab is open from aria-selected,
+        // and roving tabindex keeps Tab to one stop on the strip (arrows move between tabs).
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+        b.tabIndex = on ? 0 : -1;
+    });
     document.querySelectorAll('.main-tab-content').forEach(c => c.classList.toggle('hidden', c.id !== 'maintab-' + name));
+    // Which tabs a role shows is settled by now, so the strips' widths are final.
+    _syncTabScrollerFade();
     // Recompute auto-grow heights now panels are visible (scrollHeight was 0 while hidden).
     _resizeBriefAutoGrow();
     // Signal Inbox renders lazily — init() already fetched (its counts feed the tab badge), so
@@ -1036,11 +1045,53 @@ window._activateMainTab = function(name) {
     if (name === 'mycontent') window.AssistantMyContent?.show();
 };
 
+/** Mark which edges of a tab strip have tabs scrolled out of view (all strips when none given). */
+// Widths aren't final when a tab first opens (fonts, role tabs being shown), so each strip is also
+// watched for size changes. The view is re-injected per navigation; the WeakSet observes each new
+// strip once, and a detached one is simply never resized again.
+const _tabScrollerSeen = new WeakSet();
+const _tabScrollerRO = typeof ResizeObserver === 'function'
+    ? new ResizeObserver((entries) => entries.forEach((e) => {
+        const s = e.target.closest('.tab-scroller');
+        if (s) _syncTabScrollerFade(s);
+    }))
+    : null;
+function _syncTabScrollerFade(el) {
+    (el ? [el] : document.querySelectorAll('.tab-scroller')).forEach((s) => {
+        if (_tabScrollerRO && !_tabScrollerSeen.has(s)) {
+            _tabScrollerSeen.add(s);
+            // The strip itself, plus each tab: a tab a role un-hides widens the content without
+            // resizing the strip, and only the tab's own box reports that.
+            [s, ...s.querySelectorAll('[role="tab"]')].forEach((n) => _tabScrollerRO.observe(n));
+        }
+        s.classList.toggle('is-clipped-start', s.scrollLeft > 4);
+        s.classList.toggle('is-clipped-end', s.scrollLeft + s.clientWidth < s.scrollWidth - 4);
+    });
+}
+
+// Overview-card links into a Posts column ("Waiting for your review", "N posts failed to publish").
+// The column goes through the tab's own deep-link, so ONE load runs: activating the tab and then
+// opening the column separately started two, and the slower one painted over the column the user
+// asked for. The panel sits screens below the card on a phone, so bring it into view and put focus
+// on the column — otherwise the click looks like it did nothing.
+window._openDetailRqColumn = function(statusKey) {
+    window._assistantDetailInitialRqStatus = statusKey;
+    window._activateMainTab('review-queue');
+    // An instant jump, not smooth: a smooth scroll is dropped when the page is repainting under it,
+    // and the tab switch above does exactly that, so it could leave the user where they were.
+    document.getElementById('maintab-review-queue')?.scrollIntoView({ block: 'start' });
+    // The column strip scrolls sideways on a phone and Needs attention sits off its right edge.
+    const col = document.querySelector(`.detail-rq-col[data-status="${statusKey}"]`);
+    col?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    col?.focus({ preventScroll: true });
+};
+
 // Open the role's landing tab (SMM/Blog → 'review-queue'; everyone else the markup default,
 // Data Hub). Falls back to the first tab the role actually shows, so a role that hides its
 // default can never leave the page with every panel closed.
 function _activateDefaultMainTab() {
     const wanted = window._detailDefaultMainTab;
+    _syncTabScrollerFade(); // the early return below skips _activateMainTab, which also does this
     const visible = (n) => n && document.querySelector(`.main-tab-btn[data-maintab="${n}"]:not(.hidden)`);
     const name = visible(wanted) ? wanted
         : (document.querySelector('.main-tab-btn:not(.hidden)')?.dataset.maintab || null);
@@ -1114,16 +1165,50 @@ const _DETAIL_RQ_PAGE_SIZE = 10;
 let _detailRqLoadedPosts = [];
 let _detailRqHasMore = false;
 let _detailRqTotal = null;
+// Bumped by every list load; a load that finds it moved on was overtaken and must not paint. Two
+// loads overlap when a column is clicked while the tab's own load is still out (or the Overview
+// "N posts failed" link fired both): whichever answered LAST used to win, so Needs attention could
+// sit highlighted above the Review list.
+let _detailRqRenderSeq = 0;
+
+/**
+ * A column is loading. With a list already on screen, dim it rather than blank it: swapping it for
+ * "Loading…" on every column click made the panel flash and jump. The dimmed nodes are replaced
+ * by whatever the load paints next (list, empty state or error), so nothing has to undo this.
+ */
+function _detailRqShowLoading(container) {
+    const kids = [...container.children];
+    if (!kids.length || container.querySelector('[role="alert"]')) {
+        container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>';
+        return;
+    }
+    kids.forEach((k) => { k.style.opacity = '0.5'; k.inert = true; k.setAttribute('aria-busy', 'true'); });
+}
+
+/** The list couldn't be loaded: say so plainly and offer the same load again. A non-OK answer
+ *  lands here too — rendering it as "No social media posts awaiting review" told the user there
+ *  was nothing to approve when we simply didn't know. */
+function _detailRqRenderError(container, statusKey) {
+    container.innerHTML = `<div role="alert" class="py-10 text-center">
+        <p class="text-sm font-semibold text-gray-900">We couldn’t load this list.</p>
+        <p class="text-sm text-gray-500 mt-1">Check your connection and try again. Your posts and schedule are not affected.</p>
+        <button type="button" onclick="detailRqOpenStatus('${statusKey}')" class="btn-secondary mt-4 px-4 py-2 text-sm font-bold rounded-lg border transition cursor-pointer">Try again</button>
+    </div>`;
+}
 
 window.detailRqOpenStatus = function(statusKey, btn) {
     if (!_DETAIL_RQ_COLUMNS[statusKey]) return;
     _detailRqCurrentStatus = statusKey;
-    document.querySelectorAll('.detail-rq-col').forEach(t => {
-        t.classList.remove('border-b-2', 'border-emerald-600', 'text-emerald-700');
-        t.classList.add('text-gray-500');
-    });
+    // Brand pink: emerald-700/800 are remapped to neon / deep pink; emerald-600 is still real green.
+    // Deep pink for the text — neon pink on white is 3.8:1, too faint for small text.
     const active = btn || document.querySelector(`.detail-rq-col[data-status="${statusKey}"]`);
-    if (active) { active.classList.add('border-b-2', 'border-emerald-600', 'text-emerald-700'); active.classList.remove('text-gray-500'); }
+    document.querySelectorAll('.detail-rq-col').forEach(t => {
+        t.classList.remove('border-b-2', 'text-emerald-800');
+        t.classList.add('text-gray-500');
+        t.setAttribute('aria-selected', t === active ? 'true' : 'false');
+        t.tabIndex = t === active ? 0 : -1;
+    });
+    if (active) { active.classList.add('border-b-2', 'text-emerald-800'); active.classList.remove('text-gray-500'); }
     return _detailRqRenderGroups(statusKey);
 };
 
@@ -1344,7 +1429,7 @@ async function _detailRqRenderGroups(statusKey) {
     const col = _DETAIL_RQ_COLUMNS[statusKey] || _DETAIL_RQ_COLUMNS.review;
     const container = document.getElementById('detail-rq-groups');
     if (!container) return;
-    container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>';
+    _detailRqShowLoading(container);
     // Reset paging state on every column switch/refresh — a stale page 2 from Review must never be
     // appended under Scheduled.
     _detailRqLoadedPosts = [];
@@ -1354,18 +1439,21 @@ async function _detailRqRenderGroups(statusKey) {
     const aid = window._currentAssistantId;
     if (!aid) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
 
+    // Only the newest load may paint (two can overlap; the slower used to win).
+    const seq = ++_detailRqRenderSeq;
     let posts = [];
     try {
         const pRes = await fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}&assistantId=${aid}&limit=${_DETAIL_RQ_PAGE_SIZE}&offset=0`);
-        if (pRes.ok) {
-            const pj = await pRes.json();
-            posts = pj.drafts || [];
-            _detailRqLoadedPosts = posts;
-            _detailRqHasMore = !!pj.hasMore;
-            _detailRqTotal = typeof pj.total === 'number' ? pj.total : null;
-        }
+        if (seq !== _detailRqRenderSeq) return;
+        if (!pRes.ok) /* a failure, not an empty queue */ { _detailRqRenderError(container, statusKey); return; }
+        const pj = await pRes.json();
+        if (seq !== _detailRqRenderSeq) return;
+        posts = pj.drafts || [];
+        _detailRqLoadedPosts = posts;
+        _detailRqHasMore = !!pj.hasMore;
+        _detailRqTotal = typeof pj.total === 'number' ? pj.total : null;
     } catch {
-        container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">Failed to load.</p>';
+        if (seq === _detailRqRenderSeq) _detailRqRenderError(container, statusKey);
         return;
     }
 
@@ -1389,7 +1477,7 @@ async function _detailRqRenderGroups(statusKey) {
     // Reuse the global render helper from workspace.html (rqRenderSocialCard).
     const renderByGroup = { posts: typeof rqRenderSocialCard === 'function' ? rqRenderSocialCard : () => '' };
     const RQ_GROUPS = [
-        { key: 'posts', label: 'Social media posts', empty: 'No social media posts here.', emptyReview: 'No social media posts awaiting review.' },
+        { key: 'posts', label: 'Social media posts', empty: 'No social media posts here.', emptyReview: 'No social media posts awaiting review.', emptyReviewHtml: _detailRqEmptyReviewHtml },
     ];
     const itemsByGroup = { posts: postGroups };
     container.innerHTML = RQ_GROUPS.map(g => _detailRqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey, _detailRqTotal ?? postGroups.length)).join('')
@@ -1422,10 +1510,13 @@ window._detailRqLoadMore = async function(statusKey) {
     const btn = document.getElementById('detail-rq-more-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
     const offset = (typeof rqGroupSocialDrafts === 'function' ? rqGroupSocialDrafts(_detailRqLoadedPosts) : _detailRqLoadedPosts).length;
+    const seq = _detailRqRenderSeq; // a column switch meanwhile makes this page stale
     try {
         const res = await fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}&assistantId=${aid}&limit=${_DETAIL_RQ_PAGE_SIZE}&offset=${offset}`);
+        if (seq !== _detailRqRenderSeq) return;
         if (!res.ok) throw new Error('load failed');
         const pj = await res.json();
+        if (seq !== _detailRqRenderSeq) return;
         // rqGroupSocialDrafts caches every row it sees, so appending rather than replacing keeps the
         // earlier pages in that cache — the editor opens from it and would otherwise find nothing for
         // a post the reviewer had already paged past.
@@ -1459,11 +1550,31 @@ function _detailRqCountLabel(shown, total) {
     return (typeof total === 'number' && total > shown) ? `${shown} of ${total}` : String(shown);
 }
 
+// An empty Review column is the first thing a new hire sees, and "No posts awaiting review" alone
+// left them nowhere to go. Say when the next draft is due (the Autopilot card has already worked it
+// out, or why nothing is coming) and offer the page's own Create button, so this is the same
+// action, whatever the role's primary button is wired to.
+function _detailRqEmptyReviewHtml(emptyMsg) {
+    const next = document.getElementById('autopilot-next');
+    const why = next && !next.classList.contains('hidden') && next.textContent.trim()
+        ? next.textContent.trim()
+        : (document.getElementById('autopilot-headline')?.textContent.trim() || '');
+    const primary = document.getElementById('detail-rq-primary-btn');
+    const label = document.getElementById('detail-rq-primary-label')?.textContent.trim() || 'Create a Post';
+    const esc = (t) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    return `<div class="py-8 text-center">
+        <p class="text-sm font-semibold text-gray-900">${emptyMsg}</p>
+        ${why ? `<p class="text-sm text-gray-500 mt-1">${esc(why)}</p>` : ''}
+        ${primary && !primary.classList.contains('hidden') ? `<button type="button" onclick="document.getElementById('detail-rq-primary-btn')?.click()" class="btn-primary mt-4 px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer">${esc(label)}</button>` : ''}
+    </div>`;
+}
+
 function _detailRqGroupSection(g, items, render, statusKey, total) {
     const open = _detailRqGroupOpen[g.key] !== false;
     const emptyMsg = statusKey === 'review' ? g.emptyReview : g.empty;
     const body = items.length
         ? `<div class="divide-y divide-gray-100">${items.map(render).join('')}</div>`
+        : (statusKey === 'review' && g.emptyReviewHtml) ? g.emptyReviewHtml(emptyMsg)
         : `<p class="text-sm text-gray-400 py-6 text-center">${emptyMsg}</p>`;
     return `<section class="border-b border-gray-100 last:border-0">
       <button onclick="_detailRqToggleGroup('${g.key}')" class="w-full flex items-center gap-2 py-3 text-left cursor-pointer group">
@@ -2679,7 +2790,7 @@ async function _detailRqRenderRecords(statusKey) {
     const approval = _RQ_RECORD_STATE[statusKey];
     const aid = window._currentAssistantId;
 
-    container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>';
+    _detailRqShowLoading(container);
     if (!aid || !recordType) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
     // Names the columns as THIS role labels them — a role may have renamed either of them
     // (reviewQueue.columnLabels), and copy pointing at a column the user cannot see is the same
@@ -2715,11 +2826,13 @@ async function _detailRqRenderRecords(statusKey) {
     const approvalQuery = (recordType === 'lead' && statusKey === 'approved') ? 'approved,scheduled' : approval;
 
     let records = [];
+    const seq = ++_detailRqRenderSeq; // only the newest load may paint (see _detailRqRenderGroups)
     try {
         const res = await fetch(`/.netlify/functions/assistant-records?assistantId=${aid}&recordType=${encodeURIComponent(recordType)}&approvalStatus=${approvalQuery}${deliverableOnly ? '&deliverable=1' : ''}`);
         if (!res.ok) throw new Error();
         records = (await res.json()).records || [];
-    } catch { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">Failed to load.</p>'; return; }
+        if (seq !== _detailRqRenderSeq) return;
+    } catch { if (seq === _detailRqRenderSeq) _detailRqRenderError(container, statusKey); return; }
 
     // The briefs behind each pending decision (see _rqDecisionDetail). Best effort: without them
     // the card still shows its evidence lines, so a failure here must not fail the column.
@@ -3713,7 +3826,7 @@ async function _detailRqRenderNewsletter(statusKey) {
     const aid = window._currentAssistantId;
     const wanted = _RQ_NEWSLETTER_STATUS[statusKey] || [];
 
-    container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>';
+    _detailRqShowLoading(container);
     if (!aid) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
     if (!wanted.length) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Emails don’t have this state.</p>'; return; }
 
@@ -3721,11 +3834,13 @@ async function _detailRqRenderNewsletter(statusKey) {
     // an email visibly moves Review → Approved → Scheduled → Sent instead of only Review ever
     // carrying a number (2026-10-06).
     let all = [];
+    const seq = ++_detailRqRenderSeq; // only the newest load may paint (see _detailRqRenderGroups)
     try {
         const res = await fetch(`/.netlify/functions/newsletter-issues?assistantId=${aid}`);
         if (!res.ok) throw new Error();
         all = (await res.json()).issues || [];
-    } catch { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">Failed to load.</p>'; return; }
+        if (seq !== _detailRqRenderSeq) return;
+    } catch { if (seq === _detailRqRenderSeq) _detailRqRenderError(container, statusKey); return; }
     _detailRqPaintNewsletterCounts(all);
     const issues = all.filter((i) => wanted.includes(i.status));
 
@@ -3796,17 +3911,19 @@ async function _detailRqRenderBlog(statusKey) {
     const aid = window._currentAssistantId;
     const wanted = _RQ_BLOG_STATUS[statusKey] || [];
 
-    container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>';
+    _detailRqShowLoading(container);
     if (!aid) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
 
     // Fetched BEFORE the "no such state" bail-out: the counts on the other columns are still true
     // and still need repainting even when the open column can never hold a blog post.
     let all = [];
+    const seq = ++_detailRqRenderSeq; // only the newest load may paint (see _detailRqRenderGroups)
     try {
         const res = await fetch(`/.netlify/functions/blog-posts?assistantId=${aid}`);
         if (!res.ok) throw new Error();
         all = (await res.json()).posts || [];
-    } catch { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">Failed to load.</p>'; return; }
+        if (seq !== _detailRqRenderSeq) return;
+    } catch { if (seq === _detailRqRenderSeq) _detailRqRenderError(container, statusKey); return; }
 
     _detailRqPaintBlogCounts(all);
 
@@ -5099,6 +5216,32 @@ if (!window._detailTabsDelegated) {
         const btn = e.target.closest('.detail-tab-btn');
         if (!btn) return;
         window._openBriefDrawer(btn.dataset.tab);
+    });
+
+    // Tab strips wider than the screen fade at whichever edge has more tabs past it (CSS in
+    // assistant-detail.html). Scroll doesn't bubble, so listen in the capture phase.
+    document.addEventListener('scroll', (e) => {
+        if (e.target?.classList?.contains('tab-scroller')) _syncTabScrollerFade(e.target);
+    }, true);
+    window.addEventListener('resize', () => _syncTabScrollerFade());
+
+    // Arrow keys / Home / End move between tabs in a tab strip, as a screen-reader user expects of
+    // role="tablist". Covers both strips: the main tabs (which open on focus, like a click) and the
+    // Posts lifecycle columns. Hidden tabs (roles that don't show them) are skipped.
+    document.addEventListener('keydown', (e) => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+        const tab = e.target.closest?.('.main-tab-btn, .detail-rq-col');
+        if (!tab) return;
+        const sel = tab.classList.contains('main-tab-btn') ? '.main-tab-btn' : '.detail-rq-col';
+        const tabs = [...document.querySelectorAll(sel)].filter(t => !t.classList.contains('hidden') && t.style.display !== 'none');
+        const i = tabs.indexOf(tab);
+        if (i < 0) return;
+        const next = e.key === 'Home' ? tabs[0]
+            : e.key === 'End' ? tabs[tabs.length - 1]
+            : tabs[(i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
+        e.preventDefault();
+        next.focus();
+        next.click();
     });
 }
 
@@ -7670,7 +7813,8 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         // update button styles
         document.querySelectorAll('.activity-tf-btn').forEach(btn => {
             const active = btn.dataset.tf === timeframe;
-            btn.className = `activity-tf-btn text-xs px-2.5 py-1 rounded-lg border ${active ? 'border-indigo-500 bg-indigo-50 text-indigo-700 font-semibold' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`;
+            btn.className = `activity-tf-btn px-2.5 py-1 text-xs font-bold rounded-md transition ${active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
+            btn.setAttribute('aria-pressed', String(active));
         });
         activityList.innerHTML = '<div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading activity…</div>';
         try {
@@ -9153,18 +9297,25 @@ function _setKpiCard(key, { empty, tone = 'brand', series = null } = {}) {
         empty ? 'text-gray-200' : tone === 'down' ? 'text-rose-400' : 'text-emerald-400'}`);
 }
 
+// Platforms whose results reach post_insights (run-insights-ingest.ts). Anything else published is
+// real work these cards simply cannot see yet — the 'not-measured' copy names it.
+const _METRICS_MEASURED_PLATFORMS = ['instagram', 'facebook'];
+const _METRICS_PLATFORM_NAMES = { linkedin: 'LinkedIn', x: 'X', twitter: 'X', facebook: 'Facebook', instagram: 'Instagram' };
+
 // Swaps the four KPI cards for a single panel that says why they're blank. Four cards reading "—"
 // are indistinguishable from a broken page, and the section stays on screen for every role even
 // where nothing can currently feed it. `mode` is 'cards' (real figures), 'pending' (painted before
 // the fetch, so nothing spins), 'no-data' (nothing published to measure), 'campaign-no-data' (no
 // campaign has been run — the Campaign Assistant's equivalent, which needs its own copy because it
 // publishes nothing itself) or 'error' (we genuinely don't know). These are different truths and
-// must not share copy, or a network blip would tell the user they've published nothing.
+// must not share copy, or a network blip would tell the user they've published nothing. 'not-measured'
+// (posts went out, but only to platforms that report nothing back) carries `info` = { posts,
+// platforms, periodDays } from get-assistant-performance's `published`.
 //
 // 'pending' exists so this section can render instantly. It says the same thing as 'no-data' MINUS
 // the claim about the user's own publishing, which we have not checked yet at that point — that
 // sentence is the one part that would be a lie if the fetch turned out to fail. Keep it that way.
-function _setMetricsEmptyState(mode) {
+function _setMetricsEmptyState(mode, info) {
     const grid  = document.getElementById('metrics-kpi-grid');
     const panel = document.getElementById('metrics-empty-state');
     const note  = document.getElementById('metrics-status-note');
@@ -9229,6 +9380,26 @@ function _setMetricsEmptyState(mode) {
         if (note) note.textContent = '';
     } else {
         if (title) title.textContent = 'Performance metrics aren’t available yet';
+        if (mode === 'not-measured') {
+            // Posts DID go out, but nowhere we read results back from. Only Instagram and Facebook
+            // feed these cards (run-insights-ingest.ts); LinkedIn and X report nothing to us yet. The
+            // 'no-data' copy said "Nothing has been published" here — false for every LinkedIn-only
+            // customer — and promised the cards would fill in, which for LinkedIn they never will.
+            const n = info?.posts || 0;
+            const unmeasured = (info?.platforms || []).filter(p => !_METRICS_MEASURED_PLATFORMS.includes(p));
+            const names = unmeasured.map(p => _METRICS_PLATFORM_NAMES[p] || p);
+            const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+            const counted = n === 1 ? 'it’s counted' : 'they’re counted';
+            if (list && unmeasured.length === (info?.platforms || []).length) {
+                if (title) title.textContent = `${list} results aren’t measured yet`;
+                if (body) body.textContent = `Your assistant published ${n} post${n === 1 ? '' : 's'} in the last ${info.periodDays} days — ${counted} in Published above. ${list} ${names.length > 1 ? 'don’t' : 'doesn’t'} send us reach and engagement yet, so these cards stay empty for ${names.length > 1 ? 'those posts' : 'posts there'}.`;
+            } else if (body) {
+                // Some went to a platform we do measure; its figures just haven't come back yet.
+                body.textContent = `Your assistant published ${n} post${n === 1 ? '' : 's'} in the last ${info.periodDays} days — ${counted} in Published above. Reach and engagement show here once the platform reports back on them.`;
+            }
+            if (note) note.textContent = '';
+            return;
+        }
         if (body)  body.textContent  = 'These fill in automatically once there’s published activity for this assistant to measure, and the platform reports back on it.'
             + (mode === 'no-data' ? ' Nothing has been published in the last 30 days.' : '');
         // The panel now says this better than the note did.
@@ -9927,7 +10098,15 @@ async function _loadAssistantMetrics(assistantId, roleKey) {
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
 
-        if (!data.hasData) { _setMetricsEmptyState('no-data'); return; }
+        if (!data.hasData) {
+            // `published` says what actually went out in the window. Without it (older server, or
+            // the count failed) we don't know, so say nothing about the user's publishing at all.
+            const sent = data.published;
+            if (!sent) { _setMetricsEmptyState('pending'); return; }
+            if (!sent.posts) { _setMetricsEmptyState('no-data'); return; }
+            _setMetricsEmptyState('not-measured', { ...sent, periodDays: data.periodDays || 30 });
+            return;
+        }
 
         _setMetricsEmptyState('cards');
         const note = document.getElementById('metrics-status-note');

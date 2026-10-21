@@ -37,8 +37,8 @@ check('Sent label, failed → Needs attention, results on sent cards', () => {
 
 check('a Campaigns tab for this role only, fed by one summary request', () => {
     const d = read('assistant-detail.html');
-    assert.match(d, /id="maintab-btn-email-campaigns" data-maintab="email-campaigns" class="main-tab-btn hidden"/);
-    assert.match(d, /<div id="maintab-email-campaigns" class="main-tab-content hidden">/);
+    assert.match(d, /role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-email-campaigns" id="maintab-btn-email-campaigns" data-maintab="email-campaigns" class="main-tab-btn hidden"/);
+    assert.match(d, /<div id="maintab-email-campaigns" role="tabpanel" aria-labelledby="maintab-btn-email-campaigns" class="main-tab-content hidden">/);
     assert.match(read('src/components/assistant-dashboard-registry.js'), /emailCampaignsTab: true,/);
     assert.match(a, /toggle\('maintab-btn-email-campaigns', !!cfg\.emailCampaignsTab\);/);
     assert.match(a, /if \(name === 'email-campaigns'\) window\.AssistantEmailCampaigns\?\.activate\(\);/);

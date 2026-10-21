@@ -183,18 +183,19 @@ check('the sidebar pill is not inflated by rows nothing renders', () => {
 // and after the fix it dumped the entire queue with no paging. These pin the paged wiring.
 check('the detail Review tab requests a page, not the whole queue', () => {
     const js = readFileSync(path.join(ROOT, 'assistants.js'), 'utf8');
-    const render = js.slice(landmark(js, 'async function _detailRqRenderGroups('));
-    assert.match(render.slice(0, 1600), /limit=\$\{_DETAIL_RQ_PAGE_SIZE\}&offset=0/,
+    // Bounded by the next function, not a character count: comments in between must not break it.
+    const render = js.slice(landmark(js, 'async function _detailRqRenderGroups('), landmark(js, 'function _detailRqMoreButton('));
+    assert.match(render, /limit=\$\{_DETAIL_RQ_PAGE_SIZE\}&offset=0/,
         'the first load must be paged, or a large queue re-presigns every asset at once');
-    assert.match(render.slice(0, 4000), /container\.innerHTML = [\s\S]*\+ _detailRqMoreButton\(statusKey\)/, 'no Show-more button ⇒ pages past the first are unreachable');
+    assert.match(render, /container\.innerHTML = [\s\S]*\+ _detailRqMoreButton\(statusKey\)/, 'no Show-more button ⇒ pages past the first are unreachable');
 });
 
 check('the detail tab offsets by groups and appends, like the workspace queue', () => {
     const js = readFileSync(path.join(ROOT, 'assistants.js'), 'utf8');
-    const more = js.slice(landmark(js, 'window._detailRqLoadMore ='));
-    assert.match(more.slice(0, 1200), /rqGroupSocialDrafts\(_detailRqLoadedPosts\) : _detailRqLoadedPosts\)\.length/,
+    const more = js.slice(landmark(js, 'window._detailRqLoadMore ='), landmark(js, 'function _detailRqRepaintPostsGroup('));
+    assert.match(more, /rqGroupSocialDrafts\(_detailRqLoadedPosts\) : _detailRqLoadedPosts\)\.length/,
         'offsetting by rows would skip whole posts across the group boundary');
-    assert.match(more.slice(0, 1200), /_detailRqLoadedPosts = \[\.\.\._detailRqLoadedPosts, \.\.\.\(pj\.drafts \|\| \[\]\)\]/,
+    assert.match(more, /_detailRqLoadedPosts = \[\.\.\._detailRqLoadedPosts, \.\.\.\(pj\.drafts \|\| \[\]\)\]/,
         'replacing rather than appending would evict earlier pages from the editor cache');
 });
 
@@ -266,6 +267,34 @@ check('a mixed group states each platform, so nothing hides behind a sibling', (
         'an agreeing group keeps its plain platform chips — per-platform state everywhere is noise');
     assert.match(card.slice(0, 6500), /\$\{label\} · \$\{_rqEsc\(st\.label\)\}/,
         'a disagreeing group must name each platform WITH its own state');
+});
+
+// ── The detail Posts list says when it could not load, and a slow load cannot paint last ─────────
+// A non-OK answer used to render "No social media posts awaiting review", an empty queue, so the
+// user was told there was nothing to approve when we simply didn't know. And two overlapping loads
+// (the Overview "N posts failed" link started both) painted in whichever order they answered.
+check('a failed detail Posts load is an error with Try again, not an empty queue', () => {
+    const js = readFileSync(path.join(ROOT, 'assistants.js'), 'utf8');
+    const render = js.slice(landmark(js, 'async function _detailRqRenderGroups('), landmark(js, 'function _detailRqMoreButton('));
+    assert.match(render, /if \(!pRes\.ok\)[^\n]*\{ _detailRqRenderError\(container, statusKey\); return; \}/,
+        'a non-OK response must not fall through to the empty-queue copy');
+    const at = landmark(js, 'function _detailRqRenderError(');
+    const err = js.slice(at, at + 900);
+    assert.match(err, /role="alert"/);
+    assert.match(err, /onclick="detailRqOpenStatus\('\$\{statusKey\}'\)"[^>]*>Try again</, 'the retry must re-run the same column');
+});
+
+check('only the newest detail Posts load may paint', () => {
+    const js = readFileSync(path.join(ROOT, 'assistants.js'), 'utf8');
+    for (const fn of ['async function _detailRqRenderGroups(', 'async function _detailRqRenderRecords(',
+        'async function _detailRqRenderNewsletter(', 'async function _detailRqRenderBlog(']) {
+        const at = landmark(js, fn);
+        assert.match(js.slice(at, at + 8000), /const seq = \+\+_detailRqRenderSeq;[\s\S]*?if \(seq !== _detailRqRenderSeq\) return;/,
+            `${fn} must drop an overtaken load`);
+    }
+    const detail = readFileSync(path.join(ROOT, 'assistant-detail.html'), 'utf8');
+    assert.doesNotMatch(detail, /_activateMainTab\('review-queue'\); window\.detailRqOpenStatus/,
+        'activating the tab and then opening a column starts two loads');
 });
 
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);

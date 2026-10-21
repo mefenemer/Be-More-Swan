@@ -98,7 +98,7 @@ check('dashboard entry: own tab, own metrics, no social modules, no post queue o
 
 check('the page has the tab, its panel, the script, and every branch that routes to them', () => {
     assert.match(detail, /id="maintab-btn-website" data-maintab="website"/);
-    assert.match(detail, /<div id="maintab-website" class="main-tab-content hidden">\s*<div id="site-audit-host"><\/div>/);
+    assert.match(detail, /<div id="maintab-website" role="tabpanel" aria-labelledby="maintab-btn-website" class="main-tab-content hidden">\s*<div id="site-audit-host"><\/div>/);
     assert.match(detail, /id="site-audit-badge" style="display:none"/);
     assert.match(workspace, /<script src="\/src\/components\/assistant-site-audit\.js"><\/script>/);
     assert.match(assistants, /toggle\('maintab-btn-website', !!siteAuditTab\)/);

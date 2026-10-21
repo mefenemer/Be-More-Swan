@@ -12,7 +12,7 @@
 
 import { and, eq, gte, sql } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, postInsights } from '../../db/schema';
+import { aiAssistants, postInsights, scheduledPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { buildPerformancePayload, emptyPayload, type InsightRow } from '../../src/utils/post-performance';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -88,7 +88,40 @@ export default withLambda(async (event) => {
                 gte(sql`coalesce(${postInsights.publishedAt}, ${postInsights.createdAt})`, priorStart.toISOString()),
             ))) as InsightRow[];
 
-        return json(buildPerformancePayload(rows, periodDays, now));
+        const payload = buildPerformancePayload(rows, periodDays, now);
+        if (payload.hasData) return json(payload);
+
+        // No insights. That is NOT the same as nothing published: only the Instagram and Facebook
+        // ingests write post_insights, so a LinkedIn-only customer who posts every day still lands
+        // here — and the page used to tell them "Nothing has been published in the last 30 days".
+        // Say what actually went out, so the panel can tell those two apart. Posts are counted the
+        // way the Published tile counts them (one per crosspost group). Its own try: if this count
+        // fails the panel falls back to copy that makes no claim either way.
+        try {
+            const windowStart = new Date(now - periodDays * 24 * 60 * 60 * 1000);
+            const sent = await db
+                .selectDistinct({
+                    post: sql<string>`coalesce(${scheduledPosts.crosspostGroupId}::text, 'id:' || ${scheduledPosts.id})`,
+                    platform: scheduledPosts.platform,
+                })
+                .from(scheduledPosts)
+                .where(and(
+                    eq(scheduledPosts.assistantId, aId),
+                    eq(scheduledPosts.organisationId, orgId),
+                    eq(scheduledPosts.status, 'published'),
+                    gte(sql`coalesce(${scheduledPosts.publishedAt}, ${scheduledPosts.createdAt})`, windowStart.toISOString()),
+                ));
+            return json({
+                ...payload,
+                published: {
+                    posts: new Set(sent.map((r) => r.post)).size,
+                    platforms: [...new Set(sent.map((r) => r.platform))].sort(),
+                },
+            });
+        } catch (err) {
+            console.error('[get-assistant-performance] published count failed:', err);
+            return json(payload);
+        }
     } catch (err) {
         // Supplementary panel — a failure must never 500 the assistant-detail page. Degrade to the
         // honest "no data yet" state and log the real cause. Worth reading that log: if

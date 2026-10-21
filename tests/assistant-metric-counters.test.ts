@@ -249,7 +249,7 @@ check('failed posts have a column and a click-through, not just a number', () =>
     assert.match(assistantsJs, /attention: \{ postStatus: 'failed' \}/);
     assert.match(detailHtml, /data-status="attention"/, 'the Needs attention column must exist');
     assert.match(detailHtml, /id="metrics-needs-attention"/);
-    assert.match(detailHtml, /detailRqOpenStatus\('attention'\)/,
+    assert.match(detailHtml, /_openDetailRqColumn\('attention'\)/,
         'the failure line must deep-link to the column that can act on the posts');
 });
 
