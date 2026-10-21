@@ -61,7 +61,7 @@ check('Website, Enquiries, Orders, Bookings — each its own tab, in that order,
     const a = read('assistants.js');
     assert.ok(a.includes("if (name === 'siteorders') siteEditor((ed) => ed.activate('orders'));"));
     const ed = read('src/components/assistant-site-editor.js');
-    assert.ok(ed.includes("const tabs = [['pages', 'Pages'], ['design', 'Design'], ['templates', 'Templates'], ['details', 'Details']]"), 'the Website tab keeps only its own panels — Templates its own, or nobody with a site finds it');
+    assert.ok(ed.includes("const SUBTABS = [['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];") && ed.includes("['templates', templatesCard(false), { keep: true }]"), 'the Website tab keeps only its own panels — Templates its own, or nobody with a site finds it');
     assert.ok(ed.includes("show('maintab-btn-siteorders', featureOn('shop')); show('maintab-btn-sitebookings', featureOn('bookings'));"));
     assert.ok(read('netlify/functions/sites.ts').includes('&tab=siteorders&payments=return'), 'back from Stripe on the Orders tab');
     assert.ok(read('notifications.js').includes("site_order_received: ['Open orders', 'siteorders']"));
@@ -78,8 +78,8 @@ check('a swan on every section (list and preview) sends the request to the chat,
 });
 check('"Draft my whole site": up front on a new site, otherwise "Start again" folded into Details', () => {
     const ed = read('src/components/assistant-site-editor.js');
-    assert.ok(ed.includes("['draft', (fresh ? step === 3 || s.drafting : s.drafting || (def().settings.template && !s.publishedVersion)) ? draftCard('start') : '']"), 'step 3 of a new site, or up front on one started from a template');
-    assert.ok(ed.includes("detailsPanel() + draftCard('again')") && ed.includes('Start again from scratch'));
+    assert.ok(ed.includes("['draft', step === 3 || s.drafting ? draftCard('start') : '']") && ed.includes("['draft', !fresh && (s.drafting || (def().settings.template && !s.publishedVersion)) ? draftCard('start') : '']") && ed.includes("['draft-again', draftCard('again')]"), 'step 3 of a new site, or up front on one started from a template');
+    assert.ok(ed.includes("['details', detailsPanel()],\n      ['draft-again', draftCard('again')],") && ed.includes('Start again from scratch'));
     assert.ok(!ed.includes('          ${draftCard()}'), 'no longer under every panel');
 });
 
@@ -117,8 +117,8 @@ check('a new site is set up one numbered step at a time, with one main button, a
     const ed = read('src/components/assistant-site-editor.js');
     assert.ok(/function setupStep\(\) \{[\s\S]{0,300}if \(!featuresOn\(\)\) return 1;[\s\S]{0,200}return 2;[\s\S]{0,40}return 3;/.test(ed));
     assert.ok(ed.includes('aria-current="step"') && ed.includes('data-site-setup-step') && ed.includes('data-site-setup-skip'));
-    assert.ok(ed.includes("['publish', fresh ? '' : publishCard()]"), 'Publish waits for a draft');
-    assert.ok(ed.includes("primary && !quietPrimary ? 'btn-primary'") && ed.includes('quietPrimary = fresh && !state.editing;'));
+    assert.ok(ed.includes("['publish', fresh ? card(") && ed.includes("There's nothing to publish yet."), 'Publish waits for a draft');
+    assert.ok(ed.includes("primary && !quietPrimary ? 'btn-primary'") && ed.includes("quietPrimary = fresh && !state.editing && state.panel !== 'setup';"));
     assert.ok(ed.includes("btn('data-site-words-open', 'Add your own words')"), '"Add your own words" is an option, not a main button');
 });
 
@@ -162,7 +162,7 @@ console.log('\nLow items (UI review, 2026-10-21)');
 
 check('tabs say which is selected; loading text is readable; Publish says why it is greyed out; no second accent colour', () => {
     const ed = read('src/components/assistant-site-editor.js');
-    assert.ok(ed.includes('data-site-panel="${k}" aria-pressed="${state.panel === k}"') && ed.includes('data-site-page="${esc(x.id)}" aria-pressed="${x.id === p.id}"'));
+    assert.ok(ed.includes('role="tab" id="site-subtab-${k}" data-site-subtab="${k}" aria-selected="${on}"') && ed.includes('data-site-page="${esc(x.id)}" aria-pressed="${x.id === p.id}"'));
     assert.ok(!/text-gray-400[^"]*">Loading/.test(ed), 'loading text at least gray-500');
     assert.ok(ed.includes("${s.publishBlocker ? `<p class=\"text-xs font-semibold text-amber-800 mt-2\">${esc(s.publishBlocker)}</p>` : ''}"), 'shown before an address exists too');
     assert.ok(!ed.includes('indigo'), 'emphasis uses the brand pink (emerald-200/800, remapped in input.css)');

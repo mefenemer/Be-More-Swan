@@ -115,10 +115,15 @@ check('every tab and button the chat names is on the page', () => {
     const at = chat.indexOf('function mysteryShopperSurfaces()');
     const surfaces = chat.slice(at, chat.indexOf('\n}', at));
     for (const name of ['"Website" tab', '"Check my site now"', '"Settings"', '"I\'ll make this change"', '"Copy"', '"Not for us"', '"Results" tab',
-        '"Ideas for your other assistants"', '"Brief <name>"']) {
+        '"Ideas for your other assistants"', '"Brief <name>"',
+        // The six sub-tabs (2026-10-21) and the score explainer's buttons.
+        '"Checks"', '"To review"', '"In progress"', '"Done"', '"Needs attention"', '"Archived"',
+        '"Why your score isn\'t higher"', '"See the suggested fix"', '"Edit competitors"', '"Bring back"', '"Undo"']) {
         assert.ok(surfaces.includes(name), `surfaces names ${name}`);
     }
-    for (const label of ['Check my site now', 'Settings', "I'll make this change", '>Copy<', 'Not for us', 'Ideas for your other assistants', '>Brief ${esc(who.name)}<']) {
+    for (const label of ['Check my site now', 'Settings', "I'll make this change", '>Copy<', 'Not for us', 'Ideas for your other assistants', '>Brief ${esc(who.name)}<',
+        "['checks', 'Checks'], ['review', 'To review'], ['progress', 'In progress'], ['done', 'Done'], ['attention', 'Needs attention'], ['archived', 'Archived']",
+        "Why your score isn't higher", 'See the suggested fix', 'how to fix this', 'Edit competitors']) {
         assert.ok(tab.includes(label), `tab has ${label}`);
     }
 });
@@ -184,11 +189,17 @@ check('the tab types exactly the brief the server records for a stalled fix', ()
     assert.strictEqual(tpl.replace('${afterText}', 'X'), stalledFixBrief('X'));
 });
 
-check('History is on the tab, named to the chat, and degrades without its table', () => {
-    assert.match(tab, /<h3 class="text-sm font-black text-gray-900">History<\/h3>/);
+// History was split into the sub-tabs it belongs to (2026-10-21): briefs In progress then Done, live
+// fixes Done, dismissed fixes and unactioned ideas Archived.
+check('what happened to each suggestion is on the tab, named to the chat, and degrades without its table', () => {
+    const b = tab.slice(tab.indexOf('function buckets()'), tab.indexOf('function counts('));
+    assert.match(b, /progress: \{[\s\S]*briefs: briefs\(\)\.filter\(\(b\) => !settled\(b\)\)/, 'recent briefs are In progress');
+    assert.match(b, /done: \[[\s\S]*f\.status === 'done'[\s\S]*briefs\(\)\.filter\(settled\)/, 'live fixes and older briefs are Done');
+    assert.match(b, /archived: \[[\s\S]*f\.status === 'dismissed'[\s\S]*\.\.\.pastIdeas/, 'dismissed fixes and old ideas are Archived');
+    assert.match(b, /attention: \{[\s\S]*stalled\.has\(f\.id\)[\s\S]*newest\.status === 'failed'[\s\S]*competitorsUnread/, 'stalled fixes, failed checks, unread competitors need attention');
     assert.ok(tab.includes('Undo — not briefed after all') && tab.includes('Bring back'));
     const at = chat.indexOf('function mysteryShopperSurfaces()');
-    assert.ok(chat.slice(at, chat.indexOf('\n}', at)).includes('"History"'));
+    assert.ok(chat.slice(at, chat.indexOf('\n}', at)).includes('"In progress"'));
     assert.match(read('netlify/functions/site-audits.ts'), /briefsAvailable = false/);
     const sql = read('db/z-mystery-shopper-briefs.sql');
     assert.match(sql, /CREATE TABLE IF NOT EXISTS site_audit_briefs/);

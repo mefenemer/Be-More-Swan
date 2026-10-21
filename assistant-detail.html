@@ -2735,7 +2735,7 @@ window._revokeConnection = async function (connectionId, onSuccess) {
   .main-tab-btn.active-tab { color: #d6006b; border-bottom-color: #ff007f; }
   /* The selected column's underline follows aria-selected, so look and announced state cannot
      disagree. (border-emerald-700 is not in the compiled style.css.) */
-  .detail-rq-col[aria-selected="true"] { border-bottom-color: #ff007f; }
+  .detail-rq-col[aria-selected="true"], .site-subtab[aria-selected="true"] { border-bottom-color: #ff007f; }
   /* A tab strip wider than the screen fades at the edge that has more, so the tabs past it read as
      "scroll for more" rather than not existing. .is-clipped-* is kept current by assistants.js. */
   .tab-scroller.is-clipped-end { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent); }
@@ -2753,7 +2753,7 @@ window._revokeConnection = async function (connectionId, onSuccess) {
     .detail-suggest-name-label { display: none; }
   }
   .main-tab-btn:focus-visible, .detail-rq-col:focus-visible, #btn-back-assistants:focus-visible,
-  .activity-tf-btn:focus-visible, .metrics-period-btn:focus-visible { outline: 2px solid #ff007f; outline-offset: 2px; border-radius: 4px; }
+  .activity-tf-btn:focus-visible, .metrics-period-btn:focus-visible, .site-subtab:focus-visible { outline: 2px solid #ff007f; outline-offset: 2px; border-radius: 4px; }
 
   /* Operating File card rows */
   .brief-card {

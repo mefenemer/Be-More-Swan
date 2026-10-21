@@ -5228,12 +5228,13 @@ if (!window._detailTabsDelegated) {
 
     // Arrow keys / Home / End move between tabs in a tab strip, as a screen-reader user expects of
     // role="tablist". Covers both strips: the main tabs (which open on focus, like a click) and the
-    // Posts lifecycle columns. Hidden tabs (roles that don't show them) are skipped.
+    // Posts lifecycle columns, and the Website tab's sub-tabs. Hidden tabs (roles that don't show
+    // them) are skipped.
     document.addEventListener('keydown', (e) => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
-        const tab = e.target.closest?.('.main-tab-btn, .detail-rq-col');
+        const tab = e.target.closest?.('.main-tab-btn, .detail-rq-col, .site-subtab');
         if (!tab) return;
-        const sel = tab.classList.contains('main-tab-btn') ? '.main-tab-btn' : '.detail-rq-col';
+        const sel = ['main-tab-btn', 'detail-rq-col', 'site-subtab'].map((c) => `.${c}`).find((c) => tab.matches(c));
         const tabs = [...document.querySelectorAll(sel)].filter(t => !t.classList.contains('hidden') && t.style.display !== 'none');
         const i = tabs.indexOf(tab);
         if (i < 0) return;
@@ -5243,6 +5244,8 @@ if (!window._detailTabsDelegated) {
         e.preventDefault();
         next.focus();
         next.click();
+        // The Website sub-tabs are redrawn by the click; put focus on the new copy of the tab.
+        if (sel === '.site-subtab') setTimeout(() => document.getElementById(next.id)?.focus(), 0);
     });
 }
 

@@ -152,7 +152,7 @@
 
   const state = {
     assistantId: null, assistantName: null, data: null, loaded: false, loadError: null, rendered: false,
-    surface: 'website', panel: 'pages', pageId: null, editing: null, device: 'desktop', previewPath: '/', note: null, pollTimer: null, version: 0,
+    surface: 'website', panel: null, pageId: null, editing: null, device: 'desktop', previewPath: '/', note: null, pollTimer: null, version: 0,
     editingAddress: false, slugTyped: null, versions: null, publishNote: null,
     enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false,
     thumbs: {}, bookings: null, timetable: null,
@@ -1272,6 +1272,29 @@
   }
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.previewFull) setPreviewFull(false); });
 
+  // ── The Website tab's sub-tabs (owner, 2026-10-21) ─────────────────────────
+  // Everything on this tab used to be one stack — set-up steps, templates, import, drafting, Publish
+  // and the bracket checklist above four panel buttons. Now four tabs, left to right in the order a
+  // site is made: Set up (what it does, business details, bring your site, start again) → Design
+  // (template, layout, look) → Pages (the words and sections) → Publish (address, domain, versions).
+  // The preview stays beside whichever is open. Arrow keys move between them (assistants.js).
+  const SUBTABS = [['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];
+  function siteSubtabsHtml() {
+    const s = state.data.site;
+    const brackets = (state.data.placeholders || []).length;
+    // What a tab is waiting on, said on the tab so the owner needn't open each to find out.
+    const badge = {
+      pages: brackets ? `<span class="ml-1 bg-amber-100 text-amber-800 text-[10px] font-black px-1.5 py-0.5 rounded-full" title="Parts in [square brackets] to fill in">${brackets}</span><span class="sr-only"> parts to fill in</span>` : '',
+      publish: s.status === 'published' && s.unpublishedChanges ? '<span class="ml-1 inline-block w-2 h-2 rounded-full bg-amber-500 align-middle" aria-hidden="true" title="Changes not live yet"></span><span class="sr-only"> (changes not live yet)</span>' : '',
+    };
+    return `<div class="tab-scroller border-b border-gray-200 overflow-x-auto overflow-y-hidden">
+      <div class="flex gap-1" role="tablist" aria-label="Your website">${SUBTABS.map(([k, l]) => {
+        const on = state.panel === k;
+        return `<button type="button" role="tab" id="site-subtab-${k}" data-site-subtab="${k}" aria-selected="${on}" tabindex="${on ? 0 : -1}"
+          class="site-subtab px-3 py-2 text-sm whitespace-nowrap border-b-2 ${on ? 'font-bold text-emerald-800' : 'font-medium text-gray-500 hover:text-gray-700 border-transparent'}">${esc(l)}${badge[k] || ''}</button>`;
+      }).join('')}</div></div>`;
+  }
+
   // ── A new site's first steps (UI review 2026-10-21) ─────────────────────────
   // One at a time and numbered, each with one main button: what the website does → a template or
   // their current site (or neither) → the words. A step already done can be gone back to.
@@ -1297,7 +1320,7 @@
   }
   function setupSkipHtml() {
     return card(`<p class="text-sm font-black text-gray-900">Or start without either</p>
-      <p class="text-xs text-gray-500 mt-1">${esc(state.assistantName || 'Your assistant')} writes your site from your business details instead. You can try a template any time from the Templates tab.</p>
+      <p class="text-xs text-gray-500 mt-1">${esc(state.assistantName || 'Your assistant')} writes your site from your business details instead. You can try a template any time from the Design tab.</p>
       <div class="mt-3">${btn('data-site-setup-skip', 'Skip this step')}</div>`);
   }
 
@@ -1637,7 +1660,6 @@
       afterPaint(host);
       return;
     }
-    const tabs = [['pages', 'Pages'], ['design', 'Design'], ['templates', 'Templates'], ['details', 'Details']].map(([k, l]) => btn(`data-site-panel="${k}" aria-pressed="${state.panel === k}"`, esc(l), state.panel === k)).join(' ');
     if (!host.querySelector(':scope > [data-site-layout]')) {
       host.innerHTML = '<div data-site-layout class="grid gap-4 lg:grid-cols-2"><div class="space-y-4 min-w-0"></div><div class="min-w-0"></div></div>';
     }
@@ -1645,23 +1667,49 @@
     const s = state.data.site;
     const fresh = isFresh();
     const step = fresh ? setupStep() : 0;
-    // During set-up the panel below is for looking around: its buttons give way to the step's.
-    quietPrimary = fresh && !state.editing;
-    const panel = state.panel === 'pages' ? pagesPanel() : state.panel === 'design' ? designPanel() : state.panel === 'templates' ? templatesCard(false) : detailsPanel() + draftCard('again') + (state.data.import || fresh ? '' : importCard('again'));
+    const imp = state.data.import;
+    // Which sub-tab. A new site (or one whose imported draft is waiting to be looked at) opens on
+    // Set up, where its steps are; a site under way opens on Pages. Finishing set-up moves on to
+    // Pages once, so the words just written are what the owner sees next.
+    if (!state.panel) state.panel = fresh || (imp && imp.status === 'ready') ? 'setup' : 'pages';
+    if (state.wasFresh && !fresh && state.panel === 'setup') state.panel = 'pages';
+    state.wasFresh = fresh;
+    const tabbar = siteSubtabsHtml();
+    // During set-up the other tabs are for looking around: their buttons give way to the step's.
+    quietPrimary = fresh && !state.editing && state.panel !== 'setup';
+    const P = state.panel;
+    const blocks = P === 'setup' ? (fresh ? [
+      ['setup', setupStepsHtml(step)],
+      ['features', step === 1 ? featuresCard(true) : ''],
+      ['templates', step === 2 && !def().settings.template ? templatesCard(true) : '', { keep: true }],
+      ['import', imp || step === 2 ? importCard('start') : ''],
+      ['setup-skip', step === 2 && !imp ? setupSkipHtml() : ''],
+      ['draft', step === 3 || s.drafting ? draftCard('start') : ''],
+    ] : [
+      ['import', imp ? importCard('start') : ''],
+      ['details', detailsPanel()],
+      ['draft-again', draftCard('again')],
+      ['import-again', imp ? '' : importCard('again')],
+    ]) : P === 'design' ? [
+      ['templates', templatesCard(false), { keep: true }],
+      ['design', designPanel()],
+    ] : P === 'pages' ? [
+      // A template chosen but its words never written: writing them is the next step.
+      ['draft', !fresh && (s.drafting || (def().settings.template && !s.publishedVersion)) ? draftCard('start') : ''],
+      ['placeholders', placeholdersCard()],
+      ['pages', pagesPanel()],
+    ] : [
+      ['placeholders', placeholdersCard()],
+      ['publish', fresh ? card(`<p class="text-sm font-black text-gray-900">Publish your site</p><p class="text-xs text-gray-500 mt-1">There's nothing to publish yet. Finish setting up your website first — ${btn('data-site-subtab="setup"', 'Go to Set up')}</p>`) : publishCard()],
+    ];
+    // Drafting takes a minute or two and can be started from more than one tab: say it on all of them.
+    const drafting = s.drafting && !blocks.some(([k, h]) => (k === 'draft') && h) ? draftCard('start') : '';
     quietPrimary = false;
     paintBlocks(layout.firstElementChild, [
-      ['setup', fresh ? setupStepsHtml(step) : ''],
-      ['features', (fresh ? step === 1 : !featuresOn()) ? featuresCard(true) : ''],
-      ['templates', step === 2 && !def().settings.template ? templatesCard(true) : '', { keep: true }],
-      ['import', state.data.import || step === 2 ? importCard('start') : ''],
-      ['setup-skip', step === 2 && !state.data.import ? setupSkipHtml() : ''],
-      ['draft', (fresh ? step === 3 || s.drafting : s.drafting || (def().settings.template && !s.publishedVersion)) ? draftCard('start') : ''],
-      // Nothing to publish until there is a draft.
-      ['publish', fresh ? '' : publishCard()],
-      ['placeholders', placeholdersCard()],
-      ['tabs', `<div class="flex flex-wrap gap-2">${tabs}</div>`],
+      ['tabs', tabbar],
       ['note', noteHtml(), { live: true }],
-      [`panel-${state.panel}`, panel, { keep: state.panel === 'templates' }],
+      ['drafting', drafting],
+      ...blocks.map(([k, h, o]) => [`${P}-${k}`, h, { ...(o || {}), attrs: { role: 'tabpanel', 'aria-labelledby': `site-subtab-${P}` } }]),
       // Narrow screens: the preview is below everything, so a button that stays in reach opens it.
       // Sticky on the wrapper itself — inside it, it could only stick within its own height.
       ['preview-jump', btn('data-site-preview-full style="box-shadow:0 4px 14px rgba(0,0,0,.15)"', 'Preview my site'),
@@ -1752,7 +1800,7 @@
       state.editing = null;
       const pg = def().pages.find((q) => q.id === x.pageId);
       const sec = pg && x.sectionId && pg.sections.find((q) => q.id === x.sectionId);
-      if (!pg || x.pageTitle === 'Site details') { state.panel = 'details'; state.focusSel = '[data-site-block^="panel-"]'; render(); return; }
+      if (!pg || x.pageTitle === 'Site details') { state.panel = 'setup'; state.focusSel = '[data-site-block^="panel-"]'; render(); return; }
       state.panel = 'pages'; state.pageId = pg.id; state.previewPath = pathOf(pg);
       if (sec && FORMS[sec.type]) {
         state.editing = { pageId: pg.id, sectionId: sec.id, type: sec.type, props: JSON.parse(JSON.stringify(sec.props)), look: { ...LOOK_DEFAULT, ...(sec.look || {}) } };
@@ -1762,9 +1810,11 @@
       return;
     }
 
-    const panel = t('[data-site-panel]');
+    const panel = t('[data-site-panel]') || t('[data-site-subtab]');
     if (panel) {
-      const want = panel.dataset.sitePanel;
+      // The four panel buttons this replaced were Pages / Design / Templates / Details: the last two
+      // live in Design and Set up now, so any old name still lands somewhere sensible.
+      const want = { templates: 'design', details: 'setup' }[panel.dataset.sitePanel || panel.dataset.siteSubtab] || panel.dataset.sitePanel || panel.dataset.siteSubtab;
       // Enquiries, Orders and Bookings are tabs of their own now.
       if (want === 'enquiries' || want === 'orders' || want === 'bookings') { window._activateMainTab?.(`site${want}`); return; }
       if (want !== state.panel && !(await leaveEditor())) return;
@@ -2359,7 +2409,7 @@
       clearTimeout(state.pollTimer);
       Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false, domainChecked: false, domainTyped: null,
         words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
-        importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false, dataSig: null, noteShown: null, focusSection: null, setupStep: null, setupSkipped: false, adding: null });
+        importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false, dataSig: null, noteShown: null, focusSection: null, setupStep: null, setupSkipped: false, adding: null, panel: null, wasFresh: false });
       load();
     },
     // surface: 'website' (pages, design, details, preview) or 'enquiries' | 'orders' | 'bookings',

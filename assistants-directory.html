@@ -6,13 +6,9 @@
             <p class="text-gray-500 mt-1">Manage, monitor, and configure your active AI workforce.</p>
         </div>
         <div class="flex items-center gap-4">
-            <!-- Issue #111: the previous fixes buried the Orchestrations entry point one click deep,
-                 inside each individual assistant's "Active Workflows" card — but reporters keep
-                 checking this directory page itself and not finding it. Surface it directly here too. -->
-            <!-- Issue #134: not ready for general use yet — show it disabled with a "coming soon" hint instead of routing in. -->
-            <button id="route-to-orchestrations-from-dir" type="button" disabled title="Coming soon" aria-disabled="true" class="text-sm font-bold text-gray-400 cursor-not-allowed">
-                Orchestrations → <span class="font-normal">(coming soon)</span>
-            </button>
+            <!-- The disabled "Orchestrations → (coming soon)" link that sat here was removed (owner,
+                 2026-10-21): a dead control on the page users open most. orchestrations.ts still has no
+                 runtime consumer; when it does, give it an entry point that works. -->
             <button id="route-to-catalog-from-dir" class="hidden btn-golive sm:flex items-center gap-2 px-4 py-2.5 text-sm font-bold rounded-lg transition-colors shadow-sm">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
                 Hire New Assistant

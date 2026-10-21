@@ -13,6 +13,7 @@
 // Every number in the summary must be one we gave it (`summaryNumbersAreKnown`); a summary that
 // invents "conversion up 30%" is replaced by the plain one this file writes in code.
 
+import { coveredBlock, sameIdea, type CoveredItem } from './site-audit-covered';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../constants/safety-benchmark';
 import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import { currentDatePromptBlock } from './current-date-prompt';
@@ -140,6 +141,8 @@ export interface SummaryInput {
     previousScore: number | null;
     fixes: SuggestedFix[];
     competitorChanges: Array<{ url: string; changes: string[] }>;
+    /** Ideas already suggested, briefed or written by the other assistants (site-audit-covered.ts). */
+    covered?: CoveredItem[];
 }
 
 export function buildSummaryPrompt(input: SummaryInput): LensPrompt {
@@ -158,10 +161,11 @@ export function buildSummaryPrompt(input: SummaryInput): LensPrompt {
         `<failed_checks>\n${score.failures.slice(0, 10).map((f) => `- ${f.label}`).join('\n') || '(none)'}\n</failed_checks>`,
         `<suggested_fixes>\n${fixLines.join('\n') || '(none)'}\n</suggested_fixes>`,
         changes.length ? `<competitor_changes>\n${changes.join('\n')}\n</competitor_changes>` : '',
+        coveredBlock(input.covered ?? []),
         `<rules>
 - "summary": 2–3 short sentences to the business owner: where the site stands, what moved since last time, and the single most important thing to change. Calm and direct, no hype. Use ONLY the numbers given above — do not invent percentages, conversion rates or forecasts.
 - "priorities": up to 3 of the suggested fixes, by their [index], most valuable first, each with one sentence on why it matters commercially and an impact of "high", "medium" or "low". You may not write new fixes.
-- "handoffs": up to 2 briefs for other assistants who could help while the website is being changed. "target" is one of ${HANDOFF_TARGETS.map((t) => `"${t}"`).join(', ')}. "title" is a short button label; "brief" is 2–4 sentences the assistant can act on. Only include a hand-off if it genuinely helps.
+- "handoffs": up to 2 briefs for other assistants who could help while the website is being changed. "target" is one of ${HANDOFF_TARGETS.map((t) => `"${t}"`).join(', ')}. "title" is a short button label; "brief" is 2–4 sentences the assistant can act on. Only include a hand-off if it genuinely helps AND says something new: never one that repeats or overlaps anything in <already_covered>. When everything useful is already covered, return "handoffs": [] — an empty list is the right answer then, not a reworded repeat.
 - Reply with the JSON object only.
 </rules>`,
         `<output>\n{"summary":"","priorities":[{"fix":0,"whyItMatters":"","impact":"high"}],"handoffs":[{"target":"blog_writer","title":"","brief":""}]}\n</output>`,
@@ -225,6 +229,8 @@ export function sanitiseSummary(raw: unknown, input: SummaryInput): SummaryOutpu
         const title = typeof o.title === 'string' ? o.title.trim().slice(0, 80) : '';
         const brief = typeof o.brief === 'string' ? o.brief.trim().slice(0, 800) : '';
         if (!title || !brief) continue;
+        // The model was told what is already covered; this catches a repeat it wrote anyway.
+        if ((input.covered ?? []).some((c) => c.target === o.target && sameIdea(c.text, title))) continue;
         handoffs.push({ target: o.target as HandoffTarget, title, brief });
         if (handoffs.length >= 2) break;
     }
