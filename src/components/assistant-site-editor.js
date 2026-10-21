@@ -158,7 +158,7 @@
     thumbs: {}, bookings: null, timetable: null,
     words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
     importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false,
-    dataSig: null, noteShown: null, focusSection: null, focusEditor: false, busy: false, trigger: null, noteAt: null,
+    dataSig: null, noteShown: null, focusSection: null, focusEditor: false, focusSel: null, busy: false, trigger: null, noteAt: null,
   };
 
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -217,6 +217,7 @@
     const same = state.loaded && sig === state.dataSig;
     state.dataSig = sig;
     state.loaded = true;
+    if (state.data) paintTabBadges();
     if (!same) { keepEditing(); state.version++; rerender(); }
     schedulePoll();
   }
@@ -688,7 +689,7 @@
     return `
       ${card(`
         <div class="flex flex-wrap gap-2 items-center">${pageTabs}
-          ${d.pages.length < state.data.maxPages ? btn('data-site-add-page', '+ Page') : `<span class="text-xs text-gray-500">${esc(state.data.maxPages)} of ${esc(state.data.maxPages)} pages on your plan</span>`}</div>
+          ${d.pages.length < state.data.maxPages ? btn('data-site-add-page', '+ Page') : `<span class="text-xs text-gray-500">${esc(state.data.maxPages)} of ${esc(state.data.maxPages)} pages on your plan — the most it includes.</span> ${btn('data-site-billing', 'See plans')}`}</div>
         <p class="text-sm font-black text-gray-900 mt-4 mb-3">Sections on ${esc(p.title)}</p>
         <ul class="space-y-2">${sections || '<li class="text-xs text-gray-500">No sections yet.</li>'}</ul>
         <div class="flex flex-wrap gap-2 items-center mt-4"><select data-site-new-type aria-label="Kind of section to add" class="${inputCls}" style="max-width:220px">${state.data.vocab.sectionTypes.filter(typeAllowed).map((t) => `<option value="${esc(t)}">${esc(TYPE_LABEL[t] || t)}</option>`).join('')}</select>${btn('data-site-new-section', 'Add a section')}</div>`)}
@@ -1172,7 +1173,8 @@
     const head = slot.querySelector('[data-site-preview-head]');
     const headHtml = previewHeadHtml(showImport);
     if (head._html !== headHtml) { head.innerHTML = headHtml; head._html = headHtml; }
-    frame.style.width = state.device === 'mobile' ? '390px' : '100%';
+    // Phone: 390px wide, or the whole box on a screen narrower than that (no sideways scroll).
+    frame.style.width = state.device === 'mobile' ? 'min(390px, 100%)' : '100%';
     if (frame.dataset.src !== src) { frame.dataset.src = src; frame.src = src; }
   }
 
@@ -1312,7 +1314,8 @@
           ${btn(`data-site-restore="${esc(v.version)}"`, 'Copy into my draft')}
         </li>`).join('') : '<li class="text-xs text-gray-500">No earlier versions.</li>'}</ul>
         <p class="text-xs text-gray-500 mt-1">Copying a version replaces your draft with it. Your live site only changes when you publish.</p>` : '';
-    return card(`${status}${address}${actions}${versions}${pnote}${s.slug ? domainBlock() : ''}`, live ? 'border-green-200' : '');
+    const credit = s.credit ? '<p class="text-xs text-gray-500 mt-2">The bottom of every page says “Made with Be More Swan”, linking to us, beside “Report this site”.</p>' : '';
+    return card(`${status}${address}${actions}${credit}${versions}${pnote}${s.slug ? domainBlock() : ''}`, live ? 'border-green-200' : '');
   }
 
   // ── Their own domain (site-domains.ts) ─────────────────────────────────────────────────────
@@ -1352,7 +1355,9 @@
     if (!list.length) return '';
     return `<div class="bg-amber-50 border border-amber-200 rounded-2xl p-4">
       <p class="text-sm font-bold text-amber-800">${list.length} part${list.length === 1 ? '' : 's'} in [square brackets] to fill in with your real details before you publish</p>
-      <ul class="mt-2 space-y-1 list-disc pl-5">${list.slice(0, 8).map((x) => `<li class="text-xs text-amber-800">${esc(x.pageTitle)}: ${esc(x.text)}</li>`).join('')}</ul></div>`;
+      <p class="text-xs text-amber-800 mt-1">Tap one to go to it.</p>
+      <ul class="mt-2 flex flex-wrap gap-2">${list.slice(0, 8).map((x, i) => `<li>${btn(`data-site-fix="${i}"`, `${esc(x.pageTitle)}: ${esc(x.text)}`)}</li>`).join('')}</ul>
+      ${list.length > 8 ? `<p class="text-xs text-amber-800 mt-2">and ${esc(list.length - 8)} more.</p>` : ''}</div>`;
   }
 
   // ── Painting ───────────────────────────────────────────────────────────────
@@ -1444,6 +1449,15 @@
         (first || form.querySelector('button')).focus({ preventScroll: true });
       }
     }
+    if (state.focusSel) {
+      const el = host.querySelector(state.focusSel);
+      state.focusSel = null;
+      if (el) {
+        el.scrollIntoView({ block: 'start' });
+        const box = el.matches('input,textarea,select') ? el : el.querySelector('input:not([type=hidden]),textarea,select');
+        if (box) box.focus({ preventScroll: true });
+      }
+    }
     if (state.focusSection) {
       const row = host.querySelector(`[data-site-edit="${CSS.escape(state.focusSection)}"]`);
       state.focusRow = state.focusSection;
@@ -1479,7 +1493,7 @@
     const host = document.querySelector(`[data-site-host="${state.surface}"]`);
     if (!host) return;
     if (!state.loaded) { host.innerHTML = card('<p class="text-sm text-gray-400 text-center">Loading your website…</p>'); return; }
-    if (state.loadError && !state.data) { host.innerHTML = card(`<p class="text-sm font-bold text-gray-700 text-center">Could not load your website</p><p class="text-xs text-gray-500 mt-2 text-center">${esc(state.loadError)}</p>`); return; }
+    if (state.loadError && !state.data) { host.innerHTML = card(`<p class="text-sm font-bold text-gray-700 text-center">Could not load your website</p><p class="text-xs text-gray-500 mt-2 text-center">${esc(state.loadError)}</p><div class="mt-3 text-center">${btn('data-site-retry', 'Try again', true)}</div>`); return; }
     paintTabBadges();
     if (state.surface !== 'website') {
       const body = state.surface === 'enquiries' ? enquiriesPanel() : state.surface === 'orders' ? ordersPanel() : bookingsPanel();
@@ -1520,7 +1534,8 @@
     const d = state.data || {};
     // Orders and Bookings tabs follow what the website does.
     const show = (id, on) => { const b = document.getElementById(id); if (b) { b.classList.toggle('hidden', !on); b.style.display = on ? '' : 'none'; } };
-    if (state.data) { show('maintab-btn-siteorders', featureOn('shop')); show('maintab-btn-sitebookings', featureOn('bookings')); }
+    // The Calendar tab is this assistant's bookings calendar (assistant-calendar.js), so it goes with them.
+    if (state.data) { show('maintab-btn-siteorders', featureOn('shop')); show('maintab-btn-sitebookings', featureOn('bookings')); show('maintab-btn-calendar', featureOn('bookings')); }
     set('site-enquiries-badge', d.newEnquiries || 0);
     set('site-orders-badge', d.newOrders || 0);
     set('site-bookings-badge', (d.booking && d.booking.waiting) || 0);
@@ -1564,6 +1579,24 @@
     const p = page();
     state.trigger = t('button');
     if (t('[data-site-billing]')) { window.loadView?.('billing'); return; }
+    if (t('[data-site-retry]')) { state.loaded = false; state.loadError = null; render(); load(); return; }
+    const fix = t('[data-site-fix]');
+    if (fix) {
+      // A [placeholder]: open where it is — its section's form, the page's details, or Details.
+      const x = (state.data.placeholders || [])[Number(fix.dataset.siteFix)];
+      if (!x || !(await leaveEditor())) return;
+      state.editing = null;
+      const pg = def().pages.find((q) => q.id === x.pageId);
+      const sec = pg && x.sectionId && pg.sections.find((q) => q.id === x.sectionId);
+      if (!pg || x.pageTitle === 'Site details') { state.panel = 'details'; state.focusSel = '[data-site-block^="panel-"]'; render(); return; }
+      state.panel = 'pages'; state.pageId = pg.id; state.previewPath = pathOf(pg);
+      if (sec && FORMS[sec.type]) {
+        state.editing = { pageId: pg.id, sectionId: sec.id, type: sec.type, props: JSON.parse(JSON.stringify(sec.props)), look: { ...LOOK_DEFAULT, ...(sec.look || {}) } };
+        state.focusEditor = true;
+      } else state.focusSel = '[data-site-page-title]';
+      render();
+      return;
+    }
 
     const panel = t('[data-site-panel]');
     if (panel) {

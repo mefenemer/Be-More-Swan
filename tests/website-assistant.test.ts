@@ -226,6 +226,19 @@ check('the section form: asks before losing changes, opens in view, one save at 
     assert.match(editor, /data-site-beside[^>]*><span aria-hidden="true">/);
 });
 
+check('UX quick wins: placeholders go to where they are, plan limit and load failure have a next step', () => {
+    assert.match(editor, /btn\(`data-site-fix="\$\{i\}"`/);
+    const fix = editor.slice(editor.indexOf("const fix = t('[data-site-fix]');"), editor.indexOf("const fix = t('[data-site-fix]');") + 1400);
+    assert.match(fix, /leaveEditor\(\)/);
+    assert.match(fix, /state\.focusEditor = true/);
+    assert.match(editor, /pages on your plan — the most it includes\.<\/span> \$\{btn\('data-site-billing', 'See plans'\)\}/);
+    assert.match(editor, /btn\('data-site-retry', 'Try again', true\)/);
+    assert.match(editor, /show\('maintab-btn-calendar', featureOn\('bookings'\)\)/);
+    assert.match(editor, /if \(s\.credit\)|s\.credit \?/);
+    assert.match(editor, /Made with Be More Swan/);
+    assert.match(editor, /'min\(390px, 100%\)'/);
+});
+
 check('the chat never publishes (step 3a: a click on the Website tab), and nothing spends without saying so', () => {
     assert.ok(!/action: 'publish'/.test(read('src/components/chat-session.js')));
     assert.match(chat, /You cannot publish, take the site offline or choose its address/);
