@@ -25,6 +25,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import {
     buildSegmentCondition, checkRuleReferences, describeRules, parseRules,
 } from '../../src/utils/audience-segment-rules';
+import { previewSegmentRules } from '../../src/utils/audience-segment-preview';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, obj: unknown) => ({
@@ -146,41 +147,10 @@ export default withLambda(async (event: HandlerEvent) => {
     // and the send come from one compiler, so this is a preview of the real audience rather than an
     // estimate of it.
     if (action === 'preview') {
-        const parsed = parseRules(body.rules);
-        if (!parsed.ok) return json(400, { error: parsed.error });
-        const refError = await checkRuleReferences(db, orgId, body.rules);
-        if (refError) return json(400, { error: refError });
-        const rule = buildSegmentCondition(orgId, body.rules)!;
-        const [count] = await db
-            .select({ n: sql<number>`count(*)::int` })
-            .from(audienceContacts)
-            .where(and(
-                eq(audienceContacts.organisationId, orgId),
-                eq(audienceContacts.status, 'subscribed'),
-                rule,
-            ));
-        const previewForms = new Map<number, string>();
-        try {
-            const forms = await db.select({ id: audienceForms.id, name: audienceForms.name })
-                .from(audienceForms).where(eq(audienceForms.organisationId, orgId));
-            for (const f of forms) previewForms.set(f.id, f.name);
-        } catch { /* degrades to "form #3" */ }
-        const previewTags = new Map<number, string>();
-        try {
-            const tags = await db.select({ id: audienceSegments.id, name: audienceSegments.name })
-                .from(audienceSegments).where(eq(audienceSegments.organisationId, orgId));
-            for (const t of tags) previewTags.set(t.id, t.name);
-        } catch { /* degrades to "#3" */ }
-        const previewFields = new Map<string, string>();
-        try {
-            const defs = await db.select({ key: audienceCustomFields.key, label: audienceCustomFields.label })
-                .from(audienceCustomFields).where(eq(audienceCustomFields.organisationId, orgId));
-            for (const d of defs) previewFields.set(d.key, d.label);
-        } catch { /* falls back to the raw key */ }
-        return json(200, {
-            matches: count?.n ?? 0,
-            description: describeRules(body.rules, previewForms, previewTags, previewFields),
-        });
+        // One compiler for this and the Email Marketing chat's segment card (audience-segment-preview.ts).
+        const preview = await previewSegmentRules(db, orgId, body.rules);
+        if (!preview.ok) return json(400, { error: preview.error });
+        return json(200, { matches: preview.matches, description: preview.description });
     }
 
     if (action === 'create') {

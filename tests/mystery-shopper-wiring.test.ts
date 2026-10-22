@@ -106,7 +106,7 @@ check('the page has the tab, its panel, the script, and every branch that routes
     assert.match(assistants, /if \(source === 'site_audit'\)[\s\S]{0,120}_loadSiteAuditMetrics\(assistantId\)/);
     assert.match(assistants, /_detailRulesScope === 'audit'/);
     assert.match(read('dashboard-content.html'), /reg\.siteAuditTab\) return \{ tab: 'website'/);
-    assert.match(read('calendar.js'), /_datedSource === 'checks'/);
+    assert.match(read('calendar.js'), /t\.datedSource === 'checks'/);
 });
 
 console.log('\nNames the chat quotes');

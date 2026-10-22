@@ -1,7 +1,7 @@
 {
   "nav": {
     "how_it_works": "Como funciona",
-    "assistant_library": "Biblioteca de assistentes",
+    "assistant_library": "Conheça os assistentes",
     "pricing": "Preços",
     "about": "Sobre nós",
     "faqs": "Perguntas frequentes",
@@ -19,7 +19,7 @@
     "tagline_sub": "Os seus assistentes tratam da escrita, das publicações e do acompanhamento; você só aprova antes de qualquer coisa sair. Sem pessoal extra, sem software extra, sem surpresas.",
     "platform": "Plataforma",
     "how_it_works": "Como funciona",
-    "assistant_library": "Biblioteca de assistentes",
+    "assistant_library": "Conheça os assistentes",
     "connections": "Conexões",
     "pricing": "Preços",
     "faqs": "Perguntas frequentes",
@@ -86,7 +86,7 @@
     "currency_label": "Moeda"
   },
   "assistants": {
-    "page_title": "Biblioteca de assistentes",
+    "page_title": "Conheça os assistentes",
     "page_subtitle": "Explore o nosso catálogo de assistentes de IA. Cada um foi criado para um papel empresarial específico.",
     "join_waitlist": "Juntar-se à lista de espera",
     "notify_me": "Notificar-me",

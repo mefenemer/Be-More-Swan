@@ -64,7 +64,14 @@ import { buildBlogSnapshot, buildEmailsSnapshot, buildPostsSnapshot } from '../.
 import { postActionFromUiElement, resolvePostActionProposal, type PostActionCard } from '../../src/utils/chat-post-action';
 import { blogActionFromUiElement, resolveBlogActionProposal, type BlogActionCard } from '../../src/utils/chat-blog-action';
 import { emailActionFromUiElement, resolveEmailActionProposal, type EmailActionCard } from '../../src/utils/chat-email-action';
+import {
+    buildAudienceSnapshot, contactProposalFromUiElement, resolveContactProposal, resolveSegmentProposal, segmentProposalFromUiElement,
+    type ContactProposalCard, type SegmentProposalCard,
+} from '../../src/utils/chat-audience';
 import { leadActionFromUiElement, resolveLeadActionProposal, sendableDraft, type LeadActionCard } from '../../src/utils/chat-lead-action';
+import {
+    assistantSettingsPromptBlock, buildAssistantSettingsSnapshot, resolveSettingsProposal, settingsProposalFromUiElement, type SettingsCard,
+} from '../../src/utils/chat-assistant-settings';
 import { isInOutreachReview } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
 import { LOSS_REASONS } from '../../src/config/revenue-events';
@@ -178,6 +185,9 @@ interface RouteContext {
     /** This assistant's own posts / articles / emails, column by column, read per turn — only
      *  populated for routes with contentSnapshot. See src/utils/content-snapshot.ts. */
     contentSnapshot?: string | null;
+    /** The shared Audience — counts, segments, tags, forms, custom fields — read per turn for routes
+     *  with usesAudienceSnapshot. See src/utils/chat-audience.ts. */
+    audienceSnapshot?: string | null;
 }
 
 interface AssistantRoute {
@@ -209,6 +219,8 @@ interface AssistantRoute {
     acceptsAttachments?: boolean;
     /** Which of this assistant's own queues the handler reads for this turn (rc.contentSnapshot). */
     contentSnapshot?: 'posts' | 'blog' | 'emails';
+    /** When true the handler reads the organisation's Audience for this turn (rc.audienceSnapshot). */
+    usesAudienceSnapshot?: boolean;
     /** Role-specific prompt body. buildSystemPrompt() appends the hardened
      *  <strict_configuration> block to this before every API call. */
     buildRolePrompt(rc: RouteContext): string;
@@ -2074,6 +2086,9 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
         // single issue. max_tokens is a ceiling, not a spend.
         maxTokens: 8192,
         contentSnapshot: 'emails',
+        // The shared Audience, so it can answer "how many subscribers?" and propose a segment or a
+        // contact (src/utils/chat-audience.ts).
+        usesAudienceSnapshot: true,
         // docs/newsletter-campaigns-system-prompt.md is the reasoning behind every paragraph here.
         // ⚠️ The "TRIGGERS THAT START BY THEMSELVES" line is held to AUTOMATIC_TRIGGERS (and so to
         // newsletter_sequences_trigger_check) by tests/newsletter-campaign-draft.test.ts. Widen the
@@ -2141,7 +2156,7 @@ FORM RULES
   • Every answer must land somewhere — "target": { "kind": "contact", "column": "first_name" | "last_name" | "company" | "phone" }, or { "kind": "custom", "key": "<short_snake_case>" } (e.g. "team_size"), or { "kind": "tag" } (each chosen option becomes a tag; choice fields only).
   • Consent: always a plain sentence saying what they will receive and that they can unsubscribe at any time. Keep double opt-in ON unless they ask otherwise.
   • Colours are #rrggbb only. Never invent a URL; a redirect only if they gave you one.
-  • You CANNOT see their segments or email flows, so never choose one. Say that they link the form to an email flow in the form builder after saving — unlinked, new sign-ups get their welcome sequence (if it is switched on).
+  • Never choose a segment or an email flow for a form, even one you can see in YOUR AUDIENCE. Say that they link the form to an email flow in the form builder after saving — unlinked, new sign-ups get their welcome sequence (if it is switched on).
   • Saving a form from this card saves it SWITCHED OFF. Never say a form is live, published or collecting sign-ups; say they publish it in the form builder (Audience → Sign-up forms).`,
             // The one thing this route must never get wrong. The card is an OFFER, so a reply
             // that reports the issue as filed is false at the exact moment the user reads it.
@@ -2160,7 +2175,12 @@ ONE DRAFT OBJECT PER REPLY — one email, one email flow or one sign-up form, ne
 NEVER claim you have written something unless THIS reply carries the draft object. If it is null, nothing was written, and a reply saying otherwise leaves the user looking for something that does not exist.`,
             emailSurfaces(),
             rc.contentSnapshot ?? 'YOUR EMAILS — your list of emails could not be read this turn. Do not guess at what is drafted, scheduled or sent: if the user asks about an existing email, say you cannot see it right now and point them to the "Emails" tab.',
-            `WHAT YOU CANNOT SEE — you can see your own single emails (above), but not their audience, segments, flows, welcome sequence or results: not how many subscribers they have, and not what was opened, clicked or unsubscribed. If they ask, say plainly that you cannot see it from here and point them at the right place — subscribers and segments are on the Audience page; results and the welcome sequence are in the Email Studio and the "Email Flows" tab. Never guess at a number.`,
+            rc.audienceSnapshot ?? 'YOUR AUDIENCE — the audience could not be read this turn. Do not guess at how many subscribers they have or which segments exist: say you cannot see it right now and point them to the Audience page. Do not propose a segment or a contact this turn.',
+            `THE AUDIENCE — you can see the counts, segments, tags, sign-up forms and custom fields above, but not individual people: never list, name or guess at who is in it. You can do two things with it, each only as a card the user confirms — you never do it yourself, so never say a segment HAS been made or a person HAS been added:
+  • Build a rule-based segment from their words ("everyone who joined in the last 30 days", "people who signed up through the Bristol form and haven't opened anything in 60 days"). Emit an audience_segment_proposal. The card shows the rule in plain English and how many subscribed people it matches right now, so do not state a number yourself. Use only the fields and values in the format below; refer to a form, tag or segment by its #id from YOUR AUDIENCE and a custom field by its key. If what they ask for cannot be said with those fields, say so plainly rather than proposing something close.
+  • Add ONE person by hand, when they give you an email address. Emit an audience_contact_proposal. Only add someone the user says has agreed to hear from them; the card asks them to confirm that before it works. Never add someone they describe as a lead, a prospect or a cold contact — those belong with the Lead Generator, not the mailing list. If the person is already in the audience or has unsubscribed, the card says so.
+  You cannot import a list (that is the "Import CSV" button on the Audience page), delete anyone, unsubscribe or resubscribe anyone, edit a segment, or tag people. Say where to do it: the Audience page.`,
+            `WHAT YOU CANNOT SEE — results and the welcome sequence: not what was opened, clicked or unsubscribed from a particular email. If they ask, say plainly that you cannot see it from here and point them at the Email Studio and the "Email Flows" tab. Never guess at a number.`,
             `WHAT NEVER GOES IN THE COPY — do not write an unsubscribe line, a footer, a postal address or any "you are receiving this because…" text; those are added automatically to every email. Do not invent statistics, customer numbers, testimonials, prices, discounts, deadlines or dates: if the brief does not give you a fact, write around it. Do not invent links: only use a URL they have given you. If an email needs one you do not have, leave its callToAction "url" null and tell them which link to add.`,
             `PERSONALISATION — you may use {{contact.first_name | "there"}} where a first name belongs, and always with a fallback like that, so a subscriber whose name they do not hold still reads a natural sentence. Do not invent other tags: the only ones that work are the contact's first name, last name, company and email, and the business's own name.`,
             // Before the JSON contract, deliberately — the block ends with exemplar copy, so it
@@ -2214,6 +2234,36 @@ To act on a single email that already exists (see EXISTING EMAILS), uiElement is
   "action": "approve" | "schedule" | "reject",
   "issueId": <the number after # in YOUR EMAILS RIGHT NOW>,
   "when": "<schedule only: the send time exactly as the user said it, e.g. 'Tuesday at 10am'>" | null
+}
+
+To build a rule-based segment of the audience, uiElement is instead:
+{
+  "type": "audience_segment_proposal",
+  "name": "<short name, e.g. 'Joined this month'>",
+  "rules": {
+    "match": "all" | "any",
+    "conditions": [
+      { "field": "joined", "op": "within" | "not_within", "value": <days, 1-3650> },
+      { "field": "opened", "op": "within" | "not_within", "value": <days> },
+      { "field": "emailed", "op": "never" | "ever" },
+      { "field": "source", "op": "is" | "is_not", "value": "web_form" | "csv_import" | "manual" | "api" | "lead_promotion" },
+      { "field": "form", "op": "is", "value": <form #id> },
+      { "field": "email_domain", "op": "is" | "is_not", "value": "<domain, e.g. gmail.com>" },
+      { "field": "tag", "op": "in" | "not_in", "value": <tag or hand-picked segment #id — never a rule-based one> },
+      { "field": "custom", "key": "<custom field key>", "op": "is" | "is_not" | "contains" | "is_set" | "is_not_set", "value": "<text; omit for is_set / is_not_set>" }
+    ]
+  }
+}
+Use only the conditions the request needs (one to ten). "match": "all" means every condition must hold.
+
+To add one person to the audience, uiElement is instead:
+{
+  "type": "audience_contact_proposal",
+  "email": "<their email address>",
+  "firstName": "<or null>",
+  "lastName": "<or null>",
+  "company": "<or null>",
+  "segmentId": <a hand-picked segment or tag #id to add them to, only if the user asked> | null
 }
 
 A sign-up form:
@@ -2682,6 +2732,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         })
         : null;
 
+    // Per turn, like the others: a contact added on the Audience page a moment ago must be counted.
+    const audienceSnapshot = route.usesAudienceSnapshot ? await buildAudienceSnapshot(db, orgId) : null;
+
     // Per turn: an edit made on the Website tab a moment ago must be visible to the next message.
     const siteSnapshot = route.usesSiteSnapshot
         ? await buildSiteSnapshot(db, orgId, session.aiAssistantId).catch((err) => {
@@ -2725,6 +2778,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         siteAuditSnapshot,
         siteSnapshot,
         contentSnapshot,
+        audienceSnapshot,
         attachmentsBlock,
     });
     // The user's rules (their Assistant Rules, learned directives and workspace-wide rules) for the
@@ -2752,7 +2806,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // Its Team thread (team-messages.ts): what the user told it there, and what it said. Without it
     // a note sent on the Team page was invisible to the very assistant it was addressed to.
     const teamThreadBlock = await teamThreadPromptBlock(db, orgId, session.aiAssistantId);
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, teamBlock, teamThreadBlock].filter(Boolean).join('\n\n');
+    // Its own status, settings and goals (src/utils/chat-assistant-settings.ts), every role, per turn
+    // — a pause or a horizon changed on the page a moment ago is in the next answer. Routes with a
+    // JSON reply can also propose a change through a confirm card; the plain default route only reads.
+    const settingsBlock = await buildAssistantSettingsSnapshot(db, orgId, session.aiAssistantId, assistantRow.roleKey);
+    const settingsCardBlock = route !== defaultRoute ? assistantSettingsPromptBlock(assistantRow.roleKey) : null;
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock].filter(Boolean).join('\n\n');
 
     const system = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -2944,6 +3003,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // card calls the same endpoints the Posts tab does. Not while drafting INTO an open post —
         // that conversation is about the words of one post, not its fate.
         let postAction: PostActionCard | null = null;
+        // A change to the assistant's OWN settings (src/utils/chat-assistant-settings.ts) — any
+        // structured route. Rebuilt from its row; the click calls the page's own endpoints.
+        let settingsCard: SettingsCard | null = null;
+        const settingsReq = route !== defaultRoute ? settingsProposalFromUiElement(uiElement) : null;
+        if (settingsReq) {
+            settingsCard = await resolveSettingsProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, settingsReq);
+            uiElement = settingsCard;
+            if (!settingsCard) {
+                content = 'I couldn’t read my settings just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Profile.';
+            }
+        }
         // The Blog Writer's twin (src/utils/chat-blog-action.ts): same checks, built from blog_posts
         // rows; a time in the user's words is worked out here so the card shows the exact instant.
         let blogAction: BlogActionCard | null = null;
@@ -2963,6 +3033,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             uiElement = emailAction;
             if (!emailAction) {
                 content = 'I couldn’t find that email among this assistant’s emails, so I haven’t set anything up. Which one do you mean? You can also open it on the "Emails" tab.';
+            }
+        }
+        // And the Audience cards (src/utils/chat-audience.ts): a rule-based segment, or one contact.
+        let audienceCard: SegmentProposalCard | ContactProposalCard | null = null;
+        const segmentReq = route === ROUTES.newsletter_editor ? segmentProposalFromUiElement(uiElement) : null;
+        const contactReq = route === ROUTES.newsletter_editor && !segmentReq ? contactProposalFromUiElement(uiElement) : null;
+        if (segmentReq || contactReq) {
+            audienceCard = segmentReq ? await resolveSegmentProposal(db, orgId, segmentReq) : await resolveContactProposal(db, orgId, contactReq!);
+            uiElement = audienceCard;
+            if (!audienceCard) {
+                content = 'I couldn’t check that against your audience just now, so I haven’t set anything up. Please try again in a moment, or use the Audience page.';
             }
         }
         // And the Lead Generator's (src/utils/chat-lead-action.ts). Its "send" card carries the stored
@@ -3033,7 +3114,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         const blogDraft = route === ROUTES.blog_writer ? blogPostDraftFromUiElement(uiElement) : null;
         if (route === ROUTES.blog_writer) {
             // An action card on an existing article was already checked and rebuilt above — keep it.
-            uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft } : blogAction;
+            uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft } : blogAction ?? settingsCard;
         }
 
         // Same contract for the newsletter route, and the same reason: uiElementJson is persisted
@@ -3060,8 +3141,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             uiElement = newsletterDraft ? { type: NEWSLETTER_ISSUE_DRAFT_TYPE, ...newsletterDraft }
                 : campaignDraft ? { type: NEWSLETTER_CAMPAIGN_DRAFT_TYPE, ...campaignDraft }
                 : formDraft ? { type: AUDIENCE_FORM_DRAFT_TYPE, ...formDraft }
-                // An action card on an existing email was already checked and rebuilt above — keep it.
-                : emailAction;
+                // An action card on an existing email, or an Audience card, was already checked and
+                // rebuilt above — keep it.
+                : emailAction ?? audienceCard ?? settingsCard;
         }
 
         // ── Reply ↔ persistence reconciliation ────────────────────────────────────
@@ -3092,7 +3174,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
         // A post-action turn is not a drafting turn: "approve it and it's scheduled" describes the
         // card, and the card is the backing — the user's click is what does it.
-        if (route === ROUTES.social_media_manager && !postActionReq && replyClaimsPostSaved(content) && !alreadyApologised) {
+        if (route === ROUTES.social_media_manager && !postActionReq && !settingsCard && replyClaimsPostSaved(content) && !alreadyApologised) {
             let breach: DraftClaimFailure | null = null;
             if (draftTarget) breach = 'not_saved_here';                      // saving here is wrong by design
             else if (persistedPosts?.length === 0) breach = 'persist_failed'; // valid draft, the write threw
@@ -3111,7 +3193,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // persists), so the only unbacked claim available to it is claiming an article it did not
         // write — which is the identical bug: a confident reply about a post that does not exist.
         // An action card is the thing a "scheduled" reply is about, so it is not an unbacked claim.
-        if (route === ROUTES.blog_writer && !blogDraft && !blogAction && replyClaimsPostSaved(content) && !alreadyApologised) {
+        if (route === ROUTES.blog_writer && !blogDraft && !blogAction && !settingsCard && replyClaimsPostSaved(content) && !alreadyApologised) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked blog draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );
@@ -3121,8 +3203,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
         // And the newsletter route's. Identical shape: it never persists on the turn, so the only
         // unbacked claim available to it is claiming an issue it did not write.
-        // !emailAction: a "booked for Tuesday" reply describes its action card, not an unbacked claim.
-        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised && !emailAction) {
+        // !emailAction / !audienceCard: a "booked for Tuesday" or "here's the segment" reply describes
+        // its card, not an unbacked claim.
+        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised && !emailAction && !audienceCard && !settingsCard) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked newsletter draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );

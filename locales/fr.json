@@ -1,7 +1,7 @@
 {
   "nav": {
     "how_it_works": "Comment ça marche",
-    "assistant_library": "Bibliothèque d'assistants",
+    "assistant_library": "Découvrez les assistants",
     "pricing": "Tarifs",
     "about": "À propos",
     "faqs": "FAQ",
@@ -19,7 +19,7 @@
     "tagline_sub": "Vos assistants s’occupent de la rédaction, de la publication et des relances ; vous n’avez qu’à approuver avant que quoi que ce soit ne parte. Pas de personnel en plus, pas de logiciel en plus, pas de surprises.",
     "platform": "Plateforme",
     "how_it_works": "Comment ça marche",
-    "assistant_library": "Bibliothèque d'assistants",
+    "assistant_library": "Découvrez les assistants",
     "connections": "Connexions",
     "pricing": "Tarifs",
     "faqs": "FAQ",
@@ -86,7 +86,7 @@
     "currency_label": "Devise"
   },
   "assistants": {
-    "page_title": "Bibliothèque d'assistants",
+    "page_title": "Découvrez les assistants",
     "page_subtitle": "Parcourez notre catalogue d'assistants IA. Chacun est conçu pour un rôle métier spécifique.",
     "join_waitlist": "Rejoindre la liste d'attente",
     "notify_me": "Me notifier",

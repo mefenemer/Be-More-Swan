@@ -369,6 +369,88 @@ function _setView(v) {
 // the grid with the wrong month's posts.
 let _loadToken = 0;
 
+// Which assistants have dated work of their own for the sidebar Calendar, and what kind — from the
+// same dashboard registry the assistant Calendar tab reads (assistant-calendar.js), so the two
+// calendars can never disagree about what a role puts on a date.
+function _globalExtraTargets(list) {
+    const reg = window.AssistantDashboardRegistry;
+    if (!reg || !Array.isArray(list)) return [];
+    const out = [];
+    for (const a of list) {
+        if (a.lifecycleStatus === 'archived' || a.status === 'cancelled') continue;
+        const cfg = reg.get(a.roleKey) || {};
+        const mods = cfg.modules || {};
+        const datedSource = ['records', 'briefs', 'checks', 'campaigns'].includes(cfg.calendarItems) ? cfg.calendarItems : null;
+        const leadOutreach = mods.hasLeadOutreach === true;
+        const records = mods.hasPostingSchedule === false;   // the records roles, as on their own tab
+        if (records || leadOutreach || datedSource) out.push({ id: a.id, records, leadOutreach, datedSource });
+    }
+    return out;
+}
+
+// One assistant's scheduled records, pending follow-ups and dated items, each tagged _assistantId.
+// Every feed is swallowed on failure: a calendar that shows everything else beats one that shows
+// nothing (an un-migrated environment answers 503 for sequence_enrolments, for one).
+function _calPost(fn, body) {
+    return fetch(`/.netlify/functions/${fn}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body),
+    });
+}
+async function _loadRoleExtras(t, from, to) {
+    const tag = (x) => ({ ...x, _assistantId: t.id });
+    const [records, followUps, dated] = await Promise.all([
+        // Scheduled Data Hub records, so "Approve & Schedule" in the Review Queue shows up here.
+        !t.records ? [] : fetch(`/.netlify/functions/assistant-records?scheduled=1&assistantId=${t.id}&from=${from.toISOString()}&to=${to.toISOString()}`)
+            .then(async (r) => (r.ok ? ((await r.json()).records || []) : [])).catch(() => []),
+        // Lead roles: the follow-up emails due in this range.
+        !t.leadOutreach ? [] : _calPost('lead-threads', { action: 'calendar', assistantId: t.id, from: from.toISOString(), to: to.toISOString() })
+            .then(async (r) => (r.ok ? ((await r.json()).followUps || []) : [])).catch(() => []),
+        _loadDatedItems(t, from, to).catch(() => []),
+    ]);
+    return { records: records.map(tag), followUps: followUps.map(tag), dated: dated.map(tag) };
+}
+
+// Dated items (records or briefs): an AR Clerk's invoices, a Minute Taker's meetings, campaign
+// dates, website checks, brief deadlines.
+async function _loadDatedItems(t, from, to) {
+    if (t.datedSource === 'records') {
+        const dr = await fetch(`/.netlify/functions/assistant-records?dated=1&assistantId=${t.id}&from=${from.toISOString()}&to=${to.toISOString()}`);
+        const items = dr.ok ? ((await dr.json()).items || []) : [];
+        return items.map((i) => ({ key: `r${i.id}`, kind: i.kind, title: i.title, at: new Date(i.at), derived: !!i.derived, tab: 'datahub' }));
+    }
+    if (t.datedSource === 'campaigns') {
+        // Campaign Orchestrator: each campaign's start and end, from the same list the Campaigns tab
+        // reads. Its calendar held nothing else of its own (review, 2026-10-22).
+        const cr = await _calPost('campaigns', { action: 'list', assistantId: t.id });
+        const list = cr.ok ? ((await cr.json()).campaigns || []) : [];
+        const out = [];
+        for (const c of list) {
+            const title = c.objective || c.name || 'Campaign';
+            const done = c.status === 'finished';
+            for (const [kind, iso] of [['campaign_start', c.startsAt], ['campaign_end', c.endsAt]]) {
+                const at = iso ? new Date(iso) : null;
+                if (at && !Number.isNaN(at.getTime()) && at >= from && at < to) {
+                    out.push({ key: `${kind}-${c.id}`, kind, title, at, derived: false, tab: 'campaigns', done: kind === 'campaign_end' && done });
+                }
+            }
+        }
+        return out;
+    }
+    if (t.datedSource === 'checks') {
+        // Mystery Shopper: the checks it ran, on the day they ran (site-audits.ts `calendar`).
+        const cr = await _calPost('site-audits', { action: 'calendar', assistantId: t.id, from: from.toISOString(), to: to.toISOString() });
+        const items = cr.ok ? ((await cr.json()).items || []) : [];
+        return items.map((i) => ({ key: `c${i.id}`, kind: 'site_check', title: i.title, at: new Date(i.at), derived: false, tab: 'website', done: i.done }));
+    }
+    if (t.datedSource === 'briefs') {
+        const br = await _calPost('brand-briefs', { action: 'calendar', assistantId: t.id, from: _dateKey(from), to: _dateKey(to) });
+        const items = br.ok ? ((await br.json()).items || []) : [];
+        // A DATE column: noon local, so it can never slip a day across a timezone.
+        return items.map((i) => ({ key: `b${i.id}`, kind: 'brief_due', title: i.title, at: new Date(`${i.dueDate}T12:00:00`), derived: false, tab: 'briefs', done: i.status === 'approved' }));
+    }
+    return [];
+}
+
 async function _loadAndRender() {
     const token = ++_loadToken;
     try {
@@ -392,7 +474,7 @@ async function _loadAndRender() {
 
         // null = "no definitive answer" (a 500, say) — leave the previous value alone rather than
         // blanking the grid on a transient failure. [] is a real, empty answer.
-        let posts = null, activities = null, assistants = null, blogPosts = null, newsletterIssues = null, records = [], followUps = [];
+        let posts = null, activities = null, assistants = null, blogPosts = null, newsletterIssues = null;
 
         if (postsRes.ok) {
             posts = (await postsRes.json()).posts || [];
@@ -413,82 +495,21 @@ async function _loadAndRender() {
         // because of it would be a worse calendar than one issue short.
         if (nlRes && nlRes.ok) newsletterIssues = (await nlRes.json()).issues || [];
 
-        // Assistant Calendar tab only: overlay this assistant's scheduled Data Hub records so
-        // "Approve & Schedule" in the Review Queue shows up here as scheduled work.
-        if (_lockedAssistant && _assistantFilter !== 'all') {
-            try {
-                const rr = await fetch(`/.netlify/functions/assistant-records?scheduled=1&assistantId=${_assistantFilter}&from=${from.toISOString()}&to=${to.toISOString()}`);
-                records = rr.ok ? ((await rr.json()).records || []) : [];
-            } catch { records = []; }
-        }
-
-        // Lead roles only: the follow-up emails due in this range. Swallowed on failure like the
-        // records fetch above — an un-migrated environment (sequence_enrolments arrives with a
-        // manual db/outreach-sequences.sql) answers 503, and a calendar that renders everything
-        // else is better than one that renders nothing.
-        if (_leadOutreach && _lockedAssistant && _assistantFilter !== 'all') {
-            try {
-                const fr = await fetch('/.netlify/functions/lead-threads', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({
-                        action: 'calendar',
-                        assistantId: Number(_assistantFilter),
-                        from: from.toISOString(),
-                        to: to.toISOString(),
-                    }),
-                });
-                followUps = fr.ok ? ((await fr.json()).followUps || []) : [];
-            } catch { followUps = []; }
-        }
-
-        // Dated items (records or briefs). Swallowed on failure like the feeds above: a calendar that
-        // shows everything else beats one that shows nothing.
-        let dated = [];
-        if (_datedSource && _lockedAssistant && _assistantFilter !== 'all') {
-            try {
-                if (_datedSource === 'records') {
-                    const dr = await fetch(`/.netlify/functions/assistant-records?dated=1&assistantId=${_assistantFilter}&from=${from.toISOString()}&to=${to.toISOString()}`);
-                    const items = dr.ok ? ((await dr.json()).items || []) : [];
-                    dated = items.map((i) => ({ key: `r${i.id}`, kind: i.kind, title: i.title, at: new Date(i.at), derived: !!i.derived, tab: 'datahub' }));
-                } else if (_datedSource === 'campaigns') {
-                    // Campaign Orchestrator: each campaign's start and end, from the same list the
-                    // Campaigns tab reads. Its calendar held nothing else of its own (review, 2026-10-22).
-                    const cr = await fetch('/.netlify/functions/campaigns', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-                        body: JSON.stringify({ action: 'list', assistantId: Number(_assistantFilter) }),
-                    });
-                    const list = cr.ok ? ((await cr.json()).campaigns || []) : [];
-                    for (const c of list) {
-                        const title = c.objective || c.name || 'Campaign';
-                        const done = c.status === 'finished';
-                        for (const [kind, iso] of [['campaign_start', c.startsAt], ['campaign_end', c.endsAt]]) {
-                            const at = iso ? new Date(iso) : null;
-                            if (at && !Number.isNaN(at.getTime()) && at >= from && at < to) {
-                                dated.push({ key: `${kind}-${c.id}`, kind, title, at, derived: false, tab: 'campaigns', done: kind === 'campaign_end' && done });
-                            }
-                        }
-                    }
-                } else if (_datedSource === 'checks') {
-                    // Mystery Shopper: the checks it ran, on the day they ran (site-audits.ts `calendar`).
-                    const cr = await fetch('/.netlify/functions/site-audits', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-                        body: JSON.stringify({ action: 'calendar', assistantId: Number(_assistantFilter), from: from.toISOString(), to: to.toISOString() }),
-                    });
-                    const items = cr.ok ? ((await cr.json()).items || []) : [];
-                    dated = items.map((i) => ({ key: `c${i.id}`, kind: 'site_check', title: i.title, at: new Date(i.at), derived: false, tab: 'website', done: i.done }));
-                } else {
-                    const br = await fetch('/.netlify/functions/brand-briefs', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-                        body: JSON.stringify({ action: 'calendar', assistantId: Number(_assistantFilter), from: _dateKey(from), to: _dateKey(to) }),
-                    });
-                    const items = br.ok ? ((await br.json()).items || []) : [];
-                    // A DATE column: noon local, so it can never slip a day across a timezone.
-                    dated = items.map((i) => ({ key: `b${i.id}`, kind: 'brief_due', title: i.title, at: new Date(`${i.dueDate}T12:00:00`), derived: false, tab: 'briefs', done: i.status === 'approved' }));
-                }
-            } catch { dated = []; }
-        }
+        // Each assistant's own kind of dated work: scheduled records, a Lead Generator's follow-up
+        // emails, a Campaign Assistant's start and end dates, a Mystery Shopper's checks, a Brand
+        // Designer's brief deadlines. The assistant Calendar tab loads its one assistant's; the
+        // sidebar Calendar loads every assistant's (review, 2026-10-22 — it used to show none of
+        // them, so those assistants looked idle there). Every item carries _assistantId, so the
+        // assistant filter and colours apply to it like to a post.
+        const extraTargets = _lockedAssistant
+            ? (_assistantFilter !== 'all'
+                ? [{ id: Number(_assistantFilter), records: true, leadOutreach: _leadOutreach, datedSource: _datedSource }]
+                : [])
+            : _globalExtraTargets(assistants || _assistants);
+        const extras = await Promise.all(extraTargets.map((t) => _loadRoleExtras(t, from, to)));
+        const records = extras.flatMap((e) => e.records);
+        const followUps = extras.flatMap((e) => e.followUps);
+        const dated = extras.flatMap((e) => e.dated);
 
         if (token !== _loadToken) return;   // superseded by a newer navigation
 
@@ -1050,16 +1071,16 @@ function _emptyMonthMessage() {
 
 function _datedItemsOnDate(date) {
     const key = _dateKey(date);
-    return _datedItems.filter((i) => _dateKey(i.at) === key);
+    return _datedItems.filter((i) => _dateKey(i.at) === key && _matchesAssistantFilter(i._assistantId));
 }
 // Read-only: the date is a fact about the record (an invoice's due date, a meeting's time), so it is
 // not draggable. Clicking opens the tab where the item lives.
 function _datedChip(it) {
     const meta = DATED_KIND_META[it.kind] || { icon: '•', label: '' };
     const note = it.derived ? ' — worked out from how overdue it was when recorded' : (it.done ? ' — done' : '');
-    return `<div onclick="window._activateMainTab && window._activateMainTab('${it.tab}')"
+    return `<div onclick='window._calOpenDated(${JSON.stringify(String(it.key))}, ${Number(it._assistantId) || "null"})'
         class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-gray-50 hover:bg-gray-100 shadow-sm cursor-pointer text-left w-full"
-        style="border-left:3px solid #6b7280" title="${_escHtml(meta.label + ': ' + (it.title || '') + note)}">
+        style="border-left:3px solid ${_lockedAssistant ? '#6b7280' : _assistantColor(it._assistantId)}" title="${_escHtml(meta.label + ': ' + (it.title || '') + note)}">
         <span class="text-xs shrink-0">${meta.icon}</span>
         <div class="flex-1 min-w-0">
             <p class="text-[11px] font-bold text-gray-700 truncate">${_escHtml(meta.label)}${it.done ? ' ✓' : ''}</p>
@@ -1068,16 +1089,26 @@ function _datedChip(it) {
     </div>`;
 }
 
+// On the assistant's own page the tab is right there; from the sidebar Calendar, open that
+// assistant on the tab where the item lives.
+window._calOpenDated = function (key, assistantId) {
+    const it = _datedItems.find((x) => String(x.key) === String(key) && (assistantId == null || x._assistantId === assistantId));
+    if (!it) return;
+    if (_lockedAssistant) { window._activateMainTab && window._activateMainTab(it.tab); return; }
+    window._assistantDetailInitialTab = it.tab;
+    window.routeToAssistantDetail && window.routeToAssistantDetail(it._assistantId);
+};
+
 function _scheduledRecordsOnDate(date) {
     const key = _dateKey(date);
-    return _scheduledRecords.filter(r => r.scheduledFor && _dateKey(new Date(r.scheduledFor)) === key);
+    return _scheduledRecords.filter(r => r.scheduledFor && _dateKey(new Date(r.scheduledFor)) === key && _matchesAssistantFilter(r._assistantId));
 }
 // Clicking opens the item's detail (LeadCalendarModal); dragging moves its due date. Both were
 // added in the same change and for the same reason: this chip was previously inert with a comment
 // saying "records open from the Data Hub", which asked the user to leave the calendar, find the
 // right tab and search for a row by name to answer "what IS this?".
 function _recordChip(rec, viewType) {
-    const color = _assistantColor(_assistantFilter === 'all' ? null : Number(_assistantFilter));
+    const color = _assistantColor(rec._assistantId ?? (_assistantFilter === 'all' ? null : Number(_assistantFilter)));
     const time = new Date(rec.scheduledFor).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     // "Chase reminder" only for the lead roles, where that is what scheduled_for provably is
     // (lead-generation.ts stamps it after a send). Every other records role uses the generic word,
@@ -1105,7 +1136,7 @@ function _recordChip(rec, viewType) {
 // "you owe this lead a call" from "we are emailing this stranger on Thursday".
 function _followUpsOnDate(date) {
     const key = _dateKey(date);
-    return _followUps.filter(f => f.nextSendAt && _dateKey(new Date(f.nextSendAt)) === key);
+    return _followUps.filter(f => f.nextSendAt && _dateKey(new Date(f.nextSendAt)) === key && _matchesAssistantFilter(f._assistantId));
 }
 
 // The worker refuses to send into a thread that is no longer 'open' — Phase 2a's reply detection
@@ -1128,7 +1159,7 @@ function _followUpChip(f, viewType) {
         : `${f.title || ''} — ${label} sends ${time}`;
     return `<div
         onclick="window._calOpenFollowUp(${f.threadId})"
-        ${blocked ? '' : `draggable="true" ondragstart="window._calDragStart(event, { kind: 'followup', id: ${f.threadId} })"`}
+        ${blocked || !_lockedAssistant ? '' : `draggable="true" ondragstart="window._calDragStart(event, { kind: 'followup', id: ${f.threadId} })"`}
         data-cal-followup-thread="${f.threadId}"
         class="flex items-center gap-1.5 px-2 py-1 rounded-lg ${tone.bg} cursor-pointer transition text-left w-full select-none"
         style="border-left:3px solid ${tone.edge}"
@@ -1170,7 +1201,7 @@ function _listFollowUpRow(f) {
 // Mirrors _listRow's layout but tinted yellow like _recordChip so it reads as
 // "scheduled work", not a social post. Opens the same detail modal the chip does.
 function _listRecordRow(rec) {
-    const color = _assistantColor(_assistantFilter === 'all' ? null : Number(_assistantFilter));
+    const color = _assistantColor(rec._assistantId ?? (_assistantFilter === 'all' ? null : Number(_assistantFilter)));
     const time = new Date(rec.scheduledFor).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     return `<div
         onclick="window._calOpenRecord(${rec.id})"
@@ -1281,7 +1312,7 @@ window._calOpenRecord = function (recordId) {
     window.LeadCalendarModal.open({
         kind: 'record',
         recordId,
-        assistantId: Number(_assistantFilter),
+        assistantId: _scheduledRecords.find(r => r.id === recordId)?._assistantId ?? Number(_assistantFilter),
         onChanged: () => { void _loadAndRender(); },
     });
 };
@@ -1296,7 +1327,7 @@ window._calOpenFollowUp = function (threadId) {
         // before its fetches land — the calendar already holds both.
         followUp: f,
         recordId: f ? f.assistantRecordId : null,
-        assistantId: Number(_assistantFilter),
+        assistantId: f?._assistantId ?? Number(_assistantFilter),
         onChanged: () => { void _loadAndRender(); },
     });
 };

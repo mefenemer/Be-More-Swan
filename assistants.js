@@ -231,7 +231,7 @@ window._buildAssistantCardGoals = function (assistant) {
     // Suppressed for a single goal — the headline above already said it — and when nothing has been
     // assessed yet, where "0 on track" would be a misleading way to say "we haven't measured".
     const pills = [
-        gs.onTrack  ? `<span class="inline-flex items-center gap-1 text-emerald-600"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>${gs.onTrack} on track</span>` : '',
+        gs.onTrack  ? `<span class="inline-flex items-center gap-1 text-green-600"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>${gs.onTrack} on track</span>` : '',
         gs.atRisk   ? `<span class="inline-flex items-center gap-1 text-amber-600"><span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>${gs.atRisk} at risk</span>` : '',
         gs.offTrack ? `<span class="inline-flex items-center gap-1 text-red-600"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>${gs.offTrack} off track</span>` : '',
     ].filter(Boolean).join('');
@@ -264,20 +264,25 @@ window._buildAssistantCardGoals = function (assistant) {
     return `<div class="mb-5">${headlineHtml}${pillsHtml}${pendingHtml}${attentionHtml}</div>`;
 };
 
-window.generateAssistantCardHTML = function(assistant) {
+// An assistant's icon letter, identity colour and status badge — shared by the full card and the
+// Dashboard's one-line roster, so the two can never show the same assistant differently.
+window._assistantIdentity = function(assistant) {
     // The user's custom icon letter when they set one, else the name's initial.
     window.AssistantColors?.remember(assistant);
     const initial = String(window.AssistantColors?.letterFor(assistant.id, assistant.name, assistant.avatarLetter)
         || (assistant.name ? assistant.name.charAt(0).toUpperCase() : 'A')).replace(/[<>&"']/g, '') || 'A';
-    const role = assistant.role || 'Custom Assistant';
-    // The card icon carries the assistant's identity colour — the same one its detail hero, its
-    // calendar chips and its notifications use. Cached here as well as read, because the calendar
-    // and the inbox often render before/without their own assistants fetch and resolve by id.
-    window.AssistantColors?.remember(assistant);
+    // The identity colour — the same one its detail hero, its calendar chips and its notifications
+    // use. Cached (remember, above) as well as read, because the calendar and the inbox often render
+    // before/without their own assistants fetch and resolve by id.
     const iconColor = window.AssistantColors?.colorFor(assistant.id, assistant.avatarColor) || '#9ca3af';
-
     const db = window._resolveAssistantBadge(assistant, assistant.opSignals);
     const statusHtml = `<span class="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-md text-xs font-bold ${db.cls}"><span class="w-1.5 h-1.5 rounded-full ${db.dot}"></span> ${db.label}</span>`;
+    return { initial, iconColor, statusHtml };
+};
+
+window.generateAssistantCardHTML = function(assistant) {
+    const { initial, iconColor, statusHtml } = window._assistantIdentity(assistant);
+    const role = assistant.role || 'Custom Assistant';
 
     // SMART Goals AC2.1.1 — the goal block: one headline goal with a real progress bar, then what
     // the remaining goals add up to. See _buildGoalBlock for the layout rules.
@@ -341,7 +346,7 @@ window.generateAssistantCardHTML = function(assistant) {
     const recordCountsHtml = hasRecordActivity ? `
                 <div class="flex items-center gap-3 flex-wrap">
                     <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="Everything this assistant has filed and scored, excluding anything moved to Deleted">
-                        <svg class="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                        <svg class="w-3.5 h-3.5 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                         ${rm.total} ${words.total}
                     </span>
                     <span class="inline-flex items-center gap-1 text-xs font-semibold ${rm.pending ? 'text-amber-700' : 'text-gray-700'}" title="Waiting on your decision in the Review Queue">
@@ -349,7 +354,7 @@ window.generateAssistantCardHTML = function(assistant) {
                         ${rm.pending} ${words.pending}
                     </span>
                     <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="Approved, plus anything already acted on — the same two states the Approved column shows">
-                        <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <svg class="w-3.5 h-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                         ${rm.cleared} ${words.cleared}
                     </span>
                 </div>` : '';
@@ -357,7 +362,7 @@ window.generateAssistantCardHTML = function(assistant) {
     const postCountsHtml = totalCreated > 0 ? `
                 <div class="flex items-center gap-3 flex-wrap">
                     <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="Posts created by this assistant">
-                        <svg class="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                        <svg class="w-3.5 h-3.5 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                         ${totalCreated} created
                     </span>
                     <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="Posts scheduled or awaiting approval">
@@ -365,7 +370,7 @@ window.generateAssistantCardHTML = function(assistant) {
                         ${totalScheduled} scheduled
                     </span>
                     <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="Posts successfully published">
-                        <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <svg class="w-3.5 h-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                         ${totalPublished} published
                     </span>
                 </div>` : '';
@@ -395,7 +400,7 @@ window.generateAssistantCardHTML = function(assistant) {
     const longformCountsHtml = hasLongformActivity ? `
                 <div class="flex items-center gap-3 flex-wrap">
                     <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="${lWords.totalTitle}">
-                        <svg class="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                        <svg class="w-3.5 h-3.5 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                         ${lm.total} ${lWords.total}
                     </span>
                     <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="Scheduled or awaiting your approval">
@@ -403,7 +408,7 @@ window.generateAssistantCardHTML = function(assistant) {
                         ${lm.inFlight} ${lWords.inFlight}
                     </span>
                     <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="${lWords.deliveredTitle}">
-                        <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <svg class="w-3.5 h-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                         ${lm.delivered} ${lWords.delivered}
                     </span>
                 </div>` : '';
@@ -416,7 +421,7 @@ window.generateAssistantCardHTML = function(assistant) {
                 <div class="flex items-center gap-3 flex-wrap">
                     ${sm.items.map((i) => `
                     <span class="inline-flex items-center gap-1 text-xs font-semibold ${i.attention ? 'text-amber-700' : 'text-gray-700'}" title="${_escapeHtml(i.title)}">
-                        <span class="w-1.5 h-1.5 rounded-full ${i.attention ? 'bg-amber-500' : 'bg-emerald-500'}"></span>
+                        <span class="w-1.5 h-1.5 rounded-full ${i.attention ? 'bg-amber-500' : 'bg-green-500'}"></span>
                         ${Number(i.n) || 0} ${_escapeHtml(i.label)}
                     </span>`).join('')}
                 </div>` : '';
@@ -439,7 +444,7 @@ window.generateAssistantCardHTML = function(assistant) {
                 </span>
                 ${gbpSaved !== null
                     ? `<span class="text-xs font-bold text-green-700 bg-green-50 px-2 py-0.5 rounded-full">≈ £${gbpSaved.toLocaleString('en-GB', {minimumFractionDigits: 0, maximumFractionDigits: 0})} ROI</span>`
-                    : `<span class="text-xs text-gray-500 cursor-pointer hover:text-green-600 transition" onclick="event.stopPropagation(); loadView && loadView('account')" title="Set your hourly rate to see financial ROI">Set rate → ROI</span>`
+                    : `<button type="button" class="text-xs text-gray-500 cursor-pointer hover:text-green-600 transition" onclick="event.stopPropagation(); window.loadView && window.loadView('settings')" title="Set your hourly rate to see financial ROI">Set rate → ROI</button>`
                 }
             </div>
         </div>` : '';
@@ -472,16 +477,70 @@ window.generateAssistantCardHTML = function(assistant) {
             </div>
             ${statusHtml}
         </div>
-        <h3 class="text-lg font-bold text-gray-900">${assistant.name}</h3>
-        <p class="text-sm text-gray-500 mb-4">${role}</p>
+        <h3 class="text-lg font-bold text-gray-900">${_escapeHtml(assistant.name || '')}</h3>
+        <p class="text-sm text-gray-500 mb-4">${_escapeHtml(role)}</p>
         ${goalsHtml}
         ${metricsHtml}
         ${quickActionsHtml}
         <div class="mt-auto pt-4 border-t border-gray-50 flex justify-between items-center">
-            <button type="button" onclick="event.stopPropagation(); window.openAssistantChatModal ? window.openAssistantChatModal('${assistant.id}', '${(assistant.name || 'Your assistant').replace(/'/g, '&#39;')}', '${role.replace(/'/g, '&#39;')}', '${(assistant.roleKey || '').replace(/'/g, '&#39;')}', { resume: true }) : (window.location.href = 'assistant-chat.html?assistantId=${assistant.id}')"
+            <!-- Name and role travel as data attributes: inlined into the onclick, a ' or " in a
+                 user-chosen name broke the handler (&#39; decodes back to ' before the JS runs). -->
+            <button type="button" data-chat-name="${_escapeHtml(assistant.name || 'Your assistant')}" data-chat-role="${_escapeHtml(role)}" data-chat-role-key="${_escapeHtml(assistant.roleKey || '')}"
+               onclick="event.stopPropagation(); const d = this.dataset; window.openAssistantChatModal ? window.openAssistantChatModal('${assistant.id}', d.chatName, d.chatRole, d.chatRoleKey, { resume: true }) : (window.location.href = 'assistant-chat.html?assistantId=${assistant.id}')"
                class="btn-assistant px-3.5 py-1.5 text-xs font-bold border rounded-lg transition cursor-pointer">💬 Chat</button>
-            <span class="link text-sm font-bold">View Details &rarr;</span>
+            <!-- A real button so keyboard users can open the assistant; the card's own click stays a mouse shortcut. -->
+            <button type="button" class="link text-sm font-bold" onclick="event.stopPropagation(); window.routeToAssistantDetail('${assistant.id}')">View Details &rarr;</button>
         </div>
+    </div>`;
+};
+
+// ==========================================
+// 0. HIRE — ONE ENTRY POINT
+// ==========================================
+// Every "Hire an assistant" button lands on the catalogue (owner, 2026-10-22). With a team already
+// working, it goes through SetupWizard.openForNewAssistant, which ALSO lands on the catalogue but
+// first scopes the wizard to the new hire (held back until a role is picked) — before, only the My
+// Assistants header did that and the other buttons skipped it. A workspace with no working assistant
+// is still on its first-hire onboarding, which the plain catalogue route already drives.
+window.openHireCatalogue = function() {
+    if (window._hasWorkingAssistants && window.SetupWizard?.openForNewAssistant) {
+        window.SetupWizard.openForNewAssistant();
+        return;
+    }
+    window.loadView && window.loadView('catalog');
+};
+
+// ==========================================
+// 1a. DASHBOARD ROSTER + FIRST-HIRE CARD
+// ==========================================
+// One row per assistant: icon, name, role and the same status badge as its card. Styled by the
+// scoped .dash-roster-* CSS in dashboard-content.html.
+window.generateTeamRosterHTML = function(assistants) {
+    const rows = assistants.map((a) => {
+        const { initial, iconColor, statusHtml } = window._assistantIdentity(a);
+        return `
+        <li>
+            <button type="button" class="dash-roster-row" onclick="window.routeToAssistantDetail('${a.id}')">
+                <span class="dash-roster-ico" style="background:${iconColor}" aria-hidden="true">${initial}</span>
+                <span class="dash-roster-name">
+                    <span class="dash-roster-title">${_escapeHtml(a.name || 'Your assistant')}</span>
+                    <span class="dash-roster-role">${_escapeHtml(a.role || 'Custom Assistant')}</span>
+                </span>
+                ${statusHtml}
+                <span class="dash-roster-go" aria-hidden="true">&rarr;</span>
+            </button>
+        </li>`;
+    }).join('');
+    return `<ul class="dash-roster" aria-label="Your assistants">${rows}</ul>`;
+};
+
+// A workspace with no working assistant: one invitation instead of a page of zeros.
+window.generateFirstHireCardHTML = function() {
+    return `
+    <div class="dash-first-hire">
+        <h2 class="dash-first-hire-title">Hire your first assistant</h2>
+        <p class="dash-first-hire-sub">Each assistant takes one job off your plate — social posts, blog articles, email marketing or finding new leads.</p>
+        <button type="button" class="btn-golive px-6 py-3 text-sm font-bold rounded-lg" onclick="window.loadView && window.loadView('catalog')">Hire an assistant</button>
     </div>`;
 };
 
@@ -492,7 +551,7 @@ window.generateAssistantCardHTML = function(assistant) {
 // scoped plain CSS in assistants-directory.html (.add-asst-*), so it is immune to the prebuilt
 // Tailwind build. The copy rotates by index to keep multiple placeholders feeling fresh.
 window._ADD_ASSISTANT_COPY = [
-    { title: 'Hire an Assistant',     sub: 'Bring a new AI teammate on board to take a task off your plate.' },
+    { title: 'Your Next Assistant',   sub: 'Bring a new AI teammate on board to take a task off your plate.' },
     { title: 'Grow Your Team',        sub: 'Expand your AI workforce and delegate even more of your day.' },
     { title: 'Automate Another Task', sub: 'Find the right assistant for your next repetitive chore.' },
 ];
@@ -503,12 +562,12 @@ window.generateAddAssistantPlaceholderHTML = function(index) {
     const plus = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>`;
     return `
     <div class="add-asst-card" role="button" tabindex="0" aria-label="${copy.title}"
-         onclick="loadView('catalog')"
-         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();loadView('catalog');}">
+         onclick="window.openHireCatalogue()"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.openHireCatalogue();}">
         <div class="add-asst-ico">${plus}</div>
         <h3 class="add-asst-title">${copy.title}</h3>
         <p class="add-asst-sub">${copy.sub}</p>
-        <span class="add-asst-cta">${plus}Add New Assistant</span>
+        <span class="add-asst-cta">${plus}Hire an assistant</span>
     </div>`;
 };
 
@@ -584,6 +643,24 @@ window.fetchAndRenderAssistants = async function(containerId, options) {
         // workspace.html because it owns the toast + validation-meta state; called here because this is
         // the render it needs to re-trigger.
         const startPoll = () => window._maybeStartProvisioningPoll?.(containerId, inProgress);
+        // Read by openHireCatalogue: "add another assistant" vs a first hire.
+        window._hasWorkingAssistants = visible.length > 0;
+
+        // The Dashboard's grid is a one-line-per-assistant roster (layout review, 2026-10-22): the
+        // full cards live on My Assistants. Read from the container, not only `opts`, because
+        // workspace.html and the provisioning poll re-render this grid by id with no options.
+        if (opts.roster || container.dataset.render === 'roster') {
+            // No working assistant yet → the Dashboard swaps its value tiles, heatmap and widgets
+            // (all zeros) for a hire card. In-progress cards above still show while one is set up.
+            document.getElementById('dash-root')?.classList.toggle('dash-first-visit', visible.length === 0);
+            if (visible.length === 0) {
+                if (inProgress.length === 0) container.insertAdjacentHTML('beforeend', window.generateFirstHireCardHTML());
+            } else {
+                container.insertAdjacentHTML('beforeend', window.generateTeamRosterHTML(visible));
+            }
+            startPoll();
+            return;
+        }
 
         if (opts.placeholders) {
             // My Assistants always guides the user with placeholder cards instead of empty text.
@@ -607,7 +684,7 @@ window.fetchAndRenderAssistants = async function(containerId, options) {
         if (visible.length === 0 && inProgress.length === 0) {
             container.innerHTML = `
               <div class="col-span-full py-12 text-center text-gray-500 font-medium bg-white rounded-2xl border border-gray-100 shadow-sm">
-                  Your team is currently empty. <a href="#" onclick="loadView('catalog')" class="text-emerald-600 hover:underline">Hire an assistant</a>.
+                  Your team is currently empty. <a href="#" onclick="window.openHireCatalogue(); return false" class="link">Hire an assistant</a>.
               </div>`;
             return;
         }
@@ -617,7 +694,13 @@ window.fetchAndRenderAssistants = async function(containerId, options) {
         });
         startPoll();
     } catch (error) {
-        container.innerHTML = `<div class="col-span-full text-center text-red-500">Could not connect to the database to load your team.</div>`;
+        container.innerHTML = `
+          <div class="col-span-full py-10 text-center bg-white rounded-2xl border border-gray-100 shadow-sm">
+              <p class="text-sm font-bold text-gray-900">We couldn't load your team</p>
+              <p class="text-sm text-gray-500 mt-1">Check your connection and try again.</p>
+              <button type="button" data-team-retry class="btn-secondary mt-3 px-4 py-2 text-sm font-bold border rounded-lg cursor-pointer">Try again</button>
+          </div>`;
+        container.querySelector('[data-team-retry]')?.addEventListener('click', () => window.fetchAndRenderAssistants(containerId, options));
     }
 };
 
@@ -669,12 +752,8 @@ window.initAssistantsDirectory = async function(loadViewCb) {
     // the user had made this session.
     if (catalogBtn && !catalogBtn.dataset.bound) {
         catalogBtn.dataset.bound = 'true';
-        // US8 AC3 — "Hire New Assistant" re-opens the wizard at Step 6 (secondary onboarding), and
-        // only falls back to the catalog when the wizard isn't available.
-        catalogBtn.addEventListener('click', () => {
-            if (window.SetupWizard?.openForNewAssistant) window.SetupWizard.openForNewAssistant();
-            else loadViewCb('catalog');
-        });
+        // US8 AC3 — the catalogue first; see openHireCatalogue.
+        catalogBtn.addEventListener('click', () => window.openHireCatalogue());
     }
 
     // Issue #134: disabled ("coming soon") in the markup — no click routing to wire up.
@@ -4182,7 +4261,7 @@ window._detailRqBlogAct = async function (btn, action) {
             } else if (!sent.length) {
                 // The case that started all this: nothing connected, so nothing happened, and the
                 // old code path said nothing at all.
-                showErr('No other platforms are connected — use Manage connections on this page to add one first.');
+                showErr('No other platforms are connected — add one in Assistant Profile ▸ Connections first.');
             } else {
                 window.showToast?.(`Sent to ${sent.map((d) => d.label).join(', ')}.`);
             }
@@ -4731,40 +4810,6 @@ window._syncStatusRow = function() {
     const autopilotShown = !document.getElementById('autopilot-status-card')?.classList.contains('hidden');
     row.style.display = autopilotShown ? '' : 'none';
     row.classList.remove('lg:grid-cols-2');
-};
-
-// ── Where the "Manage connections" button lives ───────────────────────────────
-// It used to sit in the hero strip on every role, two cards above the thing it manages. On the
-// roles whose Overview ALREADY lists what they connect to — the Blog Writer's "Publishing to"
-// list of blog destinations, a social role's per-account Audience bars — that strip added a
-// second "Connections" heading saying nothing the list didn't, and the button was nowhere near
-// the list a user is looking at when they decide to change one.
-//
-// So on those roles the button moves into the list itself (#btn-audience-connections) and the
-// hero strip hides; roles with no such list keep the hero button, which is still their only route
-// into the Connections panel (see tests/outreach-connect-return.test.ts for the Lead Generator,
-// whose only connectors are mailboxes).
-//
-// ⚠️ `inAudience` is decided from the ROLE, not from whether #autopilot-audience has un-hidden
-// itself. The destination/follower fetches that reveal it are deliberately not awaited, so reading
-// that block's `hidden` class would leave BOTH buttons off the page for the length of a request.
-window._syncManageConnectionsPlacement = function() {
-    const strip = document.getElementById('connections-status-card');
-    const audienceBtn = document.getElementById('btn-audience-connections');
-    const autopilot = document.getElementById('autopilot-status-card');
-    // Whether this role has any connectors at all stays _renderConnectionsStatusCard's verdict —
-    // it is the one that knows what _loadConnections fetched. It records the answer on the dataset
-    // so this only has to choose a location, never re-derive the gate.
-    const hasConnectors = strip?.dataset.hasConnectors === '1';
-    // The audience block is a child of the Autopilot card, so a role without one never shows it.
-    const audienceShown = !!autopilot && !autopilot.classList.contains('hidden');
-    // ⚠️ Not every audience block is a connections list. The Email Marketing Assistant's is "Your list"
-    // — subscriber counts for a mailing list that lives in this product, with nothing connected to
-    // manage — so that role keeps the hero button.
-    const audienceSource = window.AssistantDashboardRegistry?.get?.(window._detailCurrentData?.roleKey)?.audienceSource;
-    const inAudience = hasConnectors && audienceShown && audienceSource !== 'newsletter_list';
-    if (audienceBtn) audienceBtn.classList.toggle('hidden', !inAudience);
-    if (strip) strip.classList.toggle('hidden', !hasConnectors || inAudience);
 };
 
 // The Posting Schedule controls drive both autopilot engines off the same context keys, so the
@@ -6294,10 +6339,6 @@ function _applyDashboardRegistry(data) {
     // Connections card, hides itself once integrations.js knows whether this role has any connectors.
     toggle('autopilot-status-card', mods.hasPostingSchedule !== false);
     window._syncStatusRow();
-    // Showing/hiding the Autopilot card just decided whether this role HAS an audience block, which
-    // is half of where the "Manage connections" button goes. Re-run the placement so a role loaded
-    // after the connections fetch resolved still lands its button in the right card.
-    window._syncManageConnectionsPlacement();
     toggle('module-social-strategy', mods.hasSocialStrategy !== false);
 
     // Overview — the post-based Impact & ROI card is meaningless for non-social roles (they publish
@@ -8103,20 +8144,6 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // state), and the goals fetch is late in this function's sequence, so without a placeholder the
     // card sits visibly blank while everything below it fills in. Cleared by _renderGoalProgressCard.
     _beginCardLoading('goal-progress-panel');
-    // Connections no longer skeletons — it PAINTS. Its card carried a "N of M on" pill and a
-    // "Posting to …" headline, and computing those needed initAssistantConnections to have
-    // finished, so the card sat on a spinner until the slowest load on Overview came back. Both are
-    // gone; what is left is a label and a button that need nothing fetched.
-    //
-    // Shown up front only for the social role, which is the one role guaranteed to keep the card
-    // (connections-card-social-always-visible). Every other role's card self-hides when it has no
-    // connectors, so revealing it here would flash a card that then disappears — the same reason the
-    // skeleton was guarded this way.
-    if (currentData.roleKey === 'social_media_manager') {
-        document.getElementById('connections-status-card')?.classList.remove('hidden');
-        window._syncStatusRow?.();
-    }
-
     // ── Icon colour picker ────────────────────────────────────────
     // Sits beside the name because the name and the colour are the same thing to a user: which
     // assistant this is. The chosen colour is stored on the assistant (configuration.avatarColor)
@@ -8611,7 +8638,7 @@ async function _fetchAndRenderLeadRoi(assistantId, period = 'all') {
         } else {
             if (gbp) { gbp.textContent = '—'; gbp.title = ''; }
             // Blank, never £0 — see the header note.
-            if (roiNote) roiNote.innerHTML = `<a href="#" onclick="loadView && loadView('account'); return false" class="text-emerald-600 hover:underline">Set your hourly rate</a> to see this`;
+            if (roiNote) roiNote.innerHTML = `<a href="#" onclick="loadView && loadView('settings'); return false" class="text-emerald-600 hover:underline">Set your hourly rate</a> to see this`;
         }
     } catch {
         // Supplementary chrome on an always-rendered hero — a failure leaves the strip as it was
@@ -8696,7 +8723,7 @@ async function _fetchAndRenderWrittenRoi(assistantId, period = 'all') {
         } else {
             if (gbp) { gbp.textContent = '—'; gbp.title = ''; }
             // Blank, never £0 — an unset rate is a blank field in Settings, not a verdict.
-            if (roiNote) roiNote.innerHTML = `<a href="#" onclick="loadView && loadView('account'); return false" class="text-emerald-600 hover:underline">Set your hourly rate</a> to see this`;
+            if (roiNote) roiNote.innerHTML = `<a href="#" onclick="loadView && loadView('settings'); return false" class="text-emerald-600 hover:underline">Set your hourly rate</a> to see this`;
         }
     } catch {
         // Supplementary chrome on an always-rendered hero — leave it as it was rather than
@@ -8877,7 +8904,7 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
             el('metrics-roi-note').textContent = `At your configured hourly rate`;
         } else {
             el('metrics-gbp-saved').textContent = '—';
-            el('metrics-roi-note').innerHTML = `<a href="#" onclick="loadView && loadView('account'); return false" class="text-emerald-600 hover:underline">Set your hourly rate</a> to see this`;
+            el('metrics-roi-note').innerHTML = `<a href="#" onclick="loadView && loadView('settings'); return false" class="text-emerald-600 hover:underline">Set your hourly rate</a> to see this`;
         }
 
         // Per-platform breakdown — absent entirely when this assistant has only ever posted to one
@@ -9033,7 +9060,7 @@ async function _fetchAndRenderBlogDestinations() {
         // own blog first. A reader seeing "0 connected" should not conclude nothing gets published.
         setFooter(connectedCount
             ? 'Every published post goes to your own blog first, then syndicates to the platforms above.'
-            : 'Published posts go to your own blog. Use <span class="font-semibold">Manage connections</span> to syndicate them further.');
+            : 'Published posts go to your own blog. Add more in <span class="font-semibold">Assistant Profile ▸ Connections</span> to syndicate them further.');
     } catch (err) {
         console.error('[blog-destinations] load failed:', err);
         // Its own copy, for the same reason the KPI cards keep error and no-data apart: a network
@@ -12220,6 +12247,42 @@ function _applyAutonomousMediaUi() {
               `using your monthly tasks. When your tasks run out it simply stops — you are never charged extra.`;
     }
 }
+
+// A setting changed from the assistant's chat (settings card → chat-session.js, same endpoints as the
+// controls here). Repaint this page if it is showing that assistant, so the chat and the page never
+// disagree. Bound once at load on document — never from a render path.
+document.addEventListener('assistant:settingsChanged', (e) => {
+    const d = e.detail || {};
+    const id = Number(d.assistantId);
+    if (!id) return;
+    const data = window._detailCurrentData;
+    const onThisPage = Number(window._currentAssistantId) === id;
+    if (d.lifecycleStatus) {
+        if (onThisPage && data) {
+            data.lifecycleStatus = d.lifecycleStatus;
+            data.isActive = d.lifecycleStatus === 'working';
+            window._renderStatusPill?.();
+            window._syncStatusRow?.();
+        }
+        if (document.getElementById('dashboard-assistants-grid')) window.fetchAndRenderAssistants?.('dashboard-assistants-grid');
+        if (document.getElementById('directory-assistants-grid')) window.fetchAndRenderAssistants?.('directory-assistants-grid');
+    }
+    if (!onThisPage) return;
+    if (d.draftHorizonDays != null) {
+        const horizonEl = document.getElementById('posting-horizon-input');
+        if (horizonEl) horizonEl.value = d.draftHorizonDays;
+        if (data) { data.draftHorizonDays = d.draftHorizonDays; window._renderAutopilotCard?.(data); }
+    }
+    if (d.reviewNotifPreference) {
+        window._reviewNotifPreference = d.reviewNotifPreference;
+        document.querySelectorAll('input[name="review-cadence"]').forEach((rb) => { rb.checked = rb.value === d.reviewNotifPreference; });
+    }
+    if (typeof d.autonomousMediaEnabled === 'boolean' && Number(_goalsAssistantId) === id) {
+        _autonomousMediaEnabled = d.autonomousMediaEnabled;
+        if (d.autonomousMediaMonthlyCap != null) _autonomousMediaCap = d.autonomousMediaMonthlyCap;
+        _applyAutonomousMediaUi();
+    }
+});
 
 async function _setAutonomousMedia(patch) {
     const res = await fetch('/.netlify/functions/set-autonomous-media', {

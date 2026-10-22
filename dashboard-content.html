@@ -41,7 +41,8 @@
 
     <div>
       <h1 id="dash-welcome-heading" class="text-3xl font-extrabold text-gray-900">Welcome back.</h1>
-      <p class="text-gray-500 mt-1">Here is what your digital team has been up to while you were away.</p>
+      <p class="text-gray-500 mt-1 dash-sub-team">Here is what your digital team has been up to while you were away.</p>
+      <p class="text-gray-500 mt-1 dash-sub-first">Let's get your first assistant working for you.</p>
     </div>
   </header>
 
@@ -61,6 +62,25 @@
          .pendingReview), so the strip and the cards cannot disagree.
          ════════════════════════════════════════════════════════════════════ -->
     <section id="needs-you" class="ny-wrap" style="display:none" aria-label="Waiting for you"></section>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         Your team (layout review, 2026-10-22). One line per assistant, near the top — the full
+         cards sat below the hero, heatmap and widgets and repeated My Assistants. Rendered by
+         fetchAndRenderAssistants in ROSTER mode (data-render, read on every re-render, including
+         workspace.html's and the provisioning poll's). With no working assistant yet it holds the
+         first-hire card, and #dash-root gets .dash-first-visit (styles below).
+         ════════════════════════════════════════════════════════════════════ -->
+    <section id="dash-team" class="mb-10" aria-labelledby="dash-team-title">
+      <div class="dash-team-head">
+        <h2 id="dash-team-title" class="dash-team-title">Your team</h2>
+        <button type="button" class="dw-link dash-team-all" onclick="window.loadView && window.loadView('assistants')">All assistants →</button>
+      </div>
+      <div id="dashboard-assistants-grid" data-render="roster" class="flex flex-col gap-4">
+        <div class="py-8 text-center text-gray-500 font-medium bg-white rounded-2xl border border-gray-100 shadow-sm animate-pulse">
+          Checking in with your team...
+        </div>
+      </div>
+    </section>
 
     <!-- ════════════════════════════════════════════════════════════════════
          US-DASH-1: "Wow" Metrics + Activity Heatmap (Swan Command Center)
@@ -118,18 +138,20 @@
         <div class="cc-usage" id="cc-usage" aria-live="polite"><div class="cc-hm-skel" style="height:56px"></div></div>
 
         <!-- AC3: Activity heatmap — proves 24/7 background productivity -->
-        <div class="cc-heatmap-wrap">
-          <div class="cc-heatmap-head">
-            <span class="cc-heatmap-title">When your team is working</span>
+        <!-- Folded by default (layout review, 2026-10-22): it is the tallest thing in the hero and the
+             least often read. -->
+        <details class="cc-heatmap-wrap">
+          <summary class="cc-heatmap-head">
+            <span class="cc-heatmap-title"><span class="cc-heatmap-chev" aria-hidden="true">▸</span> When your team is working</span>
             <span class="cc-heatmap-legend" id="cc-heatmap-legend">
               <span>Quiet</span>
               <i class="cc-key cc-key-0"></i><i class="cc-key cc-key-1"></i><i class="cc-key cc-key-2"></i><i class="cc-key cc-key-3"></i><i class="cc-key cc-key-4"></i>
               <span>Busy</span>
             </span>
-          </div>
+          </summary>
           <div id="cc-heatmap" class="cc-heatmap" aria-label="Assistant activity by day and hour"><div class="cc-hm-skel"></div></div>
           <p id="cc-heatmap-caption" class="cc-heatmap-caption">Loading activity…</p>
-        </div>
+        </details>
       </div>
     </section>
 
@@ -181,30 +203,50 @@
       <div class="dw-tray-head">
         <div>
           <h4 class="dw-tray-title">Widget library</h4>
-          <p class="dw-tray-sub">Toggle widgets on or off, then drag cards to reorder.</p>
+          <p class="dw-tray-sub">Turn widgets on or off. Reorder with the arrows, or drag the cards.</p>
         </div>
         <button id="dw-tray-close" type="button" class="dw-tray-close">Done</button>
       </div>
       <div id="dw-tray-list" class="dw-tray-list"></div>
     </aside>
 
-    <!-- Dynamic Assistants Grid -->
-    <div id="dashboard-assistants-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-      <div class="col-span-full py-12 text-center text-gray-500 font-medium bg-white rounded-2xl border border-gray-100 shadow-sm animate-pulse">
-        Checking in with your team...
-      </div>
-    </div>
-
-    <div class="mt-12 bg-emerald-700 rounded-2xl p-8 text-center shadow-lg">
+    <div id="dash-hire-banner" class="mt-12 bg-emerald-700 rounded-2xl p-8 text-center shadow-lg">
       <h3 class="text-2xl font-bold text-white mb-2">Got another process to take off your plate?</h3>
       <p class="text-emerald-100 mb-6 max-w-xl mx-auto">You can hire another assistant or upgrade your plan to automate entirely new workflows.</p>
-      <a href="#" id="route-to-catalog" class="inline-block bg-white text-emerald-700 font-bold px-8 py-3 rounded-lg shadow-sm hover:bg-gray-50 transition">Delegate a New Task</a>
+      <a href="#" id="route-to-catalog" class="inline-block bg-white text-emerald-700 font-bold px-8 py-3 rounded-lg shadow-sm hover:bg-gray-50 transition">Hire an assistant</a>
     </div>
 
   </div>
 </div>
 
 <style>
+  /* Your team roster + first-hire card (layout review, 2026-10-22). Scoped plain CSS, like the hero. */
+  .dash-team-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .dash-team-title { font-size: 18px; font-weight: 800; color: #0f172a; margin: 0; }
+  .dash-team-all { margin-top: 0; }
+  .dash-roster { list-style: none; margin: 0; padding: 0; background: #fff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; }
+  .dash-roster li + li { border-top: 1px solid #f1f5f9; }
+  .dash-roster-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 16px; min-height: 56px; background: none; border: 0; text-align: left; cursor: pointer; font: inherit; }
+  .dash-roster-row:hover { background: #fafafa; }
+  .dash-roster-row:focus-visible { outline: 2px solid #ff007f; outline-offset: -2px; }
+  .dash-roster-ico { width: 36px; height: 36px; border-radius: 10px; color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none; }
+  .dash-roster-name { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+  .dash-roster-title { font-size: 15px; font-weight: 700; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dash-roster-role { font-size: 13px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dash-roster-go { color: #d6006b; font-weight: 700; flex: none; }
+  .dash-first-hire { background: #fff; border: 2px dashed #e5e7eb; border-radius: 20px; padding: 32px 24px; text-align: center; }
+  .dash-first-hire-title { font-size: 22px; font-weight: 800; color: #0f172a; margin: 0 0 6px; }
+  .dash-first-hire-sub { font-size: 15px; color: #64748b; margin: 0 auto 20px; max-width: 32rem; line-height: 1.5; }
+  /* First visit: no working assistant yet, so nothing below has anything to show. */
+  .dash-sub-first { display: none; }
+  #dash-root.dash-first-visit .dash-sub-team,
+  #dash-root.dash-first-visit .dash-team-head,
+  #dash-root.dash-first-visit #command-center-hero,
+  #dash-root.dash-first-visit #action-stream,
+  #dash-root.dash-first-visit #dash-widgets-section,
+  #dash-root.dash-first-visit #dash-hire-banner { display: none; }
+  #dash-root.dash-first-visit .dash-sub-first { display: block; }
+
   /* US-DASH-1 — Swan Command Center hero. Scoped plain CSS (immune to the prebuilt
      Tailwind build), so new visual treatments render without a build:css step. */
   #command-center-hero * { box-sizing: border-box; }
@@ -271,7 +313,12 @@
 
   /* Heatmap */
   .cc-heatmap-wrap { position: relative; margin-top: 26px; padding-top: 22px; border-top: 1px solid rgba(15,23,42,0.07); }
-  .cc-heatmap-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+  .cc-heatmap-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; cursor: pointer; list-style: none; }
+  .cc-heatmap-head::-webkit-details-marker { display: none; }
+  .cc-heatmap-wrap[open] .cc-heatmap-head { margin-bottom: 14px; }
+  .cc-heatmap-chev { display: inline-block; transition: transform .15s ease; }
+  .cc-heatmap-wrap[open] .cc-heatmap-chev { transform: rotate(90deg); }
+  .cc-heatmap-head:focus-visible { outline: 2px solid #ff007f; outline-offset: 4px; border-radius: 6px; }
   .cc-heatmap-title { font-size: 13px; font-weight: 700; color: #334155; }
   .cc-heatmap-legend { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #94a3b8; }
   .cc-key { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
@@ -574,16 +621,13 @@
   /* AC3 — suggestion cards */
   .as-suggest-row { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 4px; }
   .as-sg { flex: 0 0 300px; max-width: 300px; padding: 16px; border-radius: 16px;
-    background: linear-gradient(160deg, #eef2ff, #ffffff); border: 1px solid rgba(99,102,241,0.2);
+    background: linear-gradient(160deg, #fff0f5, #ffffff); border: 1px solid rgba(214,0,107,0.18);
     transition: transform .25s ease, opacity .25s ease; }
   .as-sg.as-removing { opacity: 0; transform: translateY(-6px) scale(.98); }
-  .as-sg-top { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; font-weight: 700; color: #4f46e5; }
+  .as-sg-top { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; font-weight: 700; color: #d6006b; }
   .as-sg-idea { font-size: 14px; color: #1e293b; line-height: 1.5; margin: 0 0 14px; }
   .as-sg-actions { display: flex; gap: 8px; align-items: center; }
-  .as-btn-yes { background: #4f46e5; color: #fff; }
-  .as-btn-yes:hover { background: #4338ca; }
-  .as-btn-later { background: transparent; color: #94a3b8; padding: 8px 6px; }
-  .as-btn-later:hover { color: #64748b; }
+  /* Colours come from .btn-primary / .btn-utility (button system); .as-btn only sizes them. */
 </style>
 
 <script>
@@ -629,8 +673,8 @@
         <div class="as-sg-top">💡 Suggested by ${esc(item.suggestedByName)} for ${esc(item.assistantName)}${item.platformLabel ? ` · ${esc(item.platformLabel)}` : ''}</div>
         <p class="as-sg-idea">${esc(item.idea)}</p>
         <div class="as-sg-actions">
-          <button class="as-btn as-btn-yes">Yes, please</button>
-          <button class="as-btn as-btn-later">Maybe later</button>
+          <button type="button" class="as-btn as-btn-yes btn-primary">Yes, please</button>
+          <button type="button" class="as-btn as-btn-later btn-utility">Maybe later</button>
         </div>`;
       const yes = card.querySelector('.as-btn-yes');
       yes.onclick = () => actOnIdea(item, yes, card);
@@ -702,8 +746,10 @@
   .dw-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
   .dw-list li { font-size: 13px; color: #475569; display: flex; gap: 8px; }
   .dw-list .t { color: #0f172a; font-weight: 600; }
-  .dw-link { display: inline-block; margin-top: 10px; font-size: 13px; font-weight: 700; color: var(--color-emerald-800, #d6006b); cursor: pointer; }
+  /* A <button> (keyboard-reachable), reset to look like the text link it replaced. */
+  .dw-link { display: inline-block; margin-top: 10px; padding: 0; border: 0; background: none; font: inherit; font-size: 13px; font-weight: 700; color: var(--color-emerald-800, #d6006b); cursor: pointer; }
   .dw-link:hover { text-decoration: underline; }
+  .dw-link:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 4px; }
   .dw-skel { height: 14px; border-radius: 6px; background: linear-gradient(90deg,#f1f5f9,#e2e8f0,#f1f5f9);
     background-size: 200% 100%; animation: dwShimmer 1.2s infinite; margin-bottom: 8px; }
   @keyframes dwShimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
@@ -715,6 +761,14 @@
     box-shadow: -20px 0 50px -20px rgba(0,0,0,0.4); transform: translateX(100%);
     transition: transform .28s cubic-bezier(.2,.8,.2,1); display: flex; flex-direction: column; }
   .dw-tray.open { transform: none; }
+  .dw-move { display: inline-flex; gap: 2px; flex: none; }
+  .dw-move button { width: 36px; height: 36px; border: 1px solid #e5e7eb; background: #fff; border-radius: 8px; font-size: 15px; color: #334155; cursor: pointer; }
+  .dw-move button:hover:not(:disabled) { background: #f6f3eb; }
+  .dw-move button:disabled { opacity: .35; cursor: default; }
+  @media (max-width: 639px) { .dw-move button { width: 44px; height: 44px; } }
+  .dw-move button:focus-visible { outline: 2px solid #ff007f; outline-offset: 1px; }
+  /* Closed, it sits just past the right edge — without this its shadow bled onto the page. */
+  .dw-tray:not(.open) { box-shadow: none; }
   .dw-tray-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 20px; border-bottom: 1px solid #f1f5f9; }
   .dw-tray-title { font-size: 16px; font-weight: 800; color: #0f172a; margin: 0; }
   .dw-tray-sub { font-size: 12px; color: #94a3b8; margin: 4px 0 0; }
@@ -755,10 +809,12 @@
       'recent-work':   { title: 'Recent work', icon: '✅', desc: 'What every assistant did this week', render: renderRecentWork },
       'agenda':        { title: 'Next 7 days', icon: '📅', desc: 'Everything booked to go out', render: renderAgenda },
       'tips':          { title: 'Tip', icon: '💡', desc: 'Get more from your team', render: renderTips },
-      'referral':      { title: 'Invite a teammate', icon: '🎁', desc: 'Share Be More Swan', render: renderReferral },
+      'referral':      { title: 'Refer a business', icon: '🎁', desc: 'Give a month, get a month', render: renderReferral },
     };
     const ORDER = ['roi-mini', 'team-status', 'recent-work', 'agenda', 'notifications', 'tips', 'referral'];
-    const DEFAULT_ON = { 'roi-mini': true, 'team-status': true, 'recent-work': true, 'agenda': true, 'notifications': true, 'tips': false, 'referral': false };
+    // roi-mini and team-status repeat the value tiles and the Your team roster above (layout
+    // review, 2026-10-22), so they start off. A layout someone already saved keeps its choices.
+    const DEFAULT_ON = { 'roi-mini': false, 'team-status': false, 'recent-work': true, 'agenda': true, 'notifications': true, 'tips': false, 'referral': false };
 
     let layout = [];
     let editing = false;
@@ -787,23 +843,32 @@
       // properties of null (reading 'style')" into the error banner on whatever page came next
       // (2026-10-19). A grid no longer on the page has nothing to draw.
       if (!grid.isConnected) return;
-      grid.innerHTML = '';
-      const enabled = layout.filter(w => w.enabled);
+      const enabled = layout.filter(w => w.enabled && CATALOG[w.key]);
       // Drive visibility via inline style (not Tailwind .hidden) so it works regardless
       // of whether the prebuilt CSS has the utility compiled.
       const empty = document.getElementById('dw-empty');
       if (empty) empty.style.display = enabled.length > 0 ? 'none' : 'block';
+      // Reconcile, don't rebuild (layout review, 2026-10-22): a card already on the page is kept and
+      // moved into place, so toggling one widget, reordering, or entering/leaving Customize fetches
+      // only a widget that has just appeared — it used to wipe the grid and refetch all of them.
+      const have = new Map([...grid.querySelectorAll('.dw-card')].map(c => [c.dataset.key, c]));
+      const want = new Set(enabled.map(w => w.key));
+      have.forEach((card, key) => { if (!want.has(key)) card.remove(); });
       enabled.forEach(w => {
-        const meta = CATALOG[w.key]; if (!meta) return;
-        const card = document.createElement('div');
-        card.className = 'dw-card'; card.dataset.key = w.key; card.draggable = editing;
-        card.innerHTML = `<button class="dw-card-remove" title="Remove" aria-label="Remove">×</button>
-          <div class="dw-card-head"><span class="dw-card-ico">${meta.icon}</span><span class="dw-card-title">${esc(meta.title)}</span></div>
-          <div class="dw-card-body"><div class="dw-skel" style="width:80%"></div><div class="dw-skel" style="width:55%"></div></div>`;
-        card.querySelector('.dw-card-remove').onclick = e => { e.stopPropagation(); toggle(w.key, false); };
-        grid.appendChild(card);
-        try { meta.render(card.querySelector('.dw-card-body')); } catch (_) {}
-        bindDnD(card);
+        let card = have.get(w.key);
+        if (!card) {
+          const meta = CATALOG[w.key];
+          card = document.createElement('div');
+          card.className = 'dw-card'; card.dataset.key = w.key;
+          card.innerHTML = `<button class="dw-card-remove" title="Remove" aria-label="Remove ${esc(meta.title)}">×</button>
+            <div class="dw-card-head"><span class="dw-card-ico">${meta.icon}</span><span class="dw-card-title">${esc(meta.title)}</span></div>
+            <div class="dw-card-body"><div class="dw-skel" style="width:80%"></div><div class="dw-skel" style="width:55%"></div></div>`;
+          card.querySelector('.dw-card-remove').onclick = e => { e.stopPropagation(); toggle(w.key, false); };
+          try { meta.render(card.querySelector('.dw-card-body')); } catch (_) {}
+          bindDnD(card);
+        }
+        card.draggable = editing;
+        grid.appendChild(card); // appends a new card, or moves an existing one into layout order
       });
       section.classList.toggle('editing', editing);
     }
@@ -811,6 +876,17 @@
     function toggle(key, on) {
       const item = layout.find(w => w.key === key); if (!item) return;
       item.enabled = on; renderGrid(); renderTray(); save();
+    }
+
+    // Reorder without dragging (layout review, 2026-10-22): HTML5 drag does nothing on a touch
+    // screen or from the keyboard, so the tray's up/down buttons move a widget one place.
+    function move(key, dir) {
+      const i = layout.findIndex(w => w.key === key);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= layout.length) return;
+      [layout[i], layout[j]] = [layout[j], layout[i]];
+      renderGrid(); renderTray(); save();
+      document.querySelector(`#dw-tray-list [data-dw-move="${key}"][data-dir="${dir}"]`)?.focus();
     }
 
     // ── AC2: drag-and-drop reorder with snap ──
@@ -842,13 +918,19 @@
     function renderTray() {
       const list = document.getElementById('dw-tray-list'); if (!list) return;
       list.innerHTML = '';
-      layout.forEach(w => {
-        const meta = CATALOG[w.key]; if (!meta) return;
+      const shown = layout.filter(w => CATALOG[w.key]);
+      shown.forEach((w, idx) => {
+        const meta = CATALOG[w.key];
         const row = document.createElement('div'); row.className = 'dw-tray-item';
         row.innerHTML = `<span class="ico">${meta.icon}</span>
           <div class="meta"><div class="n">${esc(meta.title)}</div><div class="d">${esc(meta.desc || '')}</div></div>
-          <label class="dw-switch"><input type="checkbox" ${w.enabled ? 'checked' : ''}><span></span></label>`;
+          <span class="dw-move">
+            <button type="button" data-dw-move="${w.key}" data-dir="-1" aria-label="Move ${esc(meta.title)} up" ${idx === 0 ? 'disabled' : ''}>↑</button>
+            <button type="button" data-dw-move="${w.key}" data-dir="1" aria-label="Move ${esc(meta.title)} down" ${idx === shown.length - 1 ? 'disabled' : ''}>↓</button>
+          </span>
+          <label class="dw-switch"><input type="checkbox" aria-label="Show ${esc(meta.title)}" ${w.enabled ? 'checked' : ''}><span></span></label>`;
         row.querySelector('input').onchange = e => toggle(w.key, e.target.checked);
+        row.querySelectorAll('[data-dw-move]').forEach(b => { b.onclick = () => move(w.key, Number(b.dataset.dir)); });
         list.appendChild(row);
       });
     }
@@ -879,7 +961,7 @@
         const working = a.filter(x => x.lifecycleStatus === 'working').length;
         el.innerHTML = `<div class="dw-stat">${working}<span style="font-size:15px;color:#94a3b8;font-weight:600"> / ${a.length} working</span></div>
           <div class="dw-stat-sub">${a.length ? 'Your digital team' : 'No assistants yet'}</div>
-          <span class="dw-link">Manage assistants →</span>`;
+          <button type="button" class="dw-link">Manage assistants →</button>`;
         el.querySelector('.dw-link').onclick = () => window.loadView && window.loadView('assistants');
       } catch { el.innerHTML = '<div class="dw-stat-sub">Unavailable right now.</div>'; }
     }
@@ -888,7 +970,7 @@
         const d = await (await fetch('/.netlify/functions/notifications')).json();
         const n = (d.notifications || []).slice(0, 3);
         el.innerHTML = n.length
-          ? `<ul class="dw-list">${n.map(x => `<li><span class="t">${esc(x.title || 'Update')}</span></li>`).join('')}</ul><span class="dw-link">View all →</span>`
+          ? `<ul class="dw-list">${n.map(x => `<li><span class="t">${esc(x.title || 'Update')}</span></li>`).join('')}</ul><button type="button" class="dw-link">View all →</button>`
           : `<div class="dw-stat-sub">You're all caught up. 🎉</div>`;
         const link = el.querySelector('.dw-link'); if (link) link.onclick = () => window.loadView && window.loadView('notifications');
       } catch { el.innerHTML = '<div class="dw-stat-sub">Unavailable right now.</div>'; }
@@ -921,8 +1003,8 @@
         const items = (d.items || []).slice(0, 5);
         const more = (d.total || 0) - items.length;
         el.innerHTML = items.length
-          ? `<ul class="dw-list">${items.map(x => `<li style="justify-content:space-between"><span class="t">${esc(x.label)}${x.assistantName ? ` <span style="color:#94a3b8">· ${esc(x.assistantName)}</span>` : ''}</span><span class="dw-stat-sub" style="margin:0;white-space:nowrap">${esc(when(x.at))}</span></li>`).join('')}</ul>${more > 0 ? `<div class="dw-stat-sub">and ${more} more</div>` : ''}<span class="dw-link">Open calendar →</span>`
-          : `<div class="dw-stat-sub">Nothing booked for the next 7 days.</div><span class="dw-link">Open calendar →</span>`;
+          ? `<ul class="dw-list">${items.map(x => `<li style="justify-content:space-between"><span class="t">${esc(x.label)}${x.assistantName ? ` <span style="color:#94a3b8">· ${esc(x.assistantName)}</span>` : ''}</span><span class="dw-stat-sub" style="margin:0;white-space:nowrap">${esc(when(x.at))}</span></li>`).join('')}</ul>${more > 0 ? `<div class="dw-stat-sub">and ${more} more</div>` : ''}<button type="button" class="dw-link">Open calendar →</button>`
+          : `<div class="dw-stat-sub">Nothing booked for the next 7 days.</div><button type="button" class="dw-link">Open calendar →</button>`;
         el.querySelector('.dw-link').onclick = () => window.loadView && window.loadView('calendar');
       } catch { el.innerHTML = '<div class="dw-stat-sub">Unavailable right now.</div>'; }
     }
@@ -970,7 +1052,7 @@
       el.innerHTML = esc(tips[Math.floor(Math.random() * tips.length)]);
     }
     function renderReferral(el) {
-      el.innerHTML = `<div class="dw-stat-sub">Invite a teammate — you both get rewarded.</div><span class="dw-link">Invite now →</span>`;
+      el.innerHTML = `<div class="dw-stat-sub">Refer a business — they get their first paid month free, and you earn a free month once they start paying.</div><button type="button" class="dw-link">Refer a business →</button>`;
       el.querySelector('.dw-link').onclick = () => window.loadView && window.loadView('referral');
     }
 
@@ -988,7 +1070,11 @@
     // notification created while the user is sitting on the dashboard (e.g. "issue fixed")
     // never showed up until a manual refresh. Re-render it periodically, same cadence as
     // the sidebar notification badge poll in workspace.html.
-    setInterval(() => {
+    // Stopped once this grid leaves the page: the router swaps the fragment out, and an uncleared
+    // interval kept polling for the old grid, adding one more poll per visit to the Dashboard.
+    clearInterval(window._dashNotificationsPoll);
+    window._dashNotificationsPoll = setInterval(() => {
+      if (!grid.isConnected) { clearInterval(window._dashNotificationsPoll); return; }
       const body = grid.querySelector('.dw-card[data-key="notifications"] .dw-card-body');
       if (body) { try { renderNotifications(body); } catch (_) {} }
     }, 60_000);

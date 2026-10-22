@@ -3,7 +3,7 @@
 //
 // Two complaints, one seam.
 //
-//   1. The Lead Generator's Overview had no "Manage connections" button. The Connections tab was
+//   1. (History — superseded 2026-10-22, see below.) The Lead Generator's Overview had no "Manage connections" button. The Connections tab was
 //      reachable only from the Connections tab. The Overview card self-hides for roles with no
 //      connectors, and that emptiness test counted platforms, sources and blog destinations —
 //      written before outreach mailboxes existed and never taught about them. The Lead Generator's
@@ -45,157 +45,42 @@ const SHELL = read('assistants.js');
 const OAUTH = read('netlify/functions/oauth-integrations.ts');
 const WORKSPACE = read('workspace.html');
 
-console.log('\n──── the Overview keeps a route to Connections ────');
+console.log('\n──── every role reaches Connections the same way ────');
 
-// The whole function, so "counts mailboxes" cannot be satisfied by the word appearing in some
-// unrelated renderer further down the file.
-const STATUS_CARD = INT.slice(
-    landmark(INT, 'window._renderConnectionsStatusCard = function ('),
-    landmark(INT, 'function _blogDestStatusRow('),
-);
-
-check('a mailbox-only role is not "nothing relevant"', () => {
-    const gate = STATUS_CARD.slice(
-        landmark(STATUS_CARD, 'const nothingRelevant'),
-        landmark(STATUS_CARD, 'const keepForSocial'),
-    );
-    assert.match(gate, /!mailboxes\.length/,
-        'the emptiness test must count outreach mailboxes, or the Lead Generator — whose only '
-        + 'connectors ARE mailboxes — hides the card and loses its "Manage connections" button');
-});
-
-check('the mailboxes it counts are the ones the grid draws', () => {
-    // Both must read the same array. A second, separately-fetched source would let the card and the
-    // grid disagree about whether this role has connectors at all.
-    assert.match(STATUS_CARD, /const mailboxes = _assistantScoped \? _mailboxProviders : \[\]/,
-        'the card must read _mailboxProviders — the same array _loadConnections fills and the grid renders');
-});
-
-check('the card still hides for a role with genuinely nothing', () => {
-    // The fix must not degrade into "always show". Roles whose integrations are Synced-action
-    // recipes in the drawer have no connectors, and a button to an empty grid is worse than none.
-    assert.match(STATUS_CARD, /if \(nothingRelevant && !keepForSocial\) \{[\s\S]{0,200}classList\.add\('hidden'\)/,
-        'nothingRelevant must still hide the card');
-});
-
-check('the button lives in the card it re-reveals', () => {
-    const DETAIL = read('assistant-detail.html');
-    const card = DETAIL.slice(
-        landmark(DETAIL, 'id="connections-status-card"'),
-        landmark(DETAIL, 'id="detail-roi-strip"'),
-    );
-    assert.match(card, /Manage connections<\/button>/,
-        'if the button ever moves out of #connections-status-card the gate above stops being the '
-        + 'thing that decides whether it is on the page');
-});
-
-console.log('\n──── …and puts the button in the card that lists what is connected ────');
-
-// The hero strip is the FALLBACK home. A role whose Overview already lists its destinations — the
-// Blog Writer's "Publishing to" block, a social role's per-account Audience bars — carries the
-// button inside that list instead, and hides the strip. Exactly one of the two is ever on the page.
+// Owner, 2026-10-22: no "Manage connections" button on the Overview, for any role. It used to sit
+// in a hero strip on some roles and inside the Audience list on others, decided per role by
+// _syncManageConnectionsPlacement — so two assistants showed it and the rest did not. Connections
+// are managed in Assistant Profile ▸ Connections, which every role has. What these pin is that the
+// one remaining route is always there (the Lead Generator once had none at all — see 1. above).
 
 const DETAIL = read('assistant-detail.html');
-const AUDIENCE = DETAIL.slice(
-    landmark(DETAIL, 'id="autopilot-audience"'),
-    landmark(DETAIL, 'Connections status card moved into the hero'),
-);
 
-check('the audience/destinations block carries its own Manage connections button', () => {
-    assert.match(AUDIENCE, /id="btn-audience-connections"/,
-        'the button that belongs with the list of systems this assistant publishes to');
-    assert.match(AUDIENCE, /_openBriefDrawer\('platforms'\)/,
-        'and it must open the same Connections panel the hero button does');
+check('there is no Manage connections button on the assistant page, and nothing that placed one', () => {
+    assert.doesNotMatch(DETAIL, /Manage connections<\/button>/);
+    assert.ok(!DETAIL.includes('id="connections-status-card"') && !DETAIL.includes('id="btn-audience-connections"'));
+    assert.ok(!SHELL.includes('_syncManageConnectionsPlacement'), 'the placement logic is gone');
+    assert.ok(!INT.includes('_renderConnectionsStatusCard'), 'and so is the strip renderer');
 });
 
-check('it sits in the section header, top-right, not under the list', () => {
-    // Same slot and same pill as #autopilot-adjust-btn ("Adjust schedule") one card up, so the two
-    // card-level actions on this page read as the same control.
-    assert.ok(
-        landmark(AUDIENCE, 'id="btn-audience-connections"') < landmark(AUDIENCE, 'id="audience-by-platform"'),
-        'the button must be in the header row, ABOVE the destinations/audience list it heads',
-    );
-    const adjust = DETAIL.slice(landmark(DETAIL, 'id="autopilot-adjust-btn"'));
-    const adjustCls = /class="([^"]+)"/.exec(adjust.slice(0, landmark(adjust, '</button>')))?.[1] ?? '';
-    const btnAll = AUDIENCE.slice(landmark(AUDIENCE, 'id="btn-audience-connections"'));
-    const btnCls = /class="([^"]+)"/.exec(btnAll.slice(0, landmark(btnAll, '</button>')))?.[1] ?? '';
-    // `hidden` is this button's own (it starts invisible); everything else must match Adjust schedule.
-    assert.deepStrictEqual(
-        btnCls.split(/\s+/).filter(c => c && c !== 'hidden').sort(),
-        adjustCls.split(/\s+/).filter(Boolean).sort(),
-        'the two buttons must be styled identically',
-    );
+check('Assistant Profile has a Connections card, and no role hides it', () => {
+    const home = DETAIL.slice(landmark(DETAIL, 'id="tab-profile-home"'), landmark(DETAIL, '/tab-profile-home'));
+    assert.match(home, /data-tab="platforms" class="detail-tab-btn brief-card[^"]*"[\s\S]{0,400}Connections<\/p>/,
+        'the profile index must offer Connections — it is now the only route there');
+    assert.ok(!/\[data-tab="platforms"\][^\n]*classList\.add\('hidden'\)/.test(SHELL), 'no role may hide it');
 });
 
-check('it ships hidden, and with no display utility that would outrank .hidden', () => {
-    // ⚠️ style.css is prebuilt and orders `.inline-flex` AFTER `.hidden`, so an inline-flex button
-    // stays visible with the hidden class on it — which would put BOTH buttons on the page for
-    // every role that is supposed to keep the hero one.
-    const btn = AUDIENCE.slice(landmark(AUDIENCE, 'id="btn-audience-connections"'));
-    const tag = btn.slice(0, landmark(btn, '</button>'));
-    assert.match(tag, /class="hidden /, 'the placement function reveals it; markup must not');
-    assert.doesNotMatch(tag, /\b(inline-flex|inline-block|flex|block)\b/,
-        'no display utility on this button — .hidden has to win');
-});
-
-const PLACEMENT = SHELL.slice(
-    landmark(SHELL, 'window._syncManageConnectionsPlacement = function'),
-    landmark(SHELL, '// The Posting Schedule controls drive both autopilot engines'),
-);
-
-check('placement reads the strip\'s verdict rather than re-deriving it', () => {
-    // Two copies of "does this role have connectors" is how the strip and the button start
-    // disagreeing about whether there is anything behind them.
-    assert.match(PLACEMENT, /strip\?\.dataset\.hasConnectors === '1'/);
-    assert.match(STATUS_CARD, /card\.dataset\.hasConnectors = \(nothingRelevant && !keepForSocial\) \? '0' : '1'/,
-        '_renderConnectionsStatusCard must publish that verdict');
-});
-
-check('the two buttons are mutually exclusive', () => {
-    assert.match(PLACEMENT, /audienceBtn\.classList\.toggle\('hidden', !inAudience\)/);
-    assert.match(PLACEMENT, /strip\.classList\.toggle\('hidden', !hasConnectors \|\| inAudience\)/,
-        'the strip must hide when the audience block has the button — without it the strip is a '
-        + 'lone "Connections" heading restating the list below it');
-});
-
-check('the Email Marketing Assistant keeps the hero button', () => {
-    // Its audience block is "Your list" — subscriber counts for a mailing list that lives in this
-    // product. There is nothing connected in it to manage, so the button must not move there.
-    assert.match(PLACEMENT, /audienceSource !== 'newsletter_list'/);
-});
-
-check('placement is decided from the role, not from the block un-hiding itself', () => {
-    // ⚠️ _fetchAndRenderBlogDestinations / _fetchAndRenderFollowerCounts are deliberately NOT
-    // awaited. Keying off #autopilot-audience's hidden class would leave both buttons off the page
-    // for the length of that request.
-    assert.match(PLACEMENT, /autopilot\.classList\.contains\('hidden'\)/,
-        'the Autopilot card (role-gated, synchronous) is the right signal');
-    assert.doesNotMatch(PLACEMENT, /getElementById\('autopilot-audience'\)/,
-        'the audience block itself must not be the signal');
-});
-
-check('both exits from the connections card hand over to placement', () => {
-    const calls = STATUS_CARD.match(/_syncManageConnectionsPlacement\(\)/g) || [];
-    assert.ok(calls.length >= 2,
-        'the early return hides the strip and the normal path reveals it — placement has the last '
-        + `word on both, or the strip and the button drift apart (found ${calls.length})`);
-});
-
-check('the registry pass re-runs placement', () => {
-    // _applyDashboardRegistry is what decides whether this role HAS an audience block at all, and
-    // it can run after the connections fetch has already resolved.
-    const REG = SHELL.slice(
-        landmark(SHELL, "toggle('autopilot-status-card', mods.hasPostingSchedule !== false)"),
-        landmark(SHELL, "toggle('module-social-strategy'"),
-    );
-    assert.match(REG, /window\._syncManageConnectionsPlacement\(\)/);
+check('help text points at Assistant Profile ▸ Connections, not a button that no longer exists', () => {
+    const studio = read('src/components/blog-studio-modal.js');
+    for (const [name, src] of [['assistants.js', SHELL], ['blog-studio-modal.js', studio]] as const) {
+        assert.ok(!src.includes('Manage connections'), `${name} still names the removed button`);
+    }
 });
 
 console.log('\n──── the Goal Progress actions are the same control ────');
 
 // "Check again now" and "Manage goals" were underlined text links, which read as page chrome
 // rather than as things the Goal Progress card can do. Both are now the same pill as
-// "Adjust schedule" / "Manage connections", in the same top-right slot.
+// "Adjust schedule", in the same top-right slot.
 
 // The header now sits INSIDE the white panel (the actions belong to the card), so it runs from
 // the panel to the body.

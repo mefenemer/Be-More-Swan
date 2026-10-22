@@ -614,7 +614,7 @@ export default withLambda(async (event: HandlerEvent) => {
             source: 'manual',
             consentBasis: 'manual_entry',
             confirmedAt: new Date(),
-            sourceDetail: { addedBy: ctx.userId },
+            sourceDetail: body.via === 'chat' ? { addedBy: ctx.userId, via: 'chat' } : { addedBy: ctx.userId },
         });
 
         await recordConsentEvent(db, {
@@ -623,7 +623,11 @@ export default withLambda(async (event: HandlerEvent) => {
             email,
             event: res.created ? 'manual_added' : 'resubscribed',
             channel: 'admin',
-            evidence: `Added by user ${ctx.userId} from the Audience page.`,
+            // The Email Marketing chat's contact card (src/utils/chat-audience.ts) says where it came
+            // from: the consent record must not claim a page the person never opened.
+            evidence: body.via === 'chat'
+                ? `Added by user ${ctx.userId} from the Email Marketing chat, after confirming the person agreed to hear from them.`
+                : `Added by user ${ctx.userId} from the Audience page.`,
         });
 
         const segId = Number(body.segmentId || '');

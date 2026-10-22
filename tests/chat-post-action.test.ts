@@ -119,7 +119,7 @@ async function main() {
         const o = read('netlify/functions/chat-orchestrator.ts');
         assert.match(o, /postAction = await resolvePostActionProposal\(db, orgId, session\.aiAssistantId, postActionReq, snapshotTz\);\s*uiElement = postAction;/);
         assert.match(o, /"type": "post_action_proposal"/);
-        assert.match(o, /route === ROUTES\.social_media_manager && !postActionReq && replyClaimsPostSaved\(content\)/,
+        assert.match(o, /route === ROUTES\.social_media_manager && !postActionReq && !settingsCard && replyClaimsPostSaved\(content\)/,
             'a post-action reply describes a card; the unbacked-draft guard must not replace it');
     });
 

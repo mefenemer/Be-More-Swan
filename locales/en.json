@@ -1,7 +1,7 @@
 {
   "nav": {
     "how_it_works": "How it Works",
-    "assistant_library": "Assistant Library",
+    "assistant_library": "Meet the Assistants",
     "pricing": "Pricing",
     "about": "About",
     "faqs": "FAQs",
@@ -19,7 +19,7 @@
     "tagline_sub": "Your assistants handle the writing, posting, and chasing, you just approve before anything goes out. No extra staff, no extra software, no surprises.",
     "platform": "Platform",
     "how_it_works": "How it Works",
-    "assistant_library": "Assistant Library",
+    "assistant_library": "Meet the Assistants",
     "connections": "Connections",
     "pricing": "Pricing",
     "faqs": "FAQs",
@@ -86,7 +86,7 @@
     "currency_label": "Currency"
   },
   "assistants": {
-    "page_title": "Assistant Library",
+    "page_title": "Meet the Assistants",
     "page_subtitle": "Browse our catalogue of AI assistants. Each one is purpose-built for a specific business role.",
     "join_waitlist": "Join Waitlist",
     "notify_me": "Notify Me",

@@ -699,12 +699,12 @@
     try { payloadPreview = JSON.stringify(payload, null, 2); } catch { payloadPreview = '{}'; }
 
     const el = document.createElement('div');
-    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
       <div class="flex items-start gap-3 mb-3">
         <div class="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-xl shrink-0">🔀</div>
         <div class="min-w-0">
-          <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">System Routing · Approval needed</p>
+          <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">System Routing · Approval needed</p>
           <p class="font-bold text-gray-900 truncate">Hand off to ${esc(targetName)}</p>
         </div>
       </div>
@@ -713,7 +713,7 @@
         <p class="text-sm text-gray-700 mb-3"><span class="font-bold text-indigo-900">Why:</span> ${esc(ui.reason)}</p>` : ''}
 
       <details class="mb-4 group">
-        <summary class="text-xs font-bold text-indigo-700 cursor-pointer select-none hover:text-indigo-900">Data that will be passed</summary>
+        <summary class="text-xs font-bold text-emerald-800 cursor-pointer select-none hover:text-indigo-900">Data that will be passed</summary>
         <pre class="mt-2 bg-white border border-indigo-100 rounded-lg p-3 text-xs text-gray-600 overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap break-words">${esc(payloadPreview)}</pre>
       </details>
 
@@ -727,7 +727,7 @@
           Decline
         </button>
       </div>
-      <p class="hidden mt-1 text-xs font-semibold text-indigo-700" data-handoff-status></p>
+      <p class="hidden mt-1 text-xs font-semibold text-emerald-800" data-handoff-status></p>
     `;
 
     function settle(statusText) {
@@ -3083,6 +3083,78 @@
 
   register('email_action_proposal', renderEmailActionProposalCard);
 
+  // ── Built-in: Audience cards (Email Marketing chat) ───────────────────────
+  // { type: 'audience_segment_proposal', name, rules, description, matches, blocked, settled? }
+  // { type: 'audience_contact_proposal', email, firstName, lastName, company, segmentId, segmentName,
+  //   blocked, settled? }
+  //
+  // The Audience page's "Rule-based segment" and "Add contact", from chat. Facts from the
+  // organisation's rows (src/utils/chat-audience.ts): the segment's description and count come from
+  // the rule builder's own preview, and a contact who is already in the audience or opted out never
+  // gets a button. The click dispatches `audience:action`; chat-session.js calls audience-segments /
+  // audience-contacts — the page's own endpoints. A contact also needs the consent box ticked.
+  function renderAudienceProposalCard(ui, esc) {
+    const isSegment = ui.type === 'audience_segment_proposal';
+    if (isSegment ? !ui.name : !ui.email) return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const head = isSegment ? 'New segment' : 'Add to your audience';
+    const person = [ui.firstName, ui.lastName].filter(Boolean).join(' ');
+    const matches = Number(ui.matches);
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      ${isSegment
+        ? `<p class="text-sm font-bold text-gray-900 mt-2 break-words">${esc(ui.name)}</p>
+           ${ui.description ? `<p class="text-sm text-gray-700 mt-1">${esc(ui.description)}</p>` : ''}
+           ${!blocked && Number.isFinite(matches) ? `<p class="text-sm text-gray-900 mt-3"><span class="font-bold">${matches.toLocaleString()}</span> subscribed ${matches === 1 ? 'person matches' : 'people match'} right now.</p>
+             <p class="text-xs text-gray-600 mt-1">Members are worked out from the rule every time you send, so it never goes stale.</p>` : ''}`
+        : `<p class="text-sm font-bold text-gray-900 mt-2 break-words">${esc(ui.email)}</p>
+           ${person || ui.company ? `<p class="text-sm text-gray-700 mt-1">${esc([person, ui.company].filter(Boolean).join(' · '))}</p>` : ''}
+           ${ui.segmentName ? `<p class="text-xs text-gray-600 mt-1">Also added to “${esc(ui.segmentName)}”.</p>` : ''}`}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${!blocked && !isSegment ? `<label class="flex items-start gap-2 mt-3 text-sm text-gray-800 cursor-pointer">
+          <input type="checkbox" data-aud-consent class="mt-0.5 rounded border-gray-300 text-emerald-700 focus:ring-emerald-700">
+          <span>They agreed to hear from me. This is recorded against my account.</span>
+        </label>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-aud-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${isSegment ? 'Save segment' : 'Add contact'}</button>
+        <button type="button" data-aud-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+        ${typeof window.loadView === 'function' ? '<button type="button" data-aud-open class="btn-swan-link px-1 py-2 text-sm font-bold">Open the Audience page</button>' : ''}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-aud-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-aud-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-aud-go], [data-aud-cancel], [data-aud-consent]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-aud-open]')) { window.loadView?.('audience'); return; }
+      if (e.target.closest('[data-aud-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-aud-go]')) return;
+      const consent = el.querySelector('[data-aud-consent]');
+      if (!isSegment && !consent?.checked) { say('Tick the box first — only add people who agreed to hear from you.', 'error'); consent?.focus(); return; }
+      setBusy(true);
+      say(isSegment ? 'Saving…' : 'Adding…');
+      el.dispatchEvent(new CustomEvent('audience:action', {
+        bubbles: true,
+        detail: {
+          kind: isSegment ? 'segment' : 'contact',
+          name: ui.name, rules: ui.rules,
+          email: ui.email, firstName: ui.firstName || null, lastName: ui.lastName || null, company: ui.company || null,
+          segmentId: ui.segmentId || null, segmentName: ui.segmentName || null, consented: !!consent?.checked,
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Done.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('audience_segment_proposal', renderAudienceProposalCard);
+  register('audience_contact_proposal', renderAudienceProposalCard);
+
   // ── Built-in: Lead Action Proposal Card (Lead Generation chat) ─────────────
   // { type: 'lead_action_proposal', action: 'send'|'move_to_outreach'|'reject'|'set_outcome', recordId,
   //   assistantId, title, rating, approvalStatus, to, subject, body, signature, footerName,
@@ -3201,6 +3273,68 @@
   }
 
   register('lead_action_proposal', renderLeadActionProposalCard);
+
+  // ── Built-in: Assistant Settings Proposal Card (every structured chat) ─────
+  // { type: 'assistant_settings_proposal', setting: 'pause'|'resume'|'draft_horizon'|'review_alerts'|
+  //   'content_suggestions', assistantId, assistantName, current, proposed, days, value, enabled,
+  //   monthlyCap, blocked, settled? }
+  // A change to the assistant's OWN settings. Every fact on it was read from its row by the
+  // orchestrator (src/utils/chat-assistant-settings.ts). The click dispatches `settings:change`;
+  // chat-session.js calls the endpoint the Assistant Profile uses for that setting.
+  const SETTINGS_COPY = {
+    pause: { head: 'Pause this assistant', button: 'Yes, pause', busy: 'Pausing…', danger: true },
+    resume: { head: 'Start this assistant', button: 'Start it', busy: 'Starting…' },
+    draft_horizon: { head: 'Generate posts ahead', button: 'Save', busy: 'Saving…' },
+    review_alerts: { head: 'Review alerts', button: 'Save', busy: 'Saving…' },
+    content_suggestions: { head: 'Autonomous Content Suggestions', button: 'Save', busy: 'Saving…' },
+  };
+
+  function renderAssistantSettingsProposalCard(ui, esc) {
+    const copy = SETTINGS_COPY[ui.setting];
+    const assistantId = Number(ui.assistantId);
+    if (!copy || !Number.isInteger(assistantId)) return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      ${ui.assistantName ? `<p class="text-xs text-gray-500 mt-2">${esc(ui.assistantName)}</p>` : ''}
+      ${ui.current ? `<p class="text-sm text-gray-700 mt-2"><span class="font-bold">Now:</span> ${esc(ui.current)}</p>` : ''}
+      ${!blocked && ui.proposed ? `<p class="text-sm text-gray-900 mt-1"><span class="font-bold">After:</span> ${esc(ui.proposed)}</p>` : ''}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${!blocked && ui.setting === 'pause' ? '<p class="text-xs text-gray-600 mt-3">It stops all actions until you start it again. Nothing it has already scheduled is deleted.</p>' : ''}
+      ${!blocked && ui.setting === 'draft_horizon' ? '<p class="text-xs text-gray-600 mt-3">Further ahead: it drafts more straight away. Shorter: unreviewed drafts beyond the new window are archived.</p>' : ''}
+      ${!blocked && ui.setting === 'content_suggestions' ? '<p class="text-xs text-gray-600 mt-3">It stops when your monthly tasks run out — you are never charged extra.</p>' : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-asp-go class="${copy.danger ? 'btn-destructive' : 'btn-primary'} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>
+        <button type="button" data-asp-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-asp-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-asp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-asp-go], [data-asp-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-asp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-asp-go]')) return;
+      setBusy(true);
+      say(copy.busy);
+      el.dispatchEvent(new CustomEvent('settings:change', {
+        bubbles: true,
+        detail: {
+          setting: ui.setting, assistantId,
+          days: ui.days ?? null, value: ui.value ?? null, enabled: ui.enabled ?? null, monthlyCap: ui.monthlyCap ?? null,
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Done.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('assistant_settings_proposal', renderAssistantSettingsProposalCard);
   register('SocialPostDraftCard', renderSocialPostDraftCard);
 
   // ── Built-in: Blog Post Draft Card ──────────────────────────────────────────

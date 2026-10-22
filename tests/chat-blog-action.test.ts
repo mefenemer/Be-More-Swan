@@ -138,7 +138,7 @@ async function main() {
     const o = read('netlify/functions/chat-orchestrator.ts');
     await check('the blog route resolves the proposal with the real time parser, and keeps the card', () => {
         assert.match(o, /blogAction = await resolveBlogActionProposal\(db, orgId, session\.aiAssistantId, blogActionReq, snapshotTz, parseScheduleInstruction\);/);
-        assert.match(o, /uiElement = blogDraft \? \{ type: BLOG_POST_DRAFT_TYPE, \.\.\.blogDraft \} : blogAction;/);
+        assert.match(o, /uiElement = blogDraft \? \{ type: BLOG_POST_DRAFT_TYPE, \.\.\.blogDraft \} : blogAction \?\? settingsCard;/);
         assert.match(o, /"type": "blog_action_proposal"/);
         assert.ok(!o.includes('you cannot schedule or publish from this chat'), 'the old refusal is still in the blog prompt');
     });

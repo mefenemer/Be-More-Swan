@@ -188,7 +188,13 @@
       console.error('[audience] contacts failed to load', err);
       const tbody = $('aud-rows');
       if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="${colCount()}" class="p-8 text-center text-red-600 text-sm">${esc(err.message)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${colCount()}" class="p-8 text-center">
+          <p class="text-sm font-bold text-gray-900">We couldn't load your contacts</p>
+          <p class="text-sm text-gray-500 mt-1">${esc(err.message)}</p>
+          <button type="button" data-aud-retry class="btn-secondary mt-3 px-4 py-2 text-sm font-bold border rounded-lg cursor-pointer">Try again</button>
+        </td></tr>`;
+        // A fresh row each time, so this listener never stacks.
+        tbody.querySelector('[data-aud-retry]')?.addEventListener('click', () => loadContacts());
       }
     }
   }
@@ -306,60 +312,60 @@
         .map(([k, lbl]) => `<option value="${k}" ${c.op === k ? 'selected' : ''}>${esc(lbl)}</option>`).join('');
       let valueInput = '';
       if (spec.value === 'source') {
-        valueInput = `<select data-rule-value="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
+        valueInput = `<select data-rule-value="${i}" aria-label="Condition ${i + 1}: source" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
           ${Object.entries(SOURCE_OPTS).map(([k, lbl]) => `<option value="${k}" ${c.value === k ? 'selected' : ''}>${esc(lbl)}</option>`).join('')}
         </select>`;
       } else if (spec.value === 'days') {
-        valueInput = `<input type="number" min="1" max="3650" data-rule-value="${i}" value="${Number(c.value) || 30}"
+        valueInput = `<input type="number" min="1" max="3650" data-rule-value="${i}" aria-label="Condition ${i + 1}: number of days" value="${Number(c.value) || 30}"
           class="w-24 px-2 py-2 rounded-lg border border-gray-300 text-sm"><span class="text-sm text-gray-500">days</span>`;
       } else if (spec.value === 'custom') {
         // Two inputs, because a custom condition has two parts: WHICH field, and what it says. The
         // presence ops take no value at all — "we hold a city for this person" is a whole question.
-        const picker = `<select data-rule-key="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
+        const picker = `<select data-rule-key="${i}" aria-label="Condition ${i + 1}: custom field" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
           ${state.customFields.map((f) => `<option value="${esc(f.key)}" ${c.key === f.key ? 'selected' : ''}>${esc(f.label)}</option>`).join('')}
         </select>`;
         const needsValue = c.op !== 'is_set' && c.op !== 'is_not_set';
         valueInput = picker + (needsValue
-          ? `<input type="text" data-rule-value="${i}" value="${esc(c.value || '')}" placeholder="Bristol"
+          ? `<input type="text" data-rule-value="${i}" aria-label="Condition ${i + 1}: value" value="${esc(c.value || '')}" placeholder="Bristol"
               class="px-2 py-2 rounded-lg border border-gray-300 text-sm">`
           : '');
       } else if (spec.value === 'tag') {
         // Tags and manual segments only — a rule built on another rule is a cycle, and the server
         // refuses it with a sentence naming the segment.
         const targets = state.segments.filter((x) => x.kind !== 'dynamic');
-        valueInput = `<select data-rule-value="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
+        valueInput = `<select data-rule-value="${i}" aria-label="Condition ${i + 1}: tag or segment" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
           ${targets.map((t) => `<option value="${t.id}" ${String(c.value) === String(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
         </select>`;
       } else if (spec.value === 'form') {
-        valueInput = `<select data-rule-value="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
+        valueInput = `<select data-rule-value="${i}" aria-label="Condition ${i + 1}: sign-up form" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
           ${ruleForms.map((f) => `<option value="${f.id}" ${String(c.value) === String(f.id) ? 'selected' : ''}>${esc(f.name)}</option>`).join('')}
         </select>`;
       } else if (spec.value === 'domain') {
-        valueInput = `<input type="text" data-rule-value="${i}" value="${esc(c.value || '')}" placeholder="gmail.com"
+        valueInput = `<input type="text" data-rule-value="${i}" aria-label="Condition ${i + 1}: email domain" value="${esc(c.value || '')}" placeholder="gmail.com"
           class="px-2 py-2 rounded-lg border border-gray-300 text-sm">`;
       }
       return `<div class="flex flex-wrap items-center gap-2 py-2">
-        <select data-rule-field="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
+        <select data-rule-field="${i}" aria-label="Condition ${i + 1}: what to check" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
           ${Object.entries(RULE_FIELDS)
             .filter(([k]) => (k !== 'form' || ruleForms.length)
               && (k !== 'tag' || state.segments.some((x) => x.kind !== 'dynamic'))
               && (k !== 'custom' || state.customFields.length))
             .map(([k, f]) => `<option value="${k}" ${c.field === k ? 'selected' : ''}>${esc(f.label)}</option>`).join('')}
         </select>
-        <select data-rule-op="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">${ops}</select>
+        <select data-rule-op="${i}" aria-label="Condition ${i + 1}: comparison" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">${ops}</select>
         ${valueInput}
-        <button type="button" data-rule-remove="${i}" class="ml-auto text-xs font-bold text-gray-400 hover:text-red-600 cursor-pointer">Remove</button>
+        <button type="button" data-rule-remove="${i}" aria-label="Remove condition ${i + 1}" class="ml-auto text-xs font-bold text-gray-400 hover:text-red-600 cursor-pointer">Remove</button>
       </div>`;
     }).join('');
 
     body.innerHTML = `
-      <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Name</label>
+      <label for="aud-rule-name" class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Name</label>
       <input type="text" id="aud-rule-name" maxlength="80" value="${esc(ruleState.name)}" placeholder="Recently engaged"
-        class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-4"
+        class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-700 outline-none text-sm mb-4"
         ${ruleState.id ? 'disabled' : ''}>
 
       <div class="flex items-center gap-2 mb-1">
-        <span class="text-sm text-gray-700">Match</span>
+        <label for="aud-rule-match" class="text-sm text-gray-700">Match</label>
         <select id="aud-rule-match" class="px-2 py-1.5 rounded-lg border border-gray-300 text-sm">
           <option value="all" ${ruleState.match === 'all' ? 'selected' : ''}>all of these</option>
           <option value="any" ${ruleState.match === 'any' ? 'selected' : ''}>any of these</option>
@@ -371,7 +377,7 @@
       <div id="aud-rule-preview" class="mt-5 px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-700">Working it out…</div>
 
       <div class="flex justify-end gap-2 mt-4">
-        <button type="button" data-aud-rule-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
+        <button type="button" data-aud-rule-close class="btn-secondary px-4 py-2 text-sm font-bold border rounded-lg cursor-pointer">Cancel</button>
         <button type="button" id="aud-rule-save" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Save segment</button>
       </div>`;
 
@@ -435,7 +441,7 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'preview', rules: { match: ruleState.match, conditions: ruleState.conditions } }),
       });
-      host.className = 'mt-5 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 text-sm text-emerald-900';
+      host.className = 'mt-5 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 text-sm text-emerald-800';
       host.innerHTML = `<p class="font-bold">${Number(matches).toLocaleString()} ${matches === 1 ? 'person matches' : 'people match'} right now.</p>
         <p class="text-[12px] mt-1">${esc(description || '')}</p>
         <p class="text-[11px] text-emerald-700 mt-1">This is worked out again every time — the number will move as your audience does.</p>`;
@@ -499,8 +505,8 @@
         <span class="px-3 py-1.5 text-xs font-bold text-gray-700">${esc(f.label)}
           <span class="text-gray-400 font-mono">${esc(f.key)}</span>
         </span>
-        <button type="button" data-field-delete="${f.id}" title="Delete field"
-          class="pr-3 pl-1 text-xs text-gray-300 hover:text-red-500 cursor-pointer">&times;</button>
+        <button type="button" data-field-delete="${f.id}" title="Delete field" aria-label="Delete the ${esc(f.label)} field"
+          class="aud-x pr-3 pl-1 text-xs text-gray-500 hover:text-red-600 cursor-pointer">&times;</button>
       </span>`).join('');
 
     host.querySelectorAll('[data-field-delete]').forEach((btn) => btn.addEventListener('click', async () => {
@@ -595,6 +601,9 @@
       'No segments yet. Create one to target a newsletter at part of your audience.');
     renderChips($('aud-tags'), state.segments.filter((s) => s.kind === 'tag'), false,
       'No tags yet. Tag people to describe them, then build a segment from the tag.');
+    // The phone-width segment dropdown mirrors the sidebar's pick.
+    const pick = $('aud-segment-pick');
+    if (pick) pick.value = state.filters.segmentId || '';
   }
 
   // Drawn as a vertical list in the left-hand sidebar. Same markup and data attributes for segments
@@ -621,16 +630,16 @@
       const title = dyn ? ` title="${esc(s.rulesError || s.description || '')}"` : '';
       return `<div class="aud-side-row ${active ? 'is-active' : ''}"${title}>
         <button type="button" data-segment="${s.id}" class="flex-1 min-w-0 flex items-center justify-between gap-2 px-2 py-1.5 text-sm text-left cursor-pointer ${active ? 'font-bold text-gray-900' : 'text-gray-700'}">
-          <span class="truncate">${dyn ? '<span class="text-emerald-600">◆</span> ' : s.kind === 'tag' ? '<span class="text-gray-400">#</span> ' : ''}${esc(s.name)}</span>
+          <span class="truncate">${dyn ? '<span class="text-emerald-700">◆</span> ' : s.kind === 'tag' ? '<span class="text-gray-400">#</span> ' : ''}${esc(s.name)}</span>
           ${s.rulesError
             ? '<span class="text-[11px] font-bold text-red-600 whitespace-nowrap">rules broken</span>'
             : `<span class="text-xs text-gray-400" title="Subscribed">${Number(s.subscribedCount || 0).toLocaleString()}</span>`}
         </button>
         <span class="aud-side-actions flex items-center shrink-0 pr-1">
           ${dyn ? `<button type="button" data-segment-rules="${s.id}" title="Edit the rule" aria-label="Edit the rule for ${esc(s.name)}"
-            class="p-1 text-xs text-gray-400 hover:text-emerald-700 cursor-pointer">edit</button>` : ''}
+            class="aud-x p-1 text-xs text-gray-500 hover:text-emerald-700 cursor-pointer">edit</button>` : ''}
           <button type="button" data-segment-delete="${s.id}" title="Delete" aria-label="Delete ${esc(s.name)}"
-            class="p-1 text-sm leading-none text-gray-300 hover:text-red-500 cursor-pointer">&times;</button>
+            class="aud-x p-1 text-sm leading-none text-gray-500 hover:text-red-600 cursor-pointer">&times;</button>
         </span>
       </div>`;
     }).join('');
@@ -641,7 +650,13 @@
       .map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
     const add = $('aud-add-segment');
     const imp = $('aud-import-segment');
+    const pick = $('aud-segment-pick');
     if (add) add.innerHTML = opts;
+    if (pick) {
+      pick.innerHTML = '<option value="">Everyone</option>' + state.segments
+        .map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+      pick.value = state.filters.segmentId || '';
+    }
     if (imp) imp.innerHTML = '<option value="">Add to no segment</option>' + state.segments
       .map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
   }
@@ -653,8 +668,8 @@
     if (!state.contacts.length) {
       if (state.needsSetup) {
         tbody.innerHTML = `<tr><td colspan="${colCount()}" class="p-10 text-center">
-          <p class="text-sm font-bold text-gray-900">Audience is not set up on this environment yet</p>
-          <p class="text-sm text-gray-500 mt-1">The database migration has not been applied here. Nothing is lost — apply <span class="font-mono text-xs bg-gray-100 px-1 rounded">db/audience.sql</span> and reload.</p>
+          <p class="text-sm font-bold text-gray-900">Audience isn't available yet</p>
+          <p class="text-sm text-gray-500 mt-1">We're still switching it on for your account. Nothing is lost — please check back soon, or contact support if this doesn't clear.</p>
         </td></tr>`;
         const pagerEl = $('aud-pager');
         if (pagerEl) pagerEl.innerHTML = '';
@@ -692,7 +707,7 @@
       const name = [c.firstName, c.lastName].filter(Boolean).join(' ');
       return head + `<tr class="hover:bg-gray-50">
         <td class="px-4 py-3"><input type="checkbox" data-select="${c.id}" data-email="${esc(c.email)}" ${state.selected.has(c.id) ? 'checked' : ''}
-          aria-label="Select ${esc(name || c.email)}" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer"></td>
+          aria-label="Select ${esc(name || c.email)}" class="rounded border-gray-300 text-emerald-700 focus:ring-emerald-700 cursor-pointer"></td>
         <td class="px-4 py-3">
           <button type="button" data-open="${c.id}" class="text-left font-bold text-gray-900 hover:text-emerald-700 cursor-pointer">${esc(name || c.email)}</button>
           ${name ? `<p class="text-xs text-gray-500">${esc(c.email)}</p>` : ''}
@@ -805,7 +820,7 @@
       ? `<th class="aud-sort px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide whitespace-nowrap" data-sort="${esc(sort)}" tabindex="0">${esc(label)} <span data-sort-mark></span></th>`
       : `<th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide whitespace-nowrap">${esc(label)}</th>`;
     head.innerHTML = `<tr>
-      <th class="px-4 py-3 w-10"><input type="checkbox" id="aud-select-all" aria-label="Select all on this page" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer"></th>
+      <th class="px-4 py-3 w-10"><input type="checkbox" id="aud-select-all" aria-label="Select all on this page" class="rounded border-gray-300 text-emerald-700 focus:ring-emerald-700 cursor-pointer"></th>
       ${th('Contact', 'name')}
       ${visibleColumns().map((c) => th(c.label, c.sort)).join('')}
       <th class="px-4 py-3"></th>
@@ -818,7 +833,7 @@
     const on = new Set(state.columns);
     menu.innerHTML = `<p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1">Show columns</p>`
       + columnDefs().map((c) => `<label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
-          <input type="checkbox" data-col="${esc(c.key)}" ${on.has(c.key) ? 'checked' : ''} class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600">
+          <input type="checkbox" data-col="${esc(c.key)}" ${on.has(c.key) ? 'checked' : ''} class="rounded border-gray-300 text-emerald-700 focus:ring-emerald-700">
           <span class="truncate">${esc(c.label)}</span></label>`).join('')
       + `<button type="button" data-col-reset class="mt-1 text-xs font-bold text-gray-600 hover:text-gray-900 cursor-pointer">Reset to default</button>`;
   }
@@ -983,7 +998,7 @@
               <div class="flex items-center gap-2">
                 <label class="text-xs text-gray-500 w-28 shrink-0 truncate" title="${esc(f.label)}">${esc(f.label)}</label>
                 <input type="text" data-custom-key="${esc(f.key)}" value="${esc((contact.customFields || {})[f.key] || '')}"
-                  class="flex-1 px-2 py-1.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+                  class="flex-1 px-2 py-1.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-700 outline-none text-sm">
               </div>`).join('')}
           </div>
           <button type="button" id="aud-save-custom"
@@ -1405,7 +1420,7 @@
     $('aud-export-fields').innerHTML = exportFields().map((f) => `
       <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
         <input type="checkbox" data-export-field="${esc(f.key)}" ${(saved ? saved.has(f.key) : f.on) ? 'checked' : ''}
-          class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600">
+          class="rounded border-gray-300 text-emerald-700 focus:ring-emerald-700">
         <span class="truncate">${esc(f.label)}${f.key.startsWith('custom:') ? ' <span class="text-[11px] text-gray-400">custom</span>' : ''}</span>
       </label>`).join('');
 
@@ -1418,7 +1433,7 @@
     const pick = selectedOnly && sel ? 'selected' : scopes[0].value;
     $('aud-export-scope').innerHTML = scopes.map((o) => `
       <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
-        <input type="radio" name="aud-export-scope" value="${o.value}" ${o.value === pick ? 'checked' : ''} class="border-gray-300 text-emerald-600 focus:ring-emerald-600">
+        <input type="radio" name="aud-export-scope" value="${o.value}" ${o.value === pick ? 'checked' : ''} class="border-gray-300 text-emerald-700 focus:ring-emerald-700">
         ${esc(o.label)}
       </label>`).join('');
 
@@ -1626,9 +1641,18 @@
     if (!ok) return;
     let done = 0;
     let failed = 0;
-    for (const id of ids) {
-      try { await api(`${CONTACTS_API}?id=${id}`, { method: 'DELETE' }); done++; } catch { failed++; }
-    }
+    // Six at a time rather than one after another (review, 2026-10-22). Still the single-contact
+    // DELETE, deliberately: it carries THE DELETE RULE (opt-out kept first, then the row, then the
+    // erasure event), and a second bulk path on the server would have to repeat it exactly.
+    const DELETE_POOL = 6;
+    let next = 0;
+    const worker = async () => {
+      while (next < ids.length) {
+        const id = ids[next++];
+        try { await api(`${CONTACTS_API}?id=${id}`, { method: 'DELETE' }); done++; } catch { failed++; }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(DELETE_POOL, ids.length) }, worker));
     window.showToast(failed
       ? `Deleted ${done}; ${failed} could not be deleted — please try those again.`
       : `Deleted ${done} ${done === 1 ? 'contact' : 'contacts'}.`);
@@ -1739,6 +1763,52 @@
   // ── Wiring ─────────────────────────────────────────────────────────────────
 
   function wire() {
+    // ── Phone layout (layout review, 2026-10-22) ──────────────────────────────────────────────
+    // These elements are new on every visit (the view is re-injected), so their own listeners never
+    // stack; the one document listener is bound once.
+    const sideToggle = $('aud-side-toggle');
+    sideToggle?.addEventListener('click', () => {
+      const side = sideToggle.closest('.aud-side');
+      const open = !side.classList.contains('is-open');
+      side.classList.toggle('is-open', open);
+      sideToggle.setAttribute('aria-expanded', String(open));
+    });
+    $('aud-segment-pick')?.addEventListener('change', (e) => {
+      state.filters.segmentId = e.target.value || '';
+      state.page = 1;
+      renderSegments();
+      loadContacts();
+    });
+    const actionsBtn = $('aud-more-btn');
+    const actionsMenu = $('aud-more-menu');
+    const setActionsMenu = (open, refocus) => {
+      if (!actionsBtn || !actionsMenu) return;
+      actionsMenu.hidden = !open;
+      actionsBtn.setAttribute('aria-expanded', String(open));
+      if (open) actionsMenu.querySelector('button')?.focus();
+      else if (refocus) actionsBtn.focus();
+    };
+    actionsBtn?.addEventListener('click', () => setActionsMenu(actionsMenu.hidden));
+    actionsMenu?.addEventListener('click', (e) => {
+      const item = e.target.closest('[data-aud-more]');
+      if (!item) return;
+      setActionsMenu(false);
+      $(item.getAttribute('data-aud-more'))?.click();
+    });
+    actionsMenu?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); setActionsMenu(false, true); }
+    });
+    if (!window._audMoreOutsideBound) {
+      window._audMoreOutsideBound = true;
+      document.addEventListener('click', (e) => {
+        const menu = document.getElementById('aud-more-menu');
+        if (menu && !menu.hidden && !e.target.closest('.aud-more-wrap')) {
+          menu.hidden = true;
+          document.getElementById('aud-more-btn')?.setAttribute('aria-expanded', 'false');
+        }
+      });
+    }
+
     const search = $('aud-search');
     if (search) {
       search.addEventListener('input', () => {
@@ -2087,8 +2157,8 @@
         if (resub) {
           const ok = await window.confirmModal(
             'Mark this person as subscribed? Only do this if they have asked to hear from you again — it is recorded against your account.',
-            // Green, not the default red: this one is not destructive.
-            { title: 'Mark as subscribed?', confirmLabel: 'Mark as subscribed', confirmColor: '#059669' },
+            // Not the default red: this one is not destructive. An ordinary next step is primary.
+            { title: 'Mark as subscribed?', confirmLabel: 'Mark as subscribed', tone: 'primary' },
           );
           if (ok) await setStatus([resub.getAttribute('data-aud-resub')], 'subscribed');
           return;
@@ -2186,9 +2256,11 @@
     renderHead();
     fillSourceSelect();
     wire();
+    // Only custom fields gate the list (they are the table's columns). Segments and API keys, a
+    // folded-away panel, load alongside instead of holding the contacts back behind them.
+    const sidebar = Promise.all([loadSegments(), loadApiKeys()]);
     await loadCustomFields();
-    await loadApiKeys();
-    await loadSegments();
     await loadContacts();
+    await sidebar;
   };
 })();
