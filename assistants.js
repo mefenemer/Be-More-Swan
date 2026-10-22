@@ -3829,13 +3829,116 @@ const _RQ_NEWSLETTER_STATUS = {
     archived: ['archived', 'rejected'],
 };
 
+// newsletter_issues.status in the owner's words — the raw values ("pending_approval") were printed as-is.
+const _RQ_NEWSLETTER_STATUS_LABEL = {
+    draft: 'Draft',
+    pending_approval: 'Waiting for you',
+    in_review: 'Waiting for you',
+    approved: 'Approved',
+    scheduled: 'Scheduled',
+    sending: 'Sending now',
+    sent: 'Sent',
+    failed: 'Didn’t send',
+    archived: 'Archived',
+    rejected: 'Turned down',
+};
+
+// The chat's email confirm card (chat-session.js onEmailAction) could approve, book and send back
+// while these cards could only open the Studio (review, 2026-10-22). Same endpoint and actions
+// (newsletter-issues approve / reject), so the owner/admin rule and the empty-email check apply.
+// ⚠️ Review stays read-first, as on the Blog Writer's queue: approving an email to a whole list
+// happens in the Studio, next to the words being approved. Sending immediately stays there too.
 function _rqNewsletterActions(issue, statusKey) {
-    const primary = 'btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer';
-    const secondary = 'btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
-    // A sent issue is a record of what people received — it opens read-only and offers nothing else.
-    const open = `<button type="button" onclick="window._detailRqNewsletterOpen(${issue.id})" class="${statusKey === 'posted' ? secondary : primary}">${statusKey === 'posted' ? 'View' : 'Open in Studio'}</button>`;
-    return `<div class="flex items-center gap-2 mt-3">${open}</div>`;
+    // min-h-[44px] below sm: a ~30px button is too small a target for a thumb.
+    const tap = 'min-h-[44px] sm:min-h-0';
+    const primary = `btn-primary ${tap} px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer`;
+    const secondary = `btn-secondary ${tap} px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer`;
+    const btn = (action, label, cls) => `<button type="button" onclick="_detailRqNewsletterAct(this,'${action}')" class="${cls}">${label}</button>`;
+    const actions = [];
+    if (statusKey === 'review') {
+        actions.push(btn('open', 'Review in Email Studio', primary));
+    } else if (statusKey === 'approved') {
+        actions.push(btn('showSchedule', 'Schedule', primary));
+        actions.push(btn('open', 'Open in Email Studio', secondary));
+        actions.push(btn('reject', 'Send back to draft', secondary));
+    } else if (statusKey === 'scheduled') {
+        actions.push(btn('open', 'Open in Email Studio', primary));
+        actions.push(btn('showSchedule', 'Change time', secondary));
+        actions.push(btn('reject', 'Send back to draft', secondary));
+    } else if (statusKey === 'posted') {
+        // A sent issue is a record of what people received — it opens read-only and offers nothing else.
+        actions.push(btn('open', 'View', secondary));
+    } else {
+        actions.push(btn('open', 'Open in Email Studio', primary));
+    }
+    const schedulable = statusKey === 'approved' || statusKey === 'scheduled';
+    return `<div class="flex flex-wrap items-center gap-2 mt-3">
+        ${actions.join('')}
+        ${schedulable ? `<div class="rq-sched-row hidden w-full flex items-center gap-2 mt-2 flex-wrap">
+          <input type="datetime-local" aria-label="Send date and time" class="rq-sched-input border border-gray-300 rounded-lg px-2 py-1.5 text-base sm:text-xs focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">
+          <button type="button" onclick="_detailRqNewsletterAct(this,'schedule')" class="btn-primary ${tap} px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Book this time</button>
+        </div>` : ''}
+        <p class="rq-rec-err hidden w-full text-xs font-semibold text-red-600 mt-1" role="alert"></p>
+    </div>`;
 }
+
+window._detailRqNewsletterAct = async function (btn, action) {
+    const card = btn.closest('[data-rq-newsletter]');
+    if (!card) return;
+    const id = Number(card.getAttribute('data-rq-newsletter'));
+    const errEl = card.querySelector('.rq-rec-err');
+    const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); } };
+    if (errEl) errEl.classList.add('hidden');
+
+    if (action === 'open') { window._detailRqNewsletterOpen(id); return; }
+    if (action === 'showSchedule') {
+        const row = card.querySelector('.rq-sched-row');
+        row?.classList.remove('hidden');
+        row?.querySelector('input')?.focus();
+        return;
+    }
+
+    let payload;
+    let done;
+    if (action === 'schedule') {
+        const value = card.querySelector('.rq-sched-input')?.value || '';
+        // A wall-clock time in the email's own send timezone — newsletter-issues converts it, the
+        // same as the Studio's picker. The browser's clock is only a sanity check for "in the past".
+        if (!value) { showErr('Pick a date and time first.'); return; }
+        if (new Date(value).getTime() <= Date.now()) { showErr('Pick a time in the future.'); return; }
+        payload = { action: 'approve', id, scheduledFor: value };
+        done = (r) => `Booked — it sends ${new Date(r.issue?.scheduledFor || value).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.`;
+    } else if (action === 'reject') {
+        if (!(await window.confirmModal('It goes back to Review as a draft and won’t be sent. You can approve it again from the Email Studio.', {
+            title: 'Send this email back to draft?', confirmLabel: 'Yes, send it back', cancelLabel: 'Keep it',
+        }))) return;
+        payload = { action: 'reject', id };
+        done = () => 'Back to a draft in Review — it won’t be sent.';
+    } else {
+        return;
+    }
+
+    const buttons = card.querySelectorAll('button');
+    buttons.forEach((b) => { b.disabled = true; });
+    card.setAttribute('aria-busy', 'true');
+    try {
+        const res = await fetch('/.netlify/functions/newsletter-issues', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || 'Something went wrong.');
+        window.showToast?.(done(body));
+        _detailRqRenderGroups(_detailRqCurrentStatus);
+        const calHost = document.getElementById('assistant-calendar-host');
+        if (calHost) calHost.dataset.ready = '';
+        if (_isEmailAutopilot()) _loadEmailAutopilotStats(window._currentAssistantId);
+    } catch (e) {
+        buttons.forEach((b) => { b.disabled = false; });
+        showErr(e.message || 'Something went wrong.');
+    } finally {
+        card.removeAttribute('aria-busy');
+    }
+};
 
 function _detailRqNewsletterCard(issue, statusKey) {
     const when = issue.sentAt
@@ -3847,7 +3950,7 @@ function _detailRqNewsletterCard(issue, statusKey) {
       <div class="min-w-0">
         <p class="text-sm font-bold text-gray-900 truncate">${_rqEsc(issue.subject || '(untitled email)')}</p>
         <div class="flex items-center gap-2 mt-2">
-          <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">${_rqEsc(issue.status)}</span>
+          <span class="text-[11px] font-bold px-2 py-0.5 rounded-full border ${issue.status === 'failed' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-gray-100 text-gray-600 border-gray-200'}">${_rqEsc(_RQ_NEWSLETTER_STATUS_LABEL[issue.status] || issue.status)}</span>
           ${when ? `<span class="text-[11px] font-semibold text-gray-400">${_rqEsc(when)}</span>` : ''}
         </div>
         ${issue.status === 'sent' ? _rqNewsletterResults(issue) : ''}
@@ -4607,10 +4710,118 @@ function _isBlogAutopilot(data) {
     return (data || window._detailCurrentData || {}).roleKey === 'blog_writer';
 }
 
+// Email Marketing autopilot (draft-newsletter-issues) is a different engine wearing the same card:
+// it reads the setup's "Drafting cadence" (posting_frequency) and "Day you usually send"
+// (newsletterSendDay), writes ONE email at a time and waits until that one is dealt with. It has no
+// preferred days or times, no horizon, and nothing in get-social-drafts — so the shared card told
+// email owners about "posts", "7 days kept ahead" and Mon–Fri 09:00, and its button scrolled to a
+// schedule card this role hides (review, 2026-10-22).
+function _isEmailAutopilot(data) {
+    return (data || window._detailCurrentData || {}).roleKey === 'newsletter_editor';
+}
+
+// The tiles under the card are shared; their labels are rewritten per role and reset for the rest,
+// because the page is reused across assistants without a reload.
+function _setAutopilotTileLabels(isEmail) {
+    const labels = isEmail ? ['Written', 'Scheduled', 'Sent'] : ['Created', 'Scheduled', 'Published'];
+    ['created', 'scheduled', 'published'].forEach((k, i) => {
+        const el = document.getElementById(`metrics-label-${k}`);
+        if (el) el.textContent = labels[i];
+    });
+}
+
+function _renderEmailAutopilotCard(data) {
+    const ctx = data.context || {};
+    const el = id => document.getElementById(id);
+    const pill = el('autopilot-pill');
+    const headline = el('autopilot-headline');
+    const detail = el('autopilot-detail');
+    const adjustBtn = el('autopilot-adjust-btn');
+    // ⚠️ Not _autopilotSummary: that falls back to the SOCIAL default (3× a week) when nothing is
+    // saved, and the email cron reads a missing cadence as "on demand" — the card has to say off.
+    const rawFreq = String(ctx.posting_frequency || '').trim();
+    const reading = rawFreq ? (window.PostingCadence?.read?.(rawFreq) || { kind: 'unrecognised' }) : { kind: 'on_demand' };
+    const phrase = _AUTOPILOT_FREQ_PHRASE[rawFreq.toLowerCase()] || rawFreq;
+    const sendDay = typeof ctx.newsletterSendDay === 'string' && ctx.newsletterSendDay ? ctx.newsletterSendDay : '';
+    const active = reading.kind === 'scheduled';
+
+    el('autopilot-horizon-stat')?.classList.add('hidden');
+    el('autopilot-next')?.classList.add('hidden');
+    _setAutopilotTileLabels(true);
+
+    if (active) {
+        if (pill) { pill.textContent = '● Active'; pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700'; }
+        if (headline) headline.textContent = `Writing an email ${phrase}, automatically`;
+        // The cron only honours the send day at weekly-or-slower cadences (draft-newsletter-issues).
+        const timing = sendDay && (reading.postsPerWeek || 0) <= 1
+            ? `Each one is ready a day or two before ${sendDay}`
+            : 'Each one is written as soon as the last is dealt with';
+        if (detail) detail.textContent = `${timing}, and waits in your Emails tab for you to approve. It won’t write the next one while one is still waiting, and nothing is sent without you.`;
+        if (adjustBtn) adjustBtn.textContent = 'Change how often';
+    } else if (reading.kind === 'unrecognised') {
+        if (pill) { pill.textContent = '● Not running'; pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800'; }
+        if (headline) headline.textContent = 'Autopilot isn’t running — we couldn’t read how often to write';
+        if (detail) detail.textContent = `Your drafting cadence is saved as “${rawFreq}”, which we can’t read — so no emails are being written automatically. Pick one from the list and it will start.`;
+        if (adjustBtn) adjustBtn.textContent = 'Fix how often';
+    } else {
+        if (pill) { pill.textContent = '● Off'; pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500'; }
+        if (headline) headline.textContent = 'Autopilot is off — you start each email yourself';
+        if (detail) detail.textContent = 'Pick how often to write and your assistant will draft emails on that rhythm for you to review. Nothing is sent without your approval.';
+        if (adjustBtn) adjustBtn.textContent = 'Turn on autopilot';
+    }
+
+    // The Blogs tab's chip is blog-only; make sure a previous assistant's chip isn't left showing.
+    const chip = el('detail-rq-autopilot-chip');
+    if (chip) { chip.classList.add('hidden'); chip.style.display = 'none'; }
+
+    _loadEmailAutopilotStats(window._currentAssistantId);
+}
+
+// One newsletter-issues read fills the tiles, the waiting count and "Next email sends …".
+// Statuses follow the Emails tab's columns (_RQ_NEWSLETTER_STATUS) so the numbers agree with it.
+async function _loadEmailAutopilotStats(assistantId) {
+    if (!assistantId) return;
+    const el = id => document.getElementById(id);
+    try {
+        const res = await fetch(`/.netlify/functions/newsletter-issues?assistantId=${assistantId}`);
+        if (!res.ok) return;
+        const issues = (await res.json()).issues || [];
+        if (Number(window._currentAssistantId) !== Number(assistantId)) return;
+
+        const counts = { written: 0, scheduled: 0, sent: 0, waiting: 0 };
+        const now = Date.now();
+        let next = null;
+        for (const i of issues) {
+            if (_RQ_NEWSLETTER_STATUS.archived.includes(i.status)) continue;
+            counts.written++;
+            if (_RQ_NEWSLETTER_STATUS.scheduled.includes(i.status)) {
+                counts.scheduled++;
+                const t = i.scheduledFor ? new Date(i.scheduledFor).getTime() : NaN;
+                if (!Number.isNaN(t) && t > now && (next === null || t < next)) next = t;
+            }
+            if (_RQ_NEWSLETTER_STATUS.posted.includes(i.status)) counts.sent++;
+            if (_RQ_NEWSLETTER_STATUS.review.includes(i.status)) counts.waiting++;
+        }
+        const tile = (id, n, title) => { const t = el(id); if (t) { t.textContent = n.toLocaleString(); t.title = title; } };
+        tile('metrics-total-created', counts.written, 'Every email this assistant has written that you can still open — drafts, approved, scheduled and sent. Excludes archived ones.');
+        tile('metrics-total-scheduled', counts.scheduled, 'Approved and booked to send — the Scheduled column.');
+        tile('metrics-total-published', counts.sent, 'Emails that have gone out, or are going out now — the Sent column.');
+        _syncAutopilotPending(counts.waiting);
+
+        const nextEl = el('autopilot-next');
+        if (nextEl && next !== null) {
+            nextEl.textContent = `Next email sends ${new Date(next).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`;
+            nextEl.classList.remove('hidden');
+        }
+    } catch { /* the tiles keep their placeholders */ }
+}
+
 window._renderAutopilotCard = function(data) {
     const card = document.getElementById('autopilot-status-card');
     if (!card) return;
     data = data || window._detailCurrentData || {};
+    if (_isEmailAutopilot(data)) { _renderEmailAutopilotCard(data); return; }
+    _setAutopilotTileLabels(false);
     const ctx = data.context || {};
     const s = _autopilotSummary(ctx);
     const horizon = data.draftHorizonDays || 7;
@@ -4753,10 +4964,17 @@ window._openContentSettingsCard = function(which) {
 
 // "Adjust schedule" / "Turn on autopilot" → open the Operational Setup panel and scroll to the
 // Posting Schedule controls, which already write posting_frequency/days/times/timezone + horizon.
+//
+// Roles whose schedule card is hidden (hasScheduleCard: false — the Email Marketing Assistant) keep
+// their cadence in the setup questions instead (_renderOperationSection → #edit_op_posting_frequency).
+// Scrolling to the hidden card left the panel at its top with nothing to show for the click.
 window._openAutopilotSettings = function() {
     if (typeof window._openBriefDrawer === 'function') window._openBriefDrawer('operation');
     setTimeout(() => {
-        document.getElementById('module-posting-schedule')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const card = document.getElementById('module-posting-schedule');
+        if (card && !card.classList.contains('hidden')) { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+        const field = document.getElementById('edit_op_posting_frequency');
+        if (field) { field.scrollIntoView({ behavior: 'smooth', block: 'center' }); field.focus({ preventScroll: true }); }
     }, 120);
 };
 
@@ -8136,6 +8354,13 @@ async function _prefetchDetailRqBadge(assistantId) {
             if (!posts) return;
             const wanted = new Set(['draft', 'pending_approval', 'in_review']);
             count = posts.filter((p) => wanted.has(p.status)).length;
+        } else if (rq.source === 'newsletter_issues') {
+            // Email Marketing: the Review column's statuses. This fell through to get-social-drafts,
+            // which holds no emails, and zeroed the Emails badge and the Autopilot card's waiting
+            // count after the queue had painted them (2026-10-22).
+            const res = await fetch(`/.netlify/functions/newsletter-issues?assistantId=${assistantId}`);
+            if (!res.ok) return;
+            count = ((await res.json()).issues || []).filter((i) => _RQ_NEWSLETTER_STATUS.review.includes(i.status)).length;
         } else {
             const res = await fetch(`/.netlify/functions/get-social-drafts?status=pending_approval&assistantId=${assistantId}`);
             if (!res.ok) return;
@@ -8254,7 +8479,9 @@ async function _fetchAndRenderLeadRoi(assistantId, period = 'all') {
 }
 
 /**
- * The hero's Time Saved / Money Saved strip for the Blog Writer (registry `roiSource: 'blog'`).
+ * The hero's Time Saved / Money Saved strip for the Blog Writer (registry `roiSource: 'blog'`)
+ * and the Email Marketing Assistant (`roiSource: 'newsletter'`). The registry declared 'newsletter'
+ * from 2026-08-20 but nothing here read it, so that strip never appeared (review, 2026-10-22).
  *
  * Same endpoint as the social path — get-assistant-metrics, whose hours come from
  * src/utils/roi-activity.ts, and that module already counts blog_posts. What it does NOT do is
@@ -8265,7 +8492,15 @@ async function _fetchAndRenderLeadRoi(assistantId, period = 'all') {
  * The markup, the period toggle and the wording are the shared ones, deliberately: this exists so
  * the same figure looks the same on all three assistants, not so the blog gets a third variant.
  */
-async function _fetchAndRenderBlogRoi(assistantId, period = 'all') {
+// What the hours on the strip stand for, per roiSource — the one line that differs between them.
+const _WRITTEN_ROI_HOURS_NOTE = {
+    // Not "~N min per post": that multiplier prices a SOCIAL post, and a long-form article is
+    // not one. The rate card is the platform's, and the strip says whose work it is costing.
+    blog: 'Researching, drafting and formatting long-form posts',
+    newsletter: 'Planning, writing and laying out your emails',
+};
+
+async function _fetchAndRenderWrittenRoi(assistantId, period = 'all') {
     const roiStrip = document.getElementById('detail-roi-strip');
     if (!roiStrip || roiStrip.dataset.roleHidden === '1') return;
     const el = id => document.getElementById(id);
@@ -8276,7 +8511,7 @@ async function _fetchAndRenderBlogRoi(assistantId, period = 'all') {
         const active = btn.dataset.period === period;
         btn.className = `metrics-period-btn min-h-[44px] sm:min-h-0 px-2.5 py-1 text-[11px] font-bold rounded-md transition ${active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
         btn.setAttribute('aria-pressed', String(active));
-        btn.onclick = active ? null : () => _fetchAndRenderBlogRoi(assistantId, btn.dataset.period);
+        btn.onclick = active ? null : () => _fetchAndRenderWrittenRoi(assistantId, btn.dataset.period);
     });
 
     try {
@@ -8304,10 +8539,8 @@ async function _fetchAndRenderBlogRoi(assistantId, period = 'all') {
         if (hoursLabel) hoursLabel.textContent = 'Time Saved';
         const hours = el('metrics-hours-saved');
         if (hours) { hours.textContent = `~${d.hoursSaved}h`; hours.title = ''; }
-        // Not "~N min per post": that multiplier prices a SOCIAL post, and a long-form article is
-        // not one. The rate card is the platform's, and the strip says whose work it is costing.
         const hoursNote = el('metrics-hours-note');
-        if (hoursNote) hoursNote.textContent = 'Researching, drafting and formatting long-form posts';
+        if (hoursNote) hoursNote.textContent = _WRITTEN_ROI_HOURS_NOTE[roiStrip.dataset.roiSource] || _WRITTEN_ROI_HOURS_NOTE.blog;
 
         const gbp = el('metrics-gbp-saved');
         const roiNote = el('metrics-roi-note');
@@ -8410,8 +8643,8 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
     if (roiStrip && roiStrip.dataset.roiSource === 'lead') {
         return _fetchAndRenderLeadRoi(assistantId, period);
     }
-    if (roiStrip && roiStrip.dataset.roiSource === 'blog') {
-        return _fetchAndRenderBlogRoi(assistantId, period);
+    if (roiStrip && (roiStrip.dataset.roiSource === 'blog' || roiStrip.dataset.roiSource === 'newsletter')) {
+        return _fetchAndRenderWrittenRoi(assistantId, period);
     }
     if (!card) return;
     // Non-social roles have no post-based ROI — the registry marks both role-hidden; respect it.

@@ -51,6 +51,8 @@
     notes: {},
     showCancelled: false,
     pollTimer: null,
+    /** The HTML each brief card and the toolbar were last painted with — what a poll diffs against. */
+    painted: { cards: new Map(), toolbar: '' },
   };
 
   function esc(v) {
@@ -87,7 +89,8 @@
     return (data && data.error) || `Request failed (HTTP ${status}).`;
   }
 
-  async function load() {
+  /** `poll` — a background refresh while a round runs: repaint only what changed (see repaintChanged). */
+  async function load({ poll = false } = {}) {
     if (!state.assistantId) return;
     try {
       const data = await post({ action: 'list', assistantId: state.assistantId });
@@ -104,7 +107,7 @@
       state.loadError = err.message;
     }
     state.loaded = true;
-    rerender();
+    if (poll && state.rendered) { updateBadge(); repaintChanged(); } else rerender();
     schedulePoll();
   }
 
@@ -113,7 +116,7 @@
     clearTimeout(state.pollTimer);
     const making = state.briefs.some((b) => b.status === 'generating');
     syncBusy(making);
-    if (making) state.pollTimer = setTimeout(load, POLL_MS);
+    if (making) state.pollTimer = setTimeout(() => load({ poll: true }), POLL_MS);
   }
 
   /**
@@ -431,7 +434,7 @@
   function toolbarHtml() {
     const credits = state.credits == null ? '' : `<span class="text-xs text-gray-500">AI credits left this month: <span class="font-bold">${esc(state.credits)}</span></span>`;
     return `
-      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4" data-brief-toolbar>
         <div>
           <h2 class="text-base font-bold text-gray-900"><span data-explain="brand-briefs">Briefs</span></h2>
           <p class="text-xs text-gray-500">Say what a picture is for. Approve the option that fits — it goes into your library for every assistant to use.</p>
@@ -516,6 +519,54 @@
     host.querySelectorAll('[data-brief-reject-note]').forEach((el) => {
       if (keptNotes[el.dataset.briefRejectNote] != null) el.value = keptNotes[el.dataset.briefRejectNote];
     });
+    state.painted.cards = new Map(state.briefs.map((b) => [b.id, briefCard(b)]));
+    state.painted.toolbar = toolbarHtml();
+  }
+
+  /** The brief ids in the order render() lays them out — live first, then cancelled when shown. */
+  function paintedOrder() {
+    const live = state.briefs.filter((b) => b.status !== 'cancelled');
+    const cancelled = state.showCancelled ? state.briefs.filter((b) => b.status === 'cancelled') : [];
+    return [...live, ...cancelled].map((b) => String(b.id));
+  }
+
+  /**
+   * The poll's repaint. render() replaces the whole tab, and every 4 s while a round ran that threw
+   * away focus, the caret, scroll inside the grid and any video that was playing — on a phone the
+   * keyboard closed mid-word (review, 2026-10-22). Only the cards whose HTML actually changed (the one
+   * being made, as a rule) are swapped; the form, the guidelines and every other card are left alone.
+   * A brief appearing, disappearing or changing section falls back to the full render.
+   */
+  function repaintChanged() {
+    const host = document.getElementById('briefs-host');
+    if (!host) return;
+    const onScreen = Array.from(host.querySelectorAll('[data-brief-card]')).map((el) => el.dataset.briefCard);
+    const wanted = paintedOrder();
+    if (onScreen.length !== wanted.length || onScreen.some((id, i) => id !== wanted[i])) { render(); return; }
+
+    const toolbar = toolbarHtml();
+    if (toolbar !== state.painted.toolbar) {
+      const el = host.querySelector('[data-brief-toolbar]');
+      if (el) el.outerHTML = toolbar;
+      state.painted.toolbar = toolbar;
+    }
+    for (const b of state.briefs) {
+      const html = briefCard(b);
+      if (state.painted.cards.get(b.id) === html) continue;
+      state.painted.cards.set(b.id, html);
+      const el = host.querySelector(`[data-brief-card="${b.id}"]`);
+      if (!el) continue;
+      // A half-typed "why not" note in this card survives the swap, as it does a full render.
+      const notes = {};
+      el.querySelectorAll('[data-brief-reject-note]').forEach((n) => { notes[n.dataset.briefRejectNote] = n.value; });
+      const tpl = document.createElement('template');
+      tpl.innerHTML = html.trim();
+      const fresh = tpl.content.firstElementChild;
+      fresh.querySelectorAll('[data-brief-reject-note]').forEach((n) => {
+        if (notes[n.dataset.briefRejectNote] != null) n.value = notes[n.dataset.briefRejectNote];
+      });
+      el.replaceWith(fresh);
+    }
   }
 
   function rerender() {
