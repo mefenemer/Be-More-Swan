@@ -110,7 +110,7 @@ async function main() {
     await check('the email route resolves the proposal with the real parser, and keeps the card', () => {
         const o = read('netlify/functions/chat-orchestrator.ts');
         assert.match(o, /emailAction = await resolveEmailActionProposal\(db, orgId, session\.aiAssistantId, emailActionReq, snapshotTz, parseScheduleInstruction\);/);
-        assert.match(o, /: formDraft \? \{ type: AUDIENCE_FORM_DRAFT_TYPE, \.\.\.formDraft \}\s*\/\/[^\n]*\n\s*: emailAction;/);
+        assert.match(o, /: formDraft \? \{ type: AUDIENCE_FORM_DRAFT_TYPE, \.\.\.formDraft \}(?:\s*\/\/[^\n]*\n)+\s*: emailAction \?\? audienceCard;/);
         assert.match(o, /"type": "email_action_proposal"/);
     });
     await check('the email list the chat reads names each email by its id', () => {

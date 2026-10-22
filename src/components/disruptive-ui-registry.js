@@ -3083,6 +3083,78 @@
 
   register('email_action_proposal', renderEmailActionProposalCard);
 
+  // ── Built-in: Audience cards (Email Marketing chat) ───────────────────────
+  // { type: 'audience_segment_proposal', name, rules, description, matches, blocked, settled? }
+  // { type: 'audience_contact_proposal', email, firstName, lastName, company, segmentId, segmentName,
+  //   blocked, settled? }
+  //
+  // The Audience page's "Rule-based segment" and "Add contact", from chat. Facts from the
+  // organisation's rows (src/utils/chat-audience.ts): the segment's description and count come from
+  // the rule builder's own preview, and a contact who is already in the audience or opted out never
+  // gets a button. The click dispatches `audience:action`; chat-session.js calls audience-segments /
+  // audience-contacts — the page's own endpoints. A contact also needs the consent box ticked.
+  function renderAudienceProposalCard(ui, esc) {
+    const isSegment = ui.type === 'audience_segment_proposal';
+    if (isSegment ? !ui.name : !ui.email) return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const head = isSegment ? 'New segment' : 'Add to your audience';
+    const person = [ui.firstName, ui.lastName].filter(Boolean).join(' ');
+    const matches = Number(ui.matches);
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      ${isSegment
+        ? `<p class="text-sm font-bold text-gray-900 mt-2 break-words">${esc(ui.name)}</p>
+           ${ui.description ? `<p class="text-sm text-gray-700 mt-1">${esc(ui.description)}</p>` : ''}
+           ${!blocked && Number.isFinite(matches) ? `<p class="text-sm text-gray-900 mt-3"><span class="font-bold">${matches.toLocaleString()}</span> subscribed ${matches === 1 ? 'person matches' : 'people match'} right now.</p>
+             <p class="text-xs text-gray-600 mt-1">Members are worked out from the rule every time you send, so it never goes stale.</p>` : ''}`
+        : `<p class="text-sm font-bold text-gray-900 mt-2 break-words">${esc(ui.email)}</p>
+           ${person || ui.company ? `<p class="text-sm text-gray-700 mt-1">${esc([person, ui.company].filter(Boolean).join(' · '))}</p>` : ''}
+           ${ui.segmentName ? `<p class="text-xs text-gray-600 mt-1">Also added to “${esc(ui.segmentName)}”.</p>` : ''}`}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${!blocked && !isSegment ? `<label class="flex items-start gap-2 mt-3 text-sm text-gray-800 cursor-pointer">
+          <input type="checkbox" data-aud-consent class="mt-0.5 rounded border-gray-300 text-emerald-700 focus:ring-emerald-700">
+          <span>They agreed to hear from me. This is recorded against my account.</span>
+        </label>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-aud-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${isSegment ? 'Save segment' : 'Add contact'}</button>
+        <button type="button" data-aud-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+        ${typeof window.loadView === 'function' ? '<button type="button" data-aud-open class="btn-swan-link px-1 py-2 text-sm font-bold">Open the Audience page</button>' : ''}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-aud-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-aud-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-aud-go], [data-aud-cancel], [data-aud-consent]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-aud-open]')) { window.loadView?.('audience'); return; }
+      if (e.target.closest('[data-aud-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-aud-go]')) return;
+      const consent = el.querySelector('[data-aud-consent]');
+      if (!isSegment && !consent?.checked) { say('Tick the box first — only add people who agreed to hear from you.', 'error'); consent?.focus(); return; }
+      setBusy(true);
+      say(isSegment ? 'Saving…' : 'Adding…');
+      el.dispatchEvent(new CustomEvent('audience:action', {
+        bubbles: true,
+        detail: {
+          kind: isSegment ? 'segment' : 'contact',
+          name: ui.name, rules: ui.rules,
+          email: ui.email, firstName: ui.firstName || null, lastName: ui.lastName || null, company: ui.company || null,
+          segmentId: ui.segmentId || null, segmentName: ui.segmentName || null, consented: !!consent?.checked,
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Done.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('audience_segment_proposal', renderAudienceProposalCard);
+  register('audience_contact_proposal', renderAudienceProposalCard);
+
   // ── Built-in: Lead Action Proposal Card (Lead Generation chat) ─────────────
   // { type: 'lead_action_proposal', action: 'send'|'move_to_outreach'|'reject'|'set_outcome', recordId,
   //   assistantId, title, rating, approvalStatus, to, subject, body, signature, footerName,

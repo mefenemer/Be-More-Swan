@@ -853,6 +853,39 @@
       document.dispatchEvent(new CustomEvent('posts:changed', { detail: { assistantId } }));
     }
 
+    // Audience cards (src/utils/chat-audience.ts) → the Audience page's own endpoints:
+    // audience-segments `create` (a rule-based segment, the same validation as the rule builder) and
+    // audience-contacts `create` (one person, `via: 'chat'` so the consent record says where it came
+    // from). Own fetch, not postActionCall: that one's 409 advice is about posts.
+    async function onAudienceAction(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const call = (fn, body) => fetch(`/.netlify/functions/${fn}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `That didn’t work (HTTP ${res.status}).`);
+        return data;
+      });
+      try {
+        if (d.kind === 'segment') {
+          await call('audience-segments', { action: 'create', kind: 'dynamic', name: d.name, rules: d.rules });
+          respond({ ok: true, message: `Saved — “${d.name}” is in Segments on the Audience page, ready to pick when you send.` });
+        } else if (d.kind === 'contact') {
+          if (d.consented !== true) throw new Error('Confirm they agreed to hear from you first.');
+          await call('audience-contacts', {
+            action: 'create', via: 'chat', email: d.email, firstName: d.firstName, lastName: d.lastName,
+            company: d.company, segmentId: d.segmentId || undefined,
+          });
+          respond({ ok: true, message: `Added — ${d.email} is subscribed${d.segmentName ? ` and in “${d.segmentName}”` : ''}.` });
+        } else {
+          throw new Error('Unknown action.');
+        }
+      } catch (err) {
+        respond({ ok: false, error: err.message });
+      }
+    }
+
     // Lead action cards → the Lead Generation tabs' own endpoints: assistant-records PATCH (the
     // approval, Move to Outreach, Turn down — so the lead_approved / lead_rejected ledger events and
     // the CRM hand-off fire exactly as from the page) and lead-generation (send_outreach,
@@ -1418,6 +1451,7 @@
     container.addEventListener('post:action', onPostAction);
     container.addEventListener('blog:action', onBlogAction);
     container.addEventListener('email:action', onEmailAction);
+    container.addEventListener('audience:action', onAudienceAction);
     container.addEventListener('lead:action', onLeadAction);
     container.addEventListener('brief:review', onBriefReview);
     container.addEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
@@ -1481,6 +1515,7 @@
         container.removeEventListener('post:action', onPostAction);
         container.removeEventListener('blog:action', onBlogAction);
         container.removeEventListener('email:action', onEmailAction);
+        container.removeEventListener('audience:action', onAudienceAction);
         container.removeEventListener('lead:action', onLeadAction);
         container.removeEventListener('brief:review', onBriefReview);
         container.removeEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
