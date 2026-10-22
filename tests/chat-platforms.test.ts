@@ -166,6 +166,15 @@ async function main() {
         assert.ok(handler.includes('linked_integrations') && handler.includes('appliedDefaults'), 'both the context and the configuration copy');
     });
 
+    await check('the page refuses the last switch too, before it saves anything', () => {
+        const integrations = read('integrations.js');
+        const toggle = integrations.slice(integrations.indexOf('window._intToggleUseForAssistant = async function'), integrations.indexOf('// ── Load & render platform cards'));
+        const guard = toggle.indexOf('liveOn.length === 1');
+        assert.ok(guard > -1, 'the switch must refuse turning the last live platform off');
+        assert.ok(guard < toggle.indexOf('update-assistant-context'), 'refused before the save');
+        assert.ok(toggle.slice(guard, toggle.indexOf('update-assistant-context')).includes('pause the assistant'));
+    });
+
     await check('the card is registered and the orchestrator offers it', () => {
         assert.ok(read('src/components/disruptive-ui-registry.js').includes("register('platforms_proposal', renderPlatformsProposalCard)"));
         const orch = read('netlify/functions/chat-orchestrator.ts');

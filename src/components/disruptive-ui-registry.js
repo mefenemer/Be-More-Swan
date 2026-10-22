@@ -2281,7 +2281,7 @@
     el.innerHTML = `
       <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Waiting reviews · Approval needed</p>
       ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
-      <ul class="text-xs text-gray-700 mt-2 space-y-0.5">${decisions.map((d) => `<li>Review ${esc(d.reviewId)}: <strong>${d.decision === 'approve' ? 'show it on your website' : `decline — ${esc(RD_REASON[d.reason])}`}</strong></li>`).join('')}</ul>
+      <ul class="text-xs text-gray-700 mt-2 space-y-0.5">${decisions.map((d) => `<li>Review ${esc(d.reviewId)}: <strong>${d.decision === 'approve' ? 'approve it' : `decline — ${esc(RD_REASON[d.reason])}`}</strong></li>`).join('')}</ul>
       <p class="text-xs text-gray-600 mt-2">Declined reviews aren't shown or counted. A genuine bad review should be approved — you can hide it later, and it still counts in your average.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-rd-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${decisions.length ? '' : 'disabled'}>Do it</button>
@@ -3552,6 +3552,59 @@
   }
 
   register('platforms_proposal', renderPlatformsProposalCard);
+
+  // ── Built-in: Library Proposal Cards (Support Agent's Knowledge Base; Social / Blog Inspo) ────
+  // { type: 'kb_article_proposal', assistantId, title, content, blocked, settled? }
+  // { type: 'inspo_proposal', assistantId, kind: 'text'|'url', title, body, url, note, blocked, settled? }
+  // Built by src/utils/chat-library.ts. The card shows EXACTLY what will be saved; the click dispatches
+  // `library:add` and chat-session.js POSTs it to kb-articles.ts / inspo-items.ts as the tab's Save does.
+  function renderLibraryProposalCard(ui, esc) {
+    const assistantId = Number(ui.assistantId);
+    if (!Number.isInteger(assistantId)) return null;
+    const isKb = ui.type === 'kb_article_proposal';
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const text = isKb ? String(ui.content || '') : String(ui.body || '');
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${isKb ? 'Knowledge Base' : 'Inspo'} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      ${ui.title ? `<p class="text-sm font-bold text-gray-900 mt-2 break-words">${esc(String(ui.title))}</p>` : ''}
+      ${!isKb && ui.kind === 'url' && ui.url ? `<p class="text-sm text-gray-700 mt-1 break-all">${esc(String(ui.url))}</p>` : ''}
+      ${text ? `<div class="mt-2 max-h-48 overflow-y-auto rounded-lg bg-gray-50 border border-gray-100 p-3 text-sm text-gray-800 whitespace-pre-wrap break-words">${esc(text)}</div>` : ''}
+      ${!isKb && ui.note ? `<p class="text-sm text-gray-700 mt-2 break-words"><span class="font-bold">What you like about it:</span> ${esc(String(ui.note))}</p>` : ''}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${!blocked ? `<p class="text-xs text-gray-600 mt-3">${isKb ? 'I answer from this once it’s saved. You can edit or remove it in the Knowledge Base tab.' : (ui.kind === 'url' ? 'I read the page once it’s saved, then apply what I learn to every draft. You can edit or remove it in the Inspo tab.' : 'I apply this to every draft once it’s saved. You can edit or remove it in the Inspo tab.')}</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-lp-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${isKb ? 'Add article' : 'Add to Inspo'}</button>
+        <button type="button" data-lp-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-lp-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-lp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-lp-go], [data-lp-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-lp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-lp-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('library:add', {
+        bubbles: true,
+        detail: {
+          assistantId, which: isKb ? 'kb' : 'inspo', title: ui.title || '', content: ui.content || '',
+          kind: ui.kind, body: ui.body || '', url: ui.url || '', note: ui.note || '',
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Saved.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('kb_article_proposal', renderLibraryProposalCard);
+  register('inspo_proposal', renderLibraryProposalCard);
   register('SocialPostDraftCard', renderSocialPostDraftCard);
 
   // ── Built-in: Blog Post Draft Card ──────────────────────────────────────────

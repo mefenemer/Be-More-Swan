@@ -170,8 +170,8 @@ async function main() {
     });
     await check('proposals are rebuilt server-side and kept, and do not trip the unbacked-claim guard', () => {
         assert.match(o, /audienceCard = segmentReq \? await resolveSegmentProposal\(db, orgId, segmentReq\) : await resolveContactProposal\(db, orgId, contactReq!\);/);
-        assert.match(o, /: emailAction \?\? audienceCard \?\? profileCard;/);
-        assert.match(o, /!emailAction && !audienceCard && !profileCard\) \{/);
+        assert.match(o, /: emailAction \?\? audienceCard \?\? reviewsCard \?\? profileCard;/);
+        assert.match(o, /!emailAction && !audienceCard && !reviewsCard && !profileCard\) \{/);
     });
     const cs = read('src/components/chat-session.js');
     const reg = read('src/components/disruptive-ui-registry.js');

@@ -3887,6 +3887,7 @@ function _detailRqBlogCard(p, statusKey) {
           <span class="text-[11px] font-bold px-2 py-0.5 rounded-full border ${p.status === 'failed' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-gray-100 text-gray-600 border-gray-200'}">${_rqEsc(_RQ_BLOG_STATUS_LABEL[p.status] || p.status)}</span>
           ${when ? `<span class="text-[11px] font-semibold text-gray-500">${_rqEsc(when)}</span>` : ''}
         </div>
+        ${p.status === 'failed' && p.failureReason ? `<p class="text-xs text-amber-800 mt-2 break-words"><span class="font-bold">Why:</span> ${_rqEsc(p.failureReason)}</p>` : ''}
         ${note ? `<p class="text-xs text-gray-600 mt-2">${_rqEsc(note)}</p>` : ''}
       </div>
       ${_rqBlogActions(p, statusKey)}

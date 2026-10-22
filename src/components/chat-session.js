@@ -1111,6 +1111,30 @@
       }
     }
 
+    // Library cards → kb-articles.ts / inspo-items.ts, the Knowledge Base and Inspo tabs' own Save.
+    async function onLibraryAdd(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const id = Number(d.assistantId);
+      try {
+        const isKb = d.which === 'kb';
+        const payload = isKb
+          ? { assistantId: id, title: d.title, content: d.content, source: 'manual' }
+          : (d.kind === 'url'
+            ? { assistantId: id, kind: 'url', sourceUrl: d.url, title: d.title || undefined, userNote: d.note || undefined }
+            : { assistantId: id, kind: 'text', body: d.body, title: d.title || undefined, userNote: d.note || undefined });
+        const res = await fetch(`/.netlify/functions/${isKb ? 'kb-articles' : 'inspo-items'}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(payload),
+        });
+        const out = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(out.error || `That didn’t work (HTTP ${res.status}).`);
+        respond({ ok: true, message: isKb ? 'Added — it’s in the "Knowledge Base" tab.' : (d.kind === 'url' ? 'Added — I’m reading the page now; it’s in the "Inspo" tab.' : 'Added — it’s in the "Inspo" tab.') });
+        document.dispatchEvent(new CustomEvent('assistant:libraryChanged', { detail: { assistantId: id, which: isKb ? 'kb' : 'inspo' } }));
+      } catch (err) {
+        respond({ ok: false, error: err.message });
+      }
+    }
+
     async function onLeadAction(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -1663,6 +1687,7 @@
     container.addEventListener('goal:change', onGoalChange);
     container.addEventListener('schedule:change', onScheduleChange);
     container.addEventListener('platforms:change', onPlatformsChange);
+    container.addEventListener('library:add', onLibraryAdd);
     container.addEventListener('brief:review', onBriefReview);
     container.addEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
     container.addEventListener('siteaudit:check', onSiteAuditCheck);
@@ -1732,6 +1757,7 @@
         container.removeEventListener('goal:change', onGoalChange);
         container.removeEventListener('schedule:change', onScheduleChange);
         container.removeEventListener('platforms:change', onPlatformsChange);
+        container.removeEventListener('library:add', onLibraryAdd);
         container.removeEventListener('brief:review', onBriefReview);
         container.removeEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
         container.removeEventListener('siteaudit:check', onSiteAuditCheck);

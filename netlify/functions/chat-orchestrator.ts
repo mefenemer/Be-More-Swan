@@ -77,6 +77,9 @@ import { buildPlanSnapshot } from '../../src/utils/chat-plan-snapshot';
 import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGoalProposal, type GoalCard } from '../../src/utils/chat-goals';
 import { resolveScheduleProposal, scheduleProposalFromUiElement, schedulePromptBlock, type ScheduleCard } from '../../src/utils/chat-schedule';
 import { buildPlatformsBlock, platformsProposalFromUiElement, resolvePlatformsProposal, type PlatformsCard } from '../../src/utils/chat-platforms';
+import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal, type LibraryCard } from '../../src/utils/chat-library';
+import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
+import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
 import { isInOutreachReview } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
 import { LOSS_REASONS } from '../../src/config/revenue-events';
@@ -2858,7 +2861,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // The "Use for this assistant" switches, for the roles whose Connections card shows them
     // (src/utils/chat-platforms.ts). Null for every other role; never throws.
     const platformsBlock = route !== defaultRoute ? await buildPlatformsBlock(db, orgId, userId, session.aiAssistantId) : null;
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, scheduleBlock, platformsBlock].filter(Boolean).join('\n\n');
+    // Its Knowledge Base or Inspo, for the roles with that tab (src/utils/chat-library.ts). Never throws.
+    const libraryBlock = route !== defaultRoute ? await buildLibraryBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey) : null;
+    // Customer reviews for the Email Marketing chat (src/utils/chat-reviews.ts) — the Website Assistant's
+    // prompt carries its own. Null for every other role; never throws.
+    const reviewsBlock = route !== defaultRoute ? await buildReviewsBlock(db, orgId, assistantRow.roleKey) : null;
+    // The signed-in user's own My Account settings, read-only (src/utils/chat-my-account.ts). Every
+    // route, every role; null when the read fails.
+    const myAccountBlock = await buildMyAccountBlock(db, userId, session.aiAssistantId, assistantRow.roleKey);
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, scheduleBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock].filter(Boolean).join('\n\n');
 
     const system = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -3106,8 +3117,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             uiElement = platformsCard;
             if (!platformsCard) content = 'I couldn’t read your connections just now, so I haven’t changed anything. Please try again in a moment, or use Assistant Profile ▸ Connections.';
         }
+        // An addition to its Knowledge Base or Inspo (src/utils/chat-library.ts) — the click POSTs to
+        // kb-articles.ts / inspo-items.ts, as the tab's own Save does.
+        let libraryCard: LibraryCard | null = null;
+        const libraryReq = route !== defaultRoute && !settingsReq && !ruleReq && !goalReq && !scheduleReq && !platformsReq ? libraryProposalFromUiElement(uiElement) : null;
+        if (libraryReq) {
+            libraryCard = await resolveLibraryProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, libraryReq);
+            uiElement = libraryCard;
+            if (!libraryCard) content = `I couldn’t check your ${libraryReq.which === 'kb' ? 'Knowledge Base' : 'Inspo'} just now, so I haven’t added anything. Please try again in a moment, or use the ${libraryReq.which === 'kb' ? 'Knowledge Base' : 'Inspo'} tab.`;
+        }
         // One card for the "keep it" checks below: a change to the assistant's own profile.
-        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard;
+        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard;
         // The Blog Writer's twin (src/utils/chat-blog-action.ts): same checks, built from blog_posts
         // rows; a time in the user's words is worked out here so the card shows the exact instant.
         let blogAction: BlogActionCard | null = null;
@@ -3139,6 +3159,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             if (!audienceCard) {
                 content = 'I couldn’t check that against your audience just now, so I haven’t set anything up. Please try again in a moment, or use the Audience page.';
             }
+        }
+        // And the review cards the Website Assistant's chat offers (src/utils/chat-reviews.ts), rebuilt
+        // by org-reviews.ts's own rule so the card's button can work.
+        let reviewsCard: ReviewsCard | null = null;
+        if (route === ROUTES.newsletter_editor && isReviewsUiElement(uiElement)) {
+            reviewsCard = await resolveReviewsCard(db, orgId, uiElement);
+            uiElement = reviewsCard;
+            if (!reviewsCard) content = 'I couldn’t check that against your reviews just now, so I haven’t set anything up. Please try again in a moment, or use Audience ▸ Reviews.';
         }
         // And the Lead Generator's (src/utils/chat-lead-action.ts). Its "send" card carries the stored
         // email verbatim and a fingerprint of it, which send_outreach checks at the click.
@@ -3237,7 +3265,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 : formDraft ? { type: AUDIENCE_FORM_DRAFT_TYPE, ...formDraft }
                 // An action card on an existing email, or an Audience card, was already checked and
                 // rebuilt above — keep it.
-                : emailAction ?? audienceCard ?? profileCard;
+                : emailAction ?? audienceCard ?? reviewsCard ?? profileCard;
         }
 
         // ── Reply ↔ persistence reconciliation ────────────────────────────────────
@@ -3299,7 +3327,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // unbacked claim available to it is claiming an issue it did not write.
         // !emailAction / !audienceCard: a "booked for Tuesday" or "here's the segment" reply describes
         // its card, not an unbacked claim.
-        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised && !emailAction && !audienceCard && !profileCard) {
+        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised && !emailAction && !audienceCard && !reviewsCard && !profileCard) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked newsletter draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );

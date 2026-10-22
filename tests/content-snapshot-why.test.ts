@@ -94,6 +94,24 @@ check('a failed article is honest about having no recorded reason, except an emp
     assert.ok(blogNotes({ status: 'failed', hasBody: false })[0].includes('no body text'));
 });
 
+check('a failed article now carries the reason the publisher stored', () => {
+    const notes = blogNotes({ status: 'failed', hasBody: true, failureReason: 'Publishing stopped with an error: widget render failed' });
+    assert.ok(notes[0].startsWith('Why it stopped: Publishing stopped with an error: widget render failed'), notes[0]);
+    assert.deepStrictEqual(blogNotes({ status: 'scheduled', hasBody: true, failureReason: 'stale' }), [], 'only a failed article explains itself');
+});
+
+check('the publisher writes the reason, a new booking or a publish clears it, the tab shows it', () => {
+    const publisher = readFileSync(join(root, 'netlify/functions/publish-blog-posts.ts'), 'utf8');
+    assert.strictEqual((publisher.match(/status: 'failed', failureReason:/g) || []).length, 2, 'both failure paths record why');
+    const schedule = readFileSync(join(root, 'netlify/functions/schedule-blog.ts'), 'utf8');
+    assert.strictEqual((schedule.match(/status: 'scheduled', publishDate: when, failureReason: null/g) || []).length, 2);
+    assert.ok(readFileSync(join(root, 'src/utils/blog-publish.ts'), 'utf8').includes('failureReason: null,'));
+    assert.ok(readFileSync(join(root, 'netlify/functions/blog-posts.ts'), 'utf8').includes('failureReason: blogPosts.failureReason,'));
+    assert.ok(readFileSync(join(root, 'assistants.js'), 'utf8').includes("p.status === 'failed' && p.failureReason"));
+    const sqlFile = readFileSync(join(root, 'db/blog-failure-reason.sql'), 'utf8');
+    assert.ok(sqlFile.includes('ADD COLUMN IF NOT EXISTS failure_reason TEXT') && sqlFile.includes('APPLY ON STAGING BEFORE PUSHING'));
+});
+
 check('a failed email carries its stored reason, or admits there is none', () => {
     assert.deepEqual(emailNotes({ status: 'sent', failureReason: null }), []);
     assert.equal(emailNotes({ status: 'failed', failureReason: 'Nobody in this audience is subscribed, so there was nobody to send to.' })[0],

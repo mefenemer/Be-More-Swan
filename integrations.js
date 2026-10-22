@@ -599,6 +599,19 @@ function _setPlatformSaveStatus(text) {
 // + appliedDefaults.platforms, then PUT update-assistant-context.
 window._intToggleUseForAssistant = async function (connId, checked) {
     connId = Number(connId);
+    // An EMPTY selection means "draft for every connected platform" (assistant-platform-selection.ts),
+    // so switching the last live platform off would widen drafting, not stop it. Refuse it, put the
+    // switch back, and say what does stop posting. The chat's platforms card refuses the same thing.
+    if (!checked) {
+        const liveOn = _userConnections.filter(c => c.status === 'active' && c.userId && _assistantSelectedIds.has(c.id));
+        if (liveOn.length === 1 && liveOn[0].id === connId) {
+            _renderConnectionsGrid();
+            const msg = 'This assistant needs at least one platform switched on. With none on, it would draft for every connected platform, not none. To stop posting, pause the assistant instead.';
+            if (typeof window.alertModal === 'function') window.alertModal(msg, { title: 'Keep one platform on' });
+            else _setPlatformSaveStatus(msg);
+            return;
+        }
+    }
     if (checked) _assistantSelectedIds.add(connId); else _assistantSelectedIds.delete(connId);
     const checkedIds = Array.from(_assistantSelectedIds);
     const activeConns = _userConnections.filter(c => c.status === 'active' && c.userId);

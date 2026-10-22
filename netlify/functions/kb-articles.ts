@@ -24,14 +24,14 @@ import { getDb } from '../../db/client';
 import { aiAssistants, kbArticles, kbChunks, vectorEmbeddings } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { chunkArticle, embedTexts, embeddingsConfigured } from '../../src/utils/kb-embeddings';
+import { KB_MAX_ARTICLES, KB_MAX_CONTENT_CHARS, KB_MAX_TITLE_CHARS } from '../../src/utils/library-rules';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const SOURCES = new Set(['manual', 'file_upload']);
-const MAX_TITLE_CHARS = 300;
-// Big enough for a long policy doc; a bigger corpus should be split into articles.
-const MAX_CONTENT_CHARS = 50_000;
-// Per-assistant article ceiling — keeps ingestion and the tab listing bounded.
-const MAX_ARTICLES = 200;
+// Limits live in library-rules.ts, shared with the chat's Knowledge Base card.
+const MAX_TITLE_CHARS = KB_MAX_TITLE_CHARS;
+const MAX_CONTENT_CHARS = KB_MAX_CONTENT_CHARS;
+const MAX_ARTICLES = KB_MAX_ARTICLES;
 const PREVIEW_CHARS = 240;
 
 function json(statusCode: number, body: unknown) {

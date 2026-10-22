@@ -92,6 +92,8 @@ export default withLambda(async (event: HandlerEvent) => {
                 excerptSource: sql<string>`coalesce(nullif(btrim(${blogPosts.metaDescription}), ''), left(${blogPosts.bodyMarkdown}, 600))`,
                 wordCount: sql<number>`case when btrim(${blogPosts.bodyMarkdown}) = '' then 0 else coalesce(array_length(regexp_split_to_array(btrim(${blogPosts.bodyMarkdown}), '\s+'), 1), 0) end`,
                 writtenByAssistant: sql<boolean>`${blogPosts.generationReason} is not null`,
+                // Why it didn't go live — the Needs attention card shows it (db/blog-failure-reason.sql).
+                failureReason: blogPosts.failureReason,
             })
             .from(blogPosts)
             .where(and(

@@ -214,12 +214,15 @@ const BLOG_WORDS: Record<string, string> = {
 };
 
 /**
- * Articles record no failure reason — publish-blog-posts sets 'failed' and logs the error to the
- * console only. The one cause that can be read back is an empty body, which that function refuses
- * before trying. Anything else must be admitted, not guessed. Exported for tests.
+ * blog_posts.failure_reason (publish-blog-posts.ts, db/blog-failure-reason.sql) when there is one.
+ * Articles that failed before that column existed have none: an empty body can still be read back
+ * (the publisher refuses one before trying); anything else must be admitted, not guessed. Exported
+ * for tests.
  */
-export function blogNotes(r: { status: string; hasBody: boolean }): string[] {
+export function blogNotes(r: { status: string; hasBody: boolean; failureReason?: string | null }): string[] {
     if (r.status !== 'failed') return [];
+    const why = String(r.failureReason ?? '').trim();
+    if (why) return [`Why it stopped: ${clip(why, NOTE_MAX)} What to do: pick a new time in "Needs attention" to try again${r.hasBody ? '' : ' once the article has text (Blog Studio)'}.`];
     return [r.hasBody
         ? 'No reason was recorded for this failure. What to do: pick a new time in "Needs attention" to try again.'
         : 'Why it stopped: the article has no body text, so there was nothing to publish. What to do: write the article in Blog Studio, then pick a new time.'];
@@ -230,9 +233,9 @@ export async function buildBlogSnapshot(db: Db, organisationId: number, aiAssist
         const scope = and(eq(blogPosts.organisationId, organisationId), eq(blogPosts.assistantId, aiAssistantId));
         const cols = {
             id: blogPosts.id, status: blogPosts.status, publishDate: blogPosts.publishDate, publishedAt: blogPosts.publishedAt, title: blogPosts.title,
-            hasBody: sql<boolean>`btrim(coalesce(${blogPosts.bodyMarkdown}, '')) <> ''`,
+            hasBody: sql<boolean>`btrim(coalesce(${blogPosts.bodyMarkdown}, '')) <> ''`, failureReason: blogPosts.failureReason,
         };
-        type Row = { id: number; status: string; publishDate: Date | null; publishedAt: Date | null; title: string; hasBody: boolean };
+        type Row = { id: number; status: string; publishDate: Date | null; publishedAt: Date | null; title: string; hasBody: boolean; failureReason: string | null };
         const map = (r: Row): SnapshotItem => ({ ref: r.id, when: r.publishedAt ?? r.publishDate, where: '', status: r.status, text: r.title, notes: blogNotes(r) });
         const col = (where: SQL | undefined, order: SQL, title: string) => column(
             db.select({ n: sql<number>`count(*)::int` }).from(blogPosts).where(and(scope, where)),

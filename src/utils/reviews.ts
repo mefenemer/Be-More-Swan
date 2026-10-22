@@ -115,8 +115,9 @@ export async function loadSiteReviews(db: Db, orgId: number, def: SiteDefinition
     };
 }
 
-/** For the chat: what it may quote by id, and the honest score. */
-export async function reviewsForPrompt(db: Db, orgId: number): Promise<string> {
+/** For the chat: what it may quote by id, and the honest score. `use` words it for the Website
+ *  Assistant (a reviews section on the site) or the Email Marketing chat (quoting in an email). */
+export async function reviewsForPrompt(db: Db, orgId: number, use: 'site' | 'email' = 'site'): Promise<string> {
     const rows = await db.select({ id: orgReviews.id, authorName: orgReviews.authorName, rating: orgReviews.rating, body: orgReviews.body, status: orgReviews.status, source: orgReviews.source })
         .from(orgReviews).where(and(eq(orgReviews.organisationId, orgId), inArray(orgReviews.status, [...COUNTED_STATUSES])))
         .orderBy(desc(orgReviews.reviewedOn), desc(orgReviews.id));
@@ -125,8 +126,10 @@ export async function reviewsForPrompt(db: Db, orgId: number): Promise<string> {
     const pendingLine = waiting.length
         ? ` Waiting for their approval (sent in by customers; for a review_decisions card): ${waiting.map((r) => `reviewId ${r.id} — ${r.authorName}${r.rating ? `, ${r.rating}★` : ''}: "${r.body.replace(/\s+/g, ' ').slice(0, 160)}${r.body.length > 160 ? '…' : ''}"`).join('; ')}.`
         : '';
-    if (!rows.length) return (pendingLine ? pendingLine.trim() + ' ' : '') + 'They have no reviews in Audience ▸ Reviews yet — a reviews section needs them (Audience ▸ Reviews, or they can paste reviews to you and you offer a reviews_add card).';
+    if (!rows.length) return (pendingLine ? pendingLine.trim() + ' ' : '') + (use === 'email'
+        ? 'They have no reviews in Audience ▸ Reviews yet, so there is none to quote (they can add them there, or paste reviews to you and you offer a reviews_add card).'
+        : 'They have no reviews in Audience ▸ Reviews yet — a reviews section needs them (Audience ▸ Reviews, or they can paste reviews to you and you offer a reviews_add card).');
     const s = reviewSummary(rows);
     const shown = rows.filter((r) => r.status === 'published').slice(0, 30);
-    return `Their reviews (Audience ▸ Reviews; for a reviews section's reviewIds)${s ? `, average ${s.average} from ${s.rated} rated` : ''}: ${shown.map((r) => `reviewId ${r.id} — ${r.authorName}${r.rating ? `, ${r.rating}★` : ''}, ${r.source}: "${r.body.replace(/\s+/g, ' ').slice(0, 80)}${r.body.length > 80 ? '…' : ''}"`).join('; ')}${rows.length > shown.length ? ` (and ${rows.length - shown.length} more, some hidden)` : ''}.${pendingLine}`;
+    return `Their reviews (Audience ▸ Reviews; ${use === 'email' ? 'the ones you may quote' : 'for a reviews section\'s reviewIds'})${s ? `, average ${s.average} from ${s.rated} rated` : ''}: ${shown.map((r) => `reviewId ${r.id} — ${r.authorName}${r.rating ? `, ${r.rating}★` : ''}, ${r.source}: "${r.body.replace(/\s+/g, ' ').slice(0, 80)}${r.body.length > 80 ? '…' : ''}"`).join('; ')}${rows.length > shown.length ? ` (and ${rows.length - shown.length} more, some hidden)` : ''}.${pendingLine}`;
 }

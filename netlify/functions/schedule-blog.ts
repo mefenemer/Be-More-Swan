@@ -184,7 +184,8 @@ export default withLambda(async (event: HandlerEvent) => {
     if (body.action === 'approve') {
         const when = await pickCadenceSlot(db, ctx.organisationId, post, new Date());
         const [updated] = await db.update(blogPosts)
-            .set({ status: 'scheduled', publishDate: when, updatedAt: new Date() })
+            // A new booking is a fresh attempt: the last failure's reason no longer applies.
+            .set({ status: 'scheduled', publishDate: when, failureReason: null, updatedAt: new Date() })
             .where(and(eq(blogPosts.id, id), eq(blogPosts.organisationId, ctx.organisationId)))
             .returning({ id: blogPosts.id, status: blogPosts.status, publishDate: blogPosts.publishDate });
         return { statusCode: 200, body: JSON.stringify({ post: updated }) };
@@ -200,7 +201,7 @@ export default withLambda(async (event: HandlerEvent) => {
     }
 
     const [updated] = await db.update(blogPosts)
-        .set({ status: 'scheduled', publishDate: when, updatedAt: new Date() })
+        .set({ status: 'scheduled', publishDate: when, failureReason: null, updatedAt: new Date() })
         .where(and(eq(blogPosts.id, id), eq(blogPosts.organisationId, ctx.organisationId)))
         .returning({ id: blogPosts.id, status: blogPosts.status, publishDate: blogPosts.publishDate });
 
