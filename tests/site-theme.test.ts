@@ -127,8 +127,8 @@ check('text links share one class: pink at rest, underline on hover — and head
         assert.match(read(f), /\.link:hover \{ text-decoration: underline; \}/, f);
     }
     const a = read('assistants.js');
-    assert.match(a, /<span class="link text-sm font-bold">View Details &rarr;<\/span>/);
-    assert.match(a, /<h3 class="text-lg font-bold text-gray-900">\$\{assistant\.name\}<\/h3>/);
+    assert.match(a, /<button type="button" class="link text-sm font-bold" onclick="[^"]*">View Details &rarr;<\/button>/);
+    assert.match(a, /<h3 class="text-lg font-bold text-gray-900">\$\{_escapeHtml\(assistant\.name \|\| ''\)\}<\/h3>/);
     assert.match(a, /class="link flex items-center gap-2 text-xs font-semibold mb-5 text-left">/);
     assert.match(read('dashboard-content.html'), /\.dw-link \{[^}]*color: var\(--color-emerald-800, #d6006b\)/);
 });

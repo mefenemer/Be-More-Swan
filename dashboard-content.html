@@ -702,8 +702,10 @@
   .dw-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
   .dw-list li { font-size: 13px; color: #475569; display: flex; gap: 8px; }
   .dw-list .t { color: #0f172a; font-weight: 600; }
-  .dw-link { display: inline-block; margin-top: 10px; font-size: 13px; font-weight: 700; color: var(--color-emerald-800, #d6006b); cursor: pointer; }
+  /* A <button> (keyboard-reachable), reset to look like the text link it replaced. */
+  .dw-link { display: inline-block; margin-top: 10px; padding: 0; border: 0; background: none; font: inherit; font-size: 13px; font-weight: 700; color: var(--color-emerald-800, #d6006b); cursor: pointer; }
   .dw-link:hover { text-decoration: underline; }
+  .dw-link:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 4px; }
   .dw-skel { height: 14px; border-radius: 6px; background: linear-gradient(90deg,#f1f5f9,#e2e8f0,#f1f5f9);
     background-size: 200% 100%; animation: dwShimmer 1.2s infinite; margin-bottom: 8px; }
   @keyframes dwShimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
@@ -879,7 +881,7 @@
         const working = a.filter(x => x.lifecycleStatus === 'working').length;
         el.innerHTML = `<div class="dw-stat">${working}<span style="font-size:15px;color:#94a3b8;font-weight:600"> / ${a.length} working</span></div>
           <div class="dw-stat-sub">${a.length ? 'Your digital team' : 'No assistants yet'}</div>
-          <span class="dw-link">Manage assistants →</span>`;
+          <button type="button" class="dw-link">Manage assistants →</button>`;
         el.querySelector('.dw-link').onclick = () => window.loadView && window.loadView('assistants');
       } catch { el.innerHTML = '<div class="dw-stat-sub">Unavailable right now.</div>'; }
     }
@@ -888,7 +890,7 @@
         const d = await (await fetch('/.netlify/functions/notifications')).json();
         const n = (d.notifications || []).slice(0, 3);
         el.innerHTML = n.length
-          ? `<ul class="dw-list">${n.map(x => `<li><span class="t">${esc(x.title || 'Update')}</span></li>`).join('')}</ul><span class="dw-link">View all →</span>`
+          ? `<ul class="dw-list">${n.map(x => `<li><span class="t">${esc(x.title || 'Update')}</span></li>`).join('')}</ul><button type="button" class="dw-link">View all →</button>`
           : `<div class="dw-stat-sub">You're all caught up. 🎉</div>`;
         const link = el.querySelector('.dw-link'); if (link) link.onclick = () => window.loadView && window.loadView('notifications');
       } catch { el.innerHTML = '<div class="dw-stat-sub">Unavailable right now.</div>'; }
@@ -921,8 +923,8 @@
         const items = (d.items || []).slice(0, 5);
         const more = (d.total || 0) - items.length;
         el.innerHTML = items.length
-          ? `<ul class="dw-list">${items.map(x => `<li style="justify-content:space-between"><span class="t">${esc(x.label)}${x.assistantName ? ` <span style="color:#94a3b8">· ${esc(x.assistantName)}</span>` : ''}</span><span class="dw-stat-sub" style="margin:0;white-space:nowrap">${esc(when(x.at))}</span></li>`).join('')}</ul>${more > 0 ? `<div class="dw-stat-sub">and ${more} more</div>` : ''}<span class="dw-link">Open calendar →</span>`
-          : `<div class="dw-stat-sub">Nothing booked for the next 7 days.</div><span class="dw-link">Open calendar →</span>`;
+          ? `<ul class="dw-list">${items.map(x => `<li style="justify-content:space-between"><span class="t">${esc(x.label)}${x.assistantName ? ` <span style="color:#94a3b8">· ${esc(x.assistantName)}</span>` : ''}</span><span class="dw-stat-sub" style="margin:0;white-space:nowrap">${esc(when(x.at))}</span></li>`).join('')}</ul>${more > 0 ? `<div class="dw-stat-sub">and ${more} more</div>` : ''}<button type="button" class="dw-link">Open calendar →</button>`
+          : `<div class="dw-stat-sub">Nothing booked for the next 7 days.</div><button type="button" class="dw-link">Open calendar →</button>`;
         el.querySelector('.dw-link').onclick = () => window.loadView && window.loadView('calendar');
       } catch { el.innerHTML = '<div class="dw-stat-sub">Unavailable right now.</div>'; }
     }
@@ -970,7 +972,7 @@
       el.innerHTML = esc(tips[Math.floor(Math.random() * tips.length)]);
     }
     function renderReferral(el) {
-      el.innerHTML = `<div class="dw-stat-sub">Invite a teammate — you both get rewarded.</div><span class="dw-link">Invite now →</span>`;
+      el.innerHTML = `<div class="dw-stat-sub">Invite a teammate — you both get rewarded.</div><button type="button" class="dw-link">Invite now →</button>`;
       el.querySelector('.dw-link').onclick = () => window.loadView && window.loadView('referral');
     }
 
@@ -988,7 +990,11 @@
     // notification created while the user is sitting on the dashboard (e.g. "issue fixed")
     // never showed up until a manual refresh. Re-render it periodically, same cadence as
     // the sidebar notification badge poll in workspace.html.
-    setInterval(() => {
+    // Stopped once this grid leaves the page: the router swaps the fragment out, and an uncleared
+    // interval kept polling for the old grid, adding one more poll per visit to the Dashboard.
+    clearInterval(window._dashNotificationsPoll);
+    window._dashNotificationsPoll = setInterval(() => {
+      if (!grid.isConnected) { clearInterval(window._dashNotificationsPoll); return; }
       const body = grid.querySelector('.dw-card[data-key="notifications"] .dw-card-body');
       if (body) { try { renderNotifications(body); } catch (_) {} }
     }, 60_000);

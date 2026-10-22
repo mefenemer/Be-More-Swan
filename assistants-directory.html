@@ -5,11 +5,13 @@
             <h1 class="text-3xl font-extrabold text-gray-900">My Assistants</h1>
             <p class="text-gray-500 mt-1">Manage, monitor, and configure your active AI workforce.</p>
         </div>
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-4 w-full sm:w-auto">
             <!-- The disabled "Orchestrations → (coming soon)" link that sat here was removed (owner,
                  2026-10-21): a dead control on the page users open most. orchestrations.ts still has no
                  runtime consumer; when it does, give it an entry point that works. -->
-            <button id="route-to-catalog-from-dir" class="hidden btn-golive sm:flex items-center gap-2 px-4 py-2.5 text-sm font-bold rounded-lg transition-colors shadow-sm">
+            <!-- Shown at every width: it was `hidden sm:flex`, which left phones with only the
+                 placeholder card at the bottom of the grid as a way to hire. -->
+            <button id="route-to-catalog-from-dir" type="button" class="btn-golive flex w-full sm:w-auto justify-center items-center gap-2 px-4 py-2.5 text-sm font-bold rounded-lg transition-colors shadow-sm">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
                 Hire New Assistant
             </button>

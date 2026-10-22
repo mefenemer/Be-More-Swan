@@ -2186,9 +2186,11 @@
     renderHead();
     fillSourceSelect();
     wire();
+    // Only custom fields gate the list (they are the table's columns). Segments and API keys, a
+    // folded-away panel, load alongside instead of holding the contacts back behind them.
+    const sidebar = Promise.all([loadSegments(), loadApiKeys()]);
     await loadCustomFields();
-    await loadApiKeys();
-    await loadSegments();
     await loadContacts();
+    await sidebar;
   };
 })();

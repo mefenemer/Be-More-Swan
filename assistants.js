@@ -439,7 +439,7 @@ window.generateAssistantCardHTML = function(assistant) {
                 </span>
                 ${gbpSaved !== null
                     ? `<span class="text-xs font-bold text-green-700 bg-green-50 px-2 py-0.5 rounded-full">≈ £${gbpSaved.toLocaleString('en-GB', {minimumFractionDigits: 0, maximumFractionDigits: 0})} ROI</span>`
-                    : `<span class="text-xs text-gray-500 cursor-pointer hover:text-green-600 transition" onclick="event.stopPropagation(); loadView && loadView('account')" title="Set your hourly rate to see financial ROI">Set rate → ROI</span>`
+                    : `<button type="button" class="text-xs text-gray-500 cursor-pointer hover:text-green-600 transition" onclick="event.stopPropagation(); window.loadView && window.loadView('settings')" title="Set your hourly rate to see financial ROI">Set rate → ROI</button>`
                 }
             </div>
         </div>` : '';
@@ -472,15 +472,19 @@ window.generateAssistantCardHTML = function(assistant) {
             </div>
             ${statusHtml}
         </div>
-        <h3 class="text-lg font-bold text-gray-900">${assistant.name}</h3>
-        <p class="text-sm text-gray-500 mb-4">${role}</p>
+        <h3 class="text-lg font-bold text-gray-900">${_escapeHtml(assistant.name || '')}</h3>
+        <p class="text-sm text-gray-500 mb-4">${_escapeHtml(role)}</p>
         ${goalsHtml}
         ${metricsHtml}
         ${quickActionsHtml}
         <div class="mt-auto pt-4 border-t border-gray-50 flex justify-between items-center">
-            <button type="button" onclick="event.stopPropagation(); window.openAssistantChatModal ? window.openAssistantChatModal('${assistant.id}', '${(assistant.name || 'Your assistant').replace(/'/g, '&#39;')}', '${role.replace(/'/g, '&#39;')}', '${(assistant.roleKey || '').replace(/'/g, '&#39;')}', { resume: true }) : (window.location.href = 'assistant-chat.html?assistantId=${assistant.id}')"
+            <!-- Name and role travel as data attributes: inlined into the onclick, a ' or " in a
+                 user-chosen name broke the handler (&#39; decodes back to ' before the JS runs). -->
+            <button type="button" data-chat-name="${_escapeHtml(assistant.name || 'Your assistant')}" data-chat-role="${_escapeHtml(role)}" data-chat-role-key="${_escapeHtml(assistant.roleKey || '')}"
+               onclick="event.stopPropagation(); const d = this.dataset; window.openAssistantChatModal ? window.openAssistantChatModal('${assistant.id}', d.chatName, d.chatRole, d.chatRoleKey, { resume: true }) : (window.location.href = 'assistant-chat.html?assistantId=${assistant.id}')"
                class="btn-assistant px-3.5 py-1.5 text-xs font-bold border rounded-lg transition cursor-pointer">💬 Chat</button>
-            <span class="link text-sm font-bold">View Details &rarr;</span>
+            <!-- A real button so keyboard users can open the assistant; the card's own click stays a mouse shortcut. -->
+            <button type="button" class="link text-sm font-bold" onclick="event.stopPropagation(); window.routeToAssistantDetail('${assistant.id}')">View Details &rarr;</button>
         </div>
     </div>`;
 };
@@ -8611,7 +8615,7 @@ async function _fetchAndRenderLeadRoi(assistantId, period = 'all') {
         } else {
             if (gbp) { gbp.textContent = '—'; gbp.title = ''; }
             // Blank, never £0 — see the header note.
-            if (roiNote) roiNote.innerHTML = `<a href="#" onclick="loadView && loadView('account'); return false" class="text-emerald-600 hover:underline">Set your hourly rate</a> to see this`;
+            if (roiNote) roiNote.innerHTML = `<a href="#" onclick="loadView && loadView('settings'); return false" class="text-emerald-600 hover:underline">Set your hourly rate</a> to see this`;
         }
     } catch {
         // Supplementary chrome on an always-rendered hero — a failure leaves the strip as it was
@@ -8696,7 +8700,7 @@ async function _fetchAndRenderWrittenRoi(assistantId, period = 'all') {
         } else {
             if (gbp) { gbp.textContent = '—'; gbp.title = ''; }
             // Blank, never £0 — an unset rate is a blank field in Settings, not a verdict.
-            if (roiNote) roiNote.innerHTML = `<a href="#" onclick="loadView && loadView('account'); return false" class="text-emerald-600 hover:underline">Set your hourly rate</a> to see this`;
+            if (roiNote) roiNote.innerHTML = `<a href="#" onclick="loadView && loadView('settings'); return false" class="text-emerald-600 hover:underline">Set your hourly rate</a> to see this`;
         }
     } catch {
         // Supplementary chrome on an always-rendered hero — leave it as it was rather than
@@ -8877,7 +8881,7 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
             el('metrics-roi-note').textContent = `At your configured hourly rate`;
         } else {
             el('metrics-gbp-saved').textContent = '—';
-            el('metrics-roi-note').innerHTML = `<a href="#" onclick="loadView && loadView('account'); return false" class="text-emerald-600 hover:underline">Set your hourly rate</a> to see this`;
+            el('metrics-roi-note').innerHTML = `<a href="#" onclick="loadView && loadView('settings'); return false" class="text-emerald-600 hover:underline">Set your hourly rate</a> to see this`;
         }
 
         // Per-platform breakdown — absent entirely when this assistant has only ever posted to one
