@@ -1317,9 +1317,7 @@
     if (!b) return;
     b.querySelector('[data-dc-create]')?.addEventListener('click', (e) => create(e.currentTarget));
     // Same destination the header's Chat CTA uses (assistants.js, `kind: 'chat'`) — one way to
-    // reach chat, not two. Deliberately does NOT pass ?new=1: arriving with only an assistantId
-    // resumes that assistant's newest active thread, and a user who has been discussing their
-    // customers already should land back in that conversation rather than a blank one.
+    // reach chat, not two. It opens on a new chat; an earlier thread is in History.
     b.querySelector('[data-dc-ask]')?.addEventListener('click', () => {
         if (state.assistantId) window.location.href = `assistant-chat.html?assistantId=${state.assistantId}`;
     });

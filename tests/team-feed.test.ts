@@ -169,5 +169,22 @@ check('"Me" is the person\'s own thread: to them, or sent by them', () => {
     assert.ok(team.includes('if (filter.mine) conds.push(or(eq(teamMessages.toUser, true), sql`${teamMessages.fromUserId} IS NOT NULL`)!);'));
     assert.ok(read('netlify/functions/team.ts').includes('mine: body.mine === true'));
 });
+check('an assistant\'s Team tab can write to anyone, and shows the thread with whoever "To" names', () => {
+    const f = read('src/components/team-feed.js');
+    assert.ok(f.includes("const fixed = inst.mode === 'page' && inst.thread.type === 'assistant' ? inst.thread.id : null;"), 'the Team tab is locked to one assistant again');
+    assert.ok(f.includes("inst.mode === 'assistant' ? { assistantId: Number(inst.to) || inst.assistantId }"), 'picking someone else would not show their reply');
+    assert.ok(f.includes("document.addEventListener('change'") && f.includes("if (!inst || inst.mode !== 'assistant') return;"));
+});
+
+check('assistant chat opens on a NEW chat, with New Chat in the header (not in History)', () => {
+    const m = read('src/components/assistant-chat-modal.js');
+    assert.ok(m.includes('id="bms-chat-new-btn"') && m.includes('+ New Chat'), 'no New Chat in the popup header');
+    assert.ok(!m.includes('list-chat-sessions?limit=1'), 'the popup resumes the last chat again');
+    assert.ok(!read('src/components/chat-history-panel.js').includes('data-ch-new'), 'History has its own new button again');
+    const page = read('assistant-chat.html');
+    assert.ok(page.includes('id="chat-new-btn"') && !page.includes('list-chat-sessions?limit=1'), 'assistant-chat.html resumes the last chat again');
+    const ws = read('workspace.html');
+    assert.ok(ws.includes('id="chat-modal-new-btn"') && ws.includes('return Promise.resolve(mount(null, null));'), 'the roster chat resumes the last chat again');
+});
 console.log(`
 ${passed} passed`);

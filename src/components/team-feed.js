@@ -73,7 +73,7 @@
   // ── Loading ───────────────────────────────────────────────────────────────
   async function load(inst) {
     const filter = inst.mode === 'campaign' ? { campaignId: inst.campaignId }
-      : inst.mode === 'assistant' ? { assistantId: inst.assistantId }
+      : inst.mode === 'assistant' ? { assistantId: Number(inst.to) || inst.assistantId }
       : inst.thread.type === 'campaign' ? { campaignId: inst.thread.id }
       : inst.thread.type === 'assistant' ? { assistantId: inst.thread.id }
       : inst.thread.type === 'me' ? { mine: true } : {};
@@ -119,6 +119,8 @@
   }
 
   function threadTitle(inst) {
+    // An assistant's Team tab follows whoever "To" names — say so once it is someone else.
+    if (inst.mode === 'assistant') return Number(inst.to) && Number(inst.to) !== inst.assistantId ? `With ${assistantName(inst, inst.to)}` : '';
     if (inst.mode !== 'page' || inst.thread.type === 'all') return inst.mode === 'page' ? 'Everything' : '';
     if (inst.thread.type === 'me') return 'Me';
     if (inst.thread.type === 'campaign') {
@@ -201,9 +203,11 @@
       </div>`;
   }
 
-  /** Who a new message can go to here: this assistant, or anyone. */
+  /** Who a new message can go to here: anyone, except in one assistant's thread on the Team page.
+   *  An assistant's own Team tab offers everyone too (owner, 2026-10-22) — it starts on that
+   *  assistant, and picking another shows your thread with them (see load and the change handler). */
   function recipients(inst) {
-    const fixed = inst.mode === 'assistant' ? inst.assistantId : inst.thread.type === 'assistant' ? inst.thread.id : null;
+    const fixed = inst.mode === 'page' && inst.thread.type === 'assistant' ? inst.thread.id : null;
     if (fixed) return inst.assistants.filter((a) => Number(a.id) === Number(fixed));
     return inst.assistants;
   }
@@ -281,7 +285,7 @@
         class="btn-utility px-2 py-1 text-xs font-bold rounded-lg shrink-0">${inst.sortNewest ? 'Newest first ↓' : 'Oldest first ↑'}</button>` : '';
     const body = `
       <div class="flex items-center justify-between gap-3 mb-3">
-        ${inst.mode === 'page' ? `<p class="text-sm font-bold text-gray-900 truncate">${esc(threadTitle(inst))}</p>` : '<span></span>'}
+        ${threadTitle(inst) ? `<p class="text-sm font-bold text-gray-900 truncate">${esc(threadTitle(inst))}</p>` : '<span></span>'}
         ${sortBtn}
       </div>
       ${inst.sortNewest ? composer.replace('border-t border-gray-100 pt-3 mt-3', 'border-b border-gray-100 pb-3 mb-3') : ''}
@@ -391,6 +395,19 @@
       // A confirmed card or a drafted post can change what other panels show.
       document.dispatchEvent(new CustomEvent('campaign:updated', { detail: {} }));
     }
+  });
+
+  // In an assistant's Team tab, picking someone else in "To" shows your thread with them, so their
+  // reply lands where you are looking. On the Team page the thread list already does that.
+  document.addEventListener('change', async (e) => {
+    const sel = e.target.closest && e.target.closest('[data-team-to]');
+    if (!sel) return;
+    const inst = instFor(sel, 'data-team-to');
+    if (!inst || inst.mode !== 'assistant') return;
+    inst.to = sel.value;
+    inst.loaded = false;
+    render(inst);
+    await load(inst);
   });
 
   // Enter sends, Shift+Enter is a new line — as in any chat.
