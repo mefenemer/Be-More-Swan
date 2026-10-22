@@ -853,6 +853,85 @@
       document.dispatchEvent(new CustomEvent('posts:changed', { detail: { assistantId } }));
     }
 
+    // Lead action cards → the Lead Generation tabs' own endpoints: assistant-records PATCH (the
+    // approval, Move to Outreach, Turn down — so the lead_approved / lead_rejected ledger events and
+    // the CRM hand-off fire exactly as from the page) and lead-generation (send_outreach,
+    // set_outcome). See src/utils/chat-lead-action.ts.
+    const LEAD_NOT_SENT = {
+      no_provider: 'No inbox is set up to send from. Connect Gmail or Outlook on the Outreach tab.',
+      not_connected: 'Your sending inbox isn’t connected any more. Reconnect it on the Outreach tab.',
+      draft_changed: 'The email was edited after this card was made, so it wasn’t sent. Ask me again to see the new version.',
+      personal_inbox_unconfirmed: 'This address looks like a named person’s own inbox. Ask me again and the card will show that before you decide.',
+      no_recipient: 'There’s no email address on this lead.',
+      suppressed: 'This company is on your suppression list.',
+      unsubscribed: 'This person has unsubscribed from your emails.',
+      paused: 'This person has paused emails from you.',
+      suppression_check_failed: 'Your suppression list couldn’t be checked just now, and nothing is emailed without checking. Try again shortly.',
+      task_limit: 'Your monthly task allowance is used up. It resets on the 1st of the month.',
+    };
+    // Refusals that settle the matter: pressing again would get the same answer.
+    const LEAD_FINAL = new Set(['draft_changed', 'personal_inbox_unconfirmed', 'no_recipient', 'suppressed', 'unsubscribed', 'paused', 'do_not_contact', 'no_postal_address', 'generator_declined']);
+    const leadWhy = (r) => r.detail || LEAD_NOT_SENT[r.reason] || `Not sent (${String(r.reason || 'unknown').replace(/_/g, ' ')}).`;
+
+    async function onLeadAction(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const aid = d.assistantId || assistantId;
+      const patchRecord = (body) => fetch('/.netlify/functions/assistant-records', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `That didn’t work (HTTP ${res.status}).`);
+        return data;
+      });
+      try {
+        if (d.action === 'send') {
+          const sendBody = {
+            action: 'send_outreach', assistantId: aid, recordId: d.recordId,
+            expectDraftHash: d.draftHash, ...(d.personalInbox ? { confirmPersonal: true } : {}),
+          };
+          // Every gate first, changing nothing — a refused send leaves the lead where it was.
+          const check = await postActionCall('lead-generation', { ...sendBody, checkOnly: true });
+          if (!check.ready) {
+            respond({ ok: false, final: LEAD_FINAL.has(check.reason), error: `Nothing was sent, and the lead is where it was. ${leadWhy(check)}` });
+            return;
+          }
+          if (d.approveFirst) await patchRecord({ id: d.recordId, approvalStatus: 'approved' });
+          const r = await postActionCall('lead-generation', sendBody);
+          if (r.sent) {
+            const chase = r.chaseDate ? new Date(r.chaseDate).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : '';
+            respond({ ok: true, message: `Sent to ${r.to}.${chase ? ` A reminder to chase is set for ${chase}.` : ''}${r.followUps === 'started' ? ' Follow-ups are on — they stop as soon as they reply.' : ' No automatic follow-ups.'} It’s in the “Awaiting reply” column.` });
+          } else {
+            respond({ ok: false, final: true, error: `${d.approveFirst ? 'Approved, but nothing was sent. ' : 'Nothing was sent. '}${leadWhy(r)} It’s in the “Approved” column — “Send email now” there tries again.` });
+          }
+        } else if (d.action === 'move_to_outreach') {
+          // The same write as Enrichment's "Move to Outreach": status and stage in one PATCH. The
+          // stage is merged server-side so the lead keeps its score, intel and draft.
+          await patchRecord({ id: d.recordId, approvalStatus: 'pending_approval', dataMerge: { outreachStage: 'review' } });
+          respond({ ok: true, message: 'Moved to the Outreach tab’s Review column. Nothing was sent.' });
+        } else if (d.action === 'reject') {
+          await patchRecord({ id: d.recordId, approvalStatus: 'rejected' });
+          respond({ ok: true, message: 'Turned down. Nothing was sent.' });
+        } else if (d.action === 'set_outcome') {
+          await postActionCall('lead-generation', {
+            action: 'set_outcome', assistantId: aid, recordId: d.recordId, outcome: d.outcome,
+            ...(d.lossReason ? { lossReason: d.lossReason } : {}),
+            ...(d.valueGbp != null ? { valueGbp: d.valueGbp } : {}),
+            ...(d.confirmChange ? { confirmChange: true } : {}),
+          });
+          respond({ ok: true, message: `Recorded as ${d.outcome}. Any follow-ups still running for this lead have stopped.` });
+        } else {
+          throw new Error('Unknown action.');
+        }
+      } catch (err) {
+        respond({ ok: false, error: err.message });
+      }
+      // The tabs behind the chat.
+      window.detailRqRefresh?.();
+      window._detailRqRefreshColumnCounts?.();
+      window.AssistantDataHub?.refresh?.();
+    }
+
     // Mystery Shopper cards → site-audits.ts, the same actions as the Website tab's buttons. Each
     // dispatches `siteaudit:changed` so the tab behind the chat reloads.
     function siteAuditPost(payload) {
@@ -1339,6 +1418,7 @@
     container.addEventListener('post:action', onPostAction);
     container.addEventListener('blog:action', onBlogAction);
     container.addEventListener('email:action', onEmailAction);
+    container.addEventListener('lead:action', onLeadAction);
     container.addEventListener('brief:review', onBriefReview);
     container.addEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
     container.addEventListener('siteaudit:check', onSiteAuditCheck);
@@ -1401,6 +1481,7 @@
         container.removeEventListener('post:action', onPostAction);
         container.removeEventListener('blog:action', onBlogAction);
         container.removeEventListener('email:action', onEmailAction);
+        container.removeEventListener('lead:action', onLeadAction);
         container.removeEventListener('brief:review', onBriefReview);
         container.removeEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
         container.removeEventListener('siteaudit:check', onSiteAuditCheck);

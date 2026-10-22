@@ -64,6 +64,10 @@ import { buildBlogSnapshot, buildEmailsSnapshot, buildPostsSnapshot } from '../.
 import { postActionFromUiElement, resolvePostActionProposal, type PostActionCard } from '../../src/utils/chat-post-action';
 import { blogActionFromUiElement, resolveBlogActionProposal, type BlogActionCard } from '../../src/utils/chat-blog-action';
 import { emailActionFromUiElement, resolveEmailActionProposal, type EmailActionCard } from '../../src/utils/chat-email-action';
+import { leadActionFromUiElement, resolveLeadActionProposal, sendableDraft, type LeadActionCard } from '../../src/utils/chat-lead-action';
+import { isInOutreachReview } from '../../src/config/lead-recipient';
+import { leadOutreachState } from '../../src/config/lead-outreach-state';
+import { LOSS_REASONS } from '../../src/config/revenue-events';
 import { parseScheduleInstruction } from '../../src/utils/parse-schedule-instruction';
 import { attachmentLine, buildAttachmentsBlock, readAttachments, saveAttachments, type AcceptedAttachment } from '../../src/utils/chat-attachments';
 import { enforcePromptModeration } from '../../src/utils/moderation';
@@ -423,6 +427,21 @@ function leadGeneratorSurfaces(): string {
 FINDING NEW LEADS — when the user asks you to find leads, create a search, build a campaign, or go looking for customers: this is squarely your job and you must NEVER refuse it or send them to an outside lead-sourcing tool. Emit the discovery_campaign_proposal uiElement (shape 3 below). Write the "who to find" brief yourself, folding the ideal customer profile (industries, size, location, and the specific pain signals discussed) into that one description, since the form has no separate profile fields. Approving it SAVES the search — the user does not have to retype anything — but saves it as a draft that has not started: a run costs real money and reaches real strangers, so they start it themselves. Tell them exactly where: the search appears at the top of their Searches tab marked "Not started", with a "Start search" button beside it. Say that plainly in your reply and never claim the search is already running or that leads are already coming in. Frame it as you doing the work, because you are: the search you just wrote is what goes out and finds them.`;
 }
 
+// ── Lead Generator: acting on leads that already exist ───────────────────────
+// The chat's side of the Enrichment, Outreach and Conversations buttons (src/utils/chat-lead-action.ts).
+// The model only proposes; the card is rebuilt from the row and the user's click does the work through
+// the tabs' own endpoints. ⚠️ "send" reaches a stranger, so the rules about not restating or rewriting
+// the email are load-bearing: the card shows the stored draft verbatim, and a reply that paraphrases it
+// would put two versions of one email in front of the user with one button under them.
+function leadActionsPrompt(): string {
+    return `EXISTING LEADS — you can act on the leads listed in YOUR LEADS RIGHT NOW, each named by its "#" number, by emitting a lead_action_proposal (shape 4). Four actions:
+- "send" — approve a lead's outreach email and send it. Only for a lead under "IN OUTREACH, NOT YET EMAILED" that has an email written. The card shows the user the whole email exactly as it will go: who it is to, the subject, every word of the message, the signature and legal footer added at the bottom, and the follow-up emails that would follow if they do not reply. Nothing is sent until they press the button on the card. Do NOT restate, summarise or rewrite the email in your reply — the card shows it word for word. If they want different wording, tell them to use "Edit draft" on that lead in the Outreach tab and then ask you again.
+- "move_to_outreach" — move a lead from the Enrichment tab into the Outreach tab's Review column, where its email waits to be read. It sends nothing and it is not an approval.
+- "reject" — turn a lead down, before its email has gone.
+- "set_outcome" — record how a deal ended: "won" (with valueGbp only if the user gave a value), or "lost" / "disqualified", which need a lossReason. If they say it was lost but not why, ask them why before emitting the card.
+You never do any of these yourself: the user confirms on the card, and only that click changes anything. So never say an email HAS been sent, or a lead HAS been moved, turned down or marked — say the card is there to confirm. One lead per reply. If you cannot tell which lead they mean, ask, quoting the candidates by name. You cannot overrule a do-not-contact flag, edit an email's words, add or change an email address, or connect an inbox from this chat: for those, name the tab — Outreach for the email and the do-not-contact override, Enrichment for the lead's details.`;
+}
+
 // ── Lead Generator: what is actually IN the Leads tab, right now ──────────────
 //
 // ── The bug this fixes ───────────────────────────────────────────────────────
@@ -449,6 +468,9 @@ FINDING NEW LEADS — when the user asks you to find leads, create a search, bui
 // explicitly, so "list all my leads" is answered with "open the Leads tab", not with a truncated
 // list presented as complete.
 const LEAD_SNAPSHOT_NAMES = 20;
+/** The Outreach list: at most this many shown, picked from this many recent candidates. */
+const LEAD_SNAPSHOT_OUTREACH = 15;
+const LEAD_SNAPSHOT_OUTREACH_SCAN = 60;
 
 type LeadCounts = {
     total: number; hot: number; warm: number; cold: number; unrated: number;
@@ -492,6 +514,7 @@ async function buildLeadsSnapshot(
         // own tab would read them in.
         const names = await db
             .select({
+                id: assistantRecords.id,
                 title: assistantRecords.title,
                 status: assistantRecords.status,
                 approvalStatus: assistantRecords.approvalStatus,
@@ -517,8 +540,35 @@ async function buildLeadsSnapshot(
         const list = names.map((n) => {
             const rating = (n.status || 'unrated').toLowerCase();
             const gate = APPROVAL_WORDS[n.approvalStatus ?? ''] ?? 'no approval state recorded';
-            return `- ${n.title} (${rating}, ${gate})`;
+            return `- #${n.id} ${n.title} (${rating}, ${gate})`;
         }).join('\n');
+
+        // The leads whose email can be sent from a lead_action_proposal card right now — the Outreach
+        // tab's Review and Approved columns, judged by the SAME predicates those columns use
+        // (lead-recipient.ts, lead-outreach-state.ts). Separate from the sample above, which is
+        // ordered by rating and can leave out exactly the lead the user is asking to send.
+        const outreachRows = await db
+            .select({ id: assistantRecords.id, title: assistantRecords.title, approvalStatus: assistantRecords.approvalStatus, data: assistantRecords.data })
+            .from(assistantRecords)
+            .where(and(
+                eq(assistantRecords.organisationId, organisationId),
+                eq(assistantRecords.aiAssistantId, aiAssistantId),
+                eq(assistantRecords.recordType, 'lead'),
+                inArray(assistantRecords.approvalStatus, ['pending_approval', 'approved']),
+            ))
+            .orderBy(desc(assistantRecords.updatedAt))
+            .limit(LEAD_SNAPSHOT_OUTREACH_SCAN);
+        const waiting = outreachRows
+            .filter((r) => leadOutreachState(r.data) !== 'sent'
+                && (r.approvalStatus === 'approved' || isInOutreachReview(r.data)))
+            .slice(0, LEAD_SNAPSHOT_OUTREACH);
+        const outreachList = waiting.length
+            ? `\nIN OUTREACH, NOT YET EMAILED (newest ${waiting.length}${waiting.length === LEAD_SNAPSHOT_OUTREACH ? ', there may be more' : ''}):\n${waiting.map((r) => {
+                const draft = sendableDraft(r.data, r.title);
+                const where = r.approvalStatus === 'approved' ? 'Approved column' : 'Review column';
+                return `- #${r.id} ${r.title} (${where}${draft ? `, email to ${draft.to ?? 'no address'}: "${draft.subject}"` : ', no email written yet'})`;
+            }).join('\n')}`
+            : '\nIN OUTREACH, NOT YET EMAILED: none.';
 
         const truncated = c.total > names.length
             ? `\nThese are the ${names.length} most recent of ${c.total}. The counts above cover all ${c.total}; this list does not. If the user wants the full list, or wants to filter, sort or group it, send them to the Enrichment tab — it does all three.`
@@ -530,6 +580,7 @@ By stage: ${c.pending} awaiting your approval, ${c.approved} approved but not ye
 Contactable: ${c.withEmail} of ${c.total} have an email address on file — the rest cannot be emailed until one is added, whatever they scored.
 Closed: ${c.won} won, ${c.lost} lost.
 ${list}${truncated}
+${outreachList}
 
 ⚠️ These records belong to this business and this assistant alone. They are the ONLY leads you know anything about — do not describe, name or count any other organisation's records, and if a question needs a lead that is not listed above, say so and point at the Enrichment tab rather than inventing one.`;
     } catch (err) {
@@ -1670,6 +1721,8 @@ ${rc.leadsSnapshot
     // the question anyway from whatever else is in its context.
     ?? 'YOUR LEADS RIGHT NOW — unavailable for this turn: the lead counts could not be read. If the user asks how many leads they have, say you cannot see the count right now and point them at the Enrichment tab. Do NOT estimate, and do NOT answer from anything else in this conversation.'}
 
+${leadActionsPrompt()}
+
 Score every lead against the ideal customer profile below — a lead that matches it well scores high; one that misses it scores low, and your reasons must say which criteria it met or missed.
 
 Ideal customer profile (from setup):
@@ -1691,7 +1744,7 @@ A user turn may also open with "[Imported records]" followed by rows from the us
 
 SPREADSHEET FALLBACK — do not assume this business uses a CRM like HubSpot, and NEVER tell the user an external system is required. Leads can reach you three ways, and you should name whichever fits what they asked: your own discovery searches (above — the answer whenever they want NEW leads); pasted straight into this chat; or imported as a CSV in the "Leads" tab of your dashboard (Excel and Google Sheets users export via File → Download → CSV), which is also where everything you produce exports back out. Never offer CSV import as the answer to "find me some leads" — that is asking the user to go do your job. Every structured result you emit here is saved to the "Leads" tab automatically, so nothing is lost when the conversation ends.
 
-Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EXACTLY ONE of the three shapes below, or null:
+Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EXACTLY ONE of the four shapes below, or null:
 {
   "reply": "your conversational message to the user",
   "uiElement": {                      // shape 1 — enough data to score
@@ -1735,6 +1788,17 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EXACTL
       "negativeKeywords": ["<term that would waste a run, e.g. a competitor>", ...],
       "requireHumanApproval": true    // only ever false if the user explicitly asks to skip review
     }
+  }
+}
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {                      // shape 4 — act on a lead that already exists (see EXISTING LEADS)
+    "type": "lead_action_proposal",
+    "action": "send" | "move_to_outreach" | "reject" | "set_outcome",
+    "recordId": <the number after # in YOUR LEADS RIGHT NOW>,
+    "outcome": "won" | "lost" | "disqualified" | null,      // set_outcome only
+    "lossReason": "${LOSS_REASONS.join('" | "')}" | null,   // lost / disqualified only
+    "valueGbp": <number> | null                               // won only, when the user said it
   }
 }`,
             ].join('\n\n');
@@ -2899,6 +2963,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             uiElement = emailAction;
             if (!emailAction) {
                 content = 'I couldn’t find that email among this assistant’s emails, so I haven’t set anything up. Which one do you mean? You can also open it on the "Emails" tab.';
+            }
+        }
+        // And the Lead Generator's (src/utils/chat-lead-action.ts). Its "send" card carries the stored
+        // email verbatim and a fingerprint of it, which send_outreach checks at the click.
+        let leadAction: LeadActionCard | null = null;
+        const leadActionReq = route === ROUTES.lead_qualifier ? leadActionFromUiElement(uiElement) : null;
+        if (leadActionReq) {
+            leadAction = await resolveLeadActionProposal(db, orgId, session.aiAssistantId, leadActionReq);
+            uiElement = leadAction;
+            if (!leadAction) {
+                content = 'I couldn’t find that lead among this assistant’s leads, so I haven’t set anything up. Which one do you mean? You can also find it on the "Enrichment" tab.';
             }
         }
         const postActionReq = route === ROUTES.social_media_manager && !draftTarget ? postActionFromUiElement(uiElement) : null;

@@ -180,6 +180,42 @@ export async function loadSteps(db: Db, sequenceId: number): Promise<SequenceSte
     }
 }
 
+/**
+ * What a send would start, WITHOUT provisioning anything — for a confirm card shown before the click.
+ *
+ * Mirrors enrolInSequence's own decisions: the owner's `outreachFollowUps` answer, a cadence that was
+ * switched off, and — when the assistant has none yet — the DEFAULT_SEQUENCE_STEPS that the first
+ * send would provision. ⚠️ Follow-up text is not written in advance: the worker writes each one when
+ * it is due, from its step's brief. So this returns the briefs, and callers must say so.
+ *
+ * Fails CLOSED to "unknown" (null), unlike followUpsEnabled: a card that cannot read the cadence says
+ * so, rather than promising one email when up to four may follow.
+ */
+export async function previewFollowUps(
+    db: Db, aiAssistantId: number,
+): Promise<{ enabled: boolean; steps: Array<{ stepNumber: number; daysAfterOpener: number; brief: string }> } | null> {
+    try {
+        if (!(await followUpsEnabled(db, aiAssistantId))) return { enabled: false, steps: [] };
+        const [existing] = await db
+            .select({ id: outreachSequences.id, isEnabled: outreachSequences.isEnabled })
+            .from(outreachSequences)
+            .where(eq(outreachSequences.aiAssistantId, aiAssistantId))
+            .limit(1);
+        if (existing && !existing.isEnabled) return { enabled: false, steps: [] };
+        const rows = existing ? await loadSteps(db, existing.id) : DEFAULT_SEQUENCE_STEPS.slice(0, MAX_STEPS_PER_ENROLMENT);
+        if (!rows) return null;
+        let day = 0;
+        const steps = rows.map((s) => {
+            day += Number(s.delayDays) || 0;
+            return { stepNumber: s.stepNumber, daysAfterOpener: day, brief: s.bodyPrompt };
+        });
+        return { enabled: steps.length > 0, steps };
+    } catch (err) {
+        logQuietly('previewFollowUps', err);
+        return null;
+    }
+}
+
 // ── Enrolment ────────────────────────────────────────────────────────────────
 
 export interface EnrolInput {
