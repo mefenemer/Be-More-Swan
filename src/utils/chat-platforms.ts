@@ -124,7 +124,7 @@ ${lines}
 ${drafting} A platform not listed above is not connected; connecting one is done in Assistant Profile ▸ Connections, never from here.
 CHANGING THEM — when the user asks to start or stop posting to a connected platform, put this in "uiElement" instead of anything else:
 { "type": "platforms_proposal", "turnOn": ["instagram", …], "turnOff": ["facebook", …] }
-Use the platform names above, lower case. Turning off the last switch that is on does NOT stop posting — with none on, the assistant drafts for every platform — so if the user wants to stop posting altogether, offer to pause the assistant instead. Posts already drafted or booked for a platform keep their place; this changes what is drafted from now on. You never change a switch yourself: the user confirms on the card, and only that click saves it. So never say a switch HAS changed — say the card is there to confirm.`;
+Use the platform names above, lower case. Only a platform listed above has a switch: if they name one that is not listed, do not emit a card — say it is not connected and where to connect it. Turning off the last switch that is on does NOT stop posting — with none on, the assistant drafts for every platform — so if the user wants to stop posting altogether, offer to pause the assistant instead. Posts already drafted or booked for a platform keep their place; this changes what is drafted from now on. You never change a switch yourself: the user confirms on the card, and only that click saves it. So never say a switch HAS changed — say the card is there to confirm.`;
     } catch (err) {
         console.error('[chat-platforms] could not build the block (non-fatal)', err);
         return null;

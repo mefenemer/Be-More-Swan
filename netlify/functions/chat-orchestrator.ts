@@ -80,6 +80,7 @@ import { buildPlatformsBlock, platformsProposalFromUiElement, resolvePlatformsPr
 import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal, type LibraryCard } from '../../src/utils/chat-library';
 import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
+import { confirmCardReply } from '../../src/utils/confirm-card-reply';
 import { isInOutreachReview } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
 import { LOSS_REASONS } from '../../src/config/revenue-events';
@@ -382,7 +383,11 @@ function parseStructuredReply(raw: string): { content: string; uiElement: unknow
     // (broken) structured attempt, degrade to a friendly retry line; only genuine
     // non-JSON prose is passed through untouched.
     if (looksLikeStructuredAttempt(stripped)) {
-        console.warn('[chat-orchestrator] structured reply was unparseable — showing retry fallback');
+        // The start and end of what came back, so the next one can be diagnosed: a cut-off end means
+        // the token ceiling; a clean end means a JSON fault (2026-10-22: one live turn, no clue why).
+        console.warn('[chat-orchestrator] structured reply was unparseable — showing retry fallback', {
+            length: stripped.length, start: stripped.slice(0, 300), end: stripped.slice(-160),
+        });
         return { content: STRUCTURED_REPLY_FALLBACK, uiElement: null };
     }
     return { content: raw.trim(), uiElement: null };
@@ -3321,6 +3326,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             );
             content = honestDraftReply('blog_no_draft');
             suppressed = 'blog_no_draft';
+        }
+
+        // The words beside a profile or review card never say the change happened — only the click
+        // does that, and a refused card's reply says it was refused (src/utils/confirm-card-reply.ts).
+        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard)) {
+            content = confirmCardReply(content, uiElement as { blocked?: unknown; settled?: unknown });
         }
 
         // And the newsletter route's. Identical shape: it never persists on the turn, so the only
