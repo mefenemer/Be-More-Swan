@@ -116,7 +116,7 @@ window._PLATFORM_LABEL = { instagram: 'Instagram', facebook: 'Facebook', linkedi
 // Single source of truth for the "My Assistants" list card and the Assistant Details pill,
 // so they can't diverge again. A `working` lifecycle refines into an operational sub-state
 // from live signals: a mid-flight job → "Executing Task"; else drafts awaiting the user →
-// "Awaiting Human Review"; else "Idle".
+// "Needs you"; else "Idle".
 window._LIFECYCLE_BADGES = {
     blocked:        { cls: 'bg-amber-50 text-amber-700 border-amber-200',      dot: 'bg-amber-500',                 label: 'Action Required',    toggle: 'Initiate Kick-Off' },
     provisioning:   { cls: 'bg-amber-50 text-amber-700 border-amber-200',      dot: 'bg-amber-500 animate-pulse',   label: 'Setup in Progress',  toggle: 'Pause Assistant' },
@@ -140,7 +140,7 @@ window._resolveAssistantBadge = function(data, opSignals) {
         if (sig.activeJobCount > 0) {
             p = { ...p, cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500 animate-pulse', label: 'Executing Task' };
         } else if (sig.pendingReview > 0) {
-            p = { ...p, cls: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-500', label: 'Awaiting Human Review' };
+            p = { ...p, cls: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-500', label: 'Needs you' };
         } else {
             p = { ...p, cls: 'bg-gray-100 text-gray-600 border-gray-200', dot: 'bg-gray-400', label: 'Idle' };
         }
@@ -324,7 +324,7 @@ window.generateAssistantCardHTML = function(assistant) {
     // counted, and a role whose configuration.type has drifted still gets an honest strip.
     //
     // The three lead words are lifted verbatim from the surfaces they link to, so the card and the
-    // page agree: "found" is what the Enrichment tab holds, "awaiting you" is the Outreach ▸ Review
+    // page agree: "found" is what the Found leads tab holds, "awaiting you" is the Outreach ▸ Review
     // column, and "cleared for outreach" is Approved + Awaiting reply — the same two states the
     // qualified_leads goal counts. Deliberately NOT "qualified": that word means two different
     // things on the detail page already (a live count on the goal, a 90-day count on the
@@ -1369,7 +1369,7 @@ document.addEventListener('bms:notifications-arrived', () => {
  * ⚠️ The Review column is counted with `deliverable=1`, matching what that column actually renders
  * (leads with an address AND a drafted body). Counting it any other way would put a number on the
  * button that the list underneath contradicts — which is the specific bug that made this queue
- * read as a duplicate of the Enrichment tab.
+ * read as a duplicate of the Found leads tab.
  */
 async function _detailRqRefreshRecordCounts() {
     const aid = window._currentAssistantId;
@@ -2081,8 +2081,8 @@ async function _rqApproveCampaignDecision(card, record) {
         const refused = placed.length - issued;
         window.showToast?.(
             !placed.length ? 'Approved. No briefs were issued.'
-                : refused ? `Approved — ${issued} of ${placed.length} briefs issued. See the Orders tab for the rest.`
-                    : `Approved — ${issued} ${issued === 1 ? 'brief' : 'briefs'} issued. Track them in the Orders tab.`,
+                : refused ? `Approved — ${issued} of ${placed.length} briefs issued. See the Briefs tab for the rest.`
+                    : `Approved — ${issued} ${issued === 1 ? 'brief' : 'briefs'} issued. Track them in the Briefs tab.`,
         );
         await _detailRqRenderGroups(_detailRqCurrentStatus);
     } catch (e) {
@@ -2651,7 +2651,7 @@ function _rqCardChips(r) {
  *
  * ⚠️ Same two columns as the banner, and for the same reason: Review and Archived are the only
  * states the sweep collects. Rendered from the generated mirror (window.LeadRetention) so the
- * number here, the number in the Enrichment table's "Deletes in" column and the night the sweep
+ * number here, the number in the Found leads table's "Deletes in" column and the night the sweep
  * actually runs are one calculation rather than three.
  */
 function _rqRetentionChip(r, statusKey) {
@@ -2932,7 +2932,7 @@ function _detailRqPaintRecords(statusKey, opts) {
     const emptyMsg = statusKey !== 'review'
         ? 'Nothing here yet.'
         : (opts && opts.deliverableOnly)
-            ? 'No emails waiting for you. Leads without a contact address can’t be emailed yet — they’re in the Enrichment tab.'
+            ? 'No emails waiting for you. Leads without a contact address can’t be emailed yet — they’re in the Found leads tab.'
             : 'Nothing awaiting your review.';
 
     // ── Send readiness (the pre-flight) ──────────────────────────────────────────
@@ -3851,6 +3851,11 @@ const _RQ_NEWSLETTER_STATUS_LABEL = {
 // (newsletter-issues approve / reject), so the owner/admin rule and the empty-email check apply.
 // ⚠️ Review stays read-first, as on the Blog Writer's queue: approving an email to a whole list
 // happens in the Studio, next to the words being approved. Sending immediately stays there too.
+// The Review column holds drafts as well as emails waiting for approval, but only the second kind is
+// waiting on the owner. Counting both made the badge include emails they were still writing
+// themselves (review, 2026-10-22): badges and "waiting" counts use THIS list.
+const _RQ_NEWSLETTER_WAITING = ['pending_approval', 'in_review'];
+
 function _rqNewsletterActions(issue, statusKey) {
     // min-h-[44px] below sm: a ~30px button is too small a target for a thumb.
     const tap = 'min-h-[44px] sm:min-h-0';
@@ -4017,14 +4022,25 @@ async function _detailRqRenderNewsletter(statusKey) {
     const waiting = statusKey === 'review' ? (window.AssistantEmailCampaigns?.waiting() || []) : [];
     const waitingNote = waiting.length
         ? `<div class="my-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-center justify-between gap-3 flex-wrap">
-             <span>${waiting.length === 1 ? `The campaign <strong>${_rqEsc(waiting[0].name)}</strong> is written but switched off.` : `${waiting.length} campaigns are written but switched off.`}</span>
-             <button type="button" onclick="window._activateMainTab('email-campaigns')" class="link text-sm font-semibold">Review campaigns →</button>
+             <span>${waiting.length === 1 ? `The email flow <strong>${_rqEsc(waiting[0].name)}</strong> is written but switched off.` : `${waiting.length} email flows are written but switched off.`}</span>
+             <button type="button" onclick="window._activateMainTab('email-campaigns')" class="link text-sm font-semibold">Review email flows →</button>
            </div>`
         : '';
 
-    container.innerHTML = waitingNote + (issues.length
-        ? `<div class="divide-y divide-gray-100">${issues.map((i) => _detailRqNewsletterCard(i, statusKey)).join('')}</div>`
-        : `<p class="text-sm text-gray-500 py-10 text-center">${statusKey === 'review' ? 'No emails awaiting review.' : 'Nothing here yet.'}</p>`);
+    // Review: what is waiting for approval first, then the drafts still being written, each under
+    // its own heading, so the column's count and its first section say the same thing.
+    const list = (rows) => `<div class="divide-y divide-gray-100">${rows.map((i) => _detailRqNewsletterCard(i, statusKey)).join('')}</div>`;
+    let body;
+    if (statusKey === 'review') {
+        const waitingRows = issues.filter((i) => _RQ_NEWSLETTER_WAITING.includes(i.status));
+        const drafts = issues.filter((i) => !_RQ_NEWSLETTER_WAITING.includes(i.status));
+        const head = (t) => `<p class="text-xs font-bold text-gray-500 uppercase tracking-wide mt-4 mb-1">${t}</p>`;
+        body = (waitingRows.length ? head('Waiting for your approval') + list(waitingRows) : '<p class="text-sm text-gray-500 py-6 text-center">No emails waiting for your approval.</p>')
+            + (drafts.length ? head('Drafts you’re still writing') + list(drafts) : '');
+    } else {
+        body = issues.length ? list(issues) : '<p class="text-sm text-gray-500 py-10 text-center">Nothing here yet.</p>';
+    }
+    container.innerHTML = waitingNote + body;
 }
 
 /** Every visible column's count from one list of the assistant's emails — see _detailRqPaintBlogCounts. */
@@ -4033,7 +4049,7 @@ function _detailRqPaintNewsletterCounts(all) {
     for (const key of Object.keys(_DETAIL_RQ_COLUMNS)) {
         const btn = document.querySelector(`.detail-rq-col[data-status="${key}"]`);
         if (!btn || btn.classList.contains('hidden')) continue;
-        const wanted = _RQ_NEWSLETTER_STATUS[key] || [];
+        const wanted = key === 'review' ? _RQ_NEWSLETTER_WAITING : (_RQ_NEWSLETTER_STATUS[key] || []);
         const n = wanted.length ? all.filter((i) => wanted.includes(i.status)).length : 0;
         _detailRqSetColumnBadge(key, n);
         if (key === 'review') review = n;
@@ -4521,7 +4537,7 @@ window._closeBriefDrawer = function() {
 // The header pill keeps the lifecycle vocabulary for every non-active state
 // (Setup in Progress / Paused / Archived …). For an actively *working* assistant it
 // refines into an operational sub-state from live signals: a mid-flight job →
-// "Executing Task"; else drafts awaiting the user → "Awaiting Human Review"; else
+// "Executing Task"; else drafts awaiting the user → "Needs you"; else
 // "Idle". Signals are cached so the pill re-renders as activity/review data lands.
 // Badge resolution itself lives in window._resolveAssistantBadge, shared with the
 // "My Assistants" list card so the two views can't disagree on an assistant's status.
@@ -4819,7 +4835,7 @@ async function _loadEmailAutopilotStats(assistantId) {
                 if (!Number.isNaN(t) && t > now && (next === null || t < next)) next = t;
             }
             if (_RQ_NEWSLETTER_STATUS.posted.includes(i.status)) counts.sent++;
-            if (_RQ_NEWSLETTER_STATUS.review.includes(i.status)) counts.waiting++;
+            if (_RQ_NEWSLETTER_WAITING.includes(i.status)) counts.waiting++;
         }
         const tile = (id, n, title) => { const t = el(id); if (t) { t.textContent = n.toLocaleString(); t.title = title; } };
         tile('metrics-total-created', counts.written, 'Every email this assistant has written that you can still open — drafts, approved, scheduled and sent. Excludes archived ones.');
@@ -5264,7 +5280,7 @@ window._renderLeadRejectionEvidence = async function(assistantId) {
     show();
     if (!payload.reasons.length) {
         host.innerHTML = `
-          <p class="text-sm text-gray-500">Nothing recorded yet. When you reject a lead in the Outreach tab or the Enrichment tab, the reason you pick is filed here.</p>`;
+          <p class="text-sm text-gray-500">Nothing recorded yet. When you reject a lead in the Outreach tab or the Found leads tab, the reason you pick is filed here.</p>`;
         return;
     }
 
@@ -6031,6 +6047,16 @@ function _applyDashboardRegistry(data) {
     window._detailRulesScope = cfg.rulesScope || null;
     // Role-chosen landing tab (SMM opens on its "Posts" pipeline); null → HTML default (Data Hub).
     window._detailDefaultMainTab = cfg.defaultMainTab || null;
+    // Results sits right after the landing tab: "your work, then how it is going". It was near the
+    // end of a 6–8 tab row, past the fade on a phone (review, 2026-10-22). Moved in the DOM, so
+    // keyboard order and the scroller follow; the view is re-injected per load, so it never stacks.
+    {
+        const landing = document.getElementById(`maintab-btn-${cfg.defaultMainTab || 'datahub'}`);
+        const results = document.getElementById('maintab-btn-goals');
+        if (landing && results && landing.parentNode === results.parentNode && landing.nextElementSibling !== results) {
+            landing.after(results);
+        }
+    }
     // …except where a role's review IS another tab (cfg.hideReviewQueue): the Brand Designer's
     // approval gate is the option grid on its Briefs tab, and the default here would be an empty
     // SOCIAL post queue for an assistant that makes no posts.
@@ -8403,7 +8429,7 @@ async function _prefetchDetailRqBadge(assistantId) {
             // count after the queue had painted them (2026-10-22).
             const res = await fetch(`/.netlify/functions/newsletter-issues?assistantId=${assistantId}`);
             if (!res.ok) return;
-            count = ((await res.json()).issues || []).filter((i) => _RQ_NEWSLETTER_STATUS.review.includes(i.status)).length;
+            count = ((await res.json()).issues || []).filter((i) => _RQ_NEWSLETTER_WAITING.includes(i.status)).length;
         } else {
             const res = await fetch(`/.netlify/functions/get-social-drafts?status=pending_approval&assistantId=${assistantId}`);
             if (!res.ok) return;
@@ -8411,7 +8437,7 @@ async function _prefetchDetailRqBadge(assistantId) {
         }
         _setDetailRqTabBadge(count);
         window._setPendingReviewCount?.(count);
-        // Feed the operational status pill (Epic 1 AC1.1.2): pending drafts → "Awaiting Human Review".
+        // Feed the operational status pill (Epic 1 AC1.1.2): pending drafts → "Needs you".
         window._updateOpSignals?.({ pendingReview: count });
     } catch { /* non-critical */ }
 }
@@ -8541,6 +8567,9 @@ const _WRITTEN_ROI_HOURS_NOTE = {
     // not one. The rate card is the platform's, and the strip says whose work it is costing.
     blog: 'Researching, drafting and formatting long-form posts',
     newsletter: 'Planning, writing and laying out your emails',
+    // Campaign briefs and decisions are priced in roi-activity.ts (campaign_managed) — the strip was
+    // simply never switched on for this role (review, 2026-10-22).
+    campaign: 'Planning campaigns and briefing your other assistants',
 };
 
 async function _fetchAndRenderWrittenRoi(assistantId, period = 'all') {
@@ -8639,6 +8668,10 @@ async function _renderAssistantTaskShare(assistantId) {
     const strip = document.getElementById('detail-task-share');
     if (!strip) return;
     strip.classList.add('hidden');
+    // The Campaign Orchestrator's Budget & Control strip already states the month's allowance, with
+    // the work committed to campaigns beside it — two counts of one number (review, 2026-10-22).
+    const roleKey = (window._detailCurrentData || {}).roleKey;
+    if ((window.AssistantDashboardRegistry?.get?.(roleKey) || {}).allowanceInControlStrip) return;
     try {
         const get = (u) => (window.bmsCachedFetch ? window.bmsCachedFetch(u) : fetch(u)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
         const [cap, us] = await Promise.all([get('/.netlify/functions/check-capacity'), get('/.netlify/functions/get-usage-summary')]);
@@ -8689,7 +8722,7 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
     if (roiStrip && roiStrip.dataset.roiSource === 'lead') {
         return _fetchAndRenderLeadRoi(assistantId, period);
     }
-    if (roiStrip && (roiStrip.dataset.roiSource === 'blog' || roiStrip.dataset.roiSource === 'newsletter')) {
+    if (roiStrip && ['blog', 'newsletter', 'campaign'].includes(roiStrip.dataset.roiSource)) {
         return _fetchAndRenderWrittenRoi(assistantId, period);
     }
     if (!card) return;

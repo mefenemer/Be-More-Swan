@@ -3505,7 +3505,7 @@
     const isDraft = ui.stage === 'draft' && emails.every((n) => typeof n.bodyMarkdown === 'string' && n.bodyMarkdown.trim());
     const trigger = ui.trigger && typeof ui.trigger === 'object' ? ui.trigger : {};
     // Re-derived rather than trusted, same as the server: 'subscribed' (the welcome sequence) and
-    // 'form' (an email campaign a sign-up form starts) start by themselves; anything else does not.
+    // 'form' (an email flow a sign-up form starts) start by themselves; anything else does not.
     // ⚠️ The model's guess is only the STARTING choice for an automatic series. It once filed a
     // "beta testers" campaign as the welcome sequence — Save then tried to overwrite the LIVE
     // waitlist welcome sequence, and the user had no way to say "no, this is for a form". The card
@@ -3520,14 +3520,14 @@
     const lastDay = Number(emails[emails.length - 1].sendDay) || 1;
     const typeLabel = CAMPAIGN_TYPE_LABELS[ui.campaignType] || 'Custom';
     const n = emails.length;
-    const saveLabelFor = () => isForm ? 'Save as form email campaign' : automatic ? 'Save as email campaign' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
+    const saveLabelFor = () => isForm ? 'Save as form email flow' : automatic ? 'Save as email flow' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
     const startsLabelFor = () => isForm ? 'Starts when someone fills in a form' : 'Starts when someone subscribes';
     const statusFor = () => isForm
-      ? 'Saving creates this email campaign under Email Campaigns in the Email Studio, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on — nobody is emailed by saving.'
+      ? 'Saving creates this email flow under Email Flows in the Email Studio, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on — nobody is emailed by saving.'
       : automatic
-        ? 'Saving makes this a new campaign for everyone who subscribes, under Email Campaigns in the Email Studio. It stays switched off until you turn it on there — nobody is emailed by saving.'
+        ? 'Saving makes this a new email flow for everyone who subscribes, under Email Flows in the Email Studio. It stays switched off until you turn it on there — nobody is emailed by saving.'
         : 'Saving puts each email in your Emails tab as a draft. Nothing is sent to anyone: you send each one to the right people on the right day from the Email Studio.';
-    const eyebrow = (s) => `${isDraft ? 'Email campaign draft' : 'Email campaign plan'} · ${s}`;
+    const eyebrow = (s) => `${isDraft ? 'Email flow draft' : 'Email flow plan'} · ${s}`;
 
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-lg';
@@ -3557,7 +3557,7 @@
         </label>
         <label class="flex items-start gap-2 text-sm text-gray-800 cursor-pointer">
           <input type="radio" name="${whoName}" value="subscribed" class="mt-1" ${isForm ? '' : 'checked'}>
-          <span>Everyone who joins your list <span class="text-gray-500">— saved as a new campaign; your current one is not touched.</span></span>
+          <span>Everyone who joins your list <span class="text-gray-500">— saved as a new email flow; your current one is not touched.</span></span>
         </label>
       </fieldset>` : ''}
 
@@ -3631,12 +3631,12 @@
               setEyebrow('Saved');
               if (isForm) {
                 say(deduped
-                  ? 'Already saved — it is under Email Campaigns in the Email Studio.'
-                  : `Saved as an email campaign — ${stepCount || n} emails, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on under Email Campaigns.`);
+                  ? 'Already saved — it is under Email Flows in the Email Studio.'
+                  : `Saved as an email flow — ${stepCount || n} emails, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on under Email Flows.`);
               } else if (automatic) {
                 say(deduped
-                  ? 'Already saved — it is under Email Campaigns in the Email Studio.'
-                  : `Saved as a new email campaign for everyone who subscribes — ${stepCount || n} emails, switched off. Turn it on under Email Campaigns in the Email Studio when you are ready.`);
+                  ? 'Already saved — it is under Email Flows in the Email Studio.'
+                  : `Saved as a new email flow for everyone who subscribes — ${stepCount || n} emails, switched off. Turn it on under Email Flows in the Email Studio when you are ready.`);
               } else {
                 say(deduped
                   ? 'Already saved — these are in your Emails tab.'
@@ -3646,7 +3646,7 @@
             }
             setBusy(false);
             setEyebrow('Not saved yet');
-            say(error || 'Could not save this campaign — please try again.', 'error');
+            say(error || 'Could not save this email flow — please try again.', 'error');
           },
         },
       }));
@@ -3724,7 +3724,7 @@
         <button type="button" data-afd-save class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save form</button>
         <button type="button" data-afd-discard class="btn-destructive px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Discard</button>
       </div>
-      <p class="mt-2 text-xs font-semibold text-indigo-700" data-afd-status>Saving keeps it switched off. Open it in the form builder to link an email campaign, check it, and publish it — nobody can sign up until you do.</p>
+      <p class="mt-2 text-xs font-semibold text-indigo-700" data-afd-status>Saving keeps it switched off. Open it in the form builder to link an email flow, check it, and publish it — nobody can sign up until you do.</p>
     `;
 
     // The preview — only when the renderer is on this page (the workspace loads it; a standalone
@@ -3758,7 +3758,7 @@
             eyebrow('Saved · switched off');
             el._savedForm = form;
             const extra = (more || []).length ? ` (${more.join(' ')})` : '';
-            say(`Saved, switched off. Open it in the form builder to link an email campaign and publish it.${extra}`);
+            say(`Saved, switched off. Open it in the form builder to link an email flow and publish it.${extra}`);
             const actions = el.querySelector('[data-afd-actions]');
             if (actions && window.FormBuilder) {
               actions.innerHTML = '<button type="button" data-afd-open class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg transition border">Open in the form builder</button>';

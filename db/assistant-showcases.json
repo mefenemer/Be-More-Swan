@@ -135,9 +135,9 @@
     ]
   },
   "newsletter_editor": {
-    "headline": "Newsletters and email campaigns your audience actually opens.",
+    "headline": "Newsletters and email flows your audience actually opens.",
     "overview": [
-      "The Email Marketing Assistant writes your newsletters and email campaigns, and helps you grow the list they go to. Ask it to draft an email, plan a welcome series, or turn your latest blog post into a newsletter — then edit it in Email Studio and approve it.",
+      "The Email Marketing Assistant writes your newsletters and email flows, and helps you grow the list they go to. Ask it to draft an email, plan a welcome series, or turn your latest blog post into a newsletter — then edit it in Email Studio and approve it.",
       "Your Audience is built in: sign-up forms for your website, imports, segments and tags, and customers your Lead Generation Assistant has won. Only people who have agreed to hear from you are emailed, and anyone who unsubscribes is never emailed again."
     ],
     "highlights": [

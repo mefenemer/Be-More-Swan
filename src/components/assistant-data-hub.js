@@ -252,7 +252,7 @@
     // merged. Empty on every hub but the Lead Generator's.
     deletedRecords: [],
     // Is the Deleted section folded open? Collapsed by default: it is a graveyard, and a user
-    // arriving at the Enrichment tab is there for live leads. Part of the view state rather than
+    // arriving at the Found leads tab is there for live leads. Part of the view state rather than
     // the DOM for the same reason `collapsed` below is — the section is re-rendered on every
     // refresh and a fold recorded in the markup would spring open.
     deletedOpen: false,
@@ -303,7 +303,7 @@
    *
    * Leads only, and fetched separately rather than filtered out of one big response, for two
    * reasons. The graveyard grows without bound while the live list does not, so folding them into
-   * the same fetch would make every Enrichment tab load pay for every lead ever dropped. And
+   * the same fetch would make every Found leads tab load pay for every lead ever dropped. And
    * `state.records` is read by nine other things (table, filters, groups, counts, selection,
    * paging, CSV, deep-link focus); a single array holding two populations would need each of them
    * to remember which one it meant.
@@ -2326,10 +2326,10 @@
       } else {
         cell = esc(cellValue(record, c.key));
       }
-      return `<td class="px-4 py-3 ${i === 0 ? 'font-semibold text-gray-900' : 'text-gray-700'}">${cell}</td>`;
+      return `<td class="px-4 py-3 ${i === 0 ? 'font-semibold text-gray-900 hub-cell-title' : 'text-gray-700'}${c.phone === false ? ' hub-cell-secondary' : ''}" data-label="${esc(c.label)}">${cell}</td>`;
     }).join('');
     return `${pick}${cols}
-      <td class="px-4 py-3 text-right">
+      <td class="px-4 py-3 text-right hub-cell-chevron">
         <svg class="w-4 h-4 text-gray-400 inline transition-transform" data-row-chevron fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
       </td>`;
   }
@@ -2690,11 +2690,37 @@
     bar.querySelector('[data-hub-bulkdelete]').textContent = `Delete ${n}`;
   }
 
+  // Phone cards (hubTab.phoneCards): below 640px each row restacks as a card — every cell on its own
+  // line under its column name, the less important columns (`phone: false`) left to the detail
+  // panel. CSS only, so selection, row-click-to-open, grouping and paging behave exactly as in the
+  // table. Injected once: the rules are scoped to .hub-cards, which only a phoneCards hub sets.
+  function ensurePhoneCardStyle() {
+    if (document.getElementById('hub-cards-style')) return;
+    const st = document.createElement('style');
+    st.id = 'hub-cards-style';
+    st.textContent = `@media (max-width: 639px) {
+      .hub-cards table, .hub-cards tbody, .hub-cards tr, .hub-cards td { display: block; width: 100%; }
+      .hub-cards thead { display: none; }
+      .hub-cards tr.hidden { display: none; }
+      .hub-cards tr[data-record-id] { position: relative; padding: 0.75rem 1rem; }
+      .hub-cards tr[data-record-id] > td { padding: 0.125rem 0; display: flex; align-items: center; gap: 0.5rem; min-height: 1.75rem; }
+      .hub-cards tr[data-record-id] > td[data-label]::before { content: attr(data-label); flex: 0 0 6.5rem; font-size: 11px; font-weight: 700; color: #787263; text-transform: uppercase; letter-spacing: 0.04em; }
+      .hub-cards tr[data-record-id] > td.hub-cell-title::before { display: none; }
+      .hub-cards tr[data-record-id] > td.hub-cell-title { font-size: 0.9375rem; padding-right: 2.5rem; }
+      .hub-cards tr[data-record-id] > td.hub-cell-secondary { display: none; }
+      .hub-cards tr[data-record-id] > td.hub-cell-chevron { position: absolute; top: 0.75rem; right: 1rem; width: auto; }
+      .hub-cards tr[data-record-id] > td:first-child:has(input[data-hub-select]) { position: absolute; top: 0.85rem; right: 2.75rem; width: auto; }
+    }`;
+    document.head.appendChild(st);
+  }
+
   function renderTable() {
     updateTabCount();
     const host = document.getElementById('datahub-table-host');
     if (!host) return;
     const hub = state.hub;
+    host.classList.toggle('hub-cards', !!hub.phoneCards);
+    if (hub.phoneCards) ensurePhoneCardStyle();
 
     if (state.records.length === 0) {
       state.selected.clear();

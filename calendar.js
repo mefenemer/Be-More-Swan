@@ -220,7 +220,7 @@ let _leadOutreach = false;
 // Read-only chips: the date belongs to the record, so moving it here would be editing a fact.
 // Shape: { key, kind, title, at: Date, derived, tab }.
 let _datedItems = [];
-let _datedSource = null;   // 'records' | 'briefs' | 'checks' | null
+let _datedSource = null;   // 'records' | 'briefs' | 'checks' | 'campaigns' | null
 // The locked assistant's roleKey (opts.roleKey) — only for wording the legend and the empty month.
 let _roleKey = null;
 const DATED_KIND_META = {
@@ -229,6 +229,8 @@ const DATED_KIND_META = {
     notes_taken: { icon: '📝', label: 'Notes taken' },
     brief_due:   { icon: '🎨', label: 'Brief due' },
     site_check:  { icon: '🔍', label: 'Website check' },
+    campaign_start: { icon: '🚀', label: 'Campaign starts' },
+    campaign_end:   { icon: '🏁', label: 'Campaign ends' },
 };
 
 // An assistant's identity colour — the user's own choice where they've made one, otherwise the
@@ -276,7 +278,7 @@ window.initCalendar = async function (opts = {}) {
         _publishesContent = opts.publishesContent !== false;
         _platformFilterOn = _publishesContent && opts.platformFilter !== false;
         _leadOutreach = opts.leadOutreach === true;
-        _datedSource = ['records', 'briefs', 'checks'].includes(opts.datedItems) ? opts.datedItems : null;
+        _datedSource = ['records', 'briefs', 'checks', 'campaigns'].includes(opts.datedItems) ? opts.datedItems : null;
         _roleKey = typeof opts.roleKey === 'string' ? opts.roleKey : null;
     } else {
         _datedSource = null;
@@ -450,6 +452,24 @@ async function _loadAndRender() {
                     const dr = await fetch(`/.netlify/functions/assistant-records?dated=1&assistantId=${_assistantFilter}&from=${from.toISOString()}&to=${to.toISOString()}`);
                     const items = dr.ok ? ((await dr.json()).items || []) : [];
                     dated = items.map((i) => ({ key: `r${i.id}`, kind: i.kind, title: i.title, at: new Date(i.at), derived: !!i.derived, tab: 'datahub' }));
+                } else if (_datedSource === 'campaigns') {
+                    // Campaign Orchestrator: each campaign's start and end, from the same list the
+                    // Campaigns tab reads. Its calendar held nothing else of its own (review, 2026-10-22).
+                    const cr = await fetch('/.netlify/functions/campaigns', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+                        body: JSON.stringify({ action: 'list', assistantId: Number(_assistantFilter) }),
+                    });
+                    const list = cr.ok ? ((await cr.json()).campaigns || []) : [];
+                    for (const c of list) {
+                        const title = c.objective || c.name || 'Campaign';
+                        const done = c.status === 'finished';
+                        for (const [kind, iso] of [['campaign_start', c.startsAt], ['campaign_end', c.endsAt]]) {
+                            const at = iso ? new Date(iso) : null;
+                            if (at && !Number.isNaN(at.getTime()) && at >= from && at < to) {
+                                dated.push({ key: `${kind}-${c.id}`, kind, title, at, derived: false, tab: 'campaigns', done: kind === 'campaign_end' && done });
+                            }
+                        }
+                    }
                 } else if (_datedSource === 'checks') {
                     // Mystery Shopper: the checks it ran, on the day they ran (site-audits.ts `calendar`).
                     const cr = await fetch('/.netlify/functions/site-audits', {
@@ -556,9 +576,10 @@ function _renderStatusLegend() {
         `<span class="inline-flex items-center gap-1.5 text-xs text-gray-500">${marker} ${label}</span>`;
     // The dated kinds this assistant's grid can actually contain — listed only when it has them.
     const datedLegend = () => {
-        const kinds = _datedSource === 'briefs' ? ['brief_due'] : _datedSource === 'records' ? ['invoice_due', 'meeting', 'notes_taken'] : [];
+        const kinds = _datedSource === 'briefs' ? ['brief_due'] : _datedSource === 'campaigns' ? ['campaign_start', 'campaign_end']
+            : _datedSource === 'records' ? ['invoice_due', 'meeting', 'notes_taken'] : [];
         const role = _roleKey || '';
-        const relevant = kinds.filter((k) => _datedSource === 'briefs'
+        const relevant = kinds.filter((k) => _datedSource === 'briefs' || _datedSource === 'campaigns'
             || (role === 'accounts_receivable_clerk' ? k === 'invoice_due' : role === 'meeting_note_taker' ? k !== 'invoice_due' : true));
         return relevant.map((k) => item(`<span>${DATED_KIND_META[k].icon}</span>`, DATED_KIND_META[k].label)).join('');
     };
@@ -574,7 +595,7 @@ function _renderStatusLegend() {
           item('<span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>', 'Overdue')
         : outreachItem + datedLegend() +
           // The Brand Designer schedules nothing: no records queue, so no yellow chip can ever appear.
-          (_datedSource === 'briefs' ? '' : item('<span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>', _leadOutreach ? 'Chase reminder' : 'Scheduled')) +
+          (_datedSource === 'briefs' || _datedSource === 'campaigns' ? '' : item('<span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>', _leadOutreach ? 'Chase reminder' : 'Scheduled')) +
           item('<span class="text-gray-500 font-extrabold">✓</span>', 'Completed');
 }
 
@@ -1019,6 +1040,7 @@ function _activityChip(act, viewType) {
 function _emptyMonthMessage() {
     if (!_lockedAssistant || _publishesContent) return 'Nothing scheduled this month. Approve a draft in the Review Queue to put it on the calendar.';
     if (_datedSource === 'briefs') return 'Nothing this month. Briefs with a due date appear here on that date.';
+    if (_datedSource === 'campaigns') return 'Nothing this month. Each campaign appears on the day it starts and the day it ends.';
     const role = _roleKey || '';
     if (role === 'accounts_receivable_clerk') return 'Nothing this month. Invoices appear on their due date once your assistant has them.';
     if (role === 'meeting_note_taker') return 'Nothing this month. Meetings appear on their date once your assistant has taken notes.';

@@ -1312,7 +1312,7 @@
 
     // A whole campaign from the campaign card. Two destinations, chosen by the trigger exactly as
     // the card told the user before they pressed Save (disruptive-ui-registry.js): 'subscribed' and
-    // 'form' become a new email campaign, anything else becomes one draft issue per email.
+    // 'form' become a new email flow, anything else becomes one draft issue per email.
     // A 409's code is passed back intact, not flattened into an error string.
     function onNewsletterCampaignCreate(e) {
       const d = e.detail || {};
@@ -1322,7 +1322,7 @@
         return;
       }
       const emails = Array.isArray(d.newsletters) ? d.newsletters : [];
-      // Everyone-who-subscribes ('subscribed') and form-started email campaigns ('form') are both
+      // Everyone-who-subscribes ('subscribed') and form-started email flows ('form') are both
       // automatic series; anything else becomes draft emails.
       const trigger = d.trigger && (d.trigger.event === 'subscribed' || d.trigger.event === 'form') ? d.trigger.event : null;
       const toSequence = !!trigger;

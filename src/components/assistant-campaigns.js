@@ -1189,7 +1189,7 @@
             <option value="custom">A group I send them to myself</option>
           </select>
         </label>
-        <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Kind of email campaign
+        <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Kind of email flow
           <select data-cmp-aw-kind="${id}" data-keep="aw-kind-${id}" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
             <option value="">Let the campaign's stage decide</option>
             ${kinds.map((k) => `<option value="${esc(k.type)}">${esc(k.label)}</option>`).join('')}
@@ -2849,7 +2849,7 @@
       }
       state.busy = false;
       st.open = false;
-      window.showToast?.(`${spec.label} — briefed. It is listed in Orders.`, 'success');
+      window.showToast?.(`${spec.label} — briefed. It is listed in Briefs.`, 'success');
       await load();
     }
   });

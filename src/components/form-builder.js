@@ -406,15 +406,15 @@
         ${S.segments.map((x) => `<option value="${x.id}" ${Number(a.segmentId) === Number(x.id) ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}
       </select>
       ${label('Tag everyone who signs up (comma-separated)', 'form-tags')}${input('data-fb-aud="tags" maxlength="400" placeholder="e.g. pricing-guide, spring-event"', (a.tags || []).join(', '))}
-      ${label('Start an email campaign', 'form-campaign')}
+      ${label('Start an email flow', 'form-campaign')}
       <select data-fb-campaign="sequenceId" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm mb-2">
         <option value="">None — new sign-ups get your welcome sequence</option>
         ${S.sequences.map((x) => `<option value="${x.id}" ${Number(c.sequenceId) === Number(x.id) ? 'selected' : ''}>${esc(x.name)}${x.isEnabled ? '' : ' (switched off)'}</option>`).join('')}
       </select>
       ${c.sequenceId ? `<label class="flex items-center gap-2 text-sm text-gray-700 mb-2 cursor-pointer"><input type="checkbox" data-fb-campaign="skipWelcome" ${c.skipWelcome ? 'checked' : ''}> <span data-explain="form-skip-welcome">Send this INSTEAD of the welcome sequence</span></label>` : ''}
       <p class="text-[11px] text-gray-400">${S.sequences.length
-        ? 'Campaigns listed here start when someone fills in a form. Create one in the Email Studio with “New email campaign” → “People who fill in a form”.'
-        : 'No form campaigns yet. Create one in the Email Studio: “New email campaign” → “People who fill in a form”.'}</p>`;
+        ? 'Flows listed here start when someone fills in a form. Create one in the Email Studio with “New email flow” → “People who fill in a form”.'
+        : 'No form flows yet. Create one in the Email Studio: “New email flow” → “People who fill in a form”.'}</p>`;
   }
 
   // ── Preview ────────────────────────────────────────────────────────────────
@@ -600,7 +600,7 @@
       const k = t.getAttribute('data-fb-campaign');
       if (k === 'sequenceId') {
         d.campaign.sequenceId = Number(t.value) || null;
-        // Linking a campaign REPLACES the welcome sequence by default — two series on day one reads as spam.
+        // Linking a flow REPLACES the welcome sequence by default — two series on day one reads as spam.
         d.campaign.skipWelcome = !!d.campaign.sequenceId;
         touched(); renderPanel(); return;
       }

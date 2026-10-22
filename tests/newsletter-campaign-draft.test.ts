@@ -223,7 +223,7 @@ await check('a plan has no Save button', () => {
 });
 
 await check('the card says where Save goes before it is pressed, and that nothing is sent', () => {
-    assert.match(CARD, /'Save as email campaign'/);
+    assert.match(CARD, /'Save as email flow'/);
     assert.match(CARD, /draft \$\{n === 1 \? 'email' : 'emails'\}/);
     assert.match(CARD, /stays switched off until you turn it on/);
     assert.match(CARD, /Nothing is sent to anyone/);

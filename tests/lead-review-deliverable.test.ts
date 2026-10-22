@@ -235,12 +235,12 @@ check('an empty lead Review column explains where the leads went', () => {
     // Shipping the filter without this converts a full-looking queue into a bare "nothing awaiting
     // your review" beside a search that just filed fifteen leads, which reads as a bug.
     const fn = ASSISTANTS.slice(landmark(ASSISTANTS, 'async function _detailRqRenderRecords'), landmark(ASSISTANTS, 'window._detailRqRecordAct'));
-    // The tab is called "Enrichment" now (registry hubTab.label). This assertion is the reason
+    // The tab is called "Found leads" now (registry hubTab.label). This assertion is the reason
     // the empty state exists at all — a lead Review column is normally empty, and saying only
     // "nothing awaiting your review" beside a search that just filed fifteen leads reads as a bug.
     // It has to name where they actually went, so it has to track the rename.
-    assert.ok(/they’re in the Enrichment tab/.test(fn),
-        'the filtered empty state no longer points at the Enrichment tab');
+    assert.ok(/they’re in the Found leads tab/.test(fn),
+        'the filtered empty state no longer points at the Found leads tab');
 });
 
 // ── 5. Triage in the Leads tab does not send ─────────────────────────────────

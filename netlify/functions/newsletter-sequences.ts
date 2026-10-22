@@ -62,7 +62,7 @@ export default withLambda(async (event: HandlerEvent) => {
         if ('error' in ctx) return ctx.error;
         try {
             // Every automatic email series this org has: the ONE welcome sequence, and any number of
-            // email campaigns a sign-up form starts (trigger 'form'). The picker in the Email Studio
+            // email flows a sign-up form starts (trigger 'form'). The picker in the Email Studio
             // and the form builder's campaign dropdown both read this list.
             const sequences = await db.select({
                 id: newsletterSequences.id, name: newsletterSequences.name, triggerEvent: newsletterSequences.triggerEvent,
@@ -151,7 +151,7 @@ export default withLambda(async (event: HandlerEvent) => {
     catch { return json(400, { error: 'Invalid JSON body.' }); }
     const action = String(body.action || '');
 
-    // An email campaign a sign-up form starts. Unlike the welcome sequence there can be any number,
+    // An email flow a sign-up form starts. Unlike the welcome sequence there can be any number,
     // so this always creates — the name is what tells them apart in the pickers.
     if (action === 'create' && body.trigger === 'form') {
         const assistantId = Number(body.assistantId || '') || null;
@@ -162,7 +162,7 @@ export default withLambda(async (event: HandlerEvent) => {
         }
         const [sequence] = await db.insert(newsletterSequences).values({
             organisationId: orgId, assistantId, triggerEvent: 'form',
-            name: String(body.name || 'Form email campaign').trim().slice(0, 80) || 'Form email campaign',
+            name: String(body.name || 'Form email flow').trim().slice(0, 80) || 'Form email flow',
             createdBy: ctx.userId,
         }).returning();
         return json(200, { sequence });
@@ -230,7 +230,7 @@ export default withLambda(async (event: HandlerEvent) => {
         // used to REPLACE the one welcome sequence's emails. Matched by trigger + name + identical
         // emails only, so a second press of Save is a no-op rather than a duplicate.
         const formTrigger = body.trigger === 'form';
-        const campaignName = String(body.name || '').trim().slice(0, 80) || (formTrigger ? 'Form email campaign' : 'Welcome sequence');
+        const campaignName = String(body.name || '').trim().slice(0, 80) || (formTrigger ? 'Form email flow' : 'Welcome sequence');
         const [existing] = await db.select().from(newsletterSequences)
             .where(and(
                 eq(newsletterSequences.organisationId, orgId),
@@ -298,7 +298,7 @@ export default withLambda(async (event: HandlerEvent) => {
         return json(200, { sequence, deduped: false, replaced: false, stepCount: steps.length });
     }
 
-    // Every action below works on ONE sequence: the one named by sequenceId (an email campaign a form
+    // Every action below works on ONE sequence: the one named by sequenceId (an email flow a form
     // starts), or the welcome sequence when none is given — which is every caller that predates them.
     const seqId = Number(body.sequenceId || '') || null;
     const [sequence] = await db.select().from(newsletterSequences)
@@ -308,7 +308,7 @@ export default withLambda(async (event: HandlerEvent) => {
         ))
         .orderBy(desc(newsletterSequences.isEnabled), asc(newsletterSequences.createdAt))
         .limit(1);
-    if (!sequence) return json(404, { error: seqId ? 'That email campaign no longer exists.' : 'No welcome sequence yet.' });
+    if (!sequence) return json(404, { error: seqId ? 'That email flow no longer exists.' : 'No welcome sequence yet.' });
 
     // Rename. A name is only a label — it is not what decides who receives the emails (the trigger
     // does) — so it may change while the campaign is on, by anyone who can edit its emails.
@@ -501,7 +501,7 @@ export default withLambda(async (event: HandlerEvent) => {
         return json(200, { design, bodyMarkdown: designToMarkdown(design) });
     }
 
-    // Delete a whole email campaign (or the welcome sequence).
+    // Delete a whole email flow (or the welcome sequence).
     //
     // ⚠️ REFUSED WHILE IT IS ON. Switching it off is the step that tells the person how many people
     // are part way through and stops them (newsletter.js asks, the worker halts them) — deleting a
@@ -512,7 +512,7 @@ export default withLambda(async (event: HandlerEvent) => {
     // cleared to match so the builder does not show a link to nothing.
     if (action === 'deleteSequence') {
         if (!ENABLE_ROLES.includes(ctx.role)) {
-            return json(403, { error: 'Only an owner or admin can delete an email campaign.' });
+            return json(403, { error: 'Only an owner or admin can delete an email flow.' });
         }
         if (sequence.isEnabled) {
             return json(409, { code: 'SEQUENCE_ENABLED', error: 'Switch this campaign off before deleting it.' });
@@ -568,7 +568,7 @@ export default withLambda(async (event: HandlerEvent) => {
 
     if (action === 'enable') {
         if (!ENABLE_ROLES.includes(ctx.role)) {
-            return json(403, { error: 'Only an owner or admin can switch an email campaign on.' });
+            return json(403, { error: 'Only an owner or admin can switch an email flow on.' });
         }
         const enable = body.enabled !== false;
 

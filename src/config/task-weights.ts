@@ -47,7 +47,7 @@ export const WORK_KIND_LABELS: Record<WorkKind, string> = {
     blog_article: 'Blog articles',
     lead_search: 'Lead searches',
     email_issue: 'Email issues',
-    email_campaign: 'Email campaigns',
+    email_campaign: 'Email flows',
     outreach_email: 'Outreach emails',
     site_audit: 'Website audits',
     site_draft: 'Website drafts',

@@ -6,7 +6,7 @@
  * ── What problem this solves ─────────────────────────────────────────────────
  * The calendar could draw a lead's work but could not explain it. A chase-reminder chip was inert
  * with a code comment saying "records open from the Data Hub" — so answering "what is this, and
- * what are we about to send this company?" meant leaving the calendar, opening the Enrichment tab
+ * what are we about to send this company?" meant leaving the calendar, opening the Found leads tab
  * and finding the row by name. The one screen that shows you WHEN could not show you WHAT.
  *
  * ── The two things it opens, which are not the same thing ────────────────────

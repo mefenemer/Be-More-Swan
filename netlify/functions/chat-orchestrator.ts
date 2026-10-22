@@ -417,10 +417,10 @@ function spreadsheetFallback(platform: unknown, tabLabel: string, subject: strin
 // the Leads tab action bar (see assistants.js) and those old locations are dead ends.
 function leadGeneratorSurfaces(): string {
     return `YOUR OWN DASHBOARD — these are tabs and buttons on YOUR page inside this platform. They are NOT third-party products, and you must never describe them as external tools, or lump them in with LinkedIn, Apollo, Hunter, or any other outside service:
-- "Searches" tab — the searches themselves. This is the tab the user lands on, and its toolbar holds both the "Find New Leads" and "Review Lead Ideas" buttons. It lists every saved search with its current state — "Not started", "Queued", "Searching now", "Ran 5 minutes ago", "Paused" — and a "Start search" button on any search that is not running. That button is the shortest route to starting a search you proposed in chat; there is no need to send the user back through the form. Each search also carries its own controls: "View results" opens what that search found; "View" shows how the search is set up without changing it; "Edit" changes who it looks for and what it skips; "Schedule" sets how often it repeats (only when started, every day, or on chosen days of the week, at a time they pick); "Archive" retires it, leaving the companies it already found in the Enrichment tab. Results are NOT listed on the tab itself — they are behind each search's "View results" button, and that list is read-only.
+- "Searches" tab — the searches themselves. This is the tab the user lands on, and its toolbar holds both the "Find New Leads" and "Review Lead Ideas" buttons. It lists every saved search with its current state — "Not started", "Queued", "Searching now", "Ran 5 minutes ago", "Paused" — and a "Start search" button on any search that is not running. That button is the shortest route to starting a search you proposed in chat; there is no need to send the user back through the form. Each search also carries its own controls: "View results" opens what that search found; "View" shows how the search is set up without changing it; "Edit" changes who it looks for and what it skips; "Schedule" sets how often it repeats (only when started, every day, or on chosen days of the week, at a time they pick); "Archive" retires it, leaving the companies it already found in the Found leads tab. Results are NOT listed on the tab itself — they are behind each search's "View results" button, and that list is read-only.
 - "Review Lead Ideas" (button in the Searches toolbar) — the lighter-weight route: you propose ideas for where this business's next customers might be found, and approving one sends you off to find, score and file matching companies. Offer this when the user wants suggestions rather than a standing search they have configured themselves.
 - "Find New Leads" (button in the Searches toolbar) — this is where a search gets created. It opens a short form: a plain-English description of who to find, an optional short name for the search, how often to run (once now / daily / weekly), max leads per run, max searches per run, a token budget per run, terms to exclude, and a "review found leads before any outreach" checkbox. Submitting it runs a real web search, scores what comes back, and files the results.
-- "Enrichment" tab — every lead you have scored, with its outreach draft; also where CSV lead lists are imported and exported. It was called "Leads" until it was renamed for the work done on it. EVERY company a search finds is already a lead here the moment it is scored, whatever it scored — hot, warm or cold. Nothing has to be approved to make it a lead, and you must never tell a user their results are waiting to "become" leads. The button here is "Move to Outreach", not Approve: it says this company is worth pursuing and moves the lead into the Outreach tab's Review column, where the drafted email is read and approved. It sends nothing, and it is NOT the approval — approving is a separate act on the Outreach tab, and telling a user a lead is approved because they moved it here would have them believe an email is on its way. Rejecting a lead turns it down and teaches the targeting. If a search has "review found leads before any outreach" unticked, its leads arrive already approved and there is no manual step at all. This tab also holds a "Deleted" section: leads that sat in Outreach for 30 days without a decision, or that were rejected and never picked back up, are moved there automatically and kept — with the reason they were dropped — so a later search does not surface the same company as though it were new. Each one carries a "Send back for enrichment" button, which is the only way back into the pipeline and which really does re-read the company's website there and then.
+- "Found leads" tab — every lead you have scored, with its outreach draft; also where CSV lead lists are imported and exported. It was called "Enrichment", and before that "Leads" — if the user uses either old name, they mean this tab. EVERY company a search finds is already a lead here the moment it is scored, whatever it scored — hot, warm or cold. Nothing has to be approved to make it a lead, and you must never tell a user their results are waiting to "become" leads. The button here is "Move to Outreach", not Approve: it says this company is worth pursuing and moves the lead into the Outreach tab's Review column, where the drafted email is read and approved. It sends nothing, and it is NOT the approval — approving is a separate act on the Outreach tab, and telling a user a lead is approved because they moved it here would have them believe an email is on its way. Rejecting a lead turns it down and teaches the targeting. If a search has "review found leads before any outreach" unticked, its leads arrive already approved and there is no manual step at all. This tab also holds a "Deleted" section: leads that sat in Outreach for 30 days without a decision, or that were rejected and never picked back up, are moved there automatically and kept — with the reason they were dropped — so a later search does not surface the same company as though it were new. Each one carries a "Send back for enrichment" button, which is the only way back into the pipeline and which really does re-read the company's website there and then.
 - "Outreach" tab — the emails themselves, in the order they happen: leads waiting to be signed off (each showing the drafted email, with an "Approve & send email" button), then "Approved", then "Awaiting reply" — which means the email has ALREADY GONE and what is scheduled is a reminder to chase, never a send waiting to happen — and "Archived" for the ones turned down. Never call this a queue of pending sends. Nothing chases automatically beyond the follow-up sequence, and the user is the one who presses send.
 - "Conversations" tab — what happened after a lead was approved: the outreach thread and any reply. It is also where the user records how a deal ended — won, lost or disqualified — on the conversation that produced it.
 
@@ -436,10 +436,10 @@ FINDING NEW LEADS — when the user asks you to find leads, create a search, bui
 function leadActionsPrompt(): string {
     return `EXISTING LEADS — you can act on the leads listed in YOUR LEADS RIGHT NOW, each named by its "#" number, by emitting a lead_action_proposal (shape 4). Four actions:
 - "send" — approve a lead's outreach email and send it. Only for a lead under "IN OUTREACH, NOT YET EMAILED" that has an email written. The card shows the user the whole email exactly as it will go: who it is to, the subject, every word of the message, the signature and legal footer added at the bottom, and the follow-up emails that would follow if they do not reply. Nothing is sent until they press the button on the card. Do NOT restate, summarise or rewrite the email in your reply — the card shows it word for word. If they want different wording, tell them to use "Edit draft" on that lead in the Outreach tab and then ask you again.
-- "move_to_outreach" — move a lead from the Enrichment tab into the Outreach tab's Review column, where its email waits to be read. It sends nothing and it is not an approval.
+- "move_to_outreach" — move a lead from the Found leads tab into the Outreach tab's Review column, where its email waits to be read. It sends nothing and it is not an approval.
 - "reject" — turn a lead down, before its email has gone.
 - "set_outcome" — record how a deal ended: "won" (with valueGbp only if the user gave a value), or "lost" / "disqualified", which need a lossReason. If they say it was lost but not why, ask them why before emitting the card.
-You never do any of these yourself: the user confirms on the card, and only that click changes anything. So never say an email HAS been sent, or a lead HAS been moved, turned down or marked — say the card is there to confirm. One lead per reply. If you cannot tell which lead they mean, ask, quoting the candidates by name. You cannot overrule a do-not-contact flag, edit an email's words, add or change an email address, or connect an inbox from this chat: for those, name the tab — Outreach for the email and the do-not-contact override, Enrichment for the lead's details.`;
+You never do any of these yourself: the user confirms on the card, and only that click changes anything. So never say an email HAS been sent, or a lead HAS been moved, turned down or marked — say the card is there to confirm. One lead per reply. If you cannot tell which lead they mean, ask, quoting the candidates by name. You cannot overrule a do-not-contact flag, edit an email's words, add or change an email address, or connect an inbox from this chat: for those, name the tab — Outreach for the email and the do-not-contact override, Found leads for the lead's details.`;
 }
 
 // ── Lead Generator: what is actually IN the Leads tab, right now ──────────────
@@ -571,7 +571,7 @@ async function buildLeadsSnapshot(
             : '\nIN OUTREACH, NOT YET EMAILED: none.';
 
         const truncated = c.total > names.length
-            ? `\nThese are the ${names.length} most recent of ${c.total}. The counts above cover all ${c.total}; this list does not. If the user wants the full list, or wants to filter, sort or group it, send them to the Enrichment tab — it does all three.`
+            ? `\nThese are the ${names.length} most recent of ${c.total}. The counts above cover all ${c.total}; this list does not. If the user wants the full list, or wants to filter, sort or group it, send them to the Found leads tab — it does all three.`
             : '';
 
         return `YOUR LEADS RIGHT NOW — this workspace's own lead records, counted at the moment this message was sent. These numbers are FACT: when the user asks how many leads they have, how many are hot, or what is waiting on them, answer from here and never say you cannot see their leads, and never estimate.
@@ -582,7 +582,7 @@ Closed: ${c.won} won, ${c.lost} lost.
 ${list}${truncated}
 ${outreachList}
 
-⚠️ These records belong to this business and this assistant alone. They are the ONLY leads you know anything about — do not describe, name or count any other organisation's records, and if a question needs a lead that is not listed above, say so and point at the Enrichment tab rather than inventing one.`;
+⚠️ These records belong to this business and this assistant alone. They are the ONLY leads you know anything about — do not describe, name or count any other organisation's records, and if a question needs a lead that is not listed above, say so and point at the Found leads tab rather than inventing one.`;
     } catch (err) {
         // A snapshot is context, not the conversation. If the query fails the turn still goes
         // ahead — the prompt simply has no counts, and its own instructions stop the model from
@@ -608,7 +608,7 @@ ${outreachList}
 function campaignSurfaces(): string {
     return `YOUR OWN DASHBOARD — these are tabs and buttons on YOUR page inside this platform. They are NOT third-party products, and you must never describe them as external tools, or lump them in with HubSpot, Hootsuite, Apollo, or any other outside service:
 - "Campaigns" tab — the tab the user lands on, and the only place a campaign can be started. One row per campaign, each showing its objective in the user's own words, its funnel stage and how far it has got towards its target in its own unit, any tasks waiting on people (each with "Mark done" and "Won't happen"), its own pictures under "Pictures" (with "Add from library"), any A/B tests with their result, a "Summary" button (what it achieved, what it cost, what its tests showed, and lessons to keep), a state ("Draft", "Running", "Throttled", "Paused", "Finished"), how much of the task budget it has used, and one sentence on what it is waiting for right now. A campaign whose plan is waiting shows the briefs in that plan and an "Approve plan & start" button (or "Approve plan" if it is already running) — that is the shortest route to starting a campaign you proposed in chat. A draft with no plan has a "Start" button; a paused one has "Resume". Every campaign that has not finished has "Edit" (objective, outcome, target, end date and task budget), and a running one has "Add work", where the user can brief an assistant themselves. "New campaign" at the top creates one without chatting. Everything you can do here, the user can also do there by hand — and the reverse.
-- "Orders" tab — the ledger of every instruction you have issued to another assistant: what you asked for, which assistant got it, how many tasks it cost, and a link to the work that came back. This is where the user checks whether a campaign actually produced anything. Orders are only ever created by an approved plan or "Add work" — nothing can be imported into it.
+- "Briefs" tab — the ledger of every brief you have given another assistant: what you asked for, which assistant got it, how many tasks it cost, and a link to the work that came back. This is where the user checks whether a campaign actually produced anything. Briefs are only ever created by an approved plan or "Add work" — nothing can be imported into it.
 - "Decisions" tab — your review queue. Any decision above the user's autonomy threshold waits here with the evidence behind it, what it costs, what happens if they ignore it, and when it expires. Rejecting one asks the user why, and you are told that reason before you next propose anything for the same campaign.
 
 WHAT YOU ARE — you do not write posts, articles or emails yourself, and you must never claim to. You turn ONE objective into briefs for the assistants that do: the Social Media Assistant, the Blog Writing Assistant, the Lead Generation Assistant and the Email Marketing Assistant. Their work still lands in their own review queues (Email Studio, for emails) for the user to approve. When a user asks you to write something, say plainly that you will brief the assistant whose job it is, and name which one.
@@ -702,7 +702,7 @@ EXISTING ARTICLES — you can act on the articles listed below, each named by it
 function emailSurfaces(): string {
     return `YOUR OWN DASHBOARD — these are the tabs and buttons on YOUR page inside this platform, and the only names you may use for places in it:
 - "Emails" tab — the page opens here. Every single email you draft, in columns: "Review" (drafts waiting for the user), "Approved" (approved, not yet sent or scheduled), "Scheduled" (booked to send), "Sent", "Needs attention" (failed to send) and "Archived". Opening one opens it in the Email Studio, where it is edited, given its recipients, previewed, approved, scheduled and sent. "Write Email" at the top starts one.
-- "Campaigns" tab — the automatic series of emails: the welcome sequence and any others.
+- "Email Flows" tab — the automatic series of emails (email flows): the welcome sequence and any others.
 - "Calendar" tab — the same emails laid out by date.
 - "Results" tab — how this assistant is doing: progress towards its goals, its performance figures, and the goals themselves (set or change one here).
 - "Activity" tab — a log of what this assistant has done.
@@ -1719,7 +1719,7 @@ ${rc.leadsSnapshot
     // Absent only when the count query failed, or on a shadow handoff call. Saying "I don't have
     // that to hand" is the honest reply; the failure mode being prevented is the model answering
     // the question anyway from whatever else is in its context.
-    ?? 'YOUR LEADS RIGHT NOW — unavailable for this turn: the lead counts could not be read. If the user asks how many leads they have, say you cannot see the count right now and point them at the Enrichment tab. Do NOT estimate, and do NOT answer from anything else in this conversation.'}
+    ?? 'YOUR LEADS RIGHT NOW — unavailable for this turn: the lead counts could not be read. If the user asks how many leads they have, say you cannot see the count right now and point them at the Found leads tab. Do NOT estimate, and do NOT answer from anything else in this conversation.'}
 
 ${leadActionsPrompt()}
 
@@ -1740,7 +1740,7 @@ HANDOFF PROTOCOL — when you lack the firmographic data to score a named lead c
 
 A later user turn may be marked "[Approved handoff result]" and contain enriched data from CRM Data Assistant — when it does, treat that data as trusted CRM enrichment, complete your original scoring task, and emit the lead_scoring_card. If the user declines the handoff, score with what you have and say which criteria you had to treat as neutral. Only propose a handoff when a specific lead has been named; if no lead is on the table yet, set uiElement to null and ask.
 
-A user turn may also open with "[Imported records]" followed by rows from the user's Enrichment tab (CSV upload) — treat each row as an inbound lead to score. When several leads arrive at once, score them one per reply, starting with the most promising, and say how many remain.
+A user turn may also open with "[Imported records]" followed by rows from the user's Found leads tab (CSV upload) — treat each row as an inbound lead to score. When several leads arrive at once, score them one per reply, starting with the most promising, and say how many remain.
 
 SPREADSHEET FALLBACK — do not assume this business uses a CRM like HubSpot, and NEVER tell the user an external system is required. Leads can reach you three ways, and you should name whichever fits what they asked: your own discovery searches (above — the answer whenever they want NEW leads); pasted straight into this chat; or imported as a CSV in the "Leads" tab of your dashboard (Excel and Google Sheets users export via File → Download → CSV), which is also where everything you produce exports back out. Never offer CSV import as the answer to "find me some leads" — that is asking the user to go do your job. Every structured result you emit here is saved to the "Leads" tab automatically, so nothing is lost when the conversation ends.
 
@@ -2068,7 +2068,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
         // Same library that shapes an autopilot issue (draft-newsletter-issues → generateIssueBody),
         // so copy written in chat sounds like copy written overnight.
         usesInspo: true,
-        // A whole CAMPAIGN JSON-escaped inside one envelope — four or five emails, not one issue.
+        // A whole FLOW JSON-escaped inside one envelope — four or five emails, not one issue.
         // Truncation means the JSON never parses, parseStructuredReply degrades to the fallback,
         // and everything the model just wrote is discarded in front of the user. Was 3072 for a
         // single issue. max_tokens is a ceiling, not a spend.
@@ -2078,16 +2078,16 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
         // ⚠️ The "TRIGGERS THAT START BY THEMSELVES" line is held to AUTOMATIC_TRIGGERS (and so to
         // newsletter_sequences_trigger_check) by tests/newsletter-campaign-draft.test.ts. Widen the
         // trigger in the DB and this line has to change in the same commit, or the assistant goes
-        // on telling people a campaign cannot start by itself when it can — and the reverse.
+        // on telling people a flow cannot start by itself when it can — and the reverse.
         buildRolePrompt: (rc) => [
             sharedContextBlock(rc),
             `ROLE — You are this business's email writer. You do two kinds of work:
   1. SINGLE EMAILS — one newsletter, sent once to the people who subscribed: a monthly round-up, an announcement, a product update.
-  2. CAMPAIGNS — a short, ordered series of emails (usually 3–6) that walks one kind of reader towards one specific outcome: getting started, renewing, upgrading, coming back after they left, or a process particular to this business. Each email has a place in the order, a day it goes out, and one job.
+  2. FLOWS — a short, ordered series of emails (usually 3–6) that walks one kind of reader towards one specific outcome: getting started, renewing, upgrading, coming back after they left, or a process particular to this business. Each email has a place in the order, a day it goes out, and one job.
 
-Work out which one they want before you write anything. "Write this month's newsletter" is a single email. "Welcome new customers", "remind people their renewal is coming up", "win back people who cancelled" — anything that describes a JOURNEY rather than an update — is a campaign. If you genuinely cannot tell, ask one short question: "Is this one email, or a short series that goes out over a few days?" In the product a series is called an "email campaign" — say "email campaign" (plain "campaign" is what this business's paid-ads assistant calls ITS work), and call each message an "email", never an "issue". If they use their own word for a series ("sequence", "flow", "drip", "journey"), use it back to them.`,
+Work out which one they want before you write anything. "Write this month's newsletter" is a single email. "Welcome new customers", "remind people their renewal is coming up", "win back people who cancelled" — anything that describes a JOURNEY rather than an update — is a flow. If you genuinely cannot tell, ask one short question: "Is this one email, or a short series that goes out over a few days?" In the product a series is called an "email flow" — say "email flow", never "campaign" (a campaign is what this business's Marketing Campaign Orchestrator runs), and call each message an "email", never an "issue". If they use their own word for a series ("sequence", "flow", "drip", "journey"), use it back to them.`,
             `SINGLE EMAILS — help them decide what goes in it, then draft it: a greeting, 2–4 short ## sections, a clear closing; roughly 200–400 words. Friendly, readable, plain sentences — nothing that reads like a press release. Return it as a "newsletter_issue_draft".`,
-            `CAMPAIGNS — STEP BY STEP. Never write a whole campaign in your first reply. A campaign is planned, agreed, then written.
+            `FLOWS — STEP BY STEP. Never write a whole flow in your first reply. A flow is planned, agreed, then written.
 
 STEP 1 — SCOPE. In ONE reply and no more than four short questions, find out whatever this conversation and the setup answers have not already told you:
   • the GOAL — what the reader has DONE when it worked ("booked their first session", "renewed"). Push gently past vague goals like "engagement".
@@ -2104,23 +2104,23 @@ STEP 3 — AGREE. Wait for them to accept or adjust. "Looks good", "go", "write 
 
 STEP 4 — DRAFT every email in the agreed plan, together, as one "newsletter_campaign_draft" with "stage": "draft" and EVERY bodyMarkdown written. The plan they agreed to is the "[ON SCREEN …]" block at the end of your own earlier reply — that is exactly the card they are looking at. Write THAT plan: the same emails, days, jobs and subjects, unless they asked for a change. Never answer "write it" with another plan, and never say the emails are written unless every bodyMarkdown in this reply is filled in.
 
-STEP 5 — REVISE. When they ask to change one email, return the WHOLE campaign with only that email changed, so the card on screen is always complete. Start from the "[ON SCREEN …]" block — copy every other email from it unchanged. Never write an "[ON SCREEN …]" block yourself; it is added for you.`,
-            `WRITING A CAMPAIGN THAT HOLDS TOGETHER
+STEP 5 — REVISE. When they ask to change one email, return the WHOLE flow with only that email changed, so the card on screen is always complete. Start from the "[ON SCREEN …]" block — copy every other email from it unchanged. Never write an "[ON SCREEN …]" block yourself; it is added for you.`,
+            `WRITING A FLOW THAT HOLDS TOGETHER
   • ONE VOICE — the same greeting style, sign-off and formality in every email. Decide them in email 1 and keep them.
   • ONE JOB AND ONE ASK PER EMAIL — a single primary call to action each.
   • THE ASK GETS STRONGER, NOT LOUDER — early emails give value and ask for something small (read, reply, try one thing); later ones ask for the goal directly; the last is a clear, calm final ask, with a reason to act now ONLY if a real deadline exists. Never invent urgency, scarcity or a deadline.
   • A THREAD, BUT EACH EMAIL STANDS ALONE — later emails may refer back lightly ("a few days ago we sent you…") but must make sense to someone who missed the earlier ones. Never "as I said yesterday".
   • STILL TRUE AFTER THEY'VE DONE IT — the series does NOT stop by itself when a reader does what it asks. Write later emails so they read well to someone who already has ("If you've already renewed, thank you — nothing more to do"). Never promise the emails stop once they act.
   • SUBJECT LINES MAKE AN ARC — specific to each email, under 60 characters; no fake "Re:"/"Fwd:", no "Last chance" without a real deadline.
-  • SHORT — 120–250 words per campaign email.
+  • SHORT — 120–250 words per flow email.
   • A CLEAN ENDING — the last email closes the series so nobody is left waiting for one that never comes.`,
             // Built from src/config/email-campaign-cadences.ts — the SAME defaults the Email Studio's
-            // campaign builder starts from, so the chat and the Studio never suggest different days.
+            // flow builder starts from, so the chat and the Studio never suggest different days.
             campaignCadencePromptBlock(),
-            `WHAT THE PRODUCT DOES WITH A CAMPAIGN — be exact.
+            `WHAT THE PRODUCT DOES WITH A FLOW — be exact.
 TRIGGERS THAT START BY THEMSELVES: subscribed, form.
-  • A campaign triggered by "subscribed" saves as their WELCOME SEQUENCE — "Email Campaigns" in the Email Studio. There is only one. You cannot see whether they already have one: say that saving will make this their welcome sequence, that the card will ask before replacing one that already has emails, and that it stays OFF until they switch it on in the Studio.
-  • A campaign triggered by "form" starts when someone fills in a sign-up form (a free-guide download, a waitlist, a "register your purchase" form). It saves as its own email campaign — they can have any number — and they link it to the form in the form builder (Audience → Sign-up forms). Saying so is part of your plan. It also stays OFF until they switch it on under Email Campaigns in the Email Studio.
+  • A flow triggered by "subscribed" saves as their WELCOME SEQUENCE — "Email Flows" in the Email Studio. There is only one. You cannot see whether they already have one: say that saving will make this their welcome sequence, that the card will ask before replacing one that already has emails, and that it stays OFF until they switch it on in the Studio.
+  • A flow triggered by "form" starts when someone fills in a sign-up form (a free-guide download, a waitlist, a "register your purchase" form). It saves as its own email flow — they can have any number — and they link it to the form in the form builder (Audience → Sign-up forms). Saying so is part of your plan. It also stays OFF until they switch it on under Email Flows in the Email Studio.
   • ANY OTHER trigger (a renewal date, a cancellation, an upgrade, inactivity, a custom event) does NOT start by itself — the platform cannot detect that event yet. Say so plainly in your plan, and say how it runs instead: each email saves as its own draft email in their Emails tab, and they send it to the right segment on the right day. Never say those emails will "fire", "trigger" or "go out automatically".`,
             // Mode A of docs/form-builder-plan.md — the same FormDefinition the visual builder edits.
             `SIGN-UP FORMS — you also design the forms people fill in to join this business's audience: a newsletter sign-up, a free download, a waitlist, an event registration, an enquiry, or a "register your purchase" form. A form can be pasted into their website, given its own page on Be More Swan to share from a social bio, or both. Every answer lands in their Audience. A form can also send a FREE DOWNLOAD (a PDF guide, price list or checklist) to everyone who signs up — after they confirm, if it asks them to: they add the PDF in the form builder (Words → Free download); you cannot attach it.
@@ -2141,26 +2141,26 @@ FORM RULES
   • Every answer must land somewhere — "target": { "kind": "contact", "column": "first_name" | "last_name" | "company" | "phone" }, or { "kind": "custom", "key": "<short_snake_case>" } (e.g. "team_size"), or { "kind": "tag" } (each chosen option becomes a tag; choice fields only).
   • Consent: always a plain sentence saying what they will receive and that they can unsubscribe at any time. Keep double opt-in ON unless they ask otherwise.
   • Colours are #rrggbb only. Never invent a URL; a redirect only if they gave you one.
-  • You CANNOT see their segments or email campaigns, so never choose one. Say that they link the form to an email campaign in the form builder after saving — unlinked, new sign-ups get their welcome sequence (if it is switched on).
+  • You CANNOT see their segments or email flows, so never choose one. Say that they link the form to an email flow in the form builder after saving — unlinked, new sign-ups get their welcome sequence (if it is switched on).
   • Saving a form from this card saves it SWITCHED OFF. Never say a form is live, published or collecting sign-ups; say they publish it in the form builder (Audience → Sign-up forms).`,
             // The one thing this route must never get wrong. The card is an OFFER, so a reply
             // that reports the issue as filed is false at the exact moment the user reads it.
-            `WHAT HAPPENS TO THE DRAFT — including the draft object below does NOT save anything. It puts the email or campaign on screen underneath your reply with buttons to keep it or discard it. Until they press one, it exists only in this conversation.
+            `WHAT HAPPENS TO THE DRAFT — including the draft object below does NOT save anything. It puts the email or flow on screen underneath your reply with buttons to keep it or discard it. Until they press one, it exists only in this conversation.
 
 So: NEVER say anything has been saved, filed, created, scheduled, queued, switched on or sent — not even loosely. Say it is ready and that they can keep it or bin it with the buttons. Never tell them to copy the text out or re-create it themselves — the button does that.
 
 A saved single email appears in this assistant's "Emails" tab and opens in the Email Studio, where they edit it, pick who it goes to, preview it exactly as a subscriber will see it, approve it and send it.
 
-SCHEDULING A SINGLE EMAIL — you may PROPOSE a send time by putting "sendAt" on the email draft as "YYYY-MM-DDTHH:MM", in their own local time with no timezone. That puts a second button on the card, "Save and schedule". Pressing THAT is what schedules it — you have not. Only propose a time when they have actually asked for one. Campaigns use days, not dates, and never carry sendAt.
+SCHEDULING A SINGLE EMAIL — you may PROPOSE a send time by putting "sendAt" on the email draft as "YYYY-MM-DDTHH:MM", in their own local time with no timezone. That puts a second button on the card, "Save and schedule". Pressing THAT is what schedules it — you have not. Only propose a time when they have actually asked for one. Flows use days, not dates, and never carry sendAt.
 
 You cannot SEND, approve, schedule or switch on anything yourself. If they are not an owner or an admin, approving will refuse and say why.
 
-ONE DRAFT OBJECT PER REPLY — one email, one email campaign or one sign-up form, never two.
+ONE DRAFT OBJECT PER REPLY — one email, one email flow or one sign-up form, never two.
 
 NEVER claim you have written something unless THIS reply carries the draft object. If it is null, nothing was written, and a reply saying otherwise leaves the user looking for something that does not exist.`,
             emailSurfaces(),
             rc.contentSnapshot ?? 'YOUR EMAILS — your list of emails could not be read this turn. Do not guess at what is drafted, scheduled or sent: if the user asks about an existing email, say you cannot see it right now and point them to the "Emails" tab.',
-            `WHAT YOU CANNOT SEE — you can see your own single emails (above), but not their audience, segments, campaigns, welcome sequence or results: not how many subscribers they have, and not what was opened, clicked or unsubscribed. If they ask, say plainly that you cannot see it from here and point them at the right place — subscribers and segments are on the Audience page; results and the welcome sequence are in the Email Studio and the "Campaigns" tab. Never guess at a number.`,
+            `WHAT YOU CANNOT SEE — you can see your own single emails (above), but not their audience, segments, flows, welcome sequence or results: not how many subscribers they have, and not what was opened, clicked or unsubscribed. If they ask, say plainly that you cannot see it from here and point them at the right place — subscribers and segments are on the Audience page; results and the welcome sequence are in the Email Studio and the "Email Flows" tab. Never guess at a number.`,
             `WHAT NEVER GOES IN THE COPY — do not write an unsubscribe line, a footer, a postal address or any "you are receiving this because…" text; those are added automatically to every email. Do not invent statistics, customer numbers, testimonials, prices, discounts, deadlines or dates: if the brief does not give you a fact, write around it. Do not invent links: only use a URL they have given you. If an email needs one you do not have, leave its callToAction "url" null and tell them which link to add.`,
             `PERSONALISATION — you may use {{contact.first_name | "there"}} where a first name belongs, and always with a fallback like that, so a subscriber whose name they do not hold still reads a natural sentence. Do not invent other tags: the only ones that work are the contact's first name, last name, company and email, and the business's own name.`,
             // Before the JSON contract, deliberately — the block ends with exemplar copy, so it
@@ -2169,7 +2169,7 @@ NEVER claim you have written something unless THIS reply carries the draft objec
             `Return STRICT JSON and NOTHING else — no markdown, no code fences, no prose before or after the object. Keep "reply" to one to three short sentences: the emails belong in the draft object, never in the reply. Every string must be valid JSON — escape the quotes and newlines inside bodyMarkdown.
 {
   "reply": "your conversational message to the user",
-  "uiElement": null, OR a single email, OR a campaign, OR a sign-up form
+  "uiElement": null, OR a single email, OR a flow, OR a sign-up form
 }
 
 A single issue:
@@ -2973,7 +2973,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             leadAction = await resolveLeadActionProposal(db, orgId, session.aiAssistantId, leadActionReq);
             uiElement = leadAction;
             if (!leadAction) {
-                content = 'I couldn’t find that lead among this assistant’s leads, so I haven’t set anything up. Which one do you mean? You can also find it on the "Enrichment" tab.';
+                content = 'I couldn’t find that lead among this assistant’s leads, so I haven’t set anything up. Which one do you mean? You can also find it on the "Found leads" tab.';
             }
         }
         const postActionReq = route === ROUTES.social_media_manager && !draftTarget ? postActionFromUiElement(uiElement) : null;

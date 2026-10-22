@@ -1,5 +1,5 @@
 // src/utils/newsletter-campaign-generate.ts
-// Write every email of an email campaign whose plan a person has already agreed — the Email
+// Write every email of an email flow whose plan a person has already agreed — the Email
 // Studio's campaign builder, for people who do not use the chat. The chat route plans and drafts in
 // conversation; this takes the finished plan (kind, goal, audience, links, and the day + job of each
 // email) and returns the same normalised NewsletterCampaignDraft the chat card holds, so both paths
@@ -65,7 +65,7 @@ export async function draftCampaignEmails(db: Db, input: CampaignPlanInput): Pro
     const plan = steps.map((s, i) => `  Email ${i + 1} — Day ${s.day}: ${s.role}`).join('\n');
     const system = [
         currentDatePromptBlock({ publishDate: null, timezone }),
-        `You are writing ONE email in an email campaign for ${business}, in a ${tone} tone.` +
+        `You are writing ONE email in an email flow for ${business}, in a ${tone} tone.` +
             (assistantPrompt ? ` Voice guidance: ${assistantPrompt}` : ''),
         org?.businessDescription ? `About ${business}: ${org.businessDescription}` : '',
         `THE CAMPAIGN — "${input.name}" (${kind.label}).

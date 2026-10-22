@@ -303,7 +303,7 @@ window.NotifKit = (function () {
             } };
         }
         // Leads about to lapse off the retention clock — the Outreach tab is where the decision is
-        // made, so send them there rather than to the Enrichment table they will end up in.
+        // made, so send them there rather than to the Found leads table they will end up in.
         if (notif.type === 'leads_expiring_soon' && meta.assistantId) {
             return { label: 'Review leads', run: () => {
                 window._assistantDetailInitialTab = 'review-queue';

@@ -171,10 +171,10 @@ function rowBlock(req: LeadActionRequest, rec: LeadRow): string | null {
     if (req.action === 'send') {
         if (status === 'rejected') return 'This lead was turned down. Move it back to Outreach first if you want to email it.';
         if (sent) return 'Its outreach email has already gone. When you know how it ended, I can record that.';
-        if (status === 'pending_approval' && !isInOutreachReview(data)) return 'This lead is still in Enrichment. Move it to Outreach first — I can do that — and its email will be waiting there.';
+        if (status === 'pending_approval' && !isInOutreachReview(data)) return 'This lead is still in Found leads. Move it to Outreach first — I can do that — and its email will be waiting there.';
         if (status !== 'pending_approval' && status !== 'approved') return 'This lead isn’t waiting to be emailed.';
         if (!hasOutreachDraft(data)) return 'No email has been written for this lead yet, so there is nothing to show you. Open it on the Outreach tab: sending from there writes one first.';
-        if (!resolveLeadRecipient(data)) return 'There’s no email address on this lead, so it can’t be emailed. Add one on the Enrichment tab.';
+        if (!resolveLeadRecipient(data)) return 'There’s no email address on this lead, so it can’t be emailed. Add one on the Found leads tab.';
         const dnc = evaluateDoNotContact(data);
         if (dnc.blocked) return `This lead is flagged do-not-contact: ${dnc.reason || 'flagged during qualification'}. Only the Outreach tab can overrule that, and it asks you why.`;
         return null;

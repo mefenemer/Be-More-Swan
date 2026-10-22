@@ -7,7 +7,7 @@
 // Audience page to show it, and closing it left the person somewhere they never asked to go.
 //
 // It is a LIST, deliberately. Everything about one form — its questions, its look, the code for a
-// website, its own page, the consent wording, confirm-by-email, which segment, which email campaign —
+// website, its own page, the consent wording, confirm-by-email, which segment, which email flow —
 // belongs to THAT form and lives in its builder (form-builder.js). The previous dialog showed one
 // form's settings under the list as though they applied to the whole page.
 //
@@ -47,7 +47,7 @@
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
           </button>
         </div>
-        <p class="text-sm text-gray-500 mb-5">The forms people fill in to join your audience. Each one can sit on your website, have its own page to share from a bio or a QR code, or both — and it can start an email campaign. Open a form to change its questions, its look, where it appears and what happens after someone signs up.</p>
+        <p class="text-sm text-gray-500 mb-5">The forms people fill in to join your audience. Each one can sit on your website, have its own page to share from a bio or a QR code, or both — and it can start an email flow. Open a form to change its questions, its look, where it appears and what happens after someone signs up.</p>
         <div id="sf-list"></div>
       </div>`;
     document.body.appendChild(m);

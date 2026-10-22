@@ -74,7 +74,7 @@ const ROLES = [
         role: 'newsletter_editor', helper: 'emailSurfaces', kind: 'emails', queue: 'Emails',
         // "Sent" is the Posted column relabelled for this role (assistants.js setText … 'Sent').
         columns: ['Review', 'Approved', 'Scheduled', 'Sent', 'Needs attention', 'Archived'],
-        tabs: ['Campaigns', 'Calendar', 'Results', 'Activity'],
+        tabs: ['Email Flows', 'Calendar', 'Results', 'Activity'],
         profile: PROFILE('Brand Knowledge'),
     },
 ];
@@ -88,7 +88,7 @@ const TAB_ON_PAGE: Record<string, (reg: string) => boolean> = {
         && read('assistants.js').includes("const goalsTab = cfg.goalsTab || { label: 'Results', bringsResults: true };")
         && read('assistants.js').includes("setText('maintab-btn-goals', goalsTab.label || 'Goals');"),
     Activity: () => page.includes('data-maintab="activity"') && page.includes('>Activity</button>'),
-    Campaigns: (reg) => /emailCampaignsTab:\s*true/.test(reg) && page.includes('<span id="email-campaigns-tab-label">Campaigns</span>'),
+    'Email Flows': (reg) => /emailCampaignsTab:\s*true/.test(reg) && page.includes('<span id="email-campaigns-tab-label">Email Flows</span>'),
 };
 
 const COLUMN_ON_PAGE = (col: string) => col === 'Sent' || col === 'Published'

@@ -625,7 +625,7 @@
           <button type="button" data-si-lead-ideas
             class="btn-secondary min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg border transition">Review Lead Ideas</button>
           <button type="button" data-si-new-search
-            class="btn-assistant min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg border transition">Find New Leads</button>
+            class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">Find New Leads</button>
         </div>
         ${state.savedSearches.length ? '' : emptyState()}
         ${!state.hasSocialFeed && !socialHintDismissed() ? `

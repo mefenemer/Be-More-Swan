@@ -225,14 +225,16 @@
     const img = o.url && isVideo
       ? `<video src="${esc(o.url)}" controls muted playsinline preload="metadata" class="w-full h-full object-cover"></video>`
       : o.url
-      ? `<img src="${esc(o.url)}" alt="${esc(sourceLabel(o.source))} option" loading="lazy" class="w-full h-full object-cover">`
+      ? `<img src="${esc(o.url)}" alt="${esc(`${sourceLabel(o.source)} option for “${b.title || 'this brief'}”`)}" loading="lazy" class="w-full h-full object-cover">`
       : '<div class="w-full h-full flex items-center justify-center text-xs text-gray-500">No preview</div>';
     const credit = (o.source === 'stock' || o.source === 'stock_video') && o.attributionName
       ? `<p class="text-[11px] text-gray-500 mt-1 truncate">Photo by ${o.attributionUrl ? `<a href="${esc(o.attributionUrl)}" target="_blank" rel="noopener" class="underline">${esc(o.attributionName)}</a>` : esc(o.attributionName)} on Pexels</p>`
       : '';
     let actions = '';
     if (o.status === 'approved') {
-      actions = '<p class="text-xs font-bold text-emerald-700 mt-2">✓ In your library</p>';
+      // Approved pictures go to My Content, which this page has no tab for — so say where, and link
+      // it (review, 2026-10-22).
+      actions = '<p class="text-xs font-bold text-emerald-800 mt-2">✓ In your library · <button type="button" data-brief-library class="btn-swan-link text-xs font-bold">See it in My Content</button></p>';
     } else if (state.rejecting === o.id) {
       actions = `
         <div class="mt-2 space-y-1" data-brief-reject-panel="${o.id}">
@@ -441,7 +443,7 @@
         </div>
         <div class="flex items-center gap-3">
           ${credits}
-          ${state.form ? '' : '<button type="button" data-brief-new class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">New brief</button>'}
+          ${state.form ? '' : '<button type="button" data-brief-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New brief</button>'}
         </div>
       </div>`;
   }
@@ -653,6 +655,7 @@
       return;
     }
 
+    if (t('[data-brief-library]')) { window.loadView?.('my-content'); return; }
     const chat = t('[data-brief-chat]');
     if (chat) {
       const b = state.briefs.find((x) => x.id === Number(chat.dataset.briefChat));

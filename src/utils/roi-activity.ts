@@ -78,7 +78,7 @@ export const RECORD_TYPE_LABEL: Readonly<Record<string, string>> = {
     meeting: 'Meetings summarised',
     invoice: 'Invoices processed',
     ticket: 'Tickets handled',
-    campaign_order: 'Campaign orders',
+    campaign_order: 'Campaign briefs',
     campaign_decision: 'Campaign decisions',
 };
 

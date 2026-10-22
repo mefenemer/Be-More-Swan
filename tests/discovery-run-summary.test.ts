@@ -86,7 +86,7 @@ check('the tab named is the RIGHT one for that outcome', () => {
     // were told about is not, and the notification has spent its one chance.
     //
     // A finished run: the leads exist and are read on ENRICHMENT.
-    assert.match(outcomeSentence('plan_complete', 120, CAPS), /Enrichment tab/);
+    assert.match(outcomeSentence('plan_complete', 120, CAPS), /Found leads tab/);
     // A capped or empty run: the next act is Start or Edit, both on SEARCHES.
     for (const cap of ['lead_cap', 'search_cap', 'cost_cap', 'token_cap'] as const) {
         assert.match(outcomeSentence(cap, 50, CAPS), /Searches tab/, `${cap} must send the user to Start search`);
