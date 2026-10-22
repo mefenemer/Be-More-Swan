@@ -264,20 +264,25 @@ window._buildAssistantCardGoals = function (assistant) {
     return `<div class="mb-5">${headlineHtml}${pillsHtml}${pendingHtml}${attentionHtml}</div>`;
 };
 
-window.generateAssistantCardHTML = function(assistant) {
+// An assistant's icon letter, identity colour and status badge — shared by the full card and the
+// Dashboard's one-line roster, so the two can never show the same assistant differently.
+window._assistantIdentity = function(assistant) {
     // The user's custom icon letter when they set one, else the name's initial.
     window.AssistantColors?.remember(assistant);
     const initial = String(window.AssistantColors?.letterFor(assistant.id, assistant.name, assistant.avatarLetter)
         || (assistant.name ? assistant.name.charAt(0).toUpperCase() : 'A')).replace(/[<>&"']/g, '') || 'A';
-    const role = assistant.role || 'Custom Assistant';
-    // The card icon carries the assistant's identity colour — the same one its detail hero, its
-    // calendar chips and its notifications use. Cached here as well as read, because the calendar
-    // and the inbox often render before/without their own assistants fetch and resolve by id.
-    window.AssistantColors?.remember(assistant);
+    // The identity colour — the same one its detail hero, its calendar chips and its notifications
+    // use. Cached (remember, above) as well as read, because the calendar and the inbox often render
+    // before/without their own assistants fetch and resolve by id.
     const iconColor = window.AssistantColors?.colorFor(assistant.id, assistant.avatarColor) || '#9ca3af';
-
     const db = window._resolveAssistantBadge(assistant, assistant.opSignals);
     const statusHtml = `<span class="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-md text-xs font-bold ${db.cls}"><span class="w-1.5 h-1.5 rounded-full ${db.dot}"></span> ${db.label}</span>`;
+    return { initial, iconColor, statusHtml };
+};
+
+window.generateAssistantCardHTML = function(assistant) {
+    const { initial, iconColor, statusHtml } = window._assistantIdentity(assistant);
+    const role = assistant.role || 'Custom Assistant';
 
     // SMART Goals AC2.1.1 — the goal block: one headline goal with a real progress bar, then what
     // the remaining goals add up to. See _buildGoalBlock for the layout rules.
@@ -490,6 +495,40 @@ window.generateAssistantCardHTML = function(assistant) {
 };
 
 // ==========================================
+// 1a. DASHBOARD ROSTER + FIRST-HIRE CARD
+// ==========================================
+// One row per assistant: icon, name, role and the same status badge as its card. Styled by the
+// scoped .dash-roster-* CSS in dashboard-content.html.
+window.generateTeamRosterHTML = function(assistants) {
+    const rows = assistants.map((a) => {
+        const { initial, iconColor, statusHtml } = window._assistantIdentity(a);
+        return `
+        <li>
+            <button type="button" class="dash-roster-row" onclick="window.routeToAssistantDetail('${a.id}')">
+                <span class="dash-roster-ico" style="background:${iconColor}" aria-hidden="true">${initial}</span>
+                <span class="dash-roster-name">
+                    <span class="dash-roster-title">${_escapeHtml(a.name || 'Your assistant')}</span>
+                    <span class="dash-roster-role">${_escapeHtml(a.role || 'Custom Assistant')}</span>
+                </span>
+                ${statusHtml}
+                <span class="dash-roster-go" aria-hidden="true">&rarr;</span>
+            </button>
+        </li>`;
+    }).join('');
+    return `<ul class="dash-roster" aria-label="Your assistants">${rows}</ul>`;
+};
+
+// A workspace with no working assistant: one invitation instead of a page of zeros.
+window.generateFirstHireCardHTML = function() {
+    return `
+    <div class="dash-first-hire">
+        <h2 class="dash-first-hire-title">Hire your first assistant</h2>
+        <p class="dash-first-hire-sub">Each assistant takes one job off your plate — social posts, blog articles, email marketing or finding new leads.</p>
+        <button type="button" class="btn-golive px-6 py-3 text-sm font-bold rounded-lg" onclick="window.loadView && window.loadView('catalog')">Hire an assistant</button>
+    </div>`;
+};
+
+// ==========================================
 // 1b. "ADD NEW ASSISTANT" PLACEHOLDER CARD
 // ==========================================
 // Inviting empty-state / trailing card that guides the user into the hire flow. Styled with the
@@ -588,6 +627,22 @@ window.fetchAndRenderAssistants = async function(containerId, options) {
         // workspace.html because it owns the toast + validation-meta state; called here because this is
         // the render it needs to re-trigger.
         const startPoll = () => window._maybeStartProvisioningPoll?.(containerId, inProgress);
+
+        // The Dashboard's grid is a one-line-per-assistant roster (layout review, 2026-10-22): the
+        // full cards live on My Assistants. Read from the container, not only `opts`, because
+        // workspace.html and the provisioning poll re-render this grid by id with no options.
+        if (opts.roster || container.dataset.render === 'roster') {
+            // No working assistant yet → the Dashboard swaps its value tiles, heatmap and widgets
+            // (all zeros) for a hire card. In-progress cards above still show while one is set up.
+            document.getElementById('dash-root')?.classList.toggle('dash-first-visit', visible.length === 0);
+            if (visible.length === 0) {
+                if (inProgress.length === 0) container.insertAdjacentHTML('beforeend', window.generateFirstHireCardHTML());
+            } else {
+                container.insertAdjacentHTML('beforeend', window.generateTeamRosterHTML(visible));
+            }
+            startPoll();
+            return;
+        }
 
         if (opts.placeholders) {
             // My Assistants always guides the user with placeholder cards instead of empty text.

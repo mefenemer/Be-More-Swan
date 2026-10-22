@@ -171,7 +171,7 @@ check('agenda shows only BOOKED items — status scheduled in every source', () 
 check('task usage sits under the three tiles, above the heatmap, and reads the cap and the per-assistant split', () => {
     const tiles = dash.indexOf('Estimated Money Saved</div>');
     const slot = dash.indexOf('<div class="cc-usage" id="cc-usage"');
-    const heat = dash.indexOf('<div class="cc-heatmap-wrap">');
+    const heat = dash.indexOf('<details class="cc-heatmap-wrap">');
     assert.ok(tiles > 0 && slot > tiles && heat > slot, 'tiles → tasks this month → heatmap');
     const r = slice(dash, 'async function renderTaskUsage(el)', 'function renderTips');
     assert.ok(r.includes('check-capacity') && r.includes('get-usage-summary'));

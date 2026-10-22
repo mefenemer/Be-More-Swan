@@ -132,4 +132,44 @@ check('every Cancel on Audience is a .btn-secondary', () => {
     for (const b of cancels) assert.ok(b.includes('btn-secondary'), b);
 });
 
+check('Dashboard: the team is a one-line roster right under Needs you, not full cards at the bottom', () => {
+    const ny = dash.indexOf('<section id="needs-you"');
+    const team = dash.indexOf('<section id="dash-team"');
+    const hero = dash.indexOf('<section id="command-center-hero"');
+    assert.ok(ny > 0 && team > ny && hero > team, 'Needs you → Your team → value hero');
+    assert.ok(dash.includes('<div id="dashboard-assistants-grid" data-render="roster"'), 'roster mode is on the container, so id-only re-renders keep it');
+    assert.strictEqual(dash.split('id="dashboard-assistants-grid"').length, 2, 'one team grid only');
+    assert.ok(cards.includes("if (opts.roster || container.dataset.render === 'roster') {"));
+    const roster = cards.slice(cards.indexOf('window.generateTeamRosterHTML = function'), cards.indexOf('window.generateFirstHireCardHTML = function'));
+    assert.ok(roster.includes('_escapeHtml(a.name') && roster.includes('_escapeHtml(a.role'), 'roster escapes names');
+    assert.ok(roster.includes('window._assistantIdentity(a)'), 'same icon and badge as the card');
+});
+
+check('Dashboard: a workspace with no working assistant gets one hire card instead of zeros', () => {
+    assert.ok(cards.includes("classList.toggle('dash-first-visit', visible.length === 0)"));
+    assert.ok(cards.includes("if (inProgress.length === 0) container.insertAdjacentHTML('beforeend', window.generateFirstHireCardHTML());"));
+    for (const id of ['#command-center-hero', '#action-stream', '#dash-widgets-section', '#dash-hire-banner']) {
+        assert.ok(dash.includes(`#dash-root.dash-first-visit ${id}`), `${id} hides on a first visit`);
+    }
+});
+
+check('Dashboard: duplicate widgets start off, the heatmap is folded, and the period default is unchanged', () => {
+    assert.ok(dash.includes("const DEFAULT_ON = { 'roi-mini': false, 'team-status': false,"));
+    assert.ok(dash.includes('<details class="cc-heatmap-wrap">') && !dash.includes('<details class="cc-heatmap-wrap" open'));
+    // "All time" stays until the owner re-decides: a calendar window reads as zeros at its start.
+    assert.ok(dash.includes("let period = 'all';"));
+});
+
+check('Audience on a phone: list first, Manage folded, segment dropdown, Import and Export under More', () => {
+    const html = read('audience.html');
+    assert.ok(/@media \(max-width: 1023px\) \{\s*\.aud-side \{ order: 2; \}/.test(html), 'sidebar after the list below desktop');
+    assert.ok(html.includes('.aud-side:not(.is-open) .aud-side-body { display: none; }'));
+    assert.ok(html.includes('<button type="button" id="aud-side-toggle" class="aud-side-toggle" aria-expanded="false" aria-controls="aud-side-body">'));
+    assert.ok(html.includes('<select id="aud-segment-pick" aria-label="Segment"'));
+    assert.ok(html.includes('#aud-import-btn, #aud-export-btn { display: none !important; }'));
+    assert.ok(!/@media \(max-width: 639px\)[^}]*#aud-form-btn/.test(html), 'Sign-up forms stays visible on phones');
+    assert.ok(aud.includes("$('aud-segment-pick')?.addEventListener('change'"));
+    assert.ok(aud.includes("if (!window._audMoreOutsideBound) {"), 'the document listener is bound once');
+});
+
 console.log(`\n${passed} checks passed${process.exitCode ? ' — with FAILURES above' : ''}`);

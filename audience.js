@@ -601,6 +601,9 @@
       'No segments yet. Create one to target a newsletter at part of your audience.');
     renderChips($('aud-tags'), state.segments.filter((s) => s.kind === 'tag'), false,
       'No tags yet. Tag people to describe them, then build a segment from the tag.');
+    // The phone-width segment dropdown mirrors the sidebar's pick.
+    const pick = $('aud-segment-pick');
+    if (pick) pick.value = state.filters.segmentId || '';
   }
 
   // Drawn as a vertical list in the left-hand sidebar. Same markup and data attributes for segments
@@ -647,7 +650,13 @@
       .map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
     const add = $('aud-add-segment');
     const imp = $('aud-import-segment');
+    const pick = $('aud-segment-pick');
     if (add) add.innerHTML = opts;
+    if (pick) {
+      pick.innerHTML = '<option value="">Everyone</option>' + state.segments
+        .map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+      pick.value = state.filters.segmentId || '';
+    }
     if (imp) imp.innerHTML = '<option value="">Add to no segment</option>' + state.segments
       .map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
   }
@@ -1745,6 +1754,52 @@
   // ── Wiring ─────────────────────────────────────────────────────────────────
 
   function wire() {
+    // ── Phone layout (layout review, 2026-10-22) ──────────────────────────────────────────────
+    // These elements are new on every visit (the view is re-injected), so their own listeners never
+    // stack; the one document listener is bound once.
+    const sideToggle = $('aud-side-toggle');
+    sideToggle?.addEventListener('click', () => {
+      const side = sideToggle.closest('.aud-side');
+      const open = !side.classList.contains('is-open');
+      side.classList.toggle('is-open', open);
+      sideToggle.setAttribute('aria-expanded', String(open));
+    });
+    $('aud-segment-pick')?.addEventListener('change', (e) => {
+      state.filters.segmentId = e.target.value || '';
+      state.page = 1;
+      renderSegments();
+      loadContacts();
+    });
+    const actionsBtn = $('aud-more-btn');
+    const actionsMenu = $('aud-more-menu');
+    const setActionsMenu = (open, refocus) => {
+      if (!actionsBtn || !actionsMenu) return;
+      actionsMenu.hidden = !open;
+      actionsBtn.setAttribute('aria-expanded', String(open));
+      if (open) actionsMenu.querySelector('button')?.focus();
+      else if (refocus) actionsBtn.focus();
+    };
+    actionsBtn?.addEventListener('click', () => setActionsMenu(actionsMenu.hidden));
+    actionsMenu?.addEventListener('click', (e) => {
+      const item = e.target.closest('[data-aud-more]');
+      if (!item) return;
+      setActionsMenu(false);
+      $(item.getAttribute('data-aud-more'))?.click();
+    });
+    actionsMenu?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); setActionsMenu(false, true); }
+    });
+    if (!window._audMoreOutsideBound) {
+      window._audMoreOutsideBound = true;
+      document.addEventListener('click', (e) => {
+        const menu = document.getElementById('aud-more-menu');
+        if (menu && !menu.hidden && !e.target.closest('.aud-more-wrap')) {
+          menu.hidden = true;
+          document.getElementById('aud-more-btn')?.setAttribute('aria-expanded', 'false');
+        }
+      });
+    }
+
     const search = $('aud-search');
     if (search) {
       search.addEventListener('input', () => {

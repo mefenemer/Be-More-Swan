@@ -28,6 +28,18 @@
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
         Export to Excel
       </button>
+      <!-- Phones only (layout review, 2026-10-22): Import and Export fold into More, so the row is
+           Add contact, Sign-up forms (the growth tool stays visible), More. CSS at .aud-more-wrap. -->
+      <div class="aud-more-wrap">
+        <button type="button" id="aud-more-btn" aria-haspopup="true" aria-expanded="false" aria-controls="aud-more-menu"
+          class="btn-utility flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-lg border cursor-pointer">
+          More <span aria-hidden="true">▾</span>
+        </button>
+        <div id="aud-more-menu" class="aud-more-menu" hidden>
+          <button type="button" data-aud-more="aud-import-btn">Import CSV</button>
+          <button type="button" data-aud-more="aud-export-btn">Export to Excel</button>
+        </div>
+      </div>
       <button type="button" id="aud-add-btn"
         class="btn-primary flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-colors cursor-pointer">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
@@ -69,12 +81,48 @@
     .aud-tab { padding: .75rem .25rem; font-size: .875rem; font-weight: 600; color: #6b7280; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
     .aud-tab:hover { color: #374151; border-bottom-color: #d1d5db; }
     .aud-tab.is-active { color: #d6006b; border-bottom-color: #ff007f; }
+
+    /* Below desktop width (layout review, 2026-10-22): the people come first. The sidebar moves
+       under the list and folds behind one "Manage" button; a segment dropdown joins the filters so
+       picking a segment never means scrolling past the list. Desktop is unchanged. */
+    .aud-side-toggle, .aud-phone-only { display: none; }
+    @media (max-width: 1023px) {
+      .aud-side { order: 2; }
+      .aud-side-toggle { display: flex; }
+      .aud-side:not(.is-open) .aud-side-body { display: none; }
+      .aud-phone-only { display: block; }
+    }
+    .aud-side-toggle { width: 100%; align-items: center; justify-content: space-between; gap: .5rem; padding: .75rem 1rem;
+      background: #fff; border: 1px solid #e5e7eb; border-radius: .75rem; font-size: .875rem; font-weight: 700; color: #1f1e1b; cursor: pointer; min-height: 44px; }
+    .aud-side-toggle:focus-visible { outline: 2px solid #ff007f; outline-offset: 2px; }
+    .aud-side-chev { transition: transform .15s ease; }
+    .aud-side.is-open .aud-side-chev { transform: rotate(90deg); }
+
+    /* Phones: Import and Export live in More; Add contact leads the row. */
+    .aud-more-wrap { display: none; position: relative; }
+    @media (max-width: 639px) {
+      #aud-import-btn, #aud-export-btn { display: none !important; }
+      .aud-more-wrap { display: block; }
+      #aud-add-btn { order: -1; }
+      /* Two count tiles, not four: Unsubscribed and Total stay one tap away in the status filter. */
+      #aud-kpis [data-kpi-filter="unsubscribed"], #aud-kpis [data-kpi-filter=""] { display: none; }
+    }
+    .aud-more-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; min-width: 11rem; padding: .25rem;
+      background: #fff; border: 1px solid #e5e7eb; border-radius: .75rem; box-shadow: 0 10px 25px rgba(0,0,0,.12); }
+    .aud-more-menu[hidden] { display: none; }
+    .aud-more-menu button { display: block; width: 100%; text-align: left; padding: .625rem .75rem; min-height: 44px;
+      font-size: .875rem; font-weight: 600; color: #1f1e1b; border-radius: .5rem; background: none; border: 0; cursor: pointer; }
+    .aud-more-menu button:hover, .aud-more-menu button:focus-visible { background: #f6f3eb; outline: none; }
   </style>
 
   <div class="aud-layout" data-aud-panel="people">
 
     <!-- ── Left: who you're looking at ─────────────────────────────────── -->
-    <aside class="aud-side space-y-4" aria-label="Segments and tags">
+    <aside class="aud-side" aria-label="Segments and tags">
+      <button type="button" id="aud-side-toggle" class="aud-side-toggle" aria-expanded="false" aria-controls="aud-side-body">
+        Manage segments, tags and fields <span class="aud-side-chev" aria-hidden="true">▸</span>
+      </button>
+      <div id="aud-side-body" class="aud-side-body space-y-4">
       <div class="bg-white p-3 rounded-xl border border-gray-200 shadow-sm">
         <div class="flex items-center justify-between px-1 mb-2">
           <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Segments</p>
@@ -140,6 +188,7 @@
         </summary>
         <div id="aud-exports-list" class="space-y-2 mt-3 px-1"><p class="text-xs text-gray-400">Loading…</p></div>
       </details>
+      </div>
     </aside>
 
     <!-- ── Right: the people ───────────────────────────────────────────── -->
@@ -182,6 +231,10 @@
             <input type="text" id="aud-search" placeholder="Search name, email or company…"
               class="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-700 outline-none text-sm transition-all">
           </div>
+          <select id="aud-segment-pick" aria-label="Segment"
+            class="aud-phone-only px-3 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 focus:ring-2 focus:ring-emerald-700 outline-none cursor-pointer">
+            <option value="">Everyone</option>
+          </select>
           <select id="aud-status" aria-label="Status"
             class="px-3 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 focus:ring-2 focus:ring-emerald-700 outline-none cursor-pointer">
             <option value="">All statuses</option>

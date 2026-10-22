@@ -41,7 +41,8 @@
 
     <div>
       <h1 id="dash-welcome-heading" class="text-3xl font-extrabold text-gray-900">Welcome back.</h1>
-      <p class="text-gray-500 mt-1">Here is what your digital team has been up to while you were away.</p>
+      <p class="text-gray-500 mt-1 dash-sub-team">Here is what your digital team has been up to while you were away.</p>
+      <p class="text-gray-500 mt-1 dash-sub-first">Let's get your first assistant working for you.</p>
     </div>
   </header>
 
@@ -61,6 +62,25 @@
          .pendingReview), so the strip and the cards cannot disagree.
          ════════════════════════════════════════════════════════════════════ -->
     <section id="needs-you" class="ny-wrap" style="display:none" aria-label="Waiting for you"></section>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         Your team (layout review, 2026-10-22). One line per assistant, near the top — the full
+         cards sat below the hero, heatmap and widgets and repeated My Assistants. Rendered by
+         fetchAndRenderAssistants in ROSTER mode (data-render, read on every re-render, including
+         workspace.html's and the provisioning poll's). With no working assistant yet it holds the
+         first-hire card, and #dash-root gets .dash-first-visit (styles below).
+         ════════════════════════════════════════════════════════════════════ -->
+    <section id="dash-team" class="mb-10" aria-labelledby="dash-team-title">
+      <div class="dash-team-head">
+        <h2 id="dash-team-title" class="dash-team-title">Your team</h2>
+        <button type="button" class="dw-link dash-team-all" onclick="window.loadView && window.loadView('assistants')">All assistants →</button>
+      </div>
+      <div id="dashboard-assistants-grid" data-render="roster" class="flex flex-col gap-4">
+        <div class="py-8 text-center text-gray-500 font-medium bg-white rounded-2xl border border-gray-100 shadow-sm animate-pulse">
+          Checking in with your team...
+        </div>
+      </div>
+    </section>
 
     <!-- ════════════════════════════════════════════════════════════════════
          US-DASH-1: "Wow" Metrics + Activity Heatmap (Swan Command Center)
@@ -118,18 +138,20 @@
         <div class="cc-usage" id="cc-usage" aria-live="polite"><div class="cc-hm-skel" style="height:56px"></div></div>
 
         <!-- AC3: Activity heatmap — proves 24/7 background productivity -->
-        <div class="cc-heatmap-wrap">
-          <div class="cc-heatmap-head">
-            <span class="cc-heatmap-title">When your team is working</span>
+        <!-- Folded by default (layout review, 2026-10-22): it is the tallest thing in the hero and the
+             least often read. -->
+        <details class="cc-heatmap-wrap">
+          <summary class="cc-heatmap-head">
+            <span class="cc-heatmap-title"><span class="cc-heatmap-chev" aria-hidden="true">▸</span> When your team is working</span>
             <span class="cc-heatmap-legend" id="cc-heatmap-legend">
               <span>Quiet</span>
               <i class="cc-key cc-key-0"></i><i class="cc-key cc-key-1"></i><i class="cc-key cc-key-2"></i><i class="cc-key cc-key-3"></i><i class="cc-key cc-key-4"></i>
               <span>Busy</span>
             </span>
-          </div>
+          </summary>
           <div id="cc-heatmap" class="cc-heatmap" aria-label="Assistant activity by day and hour"><div class="cc-hm-skel"></div></div>
           <p id="cc-heatmap-caption" class="cc-heatmap-caption">Loading activity…</p>
-        </div>
+        </details>
       </div>
     </section>
 
@@ -188,14 +210,7 @@
       <div id="dw-tray-list" class="dw-tray-list"></div>
     </aside>
 
-    <!-- Dynamic Assistants Grid -->
-    <div id="dashboard-assistants-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-      <div class="col-span-full py-12 text-center text-gray-500 font-medium bg-white rounded-2xl border border-gray-100 shadow-sm animate-pulse">
-        Checking in with your team...
-      </div>
-    </div>
-
-    <div class="mt-12 bg-emerald-700 rounded-2xl p-8 text-center shadow-lg">
+    <div id="dash-hire-banner" class="mt-12 bg-emerald-700 rounded-2xl p-8 text-center shadow-lg">
       <h3 class="text-2xl font-bold text-white mb-2">Got another process to take off your plate?</h3>
       <p class="text-emerald-100 mb-6 max-w-xl mx-auto">You can hire another assistant or upgrade your plan to automate entirely new workflows.</p>
       <a href="#" id="route-to-catalog" class="inline-block bg-white text-emerald-700 font-bold px-8 py-3 rounded-lg shadow-sm hover:bg-gray-50 transition">Hire an assistant</a>
@@ -205,6 +220,33 @@
 </div>
 
 <style>
+  /* Your team roster + first-hire card (layout review, 2026-10-22). Scoped plain CSS, like the hero. */
+  .dash-team-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .dash-team-title { font-size: 18px; font-weight: 800; color: #0f172a; margin: 0; }
+  .dash-team-all { margin-top: 0; }
+  .dash-roster { list-style: none; margin: 0; padding: 0; background: #fff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; }
+  .dash-roster li + li { border-top: 1px solid #f1f5f9; }
+  .dash-roster-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 16px; min-height: 56px; background: none; border: 0; text-align: left; cursor: pointer; font: inherit; }
+  .dash-roster-row:hover { background: #fafafa; }
+  .dash-roster-row:focus-visible { outline: 2px solid #ff007f; outline-offset: -2px; }
+  .dash-roster-ico { width: 36px; height: 36px; border-radius: 10px; color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none; }
+  .dash-roster-name { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+  .dash-roster-title { font-size: 15px; font-weight: 700; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dash-roster-role { font-size: 13px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dash-roster-go { color: #d6006b; font-weight: 700; flex: none; }
+  .dash-first-hire { background: #fff; border: 2px dashed #e5e7eb; border-radius: 20px; padding: 32px 24px; text-align: center; }
+  .dash-first-hire-title { font-size: 22px; font-weight: 800; color: #0f172a; margin: 0 0 6px; }
+  .dash-first-hire-sub { font-size: 15px; color: #64748b; margin: 0 auto 20px; max-width: 32rem; line-height: 1.5; }
+  /* First visit: no working assistant yet, so nothing below has anything to show. */
+  .dash-sub-first { display: none; }
+  #dash-root.dash-first-visit .dash-sub-team,
+  #dash-root.dash-first-visit .dash-team-head,
+  #dash-root.dash-first-visit #command-center-hero,
+  #dash-root.dash-first-visit #action-stream,
+  #dash-root.dash-first-visit #dash-widgets-section,
+  #dash-root.dash-first-visit #dash-hire-banner { display: none; }
+  #dash-root.dash-first-visit .dash-sub-first { display: block; }
+
   /* US-DASH-1 — Swan Command Center hero. Scoped plain CSS (immune to the prebuilt
      Tailwind build), so new visual treatments render without a build:css step. */
   #command-center-hero * { box-sizing: border-box; }
@@ -271,7 +313,12 @@
 
   /* Heatmap */
   .cc-heatmap-wrap { position: relative; margin-top: 26px; padding-top: 22px; border-top: 1px solid rgba(15,23,42,0.07); }
-  .cc-heatmap-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+  .cc-heatmap-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; cursor: pointer; list-style: none; }
+  .cc-heatmap-head::-webkit-details-marker { display: none; }
+  .cc-heatmap-wrap[open] .cc-heatmap-head { margin-bottom: 14px; }
+  .cc-heatmap-chev { display: inline-block; transition: transform .15s ease; }
+  .cc-heatmap-wrap[open] .cc-heatmap-chev { transform: rotate(90deg); }
+  .cc-heatmap-head:focus-visible { outline: 2px solid #ff007f; outline-offset: 4px; border-radius: 6px; }
   .cc-heatmap-title { font-size: 13px; font-weight: 700; color: #334155; }
   .cc-heatmap-legend { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #94a3b8; }
   .cc-key { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
@@ -714,6 +761,8 @@
     box-shadow: -20px 0 50px -20px rgba(0,0,0,0.4); transform: translateX(100%);
     transition: transform .28s cubic-bezier(.2,.8,.2,1); display: flex; flex-direction: column; }
   .dw-tray.open { transform: none; }
+  /* Closed, it sits just past the right edge — without this its shadow bled onto the page. */
+  .dw-tray:not(.open) { box-shadow: none; }
   .dw-tray-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 20px; border-bottom: 1px solid #f1f5f9; }
   .dw-tray-title { font-size: 16px; font-weight: 800; color: #0f172a; margin: 0; }
   .dw-tray-sub { font-size: 12px; color: #94a3b8; margin: 4px 0 0; }
@@ -757,7 +806,9 @@
       'referral':      { title: 'Refer a business', icon: '🎁', desc: 'Give a month, get a month', render: renderReferral },
     };
     const ORDER = ['roi-mini', 'team-status', 'recent-work', 'agenda', 'notifications', 'tips', 'referral'];
-    const DEFAULT_ON = { 'roi-mini': true, 'team-status': true, 'recent-work': true, 'agenda': true, 'notifications': true, 'tips': false, 'referral': false };
+    // roi-mini and team-status repeat the value tiles and the Your team roster above (layout
+    // review, 2026-10-22), so they start off. A layout someone already saved keeps its choices.
+    const DEFAULT_ON = { 'roi-mini': false, 'team-status': false, 'recent-work': true, 'agenda': true, 'notifications': true, 'tips': false, 'referral': false };
 
     let layout = [];
     let editing = false;
