@@ -692,23 +692,8 @@
           <div class="flex items-center justify-between mb-3">
             <h2 class="text-sm font-bold text-gray-700">Help Articles</h2>
             <div class="flex items-center gap-3">
-              <button onclick="mdPreviewHelpSeed()" class="btn-utility text-xs border font-semibold px-3 py-1.5 rounded-lg transition">Seed Preview (Dry Run)</button>
               <a href="/help.html" target="_blank" class="text-xs text-emerald-700 hover:underline font-semibold">View public Help Center →</a>
             </div>
-          </div>
-          <!-- Seed dry-run preview panel -->
-          <div id="md-help-seed-preview" class="hidden mb-4 bg-indigo-50 border border-indigo-200 rounded-xl p-4">
-            <div class="flex items-center justify-between mb-3">
-              <h3 class="text-sm font-bold text-indigo-800">Seed Preview</h3>
-              <div class="flex gap-2">
-                <button onclick="mdApplyHelpSeed()" class="btn-primary text-xs font-semibold px-3 py-1.5 rounded-lg transition">Apply Seed</button>
-                <button onclick="document.getElementById('md-help-seed-preview').classList.add('hidden')" class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold px-2 py-1.5">Dismiss</button>
-              </div>
-            </div>
-            <table class="w-full text-xs">
-              <thead><tr class="text-left text-indigo-600 font-semibold"><th class="pb-1 pr-4">Title</th><th class="pb-1 pr-4">Category</th><th class="pb-1">Action</th></tr></thead>
-              <tbody id="md-help-seed-tbody"></tbody>
-            </table>
           </div>
           <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
             <table class="w-full text-sm admin-responsive-table">
@@ -11741,36 +11726,8 @@ function escAdm(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-async function mdPreviewHelpSeed() {
-  const panel = document.getElementById('md-help-seed-preview');
-  const tbody = document.getElementById('md-help-seed-tbody');
-  tbody.innerHTML = '<tr><td colspan="3" class="py-2 text-indigo-400 animate-pulse">Loading preview…</td></tr>';
-  panel.classList.remove('hidden');
-  try {
-    const d = await api('/.netlify/functions/admin-api?resource=help-articles-seed');
-    const actionColor = { insert: 'text-emerald-700', update: 'text-amber-600', archive: 'text-red-500' };
-    tbody.innerHTML = (d.preview || []).map(r => `
-      <tr class="border-t border-indigo-100">
-        <td class="py-1.5 pr-4 font-medium text-gray-800">${escAdm(r.title)}</td>
-        <td class="py-1.5 pr-4 text-gray-500">${escAdm(r.category)}</td>
-        <td class="py-1.5 font-bold ${actionColor[r.action] || 'text-gray-600'}">${r.action}</td>
-      </tr>`).join('');
-  } catch (e) {
-    tbody.innerHTML = '<tr><td colspan="3" class="py-2 text-red-400">Preview failed: ' + escAdm(e.message || e) + '</td></tr>';
-  }
-}
-
-async function mdApplyHelpSeed() {
-  if (!(await window.confirmModal('Existing articles with matching titles will be updated in place.', { title: 'Apply the help article seed?' }))) return;
-  try {
-    const d = await api('/.netlify/functions/admin-api?resource=help-articles-seed', { method: 'POST' });
-    window.showToast?.(`Seed applied — ${d.applied} articles upserted.`, { icon: '✅' });
-    document.getElementById('md-help-seed-preview').classList.add('hidden');
-    await mdLoadHelpArticles();
-  } catch (e) {
-    window.showToast?.('Seed failed: ' + (e.message || e), { icon: '⚠️' });
-  }
-}
+// The help article seed (Seed Preview / Apply Seed) was retired 2026-10-22: it re-ran an old file
+// whose bodies would overwrite later rewrites. Help copy changes through dated db/help-articles-*.sql files.
 
 // ── Plan Features matrix (DB-driven pricing features) ───────────────────────
 // Loads the feature catalog + per-plan values, renders an editable matrix, and saves changes

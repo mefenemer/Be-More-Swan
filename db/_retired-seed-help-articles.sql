@@ -1,3 +1,13 @@
+-- ⚠️ RETIRED 2026-10-22 (owner): this file must NOT run again. Kept for history only.
+--
+-- Renamed from db/seed-help-articles.sql. The leading "_" takes it out of scripts/db-migrate.mjs's
+-- managed set (discoverFiles skips "_" files), so `status` lists its old ledger row as ORPHAN —
+-- expected, and harmless. It was DRIFTED, and drifted files re-run in alphabetical order: it sorted
+-- AFTER db/help-articles-2026-10*.sql and would have put its older article bodies back over those
+-- rewrites. The admin "Apply Seed" action that also ran it is gone (admin-api help-articles-seed).
+--
+-- Help copy now changes through small, dated files (db/help-articles-*.sql, db/z-rename-*.sql).
+--
 -- US-HELP-1.3.1: Help Center seed script
 -- All inserts use ON CONFLICT (title) DO UPDATE so re-running is safe (UPSERT).
 -- Wrapped in a transaction — all succeed or all roll back.

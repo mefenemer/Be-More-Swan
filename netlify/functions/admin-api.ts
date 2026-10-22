@@ -2659,45 +2659,12 @@ export default withLambda(async (event) => {
         }
 
         // ── US-HELP-1.3.1: Help Articles (AC14–AC17) ─────────────────────────
+        // ⚠️ RETIRED 2026-10-22 (owner): the help seed must not run again — it re-applied
+        // db/seed-help-articles.sql (now db/_retired-seed-help-articles.sql), whose older bodies
+        // would overwrite later rewrites. Refused outright rather than left reachable.
         if (resource === 'help-articles-seed') {
-            const SEED_ARTICLES = [
-                { category: 'Getting Started', sortOrder: 10, title: 'What is Be More Swan?' },
-                { category: 'Getting Started', sortOrder: 20, title: 'Your Dashboard Overview' },
-                { category: 'Getting Started', sortOrder: 30, title: 'Setting Up Your First Assistant' },
-                { category: 'Your Assistants', sortOrder: 10, title: 'How Lead Scoring Works (And How to Trust It)' },
-                { category: 'Your Assistants', sortOrder: 20, title: 'Setting Up Lead Scoring: Simple Mode vs. Advanced Mode' },
-                { category: 'Lead Management', sortOrder: 10, title: "Why Is My Lead Stuck in 'Pending Merge'?" },
-                { category: 'Lead Management', sortOrder: 20, title: 'Understanding Email Verification' },
-                { category: 'Lead Management', sortOrder: 30, title: 'How Automated Data Enrichment Works' },
-                { category: 'Lead Management', sortOrder: 40, title: 'Exporting Leads: CRM Sync vs. CSV Download' },
-                { category: 'Integrations & Connections', sortOrder: 10, title: 'Connecting Apps & Integrations' },
-                { category: 'Billing & Your Plan', sortOrder: 10, title: 'Billing & Your Plan' },
-                { category: 'Troubleshooting & Quick Fixes', sortOrder: 10, title: 'Common Issues: Symptoms, Causes & Fixes' },
-            ];
-            const existing = await db.select({ id: helpArticles.id, title: helpArticles.title }).from(helpArticles);
-            const existingTitles = new Set(existing.map(r => r.title));
-            const preview = SEED_ARTICLES.map(a => ({
-                title: a.title,
-                category: a.category,
-                action: existingTitles.has(a.title) ? 'update' : 'insert',
-            }));
-            const archiveCandidate = existing.find(r => r.title === 'Troubleshooting' && !SEED_ARTICLES.find(s => s.title === r.title));
-            if (archiveCandidate) preview.push({ title: 'Troubleshooting', category: '—', action: 'archive' });
-
-            if (event.httpMethod === 'GET') {
-                return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ preview }) };
-            }
-            if (event.httpMethod === 'POST') {
-                // Execute the seed SQL file via DB raw queries — articles are upserted by title
-                const fs = await import('fs');
-                const path = await import('path');
-                const sqlPath = path.join(process.cwd(), 'db', 'seed-help-articles.sql');
-                const sql = fs.readFileSync(sqlPath, 'utf8');
-                await db.execute(sql as any);
-                return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: true, applied: SEED_ARTICLES.length }) };
-            }
+            return { statusCode: 410, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'The help article seed is retired. Change help copy with a dated db/help-articles-*.sql file.' }) };
         }
-
         if (resource === 'help-articles') {
             if (event.httpMethod === 'GET') {
                 const rows = await db
