@@ -2028,8 +2028,10 @@ window.showComplianceModals = function showComplianceModals(force) {
         </div>
       </div>
       <div class="flex items-center gap-1 shrink-0">
-        <!-- Past conversations (chat-history-panel.js). Hidden for seeded, task-scoped chats —
-             see openAssistantChatModal: those are about one draft, not an ongoing thread. -->
+        <!-- New Chat + Past conversations (chat-history-panel.js). Hidden for seeded, task-scoped
+             chats — see openAssistantChatModal: those are about one draft, not an ongoing thread. -->
+        <button type="button" id="chat-modal-new-btn" title="Start a new chat"
+          class="hidden btn-secondary px-2.5 h-8 rounded-lg text-xs font-bold cursor-pointer border">+ New Chat</button>
         <button type="button" id="chat-modal-history-btn" aria-expanded="false" title="Past conversations"
           class="hidden btn-secondary px-2.5 h-8 rounded-lg text-xs font-bold cursor-pointer border">History</button>
         <button onclick="window.closeAssistantChatModal()" aria-label="Close" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 cursor-pointer">
@@ -17748,12 +17750,12 @@ function _chatModalSetHistoryOpen(open) {
     if (open && _chatModalHistory) _chatModalHistory.refresh();
 }
 
-// opts.resume — continue this assistant's newest active thread instead of starting a fresh one.
-// OFF by default, and deliberately so: the seeded callers (askSwanAboutDraft, blog-studio-modal)
-// open a task-scoped conversation about one specific draft, where 20 turns of unrelated history
-// would be noise, and they consume the RETURN VALUE synchronously to seed it. Passing
-// { resume: true } makes this return a Promise<session> instead — only the roster's plain
-// "💬 Chat" button, which ignores the return value, does that.
+// opts.resume — the ongoing-conversation surface: New Chat + History in the header. It still opens
+// on a NEW chat (owner, 2026-10-22: never land on the last thread; it is one click away in History).
+// OFF by default: the seeded callers (askSwanAboutDraft, blog-studio-modal) open a task-scoped
+// conversation about one specific draft, where swapping threads mid-task would lose the seed, and
+// they consume the RETURN VALUE synchronously to seed it. Only the roster's plain "💬 Chat" button
+// passes { resume: true }.
 window.openAssistantChatModal = function(assistantId, assistantName, assistantRole, roleKey, opts) {
     const modal = document.getElementById('chat-modal');
     const root = document.getElementById('chat-modal-root');
@@ -17808,15 +17810,21 @@ window.openAssistantChatModal = function(assistantId, assistantName, assistantRo
     modal.classList.add('flex');
 
     const historyBtn = document.getElementById('chat-modal-history-btn');
+    const newBtn = document.getElementById('chat-modal-new-btn');
 
     // Default path — unchanged, synchronous, returns the session for callers to seed.
     if (!opts || !opts.resume) {
         historyBtn?.classList.add('hidden');
+        newBtn?.classList.add('hidden');
+        if (newBtn) newBtn.onclick = null;
         return mount(null, null);
     }
 
-    // ── Ongoing-conversation path: drawer on, resume the newest thread ──
+    // ── Ongoing-conversation path: New Chat + drawer on, opening on a new chat ──
     historyBtn?.classList.remove('hidden');
+    newBtn?.classList.remove('hidden');
+    const startNew = () => { _chatModalSetHistoryOpen(false); root.innerHTML = ''; mount(null, null); };
+    if (newBtn) newBtn.onclick = startNew;
     _chatModalSetHistoryOpen(false);
     if (_chatModalHistory) { _chatModalHistory.destroy(); _chatModalHistory = null; }
     if (window.ChatHistoryPanel) {
@@ -17825,31 +17833,12 @@ window.openAssistantChatModal = function(assistantId, assistantName, assistantRo
             assistantId: Number(assistantId),
             currentSessionId: null,
             onSelect: (id, o) => { _chatModalSetHistoryOpen(false); loadSession(id, o && o.readOnly); },
-            onNew: () => { _chatModalSetHistoryOpen(false); root.innerHTML = ''; mount(null, null); },
+            onNew: startNew,
         });
     }
 
-    root.innerHTML = '<div class="h-full flex items-center justify-center text-sm text-gray-500">Loading your conversation…</div>';
-
-    // Any failure here resolves to a new conversation: history is a convenience, never a gate.
-    return fetch(`/.netlify/functions/list-chat-sessions?limit=1&status=active&aiAssistantId=${Number(assistantId)}`)
-        .then(r => r.ok ? r.json() : null)
-        .then(d => {
-            const rows = (d && d.sessions) || [];
-            if (!rows.length) return null;
-            return fetch(`/.netlify/functions/get-chat-session?chatSessionId=${rows[0].id}`)
-                .then(r => r.ok ? r.json() : null)
-                .catch(() => null);
-        })
-        .catch(() => null)
-        .then(data => {
-            // The user may have closed the modal while this was in flight.
-            if (modal.classList.contains('hidden')) return null;
-            root.innerHTML = '';
-            return data?.session
-                ? mount(data.session.id, data.messages || [])
-                : mount(null, null);
-        });
+    root.innerHTML = '';
+    return Promise.resolve(mount(null, null));
 };
 
 window.closeAssistantChatModal = function() {

@@ -313,5 +313,13 @@
     }
   }
 
+  // An article added from the assistant's chat (Knowledge Base card → kb-articles.ts). Reload the list if
+  // this tab is showing that assistant; an open editor is a separate host and is left alone.
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') document.addEventListener('assistant:libraryChanged', async (e) => {
+    const d = e.detail || {};
+    if (d.which !== 'kb' || !state.assistantId || Number(state.assistantId) !== Number(d.assistantId)) return;
+    try { await fetchArticles(); renderToolbar(); renderList(); } catch { /* keep the last good list */ }
+  });
+
   window.AssistantKnowledgeBase = { init };
 })();

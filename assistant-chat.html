@@ -44,6 +44,8 @@
       <p id="chat-assistant-name" class="font-bold text-gray-900 truncate"></p>
       <p id="chat-assistant-role" class="text-xs text-gray-500 truncate"></p>
     </div>
+    <a id="chat-new-btn" href="#" title="Start a new chat"
+      class="btn-secondary shrink-0 px-2.5 h-8 inline-flex items-center rounded-lg text-xs font-bold cursor-pointer border">+ New Chat</a>
     <!-- Past conversations (chat-history-panel.js) — same drawer the in-SPA modals use. -->
     <button type="button" id="chat-history-btn" aria-expanded="false" title="Past conversations"
       class="btn-secondary shrink-0 px-2.5 h-8 rounded-lg text-xs font-bold cursor-pointer border">History</button>
@@ -100,28 +102,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const params = new URLSearchParams(window.location.search);
   let assistantId = Number(params.get('assistantId')) || null;
   let sessionId = Number(params.get('sessionId')) || null;
-  // ?new=1 opts out of the resume below and starts a fresh thread.
-  const forceNew = params.get('new') === '1';
 
   if (!sessionId && (!Number.isInteger(assistantId) || assistantId <= 0)) {
     showChatError('No assistant was specified — open a conversation from your workspace.');
     return;
   }
 
-  // Continuity (matches assistant-chat-modal.js): arriving with only an assistantId resumes
-  // that assistant's newest active thread rather than minting a new one on every visit. A
-  // lookup failure resolves to null, which simply starts a new conversation.
-  let autoResumed = false;
-  if (!sessionId && !forceNew && assistantId) {
-    try {
-      const res = await fetch(
-        `/.netlify/functions/list-chat-sessions?limit=1&status=active&aiAssistantId=${assistantId}`);
-      if (res.ok) {
-        const rows = (await res.json()).sessions || [];
-        if (rows.length) { sessionId = rows[0].id; autoResumed = true; }
-      }
-    } catch { /* no history — fall through to a new conversation */ }
-  }
+  // Arriving with only an assistantId starts a new chat (owner, 2026-10-22, as in
+  // assistant-chat-modal.js); older threads are in History.
 
   // Continuing a thread: hydrate the transcript (and the assistant identity) from the
   // history endpoint — it re-verifies org ownership server-side via requireTenant.
@@ -139,14 +127,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch { /* handled below */ }
 
     if (!data?.session) {
-      // An auto-resumed thread that won't hydrate (archived or deleted since the lookup) is
-      // not an error the user asked for — drop to a new conversation. An explicit ?sessionId=
-      // still errors, exactly as it did before.
-      if (!autoResumed) {
-        showChatError('This conversation could not be found in your workspace.');
-        return;
-      }
-      sessionId = null;
+      showChatError('This conversation could not be found in your workspace.');
+      return;
     } else {
       assistantId = data.session.aiAssistantId;
       assistantName = data.session.assistantName;
@@ -211,13 +193,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (open && historyPanel) historyPanel.refresh();
   }
 
+  // New Chat is a plain link: the URL stays the record of which conversation is open.
+  document.getElementById('chat-new-btn').href = `?assistantId=${assistantId}`;
+
   if (window.ChatHistoryPanel && assistantId) {
     historyPanel = window.ChatHistoryPanel.mount({
       container: drawerEl,
       assistantId,
       currentSessionId: sessionId,
       onSelect: (id) => { window.location.search = `?sessionId=${id}`; },
-      onNew: () => { window.location.search = `?assistantId=${assistantId}&new=1`; },
+      onNew: () => { window.location.search = `?assistantId=${assistantId}`; },
     });
     historyBtn.addEventListener('click', () => {
       setDrawerOpen(drawerEl.style.transform === 'translateX(-102%)');

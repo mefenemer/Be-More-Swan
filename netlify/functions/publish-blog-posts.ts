@@ -58,7 +58,7 @@ export default withLambda(async () => {
         try {
             if (!post.bodyMarkdown || !post.bodyMarkdown.trim()) {
                 // An empty scheduled post can't be rendered — park it as failed rather than loop.
-                await db.update(blogPosts).set({ status: 'failed', updatedAt: new Date() }).where(eq(blogPosts.id, id));
+                await db.update(blogPosts).set({ status: 'failed', failureReason: 'The article had no text, so there was nothing to publish.', updatedAt: new Date() }).where(eq(blogPosts.id, id));
                 failed++;
                 continue;
             }
@@ -66,7 +66,10 @@ export default withLambda(async () => {
             published++;
         } catch (err) {
             console.error(`[publish-blog-posts] post ${id} failed:`, err);
-            await db.update(blogPosts).set({ status: 'failed', updatedAt: new Date() }).where(eq(blogPosts.id, id));
+            // Kept for the Blogs tab's Needs attention card and the Blog Writer's chat, which said
+            // "no reason was recorded" while this only reached the console.
+            const why = String((err as Error)?.message ?? err).replace(/\s+/g, ' ').trim().slice(0, 500);
+            await db.update(blogPosts).set({ status: 'failed', failureReason: `Publishing stopped with an error${why ? `: ${why}` : '.'}`, updatedAt: new Date() }).where(eq(blogPosts.id, id));
             failed++;
         }
     }

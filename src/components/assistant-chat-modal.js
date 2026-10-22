@@ -11,13 +11,13 @@
  *
  * Public API (attached to window):
  *   openAssistantChat({ assistantId?, sessionId?, forceNew?, draft?, send? })
- *       assistantId  — resume that assistant's newest active thread, or start one if it has none.
+ *       assistantId  — start a new chat with that assistant.
  *       sessionId    — continue this exact thread (wins over assistantId).
- *       forceNew     — with assistantId, skip the resume and start a fresh thread.
+ *       forceNew     — kept for callers that pass it; every assistantId-only open is new anyway.
  *   closeAssistantChat()                             — close + tear down the ChatSession.
  *
- * The header's "History" button opens a drawer (chat-history-panel.js) listing this assistant's
- * past conversations, with archive/restore and "New conversation". Picking a thread re-mounts the
+ * The header's "New Chat" button starts a fresh thread in place. Its "History" button opens a drawer
+ * (chat-history-panel.js) listing this assistant's past conversations, with archive/restore. Picking a thread re-mounts the
  * ChatSession in place; archived threads mount read-only, because the orchestrator refuses writes
  * to them.
  *
@@ -73,6 +73,11 @@
     + 'font-size:12px;font-weight:700;color:#4b5563;cursor:pointer;}'
     + '.bms-chat-mode[aria-pressed="true"]{background:#fff;color:#111827;box-shadow:0 1px 2px rgba(0,0,0,.08);}'
     + '.bms-chat-team{position:absolute;inset:0;overflow-y:auto;padding:16px 20px;background:#fff;}'
+    // Phone width: name + close on the first row, Chat|Team / New Chat / History on the second —
+    // in one row they pushed the name to nothing and History and the close off the panel.
+    + '@media (max-width:540px){.bms-chat-head{flex-wrap:wrap;row-gap:10px;padding:12px 16px;}'
+    + '.bms-chat-id{flex:1 1 calc(100% - 108px);}.bms-chat-close{order:1;}'
+    + '.bms-chat-modes,#bms-chat-new-btn,#bms-chat-history-btn{order:2;}}'
     + '.ac-hidden{display:none !important;}';
 
   var MARKUP = ''
@@ -87,6 +92,7 @@
     +       '<button type="button" class="bms-chat-mode" id="bms-chat-mode-chat" aria-pressed="true">Chat</button>'
     +       '<button type="button" class="bms-chat-mode" id="bms-chat-mode-team" aria-pressed="false" title="What the team has said to and from this assistant">Team</button>'
     +     '</div>'
+    +     '<button type="button" class="bms-chat-headbtn" id="bms-chat-new-btn" title="Start a new chat">+ New Chat</button>'
     +     '<button type="button" class="bms-chat-headbtn" id="bms-chat-history-btn" aria-expanded="false" '
     +       'title="Past conversations">History</button>'
     +     '<button type="button" class="bms-chat-close" id="bms-chat-close" aria-label="Close chat">&times;</button>'
@@ -130,6 +136,11 @@
       closeAssistantChat();
       if (typeof window.loadView === 'function') window.loadView('team');
     });
+    el('bms-chat-new-btn').addEventListener('click', function () {
+      if (!state.assistantId) return;
+      setHistoryOpen(false);
+      loadConversation({ assistantId: state.assistantId });
+    });
     el('bms-chat-history-btn').addEventListener('click', function () {
       setHistoryOpen(!el('bms-chat-history').classList.contains('ac-open'));
     });
@@ -146,19 +157,6 @@
     el('bms-chat-errstate').classList.toggle('ac-hidden', which !== 'error');
     el('bms-chat-mount').classList.toggle('ac-hidden', which !== 'chat');
     if (which === 'error' && detail) el('bms-chat-errdetail').textContent = detail;
-  }
-
-  // Newest active thread with this assistant, or null. Any failure resolves to null so a
-  // history outage degrades to "start a new conversation" rather than blocking the chat.
-  function findLatestSession(assistantId) {
-    return fetch('/.netlify/functions/list-chat-sessions?limit=1&status=active&aiAssistantId=' + assistantId,
-      { credentials: 'same-origin' })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (d) {
-        var rows = (d && d.sessions) || [];
-        return rows.length ? rows[0].id : null;
-      })
-      .catch(function () { return null; });
   }
 
   // Resolve the assistant's identity (mirrors assistant-chat.html): a sessionId continues an
@@ -201,7 +199,7 @@
 
   // Mount (or re-mount) one conversation into the open modal. Shared by the initial open and by
   // every pick in the history drawer, so a drawer selection behaves exactly like opening it.
-  //   cfg: { assistantId, sessionId, forceNew, readOnly }
+  //   cfg: { assistantId, sessionId, readOnly }
   function loadConversation(cfg) {
     var assistantId = cfg.assistantId;
     var sessionId = cfg.sessionId;
@@ -210,22 +208,9 @@
     el('bms-chat-mount').innerHTML = '';
     showState('loading');
 
-    // Continuity: opening an assistant with no explicit sessionId resumes that assistant's
-    // newest active thread instead of silently minting a new one every time (which is what
-    // stranded every prior conversation). forceNew is the deliberate "New conversation" escape.
-    var autoResume = !sessionId && !cfg.forceNew && !!assistantId;
-    var resolveSession = autoResume ? findLatestSession(assistantId) : Promise.resolve(sessionId);
-
-    return resolveSession
-      .then(function (resumedId) {
-        return resolveConversation(assistantId, resumedId).then(function (info) {
-          // An auto-resumed thread that won't hydrate (archived or deleted between the two
-          // calls) is not an error the user asked for — fall through to a new conversation.
-          // A sessionId the CALLER passed still surfaces as an error, as it did before.
-          if (!info && resumedId && autoResume) return resolveConversation(assistantId, null);
-          return info;
-        });
-      })
+    // No sessionId means a new chat (owner, 2026-10-22: opening the chat starts fresh; an older
+    // thread is one click away in History).
+    return resolveConversation(assistantId, sessionId)
       .then(function (info) {
         // Guard against a race where the user closed the modal before this resolved.
         if (!el('bms-chat-backdrop').classList.contains('ac-open')) return null;
@@ -261,11 +246,24 @@
     el('bms-chat-mode-team').setAttribute('aria-pressed', team ? 'true' : 'false');
     el('bms-chat-team').classList.toggle('ac-hidden', !team);
     el('bms-chat-history-btn').classList.toggle('ac-hidden', team);
+    el('bms-chat-new-btn').classList.toggle('ac-hidden', team);
     if (team) {
       setHistoryOpen(false);
       if (window.TeamFeed) window.TeamFeed.mount(el('bms-chat-team-host'), { mode: 'assistant', assistantId: state.assistantId });
+    } else if (state.staleSessionId && state.chat && state.chat.getSessionId() === state.staleSessionId) {
+      // A note sent on the Team tab was answered in THIS conversation (team-feed.js → team:chatTurn):
+      // reload it so the Chat tab shows that exchange too.
+      var sid = state.staleSessionId;
+      state.staleSessionId = null;
+      loadConversation({ assistantId: state.assistantId, sessionId: sid });
     }
   }
+
+  // Bound once, at load. Remember which conversation a Team reply landed in (see setMode).
+  document.addEventListener('team:chatTurn', function (e) {
+    var d = (e && e.detail) || {};
+    if (d.chatSessionId && Number(d.assistantId) === Number(state.assistantId)) state.staleSessionId = Number(d.chatSessionId);
+  });
 
   // The assistant's own letter and colour (assistant-colors.js), as on its card and in Team Chat.
   function paintAvatar(info) {
@@ -306,7 +304,7 @@
       },
       onNew: function () {
         setHistoryOpen(false);
-        loadConversation({ assistantId: assistantId, forceNew: true });
+        loadConversation({ assistantId: assistantId });
       },
     });
   }
@@ -347,13 +345,7 @@
       return;
     }
 
-    loadConversation({
-      assistantId: assistantId,
-      sessionId: sessionId,
-      // A conversation opened ABOUT something (a brief, from the Brand Designer's Briefs tab) starts
-      // fresh, so the question is not buried under an unrelated thread.
-      forceNew: opts.forceNew || !!opts.draft || !!opts.send,
-    }).then(function (info) {
+    loadConversation({ assistantId: assistantId, sessionId: sessionId }).then(function (info) {
       // The drawer needs the resolved assistant id — a caller may have passed only a sessionId.
       if (info) mountHistory(info.assistantId);
       // `draft` is typed into the composer, never sent: the user reads it, edits it, sends it.

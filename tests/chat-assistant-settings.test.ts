@@ -140,21 +140,18 @@ async function main() {
 
     console.log('\nThe snapshot says what is true, and only what the role has');
 
-    await check('social snapshot lists status, the three settings and goals', async () => {
-        const block = await buildAssistantSettingsSnapshot(fakeDb([row({ autonomousMediaEnabled: true })], [
-            { title: 'Grow Instagram', metricKey: 'instagram_followers', targetValue: '1200', latestValue: '950', targetDate: new Date('2026-12-31T00:00:00Z'), status: 'at_risk', isPrimary: true },
-        ]), 1, 5, 'social_media_manager');
+    // Goals moved to their own block with ids (chat-goals.ts, tests/chat-goals.test.ts).
+    await check('social snapshot lists status and the three settings', async () => {
+        const block = await buildAssistantSettingsSnapshot(fakeDb([row({ autonomousMediaEnabled: true })]), 1, 5, 'social_media_manager');
         assert.match(block, /Status: working/);
         assert.match(block, /"Generate posts ahead" \(Assistant Profile ▸ When and how I post\): 7 days/);
         assert.match(block, /"Review alerts".*Immediate/);
         assert.match(block, /Autonomous Content Suggestions.*on, up to 20/);
-        assert.match(block, /\(main goal\) Grow Instagram: 950.* target 1200.* by 2026-12-31 — at risk/);
     });
-    await check('a records role sees only its status and goals', async () => {
-        const block = await buildAssistantSettingsSnapshot(fakeDb([row({ lifecycleStatus: 'paused' })], []), 1, 5, 'crm_enricher');
+    await check('a records role sees only its status', async () => {
+        const block = await buildAssistantSettingsSnapshot(fakeDb([row({ lifecycleStatus: 'paused' })]), 1, 5, 'crm_enricher');
         assert.match(block, /Status: paused by the user/);
         assert.ok(!/Generate posts ahead|Review alerts|Autonomous/.test(block));
-        assert.match(block, /YOUR GOALS: none set yet/);
     });
     await check('a failed read says so rather than inviting a guess', async () => {
         assert.match(await buildAssistantSettingsSnapshot(throwingDb, 1, 5, 'social_media_manager'), /could not be read this turn/);
@@ -180,17 +177,18 @@ async function main() {
         assert.ok(src.includes("route !== defaultRoute ? assistantSettingsPromptBlock(assistantRow.roleKey) : null"));
         assert.ok(src.includes("route !== defaultRoute ? settingsProposalFromUiElement(uiElement) : null"));
         // The blog and newsletter routes rebuild uiElement after the action cards — a settings card must survive.
-        assert.ok(src.includes('blogAction ?? settingsCard'));
-        assert.ok(src.includes('emailAction ?? audienceCard ?? settingsCard'));
+        assert.ok(src.includes('blogAction ?? profileCard'));
+        assert.ok(src.includes('emailAction ?? audienceCard ?? reviewsCard ?? profileCard'));
     });
     await check('reloading a conversation re-checks stored settings cards', () => {
-        assert.ok(read('netlify/functions/get-chat-session.ts').includes('refreshSettingsCards(db, orgId, session.aiAssistantId, session.roleKey'));
+        assert.ok(read('src/utils/chat-card-refresh.ts').includes('refreshSettingsCards(db, organisationId, aiAssistantId, roleKey, out)'));
+        assert.ok(read('netlify/functions/get-chat-session.ts').includes('refreshStoredCards(db, orgId, session.aiAssistantId, session.roleKey, messages)'));
     });
     await check('the click calls the Assistant Profile\'s endpoints with their methods', () => {
         const src = read('src/components/chat-session.js');
         const start = src.indexOf('async function onSettingsChange');
         assert.ok(start >= 0, 'onSettingsChange exists');
-        const body = src.slice(start, src.indexOf('async function onLeadAction', start));
+        const body = src.slice(start, src.indexOf('async function onRuleChange', start));
         assert.ok(body.includes("call(`manage-assistant?id=${id}`, 'PATCH', { action: 'pause' })"));
         assert.ok(body.includes("call(`kickoff-assistant?id=${id}`, 'POST')"), 'resume goes through Kick Off, like the page');
         assert.ok(body.includes("call('set-draft-horizon', 'PATCH'"));

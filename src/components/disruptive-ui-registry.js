@@ -2281,7 +2281,7 @@
     el.innerHTML = `
       <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Waiting reviews · Approval needed</p>
       ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
-      <ul class="text-xs text-gray-700 mt-2 space-y-0.5">${decisions.map((d) => `<li>Review ${esc(d.reviewId)}: <strong>${d.decision === 'approve' ? 'show it on your website' : `decline — ${esc(RD_REASON[d.reason])}`}</strong></li>`).join('')}</ul>
+      <ul class="text-xs text-gray-700 mt-2 space-y-0.5">${decisions.map((d) => `<li>Review ${esc(d.reviewId)}: <strong>${d.decision === 'approve' ? 'approve it' : `decline — ${esc(RD_REASON[d.reason])}`}</strong></li>`).join('')}</ul>
       <p class="text-xs text-gray-600 mt-2">Declined reviews aren't shown or counted. A genuine bad review should be approved — you can hide it later, and it still counts in your average.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-rd-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${decisions.length ? '' : 'disabled'}>Do it</button>
@@ -3335,6 +3335,276 @@
   }
 
   register('assistant_settings_proposal', renderAssistantSettingsProposalCard);
+
+  // ── Built-in: Rule Proposal Card (every structured chat) ──────────────────
+  // { type: 'rule_proposal', action: 'add'|'edit'|'turn_off'|'turn_on'|'delete', assistantId, ruleId,
+  //   currentText, ruleText, platform, platformLabel, isActive, blocked, settled? }
+  // A change to the assistant's Do's and don'ts, checked against content_rules by the orchestrator
+  // (src/utils/chat-rules.ts). The click dispatches `rule:change`; chat-session.js calls
+  // content-rules.ts — the endpoint the Do's and don'ts card uses.
+  const RULE_COPY = {
+    add: { head: 'Add a rule', button: 'Save rule', busy: 'Saving…' },
+    edit: { head: 'Reword a rule', button: 'Save', busy: 'Saving…' },
+    turn_off: { head: 'Switch a rule off', button: 'Switch off', busy: 'Switching off…' },
+    turn_on: { head: 'Switch a rule back on', button: 'Switch on', busy: 'Switching on…' },
+    delete: { head: 'Delete a rule', button: 'Delete rule', busy: 'Deleting…', danger: true },
+  };
+
+  function renderRuleProposalCard(ui, esc) {
+    const copy = RULE_COPY[ui.action];
+    const assistantId = Number(ui.assistantId);
+    if (!copy || !Number.isInteger(assistantId)) return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const ruleNo = Number.isInteger(Number(ui.ruleId)) && ui.ruleId ? `#${Number(ui.ruleId)}` : '';
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      <p class="text-xs text-gray-500 mt-2">Do’s and don’ts${ruleNo ? ` · rule ${ruleNo}` : ''}${ui.platformLabel ? ` · only for ${esc(ui.platformLabel)}` : ''}</p>
+      ${ui.currentText ? `<p class="text-sm text-gray-700 mt-2 break-words"><span class="font-bold">${ui.action === 'edit' ? 'Now:' : 'Rule:'}</span> ${esc(ui.currentText)}</p>` : ''}
+      ${ui.ruleText && (ui.action === 'add' || ui.action === 'edit') ? `<p class="text-sm text-gray-900 mt-1 break-words"><span class="font-bold">${ui.action === 'edit' ? 'After:' : 'Rule:'}</span> ${esc(ui.ruleText)}</p>` : ''}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${!blocked && ui.action === 'turn_off' ? '<p class="text-xs text-gray-600 mt-3">It is kept, and can be switched back on any time.</p>' : ''}
+      ${!blocked && ui.action === 'delete' ? '<p class="text-xs text-gray-600 mt-3">This removes it for good. To stop it for now instead, switch it off.</p>' : ''}
+      ${!blocked && (ui.action === 'add' || ui.action === 'edit') ? '<p class="text-xs text-gray-600 mt-3">Your assistant follows it in everything it does from your next message.</p>' : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-rp-go class="${copy.danger ? 'btn-destructive' : 'btn-primary'} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>
+        <button type="button" data-rp-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-rp-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-rp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-rp-go], [data-rp-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-rp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-rp-go]')) return;
+      setBusy(true);
+      say(copy.busy);
+      el.dispatchEvent(new CustomEvent('rule:change', {
+        bubbles: true,
+        detail: {
+          action: ui.action, assistantId, ruleId: ui.ruleId ?? null, ruleText: ui.ruleText ?? null, platform: ui.platform ?? null,
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Done.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('rule_proposal', renderRuleProposalCard);
+
+  // ── Built-in: Goal Proposal Card (every structured chat) ──────────────────
+  // { type: 'goal_proposal', action: 'create'|'update'|'delete', assistantId, goalId, metricKey,
+  //   metricLabel, unit, current, proposed, targetValue, targetDate, title?, isPrimary?, blocked, settled? }
+  // Checked with manage-goals.ts's own rules (src/utils/chat-goals.ts), realism included. The click
+  // dispatches `goal:change`; chat-session.js calls manage-goals.ts as the Results tab does.
+  const GOAL_COPY = {
+    create: { head: 'Set a goal', button: 'Set goal', busy: 'Saving…' },
+    update: { head: 'Change a goal', button: 'Save', busy: 'Saving…' },
+    delete: { head: 'Delete a goal', button: 'Delete goal', busy: 'Deleting…', danger: true },
+  };
+
+  function renderGoalProposalCard(ui, esc) {
+    const copy = GOAL_COPY[ui.action];
+    const assistantId = Number(ui.assistantId);
+    if (!copy || !Number.isInteger(assistantId)) return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      <p class="text-xs text-gray-500 mt-2">Results tab${ui.goalId ? ` · goal #${Number(ui.goalId)}` : ''}${ui.metricLabel ? ` · ${esc(ui.metricLabel)}` : ''}</p>
+      ${ui.current ? `<p class="text-sm text-gray-700 mt-2 break-words"><span class="font-bold">${ui.action === 'delete' ? 'Goal:' : 'Now:'}</span> ${esc(ui.current)}</p>` : ''}
+      ${ui.proposed && ui.action !== 'delete' ? `<p class="text-sm text-gray-900 mt-1 break-words"><span class="font-bold">${ui.action === 'create' ? 'Goal:' : 'After:'}</span> ${esc(ui.proposed)}</p>` : ''}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${!blocked && ui.action !== 'delete' ? '<p class="text-xs text-gray-600 mt-3">Your assistant steers what it drafts toward this from now on.</p>' : ''}
+      ${!blocked && ui.action === 'delete' ? '<p class="text-xs text-gray-600 mt-3">This removes the goal and its progress for good.</p>' : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-gp-go class="${copy.danger ? 'btn-destructive' : 'btn-primary'} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>
+        <button type="button" data-gp-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-gp-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-gp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-gp-go], [data-gp-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-gp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-gp-go]')) return;
+      setBusy(true);
+      say(copy.busy);
+      el.dispatchEvent(new CustomEvent('goal:change', {
+        bubbles: true,
+        detail: {
+          action: ui.action, assistantId, goalId: ui.goalId ?? null, metricKey: ui.metricKey ?? null,
+          targetValue: ui.targetValue ?? null, targetDate: ui.targetDate ?? null,
+          // Stored cards drop undefined: absent = unchanged, null = clear the name.
+          title: Object.prototype.hasOwnProperty.call(ui, 'title') ? ui.title : undefined,
+          isPrimary: typeof ui.isPrimary === 'boolean' ? ui.isPrimary : undefined,
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Done.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('goal_proposal', renderGoalProposalCard);
+
+  // ── Built-in: Schedule Proposal Card (Social Media / Blog Writer chats) ────
+  // { type: 'schedule_proposal', assistantId, current, proposed, set, blocked, settled? }
+  // `set` holds only the onboarding_context keys that change (src/utils/chat-schedule.ts). The click
+  // dispatches `schedule:change`; chat-session.js reads the current context and saves it through
+  // update-assistant-context.ts, as the Posting Schedule card does.
+  function renderScheduleProposalCard(ui, esc) {
+    const assistantId = Number(ui.assistantId);
+    if (!Number.isInteger(assistantId) || !ui.set || typeof ui.set !== 'object') return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Posting schedule · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      ${ui.current ? `<p class="text-sm text-gray-700 mt-2 break-words"><span class="font-bold">Now:</span> ${esc(ui.current)}</p>` : ''}
+      ${!blocked && ui.proposed ? `<p class="text-sm text-gray-900 mt-1 break-words"><span class="font-bold">After:</span> ${esc(ui.proposed)}</p>` : ''}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${!blocked ? '<p class="text-xs text-gray-600 mt-3">New drafts follow it from now on. Posts already booked keep their times.</p>' : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-sp-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save schedule</button>
+        <button type="button" data-sp-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-sp-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-sp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-sp-go], [data-sp-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-sp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-sp-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('schedule:change', {
+        bubbles: true,
+        detail: {
+          assistantId, set: ui.set,
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Saved.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('schedule_proposal', renderScheduleProposalCard);
+
+  // ── Built-in: Platforms Proposal Card (chats whose Connections card has the switches) ────
+  // { type: 'platforms_proposal', assistantId, nowOn, afterOn, changes, before, linked, codes, blocked, settled? }
+  // Built by src/utils/chat-platforms.ts. The click dispatches `platforms:change`; chat-session.js
+  // saves the lists through update-assistant-context.ts, as the "Use for this assistant" switch does.
+  function renderPlatformsProposalCard(ui, esc) {
+    const assistantId = Number(ui.assistantId);
+    if (!Number.isInteger(assistantId) || !Array.isArray(ui.linked)) return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const list = (a) => (Array.isArray(a) && a.length ? a.map((x) => esc(String(x))).join(', ') : 'none');
+    const changes = Array.isArray(ui.changes) ? ui.changes : [];
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Where I post · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      ${!blocked && changes.length ? `<ul class="mt-2 space-y-1">${changes.map((c) => `<li class="text-sm text-gray-900 break-words"><span class="font-bold">${c.on ? 'Turn on' : 'Turn off'}:</span> ${esc(String(c.platform))}</li>`).join('')}</ul>` : ''}
+      <p class="text-sm text-gray-700 mt-2 break-words"><span class="font-bold">On now:</span> ${list(ui.nowOn)}</p>
+      ${!blocked ? `<p class="text-sm text-gray-900 mt-1 break-words"><span class="font-bold">After:</span> ${list(ui.afterOn)}</p>` : ''}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${!blocked ? '<p class="text-xs text-gray-600 mt-3">New drafts follow this from now on. Posts already drafted or booked keep their place.</p>' : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-pp-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save</button>
+        <button type="button" data-pp-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-pp-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-pp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-pp-go], [data-pp-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-pp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-pp-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('platforms:change', {
+        bubbles: true,
+        detail: {
+          assistantId, before: ui.before || [], linked: ui.linked, codes: ui.codes || [],
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Saved.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('platforms_proposal', renderPlatformsProposalCard);
+
+  // ── Built-in: Library Proposal Cards (Support Agent's Knowledge Base; Social / Blog Inspo) ────
+  // { type: 'kb_article_proposal', assistantId, title, content, blocked, settled? }
+  // { type: 'inspo_proposal', assistantId, kind: 'text'|'url', title, body, url, note, blocked, settled? }
+  // Built by src/utils/chat-library.ts. The card shows EXACTLY what will be saved; the click dispatches
+  // `library:add` and chat-session.js POSTs it to kb-articles.ts / inspo-items.ts as the tab's Save does.
+  function renderLibraryProposalCard(ui, esc) {
+    const assistantId = Number(ui.assistantId);
+    if (!Number.isInteger(assistantId)) return null;
+    const isKb = ui.type === 'kb_article_proposal';
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const text = isKb ? String(ui.content || '') : String(ui.body || '');
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${isKb ? 'Knowledge Base' : 'Inspo'} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      ${ui.title ? `<p class="text-sm font-bold text-gray-900 mt-2 break-words">${esc(String(ui.title))}</p>` : ''}
+      ${!isKb && ui.kind === 'url' && ui.url ? `<p class="text-sm text-gray-700 mt-1 break-all">${esc(String(ui.url))}</p>` : ''}
+      ${text ? `<div class="mt-2 max-h-48 overflow-y-auto rounded-lg bg-gray-50 border border-gray-100 p-3 text-sm text-gray-800 whitespace-pre-wrap break-words">${esc(text)}</div>` : ''}
+      ${!isKb && ui.note ? `<p class="text-sm text-gray-700 mt-2 break-words"><span class="font-bold">What you like about it:</span> ${esc(String(ui.note))}</p>` : ''}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${!blocked ? `<p class="text-xs text-gray-600 mt-3">${isKb ? 'I answer from this once it’s saved. You can edit or remove it in the Knowledge Base tab.' : (ui.kind === 'url' ? 'I read the page once it’s saved, then apply what I learn to every draft. You can edit or remove it in the Inspo tab.' : 'I apply this to every draft once it’s saved. You can edit or remove it in the Inspo tab.')}</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-lp-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${isKb ? 'Add article' : 'Add to Inspo'}</button>
+        <button type="button" data-lp-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-lp-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-lp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-lp-go], [data-lp-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-lp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-lp-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('library:add', {
+        bubbles: true,
+        detail: {
+          assistantId, which: isKb ? 'kb' : 'inspo', title: ui.title || '', content: ui.content || '',
+          kind: ui.kind, body: ui.body || '', url: ui.url || '', note: ui.note || '',
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Saved.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('kb_article_proposal', renderLibraryProposalCard);
+  register('inspo_proposal', renderLibraryProposalCard);
   register('SocialPostDraftCard', renderSocialPostDraftCard);
 
   // ── Built-in: Blog Post Draft Card ──────────────────────────────────────────

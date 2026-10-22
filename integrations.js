@@ -599,6 +599,19 @@ function _setPlatformSaveStatus(text) {
 // + appliedDefaults.platforms, then PUT update-assistant-context.
 window._intToggleUseForAssistant = async function (connId, checked) {
     connId = Number(connId);
+    // An EMPTY selection means "draft for every connected platform" (assistant-platform-selection.ts),
+    // so switching the last live platform off would widen drafting, not stop it. Refuse it, put the
+    // switch back, and say what does stop posting. The chat's platforms card refuses the same thing.
+    if (!checked) {
+        const liveOn = _userConnections.filter(c => c.status === 'active' && c.userId && _assistantSelectedIds.has(c.id));
+        if (liveOn.length === 1 && liveOn[0].id === connId) {
+            _renderConnectionsGrid();
+            const msg = 'This assistant needs at least one platform switched on. With none on, it would draft for every connected platform, not none. To stop posting, pause the assistant instead.';
+            if (typeof window.alertModal === 'function') window.alertModal(msg, { title: 'Keep one platform on' });
+            else _setPlatformSaveStatus(msg);
+            return;
+        }
+    }
     if (checked) _assistantSelectedIds.add(connId); else _assistantSelectedIds.delete(connId);
     const checkedIds = Array.from(_assistantSelectedIds);
     const activeConns = _userConnections.filter(c => c.status === 'active' && c.userId);
@@ -616,6 +629,9 @@ window._intToggleUseForAssistant = async function (connId, checked) {
         });
         if (r.ok) {
             window.cachedContext = updatedContext;
+            // The detail page keeps its own copy for its autosave — tell it, or the next autosave
+            // there writes the old switches back (assistants.js, assistant:platformsChanged).
+            document.dispatchEvent(new CustomEvent('assistant:platformsChanged', { detail: { assistantId: Number(_selectedAssistantId), primary_platforms: checkedKeys, linked_integrations: checkedIds } }));
             _setPlatformSaveStatus('✓ Saved');
             setTimeout(() => {
                 const el = document.getElementById('platforms-save-status');
@@ -628,6 +644,17 @@ window._intToggleUseForAssistant = async function (connId, checked) {
         _setPlatformSaveStatus('Error saving');
     }
 };
+
+// The switches changed from the assistant's chat (platforms card → update-assistant-context.ts).
+// Repaint them if this is that assistant's Connections card. Bound once at load on document; also
+// fired by the switch itself above, where the state is already current and this is a no-op redraw.
+document.addEventListener('assistant:platformsChanged', (e) => {
+    const d = e.detail || {};
+    if (!_assistantScoped || Number(_selectedAssistantId) !== Number(d.assistantId) || !Array.isArray(d.linked_integrations)) return;
+    _assistantSelectedIds = new Set(d.linked_integrations.map(Number));
+    window.cachedContext = { ...(window.cachedContext || {}), primary_platforms: d.primary_platforms || [], linked_integrations: d.linked_integrations };
+    _renderConnectionsGrid();
+});
 
 // ── Load & render platform cards ─────────────────────────────────
 async function _loadConnections() {

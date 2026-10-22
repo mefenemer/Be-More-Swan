@@ -192,6 +192,7 @@ export async function publishBlogPost(db: any, post: BlogPostRow, organisationId
             provenanceContentId: contentId,
             publishedAt: post.publishedAt || now,
             destinations,
+            failureReason: null,
             updatedAt: now,
         })
         .where(and(eq(blogPosts.id, id), eq(blogPosts.organisationId, organisationId)))

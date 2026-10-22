@@ -15,10 +15,13 @@
  *     assistantId,               // number — scopes the list to one assistant
  *     currentSessionId,          // number | null — highlighted, and never offered as "resume"
  *     onSelect(id, { readOnly }) // a row was picked; readOnly is true for an archived thread
- *     onNew()                    // "New conversation" was clicked
+ *     onNew()                    // the conversation on screen was archived — start a fresh one
  *   });
  *   panel.refresh()              // re-fetch (e.g. after the first reply creates a session)
  *   panel.destroy()
+ *
+ * There is no "new" button in here: each chat surface puts its own "New Chat" button in its header,
+ * next to History, so starting over never means opening the drawer first.
  *
  * Requires nothing beyond the two endpoints — no marked/DOMPurify, since previews are plain
  * text and are escaped, never rendered as Markdown.
@@ -68,10 +71,7 @@
     container.innerHTML = ''
       + '<div class="flex flex-col h-full bg-white" data-ch-root>'
       +   '<div class="px-4 py-3 border-b border-gray-100 shrink-0">'
-      +     '<button type="button" data-ch-new '
-      +       'class="btn-assistant w-full flex items-center justify-center gap-2 px-3 py-2 ' + 'text-sm font-bold rounded-lg transition cursor-pointer">'
-      +       '<span aria-hidden="true">+</span> New conversation</button>'
-      +     '<div class="flex gap-1 mt-3" role="tablist">'
+      +     '<div class="flex gap-1" role="tablist">'
       +       '<button type="button" data-ch-view="active" role="tab" class="px-3 py-1 text-xs font-bold rounded-md cursor-pointer">Active</button>'
       +       '<button type="button" data-ch-view="archived" role="tab" class="px-3 py-1 text-xs font-bold rounded-md cursor-pointer">Archived</button>'
       +     '</div>'
@@ -80,7 +80,6 @@
       + '</div>';
 
     const listEl = container.querySelector('[data-ch-list]');
-    const newBtn = container.querySelector('[data-ch-new]');
     const viewBtns = Array.prototype.slice.call(container.querySelectorAll('[data-ch-view]'));
 
     function paintTabs() {
@@ -184,7 +183,6 @@
     }
 
     container.addEventListener('click', onClick);
-    newBtn.addEventListener('click', function () { onNew(); });
     viewBtns.forEach(function (b) {
       b.addEventListener('click', function () {
         if (view === b.dataset.chView) return;

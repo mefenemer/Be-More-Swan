@@ -16,12 +16,7 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, chatMessages, chatSessions, masterAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
-import { refreshPostActionCards } from '../../src/utils/chat-post-action';
-import { refreshBlogActionCards } from '../../src/utils/chat-blog-action';
-import { refreshEmailActionCards } from '../../src/utils/chat-email-action';
-import { refreshLeadActionCards } from '../../src/utils/chat-lead-action';
-import { refreshAudienceCards } from '../../src/utils/chat-audience';
-import { refreshSettingsCards } from '../../src/utils/chat-assistant-settings';
+import { refreshStoredCards } from '../../src/utils/chat-card-refresh';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 function json(statusCode: number, body: unknown) {
@@ -87,12 +82,9 @@ export default withLambda(async (event) => {
             createdAt: session.createdAt,
             updatedAt: session.updatedAt,
         },
-        // Stored post-, blog-, email-, lead-action, Audience and settings cards are re-checked against
-        // their rows, so one already acted on says so instead of offering a button the endpoint would
-        // refuse. None throws.
-        messages: await refreshSettingsCards(db, orgId, session.aiAssistantId, session.roleKey, await refreshAudienceCards(db, orgId,
-            await refreshLeadActionCards(db, orgId, session.aiAssistantId, await refreshEmailActionCards(db, orgId, session.aiAssistantId,
-                await refreshBlogActionCards(db, orgId, session.aiAssistantId,
-                    await refreshPostActionCards(db, orgId, session.aiAssistantId, messages)))))),
+        // Stored confirm cards are re-checked against their rows (src/utils/chat-card-refresh.ts — the
+        // same chain the Team feed uses), so one already acted on says so instead of offering a button
+        // the endpoint would refuse. Never throws.
+        messages: await refreshStoredCards(db, orgId, session.aiAssistantId, session.roleKey, messages),
     });
 });

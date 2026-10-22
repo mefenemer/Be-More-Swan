@@ -138,7 +138,7 @@ async function main() {
     const o = read('netlify/functions/chat-orchestrator.ts');
     await check('the blog route resolves the proposal with the real time parser, and keeps the card', () => {
         assert.match(o, /blogAction = await resolveBlogActionProposal\(db, orgId, session\.aiAssistantId, blogActionReq, snapshotTz, parseScheduleInstruction\);/);
-        assert.match(o, /uiElement = blogDraft \? \{ type: BLOG_POST_DRAFT_TYPE, \.\.\.blogDraft \} : blogAction \?\? settingsCard;/);
+        assert.match(o, /uiElement = blogDraft \? \{ type: BLOG_POST_DRAFT_TYPE, \.\.\.blogDraft \} : blogAction \?\? profileCard;/);
         assert.match(o, /"type": "blog_action_proposal"/);
         assert.ok(!o.includes('you cannot schedule or publish from this chat'), 'the old refusal is still in the blog prompt');
     });
@@ -161,7 +161,9 @@ async function main() {
         assert.match(session, /container\.addEventListener\('blog:action', onBlogAction\);/);
     });
     await check('reopening a conversation re-checks blog cards too', () => {
-        assert.match(read('netlify/functions/get-chat-session.ts'), /await refreshBlogActionCards\(db, orgId, session\.aiAssistantId,/);
+        // One chain for a reopened chat and the Team feed (chat-card-refresh.ts); get-chat-session runs it.
+        assert.match(read('src/utils/chat-card-refresh.ts'), /await refreshBlogActionCards\(db, organisationId, aiAssistantId,/);
+        assert.ok(read('netlify/functions/get-chat-session.ts').includes('refreshStoredCards(db, orgId, session.aiAssistantId, session.roleKey, messages)'));
     });
 
     console.log(`\n${passed}/${total} checks passed`);

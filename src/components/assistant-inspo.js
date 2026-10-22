@@ -700,6 +700,14 @@
     }
   }
 
+  // An item added from the assistant's chat (Inspo card → inspo-items.ts). Reload the list if this tab is
+  // showing that assistant, and poll so a link's "reading…" badge resolves as it does for a tab add.
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') document.addEventListener('assistant:libraryChanged', async (e) => {
+    const d = e.detail || {};
+    if (d.which !== 'inspo' || !state.assistantId || Number(state.assistantId) !== Number(d.assistantId)) return;
+    try { await fetchItems(); renderList(); schedulePoll(true); } catch { /* keep the last good list */ }
+  });
+
   // `_test` exposes the pure functions behind the "Write a … from this" button and the link card.
   // tests/inspo-draft-from-item.test.ts calls them directly: the wording is role-dependent, and a
   // Blog Writer being asked for a "social post" is a bug no source scan would catch.

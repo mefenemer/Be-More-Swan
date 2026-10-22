@@ -14,6 +14,12 @@
  * ⚠️ Every assistant message is written by the server where the work changed state — this file
  * renders, it never invents. Handlers are bound to `document` once, at load, and find their
  * instance by the host's data attribute, so a re-render can never strand a button without one.
+ *
+ * A note you send gets a real answer (2026-10-22): `send` with reply:'model' stores it, then this
+ * file asks chat-orchestrator.ts for a turn on it (`teamMessageId`) — the same assistant, context and
+ * cards as its chat, in its newest conversation. The server writes the reply under your note. A card
+ * on that reply (change a setting, a rule, act on a post…) is shown in place by ChatSession in
+ * `cardOnly` mode, so its buttons run through exactly the chat's handlers and endpoints.
  */
 (function () {
   const API = '/.netlify/functions/team';
@@ -67,7 +73,7 @@
   // ── Loading ───────────────────────────────────────────────────────────────
   async function load(inst) {
     const filter = inst.mode === 'campaign' ? { campaignId: inst.campaignId }
-      : inst.mode === 'assistant' ? { assistantId: inst.assistantId }
+      : inst.mode === 'assistant' ? { assistantId: Number(inst.to) || inst.assistantId }
       : inst.thread.type === 'campaign' ? { campaignId: inst.thread.id }
       : inst.thread.type === 'assistant' ? { assistantId: inst.thread.id }
       : inst.thread.type === 'me' ? { mine: true } : {};
@@ -113,6 +119,8 @@
   }
 
   function threadTitle(inst) {
+    // An assistant's Team tab follows whoever "To" names — say so once it is someone else.
+    if (inst.mode === 'assistant') return Number(inst.to) && Number(inst.to) !== inst.assistantId ? `With ${assistantName(inst, inst.to)}` : '';
     if (inst.mode !== 'page' || inst.thread.type === 'all') return inst.mode === 'page' ? 'Everything' : '';
     if (inst.thread.type === 'me') return 'Me';
     if (inst.thread.type === 'campaign') {
@@ -120,6 +128,53 @@
       return c ? `Campaign: ${c.objective}` : 'Campaign';
     }
     return assistantName(inst, inst.thread.id);
+  }
+
+  /** Answer a just-sent note with a real chat turn. Resolves to an error message, or null. */
+  async function askForReply(assistantId, teamMessageId) {
+    try {
+      const res = await fetch('/.netlify/functions/chat-orchestrator', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ aiAssistantId: assistantId, teamMessageId }),
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        // Their Chat window may be showing this same conversation behind the Team tab.
+        document.dispatchEvent(new CustomEvent('team:chatTurn', { detail: { assistantId, chatSessionId: data.chatSessionId || null } }));
+        return null;
+      }
+      const data = await res.json().catch(() => ({}));
+      const why = data.uiElementJson?.reason || data.error;
+      return `Your note is saved, but they couldn’t reply just now${why ? ` — ${why}` : '.'} They’ll see it when you next chat.`;
+    } catch (_) {
+      return 'Your note is saved, but they couldn’t reply just now. They’ll see it when you next chat.';
+    }
+  }
+
+  /**
+   * Mount each reply's card into its placeholder. A card already mounted for the same data is moved
+   * back in rather than rebuilt, so a poll re-render never wipes a click that is still running.
+   */
+  function mountCards(inst) {
+    if (!window.ChatSession || !window.DisruptiveUIRegistry) return;
+    inst.cardEls = inst.cardEls || new Map();
+    inst.host.querySelectorAll(`[data-team-card]`).forEach((slot) => {
+      const m = inst.messages.find((x) => String(x.id) === slot.getAttribute('data-team-card'));
+      if (!m || !m.card) return;
+      const key = JSON.stringify(m.card);
+      const had = inst.cardEls.get(m.id);
+      if (had && had.key === key) { slot.appendChild(had.el); return; }
+      const el = document.createElement('div');
+      try {
+        window.ChatSession.mount({
+          container: el, cardOnly: true,
+          assistantId: m.from.id, chatSessionId: m.link?.chatSessionId ?? null,
+          initialMessages: [{ role: 'assistant', content: '', uiElement: m.card }],
+        });
+      } catch (_) { return; }
+      inst.cardEls.set(m.id, { key, el });
+      slot.appendChild(el);
+    });
   }
 
   function messageHtml(inst, m) {
@@ -142,14 +197,17 @@
             ${chip ? `<span class="inline-flex items-center px-2 py-0.5 ml-1 rounded-full text-[10px] font-bold border ${chipCls}">${esc(chip)}</span>` : ''}</p>
           ${camp ? `<p class="text-[11px] text-gray-400 truncate">${esc(camp.objective)}</p>` : ''}
           <p class="text-sm text-gray-800 mt-1 whitespace-pre-line break-words">${esc(m.body)}</p>
+          ${m.card ? `<div data-team-card="${m.id}" class="mt-2"></div>` : ''}
           ${answer}${link}
         </div>
       </div>`;
   }
 
-  /** Who a new message can go to here: this assistant, or anyone. */
+  /** Who a new message can go to here: anyone, except in one assistant's thread on the Team page.
+   *  An assistant's own Team tab offers everyone too (owner, 2026-10-22) — it starts on that
+   *  assistant, and picking another shows your thread with them (see load and the change handler). */
   function recipients(inst) {
-    const fixed = inst.mode === 'assistant' ? inst.assistantId : inst.thread.type === 'assistant' ? inst.thread.id : null;
+    const fixed = inst.mode === 'page' && inst.thread.type === 'assistant' ? inst.thread.id : null;
     if (fixed) return inst.assistants.filter((a) => Number(a.id) === Number(fixed));
     return inst.assistants;
   }
@@ -169,7 +227,7 @@
               ${to.map((a) => `<option value="${esc(String(a.id))}" ${Number(inst.to) === Number(a.id) ? 'selected' : ''}>${esc(a.name)}${ROLE_LABELS[a.roleKey] ? ` (${esc(ROLE_LABELS[a.roleKey])})` : ''}</option>`).join('')}
             </select>
           </label>
-          <p class="text-[11px] text-gray-500">${campaign ? 'About this campaign — it changes what they draft for it from now on.' : 'They see it when you next chat. For a rule they always follow, use their Rules tab.'}</p>
+          <p class="text-[11px] text-gray-500">${campaign ? 'About this campaign — it changes what they draft for it from now on. They reply here.' : 'They reply here. Ask them to change a setting or remember a rule and they’ll offer it for you to confirm.'}</p>
         </div>
         <div class="flex items-end gap-2">
           <textarea data-team-text="${inst.id}" rows="2" maxlength="1000" placeholder="Tell them something, or ask a question…"
@@ -220,16 +278,18 @@
       : inst.error ? `<p class="text-sm text-red-600 py-6 text-center">${esc(inst.error)}</p>`
       : !inst.messages.length ? `<p class="text-sm text-gray-500 py-6 text-center">${esc(emptyText(inst))}</p>`
       : ordered.map((m) => messageHtml(inst, m)).join('');
+    const replying = inst.replying
+      ? `<p class="text-xs text-gray-500 italic py-1" role="status">${esc(assistantName(inst, inst.replying))} is writing a reply…</p>` : '';
     const composer = inst.loaded && !inst.error ? composerHtml(inst) : '';
     const sortBtn = inst.messages.length > 1 ? `<button type="button" data-team-sort="${inst.id}"
         class="btn-utility px-2 py-1 text-xs font-bold rounded-lg shrink-0">${inst.sortNewest ? 'Newest first ↓' : 'Oldest first ↑'}</button>` : '';
     const body = `
       <div class="flex items-center justify-between gap-3 mb-3">
-        ${inst.mode === 'page' ? `<p class="text-sm font-bold text-gray-900 truncate">${esc(threadTitle(inst))}</p>` : '<span></span>'}
+        ${threadTitle(inst) ? `<p class="text-sm font-bold text-gray-900 truncate">${esc(threadTitle(inst))}</p>` : '<span></span>'}
         ${sortBtn}
       </div>
       ${inst.sortNewest ? composer.replace('border-t border-gray-100 pt-3 mt-3', 'border-b border-gray-100 pb-3 mb-3') : ''}
-      <div data-team-scroll="${inst.id}" class="space-y-3 overflow-y-auto" style="max-height:${inst.mode === 'page' ? '60vh' : '24rem'}">${list}</div>
+      <div data-team-scroll="${inst.id}" class="space-y-3 overflow-y-auto" style="max-height:${inst.mode === 'page' ? '60vh' : '24rem'}">${inst.sortNewest ? replying + list : list + replying}</div>
       ${inst.sortNewest ? '' : composer}`;
 
     inst.host.innerHTML = inst.mode === 'page'
@@ -238,6 +298,7 @@
            <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 min-w-0">${body}</div>
          </div>`
       : `<div class="min-w-0">${body}</div>`;
+    mountCards(inst);
     // Start at the newest message, wherever the order puts it.
     const scroll = inst.host.querySelector(`[data-team-scroll="${inst.id}"]`);
     if (scroll) scroll.scrollTop = inst.sortNewest ? 0 : scroll.scrollHeight;
@@ -312,8 +373,10 @@
       inst.sending = true;
       inst.sendError = null;
       send.disabled = true;
+      let sentId = null;
       try {
-        await post({ action: 'send', assistantId: Number(to), campaignId: campaignOf(inst) || undefined, body: text });
+        const r = await post({ action: 'send', assistantId: Number(to), campaignId: campaignOf(inst) || undefined, body: text, reply: 'model' });
+        sentId = r.id || null;
         inst.draft = '';
         const box = inst.host.querySelector(`[data-team-text="${inst.id}"]`);
         if (box) box.value = '';
@@ -321,8 +384,30 @@
         inst.sendError = err.message || 'It could not be sent — please try again.';
       }
       inst.sending = false;
+      if (!sentId) { await load(inst); return; }
+      // Show the note at once, then the real reply when the turn finishes.
+      inst.replying = Number(to);
       await load(inst);
+      const failed = await askForReply(Number(to), sentId);
+      inst.replying = null;
+      if (failed) inst.sendError = failed;
+      await load(inst);
+      // A confirmed card or a drafted post can change what other panels show.
+      document.dispatchEvent(new CustomEvent('campaign:updated', { detail: {} }));
     }
+  });
+
+  // In an assistant's Team tab, picking someone else in "To" shows your thread with them, so their
+  // reply lands where you are looking. On the Team page the thread list already does that.
+  document.addEventListener('change', async (e) => {
+    const sel = e.target.closest && e.target.closest('[data-team-to]');
+    if (!sel) return;
+    const inst = instFor(sel, 'data-team-to');
+    if (!inst || inst.mode !== 'assistant') return;
+    inst.to = sel.value;
+    inst.loaded = false;
+    render(inst);
+    await load(inst);
   });
 
   // Enter sends, Shift+Enter is a new line — as in any chat.

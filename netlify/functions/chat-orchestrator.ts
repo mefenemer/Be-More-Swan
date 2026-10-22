@@ -14,7 +14,7 @@
 // Auth: aura_session + active org via requireTenant (tenant isolation on every read).
 
 import { sanitizeForModel } from '../../src/utils/text-safe';
-import { teamThreadPromptBlock } from '../../src/utils/team-messages';
+import { postTeamChatReply, teamNoteForChatTurn, teamThreadPromptBlock } from '../../src/utils/team-messages';
 import { SPECIAL_CATEGORY_RULE } from '../../src/constants/special-category-rule';
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
@@ -72,6 +72,15 @@ import { leadActionFromUiElement, resolveLeadActionProposal, sendableDraft, type
 import {
     assistantSettingsPromptBlock, buildAssistantSettingsSnapshot, resolveSettingsProposal, settingsProposalFromUiElement, type SettingsCard,
 } from '../../src/utils/chat-assistant-settings';
+import { buildRulesListBlock, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock, type RuleCard } from '../../src/utils/chat-rules';
+import { buildPlanSnapshot } from '../../src/utils/chat-plan-snapshot';
+import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGoalProposal, type GoalCard } from '../../src/utils/chat-goals';
+import { resolveScheduleProposal, scheduleProposalFromUiElement, schedulePromptBlock, type ScheduleCard } from '../../src/utils/chat-schedule';
+import { buildPlatformsBlock, platformsProposalFromUiElement, resolvePlatformsProposal, type PlatformsCard } from '../../src/utils/chat-platforms';
+import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal, type LibraryCard } from '../../src/utils/chat-library';
+import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
+import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
+import { confirmCardReply } from '../../src/utils/confirm-card-reply';
 import { isInOutreachReview } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
 import { LOSS_REASONS } from '../../src/config/revenue-events';
@@ -374,7 +383,11 @@ function parseStructuredReply(raw: string): { content: string; uiElement: unknow
     // (broken) structured attempt, degrade to a friendly retry line; only genuine
     // non-JSON prose is passed through untouched.
     if (looksLikeStructuredAttempt(stripped)) {
-        console.warn('[chat-orchestrator] structured reply was unparseable — showing retry fallback');
+        // The start and end of what came back, so the next one can be diagnosed: a cut-off end means
+        // the token ceiling; a clean end means a JSON fault (2026-10-22: one live turn, no clue why).
+        console.warn('[chat-orchestrator] structured reply was unparseable — showing retry fallback', {
+            length: stripped.length, start: stripped.slice(0, 300), end: stripped.slice(-160),
+        });
         return { content: STRUCTURED_REPLY_FALLBACK, uiElement: null };
     }
     return { content: raw.trim(), uiElement: null };
@@ -685,7 +698,7 @@ function socialSurfaces(): string {
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
-EXISTING POSTS — you can act on the posts listed below, each named by its "#" number, in four ways: approve one waiting in "Review" (it is booked into a posting slot), reject one (say what is wrong; the user can let you write a replacement and keep the reason as a rule), try again one in "Needs attention" (it goes back in the queue and publishes on the next run), or move one in "Review" or "Scheduled" to another time. To do any of them, emit a post_action_proposal naming the post's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say a post HAS been approved, rejected, retried or moved — say the card is there to confirm. One post per reply. If you cannot tell which post they mean, ask, quoting the candidates. You cannot edit an existing post's words, publish one immediately, or delete one: for those, tell them which column of the "Posts" tab it is in so they can open it there. You CAN write a new version as a fresh draft if they want one.`;
+EXISTING POSTS — you can act on the posts listed below, each named by its "#" number, in four ways: approve one waiting in "Review" (it is booked into a posting slot), reject one (say what is wrong; the user can let you write a replacement and keep the reason as a rule), try again one in "Needs attention" (it goes back in the queue and publishes on the next run), or move one in "Review" or "Scheduled" to another time. To do any of them, emit a post_action_proposal naming the post's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say a post HAS been approved, rejected, retried or moved — say the card is there to confirm. One post per reply. If you cannot tell which post they mean, ask, quoting the candidates. If a post has open compliance warnings ("↳" under it), name them before offering to approve it: the card cannot accept warnings for the user, so its click will be refused and they will need to open the post in the "Posts" tab and settle or accept the warnings there. You cannot edit an existing post's words, publish one immediately, or delete one: for those, tell them which column of the "Posts" tab it is in so they can open it there. You CAN write a new version as a fresh draft if they want one.`;
 }
 
 // ── Blog Writer and Email Marketing: their own dashboard surfaces ─────────────
@@ -2514,6 +2527,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         forPostId?: number;
         /** Pictures (library assetIds) and documents (base64) — chat-attachments.ts. */
         attachments?: unknown;
+        /** A note the user just sent this assistant on the Team page (team.ts `send`, reply:'model').
+         *  The turn answers THAT note — its stored words, not `message` — in the assistant's newest
+         *  conversation, and the reply is written back to the Team feed (team-messages.ts). */
+        teamMessageId?: number;
     };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
@@ -2530,7 +2547,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         }
     }
 
-    const typed = (body.message || '').trim();
+    // ── A Team page note (team-messages.ts teamNoteForChatTurn): this person's own unanswered note to
+    // this assistant. Its stored words are the message — the client cannot substitute others.
+    let teamNote: Awaited<ReturnType<typeof teamNoteForChatTurn>> = null;
+    if (body.teamMessageId !== undefined) {
+        const assistantId = Number(body.aiAssistantId);
+        if (!Number.isInteger(assistantId) || body.chatSessionId !== undefined) return json(400, { error: 'A Team reply needs aiAssistantId and no chatSessionId.' });
+        teamNote = await teamNoteForChatTurn(db, { orgId, userId, assistantId, teamMessageId: Number(body.teamMessageId) });
+        if (!teamNote) return json(409, { error: 'That note has already been answered, or isn’t yours to answer.' });
+    }
+
+    const typed = teamNote ? teamNote.body.trim() : (body.message || '').trim();
     if (!typed && !attached.length) return json(400, { error: 'message is required' });
     if (typed.length > MAX_MESSAGE_CHARS) return json(400, { error: `Message too long (max ${MAX_MESSAGE_CHARS} characters).` });
     // What the transcript shows: their words, then what they attached.
@@ -2579,7 +2606,19 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // ── Resolve the session (continue or create) — always scoped to the caller's org ──
     let session: { id: number; aiAssistantId: number };
 
-    if (body.chatSessionId !== undefined) {
+    // A Team note continues the assistant's newest active conversation with this person — the one the
+    // chat window resumes (assistant-chat-modal.js findLatestSession) — so both windows hold one thread.
+    const [teamThread] = teamNote
+        ? await db.select({ id: chatSessions.id, aiAssistantId: chatSessions.aiAssistantId }).from(chatSessions)
+            .where(and(eq(chatSessions.organisationId, orgId), eq(chatSessions.userId, userId),
+                eq(chatSessions.aiAssistantId, Number(body.aiAssistantId)), eq(chatSessions.status, 'active')))
+            .orderBy(desc(chatSessions.updatedAt), desc(chatSessions.id))
+            .limit(1)
+        : [];
+
+    if (teamThread) {
+        session = teamThread;
+    } else if (body.chatSessionId !== undefined) {
         const [existing] = await db
             .select({ id: chatSessions.id, aiAssistantId: chatSessions.aiAssistantId, status: chatSessions.status })
             .from(chatSessions)
@@ -2811,7 +2850,31 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // JSON reply can also propose a change through a confirm card; the plain default route only reads.
     const settingsBlock = await buildAssistantSettingsSnapshot(db, orgId, session.aiAssistantId, assistantRow.roleKey);
     const settingsCardBlock = route !== defaultRoute ? assistantSettingsPromptBlock(assistantRow.roleKey) : null;
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock].filter(Boolean).join('\n\n');
+    // Its Do's and don'ts by id, and the card that adds, rewords, switches or deletes one
+    // (src/utils/chat-rules.ts) — the rules block above is what it FOLLOWS; this is what it can CHANGE.
+    // Plus the workspace's plan and this month's task balance (src/utils/chat-plan-snapshot.ts), the
+    // same figures as the usage bar. Both every turn, every role; both never throw.
+    const rulesListBlock = route !== defaultRoute ? await buildRulesListBlock(db, orgId, session.aiAssistantId) : null;
+    const rulesCardBlock = route !== defaultRoute ? rulesPromptBlock(assistantRow.roleKey) : null;
+    const planBlock = await buildPlanSnapshot(db, orgId);
+    // Its goals by id with the metrics on offer (src/utils/chat-goals.ts) — every role reads them;
+    // structured routes can propose a goal card. And, for the roles with a Posting Schedule card, the
+    // schedule and its card (src/utils/chat-schedule.ts). Neither throws.
+    const goalsBlock = await buildGoalsBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey);
+    const goalsCardBlock = route !== defaultRoute ? goalsPromptBlock() : null;
+    const scheduleBlock = route !== defaultRoute ? schedulePromptBlock(assistantRow.roleKey, assistantRow.onboardingContext) : null;
+    // The "Use for this assistant" switches, for the roles whose Connections card shows them
+    // (src/utils/chat-platforms.ts). Null for every other role; never throws.
+    const platformsBlock = route !== defaultRoute ? await buildPlatformsBlock(db, orgId, userId, session.aiAssistantId) : null;
+    // Its Knowledge Base or Inspo, for the roles with that tab (src/utils/chat-library.ts). Never throws.
+    const libraryBlock = route !== defaultRoute ? await buildLibraryBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey) : null;
+    // Customer reviews for the Email Marketing chat (src/utils/chat-reviews.ts) — the Website Assistant's
+    // prompt carries its own. Null for every other role; never throws.
+    const reviewsBlock = route !== defaultRoute ? await buildReviewsBlock(db, orgId, assistantRow.roleKey) : null;
+    // The signed-in user's own My Account settings, read-only (src/utils/chat-my-account.ts). Every
+    // route, every role; null when the read fails.
+    const myAccountBlock = await buildMyAccountBlock(db, userId, session.aiAssistantId, assistantRow.roleKey);
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, scheduleBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock].filter(Boolean).join('\n\n');
 
     const system = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -2859,7 +2922,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             role: m.role as 'user' | 'assistant',
             content: i === latestCardIdx ? `${m.content}\n\n${onScreenCardBlock(m.uiElementJson)}` : m.content,
         })),
-        { role: 'user' as const, content: recordContext ? `${recordContext}\n\n${message}` : message },
+        { role: 'user' as const, content: [
+            recordContext,
+            // Where this message came from, for the model only (the transcript keeps their words).
+            teamNote
+                ? `[Sent to you on the Team page${teamNote.campaignId ? `, on the thread for the campaign "${teamNote.campaignObjective ?? `#${teamNote.campaignId}`}" — a note there is also added to that campaign's brief, which you follow in everything you draft for it` : ''}. Your reply appears there, under their note, with any card you include.]`
+                : '',
+            message,
+        ].filter(Boolean).join('\n\n') },
     ];
 
     try {
@@ -3014,6 +3084,55 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 content = 'I couldn’t read my settings just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Profile.';
             }
         }
+        // A change to its own Do's and don'ts (src/utils/chat-rules.ts) — any structured route. Rebuilt
+        // from content_rules; the click calls content-rules.ts, the endpoint the Do's and don'ts card uses.
+        let ruleCard: RuleCard | null = null;
+        const ruleReq = route !== defaultRoute && !settingsReq ? ruleProposalFromUiElement(uiElement) : null;
+        if (ruleReq) {
+            ruleCard = await resolveRuleProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, ruleReq);
+            uiElement = ruleCard;
+            if (!ruleCard) {
+                content = 'I couldn’t read your Do’s and don’ts just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Profile.';
+            }
+        }
+        // A goal set, changed or deleted (src/utils/chat-goals.ts) — checked with manage-goals.ts's own
+        // rules, realism included; the click calls manage-goals.ts as the Results tab does.
+        let goalCard: GoalCard | null = null;
+        const goalReq = route !== defaultRoute && !settingsReq && !ruleReq ? goalProposalFromUiElement(uiElement) : null;
+        if (goalReq) {
+            goalCard = await resolveGoalProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, goalReq);
+            uiElement = goalCard;
+            if (!goalCard) content = 'I couldn’t read your goals just now, so I haven’t set anything up. Please try again in a moment, or use the Results tab.';
+        }
+        // A posting schedule change (src/utils/chat-schedule.ts) — only the keys that change; the click
+        // saves through update-assistant-context.ts, as the Posting Schedule card does.
+        let scheduleCard: ScheduleCard | null = null;
+        const scheduleReq = route !== defaultRoute && !settingsReq && !ruleReq && !goalReq ? scheduleProposalFromUiElement(uiElement) : null;
+        if (scheduleReq) {
+            scheduleCard = await resolveScheduleProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, scheduleReq);
+            uiElement = scheduleCard;
+            if (!scheduleCard) content = 'I couldn’t read your posting schedule just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Profile.';
+        }
+        // Which connected platforms it posts to (src/utils/chat-platforms.ts) — the click saves through
+        // update-assistant-context.ts exactly as the "Use for this assistant" switch does.
+        let platformsCard: PlatformsCard | null = null;
+        const platformsReq = route !== defaultRoute && !settingsReq && !ruleReq && !goalReq && !scheduleReq ? platformsProposalFromUiElement(uiElement) : null;
+        if (platformsReq) {
+            platformsCard = await resolvePlatformsProposal(db, orgId, userId, session.aiAssistantId, platformsReq);
+            uiElement = platformsCard;
+            if (!platformsCard) content = 'I couldn’t read your connections just now, so I haven’t changed anything. Please try again in a moment, or use Assistant Profile ▸ Connections.';
+        }
+        // An addition to its Knowledge Base or Inspo (src/utils/chat-library.ts) — the click POSTs to
+        // kb-articles.ts / inspo-items.ts, as the tab's own Save does.
+        let libraryCard: LibraryCard | null = null;
+        const libraryReq = route !== defaultRoute && !settingsReq && !ruleReq && !goalReq && !scheduleReq && !platformsReq ? libraryProposalFromUiElement(uiElement) : null;
+        if (libraryReq) {
+            libraryCard = await resolveLibraryProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, libraryReq);
+            uiElement = libraryCard;
+            if (!libraryCard) content = `I couldn’t check your ${libraryReq.which === 'kb' ? 'Knowledge Base' : 'Inspo'} just now, so I haven’t added anything. Please try again in a moment, or use the ${libraryReq.which === 'kb' ? 'Knowledge Base' : 'Inspo'} tab.`;
+        }
+        // One card for the "keep it" checks below: a change to the assistant's own profile.
+        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard;
         // The Blog Writer's twin (src/utils/chat-blog-action.ts): same checks, built from blog_posts
         // rows; a time in the user's words is worked out here so the card shows the exact instant.
         let blogAction: BlogActionCard | null = null;
@@ -3045,6 +3164,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             if (!audienceCard) {
                 content = 'I couldn’t check that against your audience just now, so I haven’t set anything up. Please try again in a moment, or use the Audience page.';
             }
+        }
+        // And the review cards the Website Assistant's chat offers (src/utils/chat-reviews.ts), rebuilt
+        // by org-reviews.ts's own rule so the card's button can work.
+        let reviewsCard: ReviewsCard | null = null;
+        if (route === ROUTES.newsletter_editor && isReviewsUiElement(uiElement)) {
+            reviewsCard = await resolveReviewsCard(db, orgId, uiElement);
+            uiElement = reviewsCard;
+            if (!reviewsCard) content = 'I couldn’t check that against your reviews just now, so I haven’t set anything up. Please try again in a moment, or use Audience ▸ Reviews.';
         }
         // And the Lead Generator's (src/utils/chat-lead-action.ts). Its "send" card carries the stored
         // email verbatim and a fingerprint of it, which send_outreach checks at the click.
@@ -3114,7 +3241,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         const blogDraft = route === ROUTES.blog_writer ? blogPostDraftFromUiElement(uiElement) : null;
         if (route === ROUTES.blog_writer) {
             // An action card on an existing article was already checked and rebuilt above — keep it.
-            uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft } : blogAction ?? settingsCard;
+            uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft } : blogAction ?? profileCard;
         }
 
         // Same contract for the newsletter route, and the same reason: uiElementJson is persisted
@@ -3143,7 +3270,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 : formDraft ? { type: AUDIENCE_FORM_DRAFT_TYPE, ...formDraft }
                 // An action card on an existing email, or an Audience card, was already checked and
                 // rebuilt above — keep it.
-                : emailAction ?? audienceCard ?? settingsCard;
+                : emailAction ?? audienceCard ?? reviewsCard ?? profileCard;
         }
 
         // ── Reply ↔ persistence reconciliation ────────────────────────────────────
@@ -3174,7 +3301,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
         // A post-action turn is not a drafting turn: "approve it and it's scheduled" describes the
         // card, and the card is the backing — the user's click is what does it.
-        if (route === ROUTES.social_media_manager && !postActionReq && !settingsCard && replyClaimsPostSaved(content) && !alreadyApologised) {
+        if (route === ROUTES.social_media_manager && !postActionReq && !profileCard && replyClaimsPostSaved(content) && !alreadyApologised) {
             let breach: DraftClaimFailure | null = null;
             if (draftTarget) breach = 'not_saved_here';                      // saving here is wrong by design
             else if (persistedPosts?.length === 0) breach = 'persist_failed'; // valid draft, the write threw
@@ -3193,7 +3320,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // persists), so the only unbacked claim available to it is claiming an article it did not
         // write — which is the identical bug: a confident reply about a post that does not exist.
         // An action card is the thing a "scheduled" reply is about, so it is not an unbacked claim.
-        if (route === ROUTES.blog_writer && !blogDraft && !blogAction && !settingsCard && replyClaimsPostSaved(content) && !alreadyApologised) {
+        if (route === ROUTES.blog_writer && !blogDraft && !blogAction && !profileCard && replyClaimsPostSaved(content) && !alreadyApologised) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked blog draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );
@@ -3201,11 +3328,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             suppressed = 'blog_no_draft';
         }
 
+        // The words beside a profile or review card never say the change happened — only the click
+        // does that, and a refused card's reply says it was refused (src/utils/confirm-card-reply.ts).
+        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard)) {
+            content = confirmCardReply(content, uiElement as { blocked?: unknown; settled?: unknown });
+        }
+
         // And the newsletter route's. Identical shape: it never persists on the turn, so the only
         // unbacked claim available to it is claiming an issue it did not write.
         // !emailAction / !audienceCard: a "booked for Tuesday" or "here's the segment" reply describes
         // its card, not an unbacked claim.
-        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised && !emailAction && !audienceCard && !settingsCard) {
+        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised && !emailAction && !audienceCard && !reviewsCard && !profileCard) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked newsletter draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );
@@ -3256,6 +3389,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         await db.update(chatSessions).set({ updatedAt: new Date() }).where(eq(chatSessions.id, session.id));
 
         await persistHubRecords(db, orgId, session.aiAssistantId, hubRecords);
+
+        // A Team note's answer goes back under the note (team-messages.ts postTeamChatReply), pointing at
+        // this chat message, whose card the Team feed shows in place. Never throws.
+        if (teamNote) {
+            await postTeamChatReply(db, {
+                orgId, assistantId: session.aiAssistantId, campaignId: teamNote.campaignId, replyTo: teamNote.id,
+                body: content, chatSessionId: session.id, chatMessageId: assistantMessage.id,
+            });
+        }
 
         return json(200, {
             chatSessionId: session.id,

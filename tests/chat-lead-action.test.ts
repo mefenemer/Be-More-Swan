@@ -206,7 +206,8 @@ async function main() {
         assert.match(ar, /const merged = \{ \.\.\.base, \.\.\.\(body\.dataMerge as Record<string, unknown>\) \};/);
     });
     await check('reopening a conversation re-checks lead cards too', () => {
-        assert.match(read('netlify/functions/get-chat-session.ts'), /messages: await refreshSettingsCards\(db, orgId, session\.aiAssistantId, session\.roleKey, await refreshAudienceCards\(db, orgId,\s*await refreshLeadActionCards\(db, orgId, session\.aiAssistantId,/);
+        assert.match(read('src/utils/chat-card-refresh.ts'), /await refreshLeadActionCards\(db, organisationId, aiAssistantId, out\)/);
+        assert.ok(read('netlify/functions/get-chat-session.ts').includes('refreshStoredCards(db, orgId, session.aiAssistantId, session.roleKey, messages)'));
     });
 
     console.log(`\n${passed}/${total} checks passed`);

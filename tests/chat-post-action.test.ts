@@ -119,7 +119,7 @@ async function main() {
         const o = read('netlify/functions/chat-orchestrator.ts');
         assert.match(o, /postAction = await resolvePostActionProposal\(db, orgId, session\.aiAssistantId, postActionReq, snapshotTz\);\s*uiElement = postAction;/);
         assert.match(o, /"type": "post_action_proposal"/);
-        assert.match(o, /route === ROUTES\.social_media_manager && !postActionReq && !settingsCard && replyClaimsPostSaved\(content\)/,
+        assert.match(o, /route === ROUTES\.social_media_manager && !postActionReq && !profileCard && replyClaimsPostSaved\(content\)/,
             'a post-action reply describes a card; the unbacked-draft guard must not replace it');
     });
 
@@ -164,7 +164,8 @@ async function main() {
         ]);
         assert.strictEqual(out[0], plain);
         assert.strictEqual((out[1].uiElement as any).blocked, null);
-        assert.ok(read('netlify/functions/get-chat-session.ts').includes('await refreshPostActionCards(db, orgId, session.aiAssistantId, messages)'));
+        assert.ok(read('src/utils/chat-card-refresh.ts').includes('await refreshPostActionCards(db, organisationId, aiAssistantId, messages)'));
+        assert.ok(read('netlify/functions/get-chat-session.ts').includes('refreshStoredCards(db, orgId, session.aiAssistantId, session.roleKey, messages)'));
     });
 
     console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);

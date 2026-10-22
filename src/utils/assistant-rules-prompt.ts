@@ -27,7 +27,7 @@
 // Lead Generator, whose Rules tabs had said their rules reached nothing. The Lead Generator's
 // REJECTION evidence still has its own path (lead_reject_feedback); what is new is its manual rules
 // reaching its chat and its outreach drafts. Email Marketing reads its rules through blueprint §4
-// (newsletter-generate.ts), so it is not here — and its Rules tab now says so truthfully.
+// (newsletter-generate.ts) for autopilot; since 2026-10-22 its chat reads them here too.
 
 import { and, desc, eq, isNull, or } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -53,6 +53,10 @@ export const RULE_READING_ROLES: ReadonlySet<string> = new Set([
     // Website Assistant: its chat, and every AI draft of the site (site-store.ts runSiteDraft →
     // buildDraftPrompt). Registry rulesScope 'site' says so on the Rules tab.
     'website_assistant',
+    // Email Marketing (2026-10-22): autopilot reads its rules through blueprint §4, but an email or
+    // flow drafted in CHAT never did — the same gap the posts roles had. Its tab (rulesScope 'brief')
+    // already says rules apply to everything it does; now the chat honours that.
+    'newsletter_editor',
 ]);
 
 /** Record types those roles produce. Rejecting one of these may carry a free-text `feedback`. */
@@ -83,7 +87,7 @@ export function formatRulesBlock(rules: PromptRule[]): string | null {
         used += line.length;
     }
     if (!lines.length) return null;
-    return `RULES FROM YOUR USER — follow every one of these in everything you produce for them: posts, captions, articles, replies, tickets, summaries, action items, reminders and tables. A rule marked [only for …] applies only to that platform. Where a rule conflicts with your default behaviour, the rule wins. If a rule stops you doing part of what they asked, say so in one short sentence AND still produce the work without that part, in your normal format — never reply with the explanation alone. Never mention that you were given rules.\n${lines.join('\n')}`;
+    return `RULES FROM YOUR USER — follow every one of these in everything you produce for them: posts, captions, articles, replies, tickets, summaries, action items, reminders and tables. A rule marked [only for …] applies only to that platform. Where a rule conflicts with your default behaviour, the rule wins. If a rule stops you doing part of what they asked, say so in one short sentence AND still produce the work without that part, in your normal format — never reply with the explanation alone. Don’t bring these rules up unless the user asks about their rules or Do’s and don’ts.\n${lines.join('\n')}`;
 }
 
 /** The active rules for one assistant, as a prompt block. Never throws: a failed read means no block. */

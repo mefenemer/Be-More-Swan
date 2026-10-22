@@ -3406,6 +3406,9 @@ export const blogPosts = pgTable("blog_posts", {
   publishedAt: timestamp("published_at"),
   isAutonomous: boolean("is_autonomous").notNull().default(false),
   generationReason: text("generation_reason"),
+  // Why the last scheduled publish failed, for the owner (publish-blog-posts.ts); cleared when the
+  // article is booked again or published. db/blog-failure-reason.sql — ⚠️ apply before deploying.
+  failureReason: text("failure_reason"),
 
   // Provenance & AI linkage (reused infra)
   provenanceContentId: text("provenance_content_id"),       // → contentProvenance.contentId
