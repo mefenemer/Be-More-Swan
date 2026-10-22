@@ -231,7 +231,7 @@ window._buildAssistantCardGoals = function (assistant) {
     // Suppressed for a single goal — the headline above already said it — and when nothing has been
     // assessed yet, where "0 on track" would be a misleading way to say "we haven't measured".
     const pills = [
-        gs.onTrack  ? `<span class="inline-flex items-center gap-1 text-emerald-600"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>${gs.onTrack} on track</span>` : '',
+        gs.onTrack  ? `<span class="inline-flex items-center gap-1 text-green-600"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>${gs.onTrack} on track</span>` : '',
         gs.atRisk   ? `<span class="inline-flex items-center gap-1 text-amber-600"><span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>${gs.atRisk} at risk</span>` : '',
         gs.offTrack ? `<span class="inline-flex items-center gap-1 text-red-600"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>${gs.offTrack} off track</span>` : '',
     ].filter(Boolean).join('');
@@ -341,7 +341,7 @@ window.generateAssistantCardHTML = function(assistant) {
     const recordCountsHtml = hasRecordActivity ? `
                 <div class="flex items-center gap-3 flex-wrap">
                     <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="Everything this assistant has filed and scored, excluding anything moved to Deleted">
-                        <svg class="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                        <svg class="w-3.5 h-3.5 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                         ${rm.total} ${words.total}
                     </span>
                     <span class="inline-flex items-center gap-1 text-xs font-semibold ${rm.pending ? 'text-amber-700' : 'text-gray-700'}" title="Waiting on your decision in the Review Queue">
@@ -349,7 +349,7 @@ window.generateAssistantCardHTML = function(assistant) {
                         ${rm.pending} ${words.pending}
                     </span>
                     <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="Approved, plus anything already acted on — the same two states the Approved column shows">
-                        <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <svg class="w-3.5 h-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                         ${rm.cleared} ${words.cleared}
                     </span>
                 </div>` : '';
@@ -357,7 +357,7 @@ window.generateAssistantCardHTML = function(assistant) {
     const postCountsHtml = totalCreated > 0 ? `
                 <div class="flex items-center gap-3 flex-wrap">
                     <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="Posts created by this assistant">
-                        <svg class="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                        <svg class="w-3.5 h-3.5 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                         ${totalCreated} created
                     </span>
                     <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="Posts scheduled or awaiting approval">
@@ -365,7 +365,7 @@ window.generateAssistantCardHTML = function(assistant) {
                         ${totalScheduled} scheduled
                     </span>
                     <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="Posts successfully published">
-                        <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <svg class="w-3.5 h-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                         ${totalPublished} published
                     </span>
                 </div>` : '';
@@ -395,7 +395,7 @@ window.generateAssistantCardHTML = function(assistant) {
     const longformCountsHtml = hasLongformActivity ? `
                 <div class="flex items-center gap-3 flex-wrap">
                     <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="${lWords.totalTitle}">
-                        <svg class="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                        <svg class="w-3.5 h-3.5 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                         ${lm.total} ${lWords.total}
                     </span>
                     <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="Scheduled or awaiting your approval">
@@ -403,7 +403,7 @@ window.generateAssistantCardHTML = function(assistant) {
                         ${lm.inFlight} ${lWords.inFlight}
                     </span>
                     <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="${lWords.deliveredTitle}">
-                        <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <svg class="w-3.5 h-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                         ${lm.delivered} ${lWords.delivered}
                     </span>
                 </div>` : '';
@@ -416,7 +416,7 @@ window.generateAssistantCardHTML = function(assistant) {
                 <div class="flex items-center gap-3 flex-wrap">
                     ${sm.items.map((i) => `
                     <span class="inline-flex items-center gap-1 text-xs font-semibold ${i.attention ? 'text-amber-700' : 'text-gray-700'}" title="${_escapeHtml(i.title)}">
-                        <span class="w-1.5 h-1.5 rounded-full ${i.attention ? 'bg-amber-500' : 'bg-emerald-500'}"></span>
+                        <span class="w-1.5 h-1.5 rounded-full ${i.attention ? 'bg-amber-500' : 'bg-green-500'}"></span>
                         ${Number(i.n) || 0} ${_escapeHtml(i.label)}
                     </span>`).join('')}
                 </div>` : '';
@@ -496,7 +496,7 @@ window.generateAssistantCardHTML = function(assistant) {
 // scoped plain CSS in assistants-directory.html (.add-asst-*), so it is immune to the prebuilt
 // Tailwind build. The copy rotates by index to keep multiple placeholders feeling fresh.
 window._ADD_ASSISTANT_COPY = [
-    { title: 'Hire an Assistant',     sub: 'Bring a new AI teammate on board to take a task off your plate.' },
+    { title: 'Your Next Assistant',   sub: 'Bring a new AI teammate on board to take a task off your plate.' },
     { title: 'Grow Your Team',        sub: 'Expand your AI workforce and delegate even more of your day.' },
     { title: 'Automate Another Task', sub: 'Find the right assistant for your next repetitive chore.' },
 ];
@@ -512,7 +512,7 @@ window.generateAddAssistantPlaceholderHTML = function(index) {
         <div class="add-asst-ico">${plus}</div>
         <h3 class="add-asst-title">${copy.title}</h3>
         <p class="add-asst-sub">${copy.sub}</p>
-        <span class="add-asst-cta">${plus}Add New Assistant</span>
+        <span class="add-asst-cta">${plus}Hire an assistant</span>
     </div>`;
 };
 
@@ -611,7 +611,7 @@ window.fetchAndRenderAssistants = async function(containerId, options) {
         if (visible.length === 0 && inProgress.length === 0) {
             container.innerHTML = `
               <div class="col-span-full py-12 text-center text-gray-500 font-medium bg-white rounded-2xl border border-gray-100 shadow-sm">
-                  Your team is currently empty. <a href="#" onclick="loadView('catalog')" class="text-emerald-600 hover:underline">Hire an assistant</a>.
+                  Your team is currently empty. <a href="#" onclick="loadView('catalog'); return false" class="link">Hire an assistant</a>.
               </div>`;
             return;
         }
@@ -621,7 +621,13 @@ window.fetchAndRenderAssistants = async function(containerId, options) {
         });
         startPoll();
     } catch (error) {
-        container.innerHTML = `<div class="col-span-full text-center text-red-500">Could not connect to the database to load your team.</div>`;
+        container.innerHTML = `
+          <div class="col-span-full py-10 text-center bg-white rounded-2xl border border-gray-100 shadow-sm">
+              <p class="text-sm font-bold text-gray-900">We couldn't load your team</p>
+              <p class="text-sm text-gray-500 mt-1">Check your connection and try again.</p>
+              <button type="button" data-team-retry class="btn-secondary mt-3 px-4 py-2 text-sm font-bold border rounded-lg cursor-pointer">Try again</button>
+          </div>`;
+        container.querySelector('[data-team-retry]')?.addEventListener('click', () => window.fetchAndRenderAssistants(containerId, options));
     }
 };
 
@@ -673,7 +679,7 @@ window.initAssistantsDirectory = async function(loadViewCb) {
     // the user had made this session.
     if (catalogBtn && !catalogBtn.dataset.bound) {
         catalogBtn.dataset.bound = 'true';
-        // US8 AC3 — "Hire New Assistant" re-opens the wizard at Step 6 (secondary onboarding), and
+        // US8 AC3 — "Hire an assistant" re-opens the wizard at Step 6 (secondary onboarding), and
         // only falls back to the catalog when the wizard isn't available.
         catalogBtn.addEventListener('click', () => {
             if (window.SetupWizard?.openForNewAssistant) window.SetupWizard.openForNewAssistant();

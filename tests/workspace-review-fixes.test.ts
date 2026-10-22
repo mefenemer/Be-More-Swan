@@ -96,4 +96,40 @@ check('the Add-contact, import and segment-builder fields have real labels', () 
     for (const v of values) assert.ok(v.includes('aria-label="Condition'), v);
 });
 
+check('no customer sees a developer message, and both page loads offer Try again', () => {
+    assert.ok(!aud.includes('apply <span class="font-mono text-xs bg-gray-100 px-1 rounded">db/audience.sql'), 'migration hint is developer copy');
+    assert.ok(aud.includes("Audience isn't available yet"));
+    assert.ok(aud.includes('data-aud-retry') && aud.includes("querySelector('[data-aud-retry]')?.addEventListener('click', () => loadContacts())"));
+    assert.ok(!cards.includes('Could not connect to the database'));
+    assert.ok(cards.includes("querySelector('[data-team-retry]')?.addEventListener('click', () => window.fetchAndRenderAssistants(containerId, options))"));
+});
+
+check('one hire wording, the referral widget sells what we sell, and the back button names its page', () => {
+    for (const old of ['Hire New Assistant', 'Add New Assistant</span>', 'Delegate a New Task']) {
+        assert.ok(!dir.includes(old) && !dash.includes(old) && !cards.includes(old), old);
+    }
+    assert.ok(dir.includes('Hire an assistant') && dash.includes('Hire an assistant</a>') && cards.includes('${plus}Hire an assistant</span>'));
+    assert.ok(!dash.includes("title: 'Invite a teammate'") && !dash.includes('Invite a teammate —'), 'team seats are not sold yet');
+    assert.ok(dash.includes("title: 'Refer a business'"));
+    assert.ok(!read('assistant-detail.html').includes('Back to Team'), 'clashes with Team Chat');
+});
+
+check('the three pages use brand pink, not the emerald shades that still render green or indigo', () => {
+    const pages = { 'audience.html': read('audience.html'), 'audience.js': aud, 'dashboard-content.html': dash, 'assistants-directory.html': dir };
+    for (const [f, text] of Object.entries(pages)) {
+        assert.ok(!/emerald-(?:300|400|500|600|900)\b/.test(text), `${f}: emerald 300–600/900 render green`);
+        assert.ok(!/#4f46e5|#4338ca|#059669|#10b981|#34d399|#047857|#ecfdf5/i.test(text), `${f}: off-palette hex`);
+    }
+    const card = cards.slice(cards.indexOf('window.generateAssistantCardHTML = function'), cards.indexOf('window.fetchAndRenderAssistants = async function'));
+    assert.ok(card.length > 1000, 'card renderer slice found');
+    assert.ok(!/emerald-(?:300|400|500|600|900)\b/.test(card), 'card: emerald 300–600/900 render green');
+    assert.ok(dash.includes('class="as-btn as-btn-yes btn-primary">Yes, please'));
+});
+
+check('every Cancel on Audience is a .btn-secondary', () => {
+    const cancels = (read('audience.html') + aud).match(/<button[^>]*>Cancel<\/button>/g) || [];
+    assert.ok(cancels.length >= 5, 'found the Cancel buttons');
+    for (const b of cancels) assert.ok(b.includes('btn-secondary'), b);
+});
+
 console.log(`\n${passed} checks passed${process.exitCode ? ' — with FAILURES above' : ''}`);

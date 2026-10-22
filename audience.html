@@ -68,7 +68,7 @@
     .aud-group-row td { background: var(--color-gray-50, #f9fafb); }
     .aud-tab { padding: .75rem .25rem; font-size: .875rem; font-weight: 600; color: #6b7280; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
     .aud-tab:hover { color: #374151; border-bottom-color: #d1d5db; }
-    .aud-tab.is-active { color: #059669; border-bottom-color: #10b981; }
+    .aud-tab.is-active { color: #d6006b; border-bottom-color: #ff007f; }
   </style>
 
   <div class="aud-layout" data-aud-panel="people">
@@ -180,10 +180,10 @@
               <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
             </div>
             <input type="text" id="aud-search" placeholder="Search name, email or company…"
-              class="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm transition-all">
+              class="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-700 outline-none text-sm transition-all">
           </div>
           <select id="aud-status" aria-label="Status"
-            class="px-3 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none cursor-pointer">
+            class="px-3 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 focus:ring-2 focus:ring-emerald-700 outline-none cursor-pointer">
             <option value="">All statuses</option>
             <option value="subscribed">Subscribed</option>
             <option value="pending">Awaiting confirmation</option>
@@ -193,7 +193,7 @@
             <option value="suppressed">Suppressed</option>
           </select>
           <select id="aud-source" aria-label="How they joined"
-            class="px-3 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none cursor-pointer">
+            class="px-3 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 focus:ring-2 focus:ring-emerald-700 outline-none cursor-pointer">
             <option value="">Any source</option>
           </select>
           <button type="button" id="aud-more-filters" aria-expanded="false"
@@ -205,22 +205,22 @@
 
         <div id="aud-more-panel" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-3 border-t border-gray-100" style="display:none">
           <label class="block text-xs font-bold text-gray-500">Joined from
-            <input type="date" id="aud-from" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none">
+            <input type="date" id="aud-from" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-700 outline-none">
           </label>
           <label class="block text-xs font-bold text-gray-500">Joined up to
-            <input type="date" id="aud-to" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none">
+            <input type="date" id="aud-to" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-700 outline-none">
           </label>
           <label class="block text-xs font-bold text-gray-500">Custom field
-            <select id="aud-field" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none cursor-pointer">
+            <select id="aud-field" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-700 outline-none cursor-pointer">
               <option value="">Any</option>
             </select>
           </label>
           <label class="block text-xs font-bold text-gray-500">…contains
             <input type="text" id="aud-field-value" placeholder="Leave blank for “has any value”" disabled
-              class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none disabled:bg-gray-50">
+              class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-700 outline-none disabled:bg-gray-50">
           </label>
           <label class="block text-xs font-bold text-gray-500">Engagement
-            <select id="aud-engagement" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none cursor-pointer">
+            <select id="aud-engagement" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-700 outline-none cursor-pointer">
               <option value="">Anyone</option>
               <option value="opened_90">Opened an email in the last 90 days</option>
               <option value="not_opened_180">Not opened an email in 180 days</option>
@@ -232,7 +232,7 @@
 
         <div class="flex flex-wrap items-center gap-x-6 gap-y-2 pt-3 border-t border-gray-100">
           <label class="flex items-center gap-2 text-xs font-bold text-gray-500">Group by
-            <select id="aud-group" class="px-2.5 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none cursor-pointer">
+            <select id="aud-group" class="px-2.5 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 focus:ring-2 focus:ring-emerald-700 outline-none cursor-pointer">
               <option value="">No grouping</option>
               <option value="status">Status</option>
               <option value="source">How they joined</option>
@@ -257,7 +257,7 @@
       <!-- Bulk action bar. ⚠️ Uses BOTH the hidden class and an inline display reset: `hidden` loses to
            a utility that sets display (flex here), so toggling the class alone leaves it on screen. -->
       <div id="aud-bulk" class="hidden flex-wrap items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 mb-4" style="display:none">
-        <p class="text-sm font-bold text-emerald-900"><span id="aud-bulk-count">0</span> selected</p>
+        <p class="text-sm font-bold text-emerald-800"><span id="aud-bulk-count">0</span> selected</p>
         <div class="flex-1"></div>
         <button type="button" id="aud-bulk-segment" class="btn-primary px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Add to segment</button>
         <button type="button" id="aud-bulk-tag" class="btn-secondary px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Tag</button>
@@ -538,7 +538,7 @@
       <p id="aud-export-progress" class="hidden mt-4 text-sm font-medium text-gray-600"></p>
 
       <div class="flex justify-end gap-2 mt-6">
-        <button type="button" data-aud-export-close data-dialog-cancel class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
+        <button type="button" data-aud-export-close data-dialog-cancel class="btn-secondary px-4 py-2 text-sm font-bold border rounded-lg cursor-pointer">Cancel</button>
         <button type="button" id="aud-export-start" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Download .xlsx</button>
       </div>
     </div>
@@ -574,35 +574,35 @@
         <div>
         <label for="aud-add-email" class="block text-xs font-bold text-gray-700 mb-1">Email</label>
         <input type="email" id="aud-add-email" placeholder="email@example.com" autocomplete="off"
-          class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+          class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-700 outline-none text-sm">
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label for="aud-add-first" class="block text-xs font-bold text-gray-700 mb-1">First name</label>
             <input type="text" id="aud-add-first"
-              class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+              class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-700 outline-none text-sm">
           </div>
           <div>
             <label for="aud-add-last" class="block text-xs font-bold text-gray-700 mb-1">Last name</label>
             <input type="text" id="aud-add-last"
-              class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+              class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-700 outline-none text-sm">
           </div>
         </div>
         <div>
           <label for="aud-add-company" class="block text-xs font-bold text-gray-700 mb-1">Company <span class="font-normal text-gray-500">(optional)</span></label>
           <input type="text" id="aud-add-company"
-            class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+            class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-700 outline-none text-sm">
         </div>
         <div>
           <label for="aud-add-segment" class="block text-xs font-bold text-gray-700 mb-1">Segment</label>
           <select id="aud-add-segment"
-            class="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none cursor-pointer">
+            class="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-700 outline-none cursor-pointer">
             <option value="">No segment</option>
           </select>
         </div>
       </div>
       <div class="flex justify-end gap-2 mt-6">
-        <button type="button" data-aud-add-close data-dialog-cancel class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
+        <button type="button" data-aud-add-close data-dialog-cancel class="btn-secondary px-4 py-2 text-sm font-bold border rounded-lg cursor-pointer">Cancel</button>
         <button type="button" id="aud-add-save" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Add contact</button>
       </div>
     </div>
@@ -627,21 +627,21 @@
 
       <label for="aud-import-segment" class="block text-xs font-bold text-gray-700 mb-1 mt-4">Add them to a segment</label>
       <select id="aud-import-segment"
-        class="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none cursor-pointer">
+        class="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-700 outline-none cursor-pointer">
         <option value="">Add to no segment</option>
       </select>
 
       <!-- ⚠️ The declaration is the only lawful basis an imported list has. The server refuses the
            import without it; this checkbox is the record of who claimed it and when. -->
       <label class="flex items-start gap-2 mt-4 text-sm text-gray-700 cursor-pointer select-none">
-        <input type="checkbox" id="aud-import-consent" class="mt-0.5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-600">
+        <input type="checkbox" id="aud-import-consent" class="mt-0.5 rounded border-gray-300 text-emerald-700 focus:ring-emerald-700">
         <span>I confirm these people gave us permission to email them, and I can show when and how.</span>
       </label>
 
       <div id="aud-import-progress" class="hidden mt-4 text-sm font-medium text-gray-600"></div>
 
       <div class="flex justify-end gap-2 mt-6">
-        <button type="button" data-aud-import-close data-dialog-cancel class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
+        <button type="button" data-aud-import-close data-dialog-cancel class="btn-secondary px-4 py-2 text-sm font-bold border rounded-lg cursor-pointer">Cancel</button>
         <button type="button" id="aud-import-start" class="btn-utility px-4 py-2 text-sm font-bold rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" disabled>Import</button>
       </div>
     </div>

@@ -198,7 +198,7 @@
     <div class="mt-12 bg-emerald-700 rounded-2xl p-8 text-center shadow-lg">
       <h3 class="text-2xl font-bold text-white mb-2">Got another process to take off your plate?</h3>
       <p class="text-emerald-100 mb-6 max-w-xl mx-auto">You can hire another assistant or upgrade your plan to automate entirely new workflows.</p>
-      <a href="#" id="route-to-catalog" class="inline-block bg-white text-emerald-700 font-bold px-8 py-3 rounded-lg shadow-sm hover:bg-gray-50 transition">Delegate a New Task</a>
+      <a href="#" id="route-to-catalog" class="inline-block bg-white text-emerald-700 font-bold px-8 py-3 rounded-lg shadow-sm hover:bg-gray-50 transition">Hire an assistant</a>
     </div>
 
   </div>
@@ -574,16 +574,13 @@
   /* AC3 — suggestion cards */
   .as-suggest-row { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 4px; }
   .as-sg { flex: 0 0 300px; max-width: 300px; padding: 16px; border-radius: 16px;
-    background: linear-gradient(160deg, #eef2ff, #ffffff); border: 1px solid rgba(99,102,241,0.2);
+    background: linear-gradient(160deg, #fff0f5, #ffffff); border: 1px solid rgba(214,0,107,0.18);
     transition: transform .25s ease, opacity .25s ease; }
   .as-sg.as-removing { opacity: 0; transform: translateY(-6px) scale(.98); }
-  .as-sg-top { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; font-weight: 700; color: #4f46e5; }
+  .as-sg-top { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; font-weight: 700; color: #d6006b; }
   .as-sg-idea { font-size: 14px; color: #1e293b; line-height: 1.5; margin: 0 0 14px; }
   .as-sg-actions { display: flex; gap: 8px; align-items: center; }
-  .as-btn-yes { background: #4f46e5; color: #fff; }
-  .as-btn-yes:hover { background: #4338ca; }
-  .as-btn-later { background: transparent; color: #94a3b8; padding: 8px 6px; }
-  .as-btn-later:hover { color: #64748b; }
+  /* Colours come from .btn-primary / .btn-utility (button system); .as-btn only sizes them. */
 </style>
 
 <script>
@@ -629,8 +626,8 @@
         <div class="as-sg-top">💡 Suggested by ${esc(item.suggestedByName)} for ${esc(item.assistantName)}${item.platformLabel ? ` · ${esc(item.platformLabel)}` : ''}</div>
         <p class="as-sg-idea">${esc(item.idea)}</p>
         <div class="as-sg-actions">
-          <button class="as-btn as-btn-yes">Yes, please</button>
-          <button class="as-btn as-btn-later">Maybe later</button>
+          <button type="button" class="as-btn as-btn-yes btn-primary">Yes, please</button>
+          <button type="button" class="as-btn as-btn-later btn-utility">Maybe later</button>
         </div>`;
       const yes = card.querySelector('.as-btn-yes');
       yes.onclick = () => actOnIdea(item, yes, card);
@@ -757,7 +754,7 @@
       'recent-work':   { title: 'Recent work', icon: '✅', desc: 'What every assistant did this week', render: renderRecentWork },
       'agenda':        { title: 'Next 7 days', icon: '📅', desc: 'Everything booked to go out', render: renderAgenda },
       'tips':          { title: 'Tip', icon: '💡', desc: 'Get more from your team', render: renderTips },
-      'referral':      { title: 'Invite a teammate', icon: '🎁', desc: 'Share Be More Swan', render: renderReferral },
+      'referral':      { title: 'Refer a business', icon: '🎁', desc: 'Give a month, get a month', render: renderReferral },
     };
     const ORDER = ['roi-mini', 'team-status', 'recent-work', 'agenda', 'notifications', 'tips', 'referral'];
     const DEFAULT_ON = { 'roi-mini': true, 'team-status': true, 'recent-work': true, 'agenda': true, 'notifications': true, 'tips': false, 'referral': false };
@@ -972,7 +969,7 @@
       el.innerHTML = esc(tips[Math.floor(Math.random() * tips.length)]);
     }
     function renderReferral(el) {
-      el.innerHTML = `<div class="dw-stat-sub">Invite a teammate — you both get rewarded.</div><button type="button" class="dw-link">Invite now →</button>`;
+      el.innerHTML = `<div class="dw-stat-sub">Refer a business — they get their first paid month free, and you earn a free month once they start paying.</div><button type="button" class="dw-link">Refer a business →</button>`;
       el.querySelector('.dw-link').onclick = () => window.loadView && window.loadView('referral');
     }
 

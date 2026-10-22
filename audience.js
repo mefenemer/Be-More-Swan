@@ -188,7 +188,13 @@
       console.error('[audience] contacts failed to load', err);
       const tbody = $('aud-rows');
       if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="${colCount()}" class="p-8 text-center text-red-600 text-sm">${esc(err.message)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${colCount()}" class="p-8 text-center">
+          <p class="text-sm font-bold text-gray-900">We couldn't load your contacts</p>
+          <p class="text-sm text-gray-500 mt-1">${esc(err.message)}</p>
+          <button type="button" data-aud-retry class="btn-secondary mt-3 px-4 py-2 text-sm font-bold border rounded-lg cursor-pointer">Try again</button>
+        </td></tr>`;
+        // A fresh row each time, so this listener never stacks.
+        tbody.querySelector('[data-aud-retry]')?.addEventListener('click', () => loadContacts());
       }
     }
   }
@@ -355,7 +361,7 @@
     body.innerHTML = `
       <label for="aud-rule-name" class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Name</label>
       <input type="text" id="aud-rule-name" maxlength="80" value="${esc(ruleState.name)}" placeholder="Recently engaged"
-        class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-4"
+        class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-700 outline-none text-sm mb-4"
         ${ruleState.id ? 'disabled' : ''}>
 
       <div class="flex items-center gap-2 mb-1">
@@ -371,7 +377,7 @@
       <div id="aud-rule-preview" class="mt-5 px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-700">Working it out…</div>
 
       <div class="flex justify-end gap-2 mt-4">
-        <button type="button" data-aud-rule-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
+        <button type="button" data-aud-rule-close class="btn-secondary px-4 py-2 text-sm font-bold border rounded-lg cursor-pointer">Cancel</button>
         <button type="button" id="aud-rule-save" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Save segment</button>
       </div>`;
 
@@ -435,7 +441,7 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'preview', rules: { match: ruleState.match, conditions: ruleState.conditions } }),
       });
-      host.className = 'mt-5 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 text-sm text-emerald-900';
+      host.className = 'mt-5 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 text-sm text-emerald-800';
       host.innerHTML = `<p class="font-bold">${Number(matches).toLocaleString()} ${matches === 1 ? 'person matches' : 'people match'} right now.</p>
         <p class="text-[12px] mt-1">${esc(description || '')}</p>
         <p class="text-[11px] text-emerald-700 mt-1">This is worked out again every time — the number will move as your audience does.</p>`;
@@ -621,7 +627,7 @@
       const title = dyn ? ` title="${esc(s.rulesError || s.description || '')}"` : '';
       return `<div class="aud-side-row ${active ? 'is-active' : ''}"${title}>
         <button type="button" data-segment="${s.id}" class="flex-1 min-w-0 flex items-center justify-between gap-2 px-2 py-1.5 text-sm text-left cursor-pointer ${active ? 'font-bold text-gray-900' : 'text-gray-700'}">
-          <span class="truncate">${dyn ? '<span class="text-emerald-600">◆</span> ' : s.kind === 'tag' ? '<span class="text-gray-400">#</span> ' : ''}${esc(s.name)}</span>
+          <span class="truncate">${dyn ? '<span class="text-emerald-700">◆</span> ' : s.kind === 'tag' ? '<span class="text-gray-400">#</span> ' : ''}${esc(s.name)}</span>
           ${s.rulesError
             ? '<span class="text-[11px] font-bold text-red-600 whitespace-nowrap">rules broken</span>'
             : `<span class="text-xs text-gray-400" title="Subscribed">${Number(s.subscribedCount || 0).toLocaleString()}</span>`}
@@ -653,8 +659,8 @@
     if (!state.contacts.length) {
       if (state.needsSetup) {
         tbody.innerHTML = `<tr><td colspan="${colCount()}" class="p-10 text-center">
-          <p class="text-sm font-bold text-gray-900">Audience is not set up on this environment yet</p>
-          <p class="text-sm text-gray-500 mt-1">The database migration has not been applied here. Nothing is lost — apply <span class="font-mono text-xs bg-gray-100 px-1 rounded">db/audience.sql</span> and reload.</p>
+          <p class="text-sm font-bold text-gray-900">Audience isn't available yet</p>
+          <p class="text-sm text-gray-500 mt-1">We're still switching it on for your account. Nothing is lost — please check back soon, or contact support if this doesn't clear.</p>
         </td></tr>`;
         const pagerEl = $('aud-pager');
         if (pagerEl) pagerEl.innerHTML = '';
@@ -692,7 +698,7 @@
       const name = [c.firstName, c.lastName].filter(Boolean).join(' ');
       return head + `<tr class="hover:bg-gray-50">
         <td class="px-4 py-3"><input type="checkbox" data-select="${c.id}" data-email="${esc(c.email)}" ${state.selected.has(c.id) ? 'checked' : ''}
-          aria-label="Select ${esc(name || c.email)}" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer"></td>
+          aria-label="Select ${esc(name || c.email)}" class="rounded border-gray-300 text-emerald-700 focus:ring-emerald-700 cursor-pointer"></td>
         <td class="px-4 py-3">
           <button type="button" data-open="${c.id}" class="text-left font-bold text-gray-900 hover:text-emerald-700 cursor-pointer">${esc(name || c.email)}</button>
           ${name ? `<p class="text-xs text-gray-500">${esc(c.email)}</p>` : ''}
@@ -805,7 +811,7 @@
       ? `<th class="aud-sort px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide whitespace-nowrap" data-sort="${esc(sort)}" tabindex="0">${esc(label)} <span data-sort-mark></span></th>`
       : `<th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide whitespace-nowrap">${esc(label)}</th>`;
     head.innerHTML = `<tr>
-      <th class="px-4 py-3 w-10"><input type="checkbox" id="aud-select-all" aria-label="Select all on this page" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer"></th>
+      <th class="px-4 py-3 w-10"><input type="checkbox" id="aud-select-all" aria-label="Select all on this page" class="rounded border-gray-300 text-emerald-700 focus:ring-emerald-700 cursor-pointer"></th>
       ${th('Contact', 'name')}
       ${visibleColumns().map((c) => th(c.label, c.sort)).join('')}
       <th class="px-4 py-3"></th>
@@ -818,7 +824,7 @@
     const on = new Set(state.columns);
     menu.innerHTML = `<p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1">Show columns</p>`
       + columnDefs().map((c) => `<label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
-          <input type="checkbox" data-col="${esc(c.key)}" ${on.has(c.key) ? 'checked' : ''} class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600">
+          <input type="checkbox" data-col="${esc(c.key)}" ${on.has(c.key) ? 'checked' : ''} class="rounded border-gray-300 text-emerald-700 focus:ring-emerald-700">
           <span class="truncate">${esc(c.label)}</span></label>`).join('')
       + `<button type="button" data-col-reset class="mt-1 text-xs font-bold text-gray-600 hover:text-gray-900 cursor-pointer">Reset to default</button>`;
   }
@@ -983,7 +989,7 @@
               <div class="flex items-center gap-2">
                 <label class="text-xs text-gray-500 w-28 shrink-0 truncate" title="${esc(f.label)}">${esc(f.label)}</label>
                 <input type="text" data-custom-key="${esc(f.key)}" value="${esc((contact.customFields || {})[f.key] || '')}"
-                  class="flex-1 px-2 py-1.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+                  class="flex-1 px-2 py-1.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-700 outline-none text-sm">
               </div>`).join('')}
           </div>
           <button type="button" id="aud-save-custom"
@@ -1405,7 +1411,7 @@
     $('aud-export-fields').innerHTML = exportFields().map((f) => `
       <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
         <input type="checkbox" data-export-field="${esc(f.key)}" ${(saved ? saved.has(f.key) : f.on) ? 'checked' : ''}
-          class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600">
+          class="rounded border-gray-300 text-emerald-700 focus:ring-emerald-700">
         <span class="truncate">${esc(f.label)}${f.key.startsWith('custom:') ? ' <span class="text-[11px] text-gray-400">custom</span>' : ''}</span>
       </label>`).join('');
 
@@ -1418,7 +1424,7 @@
     const pick = selectedOnly && sel ? 'selected' : scopes[0].value;
     $('aud-export-scope').innerHTML = scopes.map((o) => `
       <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
-        <input type="radio" name="aud-export-scope" value="${o.value}" ${o.value === pick ? 'checked' : ''} class="border-gray-300 text-emerald-600 focus:ring-emerald-600">
+        <input type="radio" name="aud-export-scope" value="${o.value}" ${o.value === pick ? 'checked' : ''} class="border-gray-300 text-emerald-700 focus:ring-emerald-700">
         ${esc(o.label)}
       </label>`).join('');
 
@@ -2087,8 +2093,8 @@
         if (resub) {
           const ok = await window.confirmModal(
             'Mark this person as subscribed? Only do this if they have asked to hear from you again — it is recorded against your account.',
-            // Green, not the default red: this one is not destructive.
-            { title: 'Mark as subscribed?', confirmLabel: 'Mark as subscribed', confirmColor: '#059669' },
+            // Not the default red: this one is not destructive. An ordinary next step is primary.
+            { title: 'Mark as subscribed?', confirmLabel: 'Mark as subscribed', tone: 'primary' },
           );
           if (ok) await setStatus([resub.getAttribute('data-aud-resub')], 'subscribed');
           return;
