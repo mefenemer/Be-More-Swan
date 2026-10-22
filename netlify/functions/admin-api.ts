@@ -37,7 +37,7 @@ import {
     agentAnomalies, agentAnomalyThresholds, taskRuns,
     legalHolds, jwtBlocklist, stripeDisputes, storageUsage, helpArticles,
     rewardAudits, userOrganisations,
-    leadReplies, contactTasks, issueReports, notifications,
+    leadReplies, contactTasks, issueReports, notifications, loginEvents,
 } from '../../db/schema';
 import { createNotification, ADMIN_MESSAGE_TYPE } from '../../src/utils/notify';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
@@ -1427,15 +1427,82 @@ export default withLambda(async (event) => {
             const filterAction = qs.action || null;
             const filterTarget = qs.targetType || null;
             const fromDate     = qs.from ? new Date(qs.from) : null;
-            const toDate       = qs.to   ? new Date(qs.to)   : null;
+            // 'to' is a calendar day from <input type="date">, so it runs to the END of that day.
+            // (It used to mean midnight at its start, so "to: today" hid everything from today.)
+            const toDate       = qs.to   ? new Date(new Date(qs.to).getTime() + 24 * 60 * 60 * 1000) : null;
             const filterReason = qs.reason ? qs.reason.trim() : null;
+
+            // ── 'login' is not an admin action: it reads login_events (src/utils/login-events.ts)
+            // and returns rows in the SAME shape, so the viewer renders them unchanged. The person
+            // who signed in goes in the admin columns, the method in Reason. Only shown when the
+            // filter asks for it: every user sign-in under "All Actions" would bury the admin actions.
+            if (filterAction === 'login') {
+                const LOGIN_METHOD_LABEL: Record<string, string> = {
+                    magic_link: 'Magic link', review_login: 'Platform reviewer password', invite: 'Accepted an invite',
+                };
+                if (filterTarget && filterTarget !== 'workspace') {
+                    return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ logs: [], total: 0, page, pageSize: 50 }) };
+                }
+                const loginConds: any[] = [];
+                if (filterAdmin) loginConds.push(eq(loginEvents.userId, filterAdmin));
+                if (fromDate)    loginConds.push(gte(loginEvents.createdAt, fromDate));
+                if (toDate)      loginConds.push(sql`${loginEvents.createdAt} < ${toDate.toISOString()}`);
+                if (filterReason) loginConds.push(ilike(loginEvents.method, `%${filterReason}%`));
+                const loginWhere = loginConds.length ? and(...loginConds) : undefined;
+
+                const loginRows = await db
+                    .select({
+                        id:          loginEvents.id,
+                        method:      loginEvents.method,
+                        ip:          loginEvents.ip,
+                        userAgent:   loginEvents.userAgent,
+                        orgId:       loginEvents.organisationId,
+                        orgName:     organisations.name,
+                        createdAt:   loginEvents.createdAt,
+                        userId:      loginEvents.userId,
+                        email:       users.email,
+                        firstName:   users.firstName,
+                        lastName:    users.lastName,
+                    })
+                    .from(loginEvents)
+                    .leftJoin(users, eq(users.id, loginEvents.userId))
+                    .leftJoin(organisations, eq(organisations.id, loginEvents.organisationId))
+                    .where(loginWhere)
+                    .orderBy(desc(loginEvents.createdAt))
+                    .limit(50)
+                    .offset(page * 50);
+                const [{ c: loginTotal }] = await db.select({ c: count() }).from(loginEvents).where(loginWhere);
+
+                const logs = loginRows.map((r: any) => ({
+                    id:             `login-${r.id}`,
+                    action:         'login',
+                    targetType:     r.orgId ? 'workspace' : null,
+                    targetId:       r.orgId,
+                    targetName:     r.orgName || null,
+                    previousState:  null,
+                    newState:       null,
+                    reason:         LOGIN_METHOD_LABEL[r.method] || r.method,
+                    metadata:       { userAgent: r.userAgent },
+                    ipAddress:      r.ip,
+                    createdAt:      r.createdAt,
+                    adminId:        r.userId,
+                    adminEmail:     r.email,
+                    adminFirstName: r.firstName,
+                    adminLastName:  r.lastName,
+                }));
+                return {
+                    statusCode: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ logs, total: loginTotal, page, pageSize: 50 }),
+                };
+            }
 
             const conditions: any[] = [];
             if (filterAdmin)  conditions.push(eq(adminAuditLog.adminId, filterAdmin));
             if (filterAction) conditions.push(eq(adminAuditLog.action, filterAction));
             if (filterTarget) conditions.push(eq(adminAuditLog.targetType, filterTarget));
             if (fromDate)     conditions.push(gte(adminAuditLog.createdAt, fromDate));
-            if (toDate)       conditions.push(lte(adminAuditLog.createdAt, toDate));
+            if (toDate)       conditions.push(sql`${adminAuditLog.createdAt} < ${toDate.toISOString()}`);
             if (filterReason) conditions.push(ilike(adminAuditLog.reason, `%${filterReason}%`));
 
             const where = conditions.length ? and(...conditions) : undefined;

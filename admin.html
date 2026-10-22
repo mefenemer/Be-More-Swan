@@ -422,6 +422,7 @@
         <div class="flex flex-wrap gap-3 mb-5">
           <select id="audit-filter-action" onchange="loadAuditLog()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:ring-2 focus:ring-indigo-400 outline-none">
             <option value="">All Actions</option>
+            <option value="login">Login (users signing in)</option>
             <option value="impersonate_start">Impersonate Start</option>
             <option value="impersonate_end">Impersonate End</option>
             <option value="password_reset">Password Reset</option>
@@ -461,7 +462,7 @@
             <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide">
               <tr>
                 <th class="px-4 py-3 text-left">Time</th>
-                <th class="px-4 py-3 text-left">Admin</th>
+                <th id="audit-col-who" class="px-4 py-3 text-left">Admin</th>
                 <th class="px-4 py-3 text-left">Action</th>
                 <th class="px-4 py-3 text-left">Target</th>
                 <th class="px-4 py-3 text-left">Reason</th>
@@ -8144,7 +8145,10 @@ async function loadAuditLog() {
   if (to)         url += '&to='         + encodeURIComponent(to);
   try {
     const d = await api(url);
-    document.getElementById('audit-log-count').textContent = `${d.total} total entries`;
+    // 'login' rows come from login_events: the person in the first column signed in; they are not an admin.
+    const isLogin = action === 'login';
+    document.getElementById('audit-col-who').textContent = isLogin ? 'User' : 'Admin';
+    document.getElementById('audit-log-count').textContent = `${d.total} total ${isLogin ? 'logins' : 'entries'}`;
     document.getElementById('audit-log-prev').disabled = _auditPage === 0;
     document.getElementById('audit-log-next').disabled = (_auditPage + 1) * 50 >= d.total;
     const ACTION_COLOUR = {
@@ -8152,7 +8156,9 @@ async function loadAuditLog() {
       account_lock:'bg-red-100 text-red-700', account_unlock:'bg-emerald-100 text-emerald-800',
       gdpr_erasure:'bg-red-200 text-red-900', account_delete:'bg-red-200 text-red-900',
       tier_change:'bg-blue-100 text-blue-700', comp_credit:'bg-purple-100 text-purple-700',
+      login:'bg-sky-100 text-sky-800',
     };
+    const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
     tbody.innerHTML = (d.logs || []).map(l => {
       const adminName = [l.adminFirstName, l.adminLastName].filter(Boolean).join(' ') || l.adminEmail || `#${l.adminId}`;
       const cls = ACTION_COLOUR[l.action] || 'bg-gray-100 text-gray-700';
@@ -8165,8 +8171,8 @@ async function loadAuditLog() {
         <td class="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">${fmt(l.createdAt)}</td>
         <td class="px-4 py-3 text-xs text-gray-700">${adminName}</td>
         <td class="px-4 py-3"><span class="text-xs font-bold px-2 py-0.5 rounded ${cls}">${l.action}</span></td>
-        <td class="px-4 py-3 text-xs text-gray-500">${l.targetType || '—'}${l.targetId ? ' #' + l.targetId : ''}</td>
-        <td class="px-4 py-3 text-xs text-gray-500 max-w-xs truncate">${l.reason || '—'}</td>
+        <td class="px-4 py-3 text-xs text-gray-500">${l.targetName ? esc(l.targetName) + ' #' + l.targetId : (l.targetType || '—') + (l.targetId ? ' #' + l.targetId : '')}</td>
+        <td class="px-4 py-3 text-xs text-gray-500 max-w-xs truncate"${l.metadata && l.metadata.userAgent ? ` title="${esc(l.metadata.userAgent)}"` : ''}>${l.reason || '—'}</td>
         <td class="px-4 py-3 text-xs font-mono text-gray-400">${l.ipAddress || '—'}</td>
         <td class="px-4 py-3">${diffBtn}</td>
       </tr>`;
