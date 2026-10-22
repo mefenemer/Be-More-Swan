@@ -585,12 +585,16 @@
    * them: this state used to say "create a saved search" to a user who had just created one in
    * chat, and the fix was to make the empty state describe the actual situation.
    */
+  // Per-viewer: dismissing the social upsell is a preference, not workspace state.
+  const SOCIAL_HINT_KEY = 'bms.signalInbox.socialHintDismissed';
+  function socialHintDismissed() {
+    try { return localStorage.getItem(SOCIAL_HINT_KEY) === '1'; } catch { return false; }
+  }
+
   function emptyState() {
     return `<div class="p-8 text-center">
       <p class="text-sm font-semibold text-gray-900">No searches yet</p>
-      <p class="text-xs text-gray-500 mt-1">Create a search and your assistant will start looking for companies that match it.</p>
-      <button type="button" data-si-new-search
-        class="btn-assistant mt-3 px-3 py-1.5 text-xs font-bold rounded-lg transition">Find New Leads</button>
+      <p class="text-xs text-gray-500 mt-1">Press “Find New Leads” above to describe who you’re after, and your assistant will start looking for companies that match.</p>
     </div>`;
   }
 
@@ -619,14 +623,16 @@
         <div class="p-4 flex flex-wrap items-center gap-2">
           <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mr-auto">Lead searches</p>
           <button type="button" data-si-lead-ideas
-            class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border transition">Review Lead Ideas</button>
+            class="btn-secondary min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg border transition">Review Lead Ideas</button>
           <button type="button" data-si-new-search
-            class="btn-assistant px-2.5 py-1 text-xs font-bold rounded-lg border transition">Find New Leads</button>
+            class="btn-assistant min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg border transition">Find New Leads</button>
         </div>
         ${state.savedSearches.length ? '' : emptyState()}
-        ${!state.hasSocialFeed ? `
-        <div class="p-4 border-t border-gray-100 bg-gray-50 flex flex-wrap items-center gap-3">
-          <p class="text-xs text-gray-500">Also capture comments, DMs and mentions as signals &mdash; needs a Social Media Assistant.</p>
+        ${!state.hasSocialFeed && !socialHintDismissed() ? `
+        <div class="p-4 border-t border-gray-100 bg-gray-50 flex flex-wrap items-center gap-3" data-si-social-hint>
+          <p class="text-xs text-gray-500 mr-auto">Also capture comments, DMs and mentions as signals &mdash; needs a Social Media Assistant.</p>
+          <button type="button" data-si-social-hire class="btn-swan-link min-h-[44px] sm:min-h-0 px-1 py-1 text-xs font-bold">See the Social Media Assistant</button>
+          <button type="button" data-si-social-dismiss class="btn-utility min-h-[44px] sm:min-h-0 px-2 py-1 text-xs font-bold rounded-lg">Hide this</button>
         </div>` : ''}
       </div>
 
@@ -667,7 +673,7 @@
       </div>
 
       ${state.loading && empty
-        ? '<p class="text-sm text-gray-400 py-10 text-center">Loading results…</p>'
+        ? '<p class="text-sm text-gray-500 py-10 text-center">Loading results…</p>'
         : empty ? resultsEmptyState() : state.signals.map(row).join('')}
 
       ${state.nextCursor ? `
@@ -732,7 +738,7 @@
             <h3 class="text-lg font-bold text-gray-900">${esc(search ? search.label : 'Search results')}</h3>
             <p class="text-sm text-gray-500 mt-0.5">What this search found. Every company is already a lead &mdash; pursue or turn them down in the Leads tab.</p>
           </div>
-          <button type="button" data-si-results-close class="text-gray-400 hover:text-gray-600 text-2xl leading-none cursor-pointer shrink-0">&times;</button>
+          <button type="button" data-si-results-close class="text-gray-500 hover:text-gray-600 text-2xl leading-none cursor-pointer shrink-0">&times;</button>
         </div>
         <div class="overflow-y-auto" data-si-results-body></div>
       </div>`;
@@ -763,6 +769,12 @@
     // Two of these can be on screen at once (toolbar + empty state), so bind them as a set.
     h.querySelectorAll('[data-si-new-search]').forEach((b) => b.addEventListener('click', openNewSearch));
     h.querySelector('[data-si-lead-ideas]')?.addEventListener('click', openLeadIdeas);
+    // The social upsell had no way forward and no way to close it (review, 2026-10-22).
+    h.querySelector('[data-si-social-hire]')?.addEventListener('click', () => window.loadView?.('catalog'));
+    h.querySelector('[data-si-social-dismiss]')?.addEventListener('click', () => {
+      try { localStorage.setItem(SOCIAL_HINT_KEY, '1'); } catch { /* the hint just comes back next time */ }
+      h.querySelector('[data-si-social-hint]')?.remove();
+    });
     // "Review plan" opens the same brief screen the Find New Leads panel shows — what this search
     // will actually run, what it can reach, and the offer to split it by area. This tab could
     // start a search but never read its plan first.

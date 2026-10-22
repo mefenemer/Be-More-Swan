@@ -57,7 +57,7 @@ check('the key buttons sit in the right category', () => {
     // The swan's "Suggest a name" is swan + pink words, NOT a pink pill — on the pill the pink swan vanished.
     assert.match(d, /class="btn-swan-link cursor-pointer shrink-0" type="button">\s*\n\s*<img src="\/images\/BeMoreSwan_SwanAI\.png"/);
     const a = read('assistants.js');
-    assert.match(a, /const primary = 'btn-golive /, 'Approve on a review card commits outward');
+    assert.match(a, /const primary = [`']btn-golive /, 'Approve on a review card commits outward');
     assert.match(read('src/components/assistant-onboarding-shell.js'), /data-aos-next class="btn-primary /);
 });
 

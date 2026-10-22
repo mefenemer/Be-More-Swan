@@ -192,6 +192,10 @@ let _lockedAssistant = false;
 // posted/overdue status legend. Always true for the global Content Calendar page, which spans
 // every assistant. See _renderStatusLegend + _renderAssistantControls.
 let _publishesContent = true;
+// Whether the platform filter means anything. False for a role that publishes to ONE channel (the
+// Email Marketing Assistant: its emails still load, but an Instagram/YouTube/Blog dropdown over them
+// filtered nothing). Defaults to _publishesContent, so every other caller is unchanged.
+let _platformFilterOn = true;
 // Scheduled Data Hub records (leads/invoices/tickets/… with approval_status='scheduled') for the
 // locked assistant — only fetched in the assistant Calendar tab, rendered as timeline chips.
 let _scheduledRecords = [];
@@ -261,6 +265,8 @@ function _matchesPlatformFilter(platform) {
 // assistantId: the global page always spans publishing and non-publishing assistants at once.
 // opts.leadOutreach (optional, default false) — true for the lead roles, which adds the pending
 // follow-up email chips and their drag-to-reschedule. Opt-in; see _followUps.
+// opts.platformFilter (optional, default = publishesContent) — false hides the platform dropdown
+// and says "Sent" for a single-channel publisher; see _platformFilterOn.
 // opts.datedItems (optional) — 'records' (invoices, meetings) or 'briefs' (Brand Designer); see
 // _datedItems. From the dashboard registry's calendarItems.
 window.initCalendar = async function (opts = {}) {
@@ -268,6 +274,7 @@ window.initCalendar = async function (opts = {}) {
         _assistantFilter = String(opts.assistantId);
         _lockedAssistant = true;
         _publishesContent = opts.publishesContent !== false;
+        _platformFilterOn = _publishesContent && opts.platformFilter !== false;
         _leadOutreach = opts.leadOutreach === true;
         _datedSource = ['records', 'briefs', 'checks'].includes(opts.datedItems) ? opts.datedItems : null;
         _roleKey = typeof opts.roleKey === 'string' ? opts.roleKey : null;
@@ -277,6 +284,7 @@ window.initCalendar = async function (opts = {}) {
         _assistantFilter = 'all';
         _lockedAssistant = false;
         _publishesContent = true;
+        _platformFilterOn = true;
         // The global Content Calendar spans every assistant and has no single lead context to
         // reschedule against, so pending outreach stays off there.
         _leadOutreach = false;
@@ -510,9 +518,9 @@ function _renderAssistantControls() {
     // the filter is also reset to 'all' so a stale selection made on the global page can't travel
     // in and silently filter this grid down to nothing with no visible control to undo it.
     const psel = document.getElementById('cal-platform-filter');
-    if (!_publishesContent) _platformFilter = 'all';
+    if (!_platformFilterOn) _platformFilter = 'all';
     if (psel) {
-        psel.classList.toggle('hidden', !_publishesContent);
+        psel.classList.toggle('hidden', !_platformFilterOn);
         if (!psel.dataset.bound) {
             psel.dataset.bound = '1';
             psel.addEventListener('change', () => { _platformFilter = psel.value; _render(); });
@@ -561,7 +569,7 @@ function _renderStatusLegend() {
         ? item('<span class="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>', 'Email to be sent')
         : '';
     strip.innerHTML = _publishesContent
-        ? item('<span class="text-emerald-600 font-extrabold">✓</span>', 'Posted (live)') +
+        ? item('<span class="text-emerald-600 font-extrabold">✓</span>', _platformFilterOn ? 'Posted (live)' : 'Sent') +
           item('<span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>', 'Scheduled') +
           item('<span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>', 'Overdue')
         : outreachItem + datedLegend() +

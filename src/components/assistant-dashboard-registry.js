@@ -846,12 +846,14 @@
         // ⚠️ Says "moved", never "permanently deleted". A retained lead is still readable, still
         // countable and still recoverable through "Send back for enrichment"; overstating it would
         // make the Deleted section that follows look like a bug rather than the destination.
+        // One line up front; the retention rules behind a disclosure (descriptionMore) — five sentences
+        // of them were the tab's whole introduction (review, 2026-10-22). Wording unchanged.
         description: 'Every lead this assistant has scored — with its outreach draft — plus any lead lists you import. '
-          + 'This is where a lead is enriched: contact details found, details corrected, and cold leads worked up into warm ones. '
-          + `A lead you delete, and any lead left sitting in Outreach ▸ Review or ▸ Archived for ${(window.LeadRetention && window.LeadRetention.DAYS) || 30} days without a decision, `
+          + 'This is where a lead is enriched: contact details found, details corrected, and cold leads worked up into warm ones.',
+        descriptionMore: { summary: 'How long leads are kept', text: `A lead you delete, and any lead left sitting in Outreach ▸ Review or ▸ Archived for ${(window.LeadRetention && window.LeadRetention.DAYS) || 30} days without a decision, `
           + 'is moved to the Deleted section at the foot of this tab — nothing is destroyed, and the reason it was dropped is kept with it '
           + 'so a later search does not put the same company back in front of you as though it were new. '
-          + 'Any action on a lead restarts its clock, and "Send back for enrichment" returns it to the pipeline.',
+          + 'Any action on a lead restarts its clock, and "Send back for enrichment" returns it to the pipeline.' },
         // Manual entry: the Data Hub shows an "Add Lead" button (assistant-data-hub.js) that
         // scores a single hand-typed lead via netlify/functions/lead-generation.ts (score_lead).
         manualAdd: true,

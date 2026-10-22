@@ -1297,7 +1297,7 @@
    * keep a dead search on their list forever rather than risk it.
    */
   async function archive(campaignId, onDone) {
-    const msg = 'It stops running and leaves your Searches list. Companies it already found stay in your Leads tab.';
+    const msg = 'It stops running and leaves your Searches list. Companies it already found stay in your Enrichment tab.';
     const ok = window.confirmModal
       ? await window.confirmModal(msg, { title: 'Archive this search?', confirmLabel: 'Archive' })
       : window.confirm(`Archive this search? ${msg}`);

@@ -128,7 +128,7 @@
       draft: `${base} bg-gray-50 text-gray-600 border-gray-200`,
       active: `${base} bg-emerald-50 text-emerald-800 border-emerald-200`,
       throttled: `${base} bg-amber-50 text-amber-800 border-amber-200`,
-      finished: `${base} bg-indigo-50 text-indigo-700 border-indigo-200`,
+      finished: `${base} bg-gray-100 text-gray-700 border-gray-200`,
       archived: `${base} bg-gray-50 text-gray-500 border-gray-200`,
     };
     return {
@@ -274,7 +274,7 @@
     // assistant is already claimed even though the ledger has not charged it, and a bar that
     // ignored it would tell the user they have room they do not have.
     const pctCommitted = Math.min(100 - pct, Math.round((committed / cap) * 100));
-    const tone = pct >= 90 ? 'bg-amber-500' : 'bg-emerald-600';
+    const tone = pct >= 90 ? 'bg-amber-500' : 'bg-emerald-700';
     return `
       <div class="mt-3">
         <div class="flex items-center justify-between mb-1">
@@ -308,7 +308,7 @@
     const pct = Math.min(100, Math.round((Number(c.progress) / Number(c.targetValue)) * 100));
     return `
       <div class="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden mt-1">
-        <div class="bg-emerald-600 h-full" style="width:${pct}%"></div>
+        <div class="bg-emerald-700 h-full" style="width:${pct}%"></div>
       </div>`;
   }
 
@@ -625,8 +625,8 @@
     }).join('');
     const total = planTasks(ed.orders);
     return `
-      <div class="mt-4 bg-indigo-50/60 border border-indigo-200 rounded-xl p-4" data-cmp-plan-editor="${id}">
-        <p class="text-[11px] font-bold text-indigo-700 uppercase tracking-wide">Editing the plan</p>
+      <div class="mt-4 bg-emerald-50 border border-emerald-200 rounded-xl p-4" data-cmp-plan-editor="${id}">
+        <p class="text-[11px] font-bold text-emerald-800 uppercase tracking-wide">Editing the plan</p>
         <p class="text-xs text-gray-600 mt-1">Saving replaces the waiting plan with this one. Nothing is briefed until you approve it.</p>
         <ol class="mt-3 space-y-3">${items}</ol>
         <div class="mt-3 flex flex-wrap items-center gap-2">
@@ -644,12 +644,12 @@
     const rejecting = Number(state.rejectingPlan) === Number(plan.decisionId);
     const reasons = (C() && C().rejectReasons) || [];
     return `
-      <div class="mt-4 bg-indigo-50/60 border border-indigo-200 rounded-xl p-4">
-        <p class="text-[11px] font-bold text-indigo-700 uppercase tracking-wide" data-explain="campaign-plan">Plan waiting for you</p>
+      <div class="mt-4 bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+        <p class="text-[11px] font-bold text-emerald-800 uppercase tracking-wide" data-explain="campaign-plan">Plan waiting for you</p>
         <ul class="mt-2 space-y-1">
           ${plan.orders.map((o) => `
             <li class="text-xs text-gray-700">• ${esc(o.label)}${o.quantity > 1 ? ` ×${esc(String(o.quantity))}` : ''} — ${esc(o.assignee || o.role)}
-              <span class="text-gray-400">(${o.workItems ? `${esc(String(o.workItems))} ${o.workItems === 1 ? 'task' : 'tasks'}` : 'uses no tasks'}${o.after && plan.orders[o.after - 1] ? ` · waits until: ${esc(plan.orders[o.after - 1].label)}${plan.orders[o.after - 1].assignee ? ` (${esc(plan.orders[o.after - 1].assignee)})` : ''}` : ''})</span>
+              <span class="text-gray-500">(${o.workItems ? `${esc(String(o.workItems))} ${o.workItems === 1 ? 'task' : 'tasks'}` : 'uses no tasks'}${o.after && plan.orders[o.after - 1] ? ` · waits until: ${esc(plan.orders[o.after - 1].label)}${plan.orders[o.after - 1].assignee ? ` (${esc(plan.orders[o.after - 1].assignee)})` : ''}` : ''})</span>
               ${o.brief ? briefSummary(o) : (o.task ? `<span class="block pl-3 text-gray-500 break-words">${esc(o.task)}</span>` : '')}</li>`).join('')}
         </ul>
         <p class="text-xs text-gray-500 mt-2">
@@ -712,7 +712,7 @@
       if (state.libraryError) {
         picker = `<p class="text-xs text-red-600">${esc(state.libraryError)}</p>`;
       } else if (!state.library) {
-        picker = '<p class="text-xs text-gray-400">Loading your library…</p>';
+        picker = '<p class="text-xs text-gray-500">Loading your library…</p>';
       } else {
         const choices = state.library.filter((a) => !attachedIds.has(a.id));
         picker = choices.length ? `
@@ -720,7 +720,7 @@
           <div class="flex flex-wrap gap-2">
             ${choices.map((a) => `
               <button type="button" data-cmp-pic-pick="${id}" data-asset="${esc(String(a.id))}"
-                class="cursor-pointer rounded-md ${st.selected.has(a.id) ? 'ring-2 ring-emerald-600' : 'opacity-60'}">${thumb(a)}</button>`).join('')}
+                class="cursor-pointer rounded-md ${st.selected.has(a.id) ? 'ring-2 ring-emerald-700' : 'opacity-60'}">${thumb(a)}</button>`).join('')}
           </div>
           <div class="flex items-center gap-2">
             <button type="button" data-cmp-pic-attach="${id}" ${st.selected.size ? '' : 'disabled'}
@@ -858,7 +858,7 @@
     if (!st || !st.open) return '';
     const id = esc(String(c.id));
     if (st.error) return `<div class="mt-3 border border-gray-200 rounded-xl p-4"><p class="text-xs text-red-600">${esc(st.error)}</p></div>`;
-    if (!st.data) return '<div class="mt-3 border border-gray-200 rounded-xl p-4"><p class="text-xs text-gray-400">Working out the summary…</p></div>';
+    if (!st.data) return '<div class="mt-3 border border-gray-200 rounded-xl p-4"><p class="text-xs text-gray-500">Working out the summary…</p></div>';
     const s = st.data;
     return `
       <div class="mt-3 border border-gray-200 rounded-xl p-4 space-y-3">
@@ -894,9 +894,9 @@
         <p class="text-xs text-gray-500">Your Campaign Assistant plans with these. Removing one here does not remove a rule it became — do that from the assistant's Rules tab.</p>
         ${rows.map((l) => `
           <div class="flex items-start justify-between gap-3">
-            <p class="text-xs text-gray-700 break-words flex-1">${esc(l.learning)}${l.objective ? ` <span class="text-gray-400">— ${esc(l.objective.slice(0, 60))}</span>` : ''}${l.appliedToDrafting ? ' <span class="text-gray-400">(also a drafting rule)</span>' : ''}</p>
+            <p class="text-xs text-gray-700 break-words flex-1">${esc(l.learning)}${l.objective ? ` <span class="text-gray-500">— ${esc(l.objective.slice(0, 60))}</span>` : ''}${l.appliedToDrafting ? ' <span class="text-gray-500">(also a drafting rule)</span>' : ''}</p>
             <button type="button" data-cmp-lesson-delete="${esc(String(l.id))}" title="Stop planning with this"
-              class="text-xs font-bold text-gray-400 hover:text-gray-700">×</button>
+              class="text-xs font-bold text-gray-500 hover:text-gray-700">×</button>
           </div>`).join('')}
       </div>`;
   }
@@ -1020,7 +1020,7 @@
       return `${err}<button type="button" data-cmp-ticket-open="${id}" class="mt-1 text-xs font-bold text-gray-500 hover:text-gray-700 underline">File in Jira or Asana</button><span data-explain="campaign-ticket"></span>`;
     }
     if (state.ticketOptionsError) return `${err}<p class="text-xs text-red-600 mt-1">${esc(state.ticketOptionsError)}</p>`;
-    if (!state.ticketOptions) return `${err}<p class="text-xs text-gray-400 mt-1">Checking your connected tools…</p>`;
+    if (!state.ticketOptions) return `${err}<p class="text-xs text-gray-500 mt-1">Checking your connected tools…</p>`;
     const connected = state.ticketOptions.filter((o) => o.connected);
     if (!connected.length) {
       return `${err}<p class="text-xs text-gray-600 mt-1">Connect Jira or Asana on the <a href="/integrations.html" class="font-bold underline">Integrations</a> page, then file it from here.</p>`;
@@ -1430,9 +1430,13 @@
   function toolbarHtml() {
     if (state.form) return '';
     return `
-      <div class="flex items-center justify-between gap-3 mb-4">
-        <p class="text-sm font-bold text-gray-900" data-explain="campaign">Your campaigns</p>
-        <button type="button" data-cmp-new class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">New campaign</button>
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <p class="text-sm font-bold text-gray-900 mr-auto" data-explain="campaign">Your campaigns</p>
+        <!-- The chat route to a campaign, where the user lands. "Set an Objective" lived only on the
+             Orders tab, as a full page load, beside a header Chat button that opened a pop-up
+             (review, 2026-10-22). Both now open the same pop-up. -->
+        <button type="button" data-cmp-chat class="btn-assistant min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">Set an objective in chat</button>
+        <button type="button" data-cmp-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New campaign</button>
       </div>`;
   }
 
@@ -1476,11 +1480,11 @@
             <span data-explain="campaign-stop-everything"></span>`
             // Never a disabled button. There is nothing running, and a greyed-out kill switch reads
             // as "this is broken" rather than "there is nothing to stop".
-            : '<p class="text-xs text-gray-400">No campaigns running.</p>'}
+            : '<p class="text-xs text-gray-500">No campaigns running.</p>'}
         </div>
       </div>
       ${live.length ? '' : `
-        <p class="text-[11px] text-gray-400 mt-2">
+        <p class="text-[11px] text-gray-500 mt-2">
           Stopped a campaign? It stays in your list with a Resume button — stopping is never permanent.
         </p>`}
     `;
@@ -1501,7 +1505,7 @@
     return `
       <div class="flex-1 min-w-0">
         <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">${esc(s.label)}</p>
-        <p class="text-xl font-bold ${known ? 'text-gray-900' : 'text-gray-400'} mt-0.5 truncate">${esc(s.display)}</p>
+        <p class="text-xl font-bold ${known ? 'text-gray-900' : 'text-gray-500'} mt-0.5 truncate">${esc(s.display)}</p>
         <p class="text-xs text-gray-500 mt-1 leading-relaxed">${esc(s.note)}</p>
       </div>
       ${isLast ? '' : '<div class="text-gray-300 font-bold shrink-0 px-1">&rarr;</div>'}`;
@@ -1543,7 +1547,7 @@
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-4">
         <div class="flex items-center justify-between gap-4 mb-4">
           <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide" data-explain="campaign-results">What the work turned into</p>
-          <p class="text-xs text-gray-400">All time</p>
+          <p class="text-xs text-gray-500">All time</p>
         </div>
 
         <div class="flex items-start gap-3 overflow-x-auto">${stages}</div>
@@ -1556,7 +1560,7 @@
 
         ${(f.unavailable || []).length ? `
           <div class="mt-3 pt-3 border-t border-gray-100">
-            <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-1">Not shown yet</p>
+            <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1">Not shown yet</p>
             ${f.unavailable.map((u) => `
               <p class="text-xs text-gray-500 leading-relaxed">
                 <span class="font-bold text-gray-600">${esc(u.label)}</span> — ${esc(u.reason)}
@@ -1615,7 +1619,7 @@
     const body = st.error
       ? `<p class="text-xs text-red-600">${esc(st.error)}</p>`
       : !st.loaded
-        ? '<p class="text-xs text-gray-400">Loading links…</p>'
+        ? '<p class="text-xs text-gray-500">Loading links…</p>'
         : st.rows.length
           ? st.rows.map(linkRow).join('')
           // ⚠️ Says what a tracked link IS and what it costs to make one. "No links yet" alone
@@ -1808,7 +1812,7 @@
           // ⚠️ Only the required facet nags. Saying "optional" and then warning about it being
           // empty would be the form contradicting itself.
           : (f.required
-            ? '<p class="text-[11px] text-gray-400 mt-2">LinkedIn will not run an advert without at least one location.</p>'
+            ? '<p class="text-[11px] text-gray-500 mt-2">LinkedIn will not run an advert without at least one location.</p>'
             : '')}
       </div>`;
   }
@@ -1850,7 +1854,7 @@
     // Already staged: show the ads and, if nothing is live yet, the approve button.
     if (c.mode === 'paid') {
       const rows = !st.loaded
-        ? '<p class="text-xs text-gray-400">Loading ads…</p>'
+        ? '<p class="text-xs text-gray-500">Loading ads…</p>'
         : st.variants.length
           ? st.variants.map(variantRow).join('')
           : '<p class="text-xs text-gray-500">No ads on this campaign yet.</p>';
@@ -1897,9 +1901,9 @@
           <label class="text-xs font-bold text-gray-600">Stop an ad above £</label>
           <input type="number" min="1" step="1" placeholder="no limit" data-cmp-paid-ceiling="${esc(String(c.id))}"
             style="max-width:7rem" class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
-          <span class="text-xs text-gray-400">per result</span>
+          <span class="text-xs text-gray-500">per result</span>
         </div>
-        <p class="text-[11px] text-gray-400 mb-3 leading-relaxed">
+        <p class="text-[11px] text-gray-500 mb-3 leading-relaxed">
           Leave the limit blank and we will never pause an ad on cost — only when its click-through
           falls well below its own average. We do not guess what a result is worth to you.
         </p>
@@ -1921,7 +1925,7 @@
                 class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
             </div>`).join('')}
         </div>
-        <p class="text-[11px] text-gray-400 mt-2 leading-relaxed">
+        <p class="text-[11px] text-gray-500 mt-2 leading-relaxed">
           Use a tracked link from above as the destination and its clicks and sign-ups land in your funnel.
           LinkedIn requires an image on every advert — paste a public link to a JPG or PNG.
         </p>
@@ -1961,7 +1965,7 @@
       return;
     }
     if (!state.loaded) {
-      host.innerHTML = '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center"><p class="text-sm text-gray-400">Loading campaigns…</p></div>';
+      host.innerHTML = '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center"><p class="text-sm text-gray-500">Loading campaigns…</p></div>';
       return;
     }
     // render() rewrites the whole tab, and it runs on its own whenever the funnel or a link list
@@ -2504,10 +2508,10 @@
     const box = document.querySelector(`[data-cmp-facet-results="${cid}|${key}"]`);
     if (!box) return;
     if (spec && spec.search && q.length < 2) {
-      box.innerHTML = '<p class="text-[11px] text-gray-400">Type at least two letters.</p>';
+      box.innerHTML = '<p class="text-[11px] text-gray-500">Type at least two letters.</p>';
       return;
     }
-    box.innerHTML = '<p class="text-[11px] text-gray-400">Asking LinkedIn…</p>';
+    box.innerHTML = '<p class="text-[11px] text-gray-500">Asking LinkedIn…</p>';
     try {
       const res = await fetch('/.netlify/functions/linkedin-ads-targeting', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
@@ -2525,7 +2529,7 @@
                class="btn-secondary px-2 py-1 border text-[11px] font-bold rounded-lg transition">
                ${esc(en.name)}
              </button>`).join('')}</div>`
-        : '<p class="text-[11px] text-gray-400">Nothing matched.</p>';
+        : '<p class="text-[11px] text-gray-500">Nothing matched.</p>';
     } catch (err) {
       box.innerHTML = `<p class="text-[11px] text-red-600">${esc(err.message || 'Could not search.')}</p>`;
     }
@@ -2585,6 +2589,10 @@
   });
 
   document.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-cmp-chat]') && state.assistantId) {
+      window.openAssistantChat?.({ assistantId: state.assistantId });
+      return;
+    }
     const newBtn = e.target.closest('[data-cmp-new]');
     const editBtn = e.target.closest('[data-cmp-edit]');
     const save = e.target.closest('[data-cmpf-save]');
@@ -2987,13 +2995,14 @@
         </div>
       </div>`;
     if (timeline.error) return `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">${nav}<p class="text-xs text-red-600">${esc(timeline.error)}</p></div>`;
-    if (!timeline.data) return `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">${nav}<p class="text-xs text-gray-400">Loading…</p></div>`;
+    if (!timeline.data) return `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">${nav}<p class="text-xs text-gray-500">Loading…</p></div>`;
     const rows = timeline.data.campaigns || [];
     if (!rows.length) return `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">${nav}<p class="text-xs text-gray-500">No campaigns yet — your year fills in as you create them.</p></div>`;
 
     const yStart = new Date(Date.UTC(year, 0, 1));
     const yEnd = new Date(Date.UTC(year + 1, 0, 1));
     const now = new Date();
+    const todayPct = now >= yStart && now < yEnd ? pctOfYear(now, year) : null;
     const months = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
     const ids = new Set(rows.map((r) => r.id));
     const ordered = [];
@@ -3001,7 +3010,7 @@
       ordered.push({ r, child: false });
       rows.filter((k) => k.parentCampaignId === r.id).forEach((k) => ordered.push({ r: k, child: true }));
     });
-    const COLOUR = { active: 'bg-emerald-600', throttled: 'bg-amber-400', paused: 'bg-amber-400', finished: 'bg-gray-400', draft: 'bg-gray-300' };
+    const COLOUR = { active: 'bg-emerald-700', throttled: 'bg-amber-400', paused: 'bg-amber-400', finished: 'bg-gray-400', draft: 'bg-gray-300' };
 
     const line = ({ r, child }) => {
       const start = r.startsAt ? new Date(r.startsAt) : null;
@@ -3013,9 +3022,10 @@
         if (end >= yStart && start < yEnd) {
           const left = pctOfYear(start, year);
           const width = Math.max(0.6, pctOfYear(end, year) - left);
-          // ⚠️ Not emerald-200: that step is remapped to the brand pink (emerald-is-neon-pink), which
-          // read as the "today" line. The band is the running green, lighter.
-          const cls = r.alwaysOn ? 'bg-emerald-600 opacity-60' : (COLOUR[r.status] || 'bg-gray-300');
+          // The running pink, paler. Emerald-600 rendered GREEN on a pink page (emerald-is-neon-pink:
+          // only 50/100/200/700/800 are remapped); the today line is dark grey, so pale pink no
+          // longer reads as it.
+          const cls = r.alwaysOn ? 'bg-emerald-200' : (COLOUR[r.status] || 'bg-gray-300');
           bar = `<div class="absolute inset-y-0 ${cls} rounded-md" style="left:${left}%;width:${width}%"></div>`;
         }
       }
@@ -3026,29 +3036,33 @@
         .map((d) => `<div class="absolute bg-gray-900" style="left:${pctOfYear(d, year)}%;top:20%;bottom:20%;width:2px"></div>`)
         .join('');
       const note = !start ? 'not started' : r.alwaysOn ? 'always on' : (C() ? C().statusLabel(r.status) : r.status);
+      // Below sm the label sits ABOVE its bar: a fixed 12rem label column left ~100px of a 375px
+      // screen for twelve months (review, 2026-10-22). The shared today line is positioned for the
+      // two-column layout, so on a phone each bar carries its own today mark instead.
+      const todayMark = todayPct !== null
+        ? `<div class="sm:hidden absolute top-0 bottom-0 bg-gray-800" style="left:${todayPct}%;width:2px" title="Today"></div>` : '';
       return `
-        <div class="flex items-center gap-3">
-          <div class="w-48 shrink-0 ${child ? 'pl-4' : ''}">
+        <div class="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
+          <div class="w-full sm:w-48 shrink-0 ${child ? 'pl-4' : ''}">
             <p class="text-xs ${child ? 'text-gray-700' : 'font-bold text-gray-900'} truncate" title="${esc(r.objective)}">${esc(r.objective)}</p>
-            <p class="text-[11px] text-gray-400">${esc(note)}</p>
+            <p class="text-[11px] text-gray-500">${esc(note)}</p>
           </div>
-          <div class="relative flex-1 h-6 bg-gray-100 rounded-md overflow-hidden">${bar}${ticks}</div>
+          <div class="relative w-full sm:flex-1 h-6 bg-gray-100 rounded-md overflow-hidden">${bar}${ticks}${todayMark}</div>
         </div>`;
     };
 
-    const todayPct = now >= yStart && now < yEnd ? pctOfYear(now, year) : null;
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
         ${nav}
         <div class="flex items-center gap-3 mb-1">
-          <div class="w-48 shrink-0"></div>
-          <div class="relative flex-1 flex">${months.map((m) => `<span class="flex-1 text-[11px] text-gray-400">${m}</span>`).join('')}</div>
+          <div class="hidden sm:block w-48 shrink-0"></div>
+          <div class="relative flex-1 flex">${months.map((m) => `<span class="flex-1 text-[11px] text-gray-500">${m}</span>`).join('')}</div>
         </div>
         <div class="relative space-y-2">
           ${ordered.map(line).join('')}
-          ${todayPct !== null ? `<div class="absolute top-0 bottom-0 bg-indigo-600" style="left:calc(12rem + 0.75rem + (100% - 12rem - 0.75rem) * ${todayPct / 100});width:2px" title="Today"></div>` : ''}
+          ${todayPct !== null ? `<div class="hidden sm:block absolute top-0 bottom-0 bg-gray-800" style="left:calc(12rem + 0.75rem + (100% - 12rem - 0.75rem) * ${todayPct / 100});width:2px" title="Today"></div>` : ''}
         </div>
-        <p class="text-[11px] text-gray-400 mt-3">Bars are each campaign's dates; pale bands are always-on campaigns; each mark is a post or article it commissioned. Campaigns inside an umbrella are indented under it.</p>
+        <p class="text-[11px] text-gray-500 mt-3">Bars are each campaign's dates; pale bands are always-on campaigns; each mark is a post or article it commissioned. Campaigns inside an umbrella are indented under it.</p>
       </div>`;
   }
 

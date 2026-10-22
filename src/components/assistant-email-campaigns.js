@@ -85,7 +85,7 @@
         <button type="button" data-email-campaign-new class="btn-assistant px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">+ New email campaign</button>
       </div>`;
     if (state.error) { h.innerHTML = head + `<p class="text-sm text-red-600">${esc(state.error)}</p>`; return; }
-    if (!state.campaigns) { h.innerHTML = head + '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>'; return; }
+    if (!state.campaigns) { h.innerHTML = head + '<p class="text-sm text-gray-500 py-10 text-center">Loading…</p>'; return; }
     h.innerHTML = head + (state.campaigns.length
       ? `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm divide-y divide-gray-100">${state.campaigns.map(row).join('')}</div>
          <p class="text-[11px] text-gray-500 mt-2">Open and click rates count emails sent through a verified sending domain; a connected mailbox cannot report them.</p>`
@@ -118,7 +118,7 @@
       // it carries the "written but switched off" note. Redraw it once, only when there is a note.
       const reviewOpen = !document.getElementById('maintab-review-queue')?.classList.contains('hidden');
       if (this.waiting().length && reviewOpen && typeof window.detailRqOpenStatus === 'function'
-          && document.querySelector('.detail-rq-col[data-status="review"]')?.classList.contains('border-emerald-600')) {
+          && document.querySelector('.detail-rq-col[data-status="review"]')?.classList.contains('border-emerald-800')) {
         window.detailRqOpenStatus('review');
       }
     },

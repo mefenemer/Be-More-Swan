@@ -153,11 +153,11 @@
                JIT bundle, and grid-cols-5 / w-56 aren't in it. -->
           <div id="assistant-color-menu"
             style="width:15rem;top:3.5rem" class="hidden absolute left-0 z-30 bg-white rounded-xl border border-gray-200 shadow-xl p-3">
-            <label for="assistant-avatar-letter" class="block text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-1">Icon letter</label>
+            <label for="assistant-avatar-letter" class="block text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1">Icon letter</label>
             <input id="assistant-avatar-letter" type="text" maxlength="2" autocomplete="off"
               class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-bold mb-1" placeholder="A">
-            <p class="text-[11px] text-gray-400 mb-3">1–2 characters. Leave empty to use the name's first letter.</p>
-            <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-2">Icon colour</p>
+            <p class="text-[11px] text-gray-500 mb-3">1–2 characters. Leave empty to use the name's first letter.</p>
+            <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-2">Icon colour</p>
             <div id="assistant-color-swatches" style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0.5rem"></div>
             <button id="btn-assistant-color-auto" type="button"
               class="mt-3 w-full text-xs font-semibold text-gray-500 hover:text-gray-800 text-left cursor-pointer">Reset colour to automatic</button>
@@ -232,7 +232,7 @@
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-2 min-w-0 flex-wrap">
           <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.657l-3 3a4 4 0 01-5.657-5.657l1.5-1.5m6.828-6.829l3-3a4 4 0 015.657 5.657l-1.5 1.5"/></svg>
-          <span class="text-[11px] font-bold text-gray-400 uppercase tracking-wide shrink-0">Connections</span>
+          <span class="text-[11px] font-bold text-gray-500 uppercase tracking-wide shrink-0">Connections</span>
           <!-- #connections-pill ("N of M on") and #connections-headline ("Posting to …") were here.
                Both were derived state that the Connections tab already shows in full, and computing
                them was what made this card wait on four separate loads before it could paint. -->
@@ -251,9 +251,9 @@
     <div id="detail-roi-strip" class="hidden mt-4 pt-4 border-t border-gray-100 z-10 relative">
       <div class="flex items-center justify-between gap-3 mb-2">
         <div class="flex items-baseline gap-2 min-w-0">
-          <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wide shrink-0">Impact &amp; ROI</p>
+          <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide shrink-0">Impact &amp; ROI</p>
           <!-- Full sentence lives in the title attribute; the visible caption is the short form. -->
-          <p class="hidden sm:block text-[11px] text-gray-400 truncate" id="metrics-period-note">Time &amp; money saved all time</p>
+          <p class="hidden sm:block text-[11px] text-gray-500 truncate" id="metrics-period-note">Time &amp; money saved all time</p>
         </div>
         <!-- Same All Time / This Month / This Week periods as the dashboard hero, so the two views
              always agree — including the default, which is All Time because both calendar windows
@@ -285,7 +285,7 @@
          from check-capacity + get-usage-summary; stays hidden when the plan has no task limit. -->
     <div id="detail-task-share" class="hidden mt-4 pt-4 border-t border-gray-100 z-10 relative">
       <div class="flex items-baseline justify-between gap-3">
-        <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Tasks this month</p>
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Tasks this month</p>
         <p class="text-sm font-black text-gray-900" id="task-share-pct">—</p>
       </div>
       <div class="flex h-2 mt-2 rounded-full bg-gray-100 overflow-hidden" role="img" id="task-share-bar">
@@ -316,7 +316,7 @@
       <!-- US3 AC3.1: kick-off summary — primary directive + active connections to review -->
       <div id="kickoff-summary" class="hidden mb-5 p-4 rounded-xl bg-gray-50 border border-gray-100"></div>
       <ul id="kickoff-checklist" class="space-y-2.5 mb-5">
-        <li class="h-9 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading checklist…</li>
+        <li class="h-9 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Loading checklist…</li>
       </ul>
       <div class="flex items-center gap-3 flex-wrap">
         <button id="btn-kick-off" type="button" disabled
@@ -387,7 +387,7 @@
            figures are measured and when the next check lands. Rendered (not static) because the
            honest sentence varies — poll-goal-telemetry's cadence is per plan tier, and user-reported
            goals aren't measured by anything at all. See _renderGoalFreshnessNote in assistants.js. -->
-      <p id="goal-progress-refresh-note" class="text-[10px] text-gray-400 mt-3 leading-relaxed hidden"></p>
+      <p id="goal-progress-refresh-note" class="text-[10px] text-gray-500 mt-3 leading-relaxed hidden"></p>
     </div>
   </div>
 
@@ -437,7 +437,7 @@
            _fetchAndRenderAssistantMetrics() (assistants.js) via these same element ids. -->
       <div class="mt-4 pt-4 border-t border-gray-100 grid grid-cols-3 gap-2">
         <div class="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2 flex flex-col justify-center">
-          <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wide" id="metrics-label-created">Created</p>
+          <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide" id="metrics-label-created">Created</p>
           <p class="text-2xl font-black text-gray-900 leading-tight" id="metrics-total-created">—</p>
         </div>
         <div class="rounded-xl bg-blue-50 border border-blue-100 px-3 py-2 flex flex-col justify-center">
@@ -469,8 +469,8 @@
       <div class="autopilot-split">
       <div id="autopilot-platform-breakdown" class="mt-4 pt-4 border-t border-gray-100 hidden">
         <div class="flex items-center justify-between gap-3 mb-2">
-          <h4 class="text-[11px] font-bold text-gray-400 uppercase tracking-wide shrink-0" id="metrics-breakdown-label">Content by platform</h4>
-          <p class="text-[11px] text-gray-400 shrink-0" id="metrics-breakdown-note">All-time, per platform</p>
+          <h4 class="text-[11px] font-bold text-gray-500 uppercase tracking-wide shrink-0" id="metrics-breakdown-label">Content by platform</h4>
+          <p class="text-[11px] text-gray-500 shrink-0" id="metrics-breakdown-note">All-time, per platform</p>
         </div>
         <div id="metrics-by-platform"></div>
         <!-- Freshness, stated for the same reason the Audience block states it: side by side, two
@@ -480,7 +480,7 @@
              — deliberately NOT a schedule, which would imply a refresh that doesn't exist.
              Static copy because that truth never varies; the Audience note is rendered because
              its does (cron on/off, next due time). -->
-        <p class="text-[10px] text-gray-400 mt-2 leading-relaxed"
+        <p class="text-[10px] text-gray-500 mt-2 leading-relaxed"
            title="These come from your own posts, not from a platform API — nothing is cached and no background job is involved, so there is nothing to wait for. Reload the page to include anything created or published since you opened it.">
           Counted from your own posts, so these are always current — recounted every time this page loads.
         </p>
@@ -508,8 +508,8 @@
              with the centre of a note that may wrap to two lines. -->
         <div class="flex items-start justify-between gap-3 mb-2">
           <div class="min-w-0">
-            <h4 class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Audience</h4>
-            <p id="audience-updated-note" class="text-[11px] text-gray-400">Followers &amp; subscribers</p>
+            <h4 class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Audience</h4>
+            <p id="audience-updated-note" class="text-[11px] text-gray-500">Followers &amp; subscribers</p>
           </div>
           <!-- "Manage connections" — the route into the Connections panel, sitting with the list it
                manages rather than in the hero strip two cards up: on the Blog Writer this block IS
@@ -526,7 +526,7 @@
             class="hidden btn-secondary shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border transition cursor-pointer">Manage connections</button>
         </div>
         <div id="audience-by-platform"></div>
-        <p id="audience-refresh-note" class="text-[10px] text-gray-400 mt-2 leading-relaxed hidden"></p>
+        <p id="audience-refresh-note" class="text-[10px] text-gray-500 mt-2 leading-relaxed hidden"></p>
       </div>
       </div>
     </div>
@@ -546,14 +546,14 @@
   <div id="performance-metrics-card" class="mb-8" style="order:-1">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Performance Metrics</h3>
-      <span id="metrics-status-note" class="text-xs text-gray-400 font-medium">Last 30 days</span>
+      <span id="metrics-status-note" class="text-xs text-gray-500 font-medium">Last 30 days</span>
     </div>
     <div id="metrics-kpi-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
       <!-- KPI card 1 — label/title/desc injected from AssistantDashboardRegistry by role -->
       <div id="kpi-card-engagement" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
         <div class="flex items-center justify-between">
-          <span id="kpi-1-label" class="text-xs font-bold text-gray-400 uppercase tracking-wide"></span>
+          <span id="kpi-1-label" class="text-xs font-bold text-gray-500 uppercase tracking-wide"></span>
           <span id="metric-engagement-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
         </div>
         <div>
@@ -571,14 +571,14 @@
           <p id="kpi-1-desc" class="text-xs text-gray-500 mt-1"></p>
         </div>
         <div class="mt-auto pt-3 border-t border-gray-100">
-          <p class="text-xs text-gray-400">Trending: <span id="metric-engagement-trend" class="font-semibold text-gray-500">—</span></p>
+          <p class="text-xs text-gray-500">Trending: <span id="metric-engagement-trend" class="font-semibold text-gray-500">—</span></p>
         </div>
       </div>
 
       <!-- KPI card 2 -->
       <div id="kpi-card-reach" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
         <div class="flex items-center justify-between">
-          <span id="kpi-2-label" class="text-xs font-bold text-gray-400 uppercase tracking-wide"></span>
+          <span id="kpi-2-label" class="text-xs font-bold text-gray-500 uppercase tracking-wide"></span>
           <span id="metric-reach-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
         </div>
         <div>
@@ -596,14 +596,14 @@
           <p id="kpi-2-desc" class="text-xs text-gray-500 mt-1"></p>
         </div>
         <div class="mt-auto pt-3 border-t border-gray-100">
-          <p class="text-xs text-gray-400">Trending: <span id="metric-reach-trend" class="font-semibold text-gray-500">—</span></p>
+          <p class="text-xs text-gray-500">Trending: <span id="metric-reach-trend" class="font-semibold text-gray-500">—</span></p>
         </div>
       </div>
 
       <!-- KPI card 3 -->
       <div id="kpi-card-ctr" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
         <div class="flex items-center justify-between">
-          <span id="kpi-3-label" class="text-xs font-bold text-gray-400 uppercase tracking-wide"></span>
+          <span id="kpi-3-label" class="text-xs font-bold text-gray-500 uppercase tracking-wide"></span>
           <span id="metric-ctr-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
         </div>
         <div>
@@ -621,14 +621,14 @@
           <p id="kpi-3-desc" class="text-xs text-gray-500 mt-1"></p>
         </div>
         <div class="mt-auto pt-3 border-t border-gray-100">
-          <p class="text-xs text-gray-400">Trending: <span id="metric-ctr-trend" class="font-semibold text-gray-500">—</span></p>
+          <p class="text-xs text-gray-500">Trending: <span id="metric-ctr-trend" class="font-semibold text-gray-500">—</span></p>
         </div>
       </div>
 
       <!-- KPI card 4 -->
       <div id="kpi-card-value" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
         <div class="flex items-center justify-between">
-          <span id="kpi-4-label" class="text-xs font-bold text-gray-400 uppercase tracking-wide"></span>
+          <span id="kpi-4-label" class="text-xs font-bold text-gray-500 uppercase tracking-wide"></span>
           <span id="metric-value-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
         </div>
         <div>
@@ -646,7 +646,7 @@
           <p id="kpi-4-desc" class="text-xs text-gray-500 mt-1"></p>
         </div>
         <div class="mt-auto pt-3 border-t border-gray-100">
-          <p class="text-xs text-gray-400">Trending: <span id="metric-value-trend" class="font-semibold text-gray-500">—</span></p>
+          <p class="text-xs text-gray-500">Trending: <span id="metric-value-trend" class="font-semibold text-gray-500">—</span></p>
         </div>
       </div>
 
@@ -659,7 +659,7 @@
          yet vs. could not load) rather than hardcoded here, because those are different truths. -->
     <div id="metrics-empty-state" class="hidden bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
       <div class="flex items-start gap-4">
-        <span aria-hidden="true" class="shrink-0 w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-400">
+        <span aria-hidden="true" class="shrink-0 w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-500">
           <svg class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75">
             <path d="M3 16.5V11m4.5 5.5V7M12 16.5v-4m4.5 4V4.5" stroke-linecap="round"/>
           </svg>
@@ -860,14 +860,14 @@
     <div class="flex items-start justify-between gap-3 mb-4">
       <div>
         <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Today's Relationship-Building Checklist</h3>
-        <p class="text-xs text-gray-400 mt-1">Daily community actions to build genuine relationships. Tick them off as you go.</p>
+        <p class="text-xs text-gray-500 mt-1">Daily community actions to build genuine relationships. Tick them off as you go.</p>
       </div>
       <button type="button" id="rbc-regenerate-btn" onclick="window._rbcRegenerate()" class="text-xs font-bold text-emerald-800 hover:text-emerald-800 transition cursor-pointer shrink-0">Regenerate</button>
     </div>
     <div id="rbc-list" class="space-y-2">
-      <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading checklist…</div>
+      <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Loading checklist…</div>
     </div>
-    <p id="rbc-progress" class="text-xs font-medium text-gray-400 mt-3"></p>
+    <p id="rbc-progress" class="text-xs font-medium text-gray-500 mt-3"></p>
   </div>
 
   <!-- Unified Activity feed (Epic 2.2) — chronological, with Failed/Needs-Input pinned on top. -->
@@ -893,7 +893,7 @@
       </div>
     </div>
     <div id="recent-activity-list" class="space-y-3">
-      <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading activity…</div>
+      <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Loading activity…</div>
     </div>
   </div>
 
@@ -927,7 +927,7 @@
 
     <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
       <!-- Lifecycle columns -->
-      <div class="tab-scroller flex gap-1 px-4 pt-3 border-b border-gray-100 overflow-x-auto" role="tablist" aria-label="Posts by stage">
+      <div class="tab-scroller flex gap-1 px-4 pt-3 border-b border-gray-100 overflow-x-auto" role="tablist" aria-label="Items by stage">
         <button type="button" role="tab" aria-controls="detail-rq-groups" aria-selected="true" tabindex="0" class="detail-rq-col px-4 py-2 text-sm font-semibold rounded-t border-b-2 border-emerald-800 text-emerald-800 whitespace-nowrap"
           data-status="review" onclick="detailRqOpenStatus('review', this)">
           Review
@@ -1124,7 +1124,10 @@
        no longer a main tab. The Operating File card index is the drawer "home";
        clicking a card swaps to that section panel with a back arrow. -->
   <div id="brief-drawer-backdrop" onclick="window._closeBriefDrawer()" style="display:none;opacity:0;position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:9000;transition:opacity .2s ease" aria-hidden="true"></div>
-  <aside id="brief-drawer" aria-label="Assistant Profile"
+  <!-- A dialog, not a plain aside: focus moves in on open and back to what opened it on close, and
+       `inert` keeps the off-screen drawer out of the Tab order while closed (_briefOpenChrome /
+       _closeBriefDrawer in assistants.js). -->
+  <aside id="brief-drawer" role="dialog" aria-modal="true" aria-labelledby="brief-drawer-title" inert
     style="position:fixed;top:0;right:0;bottom:0;width:min(560px,100vw);z-index:9001;display:flex;flex-direction:column;background:#fff;box-shadow:-4px 0 32px rgba(0,0,0,0.12);transform:translateX(100%);transition:transform .25s cubic-bezier(.4,0,.2,1);overflow:hidden">
     <!-- Drawer header -->
     <div style="display:flex;align-items:center;gap:0.5rem;padding:1.25rem 1.5rem;border-bottom:1px solid #e5e7eb;flex-shrink:0">
@@ -1133,7 +1136,7 @@
         onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='none'">
         <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
       </button>
-      <h2 id="brief-drawer-title" style="font-size:1.0625rem;font-weight:700;color:#111827;margin:0;flex:1;min-width:0">Assistant Profile</h2>
+      <h2 id="brief-drawer-title" tabindex="-1" style="outline:none;"font-size:1.0625rem;font-weight:700;color:#111827;margin:0;flex:1;min-width:0">Assistant Profile</h2>
       <span id="brief-drawer-save" role="status" aria-live="polite" style="font-size:0.75rem;font-weight:600;color:#d6006b;flex-shrink:0"></span>
       <button type="button" onclick="window._closeBriefDrawer()" aria-label="Close"
         style="width:2rem;height:2rem;display:flex;align-items:center;justify-content:center;border-radius:0.5rem;border:none;background:none;cursor:pointer;color:#6b7280;transition:background .12s ease;flex-shrink:0"
@@ -1157,7 +1160,7 @@
 
   <!-- Operating File card list -->
   <div class="space-y-3">
-    <p class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Operating File</p>
+    <p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">Operating File</p>
 
     <button type="button" data-tab="problem" class="detail-tab-btn brief-card w-full text-left">
       <div class="flex items-center justify-between gap-4">
@@ -1256,7 +1259,7 @@
         <textarea id="edit_problem" rows="3"
           class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm resize-none overflow-hidden"
           placeholder="E.g., I lose hours every week to repetitive work — research, drafting, chasing and follow-ups — that I'd rather hand off…"></textarea>
-        <p class="text-xs text-gray-400 mt-1">Be as specific as possible — the more detail, the smarter your assistant.</p>
+        <p class="text-xs text-gray-500 mt-1">Be as specific as possible — the more detail, the smarter your assistant.</p>
       </div>
     </div>
   </div>
@@ -1325,7 +1328,7 @@
                    the scheduler's own catalogue. They were six hardcoded <option>s, i.e. a third
                    hand-copy of a list that already had two copies and one silent disagreement. -->
               <select id="edit_frequency" class="w-full border border-gray-300 rounded-lg p-3 text-sm bg-white focus:ring-2 focus:ring-emerald-700 transition shadow-sm"></select>
-              <p id="posting-frequency-hint" class="text-xs text-gray-400 mt-1">How many posts per week this assistant drafts automatically.</p>
+              <p id="posting-frequency-hint" class="text-xs text-gray-500 mt-1">How many posts per week this assistant drafts automatically.</p>
             </div>
 
             <!-- Preferred days -->
@@ -1354,7 +1357,7 @@
               <label class="block text-sm font-bold text-gray-700 mb-2">Preferred Times</label>
               <div id="posting-times-list" class="space-y-2"></div>
               <button type="button" id="btn-add-posting-time" class="mt-2 text-sm font-semibold text-emerald-700 hover:text-emerald-800 transition cursor-pointer">+ Add a time</button>
-              <p class="text-xs text-gray-400 mt-1">Times of day (your timezone) at which posts go out. When a day has more slots than posts, times are spread evenly.</p>
+              <p class="text-xs text-gray-500 mt-1">Times of day (your timezone) at which posts go out. When a day has more slots than posts, times are spread evenly.</p>
             </div>
 
             <!-- Timezone -->
@@ -1374,7 +1377,7 @@
                 <option value="Asia/Singapore">Singapore</option>
                 <option value="Australia/Sydney">Sydney</option>
               </select>
-              <p class="text-xs text-gray-400 mt-1">Preferred times are interpreted in this timezone.</p>
+              <p class="text-xs text-gray-500 mt-1">Preferred times are interpreted in this timezone.</p>
             </div>
 
             <!-- Draft horizon -->
@@ -1385,7 +1388,7 @@
                 <span class="text-sm text-gray-600">days into the future</span>
                 <span id="posting-horizon-status" class="text-sm font-semibold"></span>
               </div>
-              <p class="text-xs text-gray-400 mt-1">The assistant keeps your Review filled this many days ahead, so you always have content to approve. Increasing this drafts the new days now; decreasing it archives unreviewed drafts beyond the window.</p>
+              <p class="text-xs text-gray-500 mt-1">The assistant keeps your Review filled this many days ahead, so you always have content to approve. Increasing this drafts the new days now; decreasing it archives unreviewed drafts beyond the window.</p>
             </div>
           </div>
         </div>
@@ -1434,7 +1437,7 @@
             <label for="autonomous-media-cap" class="text-sm font-bold text-gray-700">Monthly AI media cap</label>
             <input id="autonomous-media-cap" type="number" min="0" step="1" onchange="window._saveAutonomousMediaCap()"
               class="w-24 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none">
-            <span id="autonomous-media-cap-hint" class="text-xs text-gray-400">Most AI images or videos this assistant may make on its own each month.</span>
+            <span id="autonomous-media-cap-hint" class="text-xs text-gray-500">Most AI images or videos this assistant may make on its own each month.</span>
           </div>
         </div>
       </div>
@@ -1463,7 +1466,7 @@
         <div id="autopublish-platform-list" class="mt-5 space-y-2.5">
           <!-- Rows injected by _hydrateAutoPublish() in assistants.js -->
         </div>
-        <p id="autopublish-empty" class="hidden mt-3 text-xs font-semibold text-gray-400">Connect a platform first — Autopilot mode applies per platform.</p>
+        <p id="autopublish-empty" class="hidden mt-3 text-xs font-semibold text-gray-500">Connect a platform first — Autopilot mode applies per platform.</p>
 
         <!-- AI-media auto-publish opt-in. By default a post whose image was AI-generated is ALWAYS held
              for review even in publish mode (the confidence check reads the caption, not the picture).
@@ -1550,7 +1553,7 @@
         <p class="text-sm text-gray-500 mt-1">Your business details and any documents or links added in <a href="#" onclick="window.loadView('assets')" class="text-emerald-800 hover:underline font-medium">Business Information</a> are automatically applied to this assistant.</p>
       </div>
       <div id="business-knowledge-content">
-        <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading brand knowledge…</div>
+        <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Loading brand knowledge…</div>
       </div>
     </div>
 
@@ -1610,7 +1613,7 @@
             </button>
           </div>
           <textarea id="edit_audience" rows="2" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm resize-none overflow-hidden" placeholder="E.g., Tech founders aged 30–45 building B2B SaaS products…"></textarea>
-          <p class="text-xs text-gray-400 mt-1">Be specific — the more detail, the more targeted the content.</p>
+          <p class="text-xs text-gray-500 mt-1">Be specific — the more detail, the more targeted the content.</p>
         </div>
         <div>
           <div class="flex items-center justify-between mb-1">
@@ -1630,7 +1633,7 @@
           </div>
           <textarea id="edit_pillars" rows="2" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm resize-none overflow-hidden" placeholder="E.g., Growth hacking, Leadership, Behind the scenes…"></textarea>
           <div id="pillars-chips" class="flex flex-wrap gap-1.5 mt-2"></div>
-          <p class="text-xs text-gray-400 mt-1">Up to 5 short themes, separated by commas or one per line. Your assistant rotates between them so each one gets its turn.</p>
+          <p class="text-xs text-gray-500 mt-1">Up to 5 short themes, separated by commas or one per line. Your assistant rotates between them so each one gets its turn.</p>
         </div>
       </div>
     </div>
@@ -1659,7 +1662,7 @@
         <p id="content-mix-desc" class="text-sm text-gray-500 mt-1"></p>
       </div>
       <div id="content-mix-list" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
-      <p class="text-xs text-gray-400 mt-3">Untick anything you never want. Your assistant rotates through the rest so no two posts in a row share a structure — keep a few ticked for a feed that reads like a person wrote it.</p>
+      <p class="text-xs text-gray-500 mt-3">Untick anything you never want. Your assistant rotates through the rest so no two posts in a row share a structure — keep a few ticked for a feed that reads like a person wrote it.</p>
     </div>
 
     <!-- Sales Context — feeds the auto-responder objection playbook + DM reply drafting -->
@@ -1675,7 +1678,7 @@
         <div id="edit-offerings">
           <p class="block text-sm font-bold text-gray-700 mb-1">Products &amp; Services</p>
           <p class="text-xs text-gray-500 mb-2">Kept in one place for all your assistants: Business Information ▸ Products &amp; Services.</p>
-          <ul id="edit-offerings-list" class="space-y-1 text-sm text-gray-800"><li class="text-gray-400">Loading…</li></ul>
+          <ul id="edit-offerings-list" class="space-y-1 text-sm text-gray-800"><li class="text-gray-500">Loading…</li></ul>
           <button type="button" id="edit-offerings-open" class="btn-secondary mt-2 px-3 py-1.5 text-sm font-bold rounded-md border">Edit in Products &amp; Services</button>
           <div id="edit-offerings-legacy" class="hidden mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
             <p class="text-sm font-bold text-amber-900">Older notes from setup</p>
@@ -1691,7 +1694,7 @@
         <div>
           <label for="edit_objections" class="block text-sm font-bold text-gray-700 mb-1">Sales Objection Playbook</label>
           <textarea id="edit_objections" rows="4" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm resize-none overflow-hidden" placeholder="One per line — objection, then your preferred response. E.g., &quot;Too expensive&quot; — Emphasise the time saved and the money-back guarantee."></textarea>
-          <p class="text-xs text-gray-400 mt-1">One objection per line with your preferred response. The assistant drafts replies from these — it never invents pricing or claims.</p>
+          <p class="text-xs text-gray-500 mt-1">One objection per line with your preferred response. The assistant drafts replies from these — it never invents pricing or claims.</p>
         </div>
       </div>
     </div>
@@ -1705,7 +1708,7 @@
       <div>
         <label for="edit_reference_url" class="block text-sm font-bold text-gray-700 mb-1">Reference Style / Visual Assets Link</label>
         <input type="url" id="edit_reference_url" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm" placeholder="https://…">
-        <p class="text-xs text-gray-400 mt-1">A past post, a Drive folder of brand guidelines, or a moodboard.</p>
+        <p class="text-xs text-gray-500 mt-1">A past post, a Drive folder of brand guidelines, or a moodboard.</p>
       </div>
     </div>
 
@@ -1719,7 +1722,7 @@
         <p class="text-sm text-gray-500 mt-1">Fine-tune how your assistant formats posts and uses hashtags on each platform.</p>
       </div>
 
-      <p id="platform-strategy-empty" class="hidden text-sm text-gray-400 italic">Connect a social platform first — strategy options appear here for each one you use.</p>
+      <p id="platform-strategy-empty" class="hidden text-sm text-gray-500 italic">Connect a social platform first — strategy options appear here for each one you use.</p>
 
       <div class="space-y-4">
         <!-- Facebook -->
@@ -1847,7 +1850,7 @@
          populated by integrations.js (initAssistantConnections). Categories already covered by
          an enable-able recipe above are suppressed here to avoid duplicate cards. -->
     <div id="connections-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-5 items-start">
-      <div class="col-span-full flex items-center justify-center py-16 text-gray-400 text-sm">Loading…</div>
+      <div class="col-span-full flex items-center justify-center py-16 text-gray-500 text-sm">Loading…</div>
     </div>
 
     <!-- US-AUD-4.2.1 SC4: Emergency Revocation — Revoke All Connections (workspace-wide) -->
@@ -1889,10 +1892,10 @@
       </div>
       <div class="border border-gray-200 rounded-xl overflow-hidden">
         <div id="strict-rules-list" class="divide-y divide-gray-100">
-          <div class="sr-empty-hint px-4 py-3 text-sm text-gray-400">No strict rules yet — click “Add Rule” to create one.</div>
+          <div class="sr-empty-hint px-4 py-3 text-sm text-gray-500">No strict rules yet — click “Add Rule” to create one.</div>
         </div>
       </div>
-      <p class="text-xs text-gray-400 mt-2">One rule per row, e.g. “Always use British English spelling” or “Never mention competitor brand names”.</p>
+      <p class="text-xs text-gray-500 mt-2">One rule per row, e.g. “Always use British English spelling” or “Never mention competitor brand names”.</p>
     </div>
 
     <!-- Per-assistant Assistant Rules (injected into this assistant's brief) -->
@@ -1919,7 +1922,7 @@
         <span id="assistant-rules-scope-text">These rules are added to this assistant's brief. Changes apply to everything this assistant does from now on.</span>
       </div>
       <div id="assistant-rules-editor" class="space-y-6">
-        <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading rules…</div>
+        <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Loading rules…</div>
       </div>
     </div>
 
@@ -1952,7 +1955,7 @@
         </button>
       </div>
       <div id="runbook-directives" class="space-y-2">
-        <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading directives…</div>
+        <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Loading directives…</div>
       </div>
     </div>
 
@@ -2051,7 +2054,7 @@
         <svg class="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
         <span>Toggles start on your workspace-wide settings; changing one here applies to this assistant only. SMS and WhatsApp delivery is coming to higher plans.</span>
       </div>
-      <div id="assistant-notif-prefs-loading" class="text-sm text-gray-400">Loading preferences…</div>
+      <div id="assistant-notif-prefs-loading" class="text-sm text-gray-500">Loading preferences…</div>
       <div id="assistant-notif-prefs-list" class="hidden divide-y divide-gray-100"></div>
       <p id="assistant-notif-prefs-saved" class="hidden text-xs text-emerald-800 font-semibold mt-3">✓ Preference saved</p>
     </div>
@@ -2068,21 +2071,21 @@
           <input type="radio" name="review-cadence" value="immediate" class="mt-1 h-4 w-4 text-emerald-800 border-gray-300 focus:ring-emerald-700">
           <span>
             <span class="block text-sm font-semibold text-gray-900">Immediate</span>
-            <span class="block text-xs text-gray-400 leading-snug">Alert me as soon as a pending post enters its final 12-hour approval window.</span>
+            <span class="block text-xs text-gray-500 leading-snug">Alert me as soon as a pending post enters its final 12-hour approval window.</span>
           </span>
         </label>
         <label class="flex items-start gap-3 cursor-pointer">
           <input type="radio" name="review-cadence" value="red_urgency_only" class="mt-1 h-4 w-4 text-emerald-800 border-gray-300 focus:ring-emerald-700">
           <span>
             <span class="block text-sm font-semibold text-gray-900">Urgent only</span>
-            <span class="block text-xs text-gray-400 leading-snug">Only alert me for posts at risk of missing their publish window.</span>
+            <span class="block text-xs text-gray-500 leading-snug">Only alert me for posts at risk of missing their publish window.</span>
           </span>
         </label>
         <label class="flex items-start gap-3 cursor-pointer">
           <input type="radio" name="review-cadence" value="daily_digest" class="mt-1 h-4 w-4 text-emerald-800 border-gray-300 focus:ring-emerald-700">
           <span>
             <span class="block text-sm font-semibold text-gray-900">Daily digest</span>
-            <span class="block text-xs text-gray-400 leading-snug">Skip instant alerts — I'll review pending posts from my daily approvals summary. Posts not approved before their cut-off are never auto-published.</span>
+            <span class="block text-xs text-gray-500 leading-snug">Skip instant alerts — I'll review pending posts from my daily approvals summary. Posts not approved before their cut-off are never auto-published.</span>
           </span>
         </label>
       </div>
@@ -2093,7 +2096,7 @@
   <!-- Assistant lifecycle — Pause / Archive, moved here from the header "More actions" menu (Issue #65
        follow-up). IDs preserved so the existing handlers (toggle status / archive) still bind. -->
   <div id="assistant-lifecycle-actions" class="mt-8 pt-5 border-t border-gray-200">
-    <h3 class="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-3">Assistant lifecycle</h3>
+    <h3 class="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-3">Assistant lifecycle</h3>
     <button id="btn-toggle-status" type="button" class="btn-secondary w-full text-left px-4 py-2.5 mb-2 text-sm font-bold border rounded-xl cursor-pointer">
       Pause Assistant
     </button>
@@ -2168,7 +2171,7 @@
             <label for="goal-title" data-explain="goal-name" class="block text-sm font-bold text-gray-700 mb-1">Goal Name</label>
             <input id="goal-title" type="text" maxlength="120" placeholder="e.g. Reach wholesale buyers before the Q4 launch"
               class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none transition">
-            <p class="text-xs text-gray-400 mt-1">A short name so you can tell your goals apart at a glance.</p>
+            <p class="text-xs text-gray-500 mt-1">A short name so you can tell your goals apart at a glance.</p>
           </div>
           <div class="sm:col-span-3">
             <label for="goal-objective" data-explain="goal-objective" class="block text-sm font-bold text-gray-700 mb-1">Objective</label>
@@ -2181,14 +2184,14 @@
               <option value="engagement">Increase Interaction (Engagement)</option>
               <option value="action">Drive Traffic (Action)</option>
             </select>
-            <p class="text-xs text-gray-400 mt-1">Choose what this goal is for — we'll show the metrics that measure it.</p>
+            <p class="text-xs text-gray-500 mt-1">Choose what this goal is for — we'll show the metrics that measure it.</p>
           </div>
           <div class="sm:col-span-3">
             <label for="goal-metric" data-explain="goal-metric" class="block text-sm font-bold text-gray-700 mb-1">Target Metric</label>
             <select id="goal-metric" disabled class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none transition disabled:bg-gray-50 disabled:text-gray-400">
               <option value="">Select an objective first…</option>
             </select>
-            <p id="goal-metric-help" class="text-xs text-gray-400 mt-1"></p>
+            <p id="goal-metric-help" class="text-xs text-gray-500 mt-1"></p>
           </div>
           <div>
             <label for="goal-target" data-explain="goal-target-value" class="block text-sm font-bold text-gray-700 mb-1">Target Value</label>
@@ -2208,7 +2211,7 @@
             <!-- Shown when a user-reported metric is selected. The primary goal is the one this
                  assistant is measured on and steered toward, which can't honestly be a number its
                  own work doesn't move — manage-goals rejects the combination server-side too. -->
-            <p id="goal-primary-note" class="hidden text-xs text-gray-400 mt-1 leading-relaxed">
+            <p id="goal-primary-note" class="hidden text-xs text-gray-500 mt-1 leading-relaxed">
               You report this figure yourself, so it can't be the primary goal — this assistant's work isn't what moves it.
             </p>
           </div>
@@ -2232,7 +2235,7 @@
             <textarea id="goal-rationale" rows="3" maxlength="600"
               placeholder="e.g. We're launching a wholesale range in Q4 and need independent retailers to discover us. Most of our current followers are direct consumers, so we need content that speaks to buyers."
               class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none transition"></textarea>
-            <p class="text-xs text-gray-400 mt-1">Your assistant reads this when drafting, and uses it to choose topics, formats and calls to action. The more context, the better the content.</p>
+            <p class="text-xs text-gray-500 mt-1">Your assistant reads this when drafting, and uses it to choose topics, formats and calls to action. The more context, the better the content.</p>
           </div>
         </div>
         <p id="goal-builder-error" class="hidden text-sm text-red-600 font-medium mt-3"></p>
@@ -2244,7 +2247,7 @@
 
       <!-- Goals list -->
       <div id="goals-list" class="mt-6 space-y-3">
-        <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading goals…</div>
+        <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Loading goals…</div>
       </div>
     </div>
   </div>
@@ -2283,7 +2286,7 @@
         </div>
       </div>
       <button onclick="document.getElementById('modal-copy-rules').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
+        class="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2323,19 +2326,19 @@
         </div>
       </div>
       <button onclick="window._closeTuningSession()" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
+        class="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
     <!-- Split screen: output (left) | correction (right) -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-0 flex-1 overflow-hidden">
       <div class="p-6 border-b md:border-b-0 md:border-r border-gray-100 overflow-y-auto bg-gray-50/40">
-        <p class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">The output</p>
+        <p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">The output</p>
         <p id="tuning-output-meta" class="text-xs text-gray-500 mb-3"></p>
         <div id="tuning-output" class="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">Loading…</div>
       </div>
       <div class="p-6 overflow-y-auto flex flex-col">
-        <p class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Your correction</p>
+        <p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Your correction</p>
         <textarea id="tuning-correction" rows="5" placeholder="What should be different? e.g. “Don’t open with a question — lead with the benefit.”"
           class="w-full border border-gray-300 rounded-lg p-3 text-sm resize-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"></textarea>
         <!-- Result: the learned directive + follow-up actions (hidden until submit) -->
@@ -2366,12 +2369,12 @@
     <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-indigo-50">
       <h3 class="font-extrabold text-gray-900">Choose a post to tune</h3>
       <button onclick="document.getElementById('modal-tuning-picker').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
+        class="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
     <div id="tuning-picker-list" class="px-6 py-5 space-y-2 max-h-[60vh] overflow-y-auto">
-      <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading recent posts…</div>
+      <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Loading recent posts…</div>
     </div>
   </div>
 </div>
@@ -2385,7 +2388,7 @@
         <p class="text-xs text-gray-500 mt-0.5">Actual performance against the trajectory needed to hit your target.</p>
       </div>
       <button onclick="document.getElementById('modal-review-progress').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
+        class="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2397,7 +2400,7 @@
       </div>
       <div id="review-status-banner"></div>
       <!-- Trendline vs trajectory chart (dependency-free SVG) — AC2.2.2 -->
-      <div id="review-chart" style="min-height:220px" class="rounded-xl border border-gray-100 bg-gray-50/50 p-3 flex items-center justify-center text-sm text-gray-400">Loading chart…</div>
+      <div id="review-chart" style="min-height:220px" class="rounded-xl border border-gray-100 bg-gray-50/50 p-3 flex items-center justify-center text-sm text-gray-500">Loading chart…</div>
       <div class="flex items-center gap-4 text-xs text-gray-500">
         <span class="inline-flex items-center gap-1.5"><span class="w-4 h-0.5 bg-emerald-500 inline-block"></span>Actual</span>
         <span class="inline-flex items-center gap-1.5"><span class="w-4 h-0.5 inline-block" style="background:repeating-linear-gradient(90deg,#9ca3af 0,#9ca3af 3px,transparent 3px,transparent 6px)"></span>Required trajectory</span>
@@ -2418,12 +2421,12 @@
         <p id="wand-field-label" class="text-xs text-emerald-800 mt-0.5"></p>
       </div>
       <button onclick="document.getElementById('modal-wand').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
+        class="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
     <div class="px-6 py-5">
-      <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">Optimized for your goals</p>
+      <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Optimized for your goals</p>
       <div id="wand-suggestion" style="min-height:64px" class="text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg p-3"></div>
     </div>
     <div class="px-6 py-4 border-t border-gray-100 bg-gray-50/50 rounded-b-2xl flex items-center justify-end gap-3">
@@ -2442,12 +2445,12 @@
         <p class="text-xs text-emerald-700 mt-0.5">Why this goal is slipping — and the strategy change to fix it.</p>
       </div>
       <button onclick="document.getElementById('modal-strategy-fix').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
+        class="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
     <div id="strategy-fix-body" class="px-6 py-5 space-y-5">
-      <div class="flex items-center justify-center py-10 text-sm text-gray-400">Analysing your strategy…</div>
+      <div class="flex items-center justify-center py-10 text-sm text-gray-500">Analysing your strategy…</div>
     </div>
     <div id="strategy-fix-footer" class="px-6 py-4 border-t border-gray-100 bg-gray-50/50 rounded-b-2xl flex items-center justify-end gap-3 hidden">
       <button onclick="document.getElementById('modal-strategy-fix').classList.add('hidden')" type="button" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border transition cursor-pointer">Dismiss</button>
@@ -2515,7 +2518,7 @@
         </div>
       </div>
       <button onclick="document.getElementById('modal-safety-feedback').classList.add('hidden')" type="button"
-        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
+        class="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2527,7 +2530,7 @@
           class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition resize-none"></textarea>
       </div>
       <div>
-        <label for="safety-context" class="block text-sm font-bold text-gray-700 mb-1">Additional context <span class="text-gray-400 font-normal">(optional)</span></label>
+        <label for="safety-context" class="block text-sm font-bold text-gray-700 mb-1">Additional context <span class="text-gray-500 font-normal">(optional)</span></label>
         <textarea id="safety-context" rows="2" placeholder="Why is this important? Is there a specific platform policy or incident driving this?"
           class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition resize-none"></textarea>
       </div>
@@ -2560,7 +2563,7 @@
           <p id="modal-platform-desc" class="text-sm text-gray-500 mt-0.5"></p>
         </div>
       </div>
-      <button onclick="document.getElementById('modal-connect').classList.add('hidden')" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" type="button" data-dialog-cancel aria-label="Close">
+      <button onclick="document.getElementById('modal-connect').classList.add('hidden')" class="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" type="button" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -2593,7 +2596,7 @@
               <input type="password" id="conn-token" required autocomplete="off" spellcheck="false"
                 class="w-full border border-gray-300 rounded-lg p-3 pr-12 text-sm font-mono focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none transition">
               <button type="button" id="btn-toggle-token" onclick="window._intToggleToken()"
-                class="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-gray-600 transition cursor-pointer" title="Show / hide token">
+                class="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-gray-500 hover:text-gray-600 transition cursor-pointer" title="Show / hide token">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
               </button>
             </div>
@@ -2629,7 +2632,7 @@
           <p id="preconnect-intro" class="text-sm text-gray-500 mt-0.5"></p>
         </div>
       </div>
-      <button onclick="document.getElementById('modal-preconnect').classList.add('hidden')" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" type="button" data-dialog-cancel aria-label="Close">
+      <button onclick="document.getElementById('modal-preconnect').classList.add('hidden')" class="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" type="button" data-dialog-cancel aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>

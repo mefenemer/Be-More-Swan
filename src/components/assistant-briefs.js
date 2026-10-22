@@ -147,7 +147,7 @@
   function chip(b) {
     const base = 'inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border';
     const waiting = b.options.filter((o) => o.status === 'proposed').length;
-    if (b.status === 'generating') return `<span class="${base} bg-indigo-50 text-indigo-700 border-indigo-200">Making options</span>`;
+    if (b.status === 'generating') return `<span class="${base} bg-emerald-50 text-emerald-800 border-emerald-200">Making options</span>`;
     if (b.status === 'cancelled') return `<span class="${base} bg-gray-50 text-gray-500 border-gray-200">Cancelled</span>`;
     if (b.status === 'approved') return `<span class="${base} bg-emerald-50 text-emerald-800 border-emerald-200">Approved</span>`;
     if (waiting) return `<span class="${base} bg-amber-50 text-amber-800 border-amber-200">Needs you</span>`;
@@ -226,7 +226,7 @@
       ? `<video src="${esc(o.url)}" controls muted playsinline preload="metadata" class="w-full h-full object-cover"></video>`
       : o.url
       ? `<img src="${esc(o.url)}" alt="${esc(sourceLabel(o.source))} option" loading="lazy" class="w-full h-full object-cover">`
-      : '<div class="w-full h-full flex items-center justify-center text-xs text-gray-400">No preview</div>';
+      : '<div class="w-full h-full flex items-center justify-center text-xs text-gray-500">No preview</div>';
     const credit = (o.source === 'stock' || o.source === 'stock_video') && o.attributionName
       ? `<p class="text-[11px] text-gray-500 mt-1 truncate">Photo by ${o.attributionUrl ? `<a href="${esc(o.attributionUrl)}" target="_blank" rel="noopener" class="underline">${esc(o.attributionName)}</a>` : esc(o.attributionName)} on Pexels</p>`
       : '';
@@ -239,21 +239,21 @@
           <p class="text-[11px] font-bold text-gray-700">What is wrong with it?</p>
           <div class="flex flex-wrap gap-1">
             ${V().rejectReasons.map((r) => `<button type="button" data-brief-reject-reason="${esc(r.key)}" data-option="${o.id}"
-              class="btn-secondary px-2 py-1 border text-[11px] font-bold rounded-lg">${esc(r.label)}</button>`).join('')}
+              class="btn-secondary min-h-[44px] sm:min-h-0 px-2 py-1 border text-xs font-bold rounded-lg">${esc(r.label)}</button>`).join('')}
           </div>
-          <input type="text" data-brief-reject-note="${o.id}" maxlength="300" placeholder="In your words (optional)"
-            class="w-full mt-1 px-2 py-1 border border-gray-200 rounded-lg text-xs">
-          <button type="button" data-brief-reject-cancel class="text-[11px] text-gray-500 underline">Keep it</button>
+          <input type="text" data-brief-reject-note="${o.id}" maxlength="300" placeholder="In your words (optional)" aria-label="Why not this one (optional)"
+            class="w-full mt-1 px-2 py-1 border border-gray-200 rounded-lg text-base sm:text-xs">
+          <button type="button" data-brief-reject-cancel class="btn-swan-link min-h-[44px] sm:min-h-0 px-1 py-1 text-xs font-bold">Keep it</button>
         </div>`;
     } else if (o.status === 'proposed' && b.status !== 'cancelled' && !progress(b).done) {
       actions = `
         <div class="flex gap-1 mt-2">
-          <button type="button" data-brief-approve="${o.id}" class="btn-primary flex-1 px-2 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">Use this</button>
-          <button type="button" data-brief-reject="${o.id}" class="btn-secondary flex-1 px-2 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">Not this</button>
+          <button type="button" data-brief-approve="${o.id}" class="btn-golive min-h-[44px] sm:min-h-0 flex-1 px-2 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">Use this</button>
+          <button type="button" data-brief-reject="${o.id}" class="btn-secondary min-h-[44px] sm:min-h-0 flex-1 px-2 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">Not this</button>
         </div>`;
     }
     return `
-      <div class="bg-white border ${o.status === 'approved' ? 'border-emerald-300' : 'border-gray-200'} rounded-xl p-2">
+      <div class="bg-white border ${o.status === 'approved' ? 'border-emerald-700' : 'border-gray-200'} rounded-xl p-2">
         <div class="relative rounded-lg overflow-hidden bg-gray-100" style="aspect-ratio:${esc(ratio)}">${img}</div>
         <p class="text-[11px] font-bold text-gray-600 mt-1">${esc(sourceLabel(o.source).replace(/s$/, ''))} · round ${o.round}</p>
         ${credit}
@@ -297,18 +297,18 @@
         </label>
         <p class="text-xs font-bold text-gray-600">…or choose from your library <span class="font-normal text-gray-500">(designs you imported from Canva are here too)</span></p>
         ${o.error ? `<p class="text-xs text-red-600">${esc(o.error)}</p>`
-          : !lib ? '<p class="text-xs text-gray-400">Loading your library…</p>'
+          : !lib ? '<p class="text-xs text-gray-500">Loading your library…</p>'
           : !lib.length ? '<p class="text-xs text-gray-500">Your library is empty.</p>'
           : `<div class="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-64 overflow-y-auto">${lib.map((a) => `
               <button type="button" data-brief-own-pick="${a.id}" title="${esc(a.name)}"
-                class="relative rounded-lg overflow-hidden border-2 ${o.selected.has(a.id) ? 'border-emerald-500' : 'border-transparent'} bg-gray-100" style="aspect-ratio:1 / 1">
+                class="relative rounded-lg overflow-hidden border-2 ${o.selected.has(a.id) ? 'border-emerald-700' : 'border-transparent'} bg-gray-100" style="aspect-ratio:1 / 1">
                 ${a.url ? (a.assetType === 'video'
                   ? `<video src="${esc(a.url)}" muted preload="metadata" class="w-full h-full object-cover"></video>`
                   : `<img src="${esc(a.url)}" alt="" loading="lazy" class="w-full h-full object-cover">`)
-                  : '<span class="text-[10px] text-gray-400">No preview</span>'}
+                  : '<span class="text-[10px] text-gray-500">No preview</span>'}
                 ${a.fromCanva ? '<span class="absolute bottom-0 left-0 right-0 bg-white/80 text-[10px] font-bold text-gray-700">Canva</span>' : ''}
               </button>`).join('')}</div>`}
-        ${o.status ? `<p class="text-xs font-semibold text-indigo-700">${esc(o.status)}</p>` : ''}
+        ${o.status ? `<p class="text-xs font-semibold text-gray-700">${esc(o.status)}</p>` : ''}
         <div class="flex gap-2">
           <button type="button" data-brief-own-add="${b.id}" ${o.selected.size && !o.busy ? '' : 'disabled'}
             class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Add ${o.selected.size || ''} to this brief</button>
@@ -353,13 +353,13 @@
           </div>
           ${chip(b)}
         </div>
-        ${b.scheduledPostId ? '<p class="text-xs text-indigo-700 mt-1">For a social post that found no picture — the one you approve goes onto that post if it still has none.</p>' : ''}
-        ${b.campaign ? `<p class="text-xs text-indigo-700 mt-1 break-words">For the campaign “${esc(b.campaign.objective)}” — the picture you approve joins that campaign's pictures.</p>` : ''}
+        ${b.scheduledPostId ? '<p class="text-xs text-gray-700 mt-1">For a social post that found no picture — the one you approve goes onto that post if it still has none.</p>' : ''}
+        ${b.campaign ? `<p class="text-xs text-gray-700 mt-1 break-words">For the campaign “${esc(b.campaign.objective)}” — the picture you approve joins that campaign's pictures.</p>` : ''}
         ${b.message ? `<p class="text-sm text-gray-700 mt-2 break-words">${esc(b.message)}</p>` : ''}
         ${b.headline ? `<p class="text-xs text-gray-600 mt-1">Words on the card: <span class="font-bold">${esc(b.headline)}</span></p>` : ''}
         <p class="text-xs text-gray-600 mt-2 flex items-center gap-2">${b.status === 'generating' && window.bmsSpinnerHtml ? window.bmsSpinnerHtml(14) : ''}<span>${esc(activityLine(b))}</span></p>
         ${b.generationNote ? `<p class="text-xs text-amber-700 mt-1">${esc(b.generationNote)}</p>` : ''}
-        ${note ? `<p class="text-xs mt-1 ${note.tone === 'error' ? 'text-red-600' : 'text-indigo-700'} font-semibold">${esc(note.text)}</p>` : ''}
+        ${note ? `<p class="text-xs mt-1 ${note.tone === 'error' ? 'text-red-600' : 'text-emerald-800'} font-semibold">${esc(note.text)}</p>` : ''}
         ${visible.length ? `<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">${visible.map((o) => optionTile(b, o)).join('')}</div>` : ''}
         ${rejected ? `<p class="text-[11px] text-gray-500 mt-2">${rejected} turned down — the next round reads why.</p>` : ''}
         ${artDirectionHtml(b)}
@@ -373,7 +373,7 @@
             <button type="button" data-brief-edit="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
               class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">Edit brief</button>
             <button type="button" data-brief-chat="${b.id}"
-              class="btn-assistant px-3 py-1.5 text-xs font-bold rounded-lg transition">Talk it through with ${esc(name())}</button>
+              class="btn-swan-link min-h-[44px] sm:min-h-0 px-1 py-1.5 text-xs font-bold">Talk it through with ${esc(name())}</button>
             <button type="button" data-brief-cancel="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
               class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">Cancel brief</button>
           </div>
@@ -393,7 +393,7 @@
       </label>`;
     const input = (name, val, ph, max) => `<input type="text" data-keep="brief-${name}" name="${name}" value="${esc(val || '')}" maxlength="${max}" placeholder="${esc(ph)}" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">`;
     return `
-      <form data-brief-form class="bg-white rounded-2xl border-2 border-indigo-200 shadow-sm p-5 mb-4 space-y-3">
+      <form data-brief-form class="bg-white rounded-2xl border-2 border-emerald-200 shadow-sm p-5 mb-4 space-y-3">
         <p class="text-sm font-bold text-gray-900">${editing ? 'Edit brief' : 'New brief'}</p>
         ${field('Name', input('title', v.title, 'e.g. Spring launch — hero image', 120))}
         ${field('What should it show, or say?', `<textarea data-keep="brief-message" name="message" maxlength="1000" rows="3" placeholder="e.g. A small team celebrating in a bright studio — the feeling of finally having time back" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">${esc(v.message || '')}</textarea>`)}
@@ -415,7 +415,7 @@
           <div class="mt-1 space-y-1">
             ${V().sources.map((s) => {
               const off = sourceBlocked(s.key);
-              return `<label class="flex items-start gap-2 text-sm ${off ? 'text-gray-400' : 'text-gray-700'}">
+              return `<label class="flex items-start gap-2 text-sm ${off ? 'text-gray-500' : 'text-gray-700'}">
                 <input type="checkbox" data-keep="brief-src-${esc(s.key)}" name="source" value="${esc(s.key)}" ${v.sources.includes(s.key) && !off ? 'checked' : ''} ${off ? 'disabled' : ''} class="mt-1">
                 <span>${esc(s.label)} <span class="text-xs text-gray-500">— ${esc(off || s.cost)}</span></span>
               </label>`;
@@ -473,7 +473,7 @@
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center">
         <p class="text-sm font-bold text-gray-700">No briefs yet</p>
-        <p class="text-xs text-gray-500 mt-2">Press "New brief", or tell ${esc(state.assistantName || 'your Brand Designer')} in chat what you need — "a square image for our spring offer, warm and bright". Either way, nothing is made until you press "Make options", and nothing is used until you approve it.</p>
+        <p class="text-xs text-gray-500 mt-2">Press "New brief", or tell ${esc(state.assistantName || 'your Brand Designer')} in chat what you need — "a square image for our spring offer, warm and bright". Either way, nothing is made until you press "Ask ${esc(name())} for options" on the brief, and nothing is used until you press "Use this".</p>
       </div>`;
   }
 
@@ -490,7 +490,7 @@
       return;
     }
     if (!state.loaded) {
-      host.innerHTML = '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center"><p class="text-sm text-gray-400">Loading briefs…</p></div>';
+      host.innerHTML = '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center"><p class="text-sm text-gray-500">Loading briefs…</p></div>';
       return;
     }
     // The poll re-renders every few seconds while a round runs — carry typed values across it.

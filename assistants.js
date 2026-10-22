@@ -224,7 +224,7 @@ window._buildAssistantCardGoals = function (assistant) {
             <div class="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
                 <div class="h-full ${meta.dot} transition-all" style="width:${pct}%"></div>
             </div>
-            <p class="text-[11px] text-gray-400 mt-1">${figures}</p>${_goalNextStep(h, latest, target, goalsTab)}`;
+            <p class="text-[11px] text-gray-500 mt-1">${figures}</p>${_goalNextStep(h, latest, target, goalsTab)}`;
     }
 
     // ── Performance counts (coloured) ────────────────────────────────────────
@@ -237,13 +237,13 @@ window._buildAssistantCardGoals = function (assistant) {
     ].filter(Boolean).join('');
     const pillsHtml = (total > 1 && gs.assessed && pills) ? `
         <div class="flex items-center gap-3 flex-wrap text-[11px] font-semibold mt-2">
-            <span class="text-gray-400">${plural(total, 'goal')}:</span>${pills}
+            <span class="text-gray-500">${plural(total, 'goal')}:</span>${pills}
         </div>` : '';
 
     // Goals sit at 'pending' until the run-rate engine has enough observations
     // (RUN_RATE_THRESHOLDS.minObservationDays). Saying so beats "0 on track | 0 off track" (issue #135).
     const pendingHtml = (!gs.assessed && gs.pending > 0) ? `
-        <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 mt-2">
+        <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-500 mt-2">
             <span class="w-1.5 h-1.5 rounded-full bg-gray-300"></span>Awaiting first progress check-in
         </div>` : '';
 
@@ -256,7 +256,7 @@ window._buildAssistantCardGoals = function (assistant) {
     ].filter(Boolean).join(' · ');
     const attentionHtml = attention ? `
         <button type="button" onclick="${goalsTab}"
-            class="flex items-center gap-1.5 text-[11px] font-medium text-gray-400 hover:text-gray-600 mt-2 cursor-pointer transition-colors text-left">
+            class="flex items-center gap-1.5 text-[11px] font-medium text-gray-500 hover:text-gray-600 mt-2 cursor-pointer transition-colors text-left">
             <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             ${attention}
         </button>` : '';
@@ -439,7 +439,7 @@ window.generateAssistantCardHTML = function(assistant) {
                 </span>
                 ${gbpSaved !== null
                     ? `<span class="text-xs font-bold text-green-700 bg-green-50 px-2 py-0.5 rounded-full">≈ £${gbpSaved.toLocaleString('en-GB', {minimumFractionDigits: 0, maximumFractionDigits: 0})} ROI</span>`
-                    : `<span class="text-xs text-gray-400 cursor-pointer hover:text-green-600 transition" onclick="event.stopPropagation(); loadView && loadView('account')" title="Set your hourly rate to see financial ROI">Set rate → ROI</span>`
+                    : `<span class="text-xs text-gray-500 cursor-pointer hover:text-green-600 transition" onclick="event.stopPropagation(); loadView && loadView('account')" title="Set your hourly rate to see financial ROI">Set rate → ROI</span>`
                 }
             </div>
         </div>` : '';
@@ -757,7 +757,7 @@ function _addPostingTimeRow(value) {
     row.style.cssText = 'display:flex;align-items:center;gap:0.5rem';
     row.innerHTML = `
         <input type="time" value="${_normaliseTime(value) || '09:00'}" class="posting-time-input border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
-        <button type="button" class="posting-time-remove text-gray-400 hover:text-red-500 transition cursor-pointer" title="Remove time" aria-label="Remove time">✕</button>`;
+        <button type="button" class="posting-time-remove text-gray-500 hover:text-red-500 transition cursor-pointer" title="Remove time" aria-label="Remove time">✕</button>`;
     row.querySelector('.posting-time-input').addEventListener('input', () => window._postingScheduleChanged && window._postingScheduleChanged());
     row.querySelector('.posting-time-remove').addEventListener('click', () => {
         row.remove();
@@ -1179,7 +1179,7 @@ let _detailRqRenderSeq = 0;
 function _detailRqShowLoading(container) {
     const kids = [...container.children];
     if (!kids.length || container.querySelector('[role="alert"]')) {
-        container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>';
+        container.innerHTML = '<p class="text-sm text-gray-500 py-10 text-center">Loading…</p>';
         return;
     }
     kids.forEach((k) => { k.style.opacity = '0.5'; k.inert = true; k.setAttribute('aria-busy', 'true'); });
@@ -1518,7 +1518,7 @@ function _detailRqMoreButton(statusKey) {
         class="btn-secondary px-4 py-2 text-xs font-bold rounded-lg border transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
         Show more
       </button>
-      <p class="text-[11px] text-gray-400 mt-1.5">Showing ${shown} of ${total}</p>
+      <p class="text-[11px] text-gray-500 mt-1.5">Showing ${shown} of ${total}</p>
     </div>`;
 }
 
@@ -1599,7 +1599,7 @@ function _detailRqGroupSection(g, items, render, statusKey, total) {
     const body = items.length
         ? `<div class="divide-y divide-gray-100">${items.map(render).join('')}</div>`
         : (statusKey === 'review' && g.emptyReviewHtml) ? g.emptyReviewHtml(emptyMsg)
-        : `<p class="text-sm text-gray-400 py-6 text-center">${emptyMsg}</p>`;
+        : `<p class="text-sm text-gray-500 py-6 text-center">${emptyMsg}</p>`;
     return `<section class="border-b border-gray-100 last:border-0">
       <button onclick="_detailRqToggleGroup('${g.key}')" class="w-full flex items-center gap-2 py-3 text-left cursor-pointer group">
         <svg class="detail-rq-group-chevron-${g.key} w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
@@ -1932,9 +1932,9 @@ function _rqSignatureNote() {
     const sig = _rqReadiness && _rqReadiness.signature;
     if (!sig) return '';
     return `<div class="mt-2 rounded-lg border border-dashed border-gray-200 px-2.5 py-2">
-        <p class="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-0.5">Added when it sends — your signature</p>
+        <p class="text-[10px] font-bold uppercase tracking-wide text-gray-500 mb-0.5">Added when it sends — your signature</p>
         <pre class="text-xs text-gray-500 whitespace-pre-wrap font-sans">${_rqEsc(sig)}</pre>
-        <p class="text-[10px] text-gray-400 mt-1">If the message above already signs off, remove that line so it is not signed twice.</p>
+        <p class="text-[10px] text-gray-500 mt-1">If the message above already signs off, remove that line so it is not signed twice.</p>
       </div>`;
 }
 
@@ -1976,7 +1976,7 @@ function _rqShowEditReasonStrip() {
       <p class="text-[11px] text-gray-500 mb-2">Optional. Your edit is already saved — this teaches the drafter for next time.</p>
       <div class="flex flex-wrap gap-1.5">
         ${RC.editReasons.map((r) => `<button type="button" class="${chip}" data-edit-reason="${_rqEsc(r)}">${_rqEsc(RC.editReasonLabel(r))}</button>`).join('')}
-        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-400 hover:text-gray-600 transition cursor-pointer" data-edit-reason-skip>Skip</button>
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-600 transition cursor-pointer" data-edit-reason-skip>Skip</button>
       </div>
       <p class="hidden text-[11px] font-semibold mt-1.5" data-edit-reason-status></p>`;
 
@@ -2125,7 +2125,7 @@ function _rqRejectCampaignDecision(card, record) {
       <p class="text-[11px] text-gray-500 mb-2">This is what stops it proposing the same thing again, so it is not optional.</p>
       <div class="flex flex-wrap gap-1.5">
         ${C.rejectReasons.map((r) => `<button type="button" class="${chip}" data-cd-reason="${_rqEsc(r)}">${_rqEsc(C.rejectReasonLabel(r))}</button>`).join('')}
-        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-400 hover:text-gray-600 transition cursor-pointer" data-cd-cancel>Cancel</button>
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-600 transition cursor-pointer" data-cd-cancel>Cancel</button>
       </div>
       <p class="hidden text-[11px] font-semibold mt-1.5" data-cd-status></p>`;
 
@@ -2198,7 +2198,7 @@ function _rqShowRejectReasonStrip() {
       <p class="text-[11px] text-gray-500 mb-2">Optional. It’s already rejected — this records what the search got wrong.</p>
       <div class="flex flex-wrap gap-1.5">
         ${RC.leadRejectReasons.map((r) => `<button type="button" class="${chip}" data-reject-reason="${_rqEsc(r)}">${_rqEsc(RC.leadRejectReasonLabel(r))}</button>`).join('')}
-        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-400 hover:text-gray-600 transition cursor-pointer" data-reject-reason-skip>Skip</button>
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-600 transition cursor-pointer" data-reject-reason-skip>Skip</button>
       </div>
       <p class="hidden text-[11px] font-semibold mt-1.5" data-reject-reason-status></p>`;
 
@@ -2254,7 +2254,7 @@ function _rqOfferDomainExclusion(strip, domain, campaignId) {
       <p class="text-[11px] text-gray-500 mb-2">Adds the domain to this search’s exclusions. You can remove it later by editing the search.</p>
       <div class="flex flex-wrap gap-1.5">
         <button type="button" class="btn-primary px-2 py-1 text-[11px] font-bold rounded-lg transition cursor-pointer" data-exclude-domain>Yes, exclude it</button>
-        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-400 hover:text-gray-600 transition cursor-pointer" data-exclude-skip>No thanks</button>
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-600 transition cursor-pointer" data-exclude-skip>No thanks</button>
       </div>
       <p class="hidden text-[11px] font-semibold mt-1.5" data-exclude-status></p>`;
 
@@ -2283,10 +2283,13 @@ function _rqOfferDomainExclusion(strip, domain, campaignId) {
 }
 
 function _rqRecordActions(r, statusKey) {
-    const secondary = 'btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
-    const primary = 'btn-golive px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer';
+    // min-h-[44px] below sm: "Approve & send email" emails a stranger, and a ~28px target invites a
+    // mis-tap on a phone (review, 2026-10-22). Same rule as the blog and email cards.
+    const tap = 'min-h-[44px] sm:min-h-0';
+    const secondary = `btn-secondary ${tap} px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer`;
+    const primary = `btn-golive ${tap} px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer`;
     const btn = (label, act, cls) => `<button type="button" onclick="_detailRqRecordAct(this,'${act}')" class="${cls}">${label}</button>`;
-    const reject = `<button type="button" onclick="_detailRqRecordAct(this,'reject')" class="btn-destructive px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer ml-auto">Reject</button>`;
+    const reject = `<button type="button" onclick="_detailRqRecordAct(this,'reject')" class="btn-destructive ${tap} px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer ml-auto">Reject</button>`;
     // Leads follow a simpler lifecycle than posts: Approve just accepts the lead (no "Approve &
     // Schedule"). The chase reminder (a scheduled_for that surfaces on the Calendar) is set later,
     // once the first outreach has gone out — via "Mark outreach sent" in the Approved column.
@@ -2819,12 +2822,12 @@ async function _detailRqRenderRecords(statusKey) {
     // Names the columns as THIS role labels them — a role may have renamed either of them
     // (reviewQueue.columnLabels), and copy pointing at a column the user cannot see is the same
     // dead end as naming a tab that does not exist.
-    if (approval === null) { container.innerHTML = `<p class="text-sm text-gray-400 py-10 text-center">These records don’t have a published state — see the ${_rqEsc(_rqColumnLabel('approved'))} and ${_rqEsc(_rqColumnLabel('scheduled'))} columns.</p>`; return; }
+    if (approval === null) { container.innerHTML = `<p class="text-sm text-gray-500 py-10 text-center">These records don’t have a published state — see the ${_rqEsc(_rqColumnLabel('approved'))} and ${_rqEsc(_rqColumnLabel('scheduled'))} columns.</p>`; return; }
     // ⚠️ A column this queue has no approval state for — 'attention', which is a failed PUBLISH and
     // belongs to posts. Its button is hidden for records queues, so this is only reachable by a
     // deep link, and it must not fall through: `approvalStatus=undefined` is not a valid filter, so
     // the server would answer with every record of this type in no particular state.
-    if (approval === undefined) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Nothing to show here — these records are approved or rejected, never published, so they have no failures to fix.</p>'; return; }
+    if (approval === undefined) { container.innerHTML = '<p class="text-sm text-gray-500 py-10 text-center">Nothing to show here — these records are approved or rejected, never published, so they have no failures to fix.</p>'; return; }
 
     // Leads awaiting review are filtered to the ones that actually have an email to sign off —
     // a resolvable recipient AND a drafted body. Everything else stays in the Leads tab for
@@ -2990,7 +2993,7 @@ function _detailRqPaintRecords(statusKey, opts) {
     const readyHtml = _rqOutreachReadinessHtml(statusKey);
 
     if (!records.length) {
-        container.innerHTML = readyHtml + noticeHtml + `<p class="text-sm text-gray-400 py-10 text-center">${emptyMsg}</p>`;
+        container.innerHTML = readyHtml + noticeHtml + `<p class="text-sm text-gray-500 py-10 text-center">${emptyMsg}</p>`;
         return;
     }
 
@@ -3798,10 +3801,10 @@ function _detailRqBlogCard(p, statusKey) {
       <div class="min-w-0">
         <p class="text-sm font-bold text-gray-900 truncate">${_rqEsc(p.title || '(untitled draft)')}</p>
         ${excerpt ? `<p class="text-xs text-gray-600 mt-1 line-clamp-2">${_rqEsc(excerpt)}</p>` : ''}
-        ${byline ? `<p class="text-[11px] text-gray-400 mt-1">${_rqEsc(byline)}</p>` : ''}
+        ${byline ? `<p class="text-[11px] text-gray-500 mt-1">${_rqEsc(byline)}</p>` : ''}
         <div class="flex items-center gap-2 mt-2">
           <span class="text-[11px] font-bold px-2 py-0.5 rounded-full border ${p.status === 'failed' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-gray-100 text-gray-600 border-gray-200'}">${_rqEsc(_RQ_BLOG_STATUS_LABEL[p.status] || p.status)}</span>
-          ${when ? `<span class="text-[11px] font-semibold text-gray-400">${_rqEsc(when)}</span>` : ''}
+          ${when ? `<span class="text-[11px] font-semibold text-gray-500">${_rqEsc(when)}</span>` : ''}
         </div>
         ${note ? `<p class="text-xs text-gray-600 mt-2">${_rqEsc(note)}</p>` : ''}
       </div>
@@ -3951,7 +3954,7 @@ function _detailRqNewsletterCard(issue, statusKey) {
         <p class="text-sm font-bold text-gray-900 truncate">${_rqEsc(issue.subject || '(untitled email)')}</p>
         <div class="flex items-center gap-2 mt-2">
           <span class="text-[11px] font-bold px-2 py-0.5 rounded-full border ${issue.status === 'failed' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-gray-100 text-gray-600 border-gray-200'}">${_rqEsc(_RQ_NEWSLETTER_STATUS_LABEL[issue.status] || issue.status)}</span>
-          ${when ? `<span class="text-[11px] font-semibold text-gray-400">${_rqEsc(when)}</span>` : ''}
+          ${when ? `<span class="text-[11px] font-semibold text-gray-500">${_rqEsc(when)}</span>` : ''}
         </div>
         ${issue.status === 'sent' ? _rqNewsletterResults(issue) : ''}
       </div>
@@ -3993,7 +3996,7 @@ async function _detailRqRenderNewsletter(statusKey) {
 
     _detailRqShowLoading(container);
     if (!aid) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
-    if (!wanted.length) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Emails don’t have this state.</p>'; return; }
+    if (!wanted.length) { container.innerHTML = '<p class="text-sm text-gray-500 py-10 text-center">Emails don’t have this state.</p>'; return; }
 
     // The WHOLE list, once: every column's count comes from it (like the Blog Writer's queue), so
     // an email visibly moves Review → Approved → Scheduled → Sent instead of only Review ever
@@ -4021,7 +4024,7 @@ async function _detailRqRenderNewsletter(statusKey) {
 
     container.innerHTML = waitingNote + (issues.length
         ? `<div class="divide-y divide-gray-100">${issues.map((i) => _detailRqNewsletterCard(i, statusKey)).join('')}</div>`
-        : `<p class="text-sm text-gray-400 py-10 text-center">${statusKey === 'review' ? 'No emails awaiting review.' : 'Nothing here yet.'}</p>`);
+        : `<p class="text-sm text-gray-500 py-10 text-center">${statusKey === 'review' ? 'No emails awaiting review.' : 'Nothing here yet.'}</p>`);
 }
 
 /** Every visible column's count from one list of the assistant's emails — see _detailRqPaintBlogCounts. */
@@ -4090,7 +4093,7 @@ async function _detailRqRenderBlog(statusKey) {
 
     _detailRqPaintBlogCounts(all);
 
-    if (!wanted.length) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Blog posts don’t have this state.</p>'; return; }
+    if (!wanted.length) { container.innerHTML = '<p class="text-sm text-gray-500 py-10 text-center">Blog posts don’t have this state.</p>'; return; }
     const posts = all.filter((p) => wanted.includes(p.status));
 
     container.innerHTML = posts.length
@@ -4100,7 +4103,7 @@ async function _detailRqRenderBlog(statusKey) {
                  <p class="text-sm text-gray-500">No blog drafts waiting for you. Nothing publishes until you approve it.</p>
                  <button type="button" onclick="window.openBlogStudio && window.openBlogStudio({ assistantId: window._currentAssistantId })" class="btn-primary min-h-[44px] sm:min-h-0 mt-3 px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer">Write Blog Post</button>
                </div>`
-            : '<p class="text-sm text-gray-400 py-10 text-center">Nothing here yet.</p>');
+            : '<p class="text-sm text-gray-500 py-10 text-center">Nothing here yet.</p>');
 }
 
 // Open in Blog Studio / schedule / unschedule a blog draft from the Review Queue.
@@ -4260,6 +4263,13 @@ function _briefOpenChrome() {
     const drawer = document.getElementById('brief-drawer');
     const backdrop = document.getElementById('brief-drawer-backdrop');
     if (!drawer) return;
+    // Remember what opened it — only on the closed→open edge, so moving between panels inside the
+    // drawer doesn't overwrite the header button with a card inside the drawer.
+    if (!document.body.classList.contains('brief-drawer-open')) {
+        const opener = document.activeElement;
+        window._briefDrawerOpener = opener && !drawer.contains(opener) ? opener : null;
+    }
+    drawer.inert = false;
     document.body.classList.add('brief-drawer-open');
     if (backdrop) { backdrop.style.display = 'block'; setTimeout(() => backdrop.style.opacity = '1', 10); }
     drawer.style.transform = 'translateX(0)';
@@ -4270,6 +4280,9 @@ function _briefOpenChrome() {
     const body = document.getElementById('brief-drawer-body');
     if (body) body.scrollTop = 0;
     _resizeBriefAutoGrow();
+    // Focus into the dialog, at its title. A caller that wants a specific field (the Autopilot
+    // card's "Change how often") focuses it afterwards, which wins.
+    document.getElementById('brief-drawer-title')?.focus({ preventScroll: true });
 }
 
 // Entry point from the header — opens the drawer to the profile "home" card index.
@@ -4384,7 +4397,7 @@ async function _initAssistantNotifPrefs() {
                 <p class="text-sm font-semibold text-gray-900">${cat.label}</p>
                 <span data-custom-badge class="${custom ? '' : 'hidden '}text-[10px] font-bold bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200">Custom for this assistant</span>
               </div>
-              <p class="text-xs text-gray-400 mt-0.5 leading-snug">${cat.description}</p>
+              <p class="text-xs text-gray-500 mt-0.5 leading-snug">${cat.description}</p>
               <div class="flex items-center gap-6 mt-2">
                 ${toggleHtml(cat, 'inApp', !!cat.inApp.value)}
                 ${toggleHtml(cat, 'email', !!cat.email.value)}
@@ -4496,6 +4509,12 @@ window._closeBriefDrawer = function() {
     if (backdrop) { backdrop.style.opacity = '0'; setTimeout(() => { backdrop.style.display = 'none'; }, 250); }
     document.body.classList.remove('brief-drawer-open');
     window.ScrollLock.release('brief-drawer');
+    if (drawer) drawer.inert = true;
+    // Back to whatever opened it, or the header's profile button when that has gone.
+    const opener = window._briefDrawerOpener;
+    window._briefDrawerOpener = null;
+    const target = opener && document.contains(opener) ? opener : document.getElementById('btn-assistant-profile');
+    target?.focus({ preventScroll: true });
 };
 
 // ── Operational status pill (Epic 1 AC1.1.2) ──────────────────────────────────
@@ -5161,8 +5180,8 @@ window._renderRunbookDirectives = async function(assistantId) {
     rules.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
     if (!rules.length) {
         host.innerHTML = viaChat
-            ? `<p class="text-sm text-gray-400 text-center py-6">No directives yet. When you reject a ${_RQ_FEEDBACK_NOUNS[(window._detailReviewQueue || {}).recordType]} and say what was wrong, it's saved here and your assistant follows it from then on.</p>`
-            : '<p class="text-sm text-gray-400 text-center py-6">No directives yet. Start a Tuning Session to teach your assistant its first rule.</p>';
+            ? `<p class="text-sm text-gray-500 text-center py-6">No directives yet. When you reject a ${_RQ_FEEDBACK_NOUNS[(window._detailReviewQueue || {}).recordType]} and say what was wrong, it's saved here and your assistant follows it from then on.</p>`
+            : '<p class="text-sm text-gray-500 text-center py-6">No directives yet. Start a Tuning Session to teach your assistant its first rule.</p>';
         return;
     }
     host.innerHTML = rules.map(r => {
@@ -5170,20 +5189,20 @@ window._renderRunbookDirectives = async function(assistantId) {
         const o = _RUNBOOK_ORIGIN[r.origin] || _RUNBOOK_ORIGIN.manual;
         const when = r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
         const cap = r.originPost && r.originPost.caption ? String(r.originPost.caption) : '';
-        const originPost = cap ? `<p class="text-xs text-gray-400 mt-1 italic">from post: “${_escapeHtml(cap.slice(0, 80))}${cap.length > 80 ? '…' : ''}”</p>` : '';
+        const originPost = cap ? `<p class="text-xs text-gray-500 mt-1 italic">from post: “${_escapeHtml(cap.slice(0, 80))}${cap.length > 80 ? '…' : ''}”</p>` : '';
         return `<div class="flex items-start gap-3 px-3 py-3 rounded-xl border border-gray-100 ${active ? '' : 'bg-gray-50'}" data-rule-id="${r.id}">
             <div class="flex-1 min-w-0">
-                <p class="text-sm ${active ? 'text-gray-800' : 'text-gray-400 line-through'}">${_escapeHtml(r.ruleText || '')}</p>
+                <p class="text-sm ${active ? 'text-gray-800' : 'text-gray-500 line-through'}">${_escapeHtml(r.ruleText || '')}</p>
                 <div class="flex items-center gap-2 mt-1">
                     <span class="px-2 py-0.5 rounded-full text-xs font-bold ${o[1]}">${o[0]}</span>
-                    <span class="text-xs text-gray-400">${when}</span>
+                    <span class="text-xs text-gray-500">${when}</span>
                 </div>
                 ${originPost}
             </div>
             <button type="button" aria-checked="${active}" onclick="window._toggleDirective(${r.id}, this)" class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors mt-0.5 ${active ? 'bg-emerald-500' : 'bg-gray-300'}">
                 <span class="${active ? 'translate-x-5' : 'translate-x-0'} pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition"></span>
             </button>
-            <button type="button" onclick="window._deleteDirective(${r.id})" class="text-gray-400 hover:text-red-500 transition mt-1" aria-label="Delete directive">
+            <button type="button" onclick="window._deleteDirective(${r.id})" class="text-gray-500 hover:text-red-500 transition mt-1" aria-label="Delete directive">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
             </button>
         </div>`;
@@ -5258,7 +5277,7 @@ window._renderLeadRejectionEvidence = async function(assistantId) {
             <span class="text-sm font-bold text-gray-900 w-10 shrink-0 tabular-nums">${Number(r.count)}×</span>
             <div class="flex-1 min-w-0">
                 <p class="text-sm text-gray-800">${_escapeHtml(RC.leadRejectReasonLabel(r.reason) || r.reason)}</p>
-                <div class="flex items-center gap-2 mt-1 flex-wrap">${applied}<span class="text-xs text-gray-400">last ${_escapeHtml(when)}</span></div>
+                <div class="flex items-center gap-2 mt-1 flex-wrap">${applied}<span class="text-xs text-gray-500">last ${_escapeHtml(when)}</span></div>
             </div>
         </div>`;
     }).join('');
@@ -5268,7 +5287,7 @@ window._renderLeadRejectionEvidence = async function(assistantId) {
     host.innerHTML = `
       <p class="text-sm text-gray-500 mb-3">${total} rejection${total === 1 ? '' : 's'} recorded, grouped by what you said was wrong with the targeting. These aren't rules you can switch on and off — they're the evidence behind a proposed change to who your searches look for, which you approve on the Strategy tab.</p>
       <div class="space-y-1.5">${rows}</div>
-      ${appliedTotal === 0 ? `<p class="text-xs text-gray-400 mt-3">None of these has changed a search yet. A reason has to come up repeatedly, across more than one search or more than one day, before a change is put to you. To act on one now, edit the search's excluded domains or negative keywords.</p>` : ''}`;
+      ${appliedTotal === 0 ? `<p class="text-xs text-gray-500 mt-3">None of these has changed a search yet. A reason has to come up repeatedly, across more than one search or more than one day, before a change is put to you. To act on one now, edit the search's excluded domains or negative keywords.</p>` : ''}`;
 };
 
 window._toggleDirective = async function(id, btn) {
@@ -5450,7 +5469,7 @@ window._openTuningPicker = async function() {
     if (!modal || !list) return;
     const isBlog = ((window._detailReviewQueue || {}).source === 'blog_posts');
     const noun = isBlog ? 'blog posts' : 'posts';
-    list.innerHTML = `<div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading recent ${noun}…</div>`;
+    list.innerHTML = `<div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Loading recent ${noun}…</div>`;
     modal.classList.remove('hidden');
     // Normalised to one row shape so the render below is not written twice: `label` is the small
     // grey line (platform / publish date), `body` the output itself.
@@ -5485,13 +5504,13 @@ window._openTuningPicker = async function() {
         }
     } catch { /* non-critical */ }
     if (!rows.length) {
-        list.innerHTML = `<p class="text-sm text-gray-400 text-center py-6">No recent ${noun} to tune. They appear here once your assistant has drafted something and it is waiting for your review.</p>`;
+        list.innerHTML = `<p class="text-sm text-gray-500 text-center py-6">No recent ${noun} to tune. They appear here once your assistant has drafted something and it is waiting for your review.</p>`;
         return;
     }
     list.innerHTML = rows.slice(0, 15).map(r => `
         <button type="button" onclick="document.getElementById('modal-tuning-picker').classList.add('hidden'); window._openTuningSession({ ${r.arg}:${r.id} })"
             class="btn-secondary w-full text-left px-4 py-3 rounded-xl border transition cursor-pointer">
-            <p class="text-xs text-gray-400 mb-0.5">${_escapeHtml(r.label)}</p>
+            <p class="text-xs text-gray-500 mb-0.5">${_escapeHtml(r.label)}</p>
             <p class="text-sm text-gray-800">${_escapeHtml(r.body.slice(0, 120))}</p>
         </button>`).join('');
 };
@@ -5621,7 +5640,7 @@ function _renderOnboardingSummary(data) {
             <p class="text-sm text-gray-500 mt-1">A read-only summary of everything you told us when setting up this assistant. Expand to review — you can edit any of it in the tabs below.</p>
           </div>
           <div class="flex items-center gap-3 shrink-0">
-            <span id="onboarding-summary-count" data-base-count="${fieldCount}" class="text-xs font-semibold text-gray-400">${fieldCount} item${fieldCount === 1 ? '' : 's'}</span>
+            <span id="onboarding-summary-count" data-base-count="${fieldCount}" class="text-xs font-semibold text-gray-500">${fieldCount} item${fieldCount === 1 ? '' : 's'}</span>
             <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
           </div>
         </summary>
@@ -5629,13 +5648,13 @@ function _renderOnboardingSummary(data) {
           <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4 mt-4">
             ${rows.map(([label, value]) => `
               <div>
-                <dt class="text-xs font-bold text-gray-400 uppercase tracking-wide">${esc(label)}</dt>
+                <dt class="text-xs font-bold text-gray-500 uppercase tracking-wide">${esc(label)}</dt>
                 <dd class="text-sm text-gray-900 mt-1 whitespace-pre-line">${esc(value)}</dd>
               </div>`).join('')}
           </dl>
           ${rules.length ? `
             <div class="mt-6 pt-5 border-t border-gray-100">
-              <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Knowledge &amp; Guardrails</p>
+              <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Knowledge &amp; Guardrails</p>
               <ul class="list-disc pl-5 space-y-1 text-sm text-gray-900">
                 ${rules.map(r => `<li class="whitespace-pre-line">${esc(r)}</li>`).join('')}
               </ul>
@@ -5671,7 +5690,7 @@ function _renderOnboardingConnections() {
 
     block.innerHTML = `
         <div class="mt-6 pt-5 border-t border-gray-100">
-          <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Connections</p>
+          <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Connections</p>
           <p class="text-xs text-gray-500 mb-2">External tools this assistant can use. Manage them in the Connections tab below.</p>
           <ul class="divide-y divide-gray-100">${items}</ul>
           ${connectedLabels.length ? `<p class="text-xs text-gray-500 mt-3">Currently connected: <span class="font-semibold text-gray-700">${connectedLabels.map(esc).join(', ')}</span></p>` : ''}
@@ -5785,7 +5804,7 @@ async function _renderOutreachEmailConnect(data) {
     const altKey = _OUTREACH_OTHER[provider];
     const ALT = _OUTREACH_MAILBOXES[altKey];
 
-    card.innerHTML = `<div class="bg-white border border-gray-200 rounded-2xl p-5 text-sm text-gray-400">Checking your ${esc(M.brand)} connection…</div>`;
+    card.innerHTML = `<div class="bg-white border border-gray-200 rounded-2xl p-5 text-sm text-gray-500">Checking your ${esc(M.brand)} connection…</div>`;
 
     // One status call covers BOTH providers — the endpoint returns every provider — so the card
     // can tell "nothing connected" from "the other one is connected and the answer is stale".
@@ -6141,7 +6160,10 @@ function _applyDashboardRegistry(data) {
     setText('detail-rq-col-label-posted', 'Posted');
     const setupBtn = document.getElementById('detail-rq-setup-btn');
     if (setupBtn) setupBtn.style.display = rqIsBlog ? '' : 'none';
-    document.querySelector('#maintab-review-queue [role="tablist"]')?.setAttribute('aria-label', rqIsBlog ? 'Blogs by stage' : 'Posts by stage');
+    // Named after the role's own tab ("Emails", "Outreach"…) — every non-blog role was announced
+    // as "Posts by stage" (review, 2026-10-22).
+    document.querySelector('#maintab-review-queue [role="tablist"]')?.setAttribute('aria-label',
+        `${(window._detailReviewQueue || {}).label || (rqIsBlog ? 'Blogs' : 'Posts')} by stage`);
     if (rqIsBlog) {
         setText('detail-rq-primary-label', 'Write Blog Post');
         setText('detail-rq-col-label-posted', 'Published');
@@ -6276,7 +6298,12 @@ function _applyDashboardRegistry(data) {
         if (paLabel) paLabel.textContent = pa.label || 'Assign New Task';
         if (paBtn) {
             if (pa.kind === 'chat') {
-                paBtn.onclick = () => { window.location.href = `assistant-chat.html?assistantId=${data.id}`; };
+                // The same pop-up as the header Chat button — this was a full page load, so the two
+                // doors into one conversation behaved differently (review, 2026-10-22).
+                paBtn.onclick = () => {
+                    if (typeof window.openAssistantChat === 'function') window.openAssistantChat({ assistantId: data.id });
+                    else window.location.href = `assistant-chat.html?assistantId=${data.id}`;
+                };
             } else {
                 // Pass the id the same way the blog branch above does, rather than leaning on the
                 // _currentAssistantId global — this handler closes over the assistant it was built
@@ -6739,7 +6766,7 @@ function _renderDisclosureHelp(data) {
             <div class="min-w-0 flex-1">
                 <p class="text-xs font-bold text-gray-700">${label}</p>
                 <p class="text-xs text-gray-600 italic">&ldquo;${text}&rdquo;</p>
-                <p class="text-[11px] text-gray-400 mt-0.5">${note}</p>
+                <p class="text-[11px] text-gray-500 mt-0.5">${note}</p>
             </div>
             <button type="button" role="switch" aria-checked="false" data-disclosure-example="${_escapeHtml(text)}"
                 title="Include this disclosure"
@@ -6951,7 +6978,7 @@ function _hydrateAutoPublish(data) {
           <label class="flex items-center justify-between gap-4 p-3 border border-gray-200 rounded-lg ${inert ? '' : 'cursor-pointer hover:bg-gray-50'}">
             <span>
               <span class="block text-sm font-bold text-gray-900">${p.label}</span>
-              <span class="block text-xs ${inert ? 'text-gray-400' : 'text-gray-500'} mt-0.5">${subtitle}</span>
+              <span class="block text-xs ${inert ? 'text-gray-500' : 'text-gray-500'} mt-0.5">${subtitle}</span>
             </span>
             <span class="relative inline-flex shrink-0">
               <input type="checkbox" data-autopublish-platform="${p.value}" class="sr-only peer" ${on ? 'checked' : ''} ${inert ? 'disabled' : ''}>
@@ -7090,7 +7117,7 @@ function _vbPaint() {
     const sel = (key, opts) => `<select data-vb-select="${key}" class="w-full border border-gray-300 rounded-lg p-2 text-sm bg-white">${opts.map(([v, l]) => `<option value="${v}" ${_vb[key] === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
     host.innerHTML = `
       <div>
-        <p class="text-sm font-bold text-gray-700 mb-1">Personality <span class="font-normal text-gray-400">— pick up to two</span></p>
+        <p class="text-sm font-bold text-gray-700 mb-1">Personality <span class="font-normal text-gray-500">— pick up to two</span></p>
         <div class="flex flex-wrap gap-2">${window.VoiceBuilder.personalities.map((p) => `<button type="button" data-vb-personality="${esc(p.key)}" class="${chip(_vb.personalities.includes(p.key))}">${esc(p.label)}</button>`).join('')}</div>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
@@ -7108,7 +7135,7 @@ function _vbPaint() {
       <div>
         <p class="text-sm font-bold text-gray-700 mb-1">Never say</p>
         <p class="text-xs text-gray-500 mb-2">Words and phrases your assistant must never use. Add your own, or pick from the suggestions below.</p>
-        <div class="flex flex-wrap gap-1.5 mb-2">${_vb.neverSay.map((p, i) => `<span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-full bg-gray-100 border border-gray-200 text-gray-700">${esc(p)}<button type="button" data-vb-remove-never="${i}" aria-label="Remove ${esc(p)}" class="w-4 h-4 inline-flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 cursor-pointer">&times;</button></span>`).join('') || '<span class="text-xs text-gray-400">Nothing banned yet.</span>'}</div>
+        <div class="flex flex-wrap gap-1.5 mb-2">${_vb.neverSay.map((p, i) => `<span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-full bg-gray-100 border border-gray-200 text-gray-700">${esc(p)}<button type="button" data-vb-remove-never="${i}" aria-label="Remove ${esc(p)}" class="w-4 h-4 inline-flex items-center justify-center rounded-full text-gray-500 hover:text-gray-700 cursor-pointer">&times;</button></span>`).join('') || '<span class="text-xs text-gray-500">Nothing banned yet.</span>'}</div>
         <div class="flex gap-2"><input type="text" data-vb-never-input maxlength="60" placeholder="Add a word or phrase, then Enter" class="flex-1 border border-gray-300 rounded-lg p-2 text-sm">
           <button type="button" data-vb-add-never class="btn-secondary px-3 py-2 text-xs font-bold border rounded-lg cursor-pointer">Add</button></div>
         ${(() => {
@@ -7119,7 +7146,7 @@ function _vbPaint() {
         })()}
       </div>
       <div>
-        <p class="text-sm font-bold text-gray-700 mb-1">Write like this <span class="font-normal text-gray-400">— optional style reference</span></p>
+        <p class="text-sm font-bold text-gray-700 mb-1">Write like this <span class="font-normal text-gray-500">— optional style reference</span></p>
         <textarea data-vb-sample rows="3" maxlength="1500" placeholder="Paste something you wrote yourself — an email, a post, your About page. Your assistant copies its rhythm and word choice, not its words." class="w-full border border-gray-300 rounded-lg p-3 text-sm resize-y">${esc(_vb.sample || '')}</textarea>
       </div>
       <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
@@ -7181,7 +7208,7 @@ document.addEventListener('click', async (e) => {
             if (!res.ok) throw new Error(d.error || 'Could not write a preview.');
             if (out) out.innerHTML = (d.samples || []).map((s) => `<div class="bg-white border border-gray-200 rounded-lg p-3" data-vb-sample-card>
                 <div class="flex items-center justify-between gap-2 mb-1">
-                  <p class="text-[11px] font-bold uppercase tracking-wide text-gray-400">${_escapeHtml(s.shape || 'Sample')}</p>
+                  <p class="text-[11px] font-bold uppercase tracking-wide text-gray-500">${_escapeHtml(s.shape || 'Sample')}</p>
                   ${'speechSynthesis' in window ? '<button type="button" data-vb-say class="link text-xs font-semibold">🔊 Read aloud</button>' : ''}
                 </div>
                 <p class="text-sm text-gray-800 whitespace-pre-line" data-vb-sample-text>${_escapeHtml(s.text)}</p>
@@ -7239,7 +7266,7 @@ function _buildStrictRuleRow(text) {
     row.innerHTML = `
         <textarea rows="1" placeholder="e.g. Always use British English spelling"
             class="sr-input flex-1 min-w-0 w-full px-3 py-2 text-sm rounded-lg border border-transparent hover:border-gray-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none bg-transparent focus:bg-white resize-none overflow-hidden">${_escapeHtml(text || '')}</textarea>
-        <button type="button" class="sr-del text-gray-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 mt-1.5" aria-label="Delete rule" title="Delete rule">
+        <button type="button" class="sr-del text-gray-500 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 mt-1.5" aria-label="Delete rule" title="Delete rule">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
         </button>`;
     return row;
@@ -8153,7 +8180,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
             btn.className = `activity-tf-btn px-2.5 py-1 text-xs font-bold rounded-md transition ${active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
             btn.setAttribute('aria-pressed', String(active));
         });
-        activityList.innerHTML = '<div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading activity…</div>';
+        activityList.innerHTML = '<div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Loading activity…</div>';
         try {
             const res = await fetch(`${_activityUrl}?id=${assistantId}&timeframe=${timeframe}`);
             if (res.ok) {
@@ -8241,13 +8268,13 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                                     <p class="text-sm text-gray-700">${_escapeHtml(log.description || log.actionType)}</p>
                                     ${statusTag(log.status)}
                                 </div>
-                                <p class="text-xs text-gray-400 mt-0.5">${log.createdAt ? new Date(log.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</p>
+                                <p class="text-xs text-gray-500 mt-0.5">${log.createdAt ? new Date(log.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</p>
                                 ${tuneBtn}
                                 ${failureHtml}
                             </div>
                         </div>`;
                     };
-                    const sectionLabel = (txt) => `<p class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1.5">${txt}</p>`;
+                    const sectionLabel = (txt) => `<p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5">${txt}</p>`;
                     // Pin Failed + Needs-Input into a "Needs attention" group above the chronological list.
                     const attention = logs.filter(l => l.status === 'failed' || l.status === 'needs_input');
                     const rest = logs.filter(l => l.status !== 'failed' && l.status !== 'needs_input');
@@ -8257,7 +8284,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                         if (attention.length) html += '<div class="h-4"></div>';
                         html += sectionLabel('Recent') + rest.map(l => rowHtml(l, false)).join('');
                     }
-                    activityList.innerHTML = html || '<p class="text-sm text-gray-400 text-center py-3">No activity yet.</p>';
+                    activityList.innerHTML = html || '<p class="text-sm text-gray-500 text-center py-3">No activity yet.</p>';
                     // Arrived from a "couldn't write a post" notification: bring that row into view, once.
                     if (window._activityFocusJobId) {
                         const row = activityList.querySelector(`[data-gen-job="${window._activityFocusJobId}"]`);
@@ -8265,26 +8292,42 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                         if (row) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
                     }
                 } else {
-                    activityList.innerHTML = '<p class="text-sm text-gray-400 text-center py-3">No activity yet — your assistant is ready to get to work.</p>';
+                    // Name the range: "No activity yet" over a one-day window read as an idle assistant
+                    // on roles that work weekly (review, 2026-10-22).
+                    activityList.innerHTML = timeframe === 'all'
+                        ? '<p class="text-sm text-gray-500 text-center py-3">No activity yet — your assistant is ready to get to work.</p>'
+                        : `<p class="text-sm text-gray-500 text-center py-3">Nothing in the ${_ACTIVITY_TF_WORDS[timeframe] || 'selected period'}. Pick a longer range above to see earlier work.</p>`;
                 }
             } else {
-                activityList.innerHTML = '<p class="text-sm text-gray-400 text-center py-3">No activity yet.</p>';
+                _activityLoadFailed();
             }
         } catch {
-            activityList.innerHTML = '<p class="text-sm text-gray-400 text-center py-3">No activity yet.</p>';
+            _activityLoadFailed();
         }
         }; // end loadActivity
+        // A failed read is not an empty history — it used to say "No activity yet" either way.
+        const _activityLoadFailed = () => {
+            activityList.innerHTML = `<div class="text-center py-3">
+                <p class="text-sm text-gray-700">Couldn’t load activity just now.</p>
+                <button type="button" data-activity-retry class="btn-secondary min-h-[44px] sm:min-h-0 mt-2 px-3 py-1.5 border text-xs font-bold rounded-lg transition">Try again</button>
+            </div>`;
+            activityList.querySelector('[data-activity-retry]')?.addEventListener('click', () => loadActivity(_activityTf));
+        };
 
-        let _activityTf = '1d';
+        // Only a social-posting role fans one post out to several platforms; elsewhere the
+        // control would be a switch that changes nothing. ⚠️ `__defaulted` is the registry's
+        // placeholder queue for roles with NONE (the Brand Designer) — it reads kind 'posts' but is
+        // not one, and the switch showed on its Activity tab.
+        const _rq = _activityCfg.reviewQueue || {};
+        const _crossPosts = _activityCfg.activitySource !== 'lead' && _rq.kind === 'posts' && !_rq.source && !_rq.__defaulted;
+        // A social assistant posts daily, so a day is a full screen. Every other role works weekly or
+        // less — one day was usually empty — so they open on a month.
+        let _activityTf = _crossPosts ? '1d' : '30d';
         document.querySelectorAll('.activity-tf-btn').forEach(btn => {
             btn.addEventListener('click', () => { _activityTf = btn.dataset.tf; loadActivity(_activityTf); });
         });
         // "Combine platforms" (crosspost-view.js) — the server merges, so a change is a re-fetch of
         // the timeframe on screen. This view is rebuilt per navigation: replace, never stack.
-        // Only a social-posting role fans one post out to several platforms; elsewhere the
-        // control would be a switch that changes nothing.
-        const _rq = _activityCfg.reviewQueue || {};
-        const _crossPosts = _activityCfg.activitySource !== 'lead' && _rq.kind === 'posts' && !_rq.source;
         const _cpWrap = document.getElementById('activity-crosspost-toggle');
         if (_cpWrap) { _cpWrap.classList.toggle('hidden', !_crossPosts); _cpWrap.style.display = _crossPosts ? '' : 'none'; }
         window.CrossPostView?.hydrate();
@@ -8623,6 +8666,9 @@ async function _renderAssistantTaskShare(assistantId) {
     } catch { /* the strip just stays hidden */ }
 }
 
+// The Activity timeframe buttons, in words, for the empty state.
+const _ACTIVITY_TF_WORDS = { '1d': 'last day', '7d': 'last 7 days', '30d': 'last 30 days', '90d': 'last 90 days' };
+
 async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
     // Remembered for _refreshAssistantMetrics above — the period toggle calls straight back into
     // here, so this is the one place that knows which view is on screen.
@@ -8759,7 +8805,7 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
                 const pct = Math.round((v.created / maxCreated) * 100);
                 return `<div title="${label}: ${v.created} sent or queued · ${v.scheduled} scheduled · ${v.published} published (per-platform, so a cross-post counts here once per platform)">
                     <div class="flex items-center justify-between text-xs font-semibold mb-1">
-                        <span class="flex items-center gap-1.5 text-gray-700"><span class="text-gray-400">${icon}</span>${label}</span>
+                        <span class="flex items-center gap-1.5 text-gray-700"><span class="text-gray-500">${icon}</span>${label}</span>
                         <span class="text-gray-500" style="font-variant-numeric:tabular-nums">${v.published}/${v.created}</span>
                     </div>
                     <div class="rounded-full overflow-hidden" style="height:8px;background:#f3f4f6;">
@@ -8846,7 +8892,7 @@ async function _fetchAndRenderBlogDestinations() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const { destinations } = await res.json();
         if (!Array.isArray(destinations) || !destinations.length) {
-            list.innerHTML = '<p class="text-xs text-gray-400 py-1">No blog platforms available to connect.</p>';
+            list.innerHTML = '<p class="text-xs text-gray-500 py-1">No blog platforms available to connect.</p>';
             setFooter('');
             return;
         }
@@ -8865,7 +8911,7 @@ async function _fetchAndRenderBlogDestinations() {
             const account = r.accountLabel ? ` · ${_escapeHtml(r.accountLabel)}` : '';
             const state = r.connected
                 ? `<span class="text-[11px] font-semibold text-emerald-700">${_escapeHtml(mode)}${account}</span>`
-                : '<span class="text-[11px] text-gray-400">Not connected</span>';
+                : '<span class="text-[11px] text-gray-500">Not connected</span>';
             const dot = r.connected ? 'bg-emerald-500' : 'bg-gray-200';
             return `<div class="flex items-center justify-between gap-3">
                 <span class="flex items-center gap-2 text-xs font-semibold text-gray-700 min-w-0">
@@ -8885,7 +8931,7 @@ async function _fetchAndRenderBlogDestinations() {
         console.error('[blog-destinations] load failed:', err);
         // Its own copy, for the same reason the KPI cards keep error and no-data apart: a network
         // blip must never be reported to the user as "you have nothing connected".
-        list.innerHTML = '<p class="text-xs text-gray-400 py-1">Couldn\'t load your publishing destinations just now.</p>';
+        list.innerHTML = '<p class="text-xs text-gray-500 py-1">Couldn\'t load your publishing destinations just now.</p>';
         setFooter('');
     }
 }
@@ -8945,7 +8991,7 @@ async function _fetchAndRenderNewsletterList() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (data.needsSetup) {
-            list.innerHTML = '<p class="text-xs text-gray-400 py-1">The audience tables have not been set up on this environment yet.</p>';
+            list.innerHTML = '<p class="text-xs text-gray-500 py-1">The audience tables have not been set up on this environment yet.</p>';
             setFooter('');
             return;
         }
@@ -8970,7 +9016,7 @@ async function _fetchAndRenderNewsletterList() {
         if (!total) {
             // ⚠️ Its own state, and it is an INSTRUCTION rather than a report. "0 subscribers" on a
             // brand-new workspace is not news; where to get the first one is.
-            list.innerHTML = `<p class="text-xs text-gray-400 py-1">Nobody on your list yet — add a sign-up form to your site, or import the people who have already said yes, from the ${audienceLink('Audience page')}.</p>`;
+            list.innerHTML = `<p class="text-xs text-gray-500 py-1">Nobody on your list yet — add a sign-up form to your site, or import the people who have already said yes, from the ${audienceLink('Audience page')}.</p>`;
             setFooter('');
             return;
         }
@@ -9002,7 +9048,7 @@ async function _fetchAndRenderNewsletterList() {
     } catch (err) {
         console.error('[newsletter-list] load failed:', err);
         // A network blip must never be reported to the user as "your list is empty".
-        list.innerHTML = '<p class="text-xs text-gray-400 py-1">Couldn\'t load your list just now.</p>';
+        list.innerHTML = '<p class="text-xs text-gray-500 py-1">Couldn\'t load your list just now.</p>';
         setFooter('');
     }
 }
@@ -9041,7 +9087,7 @@ async function _fetchAndRenderFollowerCounts() {
     // An empty chart still gets its axis-less track row per platform we know about, so the block has
     // the same shape whether or not there are numbers in it.
     const emptyState = (msg) => {
-        list.innerHTML = `<p class="text-xs text-gray-400 py-1">${msg}</p>`;
+        list.innerHTML = `<p class="text-xs text-gray-500 py-1">${msg}</p>`;
     };
 
     try {
@@ -9074,7 +9120,7 @@ async function _fetchAndRenderFollowerCounts() {
             const unit = r.platform === 'youtube' ? 'subscribers' : 'followers';
             const has = r.available && r.count != null;
             const pct = has ? Math.round((r.count / maxCount) * 100) : 0;
-            const labelSpan = `<span class="flex items-center gap-1.5 text-xs font-semibold text-gray-700 min-w-0"><span class="text-gray-400 shrink-0" style="width:14px">${icon}</span><span class="truncate">${label}</span></span>`;
+            const labelSpan = `<span class="flex items-center gap-1.5 text-xs font-semibold text-gray-700 min-w-0"><span class="text-gray-500 shrink-0" style="width:14px">${icon}</span><span class="truncate">${label}</span></span>`;
             const value = has
                 ? `<span class="text-sm font-black text-gray-900" style="font-variant-numeric:tabular-nums">${_formatFollowerCount(r.count)}</span>`
                 : `<span class="text-sm font-black text-gray-300">—</span>`;
@@ -9097,12 +9143,12 @@ async function _fetchAndRenderFollowerCounts() {
                 // "as of {date}" sits UNDER the bar, not in the top row: these columns are ~215px wide
                 // on a desktop Overview, and label + count + date + Update in one line squeezed the
                 // platform name down to an unreadable "L…".
-                const asOf = r.recordedAt ? `<p class="text-[10px] text-gray-400 mt-1">Entered by you, as of ${new Date(r.recordedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>` : '';
+                const asOf = r.recordedAt ? `<p class="text-[10px] text-gray-500 mt-1">Entered by you, as of ${new Date(r.recordedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>` : '';
                 // Say where else this number goes. It is the ONE input for a LinkedIn goal now, and
                 // without this line people kept typing it into the goal as well.
                 // Unconditional: this card can paint before the goals have loaded.
                 const feedsGoal = r.platform === 'linkedin'
-                    ? '<p class="text-[10px] text-gray-400 mt-0.5">This figure also drives any LinkedIn Followers goal.</p>' : '';
+                    ? '<p class="text-[10px] text-gray-500 mt-0.5">This figure also drives any LinkedIn Followers goal.</p>' : '';
                 const cta = r.available ? 'Update' : 'Add';
                 return `<div title="${rowTitle}">
                     <div class="flex items-center justify-between gap-3 mb-1">
@@ -9258,7 +9304,7 @@ function _rbcRender(items) {
     const progress = document.getElementById('rbc-progress');
     if (!list) return;
     if (!items.length) {
-        list.innerHTML = '<p class="text-sm text-gray-400 text-center py-3">No checklist items today.</p>';
+        list.innerHTML = '<p class="text-sm text-gray-500 text-center py-3">No checklist items today.</p>';
         if (progress) progress.textContent = '';
         return;
     }
@@ -9276,7 +9322,7 @@ function _rbcRender(items) {
             <input type="checkbox" ${item.completed ? 'checked' : ''} onchange="window._rbcToggle(${item.id}, this.checked)" class="mt-0.5 w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500 cursor-pointer">
             <span class="flex-1 min-w-0">
                 <span class="flex items-center gap-2 flex-wrap">
-                    <span class="text-sm font-semibold ${item.completed ? 'text-gray-400 line-through' : 'text-gray-800'}" id="rbc-title-${item.id}">${esc(item.title)}</span>
+                    <span class="text-sm font-semibold ${item.completed ? 'text-gray-500 line-through' : 'text-gray-800'}" id="rbc-title-${item.id}">${esc(item.title)}</span>
                     ${badge}
                 </span>
                 ${item.description ? `<span class="block text-xs text-gray-500 mt-0.5">${esc(item.description)}</span>` : ''}
@@ -9330,7 +9376,7 @@ window._rbcRegenerate = async function () {
     const btn = document.getElementById('rbc-regenerate-btn');
     const list = document.getElementById('rbc-list');
     if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
-    if (list) list.innerHTML = '<div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Generating a fresh checklist…</div>';
+    if (list) list.innerHTML = '<div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Generating a fresh checklist…</div>';
     try {
         const res = await fetch('/.netlify/functions/relationship-checklist', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -9374,7 +9420,12 @@ window._goToDisclosureField = function() {
 function _kickoffFixLink(key) {
     const fix = _KICKOFF_FIX[key];
     if (!fix) return '';
-    return ` <button type="button" onclick="${fix.go}" title="Opens ${fix.where}" class="link font-semibold cursor-pointer">${fix.label || 'Do this now →'}</button>`;
+    // The strategy card is retitled per role ("Brand Knowledge" for roles that post nothing), so read
+    // the name off the card rather than promising "What I post about" (review, 2026-10-22).
+    const where = key === 'brand_strategy'
+        ? (document.getElementById('opcard-strategy-title')?.textContent.trim() || fix.where)
+        : fix.where;
+    return ` <button type="button" onclick="${fix.go}" title="Opens ${_escapeHtml(where)}" class="link font-semibold cursor-pointer">${fix.label || 'Do this now →'}</button>`;
 }
 
 // Kick Off Meeting — readiness checklist + activation gate. Fetches
@@ -9491,7 +9542,7 @@ async function _renderKickOff(assistantId) {
             <li class="flex items-start gap-3">
                 ${it.done ? bTick : bCross}
                 <span class="min-w-0">
-                    <span class="block text-sm font-semibold ${it.done ? 'text-gray-800' : 'text-red-700'}">${it.label}${it.required ? '' : ' <span class="text-xs font-normal text-gray-400">(recommended)</span>'}</span>
+                    <span class="block text-sm font-semibold ${it.done ? 'text-gray-800' : 'text-red-700'}">${it.label}${it.required ? '' : ' <span class="text-xs font-normal text-gray-500">(recommended)</span>'}</span>
                     ${it.done ? '' : `<span class="block text-xs text-red-500 mt-0.5">${it.hint || ''}${_kickoffFixLink(it.key)}</span>`}
                 </span>
             </li>`).join('') || '';
@@ -9512,10 +9563,10 @@ async function _renderKickOff(assistantId) {
         <li class="flex items-start gap-3">
             ${it.done ? tick : cross}
             <span class="min-w-0">
-                <span class="block text-sm font-semibold ${it.done ? 'text-gray-800' : 'text-gray-500'}">${_escapeHtml(it.label)}${it.required ? '' : ' <span class="text-xs font-normal text-gray-400">(recommended)</span>'}</span>
-                ${it.done ? '' : `<span class="block text-xs text-gray-400 mt-0.5">${_escapeHtml(it.hint || '')}${_kickoffFixLink(it.key)}</span>`}
+                <span class="block text-sm font-semibold ${it.done ? 'text-gray-800' : 'text-gray-500'}">${_escapeHtml(it.label)}${it.required ? '' : ' <span class="text-xs font-normal text-gray-500">(recommended)</span>'}</span>
+                ${it.done ? '' : `<span class="block text-xs text-gray-500 mt-0.5">${_escapeHtml(it.hint || '')}${_kickoffFixLink(it.key)}</span>`}
             </span>
-        </li>`).join('') || '<li class="text-sm text-gray-400">No checklist items.</li>';
+        </li>`).join('') || '<li class="text-sm text-gray-500">No checklist items.</li>';
 
     // US3 AC3.1: summary — primary directive + active connections the user reviews before confirming.
     const summaryEl = document.getElementById('kickoff-summary');
@@ -9525,12 +9576,12 @@ async function _renderKickOff(assistantId) {
         const conns = (sm.connections || []);
         const connPills = conns.length
             ? conns.map(c => `<span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700 bg-white border border-gray-200 px-2 py-0.5 rounded-full">${CONN_LABELS[c] || (c.charAt(0).toUpperCase() + c.slice(1))}</span>`).join(' ')
-            : '<span class="text-xs text-gray-400 italic">No connected accounts yet</span>';
+            : '<span class="text-xs text-gray-500 italic">No connected accounts yet</span>';
         summaryEl.className = 'mb-5 p-4 rounded-xl bg-gray-50 border border-gray-100' + (data.working ? ' hidden' : '');
         summaryEl.innerHTML = `
-            <p class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Primary directive</p>
+            <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Primary directive</p>
             <p class="text-sm font-semibold text-gray-800 mb-3">${sm.directive || 'Digital Assistant'}</p>
-            <p class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Active connections</p>
+            <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Active connections</p>
             <div class="flex flex-wrap gap-1.5">${connPills}</div>`;
     }
 
@@ -9623,7 +9674,7 @@ function _renderMeetingsBrief(data) {
 
     content.innerHTML = rows.map(r => `
         <div class="border-t border-gray-100 pt-4 first:border-t-0 first:pt-0">
-          <p class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">${r.label}</p>
+          <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">${r.label}</p>
           <p class="text-sm text-gray-800">${r.value}</p>
         </div>`).join('');
     card.classList.remove('hidden');
@@ -10028,11 +10079,11 @@ function _renderBlogReaders(readers) {
         const swanCell = !p.swan
             ? '<span class="text-gray-300" title="Not sent to The Swan Index">—</span>'
             : p.swan.url
-                ? `<a href="${esc(p.swan.url)}" target="_blank" rel="noopener" class="font-semibold text-gray-900 hover:underline">${n(p.swan.views)}<span class="sr-only"> (opens in new tab)</span></a> <span class="text-gray-400">· ${n(p.swan.reads)} engaged</span>`
-                : `<span class="text-gray-400">${p.swan.status === 'pending' ? 'Waiting for an editor' : 'Not on the site'}</span>`;
+                ? `<a href="${esc(p.swan.url)}" target="_blank" rel="noopener" class="font-semibold text-gray-900 hover:underline">${n(p.swan.views)}<span class="sr-only"> (opens in new tab)</span></a> <span class="text-gray-500">· ${n(p.swan.reads)} engaged</span>`
+                : `<span class="text-gray-500">${p.swan.status === 'pending' ? 'Waiting for an editor' : 'Not on the site'}</span>`;
         return `<tr class="border-t border-gray-100">
           <td class="py-2 pr-3 min-w-0"><p class="font-semibold text-gray-900" style="overflow-wrap:break-word" title="${esc(p.title)}">${esc(p.title)}</p>
-            ${p.publishedAt ? `<p class="text-[11px] text-gray-400">${esc(new Date(p.publishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }))}</p>` : ''}</td>
+            ${p.publishedAt ? `<p class="text-[11px] text-gray-500">${esc(new Date(p.publishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }))}</p>` : ''}</td>
           <td class="py-2 px-3 text-right whitespace-nowrap font-semibold text-gray-900">${n(p.blogReads)}</td>
           <td class="py-2 px-3 text-right whitespace-nowrap text-gray-600">${secs(p.avgReadSeconds)}</td>
           ${onSwan ? `<td class="py-2 pl-3 text-right">${swanCell}</td>` : ''}
@@ -10046,7 +10097,7 @@ function _renderBlogReaders(readers) {
         const swan = !onSwan ? '' : !p.swan ? '<span class="text-gray-300">Not on The Swan Index</span>'
             : p.swan.url
                 ? `<a href="${esc(p.swan.url)}" target="_blank" rel="noopener" class="font-semibold text-gray-900 hover:underline">${n(p.swan.views)} Swan Index views<span class="sr-only"> (opens in new tab)</span></a>`
-                : `<span class="text-gray-400">Swan Index: ${p.swan.status === 'pending' ? 'waiting for an editor' : 'not on the site'}</span>`;
+                : `<span class="text-gray-500">Swan Index: ${p.swan.status === 'pending' ? 'waiting for an editor' : 'not on the site'}</span>`;
         return `<li class="py-2 border-t border-gray-100">
           <p class="font-semibold text-gray-900" style="overflow-wrap:break-word">${esc(p.title)}</p>
           <p class="text-xs text-gray-600 mt-0.5">${date(p) ? `${date(p)} · ` : ''}<span class="font-semibold text-gray-900">${n(p.blogReads)}</span> reads · ${secs(p.avgReadSeconds)} avg</p>
@@ -10057,7 +10108,7 @@ function _renderBlogReaders(readers) {
     panel.innerHTML = `
       <div class="flex flex-wrap items-baseline justify-between gap-2 mb-3">
         <h4 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Readers</h4>
-        <span class="text-xs text-gray-400 font-medium">Since tracking began</span>
+        <span class="text-xs text-gray-500 font-medium">Since tracking began</span>
       </div>
       <div class="grid grid-cols-1 ${onSwan ? 'sm:grid-cols-2' : ''} gap-3 mb-4">
         <div class="rounded-xl bg-gray-50 border border-gray-100 p-3">
@@ -10072,7 +10123,7 @@ function _renderBlogReaders(readers) {
       <ul class="sm:hidden text-sm">${stacked}</ul>
       <div class="hidden sm:block overflow-x-auto">
         <table class="w-full text-sm">
-          <thead><tr class="text-[11px] text-gray-400 uppercase tracking-wide">
+          <thead><tr class="text-[11px] text-gray-500 uppercase tracking-wide">
             <th class="text-left font-bold pb-1 pr-3">Post</th>
             <th class="text-right font-bold pb-1 px-3">Reads</th>
             <th class="text-right font-bold pb-1 px-3">Avg read</th>
@@ -10081,7 +10132,7 @@ function _renderBlogReaders(readers) {
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <p class="text-[11px] text-gray-400 mt-3">Counted anonymously when someone reads a post on your embedded blog, your hosted blog pages${onSwan ? ' or The Swan Index' : ''}. Readers with JavaScript turned off, and copies you paste elsewhere, aren't counted.</p>`;
+      <p class="text-[11px] text-gray-500 mt-3">Counted anonymously when someone reads a post on your embedded blog, your hosted blog pages${onSwan ? ' or The Swan Index' : ''}. Readers with JavaScript turned off, and copies you paste elsewhere, aren't counted.</p>`;
     panel.classList.remove('hidden');
 }
 
@@ -10656,7 +10707,7 @@ async function _fetchAndRenderWorkspaceDefaults(assistantId, currentData, trigge
                         <li class="flex items-center justify-between gap-3 px-4 py-3">
                             <div class="min-w-0">
                                 <p class="text-sm font-semibold text-gray-800 truncate">${_escapeHtml(a.name)}</p>
-                                <p class="text-xs text-gray-400 mt-0.5">${a.isFile ? 'Document' : 'Link'} · ${_escapeHtml(catLabel(a.category))}</p>
+                                <p class="text-xs text-gray-500 mt-0.5">${a.isFile ? 'Document' : 'Link'} · ${_escapeHtml(catLabel(a.category))}</p>
                             </div>
                             ${(a.externalUrl && !a.isFile) ? `<a href="${_escapeHtml(a.externalUrl)}" target="_blank" rel="noopener" class="text-xs font-bold text-emerald-700 hover:underline shrink-0">Open</a>` : ''}
                         </li>`).join('')}
@@ -10669,15 +10720,15 @@ async function _fetchAndRenderWorkspaceDefaults(assistantId, currentData, trigge
         // Muted section for assets that exist but aren't feeding the assistant yet.
         const pendingList = pending.length ? `
                 <div class="mt-4">
-                    <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Not applied yet</p>
+                    <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Not applied yet</p>
                     <ul class="divide-y divide-gray-100 border border-dashed border-gray-200 rounded-xl overflow-hidden">
                         ${pending.map(a => `
                             <li class="flex items-center justify-between gap-3 px-4 py-3 bg-gray-50/50">
                                 <div class="min-w-0">
                                     <p class="text-sm font-semibold text-gray-500 truncate">${_escapeHtml(a.name)}</p>
-                                    <p class="text-xs text-gray-400 mt-0.5">${a.isFile ? 'Document' : 'Link'} · ${_escapeHtml(catLabel(a.category))}</p>
+                                    <p class="text-xs text-gray-500 mt-0.5">${a.isFile ? 'Document' : 'Link'} · ${_escapeHtml(catLabel(a.category))}</p>
                                 </div>
-                                <span class="text-xs font-medium text-gray-400 shrink-0" title="${_escapeHtml(notAppliedHint(a.status))}">${_escapeHtml(a.status)}</span>
+                                <span class="text-xs font-medium text-gray-500 shrink-0" title="${_escapeHtml(notAppliedHint(a.status))}">${_escapeHtml(a.status)}</span>
                             </li>`).join('')}
                     </ul>
                 </div>` : '';
@@ -10829,13 +10880,13 @@ function _buildRuleRow(catId, placeholder, rule) {
     tr.innerHTML = `
         <div class="flex-1 min-w-0">
             <textarea rows="1" placeholder="${_escapeHtml(placeholder || 'Describe the rule…')}"
-                class="ar-input w-full px-3 py-2 text-sm rounded-lg border border-transparent hover:border-gray-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none bg-transparent focus:bg-white resize-none overflow-hidden ${active ? '' : 'text-gray-400 line-through'}">${_escapeHtml(rule?.ruleText || '')}</textarea>
+                class="ar-input w-full px-3 py-2 text-sm rounded-lg border border-transparent hover:border-gray-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none bg-transparent focus:bg-white resize-none overflow-hidden ${active ? '' : 'text-gray-500 line-through'}">${_escapeHtml(rule?.ruleText || '')}</textarea>
             ${isFeedback ? '<p class="text-xs text-amber-600 font-semibold px-3 mt-0.5">From rejected-post feedback</p>' : ''}
         </div>
         <button type="button" aria-checked="${active}" class="ar-toggle relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none mt-1 ${active ? 'bg-emerald-500' : 'bg-gray-300'}">
             <span class="${active ? 'translate-x-5' : 'translate-x-0'} pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ease-in-out"></span>
         </button>
-        <button type="button" class="ar-del text-gray-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 mt-1.5">
+        <button type="button" class="ar-del text-gray-500 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 mt-1.5">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
         </button>`;
 
@@ -11122,7 +11173,7 @@ async function _fetchAndRenderGoals(assistantId) {
     _applyMediaSourcesUi();
 
     if (!goals.length) {
-        list.innerHTML = `<div class="py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-lg border border-dashed border-gray-200">
+        list.innerHTML = `<div class="py-8 text-center text-sm text-gray-500 bg-gray-50 rounded-lg border border-dashed border-gray-200">
             No goals yet. Click <span class="font-bold text-emerald-600">Add New Goal</span> to set your first target.</div>`;
         return;
     }
@@ -11222,7 +11273,7 @@ function _renderGoalProgressCard() {
         // Two different truths: "you have no goals" invites a goal, "we couldn't load them" must not.
         body.innerHTML = _goalsLoadFailed
             ? `<div class="flex items-start gap-4">
-                    <span aria-hidden="true" class="shrink-0 w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-400">
+                    <span aria-hidden="true" class="shrink-0 w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-500">
                         <svg class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M10 6.5v5m0 2.5h.01M10 2.5 2.5 16.5h15L10 2.5Z" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </span>
                     <div class="min-w-0">
@@ -11370,7 +11421,7 @@ function _buildGoalProgressTile(g) {
                     <p class="text-sm font-bold text-gray-900 truncate">${_escapeHtml(g.title || label)}</p>
                     ${g.isPrimary ? '<span class="text-[10px] font-bold uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded">Primary</span>' : ''}
                 </div>
-                <p class="text-[11px] text-gray-400 mt-0.5 truncate">${_escapeHtml(label)}${due ? ' · by ' + due : ''}</p>
+                <p class="text-[11px] text-gray-500 mt-0.5 truncate">${_escapeHtml(label)}${due ? ' · by ' + due : ''}</p>
             </div>
             <span class="inline-flex items-center gap-1.5 text-[11px] font-bold shrink-0 ${meta.text}">
                 <span class="w-2 h-2 rounded-full ${meta.dot}"></span>${meta.label}
@@ -11380,7 +11431,7 @@ function _buildGoalProgressTile(g) {
             <div class="h-full ${meta.dot} transition-all" style="width:${pct}%"></div>
         </div>
         <div class="flex items-center justify-between gap-3 mt-1.5">
-            <p class="text-xs font-semibold text-gray-600 truncate">${pending ? `<span class="font-medium text-gray-400">${pending}</span>` : _escapeHtml(_fmtGoalPair(latest, target, unit))}</p>
+            <p class="text-xs font-semibold text-gray-600 truncate">${pending ? `<span class="font-medium text-gray-500">${pending}</span>` : _escapeHtml(_fmtGoalPair(latest, target, unit))}</p>
             <p class="text-xs font-bold text-gray-500 shrink-0">${pending ? _escapeHtml(`Target ${_fmtGoalValue(target, unit)}`) : pct + '%'}</p>
         </div>
     </button>`;
@@ -11531,7 +11582,7 @@ function _buildGoalCard(g) {
                     ${g.isPrimary ? '<span class="text-[10px] font-bold uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded">Primary</span>' : ''}
                 </div>
                 <p class="text-xs text-gray-500 mt-0.5">${g.title ? _escapeHtml(label) + ' — t' : 'T'}arget: <span class="font-semibold text-gray-700">${_escapeHtml(fmt(target))}</span> by ${due}</p>
-                ${g.rationale ? `<p class="text-xs text-gray-400 mt-1.5 italic border-l-2 border-emerald-100 pl-2">${_escapeHtml(g.rationale)}</p>` : ''}
+                ${g.rationale ? `<p class="text-xs text-gray-500 mt-1.5 italic border-l-2 border-emerald-100 pl-2">${_escapeHtml(g.rationale)}</p>` : ''}
             </div>
             <div class="flex items-center gap-3 shrink-0">
                 <span class="inline-flex items-center gap-1.5 text-xs font-bold ${meta.text}">
@@ -11546,7 +11597,7 @@ function _buildGoalCard(g) {
             </div>
         </div>
         <div class="mt-3">
-            <div class="flex items-center justify-between text-[11px] text-gray-400 mb-1">
+            <div class="flex items-center justify-between text-[11px] text-gray-500 mb-1">
                 <span>${latest != null ? _escapeHtml(fmt(latest)) : (g.isManual ? 'No figure entered yet' : 'Awaiting first data sync')}</span>
                 <span>${latest != null ? pct + '%' : ''}</span>
             </div>
@@ -11583,7 +11634,7 @@ function _buildManualEntryRow(g) {
         : (g.updateCadenceDays ? `You'll update this every ${g.updateCadenceDays} days` : '');
 
     return `<div class="mt-3 pt-3 border-t border-dashed border-gray-200">
-        <p class="text-[11px] text-gray-400 mb-2">${history}${next ? ' · ' + next : ''}</p>
+        <p class="text-[11px] text-gray-500 mb-2">${history}${next ? ' · ' + next : ''}</p>
         <div class="flex items-center gap-2">
             <input type="number" min="0" step="any" id="manual-value-${g.id}"
                 placeholder="${/^[£$€]$/.test(unit) ? `Current amount in ${_escapeHtml(unit)}` : `Current ${_escapeHtml(unit || 'value')}`}"
@@ -11920,7 +11971,7 @@ window._renderReviewChart = async function (goalId) {
     const banner = document.getElementById('review-status-banner');
     const footer = document.getElementById('review-footer');
     if (!chart) return;
-    chart.innerHTML = '<span class="text-sm text-gray-400">Loading chart…</span>';
+    chart.innerHTML = '<span class="text-sm text-gray-500">Loading chart…</span>';
     if (banner) banner.innerHTML = '';
     if (footer) footer.innerHTML = '';
 
@@ -11977,7 +12028,7 @@ window._editBriefFromReview = function () {
 // Dependency-free line chart: actual (solid emerald) vs required trajectory (dashed grey).
 function _buildTelemetrySvg(actual, trajectory) {
     const all = [...actual, ...trajectory];
-    if (!all.length) return '<span class="text-sm text-gray-400">No data yet — the first sync will populate this chart.</span>';
+    if (!all.length) return '<span class="text-sm text-gray-500">No data yet — the first sync will populate this chart.</span>';
 
     const W = 560, H = 220, PAD = { l: 52, r: 16, t: 14, b: 28 };
     const xs = all.map(p => new Date(p.date).getTime());
@@ -12131,18 +12182,18 @@ function _applyMediaSourcesUi() {
         const arrows = on ? `
             <div class="flex flex-col">
               <button type="button" aria-label="Move up" onclick="window._reorderMediaSource('${src}',-1)"
-                class="px-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 disabled:hover:text-gray-400 cursor-pointer leading-none" ${idx === 0 ? 'disabled' : ''}>&#9650;</button>
+                class="px-1 text-gray-500 hover:text-gray-700 disabled:opacity-30 disabled:hover:text-gray-400 cursor-pointer leading-none" ${idx === 0 ? 'disabled' : ''}>&#9650;</button>
               <button type="button" aria-label="Move down" onclick="window._reorderMediaSource('${src}',1)"
-                class="px-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 disabled:hover:text-gray-400 cursor-pointer leading-none" ${idx === enabled.length - 1 ? 'disabled' : ''}>&#9660;</button>
+                class="px-1 text-gray-500 hover:text-gray-700 disabled:opacity-30 disabled:hover:text-gray-400 cursor-pointer leading-none" ${idx === enabled.length - 1 ? 'disabled' : ''}>&#9660;</button>
             </div>` : '<div class="w-[18px]"></div>';
-        const badge = on ? `<span class="text-xs font-bold text-gray-400 w-5 text-center">${idx + 1}</span>` : '<span class="w-5"></span>';
+        const badge = on ? `<span class="text-xs font-bold text-gray-500 w-5 text-center">${idx + 1}</span>` : '<span class="w-5"></span>';
         return `
         <div class="flex items-center gap-3 border ${on ? 'border-gray-200 bg-white' : 'border-dashed border-gray-200 bg-gray-50'} rounded-xl px-4 py-3">
           ${badge}
           ${arrows}
           <div class="flex-1 min-w-0">
             <p class="text-sm font-bold ${on ? 'text-gray-900' : 'text-gray-500'} inline-flex items-center" data-explain="media-source-${src}">${meta.label}</p>
-            <p class="text-xs text-gray-400">${meta.desc}</p>
+            <p class="text-xs text-gray-500">${meta.desc}</p>
           </div>
           <button type="button" role="switch" aria-checked="${on}" aria-label="${on ? 'Disable' : 'Enable'} ${meta.label}"
             onclick="window._toggleMediaSource('${src}')"
@@ -12201,7 +12252,7 @@ window._getAiRecommendations = async function (goalId) {
         return _openUpgrade('AI Recommendations are available on The Busywork Buster plan and above.');
     }
     const box = document.getElementById('review-recommendations');
-    if (box) { box.classList.remove('hidden'); box.innerHTML = '<p class="text-sm text-gray-400 mt-3">Analysing your goal…</p>'; }
+    if (box) { box.classList.remove('hidden'); box.innerHTML = '<p class="text-sm text-gray-500 mt-3">Analysing your goal…</p>'; }
     try {
         const res = await fetch(GOAL_AI_API, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -12223,7 +12274,7 @@ window._getAiRecommendations = async function (goalId) {
                 <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">${_escapeHtml(assistantName)}'s Recommendations</p>
                 ${funnelTag}
             </div>
-            <p class="text-xs text-gray-400">Select the recommendations you'd like to progress, then click <strong>Progress Selected</strong>.</p>
+            <p class="text-xs text-gray-500">Select the recommendations you'd like to progress, then click <strong>Progress Selected</strong>.</p>
             <div class="space-y-2" id="recs-list">
                 ${data.recommendations.map((r, i) => `<label class="flex items-start gap-3 text-sm text-gray-700 bg-emerald-50/60 border border-emerald-100 rounded-lg px-3 py-2.5 cursor-pointer hover:bg-emerald-50 transition has-[:checked]:border-emerald-400 has-[:checked]:bg-emerald-50">
                     <input type="checkbox" data-rec-idx="${i}" class="rec-checkbox mt-0.5 accent-emerald-600 shrink-0 w-4 h-4 cursor-pointer">
@@ -12389,7 +12440,7 @@ window._openStrategyFix = async function (goalId) {
     const footer = document.getElementById('strategy-fix-footer');
     if (!modal || !body) return;
     footer?.classList.add('hidden');
-    body.innerHTML = '<div class="flex items-center justify-center py-10 text-sm text-gray-400">Analysing your strategy…</div>';
+    body.innerHTML = '<div class="flex items-center justify-center py-10 text-sm text-gray-500">Analysing your strategy…</div>';
     modal.classList.remove('hidden');
 
     try {
@@ -12444,7 +12495,7 @@ function _renderStrategyFix(data) {
             <div class="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-gray-200">
                 <div class="p-3 bg-red-50/40">
                     <p class="text-[10px] font-bold uppercase tracking-wide text-red-400 mb-1">− Current</p>
-                    <p class="text-sm text-gray-600 whitespace-pre-wrap">${c.current ? _escapeHtml(c.current) : '<span class="italic text-gray-400">(empty)</span>'}</p>
+                    <p class="text-sm text-gray-600 whitespace-pre-wrap">${c.current ? _escapeHtml(c.current) : '<span class="italic text-gray-500">(empty)</span>'}</p>
                 </div>
                 <div class="p-3 bg-emerald-50/50">
                     <p class="text-[10px] font-bold uppercase tracking-wide text-emerald-600 mb-1">+ AI-Suggested</p>
