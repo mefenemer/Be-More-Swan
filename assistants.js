@@ -12248,6 +12248,42 @@ function _applyAutonomousMediaUi() {
     }
 }
 
+// A setting changed from the assistant's chat (settings card → chat-session.js, same endpoints as the
+// controls here). Repaint this page if it is showing that assistant, so the chat and the page never
+// disagree. Bound once at load on document — never from a render path.
+document.addEventListener('assistant:settingsChanged', (e) => {
+    const d = e.detail || {};
+    const id = Number(d.assistantId);
+    if (!id) return;
+    const data = window._detailCurrentData;
+    const onThisPage = Number(window._currentAssistantId) === id;
+    if (d.lifecycleStatus) {
+        if (onThisPage && data) {
+            data.lifecycleStatus = d.lifecycleStatus;
+            data.isActive = d.lifecycleStatus === 'working';
+            window._renderStatusPill?.();
+            window._syncStatusRow?.();
+        }
+        if (document.getElementById('dashboard-assistants-grid')) window.fetchAndRenderAssistants?.('dashboard-assistants-grid');
+        if (document.getElementById('directory-assistants-grid')) window.fetchAndRenderAssistants?.('directory-assistants-grid');
+    }
+    if (!onThisPage) return;
+    if (d.draftHorizonDays != null) {
+        const horizonEl = document.getElementById('posting-horizon-input');
+        if (horizonEl) horizonEl.value = d.draftHorizonDays;
+        if (data) { data.draftHorizonDays = d.draftHorizonDays; window._renderAutopilotCard?.(data); }
+    }
+    if (d.reviewNotifPreference) {
+        window._reviewNotifPreference = d.reviewNotifPreference;
+        document.querySelectorAll('input[name="review-cadence"]').forEach((rb) => { rb.checked = rb.value === d.reviewNotifPreference; });
+    }
+    if (typeof d.autonomousMediaEnabled === 'boolean' && Number(_goalsAssistantId) === id) {
+        _autonomousMediaEnabled = d.autonomousMediaEnabled;
+        if (d.autonomousMediaMonthlyCap != null) _autonomousMediaCap = d.autonomousMediaMonthlyCap;
+        _applyAutonomousMediaUi();
+    }
+});
+
 async function _setAutonomousMedia(patch) {
     const res = await fetch('/.netlify/functions/set-autonomous-media', {
         method: 'PATCH',

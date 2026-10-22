@@ -151,7 +151,7 @@ async function main() {
         assert.strictEqual((m.uiElement as any).settled, true);
     });
     await check('get-chat-session runs the audience re-check', () => {
-        assert.match(read('netlify/functions/get-chat-session.ts'), /messages: await refreshAudienceCards\(db, orgId,/);
+        assert.match(read('netlify/functions/get-chat-session.ts'), /messages: await refreshSettingsCards\(db, orgId, session\.aiAssistantId, session\.roleKey, await refreshAudienceCards\(db, orgId,/);
     });
 
     console.log('\nWiring: one server path, a consent tick, no import from chat');
@@ -169,8 +169,8 @@ async function main() {
     });
     await check('proposals are rebuilt server-side and kept, and do not trip the unbacked-claim guard', () => {
         assert.match(o, /audienceCard = segmentReq \? await resolveSegmentProposal\(db, orgId, segmentReq\) : await resolveContactProposal\(db, orgId, contactReq!\);/);
-        assert.match(o, /: emailAction \?\? audienceCard;/);
-        assert.match(o, /!emailAction && !audienceCard\) \{/);
+        assert.match(o, /: emailAction \?\? audienceCard \?\? settingsCard;/);
+        assert.match(o, /!emailAction && !audienceCard && !settingsCard\) \{/);
     });
     const cs = read('src/components/chat-session.js');
     const reg = read('src/components/disruptive-ui-registry.js');

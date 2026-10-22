@@ -69,6 +69,9 @@ import {
     type ContactProposalCard, type SegmentProposalCard,
 } from '../../src/utils/chat-audience';
 import { leadActionFromUiElement, resolveLeadActionProposal, sendableDraft, type LeadActionCard } from '../../src/utils/chat-lead-action';
+import {
+    assistantSettingsPromptBlock, buildAssistantSettingsSnapshot, resolveSettingsProposal, settingsProposalFromUiElement, type SettingsCard,
+} from '../../src/utils/chat-assistant-settings';
 import { isInOutreachReview } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
 import { LOSS_REASONS } from '../../src/config/revenue-events';
@@ -2803,7 +2806,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // Its Team thread (team-messages.ts): what the user told it there, and what it said. Without it
     // a note sent on the Team page was invisible to the very assistant it was addressed to.
     const teamThreadBlock = await teamThreadPromptBlock(db, orgId, session.aiAssistantId);
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, teamBlock, teamThreadBlock].filter(Boolean).join('\n\n');
+    // Its own status, settings and goals (src/utils/chat-assistant-settings.ts), every role, per turn
+    // — a pause or a horizon changed on the page a moment ago is in the next answer. Routes with a
+    // JSON reply can also propose a change through a confirm card; the plain default route only reads.
+    const settingsBlock = await buildAssistantSettingsSnapshot(db, orgId, session.aiAssistantId, assistantRow.roleKey);
+    const settingsCardBlock = route !== defaultRoute ? assistantSettingsPromptBlock(assistantRow.roleKey) : null;
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock].filter(Boolean).join('\n\n');
 
     const system = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -2995,6 +3003,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // card calls the same endpoints the Posts tab does. Not while drafting INTO an open post —
         // that conversation is about the words of one post, not its fate.
         let postAction: PostActionCard | null = null;
+        // A change to the assistant's OWN settings (src/utils/chat-assistant-settings.ts) — any
+        // structured route. Rebuilt from its row; the click calls the page's own endpoints.
+        let settingsCard: SettingsCard | null = null;
+        const settingsReq = route !== defaultRoute ? settingsProposalFromUiElement(uiElement) : null;
+        if (settingsReq) {
+            settingsCard = await resolveSettingsProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, settingsReq);
+            uiElement = settingsCard;
+            if (!settingsCard) {
+                content = 'I couldn’t read my settings just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Profile.';
+            }
+        }
         // The Blog Writer's twin (src/utils/chat-blog-action.ts): same checks, built from blog_posts
         // rows; a time in the user's words is worked out here so the card shows the exact instant.
         let blogAction: BlogActionCard | null = null;
@@ -3095,7 +3114,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         const blogDraft = route === ROUTES.blog_writer ? blogPostDraftFromUiElement(uiElement) : null;
         if (route === ROUTES.blog_writer) {
             // An action card on an existing article was already checked and rebuilt above — keep it.
-            uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft } : blogAction;
+            uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft } : blogAction ?? settingsCard;
         }
 
         // Same contract for the newsletter route, and the same reason: uiElementJson is persisted
@@ -3124,7 +3143,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 : formDraft ? { type: AUDIENCE_FORM_DRAFT_TYPE, ...formDraft }
                 // An action card on an existing email, or an Audience card, was already checked and
                 // rebuilt above — keep it.
-                : emailAction ?? audienceCard;
+                : emailAction ?? audienceCard ?? settingsCard;
         }
 
         // ── Reply ↔ persistence reconciliation ────────────────────────────────────
@@ -3155,7 +3174,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
         // A post-action turn is not a drafting turn: "approve it and it's scheduled" describes the
         // card, and the card is the backing — the user's click is what does it.
-        if (route === ROUTES.social_media_manager && !postActionReq && replyClaimsPostSaved(content) && !alreadyApologised) {
+        if (route === ROUTES.social_media_manager && !postActionReq && !settingsCard && replyClaimsPostSaved(content) && !alreadyApologised) {
             let breach: DraftClaimFailure | null = null;
             if (draftTarget) breach = 'not_saved_here';                      // saving here is wrong by design
             else if (persistedPosts?.length === 0) breach = 'persist_failed'; // valid draft, the write threw
@@ -3174,7 +3193,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // persists), so the only unbacked claim available to it is claiming an article it did not
         // write — which is the identical bug: a confident reply about a post that does not exist.
         // An action card is the thing a "scheduled" reply is about, so it is not an unbacked claim.
-        if (route === ROUTES.blog_writer && !blogDraft && !blogAction && replyClaimsPostSaved(content) && !alreadyApologised) {
+        if (route === ROUTES.blog_writer && !blogDraft && !blogAction && !settingsCard && replyClaimsPostSaved(content) && !alreadyApologised) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked blog draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );
@@ -3186,7 +3205,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // unbacked claim available to it is claiming an issue it did not write.
         // !emailAction / !audienceCard: a "booked for Tuesday" or "here's the segment" reply describes
         // its card, not an unbacked claim.
-        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised && !emailAction && !audienceCard) {
+        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised && !emailAction && !audienceCard && !settingsCard) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked newsletter draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );

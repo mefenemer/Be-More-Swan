@@ -906,6 +906,63 @@
     const LEAD_FINAL = new Set(['draft_changed', 'personal_inbox_unconfirmed', 'no_recipient', 'suppressed', 'unsubscribed', 'paused', 'do_not_contact', 'no_postal_address', 'generator_declined']);
     const leadWhy = (r) => r.detail || LEAD_NOT_SENT[r.reason] || `Not sent (${String(r.reason || 'unknown').replace(/_/g, ' ')}).`;
 
+    // Settings cards → the endpoint the Assistant Profile uses for that setting, with its method, so
+    // its gates apply unchanged (owner/admin to pause, Kick Off's readiness checks to start, 1–30
+    // days). Then `assistant:settingsChanged` on document repaints the page behind the chat.
+    async function onSettingsChange(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const call = async (fn, method, body) => {
+        const res = await fetch(`/.netlify/functions/${fn}`, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || data.message || `That didn’t work (HTTP ${res.status}).`);
+        return data;
+      };
+      const id = Number(d.assistantId);
+      const changed = { assistantId: id, setting: d.setting };
+      try {
+        let message = 'Saved.';
+        if (d.setting === 'pause') {
+          await call(`manage-assistant?id=${id}`, 'PATCH', { action: 'pause' });
+          changed.lifecycleStatus = 'paused';
+          message = 'Paused — it does nothing until you start it again.';
+        } else if (d.setting === 'resume') {
+          await call(`kickoff-assistant?id=${id}`, 'POST');
+          changed.lifecycleStatus = 'working';
+          message = 'Started — it’s working again.';
+        } else if (d.setting === 'draft_horizon') {
+          const r = await call('set-draft-horizon', 'PATCH', { assistantId: id, draftHorizonDays: d.days });
+          changed.draftHorizonDays = d.days;
+          message = r.gapFillEnqueued
+            ? `Saved — drafting ${r.gapFillEnqueued} new post${r.gapFillEnqueued === 1 ? '' : 's'} to fill the window.`
+            : `Saved — it now drafts ${d.days} day${d.days === 1 ? '' : 's'} ahead.`;
+        } else if (d.setting === 'review_alerts') {
+          await call('set-review-notif-prefs', 'PATCH', { assistantId: id, reviewNotifPreference: d.value });
+          changed.reviewNotifPreference = d.value;
+          message = 'Saved — review alerts updated.';
+        } else if (d.setting === 'content_suggestions') {
+          const patch = {};
+          if (typeof d.enabled === 'boolean') patch.enabled = d.enabled;
+          if (d.monthlyCap != null) patch.monthlyCap = d.monthlyCap;
+          const r = await call('set-autonomous-media', 'PATCH', { assistantId: id, ...patch });
+          changed.autonomousMediaEnabled = r.autonomousMediaEnabled;
+          changed.autonomousMediaMonthlyCap = r.autonomousMediaMonthlyCap;
+          message = r.autonomousMediaEnabled ? `Saved — on, up to ${r.autonomousMediaMonthlyCap} a month.` : 'Saved — switched off.';
+        } else {
+          throw new Error('Unknown setting.');
+        }
+        respond({ ok: true, message });
+        document.dispatchEvent(new CustomEvent('assistant:settingsChanged', { detail: changed }));
+      } catch (err) {
+        respond({ ok: false, error: err.message });
+      }
+    }
+
     async function onLeadAction(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -1453,6 +1510,7 @@
     container.addEventListener('email:action', onEmailAction);
     container.addEventListener('audience:action', onAudienceAction);
     container.addEventListener('lead:action', onLeadAction);
+    container.addEventListener('settings:change', onSettingsChange);
     container.addEventListener('brief:review', onBriefReview);
     container.addEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
     container.addEventListener('siteaudit:check', onSiteAuditCheck);
@@ -1517,6 +1575,7 @@
         container.removeEventListener('email:action', onEmailAction);
         container.removeEventListener('audience:action', onAudienceAction);
         container.removeEventListener('lead:action', onLeadAction);
+        container.removeEventListener('settings:change', onSettingsChange);
         container.removeEventListener('brief:review', onBriefReview);
         container.removeEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
         container.removeEventListener('siteaudit:check', onSiteAuditCheck);

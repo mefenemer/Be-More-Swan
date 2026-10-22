@@ -21,6 +21,7 @@ import { refreshBlogActionCards } from '../../src/utils/chat-blog-action';
 import { refreshEmailActionCards } from '../../src/utils/chat-email-action';
 import { refreshLeadActionCards } from '../../src/utils/chat-lead-action';
 import { refreshAudienceCards } from '../../src/utils/chat-audience';
+import { refreshSettingsCards } from '../../src/utils/chat-assistant-settings';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 function json(statusCode: number, body: unknown) {
@@ -51,6 +52,8 @@ export default withLambda(async (event) => {
             // Live role label from master_assistants; ai_assistant_job_role is a hire-time snapshot
             // that goes stale on an admin rename, so it's only the legacy fallback.
             assistantRole: sql<string | null>`coalesce(${masterAssistants.name}, ${aiAssistants.aiAssistantJobRole})`,
+            // Which settings a stored settings card may still offer (chat-assistant-settings.ts).
+            roleKey: masterAssistants.roleKey,
         })
         .from(chatSessions)
         .innerJoin(aiAssistants, eq(chatSessions.aiAssistantId, aiAssistants.id))
@@ -84,12 +87,12 @@ export default withLambda(async (event) => {
             createdAt: session.createdAt,
             updatedAt: session.updatedAt,
         },
-        // Stored post-, blog-, email-, lead-action and Audience cards are re-checked against their rows,
-        // so one already acted on says so instead of offering a button the endpoint would refuse.
-        // None throws.
-        messages: await refreshAudienceCards(db, orgId,
+        // Stored post-, blog-, email-, lead-action, Audience and settings cards are re-checked against
+        // their rows, so one already acted on says so instead of offering a button the endpoint would
+        // refuse. None throws.
+        messages: await refreshSettingsCards(db, orgId, session.aiAssistantId, session.roleKey, await refreshAudienceCards(db, orgId,
             await refreshLeadActionCards(db, orgId, session.aiAssistantId, await refreshEmailActionCards(db, orgId, session.aiAssistantId,
                 await refreshBlogActionCards(db, orgId, session.aiAssistantId,
-                    await refreshPostActionCards(db, orgId, session.aiAssistantId, messages))))),
+                    await refreshPostActionCards(db, orgId, session.aiAssistantId, messages)))))),
     });
 });

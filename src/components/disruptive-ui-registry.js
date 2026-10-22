@@ -3273,6 +3273,68 @@
   }
 
   register('lead_action_proposal', renderLeadActionProposalCard);
+
+  // ── Built-in: Assistant Settings Proposal Card (every structured chat) ─────
+  // { type: 'assistant_settings_proposal', setting: 'pause'|'resume'|'draft_horizon'|'review_alerts'|
+  //   'content_suggestions', assistantId, assistantName, current, proposed, days, value, enabled,
+  //   monthlyCap, blocked, settled? }
+  // A change to the assistant's OWN settings. Every fact on it was read from its row by the
+  // orchestrator (src/utils/chat-assistant-settings.ts). The click dispatches `settings:change`;
+  // chat-session.js calls the endpoint the Assistant Profile uses for that setting.
+  const SETTINGS_COPY = {
+    pause: { head: 'Pause this assistant', button: 'Yes, pause', busy: 'Pausing…', danger: true },
+    resume: { head: 'Start this assistant', button: 'Start it', busy: 'Starting…' },
+    draft_horizon: { head: 'Generate posts ahead', button: 'Save', busy: 'Saving…' },
+    review_alerts: { head: 'Review alerts', button: 'Save', busy: 'Saving…' },
+    content_suggestions: { head: 'Autonomous Content Suggestions', button: 'Save', busy: 'Saving…' },
+  };
+
+  function renderAssistantSettingsProposalCard(ui, esc) {
+    const copy = SETTINGS_COPY[ui.setting];
+    const assistantId = Number(ui.assistantId);
+    if (!copy || !Number.isInteger(assistantId)) return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      ${ui.assistantName ? `<p class="text-xs text-gray-500 mt-2">${esc(ui.assistantName)}</p>` : ''}
+      ${ui.current ? `<p class="text-sm text-gray-700 mt-2"><span class="font-bold">Now:</span> ${esc(ui.current)}</p>` : ''}
+      ${!blocked && ui.proposed ? `<p class="text-sm text-gray-900 mt-1"><span class="font-bold">After:</span> ${esc(ui.proposed)}</p>` : ''}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${!blocked && ui.setting === 'pause' ? '<p class="text-xs text-gray-600 mt-3">It stops all actions until you start it again. Nothing it has already scheduled is deleted.</p>' : ''}
+      ${!blocked && ui.setting === 'draft_horizon' ? '<p class="text-xs text-gray-600 mt-3">Further ahead: it drafts more straight away. Shorter: unreviewed drafts beyond the new window are archived.</p>' : ''}
+      ${!blocked && ui.setting === 'content_suggestions' ? '<p class="text-xs text-gray-600 mt-3">It stops when your monthly tasks run out — you are never charged extra.</p>' : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-asp-go class="${copy.danger ? 'btn-destructive' : 'btn-primary'} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>
+        <button type="button" data-asp-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-asp-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-asp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-asp-go], [data-asp-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-asp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-asp-go]')) return;
+      setBusy(true);
+      say(copy.busy);
+      el.dispatchEvent(new CustomEvent('settings:change', {
+        bubbles: true,
+        detail: {
+          setting: ui.setting, assistantId,
+          days: ui.days ?? null, value: ui.value ?? null, enabled: ui.enabled ?? null, monthlyCap: ui.monthlyCap ?? null,
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Done.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('assistant_settings_proposal', renderAssistantSettingsProposalCard);
   register('SocialPostDraftCard', renderSocialPostDraftCard);
 
   // ── Built-in: Blog Post Draft Card ──────────────────────────────────────────
