@@ -965,6 +965,8 @@ function _resizeBriefAutoGrow() {
 // Activate a main tab by name ('datahub' | 'goals' | 'activity'). Exposed so other code
 // (deep-links, attention CTAs, child-tab clicks) can surface the right section.
 window._activateMainTab = function(name) {
+    // The strip belongs to the landing tab only; re-judged after the tab has switched.
+    setTimeout(() => window._renderNeedsYou?.(), 0);
     document.querySelectorAll('.main-tab-btn').forEach(b => {
         const on = b.dataset.maintab === name;
         b.classList.toggle('active-tab', on);
@@ -4560,6 +4562,60 @@ window._renderStatusPill = function(data) {
 window._updateOpSignals = function(patch) {
     window._detailOpSignals = { ...window._detailOpSignals, ...patch };
     window._renderStatusPill();
+    window._renderNeedsYou?.();
+};
+
+// ── "Needs you" strip (#detail-needs-you) ─────────────────────────────────────
+// One rule for every assistant: the landing tab starts with what is waiting on the owner and what
+// happens next. The COUNT is the one the tab badge shows — the pending-review signal every queue
+// loader already feeds (_updateOpSignals), or, for the Brand Designer, its Briefs badge
+// (_setNeedsYouCount). The NEXT line is set by whichever module knows it (_setNextUp): the
+// Autopilot card, the Searches tab, the Campaigns tab, the Briefs tab. Reset per assistant load in
+// _applyDashboardRegistry.
+window._setNeedsYouCount = function(n) {
+    window._detailNeedsYouOverride = Number(n) || 0;
+    window._renderNeedsYou();
+};
+window._setNextUp = function(text) {
+    window._detailNextUp = text ? String(text) : null;
+    window._renderNeedsYou();
+};
+window._renderNeedsYou = function() {
+    const strip = document.getElementById('detail-needs-you');
+    if (!strip) return;
+    const source = window._detailNeedsYouSource;   // 'review' | 'briefs' | null
+    const landing = window._detailDefaultMainTab || 'datahub';
+    const onLanding = document.querySelector('.main-tab-btn.active-tab')?.dataset.maintab === landing;
+    if (!source || !onLanding) { strip.classList.add('hidden'); return; }
+
+    const n = source === 'briefs' ? (window._detailNeedsYouOverride || 0) : (window._detailOpSignals?.pendingReview || 0);
+    const where = source === 'briefs' ? 'Briefs' : ((window._detailReviewQueue || {}).label || 'Review');
+    const targetTab = source === 'briefs' ? 'briefs' : 'review-queue';
+    const text = document.getElementById('needs-you-text');
+    const go = document.getElementById('needs-you-go');
+    const next = document.getElementById('next-up-text');
+
+    strip.className = `mb-4 rounded-xl border px-4 py-3 ${n ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-white'}`;
+    if (text) {
+        text.className = `text-sm font-bold mr-auto ${n ? 'text-amber-900' : 'text-gray-700'}`;
+        text.textContent = n ? `Needs you: ${n} waiting in ${where}` : 'Nothing needs you right now.';
+    }
+    // A button only when the waiting things are on ANOTHER tab — on the landing tab they are below.
+    const showGo = n > 0 && targetTab !== landing;
+    if (go) {
+        go.classList.toggle('hidden', !showGo);
+        go.style.display = showGo ? '' : 'none';
+        go.textContent = `Open ${where}`;
+        go.onclick = () => {
+            window._activateMainTab(targetTab);
+            if (targetTab === 'review-queue') window.detailRqOpenStatus?.('review');
+        };
+    }
+    if (next) {
+        const line = window._detailNextUp;
+        next.classList.toggle('hidden', !line);
+        next.textContent = line ? `What happens next: ${line}` : '';
+    }
 };
 
 // Fan the pending-review count out to the surfaces that display it. Called on load and after
@@ -4809,6 +4865,8 @@ function _renderEmailAutopilotCard(data) {
     const chip = el('detail-rq-autopilot-chip');
     if (chip) { chip.classList.add('hidden'); chip.style.display = 'none'; }
 
+    // "What happens next" on the Needs-you strip: the cadence now, the exact send once stats load.
+    window._setNextUp?.(active ? `${headline?.textContent || ''}.` : 'Nothing is scheduled — you start each email yourself.');
     _loadEmailAutopilotStats(window._currentAssistantId);
 }
 
@@ -4847,6 +4905,7 @@ async function _loadEmailAutopilotStats(assistantId) {
         if (nextEl && next !== null) {
             nextEl.textContent = `Next email sends ${new Date(next).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`;
             nextEl.classList.remove('hidden');
+            window._setNextUp?.(`${nextEl.textContent}.`);
         }
     } catch { /* the tiles keep their placeholders */ }
 }
@@ -4927,6 +4986,12 @@ window._renderAutopilotCard = function(data) {
             : 'Autopilot off · you write each post';
     }
 
+    // "What happens next" on the Needs-you strip: the schedule in words; "Next post …" replaces it
+    // once _loadAutopilotNext / _loadBlogAutopilotStats find a dated draft.
+    if (!card.classList.contains('hidden')) window._setNextUp?.(s.active ? `${headline?.textContent || ''}.`
+        : s.kind === 'unrecognised' ? 'Autopilot isn’t running — its schedule needs fixing.'
+        : `Nothing is scheduled — you create each ${isBlog ? 'article' : 'post'} yourself.`);
+
     if (isBlog) {
         // Long-form counts come from blog_posts, which get-assistant-metrics doesn't read — it is
         // scheduledPosts-only, and _fetchAndRenderAssistantMetrics early-returns for this role
@@ -4978,6 +5043,7 @@ async function _loadBlogAutopilotStats(assistantId, scheduleActive) {
             const when = new Date(next).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
             nextEl.textContent = `Next post: ${when}`;
             nextEl.classList.remove('hidden');
+            if (!document.getElementById('autopilot-status-card')?.classList.contains('hidden')) window._setNextUp?.(`Next article publishes ${when}.`);
         } else {
             nextEl?.classList.add('hidden');
         }
@@ -5041,6 +5107,7 @@ async function _loadAutopilotNext(assistantId) {
         const when = new Date(next).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
         el.textContent = `Next post: ${when}`;
         el.classList.remove('hidden');
+        if (!document.getElementById('autopilot-status-card')?.classList.contains('hidden')) window._setNextUp?.(`Next post goes out ${when}.`);
     } catch {
         el.classList.add('hidden');
     }
@@ -6047,6 +6114,11 @@ function _applyDashboardRegistry(data) {
     window._detailRulesScope = cfg.rulesScope || null;
     // Role-chosen landing tab (SMM opens on its "Posts" pipeline); null → HTML default (Data Hub).
     window._detailDefaultMainTab = cfg.defaultMainTab || null;
+    // The "Needs you" strip's source for this role: the review queue's count, the Brand Designer's
+    // Briefs badge, or nothing for a role with neither. Its figures are reset per assistant.
+    window._detailNeedsYouSource = !cfg.hideReviewQueue ? 'review' : (cfg.briefsTab ? 'briefs' : null);
+    window._detailNeedsYouOverride = 0;
+    window._detailNextUp = null;
     // Results sits right after the landing tab: "your work, then how it is going". It was near the
     // end of a 6–8 tab row, past the fade on a phone (review, 2026-10-22). Moved in the DOM, so
     // keyboard order and the scroller follow; the view is re-injected per load, so it never stacks.
@@ -8570,6 +8642,8 @@ const _WRITTEN_ROI_HOURS_NOTE = {
     // Campaign briefs and decisions are priced in roi-activity.ts (campaign_managed) — the strip was
     // simply never switched on for this role (review, 2026-10-22).
     campaign: 'Planning campaigns and briefing your other assistants',
+    // Pictures you chose (roi-activity.ts `pictures`, platform-config picture_chosen) — 2026-10-22.
+    brand: 'Finding and making on-brand pictures',
 };
 
 async function _fetchAndRenderWrittenRoi(assistantId, period = 'all') {
@@ -8722,7 +8796,7 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
     if (roiStrip && roiStrip.dataset.roiSource === 'lead') {
         return _fetchAndRenderLeadRoi(assistantId, period);
     }
-    if (roiStrip && ['blog', 'newsletter', 'campaign'].includes(roiStrip.dataset.roiSource)) {
+    if (roiStrip && ['blog', 'newsletter', 'campaign', 'brand'].includes(roiStrip.dataset.roiSource)) {
         return _fetchAndRenderWrittenRoi(assistantId, period);
     }
     if (!card) return;

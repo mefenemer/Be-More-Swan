@@ -189,6 +189,15 @@
       class="${cls} px-3 py-1.5 text-xs font-bold rounded-lg transition">${esc(link.label)}</button>`;
   }
 
+  /** "What happens next" for the page's Needs-you strip: a running campaign's own next step. */
+  function nextUpLine() {
+    const live = state.campaigns.filter((c) => c.status === 'active' || c.status === 'throttled');
+    const c = live.find((x) => x.nextStep && x.nextStep.text) || state.campaigns.find((x) => x.status === 'draft' && x.nextStep && x.nextStep.text);
+    if (c) return `“${c.objective}”: ${c.nextStep.text}`;
+    if (live.length) return live.length === 1 ? `“${live[0].objective}” is running.` : `${live.length} campaigns are running.`;
+    return state.campaigns.length ? 'No campaign is running right now.' : 'No campaigns yet — press “New campaign”, or set an objective in chat.';
+  }
+
   function nextStepHtml(c) {
     const n = c.nextStep;
     const needsYou = n.kind === 'act' || n.kind === 'plan';
@@ -2036,6 +2045,7 @@
       state.loadError = err.message;
     }
     state.loaded = true;
+    window._setNextUp?.(nextUpLine());
     rerender();
     loadFunnel();
     loadLearnings();

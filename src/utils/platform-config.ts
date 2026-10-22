@@ -195,6 +195,11 @@ export interface TimeMultipliers {
     ticket_handled: number;
     record_enriched: number;
     campaign_managed: number;
+    // Added 2026-10-22 so the Brand Designer's strip is not a flat zero: one picture the user CHOSE
+    // (a visual_brief_options row approved into the library). Weighted as the time to find or make a
+    // fitting, on-brand picture at the right size — searching stock, a branded card, resizing — not
+    // the whole brief. An estimate, admin-tunable like the rest.
+    picture_chosen: number;
 }
 export interface Milestones { leads_for_token: number; hours_for_beta: number; }
 
@@ -214,6 +219,7 @@ export const DEFAULT_TIME_MULTIPLIERS: TimeMultipliers = {
     ticket_handled: 8,
     record_enriched: 3,
     campaign_managed: 10,
+    picture_chosen: 10,
 };
 export const DEFAULT_MILESTONES: Milestones = { leads_for_token: 100, hours_for_beta: 50 };
 

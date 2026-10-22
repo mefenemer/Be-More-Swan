@@ -233,7 +233,7 @@ The pricing page lists everything else each plan includes — app connections, A
 
 ## Tasks
 
-A task is **one finished piece of work** — a drafted post, a blog article, a lead search, an email or email campaign, a quality review or rewrite of a post, or a message to an assistant in chat. A post that goes out to several platforms counts once. Work is counted only once it's delivered, so a failure or a retry never costs you a task. See [Tasks and AI Media Credits: What Uses What](#tasks-and-ai-media-credits-what-uses-what).
+A task is **one finished piece of work** — a drafted post, a blog article, a lead search, an email or email flow, a quality review or rewrite of a post, or a message to an assistant in chat. A post that goes out to several platforms counts once. Work is counted only once it's delivered, so a failure or a retry never costs you a task. See [Tasks and AI Media Credits: What Uses What](#tasks-and-ai-media-credits-what-uses-what).
 
 ## What happens at the limit
 
@@ -279,7 +279,7 @@ Your plan comes with two allowances. They measure different things, so they're k
 |-----------|-------------------|---------------------------|
 | **Social Media Assistant** | Each drafted post (once, however many platforms it goes to), each quality review, rewrite or suggestion you apply, copying a post to another platform | AI images (1 credit), AI video (5), AI music (5, or 3 if you share the track) |
 | **Blog Writing Assistant** | Each drafted article | AI images for an article |
-| **Email Marketing Assistant** | Each drafted email — on its own schedule, or when you ask it to draft or rewrite one in Email Studio — and each email campaign written for a Marketing Campaign Orchestrator order | — |
+| **Email Marketing Assistant** | Each drafted email — on its own schedule, or when you ask it to draft or rewrite one in Email Studio — and each email flow written for a Marketing Campaign Orchestrator order | — |
 | **Lead Generation Assistant** | Each finished lead search, however many leads it finds | — |
 | **Marketing Campaign Orchestrator** | Nothing itself — the posts, articles, searches and emails it asks your other assistants for are counted where they're made | — |
 | **Any assistant, in chat** | Each message you send | — |
@@ -327,12 +327,12 @@ Find your symptom, read the most likely cause, and follow the quick fix.
 | Approving a lead sent nothing | No business postal address saved | Business Information ▸ **Business postal address**. It's legally required in every outreach email |
 | Approving a lead sent nothing | No mailbox connected, or it has lapsed | The assistant's **Connections** — connect or reconnect Gmail or Outlook. Until then each approval hands you the draft to send yourself |
 | Approving a lead sent nothing | The lead is flagged do-not-contact, or its address is suppressed | Both are deliberate. A do-not-contact flag can be overridden with a written reason. A suppressed address cannot |
-| A lead has no drafted email | It scored cold, or was flagged do-not-contact | Emails are only drafted for hot and warm leads. **Research this lead** on the Enrichment tab can move a rating |
+| A lead has no drafted email | It scored cold, or was flagged do-not-contact | Emails are only drafted for hot and warm leads. **Research this lead** on the Found leads tab can move a rating |
 | Most leads show no contact address | Their websites publish none — roughly two in three don't | Add one with **Edit**, press **Look again** later, or read [Why Can't This Lead Be Emailed?](#why-cant-this-lead-be-emailed) |
 | A supplier or directory scored highly | Suppliers describe your market in their customers' words | Add them to **Who is NOT a customer?** in setup |
 | A search found little or nothing | The queries were too broad, or the wrong shape | Open the search, edit its plan, and run it again |
 | Cannot start another search | 10 searches are already running | Pause one on the **Searches** tab |
-| Leads vanished from Outreach | They sat 30 days without a decision | They're in **Deleted** at the foot of the Enrichment tab. **Send back for enrichment** returns one |
+| Leads vanished from Outreach | They sat 30 days without a decision | They're in **Deleted** at the foot of the Found leads tab. **Send back for enrichment** returns one |
 | Deleting many leads stopped part-way | A very large selection | Press **Delete** again on what's left. Deleted leads move to the Deleted section, nothing is lost |
 
 ## Still stuck?

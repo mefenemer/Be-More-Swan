@@ -115,7 +115,7 @@ Use the left-hand sidebar to move between sections:
 
 > Leads, searches, conversations and connections all live **inside an assistant**, not in the
 > sidebar. Open your Lead Generator from **My Assistants** and you will find its tabs across the top:
-> Searches, Enrichment, Outreach, Conversations, Calendar and Goals.
+> Searches, Found leads, Outreach, Conversations, Calendar and Goals.
 
 ## Trial and tier indicators
 
@@ -189,11 +189,11 @@ setup answers, and files the results.
 | Tab | What you do there |
 |-----|------------------|
 | **Searches** | Start searches, review plans, see what each run found |
-| **Enrichment** | Every lead in every state. Find contact details, correct details, research a company to improve its rating, then **Move to Outreach** the ones worth pursuing |
+| **Found leads** | Every lead in every state. Find contact details, correct details, research a company to improve its rating, then **Move to Outreach** the ones worth pursuing |
 | **Outreach** | Read each drafted email and approve or archive it. Approving is what sends |
 | **Conversations** | What happened after the email: replies, chasers, your own answers, and the deal outcome |
 
-Leads left undecided in Outreach for 30 days move to the Deleted section of the Enrichment tab —
+Leads left undecided in Outreach for 30 days move to the Deleted section of the Found leads tab —
 you are warned three days beforehand, nothing is destroyed, and one button puts a lead back.
 $$,
 TRUE)
@@ -254,7 +254,7 @@ scored hot repeatedly until the judgement was separated from the score.
 ## What can change a rating
 
 A score is formed from whatever was known at the time — often a single search result. Two things can
-move it, both in the **Enrichment** tab:
+move it, both in the **Found leads** tab:
 
 - **Research this lead** — reads the company properly (site, buying signals, decision makers) and
   re-scores on what it finds. This is the only action that can turn a cold lead warm.
@@ -310,7 +310,7 @@ This step exists because a real run once spent its whole budget searching job bo
 4. Looks for a published contact address on the hot and warm ones.
 5. Files every scored company as a lead, and tells you when it has finished.
 
-Each company appears in the **Enrichment** tab as it is scored, so the tab fills while the run is
+Each company appears in the **Found leads** tab as it is scored, so the tab fills while the run is
 still going.
 
 ## Cadence and limits
@@ -480,7 +480,7 @@ Outreach is email only, and most companies do not publish an address. On UK smal
 roughly **one in three** does — so "we cannot reach this one" is the normal state of a lead list, not
 a fault.
 
-The **Contact** column in the Enrichment tab tells you which case you are in.
+The **Contact** column in the Found leads tab tells you which case you are in.
 
 | Chip | Meaning | What you can do |
 |------|---------|----------------|
@@ -540,7 +540,7 @@ The **Outreach** tab holds each lead with the email your assistant drafted for i
 edit it if you want, then approve.
 
 Leads arrive here two ways: automatically, once a search has scored a company and written its
-draft; or because you pressed **Move to Outreach** on a lead in the **Enrichment** tab. Neither
+draft; or because you pressed **Move to Outreach** on a lead in the **Found leads** tab. Neither
 route sends anything.
 
 > **Approve & send email** does exactly that — the email goes immediately, from your own connected
@@ -556,7 +556,7 @@ Turn the whole thing off with **Chase leads who do not reply?** in the assistant
 | Column | What is in it |
 |--------|--------------|
 | **Review** | Waiting on your decision. Stocked automatically with the leads that have an email ready to read, plus any you moved here by hand |
-| **Approved** | You cleared it. Also where **Send email now**, **Mark outreach sent**, **Send back to Review** and **Move to Enrichment** live |
+| **Approved** | You cleared it. Also where **Send email now**, **Mark outreach sent**, **Send back to Review** and **Move to Found leads** live |
 | **Awaiting reply** | The email has **already gone** — this is the chase reminder, not a pending send |
 | **Archived** | You turned it down. The reason feeds your targeting |
 
@@ -597,11 +597,11 @@ ON CONFLICT (title) DO UPDATE SET
   updated_at = NOW();
 
 INSERT INTO help_articles (category, sort_order, title, content_md, is_published) VALUES
-('Lead Management', 30, 'The Enrichment Tab: Working a Lead Up',
+('Lead Management', 30, 'The Found Leads Tab: Working a Lead Up',
 $$
-# The Enrichment Tab: Working a Lead Up
+# The Found Leads Tab: Working a Lead Up
 
-The **Enrichment** tab holds every lead this assistant has scored, in every state, plus anything you
+The **Found leads** tab holds every lead this assistant has scored, in every state, plus anything you
 imported from a spreadsheet. It is where a lead is worked up and triaged: you improve what is known
 about a company here, then decide whether it is worth approaching. Judging the *email* happens one
 tab along, in **Outreach**.
@@ -665,7 +665,7 @@ $$
 
 ## Getting leads out
 
-Export from the **Enrichment** tab. Nothing is exported automatically and nothing is pushed into a
+Export from the **Found leads** tab. Nothing is exported automatically and nothing is pushed into a
 CRM on its own — an export happens when you ask for one.
 
 | Format | Use it for |
@@ -833,13 +833,13 @@ Use this table to diagnose common problems quickly. Find your symptom in the lef
 | 1 | Approving a lead sent nothing | No business postal address saved | Business Information → **Business postal address**. Legally required in every outreach email, so nothing sends until it is filled in. |
 | 2 | Approving a lead sent nothing | No mailbox connected, or its connection has lapsed | The assistant's **Connections** tab → connect or reconnect Gmail/Outlook. Until then each approval hands you the draft to send yourself. |
 | 3 | Approving a lead sent nothing | The lead is flagged do-not-contact, or its address is suppressed | Both are deliberate. A do-not-contact verdict can be overridden with a written reason; a suppressed address cannot — they asked not to be contacted, or your CRM says they are already a customer. |
-| 4 | A lead has no drafted email | It scored **cold**, or was flagged do-not-contact | Not a fault: emails are only drafted for hot and warm leads. **Research this lead** on the Enrichment tab is what can move a rating. See [How Lead Scoring Works](#how-lead-scoring-works-and-how-to-trust-it). |
+| 4 | A lead has no drafted email | It scored **cold**, or was flagged do-not-contact | Not a fault: emails are only drafted for hot and warm leads. **Research this lead** on the Found leads tab is what can move a rating. See [How Lead Scoring Works](#how-lead-scoring-works-and-how-to-trust-it). |
 | 5 | Most leads show no contact address | Their websites publish none — roughly two in three do not | Expected. Add an address by hand with **Edit**, press **Look again** later, or read [Why Can't This Lead Be Emailed?](#why-cant-this-lead-be-emailed). |
 | 6 | A lead scored lower than expected | It was judged on a single search result | **Research this lead** reads the company properly and re-scores it. |
 | 7 | A supplier or directory scored highly | Suppliers describe your market in their customers' words | Add them to **Who is NOT a customer?** in setup — that list is a hard no, not a low score. |
 | 8 | A search found little or nothing | The queries were too broad, or the wrong shape | Open the search, edit its plan, and run it again. The plan is shown before every first run for exactly this reason. |
 | 9 | Cannot start another search | 10 searches are already running in this workspace | Pause one on the **Searches** tab. Paused and draft searches do not count. |
-| 10 | Leads vanished from the Outreach tab | They sat 30 days without a decision and were retired | They are in the **Deleted** section at the foot of the Enrichment tab, with the reason. **Send back for enrichment** returns one to the pipeline. |
+| 10 | Leads vanished from the Outreach tab | They sat 30 days without a decision and were retired | They are in the **Deleted** section at the foot of the Found leads tab, with the reason. **Send back for enrichment** returns one to the pipeline. |
 | 11 | A prospect replied but nothing chased them again | Correct — a reply stops the cadence immediately | Answer them yourself in the **Conversations** tab; the thread is where the reply and your answer both live. |
 | 12 | Cannot add another assistant | Workspace assistant limit reached | Settings → Billing → change your plan. |
 

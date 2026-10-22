@@ -36,6 +36,7 @@
 import { and, count, eq, gte, inArray, ne, notInArray, sql } from 'drizzle-orm';
 import {
     aiAssistants, assistantRecords, blogPosts, newsletterIssues, scheduledPosts, taskRuns,
+    visualBriefOptions, visualBriefs,
 } from '../../db/schema';
 import { getTimeMultipliers, type TimeMultipliers } from './platform-config';
 
@@ -274,11 +275,25 @@ export async function countRoiActivity(db: Db, opts: CountRoiActivityOptions): P
         ))
         .groupBy(assistantRecords.recordType);
 
-    const [taskRunCount, postCount, blogCount, newsletterCount, recordRows] = await Promise.all([
+    // Pictures the user chose (Brand Designer): an option approved into the library, counted on the
+    // day it was CHOSEN (decided_at) — the moment the work became useful, and the only option state
+    // that means a picture was kept. The assistant lives on the brief, so the option joins to it.
+    const pictureQ = db.select({ count: count() })
+        .from(visualBriefOptions)
+        .innerJoin(visualBriefs, eq(visualBriefs.id, visualBriefOptions.briefId))
+        .where(and(
+            eq(visualBriefOptions.organisationId, organisationId),
+            inArray(visualBriefs.aiAssistantId, assistantIds),
+            eq(visualBriefOptions.status, 'approved'),
+            gte(visualBriefOptions.decidedAt, windowStart),
+        ));
+
+    const [taskRunCount, postCount, blogCount, newsletterCount, pictureCount, recordRows] = await Promise.all([
         safeCount(taskRunQ, markDegraded),
         safeCount(postQ, markDegraded),
         safeCount(blogQ, markDegraded),
         safeCount(newsletterQ, markDegraded),
+        safeCount(pictureQ, markDegraded),
         (async (): Promise<{ recordType: string; count: number }[]> => {
             try { return await recordQ; } catch (err) {
                 console.error('[roi-activity] assistant_records count failed, defaulting to none', err);
@@ -296,6 +311,7 @@ export async function countRoiActivity(db: Db, opts: CountRoiActivityOptions): P
     push('task_runs', 'Tasks completed', taskRunCount, mult.tasks_completed);
     push('blog', 'Blog posts written', blogCount, mult.blog_drafted);
     push('newsletter', 'Newsletter issues written', newsletterCount, mult.newsletter_drafted);
+    push('pictures', 'Pictures chosen', pictureCount, mult.picture_chosen);
     for (const row of recordRows) {
         const key = String(row.recordType);
         const multKey = RECORD_TYPE_MULTIPLIER[key];
@@ -355,7 +371,7 @@ export async function countRoiActivityByAssistant(
         }
     };
 
-    const [postRows, taskRows, blogRows, newsletterRows, recordRows] = await Promise.all([
+    const [postRows, taskRows, blogRows, newsletterRows, pictureRows, recordRows] = await Promise.all([
         safeGroup(db.select({ assistantId: scheduledPosts.assistantId, c: sql<number>`count(*)::int` })
             .from(scheduledPosts)
             .where(and(
@@ -396,6 +412,17 @@ export async function countRoiActivityByAssistant(
             ))
             .groupBy(newsletterIssues.assistantId)),
 
+        safeGroup(db.select({ assistantId: visualBriefs.aiAssistantId, c: sql<number>`count(*)::int` })
+            .from(visualBriefOptions)
+            .innerJoin(visualBriefs, eq(visualBriefs.id, visualBriefOptions.briefId))
+            .where(and(
+                eq(visualBriefOptions.organisationId, organisationId),
+                inArray(visualBriefs.aiAssistantId, assistantIds),
+                eq(visualBriefOptions.status, 'approved'),
+                gte(visualBriefOptions.decidedAt, windowStart),
+            ))
+            .groupBy(visualBriefs.aiAssistantId)),
+
         (async (): Promise<{ assistantId: number; recordType: string; c: number }[]> => {
             try {
                 return await db.select({
@@ -430,6 +457,7 @@ export async function countRoiActivityByAssistant(
     taskRows.forEach(r => add(r.assistantId, 'task_runs', 'Tasks completed', Number(r.c), mult.tasks_completed));
     blogRows.forEach(r => add(r.assistantId, 'blog', 'Blog posts written', Number(r.c), mult.blog_drafted));
     newsletterRows.forEach(r => add(r.assistantId, 'newsletter', 'Newsletter issues written', Number(r.c), mult.newsletter_drafted));
+    pictureRows.forEach(r => add(r.assistantId, 'pictures', 'Pictures chosen', Number(r.c), mult.picture_chosen));
     for (const r of recordRows) {
         const type = String(r.recordType);
         const multKey = RECORD_TYPE_MULTIPLIER[type];

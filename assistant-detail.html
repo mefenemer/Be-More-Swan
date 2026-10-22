@@ -851,6 +851,19 @@
     </nav>
   </div>
 
+  <!-- "Needs you" — one strip at the top of the landing tab, for every assistant (UX review,
+       2026-10-22): how many things are waiting on the owner (the same number as the tab badge), a
+       button to them when they live on another tab, and one line on what this assistant will do
+       next. Filled by window._renderNeedsYou (assistants.js); shown only while the landing tab is
+       open, so it never sits above a tab it does not describe. -->
+  <div id="detail-needs-you" class="hidden mb-4 rounded-xl border px-4 py-3" role="status" aria-live="polite">
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <p id="needs-you-text" class="text-sm font-bold mr-auto"></p>
+      <button type="button" id="needs-you-go" class="hidden btn-secondary min-h-[44px] sm:min-h-0 px-3 py-1.5 border text-xs font-bold rounded-lg transition"></button>
+    </div>
+    <p id="next-up-text" class="hidden text-xs text-gray-600 mt-1"></p>
+  </div>
+
   <!-- ── MAIN TAB: Activity ─────────────────────────────────────────── -->
   <div id="maintab-activity" role="tabpanel" aria-labelledby="maintab-btn-activity" class="main-tab-content hidden">
 

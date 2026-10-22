@@ -33,7 +33,7 @@ Be More Swan gives your business a team of **digital assistants**. Each one is h
 |-----------|---------------------|
 | **Social Media Assistant** | Plans, writes and schedules on-brand posts for your connected social accounts |
 | **Blog Writing Assistant** | Researches and writes long-form posts in your voice, on a cadence you set |
-| **Email Marketing Assistant** | Writes newsletters and email campaigns for your Audience, and grows it with sign-up forms |
+| **Email Marketing Assistant** | Writes newsletters and email flows for your Audience, and grows it with sign-up forms |
 | **Lead Generation Assistant** | Finds companies that match your ideal customer, scores them, and drafts personal outreach |
 | **Marketing Campaign Assistant** | Turns one objective into coordinated work across your other assistants |
 
@@ -158,7 +158,7 @@ Open any assistant from **My Assistants** to reach its own page — where its wo
 
 ## The tabs
 
-Each assistant has tabs for its own work — for example **Review**, **Calendar**, **Goals** and **Activity**, plus role-specific ones such as **Content Library** and **Inspo** for content assistants, or **Searches**, **Enrichment**, **Outreach** and **Conversations** for the Lead Generation Assistant.
+Each assistant has tabs for its own work — for example **Review**, **Calendar**, **Goals** and **Activity**, plus role-specific ones such as **Content Library** and **Inspo** for content assistants, or **Searches**, **Found leads**, **Outreach** and **Conversations** for the Lead Generation Assistant.
 $$, TRUE),
 
 ('Your Assistants', 2, 'The Assistant Profile Pane', $$
@@ -340,15 +340,15 @@ $$, TRUE),
 ('Your Assistants', 60, 'The Email Marketing Assistant', $$
 # The Email Marketing Assistant
 
-Writes newsletters and email campaigns for your Audience, and helps you grow it.
+Writes newsletters and email flows for your Audience, and helps you grow it.
 
 ## Writing an email
 
 Press **Write Email** to open **Email Studio**. Ask the assistant to draft it, or write it yourself, then preview it. When it's ready, **Approve for sending** — or **Send now** — and it goes to the audience or segment you chose. Nothing is sent until you approve it.
 
-## Email campaigns
+## Email flows
 
-An email campaign is a planned sequence of emails with a shared aim — welcoming new subscribers, for example. Describe what you want and the assistant plans the whole sequence and drafts each email. Campaigns can start automatically when someone joins through one of your sign-up forms.
+An email flow is a planned sequence of emails with a shared aim — welcoming new subscribers, for example. Describe what you want and the assistant plans the whole sequence and drafts each email. Campaigns can start automatically when someone joins through one of your sign-up forms.
 
 ## Who receives your emails
 
@@ -403,7 +403,7 @@ Finds companies that match your ideal customer, scores them against what you tol
 | Tab | What you do there |
 |-----|------------------|
 | **Searches** | Press **Find New Leads**, describe who you want, review the search plan and approve it |
-| **Enrichment** | Every lead in every state. Find contact details, research a company, and move the good ones on |
+| **Found leads** | Every lead in every state. Find contact details, research a company, and move the good ones on |
 | **Outreach** | Read each drafted email and approve it. Approving is what sends |
 | **Conversations** | Replies, follow-ups, your answers and the deal outcome |
 | **Strategy** | What's working, and suggested changes to your targeting |
@@ -571,12 +571,12 @@ Find your symptom, read the most likely cause, and follow the quick fix.
 | Approving a lead sent nothing | No business postal address saved | Business Information ▸ **Business postal address**. It's legally required in every outreach email |
 | Approving a lead sent nothing | No mailbox connected, or it has lapsed | The assistant's **Connections** — connect or reconnect Gmail or Outlook. Until then each approval hands you the draft to send yourself |
 | Approving a lead sent nothing | The lead is flagged do-not-contact, or its address is suppressed | Both are deliberate. A do-not-contact flag can be overridden with a written reason. A suppressed address cannot |
-| A lead has no drafted email | It scored cold, or was flagged do-not-contact | Emails are only drafted for hot and warm leads. **Research this lead** on the Enrichment tab can move a rating |
+| A lead has no drafted email | It scored cold, or was flagged do-not-contact | Emails are only drafted for hot and warm leads. **Research this lead** on the Found leads tab can move a rating |
 | Most leads show no contact address | Their websites publish none — roughly two in three don't | Add one with **Edit**, press **Look again** later, or read [Why Can't This Lead Be Emailed?](#why-cant-this-lead-be-emailed) |
 | A supplier or directory scored highly | Suppliers describe your market in their customers' words | Add them to **Who is NOT a customer?** in setup |
 | A search found little or nothing | The queries were too broad, or the wrong shape | Open the search, edit its plan, and run it again |
 | Cannot start another search | 10 searches are already running | Pause one on the **Searches** tab |
-| Leads vanished from Outreach | They sat 30 days without a decision | They're in **Deleted** at the foot of the Enrichment tab. **Send back for enrichment** returns one |
+| Leads vanished from Outreach | They sat 30 days without a decision | They're in **Deleted** at the foot of the Found leads tab. **Send back for enrichment** returns one |
 | Deleting many leads stopped part-way | A very large selection | Press **Delete** again on what's left. Deleted leads move to the Deleted section, nothing is lost |
 
 ## Still stuck?

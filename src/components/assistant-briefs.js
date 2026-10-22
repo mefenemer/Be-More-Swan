@@ -138,6 +138,9 @@
     // A brief with every picture it needs chosen is finished — leftover options do not ask for anything.
     const n = state.briefs.filter((b) => b.options.some((o) => o.status === 'proposed') && b.status !== 'cancelled' && !progress(b).done).length;
     el.textContent = n > 99 ? '99+' : String(n);
+    // The page's Needs-you strip counts the same briefs as this badge.
+    window._setNeedsYouCount?.(n);
+    window._setNextUp?.(nextUpLine());
     el.classList.toggle('hidden', n === 0);
     // `hidden` loses to inline-flex (equal specificity, later in style.css) — pin it inline too.
     el.style.display = n === 0 ? 'none' : '';
@@ -152,6 +155,17 @@
     if (b.status === 'approved') return `<span class="${base} bg-emerald-50 text-emerald-800 border-emerald-200">Approved</span>`;
     if (waiting) return `<span class="${base} bg-amber-50 text-amber-800 border-amber-200">Needs you</span>`;
     return `<span class="${base} bg-gray-50 text-gray-600 border-gray-200">Not started</span>`;
+  }
+
+  /** "What happens next" for the page's Needs-you strip. */
+  function nextUpLine() {
+    const making = state.briefs.find((b) => b.status === 'generating');
+    if (making) return `${name()} is making options for “${making.title}” now.`;
+    const due = state.briefs
+      .filter((b) => b.status !== 'cancelled' && b.dueDate && !progress(b).done)
+      .sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)))[0];
+    if (due) return `“${due.title}” is due ${new Date(`${due.dueDate}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}.`;
+    return state.briefs.length ? 'Nothing is being made right now.' : `No briefs yet — press “New brief”, or tell ${name()} in chat what you need.`;
   }
 
   /** How many pictures this brief is for, and how many are chosen. */

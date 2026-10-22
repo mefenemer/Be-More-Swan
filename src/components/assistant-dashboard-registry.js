@@ -538,6 +538,9 @@
       // shared post_insights endpoint, which would report hasData:false for ever — this assistant
       // publishes nothing.
       metricsSource: 'brand',
+      // ⊕ The hero's Time Saved / Money Saved strip: each picture you choose is priced in
+      // roi-activity.ts (picture_chosen, 10 min by default, admin-tunable). Hidden until one is.
+      roiSource: 'brand',
       kpis: [
         {
           label: 'Pictures Approved',

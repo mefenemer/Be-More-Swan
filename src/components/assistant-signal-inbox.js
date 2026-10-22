@@ -286,6 +286,19 @@
    * `nextRunAt` is seeded to now() at creation and the hourly dispatcher moves it forward, so a
    * due-but-unfired schedule is normal and means "within the hour", not "overdue".
    */
+  /** "What happens next" for the page's Needs-you strip: the soonest scheduled search run. */
+  function nextUpLine(searches) {
+    const times = searches
+      .filter((s) => (s.cadence || 'one_off') !== 'one_off' && s.scheduleEnabled)
+      .map((s) => Date.parse(s.nextRunAt || ''))
+      .filter((t) => t);
+    if (!times.length) return searches.length
+      ? 'No search is scheduled to run again — start one on the Searches tab when you want more leads.'
+      : 'No searches yet — press “Find New Leads” to describe who you’re after.';
+    const t = Math.min(...times);
+    return t <= Date.now() ? 'A scheduled search is due and starts within the hour.' : `The next scheduled search runs ${when(t)}.`;
+  }
+
   function cadenceLine(s) {
     const cadence = s.cadence || 'one_off';
     if (cadence === 'one_off') return 'It runs once each time you start it — nothing is scheduled after that.';
@@ -965,6 +978,7 @@
       }
       state.hasSocialFeed = !!data.hasSocialFeed;
       state.sourceLabel = data.sourceLabel || state.sourceLabel;
+      window._setNextUp?.(nextUpLine(state.savedSearches));
     } catch (err) {
       // The columns arrive with db/signal-inbox-1a.sql, a MANUAL apply. Say so plainly rather than
       // showing a generic failure the user can do nothing with.
