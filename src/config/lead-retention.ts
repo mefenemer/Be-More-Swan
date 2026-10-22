@@ -6,7 +6,7 @@
 //   • Review   — pending_approval. A drafted email nobody has approved or turned down.
 //   • Archived — rejected. A lead the user said no to.
 // Both accumulate for the life of the account. After 30 days a lead in either is moved to a
-// RETAINED "Deleted" state, surfaced as its own section in the Enrichment tab.
+// RETAINED "Deleted" state, surfaced as its own section in the Found leads tab.
 //
 // ⚠️ MOVED, NOT DESTROYED — and the distinction is the whole design.
 //
@@ -277,7 +277,7 @@ export function retentionDaysRemaining(clockStartIso: string | null, now?: Date)
  * The countdown, as the UI prints it.
  *
  * Kept here rather than in the component because three surfaces show it — the Outreach Review
- * column, the Outreach Archived column, and the Enrichment table's own column — and a lead that
+ * column, the Outreach Archived column, and the Found leads table's own column — and a lead that
  * says "3 days left" on one tab and "2 days" on another is the kind of small inconsistency that
  * makes a destructive countdown untrustworthy.
  */
@@ -313,7 +313,7 @@ export function retentionUrgency(daysRemaining: number | null): 'none' | 'low' |
 export const RETENTION_NOTICE =
     `Leads left here for ${LEAD_RETENTION_DAYS} days are moved to Deleted automatically. `
     + 'Nothing is sent, and the move cannot be undone — but the lead is kept, with the reason it was '
-    + 'dropped, in the Deleted section of the Enrichment tab. To stop the countdown on a lead, send '
+    + 'dropped, in the Deleted section of the Found leads tab. To stop the countdown on a lead, send '
     + 'it back for enrichment before it runs out.';
 
 /** The same fact, one line, for the Deleted section's own header. */

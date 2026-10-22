@@ -26,7 +26,7 @@ Be More Swan gives your business a team of **digital assistants**. Each one is h
 |-----------|---------------------|
 | **Social Media Assistant** | Plans, writes and schedules on-brand posts for your connected social accounts |
 | **Blog Writing Assistant** | Researches and writes long-form posts in your voice, on a cadence you set |
-| **Email Marketing Assistant** | Writes newsletters and email campaigns for your Audience, and grows it with sign-up forms |
+| **Email Marketing Assistant** | Writes newsletters and email flows for your Audience, and grows it with sign-up forms |
 | **Lead Generation Assistant** | Finds companies that match your ideal customer, scores them, and drafts personal outreach |
 | **Marketing Campaign Orchestrator** | Turns one objective into coordinated work across your other assistants |
 | **Brand Designer** | Finds stock photos and videos, makes AI images and videos, and designs branded graphics — you pick the ones to use |

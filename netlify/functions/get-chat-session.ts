@@ -19,6 +19,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { refreshPostActionCards } from '../../src/utils/chat-post-action';
 import { refreshBlogActionCards } from '../../src/utils/chat-blog-action';
 import { refreshEmailActionCards } from '../../src/utils/chat-email-action';
+import { refreshLeadActionCards } from '../../src/utils/chat-lead-action';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 function json(statusCode: number, body: unknown) {
@@ -82,10 +83,10 @@ export default withLambda(async (event) => {
             createdAt: session.createdAt,
             updatedAt: session.updatedAt,
         },
-        // Stored post-, blog- and email-action cards are re-checked against their rows, so one already
-        // acted on says so instead of offering a button the endpoint would refuse. None throws.
-        messages: await refreshEmailActionCards(db, orgId, session.aiAssistantId,
+        // Stored post-, blog-, email- and lead-action cards are re-checked against their rows, so one
+        // already acted on says so instead of offering a button the endpoint would refuse. None throws.
+        messages: await refreshLeadActionCards(db, orgId, session.aiAssistantId, await refreshEmailActionCards(db, orgId, session.aiAssistantId,
             await refreshBlogActionCards(db, orgId, session.aiAssistantId,
-                await refreshPostActionCards(db, orgId, session.aiAssistantId, messages))),
+                await refreshPostActionCards(db, orgId, session.aiAssistantId, messages)))),
     });
 });

@@ -13,7 +13,7 @@
  * need it are the ones a lead passes THROUGH, and a note is worth least on the one screen the user
  * happens to be on when they learn something.
  *
- *   • the Enrichment tab (assistant-data-hub.js) — every lead, in every state, including the ones
+ *   • the Found leads tab (assistant-data-hub.js) — every lead, in every state, including the ones
  *     with no address and no conversation.
  *   • the Outreach tab (assistants.js `_rqRecordActions`) — the card holding the email, where
  *     "they replied by phone instead" is learned.

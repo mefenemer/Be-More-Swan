@@ -120,14 +120,14 @@ async function main() {
         const reg = read('src/components/disruptive-ui-registry.js');
         assert.match(reg, /register\('email_action_proposal', renderEmailActionProposalCard\);/);
         const session = read('src/components/chat-session.js');
-        const handler = session.slice(session.indexOf('async function onEmailAction('), session.indexOf('// Mystery Shopper cards'));
+        const handler = session.slice(session.indexOf('async function onEmailAction('), session.indexOf('// Lead action cards'));
         assert.match(handler, /postActionCall\('newsletter-issues', \{ action: 'approve', id: d\.issueId \}\)/);
         assert.match(handler, /postActionCall\('newsletter-issues', \{ action: 'approve', id: d\.issueId, scheduledFor: d\.scheduleAt \}\)/);
         assert.match(handler, /postActionCall\('newsletter-issues', \{ action: 'reject', id: d\.issueId \}\)/);
         assert.ok(!/action: 'send'/.test(handler), 'the chat must never send an email immediately');
     });
     await check('reopening a conversation re-checks email cards too', () => {
-        assert.match(read('netlify/functions/get-chat-session.ts'), /messages: await refreshEmailActionCards\(db, orgId, session\.aiAssistantId,/);
+        assert.match(read('netlify/functions/get-chat-session.ts'), /await refreshEmailActionCards\(db, orgId, session\.aiAssistantId,/);
     });
 
     console.log(`\n${passed}/${total} checks passed`);

@@ -470,7 +470,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 organisationId: orgId,
                 userId: ctx.userId,
                 assistantId,
-                name: String(body.name || '').trim().slice(0, 80) || 'Email campaign',
+                name: String(body.name || '').trim().slice(0, 80) || 'Email flow',
                 campaignType: body.campaignType,
                 goal: String(body.goal || '').trim().slice(0, 300),
                 audience: String(body.audience || '').trim().slice(0, 300),

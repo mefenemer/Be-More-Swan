@@ -116,7 +116,7 @@ window._PLATFORM_LABEL = { instagram: 'Instagram', facebook: 'Facebook', linkedi
 // Single source of truth for the "My Assistants" list card and the Assistant Details pill,
 // so they can't diverge again. A `working` lifecycle refines into an operational sub-state
 // from live signals: a mid-flight job → "Executing Task"; else drafts awaiting the user →
-// "Awaiting Human Review"; else "Idle".
+// "Needs you"; else "Idle".
 window._LIFECYCLE_BADGES = {
     blocked:        { cls: 'bg-amber-50 text-amber-700 border-amber-200',      dot: 'bg-amber-500',                 label: 'Action Required',    toggle: 'Initiate Kick-Off' },
     provisioning:   { cls: 'bg-amber-50 text-amber-700 border-amber-200',      dot: 'bg-amber-500 animate-pulse',   label: 'Setup in Progress',  toggle: 'Pause Assistant' },
@@ -140,7 +140,7 @@ window._resolveAssistantBadge = function(data, opSignals) {
         if (sig.activeJobCount > 0) {
             p = { ...p, cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500 animate-pulse', label: 'Executing Task' };
         } else if (sig.pendingReview > 0) {
-            p = { ...p, cls: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-500', label: 'Awaiting Human Review' };
+            p = { ...p, cls: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-500', label: 'Needs you' };
         } else {
             p = { ...p, cls: 'bg-gray-100 text-gray-600 border-gray-200', dot: 'bg-gray-400', label: 'Idle' };
         }
@@ -224,7 +224,7 @@ window._buildAssistantCardGoals = function (assistant) {
             <div class="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
                 <div class="h-full ${meta.dot} transition-all" style="width:${pct}%"></div>
             </div>
-            <p class="text-[11px] text-gray-400 mt-1">${figures}</p>${_goalNextStep(h, latest, target, goalsTab)}`;
+            <p class="text-[11px] text-gray-500 mt-1">${figures}</p>${_goalNextStep(h, latest, target, goalsTab)}`;
     }
 
     // ── Performance counts (coloured) ────────────────────────────────────────
@@ -237,13 +237,13 @@ window._buildAssistantCardGoals = function (assistant) {
     ].filter(Boolean).join('');
     const pillsHtml = (total > 1 && gs.assessed && pills) ? `
         <div class="flex items-center gap-3 flex-wrap text-[11px] font-semibold mt-2">
-            <span class="text-gray-400">${plural(total, 'goal')}:</span>${pills}
+            <span class="text-gray-500">${plural(total, 'goal')}:</span>${pills}
         </div>` : '';
 
     // Goals sit at 'pending' until the run-rate engine has enough observations
     // (RUN_RATE_THRESHOLDS.minObservationDays). Saying so beats "0 on track | 0 off track" (issue #135).
     const pendingHtml = (!gs.assessed && gs.pending > 0) ? `
-        <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 mt-2">
+        <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-500 mt-2">
             <span class="w-1.5 h-1.5 rounded-full bg-gray-300"></span>Awaiting first progress check-in
         </div>` : '';
 
@@ -256,7 +256,7 @@ window._buildAssistantCardGoals = function (assistant) {
     ].filter(Boolean).join(' · ');
     const attentionHtml = attention ? `
         <button type="button" onclick="${goalsTab}"
-            class="flex items-center gap-1.5 text-[11px] font-medium text-gray-400 hover:text-gray-600 mt-2 cursor-pointer transition-colors text-left">
+            class="flex items-center gap-1.5 text-[11px] font-medium text-gray-500 hover:text-gray-600 mt-2 cursor-pointer transition-colors text-left">
             <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             ${attention}
         </button>` : '';
@@ -324,7 +324,7 @@ window.generateAssistantCardHTML = function(assistant) {
     // counted, and a role whose configuration.type has drifted still gets an honest strip.
     //
     // The three lead words are lifted verbatim from the surfaces they link to, so the card and the
-    // page agree: "found" is what the Enrichment tab holds, "awaiting you" is the Outreach ▸ Review
+    // page agree: "found" is what the Found leads tab holds, "awaiting you" is the Outreach ▸ Review
     // column, and "cleared for outreach" is Approved + Awaiting reply — the same two states the
     // qualified_leads goal counts. Deliberately NOT "qualified": that word means two different
     // things on the detail page already (a live count on the goal, a 90-day count on the
@@ -439,7 +439,7 @@ window.generateAssistantCardHTML = function(assistant) {
                 </span>
                 ${gbpSaved !== null
                     ? `<span class="text-xs font-bold text-green-700 bg-green-50 px-2 py-0.5 rounded-full">≈ £${gbpSaved.toLocaleString('en-GB', {minimumFractionDigits: 0, maximumFractionDigits: 0})} ROI</span>`
-                    : `<span class="text-xs text-gray-400 cursor-pointer hover:text-green-600 transition" onclick="event.stopPropagation(); loadView && loadView('account')" title="Set your hourly rate to see financial ROI">Set rate → ROI</span>`
+                    : `<span class="text-xs text-gray-500 cursor-pointer hover:text-green-600 transition" onclick="event.stopPropagation(); loadView && loadView('account')" title="Set your hourly rate to see financial ROI">Set rate → ROI</span>`
                 }
             </div>
         </div>` : '';
@@ -757,7 +757,7 @@ function _addPostingTimeRow(value) {
     row.style.cssText = 'display:flex;align-items:center;gap:0.5rem';
     row.innerHTML = `
         <input type="time" value="${_normaliseTime(value) || '09:00'}" class="posting-time-input border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
-        <button type="button" class="posting-time-remove text-gray-400 hover:text-red-500 transition cursor-pointer" title="Remove time" aria-label="Remove time">✕</button>`;
+        <button type="button" class="posting-time-remove text-gray-500 hover:text-red-500 transition cursor-pointer" title="Remove time" aria-label="Remove time">✕</button>`;
     row.querySelector('.posting-time-input').addEventListener('input', () => window._postingScheduleChanged && window._postingScheduleChanged());
     row.querySelector('.posting-time-remove').addEventListener('click', () => {
         row.remove();
@@ -965,6 +965,8 @@ function _resizeBriefAutoGrow() {
 // Activate a main tab by name ('datahub' | 'goals' | 'activity'). Exposed so other code
 // (deep-links, attention CTAs, child-tab clicks) can surface the right section.
 window._activateMainTab = function(name) {
+    // The strip belongs to the landing tab only; re-judged after the tab has switched.
+    setTimeout(() => window._renderNeedsYou?.(), 0);
     document.querySelectorAll('.main-tab-btn').forEach(b => {
         const on = b.dataset.maintab === name;
         b.classList.toggle('active-tab', on);
@@ -1179,7 +1181,7 @@ let _detailRqRenderSeq = 0;
 function _detailRqShowLoading(container) {
     const kids = [...container.children];
     if (!kids.length || container.querySelector('[role="alert"]')) {
-        container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>';
+        container.innerHTML = '<p class="text-sm text-gray-500 py-10 text-center">Loading…</p>';
         return;
     }
     kids.forEach((k) => { k.style.opacity = '0.5'; k.inert = true; k.setAttribute('aria-busy', 'true'); });
@@ -1369,7 +1371,7 @@ document.addEventListener('bms:notifications-arrived', () => {
  * ⚠️ The Review column is counted with `deliverable=1`, matching what that column actually renders
  * (leads with an address AND a drafted body). Counting it any other way would put a number on the
  * button that the list underneath contradicts — which is the specific bug that made this queue
- * read as a duplicate of the Enrichment tab.
+ * read as a duplicate of the Found leads tab.
  */
 async function _detailRqRefreshRecordCounts() {
     const aid = window._currentAssistantId;
@@ -1518,7 +1520,7 @@ function _detailRqMoreButton(statusKey) {
         class="btn-secondary px-4 py-2 text-xs font-bold rounded-lg border transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
         Show more
       </button>
-      <p class="text-[11px] text-gray-400 mt-1.5">Showing ${shown} of ${total}</p>
+      <p class="text-[11px] text-gray-500 mt-1.5">Showing ${shown} of ${total}</p>
     </div>`;
 }
 
@@ -1599,7 +1601,7 @@ function _detailRqGroupSection(g, items, render, statusKey, total) {
     const body = items.length
         ? `<div class="divide-y divide-gray-100">${items.map(render).join('')}</div>`
         : (statusKey === 'review' && g.emptyReviewHtml) ? g.emptyReviewHtml(emptyMsg)
-        : `<p class="text-sm text-gray-400 py-6 text-center">${emptyMsg}</p>`;
+        : `<p class="text-sm text-gray-500 py-6 text-center">${emptyMsg}</p>`;
     return `<section class="border-b border-gray-100 last:border-0">
       <button onclick="_detailRqToggleGroup('${g.key}')" class="w-full flex items-center gap-2 py-3 text-left cursor-pointer group">
         <svg class="detail-rq-group-chevron-${g.key} w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
@@ -1932,9 +1934,9 @@ function _rqSignatureNote() {
     const sig = _rqReadiness && _rqReadiness.signature;
     if (!sig) return '';
     return `<div class="mt-2 rounded-lg border border-dashed border-gray-200 px-2.5 py-2">
-        <p class="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-0.5">Added when it sends — your signature</p>
+        <p class="text-[10px] font-bold uppercase tracking-wide text-gray-500 mb-0.5">Added when it sends — your signature</p>
         <pre class="text-xs text-gray-500 whitespace-pre-wrap font-sans">${_rqEsc(sig)}</pre>
-        <p class="text-[10px] text-gray-400 mt-1">If the message above already signs off, remove that line so it is not signed twice.</p>
+        <p class="text-[10px] text-gray-500 mt-1">If the message above already signs off, remove that line so it is not signed twice.</p>
       </div>`;
 }
 
@@ -1976,7 +1978,7 @@ function _rqShowEditReasonStrip() {
       <p class="text-[11px] text-gray-500 mb-2">Optional. Your edit is already saved — this teaches the drafter for next time.</p>
       <div class="flex flex-wrap gap-1.5">
         ${RC.editReasons.map((r) => `<button type="button" class="${chip}" data-edit-reason="${_rqEsc(r)}">${_rqEsc(RC.editReasonLabel(r))}</button>`).join('')}
-        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-400 hover:text-gray-600 transition cursor-pointer" data-edit-reason-skip>Skip</button>
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-600 transition cursor-pointer" data-edit-reason-skip>Skip</button>
       </div>
       <p class="hidden text-[11px] font-semibold mt-1.5" data-edit-reason-status></p>`;
 
@@ -2081,8 +2083,8 @@ async function _rqApproveCampaignDecision(card, record) {
         const refused = placed.length - issued;
         window.showToast?.(
             !placed.length ? 'Approved. No briefs were issued.'
-                : refused ? `Approved — ${issued} of ${placed.length} briefs issued. See the Orders tab for the rest.`
-                    : `Approved — ${issued} ${issued === 1 ? 'brief' : 'briefs'} issued. Track them in the Orders tab.`,
+                : refused ? `Approved — ${issued} of ${placed.length} briefs issued. See the Briefs tab for the rest.`
+                    : `Approved — ${issued} ${issued === 1 ? 'brief' : 'briefs'} issued. Track them in the Briefs tab.`,
         );
         await _detailRqRenderGroups(_detailRqCurrentStatus);
     } catch (e) {
@@ -2125,7 +2127,7 @@ function _rqRejectCampaignDecision(card, record) {
       <p class="text-[11px] text-gray-500 mb-2">This is what stops it proposing the same thing again, so it is not optional.</p>
       <div class="flex flex-wrap gap-1.5">
         ${C.rejectReasons.map((r) => `<button type="button" class="${chip}" data-cd-reason="${_rqEsc(r)}">${_rqEsc(C.rejectReasonLabel(r))}</button>`).join('')}
-        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-400 hover:text-gray-600 transition cursor-pointer" data-cd-cancel>Cancel</button>
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-600 transition cursor-pointer" data-cd-cancel>Cancel</button>
       </div>
       <p class="hidden text-[11px] font-semibold mt-1.5" data-cd-status></p>`;
 
@@ -2198,7 +2200,7 @@ function _rqShowRejectReasonStrip() {
       <p class="text-[11px] text-gray-500 mb-2">Optional. It’s already rejected — this records what the search got wrong.</p>
       <div class="flex flex-wrap gap-1.5">
         ${RC.leadRejectReasons.map((r) => `<button type="button" class="${chip}" data-reject-reason="${_rqEsc(r)}">${_rqEsc(RC.leadRejectReasonLabel(r))}</button>`).join('')}
-        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-400 hover:text-gray-600 transition cursor-pointer" data-reject-reason-skip>Skip</button>
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-600 transition cursor-pointer" data-reject-reason-skip>Skip</button>
       </div>
       <p class="hidden text-[11px] font-semibold mt-1.5" data-reject-reason-status></p>`;
 
@@ -2254,7 +2256,7 @@ function _rqOfferDomainExclusion(strip, domain, campaignId) {
       <p class="text-[11px] text-gray-500 mb-2">Adds the domain to this search’s exclusions. You can remove it later by editing the search.</p>
       <div class="flex flex-wrap gap-1.5">
         <button type="button" class="btn-primary px-2 py-1 text-[11px] font-bold rounded-lg transition cursor-pointer" data-exclude-domain>Yes, exclude it</button>
-        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-400 hover:text-gray-600 transition cursor-pointer" data-exclude-skip>No thanks</button>
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-600 transition cursor-pointer" data-exclude-skip>No thanks</button>
       </div>
       <p class="hidden text-[11px] font-semibold mt-1.5" data-exclude-status></p>`;
 
@@ -2283,10 +2285,13 @@ function _rqOfferDomainExclusion(strip, domain, campaignId) {
 }
 
 function _rqRecordActions(r, statusKey) {
-    const secondary = 'btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
-    const primary = 'btn-golive px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer';
+    // min-h-[44px] below sm: "Approve & send email" emails a stranger, and a ~28px target invites a
+    // mis-tap on a phone (review, 2026-10-22). Same rule as the blog and email cards.
+    const tap = 'min-h-[44px] sm:min-h-0';
+    const secondary = `btn-secondary ${tap} px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer`;
+    const primary = `btn-golive ${tap} px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer`;
     const btn = (label, act, cls) => `<button type="button" onclick="_detailRqRecordAct(this,'${act}')" class="${cls}">${label}</button>`;
-    const reject = `<button type="button" onclick="_detailRqRecordAct(this,'reject')" class="btn-destructive px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer ml-auto">Reject</button>`;
+    const reject = `<button type="button" onclick="_detailRqRecordAct(this,'reject')" class="btn-destructive ${tap} px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer ml-auto">Reject</button>`;
     // Leads follow a simpler lifecycle than posts: Approve just accepts the lead (no "Approve &
     // Schedule"). The chase reminder (a scheduled_for that surfaces on the Calendar) is set later,
     // once the first outreach has gone out — via "Mark outreach sent" in the Approved column.
@@ -2648,7 +2653,7 @@ function _rqCardChips(r) {
  *
  * ⚠️ Same two columns as the banner, and for the same reason: Review and Archived are the only
  * states the sweep collects. Rendered from the generated mirror (window.LeadRetention) so the
- * number here, the number in the Enrichment table's "Deletes in" column and the night the sweep
+ * number here, the number in the Found leads table's "Deletes in" column and the night the sweep
  * actually runs are one calculation rather than three.
  */
 function _rqRetentionChip(r, statusKey) {
@@ -2819,12 +2824,12 @@ async function _detailRqRenderRecords(statusKey) {
     // Names the columns as THIS role labels them — a role may have renamed either of them
     // (reviewQueue.columnLabels), and copy pointing at a column the user cannot see is the same
     // dead end as naming a tab that does not exist.
-    if (approval === null) { container.innerHTML = `<p class="text-sm text-gray-400 py-10 text-center">These records don’t have a published state — see the ${_rqEsc(_rqColumnLabel('approved'))} and ${_rqEsc(_rqColumnLabel('scheduled'))} columns.</p>`; return; }
+    if (approval === null) { container.innerHTML = `<p class="text-sm text-gray-500 py-10 text-center">These records don’t have a published state — see the ${_rqEsc(_rqColumnLabel('approved'))} and ${_rqEsc(_rqColumnLabel('scheduled'))} columns.</p>`; return; }
     // ⚠️ A column this queue has no approval state for — 'attention', which is a failed PUBLISH and
     // belongs to posts. Its button is hidden for records queues, so this is only reachable by a
     // deep link, and it must not fall through: `approvalStatus=undefined` is not a valid filter, so
     // the server would answer with every record of this type in no particular state.
-    if (approval === undefined) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Nothing to show here — these records are approved or rejected, never published, so they have no failures to fix.</p>'; return; }
+    if (approval === undefined) { container.innerHTML = '<p class="text-sm text-gray-500 py-10 text-center">Nothing to show here — these records are approved or rejected, never published, so they have no failures to fix.</p>'; return; }
 
     // Leads awaiting review are filtered to the ones that actually have an email to sign off —
     // a resolvable recipient AND a drafted body. Everything else stays in the Leads tab for
@@ -2929,7 +2934,7 @@ function _detailRqPaintRecords(statusKey, opts) {
     const emptyMsg = statusKey !== 'review'
         ? 'Nothing here yet.'
         : (opts && opts.deliverableOnly)
-            ? 'No emails waiting for you. Leads without a contact address can’t be emailed yet — they’re in the Enrichment tab.'
+            ? 'No emails waiting for you. Leads without a contact address can’t be emailed yet — they’re in the Found leads tab.'
             : 'Nothing awaiting your review.';
 
     // ── Send readiness (the pre-flight) ──────────────────────────────────────────
@@ -2990,7 +2995,7 @@ function _detailRqPaintRecords(statusKey, opts) {
     const readyHtml = _rqOutreachReadinessHtml(statusKey);
 
     if (!records.length) {
-        container.innerHTML = readyHtml + noticeHtml + `<p class="text-sm text-gray-400 py-10 text-center">${emptyMsg}</p>`;
+        container.innerHTML = readyHtml + noticeHtml + `<p class="text-sm text-gray-500 py-10 text-center">${emptyMsg}</p>`;
         return;
     }
 
@@ -3798,10 +3803,10 @@ function _detailRqBlogCard(p, statusKey) {
       <div class="min-w-0">
         <p class="text-sm font-bold text-gray-900 truncate">${_rqEsc(p.title || '(untitled draft)')}</p>
         ${excerpt ? `<p class="text-xs text-gray-600 mt-1 line-clamp-2">${_rqEsc(excerpt)}</p>` : ''}
-        ${byline ? `<p class="text-[11px] text-gray-400 mt-1">${_rqEsc(byline)}</p>` : ''}
+        ${byline ? `<p class="text-[11px] text-gray-500 mt-1">${_rqEsc(byline)}</p>` : ''}
         <div class="flex items-center gap-2 mt-2">
           <span class="text-[11px] font-bold px-2 py-0.5 rounded-full border ${p.status === 'failed' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-gray-100 text-gray-600 border-gray-200'}">${_rqEsc(_RQ_BLOG_STATUS_LABEL[p.status] || p.status)}</span>
-          ${when ? `<span class="text-[11px] font-semibold text-gray-400">${_rqEsc(when)}</span>` : ''}
+          ${when ? `<span class="text-[11px] font-semibold text-gray-500">${_rqEsc(when)}</span>` : ''}
         </div>
         ${note ? `<p class="text-xs text-gray-600 mt-2">${_rqEsc(note)}</p>` : ''}
       </div>
@@ -3829,13 +3834,121 @@ const _RQ_NEWSLETTER_STATUS = {
     archived: ['archived', 'rejected'],
 };
 
+// newsletter_issues.status in the owner's words — the raw values ("pending_approval") were printed as-is.
+const _RQ_NEWSLETTER_STATUS_LABEL = {
+    draft: 'Draft',
+    pending_approval: 'Waiting for you',
+    in_review: 'Waiting for you',
+    approved: 'Approved',
+    scheduled: 'Scheduled',
+    sending: 'Sending now',
+    sent: 'Sent',
+    failed: 'Didn’t send',
+    archived: 'Archived',
+    rejected: 'Turned down',
+};
+
+// The chat's email confirm card (chat-session.js onEmailAction) could approve, book and send back
+// while these cards could only open the Studio (review, 2026-10-22). Same endpoint and actions
+// (newsletter-issues approve / reject), so the owner/admin rule and the empty-email check apply.
+// ⚠️ Review stays read-first, as on the Blog Writer's queue: approving an email to a whole list
+// happens in the Studio, next to the words being approved. Sending immediately stays there too.
+// The Review column holds drafts as well as emails waiting for approval, but only the second kind is
+// waiting on the owner. Counting both made the badge include emails they were still writing
+// themselves (review, 2026-10-22): badges and "waiting" counts use THIS list.
+const _RQ_NEWSLETTER_WAITING = ['pending_approval', 'in_review'];
+
 function _rqNewsletterActions(issue, statusKey) {
-    const primary = 'btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer';
-    const secondary = 'btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
-    // A sent issue is a record of what people received — it opens read-only and offers nothing else.
-    const open = `<button type="button" onclick="window._detailRqNewsletterOpen(${issue.id})" class="${statusKey === 'posted' ? secondary : primary}">${statusKey === 'posted' ? 'View' : 'Open in Studio'}</button>`;
-    return `<div class="flex items-center gap-2 mt-3">${open}</div>`;
+    // min-h-[44px] below sm: a ~30px button is too small a target for a thumb.
+    const tap = 'min-h-[44px] sm:min-h-0';
+    const primary = `btn-primary ${tap} px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer`;
+    const secondary = `btn-secondary ${tap} px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer`;
+    const btn = (action, label, cls) => `<button type="button" onclick="_detailRqNewsletterAct(this,'${action}')" class="${cls}">${label}</button>`;
+    const actions = [];
+    if (statusKey === 'review') {
+        actions.push(btn('open', 'Review in Email Studio', primary));
+    } else if (statusKey === 'approved') {
+        actions.push(btn('showSchedule', 'Schedule', primary));
+        actions.push(btn('open', 'Open in Email Studio', secondary));
+        actions.push(btn('reject', 'Send back to draft', secondary));
+    } else if (statusKey === 'scheduled') {
+        actions.push(btn('open', 'Open in Email Studio', primary));
+        actions.push(btn('showSchedule', 'Change time', secondary));
+        actions.push(btn('reject', 'Send back to draft', secondary));
+    } else if (statusKey === 'posted') {
+        // A sent issue is a record of what people received — it opens read-only and offers nothing else.
+        actions.push(btn('open', 'View', secondary));
+    } else {
+        actions.push(btn('open', 'Open in Email Studio', primary));
+    }
+    const schedulable = statusKey === 'approved' || statusKey === 'scheduled';
+    return `<div class="flex flex-wrap items-center gap-2 mt-3">
+        ${actions.join('')}
+        ${schedulable ? `<div class="rq-sched-row hidden w-full flex items-center gap-2 mt-2 flex-wrap">
+          <input type="datetime-local" aria-label="Send date and time" class="rq-sched-input border border-gray-300 rounded-lg px-2 py-1.5 text-base sm:text-xs focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">
+          <button type="button" onclick="_detailRqNewsletterAct(this,'schedule')" class="btn-primary ${tap} px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Book this time</button>
+        </div>` : ''}
+        <p class="rq-rec-err hidden w-full text-xs font-semibold text-red-600 mt-1" role="alert"></p>
+    </div>`;
 }
+
+window._detailRqNewsletterAct = async function (btn, action) {
+    const card = btn.closest('[data-rq-newsletter]');
+    if (!card) return;
+    const id = Number(card.getAttribute('data-rq-newsletter'));
+    const errEl = card.querySelector('.rq-rec-err');
+    const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); } };
+    if (errEl) errEl.classList.add('hidden');
+
+    if (action === 'open') { window._detailRqNewsletterOpen(id); return; }
+    if (action === 'showSchedule') {
+        const row = card.querySelector('.rq-sched-row');
+        row?.classList.remove('hidden');
+        row?.querySelector('input')?.focus();
+        return;
+    }
+
+    let payload;
+    let done;
+    if (action === 'schedule') {
+        const value = card.querySelector('.rq-sched-input')?.value || '';
+        // A wall-clock time in the email's own send timezone — newsletter-issues converts it, the
+        // same as the Studio's picker. The browser's clock is only a sanity check for "in the past".
+        if (!value) { showErr('Pick a date and time first.'); return; }
+        if (new Date(value).getTime() <= Date.now()) { showErr('Pick a time in the future.'); return; }
+        payload = { action: 'approve', id, scheduledFor: value };
+        done = (r) => `Booked — it sends ${new Date(r.issue?.scheduledFor || value).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.`;
+    } else if (action === 'reject') {
+        if (!(await window.confirmModal('It goes back to Review as a draft and won’t be sent. You can approve it again from the Email Studio.', {
+            title: 'Send this email back to draft?', confirmLabel: 'Yes, send it back', cancelLabel: 'Keep it',
+        }))) return;
+        payload = { action: 'reject', id };
+        done = () => 'Back to a draft in Review — it won’t be sent.';
+    } else {
+        return;
+    }
+
+    const buttons = card.querySelectorAll('button');
+    buttons.forEach((b) => { b.disabled = true; });
+    card.setAttribute('aria-busy', 'true');
+    try {
+        const res = await fetch('/.netlify/functions/newsletter-issues', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || 'Something went wrong.');
+        window.showToast?.(done(body));
+        _detailRqRenderGroups(_detailRqCurrentStatus);
+        const calHost = document.getElementById('assistant-calendar-host');
+        if (calHost) calHost.dataset.ready = '';
+        if (_isEmailAutopilot()) _loadEmailAutopilotStats(window._currentAssistantId);
+    } catch (e) {
+        buttons.forEach((b) => { b.disabled = false; });
+        showErr(e.message || 'Something went wrong.');
+    } finally {
+        card.removeAttribute('aria-busy');
+    }
+};
 
 function _detailRqNewsletterCard(issue, statusKey) {
     const when = issue.sentAt
@@ -3847,8 +3960,8 @@ function _detailRqNewsletterCard(issue, statusKey) {
       <div class="min-w-0">
         <p class="text-sm font-bold text-gray-900 truncate">${_rqEsc(issue.subject || '(untitled email)')}</p>
         <div class="flex items-center gap-2 mt-2">
-          <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">${_rqEsc(issue.status)}</span>
-          ${when ? `<span class="text-[11px] font-semibold text-gray-400">${_rqEsc(when)}</span>` : ''}
+          <span class="text-[11px] font-bold px-2 py-0.5 rounded-full border ${issue.status === 'failed' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-gray-100 text-gray-600 border-gray-200'}">${_rqEsc(_RQ_NEWSLETTER_STATUS_LABEL[issue.status] || issue.status)}</span>
+          ${when ? `<span class="text-[11px] font-semibold text-gray-500">${_rqEsc(when)}</span>` : ''}
         </div>
         ${issue.status === 'sent' ? _rqNewsletterResults(issue) : ''}
       </div>
@@ -3890,7 +4003,7 @@ async function _detailRqRenderNewsletter(statusKey) {
 
     _detailRqShowLoading(container);
     if (!aid) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
-    if (!wanted.length) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Emails don’t have this state.</p>'; return; }
+    if (!wanted.length) { container.innerHTML = '<p class="text-sm text-gray-500 py-10 text-center">Emails don’t have this state.</p>'; return; }
 
     // The WHOLE list, once: every column's count comes from it (like the Blog Writer's queue), so
     // an email visibly moves Review → Approved → Scheduled → Sent instead of only Review ever
@@ -3911,14 +4024,25 @@ async function _detailRqRenderNewsletter(statusKey) {
     const waiting = statusKey === 'review' ? (window.AssistantEmailCampaigns?.waiting() || []) : [];
     const waitingNote = waiting.length
         ? `<div class="my-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-center justify-between gap-3 flex-wrap">
-             <span>${waiting.length === 1 ? `The campaign <strong>${_rqEsc(waiting[0].name)}</strong> is written but switched off.` : `${waiting.length} campaigns are written but switched off.`}</span>
-             <button type="button" onclick="window._activateMainTab('email-campaigns')" class="link text-sm font-semibold">Review campaigns →</button>
+             <span>${waiting.length === 1 ? `The email flow <strong>${_rqEsc(waiting[0].name)}</strong> is written but switched off.` : `${waiting.length} email flows are written but switched off.`}</span>
+             <button type="button" onclick="window._activateMainTab('email-campaigns')" class="link text-sm font-semibold">Review email flows →</button>
            </div>`
         : '';
 
-    container.innerHTML = waitingNote + (issues.length
-        ? `<div class="divide-y divide-gray-100">${issues.map((i) => _detailRqNewsletterCard(i, statusKey)).join('')}</div>`
-        : `<p class="text-sm text-gray-400 py-10 text-center">${statusKey === 'review' ? 'No emails awaiting review.' : 'Nothing here yet.'}</p>`);
+    // Review: what is waiting for approval first, then the drafts still being written, each under
+    // its own heading, so the column's count and its first section say the same thing.
+    const list = (rows) => `<div class="divide-y divide-gray-100">${rows.map((i) => _detailRqNewsletterCard(i, statusKey)).join('')}</div>`;
+    let body;
+    if (statusKey === 'review') {
+        const waitingRows = issues.filter((i) => _RQ_NEWSLETTER_WAITING.includes(i.status));
+        const drafts = issues.filter((i) => !_RQ_NEWSLETTER_WAITING.includes(i.status));
+        const head = (t) => `<p class="text-xs font-bold text-gray-500 uppercase tracking-wide mt-4 mb-1">${t}</p>`;
+        body = (waitingRows.length ? head('Waiting for your approval') + list(waitingRows) : '<p class="text-sm text-gray-500 py-6 text-center">No emails waiting for your approval.</p>')
+            + (drafts.length ? head('Drafts you’re still writing') + list(drafts) : '');
+    } else {
+        body = issues.length ? list(issues) : '<p class="text-sm text-gray-500 py-10 text-center">Nothing here yet.</p>';
+    }
+    container.innerHTML = waitingNote + body;
 }
 
 /** Every visible column's count from one list of the assistant's emails — see _detailRqPaintBlogCounts. */
@@ -3927,7 +4051,7 @@ function _detailRqPaintNewsletterCounts(all) {
     for (const key of Object.keys(_DETAIL_RQ_COLUMNS)) {
         const btn = document.querySelector(`.detail-rq-col[data-status="${key}"]`);
         if (!btn || btn.classList.contains('hidden')) continue;
-        const wanted = _RQ_NEWSLETTER_STATUS[key] || [];
+        const wanted = key === 'review' ? _RQ_NEWSLETTER_WAITING : (_RQ_NEWSLETTER_STATUS[key] || []);
         const n = wanted.length ? all.filter((i) => wanted.includes(i.status)).length : 0;
         _detailRqSetColumnBadge(key, n);
         if (key === 'review') review = n;
@@ -3987,7 +4111,7 @@ async function _detailRqRenderBlog(statusKey) {
 
     _detailRqPaintBlogCounts(all);
 
-    if (!wanted.length) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Blog posts don’t have this state.</p>'; return; }
+    if (!wanted.length) { container.innerHTML = '<p class="text-sm text-gray-500 py-10 text-center">Blog posts don’t have this state.</p>'; return; }
     const posts = all.filter((p) => wanted.includes(p.status));
 
     container.innerHTML = posts.length
@@ -3997,7 +4121,7 @@ async function _detailRqRenderBlog(statusKey) {
                  <p class="text-sm text-gray-500">No blog drafts waiting for you. Nothing publishes until you approve it.</p>
                  <button type="button" onclick="window.openBlogStudio && window.openBlogStudio({ assistantId: window._currentAssistantId })" class="btn-primary min-h-[44px] sm:min-h-0 mt-3 px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer">Write Blog Post</button>
                </div>`
-            : '<p class="text-sm text-gray-400 py-10 text-center">Nothing here yet.</p>');
+            : '<p class="text-sm text-gray-500 py-10 text-center">Nothing here yet.</p>');
 }
 
 // Open in Blog Studio / schedule / unschedule a blog draft from the Review Queue.
@@ -4157,6 +4281,13 @@ function _briefOpenChrome() {
     const drawer = document.getElementById('brief-drawer');
     const backdrop = document.getElementById('brief-drawer-backdrop');
     if (!drawer) return;
+    // Remember what opened it — only on the closed→open edge, so moving between panels inside the
+    // drawer doesn't overwrite the header button with a card inside the drawer.
+    if (!document.body.classList.contains('brief-drawer-open')) {
+        const opener = document.activeElement;
+        window._briefDrawerOpener = opener && !drawer.contains(opener) ? opener : null;
+    }
+    drawer.inert = false;
     document.body.classList.add('brief-drawer-open');
     if (backdrop) { backdrop.style.display = 'block'; setTimeout(() => backdrop.style.opacity = '1', 10); }
     drawer.style.transform = 'translateX(0)';
@@ -4167,6 +4298,9 @@ function _briefOpenChrome() {
     const body = document.getElementById('brief-drawer-body');
     if (body) body.scrollTop = 0;
     _resizeBriefAutoGrow();
+    // Focus into the dialog, at its title. A caller that wants a specific field (the Autopilot
+    // card's "Change how often") focuses it afterwards, which wins.
+    document.getElementById('brief-drawer-title')?.focus({ preventScroll: true });
 }
 
 // Entry point from the header — opens the drawer to the profile "home" card index.
@@ -4281,7 +4415,7 @@ async function _initAssistantNotifPrefs() {
                 <p class="text-sm font-semibold text-gray-900">${cat.label}</p>
                 <span data-custom-badge class="${custom ? '' : 'hidden '}text-[10px] font-bold bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200">Custom for this assistant</span>
               </div>
-              <p class="text-xs text-gray-400 mt-0.5 leading-snug">${cat.description}</p>
+              <p class="text-xs text-gray-500 mt-0.5 leading-snug">${cat.description}</p>
               <div class="flex items-center gap-6 mt-2">
                 ${toggleHtml(cat, 'inApp', !!cat.inApp.value)}
                 ${toggleHtml(cat, 'email', !!cat.email.value)}
@@ -4393,13 +4527,19 @@ window._closeBriefDrawer = function() {
     if (backdrop) { backdrop.style.opacity = '0'; setTimeout(() => { backdrop.style.display = 'none'; }, 250); }
     document.body.classList.remove('brief-drawer-open');
     window.ScrollLock.release('brief-drawer');
+    if (drawer) drawer.inert = true;
+    // Back to whatever opened it, or the header's profile button when that has gone.
+    const opener = window._briefDrawerOpener;
+    window._briefDrawerOpener = null;
+    const target = opener && document.contains(opener) ? opener : document.getElementById('btn-assistant-profile');
+    target?.focus({ preventScroll: true });
 };
 
 // ── Operational status pill (Epic 1 AC1.1.2) ──────────────────────────────────
 // The header pill keeps the lifecycle vocabulary for every non-active state
 // (Setup in Progress / Paused / Archived …). For an actively *working* assistant it
 // refines into an operational sub-state from live signals: a mid-flight job →
-// "Executing Task"; else drafts awaiting the user → "Awaiting Human Review"; else
+// "Executing Task"; else drafts awaiting the user → "Needs you"; else
 // "Idle". Signals are cached so the pill re-renders as activity/review data lands.
 // Badge resolution itself lives in window._resolveAssistantBadge, shared with the
 // "My Assistants" list card so the two views can't disagree on an assistant's status.
@@ -4422,6 +4562,60 @@ window._renderStatusPill = function(data) {
 window._updateOpSignals = function(patch) {
     window._detailOpSignals = { ...window._detailOpSignals, ...patch };
     window._renderStatusPill();
+    window._renderNeedsYou?.();
+};
+
+// ── "Needs you" strip (#detail-needs-you) ─────────────────────────────────────
+// One rule for every assistant: the landing tab starts with what is waiting on the owner and what
+// happens next. The COUNT is the one the tab badge shows — the pending-review signal every queue
+// loader already feeds (_updateOpSignals), or, for the Brand Designer, its Briefs badge
+// (_setNeedsYouCount). The NEXT line is set by whichever module knows it (_setNextUp): the
+// Autopilot card, the Searches tab, the Campaigns tab, the Briefs tab. Reset per assistant load in
+// _applyDashboardRegistry.
+window._setNeedsYouCount = function(n) {
+    window._detailNeedsYouOverride = Number(n) || 0;
+    window._renderNeedsYou();
+};
+window._setNextUp = function(text) {
+    window._detailNextUp = text ? String(text) : null;
+    window._renderNeedsYou();
+};
+window._renderNeedsYou = function() {
+    const strip = document.getElementById('detail-needs-you');
+    if (!strip) return;
+    const source = window._detailNeedsYouSource;   // 'review' | 'briefs' | null
+    const landing = window._detailDefaultMainTab || 'datahub';
+    const onLanding = document.querySelector('.main-tab-btn.active-tab')?.dataset.maintab === landing;
+    if (!source || !onLanding) { strip.classList.add('hidden'); return; }
+
+    const n = source === 'briefs' ? (window._detailNeedsYouOverride || 0) : (window._detailOpSignals?.pendingReview || 0);
+    const where = source === 'briefs' ? 'Briefs' : ((window._detailReviewQueue || {}).label || 'Review');
+    const targetTab = source === 'briefs' ? 'briefs' : 'review-queue';
+    const text = document.getElementById('needs-you-text');
+    const go = document.getElementById('needs-you-go');
+    const next = document.getElementById('next-up-text');
+
+    strip.className = `mb-4 rounded-xl border px-4 py-3 ${n ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-white'}`;
+    if (text) {
+        text.className = `text-sm font-bold mr-auto ${n ? 'text-amber-900' : 'text-gray-700'}`;
+        text.textContent = n ? `Needs you: ${n} waiting in ${where}` : 'Nothing needs you right now.';
+    }
+    // A button only when the waiting things are on ANOTHER tab — on the landing tab they are below.
+    const showGo = n > 0 && targetTab !== landing;
+    if (go) {
+        go.classList.toggle('hidden', !showGo);
+        go.style.display = showGo ? '' : 'none';
+        go.textContent = `Open ${where}`;
+        go.onclick = () => {
+            window._activateMainTab(targetTab);
+            if (targetTab === 'review-queue') window.detailRqOpenStatus?.('review');
+        };
+    }
+    if (next) {
+        const line = window._detailNextUp;
+        next.classList.toggle('hidden', !line);
+        next.textContent = line ? `What happens next: ${line}` : '';
+    }
 };
 
 // Fan the pending-review count out to the surfaces that display it. Called on load and after
@@ -4607,10 +4801,121 @@ function _isBlogAutopilot(data) {
     return (data || window._detailCurrentData || {}).roleKey === 'blog_writer';
 }
 
+// Email Marketing autopilot (draft-newsletter-issues) is a different engine wearing the same card:
+// it reads the setup's "Drafting cadence" (posting_frequency) and "Day you usually send"
+// (newsletterSendDay), writes ONE email at a time and waits until that one is dealt with. It has no
+// preferred days or times, no horizon, and nothing in get-social-drafts — so the shared card told
+// email owners about "posts", "7 days kept ahead" and Mon–Fri 09:00, and its button scrolled to a
+// schedule card this role hides (review, 2026-10-22).
+function _isEmailAutopilot(data) {
+    return (data || window._detailCurrentData || {}).roleKey === 'newsletter_editor';
+}
+
+// The tiles under the card are shared; their labels are rewritten per role and reset for the rest,
+// because the page is reused across assistants without a reload.
+function _setAutopilotTileLabels(isEmail) {
+    const labels = isEmail ? ['Written', 'Scheduled', 'Sent'] : ['Created', 'Scheduled', 'Published'];
+    ['created', 'scheduled', 'published'].forEach((k, i) => {
+        const el = document.getElementById(`metrics-label-${k}`);
+        if (el) el.textContent = labels[i];
+    });
+}
+
+function _renderEmailAutopilotCard(data) {
+    const ctx = data.context || {};
+    const el = id => document.getElementById(id);
+    const pill = el('autopilot-pill');
+    const headline = el('autopilot-headline');
+    const detail = el('autopilot-detail');
+    const adjustBtn = el('autopilot-adjust-btn');
+    // ⚠️ Not _autopilotSummary: that falls back to the SOCIAL default (3× a week) when nothing is
+    // saved, and the email cron reads a missing cadence as "on demand" — the card has to say off.
+    const rawFreq = String(ctx.posting_frequency || '').trim();
+    const reading = rawFreq ? (window.PostingCadence?.read?.(rawFreq) || { kind: 'unrecognised' }) : { kind: 'on_demand' };
+    const phrase = _AUTOPILOT_FREQ_PHRASE[rawFreq.toLowerCase()] || rawFreq;
+    const sendDay = typeof ctx.newsletterSendDay === 'string' && ctx.newsletterSendDay ? ctx.newsletterSendDay : '';
+    const active = reading.kind === 'scheduled';
+
+    el('autopilot-horizon-stat')?.classList.add('hidden');
+    el('autopilot-next')?.classList.add('hidden');
+    _setAutopilotTileLabels(true);
+
+    if (active) {
+        if (pill) { pill.textContent = '● Active'; pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700'; }
+        if (headline) headline.textContent = `Writing an email ${phrase}, automatically`;
+        // The cron only honours the send day at weekly-or-slower cadences (draft-newsletter-issues).
+        const timing = sendDay && (reading.postsPerWeek || 0) <= 1
+            ? `Each one is ready a day or two before ${sendDay}`
+            : 'Each one is written as soon as the last is dealt with';
+        if (detail) detail.textContent = `${timing}, and waits in your Emails tab for you to approve. It won’t write the next one while one is still waiting, and nothing is sent without you.`;
+        if (adjustBtn) adjustBtn.textContent = 'Change how often';
+    } else if (reading.kind === 'unrecognised') {
+        if (pill) { pill.textContent = '● Not running'; pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800'; }
+        if (headline) headline.textContent = 'Autopilot isn’t running — we couldn’t read how often to write';
+        if (detail) detail.textContent = `Your drafting cadence is saved as “${rawFreq}”, which we can’t read — so no emails are being written automatically. Pick one from the list and it will start.`;
+        if (adjustBtn) adjustBtn.textContent = 'Fix how often';
+    } else {
+        if (pill) { pill.textContent = '● Off'; pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500'; }
+        if (headline) headline.textContent = 'Autopilot is off — you start each email yourself';
+        if (detail) detail.textContent = 'Pick how often to write and your assistant will draft emails on that rhythm for you to review. Nothing is sent without your approval.';
+        if (adjustBtn) adjustBtn.textContent = 'Turn on autopilot';
+    }
+
+    // The Blogs tab's chip is blog-only; make sure a previous assistant's chip isn't left showing.
+    const chip = el('detail-rq-autopilot-chip');
+    if (chip) { chip.classList.add('hidden'); chip.style.display = 'none'; }
+
+    // "What happens next" on the Needs-you strip: the cadence now, the exact send once stats load.
+    window._setNextUp?.(active ? `${headline?.textContent || ''}.` : 'Nothing is scheduled — you start each email yourself.');
+    _loadEmailAutopilotStats(window._currentAssistantId);
+}
+
+// One newsletter-issues read fills the tiles, the waiting count and "Next email sends …".
+// Statuses follow the Emails tab's columns (_RQ_NEWSLETTER_STATUS) so the numbers agree with it.
+async function _loadEmailAutopilotStats(assistantId) {
+    if (!assistantId) return;
+    const el = id => document.getElementById(id);
+    try {
+        const res = await fetch(`/.netlify/functions/newsletter-issues?assistantId=${assistantId}`);
+        if (!res.ok) return;
+        const issues = (await res.json()).issues || [];
+        if (Number(window._currentAssistantId) !== Number(assistantId)) return;
+
+        const counts = { written: 0, scheduled: 0, sent: 0, waiting: 0 };
+        const now = Date.now();
+        let next = null;
+        for (const i of issues) {
+            if (_RQ_NEWSLETTER_STATUS.archived.includes(i.status)) continue;
+            counts.written++;
+            if (_RQ_NEWSLETTER_STATUS.scheduled.includes(i.status)) {
+                counts.scheduled++;
+                const t = i.scheduledFor ? new Date(i.scheduledFor).getTime() : NaN;
+                if (!Number.isNaN(t) && t > now && (next === null || t < next)) next = t;
+            }
+            if (_RQ_NEWSLETTER_STATUS.posted.includes(i.status)) counts.sent++;
+            if (_RQ_NEWSLETTER_WAITING.includes(i.status)) counts.waiting++;
+        }
+        const tile = (id, n, title) => { const t = el(id); if (t) { t.textContent = n.toLocaleString(); t.title = title; } };
+        tile('metrics-total-created', counts.written, 'Every email this assistant has written that you can still open — drafts, approved, scheduled and sent. Excludes archived ones.');
+        tile('metrics-total-scheduled', counts.scheduled, 'Approved and booked to send — the Scheduled column.');
+        tile('metrics-total-published', counts.sent, 'Emails that have gone out, or are going out now — the Sent column.');
+        _syncAutopilotPending(counts.waiting);
+
+        const nextEl = el('autopilot-next');
+        if (nextEl && next !== null) {
+            nextEl.textContent = `Next email sends ${new Date(next).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`;
+            nextEl.classList.remove('hidden');
+            window._setNextUp?.(`${nextEl.textContent}.`);
+        }
+    } catch { /* the tiles keep their placeholders */ }
+}
+
 window._renderAutopilotCard = function(data) {
     const card = document.getElementById('autopilot-status-card');
     if (!card) return;
     data = data || window._detailCurrentData || {};
+    if (_isEmailAutopilot(data)) { _renderEmailAutopilotCard(data); return; }
+    _setAutopilotTileLabels(false);
     const ctx = data.context || {};
     const s = _autopilotSummary(ctx);
     const horizon = data.draftHorizonDays || 7;
@@ -4681,6 +4986,12 @@ window._renderAutopilotCard = function(data) {
             : 'Autopilot off · you write each post';
     }
 
+    // "What happens next" on the Needs-you strip: the schedule in words; "Next post …" replaces it
+    // once _loadAutopilotNext / _loadBlogAutopilotStats find a dated draft.
+    if (!card.classList.contains('hidden')) window._setNextUp?.(s.active ? `${headline?.textContent || ''}.`
+        : s.kind === 'unrecognised' ? 'Autopilot isn’t running — its schedule needs fixing.'
+        : `Nothing is scheduled — you create each ${isBlog ? 'article' : 'post'} yourself.`);
+
     if (isBlog) {
         // Long-form counts come from blog_posts, which get-assistant-metrics doesn't read — it is
         // scheduledPosts-only, and _fetchAndRenderAssistantMetrics early-returns for this role
@@ -4732,6 +5043,7 @@ async function _loadBlogAutopilotStats(assistantId, scheduleActive) {
             const when = new Date(next).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
             nextEl.textContent = `Next post: ${when}`;
             nextEl.classList.remove('hidden');
+            if (!document.getElementById('autopilot-status-card')?.classList.contains('hidden')) window._setNextUp?.(`Next article publishes ${when}.`);
         } else {
             nextEl?.classList.add('hidden');
         }
@@ -4753,10 +5065,17 @@ window._openContentSettingsCard = function(which) {
 
 // "Adjust schedule" / "Turn on autopilot" → open the Operational Setup panel and scroll to the
 // Posting Schedule controls, which already write posting_frequency/days/times/timezone + horizon.
+//
+// Roles whose schedule card is hidden (hasScheduleCard: false — the Email Marketing Assistant) keep
+// their cadence in the setup questions instead (_renderOperationSection → #edit_op_posting_frequency).
+// Scrolling to the hidden card left the panel at its top with nothing to show for the click.
 window._openAutopilotSettings = function() {
     if (typeof window._openBriefDrawer === 'function') window._openBriefDrawer('operation');
     setTimeout(() => {
-        document.getElementById('module-posting-schedule')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const card = document.getElementById('module-posting-schedule');
+        if (card && !card.classList.contains('hidden')) { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+        const field = document.getElementById('edit_op_posting_frequency');
+        if (field) { field.scrollIntoView({ behavior: 'smooth', block: 'center' }); field.focus({ preventScroll: true }); }
     }, 120);
 };
 
@@ -4788,6 +5107,7 @@ async function _loadAutopilotNext(assistantId) {
         const when = new Date(next).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
         el.textContent = `Next post: ${when}`;
         el.classList.remove('hidden');
+        if (!document.getElementById('autopilot-status-card')?.classList.contains('hidden')) window._setNextUp?.(`Next post goes out ${when}.`);
     } catch {
         el.classList.add('hidden');
     }
@@ -4943,8 +5263,8 @@ window._renderRunbookDirectives = async function(assistantId) {
     rules.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
     if (!rules.length) {
         host.innerHTML = viaChat
-            ? `<p class="text-sm text-gray-400 text-center py-6">No directives yet. When you reject a ${_RQ_FEEDBACK_NOUNS[(window._detailReviewQueue || {}).recordType]} and say what was wrong, it's saved here and your assistant follows it from then on.</p>`
-            : '<p class="text-sm text-gray-400 text-center py-6">No directives yet. Start a Tuning Session to teach your assistant its first rule.</p>';
+            ? `<p class="text-sm text-gray-500 text-center py-6">No directives yet. When you reject a ${_RQ_FEEDBACK_NOUNS[(window._detailReviewQueue || {}).recordType]} and say what was wrong, it's saved here and your assistant follows it from then on.</p>`
+            : '<p class="text-sm text-gray-500 text-center py-6">No directives yet. Start a Tuning Session to teach your assistant its first rule.</p>';
         return;
     }
     host.innerHTML = rules.map(r => {
@@ -4952,20 +5272,20 @@ window._renderRunbookDirectives = async function(assistantId) {
         const o = _RUNBOOK_ORIGIN[r.origin] || _RUNBOOK_ORIGIN.manual;
         const when = r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
         const cap = r.originPost && r.originPost.caption ? String(r.originPost.caption) : '';
-        const originPost = cap ? `<p class="text-xs text-gray-400 mt-1 italic">from post: “${_escapeHtml(cap.slice(0, 80))}${cap.length > 80 ? '…' : ''}”</p>` : '';
+        const originPost = cap ? `<p class="text-xs text-gray-500 mt-1 italic">from post: “${_escapeHtml(cap.slice(0, 80))}${cap.length > 80 ? '…' : ''}”</p>` : '';
         return `<div class="flex items-start gap-3 px-3 py-3 rounded-xl border border-gray-100 ${active ? '' : 'bg-gray-50'}" data-rule-id="${r.id}">
             <div class="flex-1 min-w-0">
-                <p class="text-sm ${active ? 'text-gray-800' : 'text-gray-400 line-through'}">${_escapeHtml(r.ruleText || '')}</p>
+                <p class="text-sm ${active ? 'text-gray-800' : 'text-gray-500 line-through'}">${_escapeHtml(r.ruleText || '')}</p>
                 <div class="flex items-center gap-2 mt-1">
                     <span class="px-2 py-0.5 rounded-full text-xs font-bold ${o[1]}">${o[0]}</span>
-                    <span class="text-xs text-gray-400">${when}</span>
+                    <span class="text-xs text-gray-500">${when}</span>
                 </div>
                 ${originPost}
             </div>
             <button type="button" aria-checked="${active}" onclick="window._toggleDirective(${r.id}, this)" class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors mt-0.5 ${active ? 'bg-emerald-500' : 'bg-gray-300'}">
                 <span class="${active ? 'translate-x-5' : 'translate-x-0'} pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition"></span>
             </button>
-            <button type="button" onclick="window._deleteDirective(${r.id})" class="text-gray-400 hover:text-red-500 transition mt-1" aria-label="Delete directive">
+            <button type="button" onclick="window._deleteDirective(${r.id})" class="text-gray-500 hover:text-red-500 transition mt-1" aria-label="Delete directive">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
             </button>
         </div>`;
@@ -5027,7 +5347,7 @@ window._renderLeadRejectionEvidence = async function(assistantId) {
     show();
     if (!payload.reasons.length) {
         host.innerHTML = `
-          <p class="text-sm text-gray-500">Nothing recorded yet. When you reject a lead in the Outreach tab or the Enrichment tab, the reason you pick is filed here.</p>`;
+          <p class="text-sm text-gray-500">Nothing recorded yet. When you reject a lead in the Outreach tab or the Found leads tab, the reason you pick is filed here.</p>`;
         return;
     }
 
@@ -5040,7 +5360,7 @@ window._renderLeadRejectionEvidence = async function(assistantId) {
             <span class="text-sm font-bold text-gray-900 w-10 shrink-0 tabular-nums">${Number(r.count)}×</span>
             <div class="flex-1 min-w-0">
                 <p class="text-sm text-gray-800">${_escapeHtml(RC.leadRejectReasonLabel(r.reason) || r.reason)}</p>
-                <div class="flex items-center gap-2 mt-1 flex-wrap">${applied}<span class="text-xs text-gray-400">last ${_escapeHtml(when)}</span></div>
+                <div class="flex items-center gap-2 mt-1 flex-wrap">${applied}<span class="text-xs text-gray-500">last ${_escapeHtml(when)}</span></div>
             </div>
         </div>`;
     }).join('');
@@ -5050,7 +5370,7 @@ window._renderLeadRejectionEvidence = async function(assistantId) {
     host.innerHTML = `
       <p class="text-sm text-gray-500 mb-3">${total} rejection${total === 1 ? '' : 's'} recorded, grouped by what you said was wrong with the targeting. These aren't rules you can switch on and off — they're the evidence behind a proposed change to who your searches look for, which you approve on the Strategy tab.</p>
       <div class="space-y-1.5">${rows}</div>
-      ${appliedTotal === 0 ? `<p class="text-xs text-gray-400 mt-3">None of these has changed a search yet. A reason has to come up repeatedly, across more than one search or more than one day, before a change is put to you. To act on one now, edit the search's excluded domains or negative keywords.</p>` : ''}`;
+      ${appliedTotal === 0 ? `<p class="text-xs text-gray-500 mt-3">None of these has changed a search yet. A reason has to come up repeatedly, across more than one search or more than one day, before a change is put to you. To act on one now, edit the search's excluded domains or negative keywords.</p>` : ''}`;
 };
 
 window._toggleDirective = async function(id, btn) {
@@ -5232,7 +5552,7 @@ window._openTuningPicker = async function() {
     if (!modal || !list) return;
     const isBlog = ((window._detailReviewQueue || {}).source === 'blog_posts');
     const noun = isBlog ? 'blog posts' : 'posts';
-    list.innerHTML = `<div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading recent ${noun}…</div>`;
+    list.innerHTML = `<div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Loading recent ${noun}…</div>`;
     modal.classList.remove('hidden');
     // Normalised to one row shape so the render below is not written twice: `label` is the small
     // grey line (platform / publish date), `body` the output itself.
@@ -5267,13 +5587,13 @@ window._openTuningPicker = async function() {
         }
     } catch { /* non-critical */ }
     if (!rows.length) {
-        list.innerHTML = `<p class="text-sm text-gray-400 text-center py-6">No recent ${noun} to tune. They appear here once your assistant has drafted something and it is waiting for your review.</p>`;
+        list.innerHTML = `<p class="text-sm text-gray-500 text-center py-6">No recent ${noun} to tune. They appear here once your assistant has drafted something and it is waiting for your review.</p>`;
         return;
     }
     list.innerHTML = rows.slice(0, 15).map(r => `
         <button type="button" onclick="document.getElementById('modal-tuning-picker').classList.add('hidden'); window._openTuningSession({ ${r.arg}:${r.id} })"
             class="btn-secondary w-full text-left px-4 py-3 rounded-xl border transition cursor-pointer">
-            <p class="text-xs text-gray-400 mb-0.5">${_escapeHtml(r.label)}</p>
+            <p class="text-xs text-gray-500 mb-0.5">${_escapeHtml(r.label)}</p>
             <p class="text-sm text-gray-800">${_escapeHtml(r.body.slice(0, 120))}</p>
         </button>`).join('');
 };
@@ -5403,7 +5723,7 @@ function _renderOnboardingSummary(data) {
             <p class="text-sm text-gray-500 mt-1">A read-only summary of everything you told us when setting up this assistant. Expand to review — you can edit any of it in the tabs below.</p>
           </div>
           <div class="flex items-center gap-3 shrink-0">
-            <span id="onboarding-summary-count" data-base-count="${fieldCount}" class="text-xs font-semibold text-gray-400">${fieldCount} item${fieldCount === 1 ? '' : 's'}</span>
+            <span id="onboarding-summary-count" data-base-count="${fieldCount}" class="text-xs font-semibold text-gray-500">${fieldCount} item${fieldCount === 1 ? '' : 's'}</span>
             <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
           </div>
         </summary>
@@ -5411,13 +5731,13 @@ function _renderOnboardingSummary(data) {
           <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4 mt-4">
             ${rows.map(([label, value]) => `
               <div>
-                <dt class="text-xs font-bold text-gray-400 uppercase tracking-wide">${esc(label)}</dt>
+                <dt class="text-xs font-bold text-gray-500 uppercase tracking-wide">${esc(label)}</dt>
                 <dd class="text-sm text-gray-900 mt-1 whitespace-pre-line">${esc(value)}</dd>
               </div>`).join('')}
           </dl>
           ${rules.length ? `
             <div class="mt-6 pt-5 border-t border-gray-100">
-              <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Knowledge &amp; Guardrails</p>
+              <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Knowledge &amp; Guardrails</p>
               <ul class="list-disc pl-5 space-y-1 text-sm text-gray-900">
                 ${rules.map(r => `<li class="whitespace-pre-line">${esc(r)}</li>`).join('')}
               </ul>
@@ -5453,7 +5773,7 @@ function _renderOnboardingConnections() {
 
     block.innerHTML = `
         <div class="mt-6 pt-5 border-t border-gray-100">
-          <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Connections</p>
+          <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Connections</p>
           <p class="text-xs text-gray-500 mb-2">External tools this assistant can use. Manage them in the Connections tab below.</p>
           <ul class="divide-y divide-gray-100">${items}</ul>
           ${connectedLabels.length ? `<p class="text-xs text-gray-500 mt-3">Currently connected: <span class="font-semibold text-gray-700">${connectedLabels.map(esc).join(', ')}</span></p>` : ''}
@@ -5567,7 +5887,7 @@ async function _renderOutreachEmailConnect(data) {
     const altKey = _OUTREACH_OTHER[provider];
     const ALT = _OUTREACH_MAILBOXES[altKey];
 
-    card.innerHTML = `<div class="bg-white border border-gray-200 rounded-2xl p-5 text-sm text-gray-400">Checking your ${esc(M.brand)} connection…</div>`;
+    card.innerHTML = `<div class="bg-white border border-gray-200 rounded-2xl p-5 text-sm text-gray-500">Checking your ${esc(M.brand)} connection…</div>`;
 
     // One status call covers BOTH providers — the endpoint returns every provider — so the card
     // can tell "nothing connected" from "the other one is connected and the answer is stale".
@@ -5794,6 +6114,21 @@ function _applyDashboardRegistry(data) {
     window._detailRulesScope = cfg.rulesScope || null;
     // Role-chosen landing tab (SMM opens on its "Posts" pipeline); null → HTML default (Data Hub).
     window._detailDefaultMainTab = cfg.defaultMainTab || null;
+    // The "Needs you" strip's source for this role: the review queue's count, the Brand Designer's
+    // Briefs badge, or nothing for a role with neither. Its figures are reset per assistant.
+    window._detailNeedsYouSource = !cfg.hideReviewQueue ? 'review' : (cfg.briefsTab ? 'briefs' : null);
+    window._detailNeedsYouOverride = 0;
+    window._detailNextUp = null;
+    // Results sits right after the landing tab: "your work, then how it is going". It was near the
+    // end of a 6–8 tab row, past the fade on a phone (review, 2026-10-22). Moved in the DOM, so
+    // keyboard order and the scroller follow; the view is re-injected per load, so it never stacks.
+    {
+        const landing = document.getElementById(`maintab-btn-${cfg.defaultMainTab || 'datahub'}`);
+        const results = document.getElementById('maintab-btn-goals');
+        if (landing && results && landing.parentNode === results.parentNode && landing.nextElementSibling !== results) {
+            landing.after(results);
+        }
+    }
     // …except where a role's review IS another tab (cfg.hideReviewQueue): the Brand Designer's
     // approval gate is the option grid on its Briefs tab, and the default here would be an empty
     // SOCIAL post queue for an assistant that makes no posts.
@@ -5923,7 +6258,10 @@ function _applyDashboardRegistry(data) {
     setText('detail-rq-col-label-posted', 'Posted');
     const setupBtn = document.getElementById('detail-rq-setup-btn');
     if (setupBtn) setupBtn.style.display = rqIsBlog ? '' : 'none';
-    document.querySelector('#maintab-review-queue [role="tablist"]')?.setAttribute('aria-label', rqIsBlog ? 'Blogs by stage' : 'Posts by stage');
+    // Named after the role's own tab ("Emails", "Outreach"…) — every non-blog role was announced
+    // as "Posts by stage" (review, 2026-10-22).
+    document.querySelector('#maintab-review-queue [role="tablist"]')?.setAttribute('aria-label',
+        `${(window._detailReviewQueue || {}).label || (rqIsBlog ? 'Blogs' : 'Posts')} by stage`);
     if (rqIsBlog) {
         setText('detail-rq-primary-label', 'Write Blog Post');
         setText('detail-rq-col-label-posted', 'Published');
@@ -6058,7 +6396,12 @@ function _applyDashboardRegistry(data) {
         if (paLabel) paLabel.textContent = pa.label || 'Assign New Task';
         if (paBtn) {
             if (pa.kind === 'chat') {
-                paBtn.onclick = () => { window.location.href = `assistant-chat.html?assistantId=${data.id}`; };
+                // The same pop-up as the header Chat button — this was a full page load, so the two
+                // doors into one conversation behaved differently (review, 2026-10-22).
+                paBtn.onclick = () => {
+                    if (typeof window.openAssistantChat === 'function') window.openAssistantChat({ assistantId: data.id });
+                    else window.location.href = `assistant-chat.html?assistantId=${data.id}`;
+                };
             } else {
                 // Pass the id the same way the blog branch above does, rather than leaning on the
                 // _currentAssistantId global — this handler closes over the assistant it was built
@@ -6521,7 +6864,7 @@ function _renderDisclosureHelp(data) {
             <div class="min-w-0 flex-1">
                 <p class="text-xs font-bold text-gray-700">${label}</p>
                 <p class="text-xs text-gray-600 italic">&ldquo;${text}&rdquo;</p>
-                <p class="text-[11px] text-gray-400 mt-0.5">${note}</p>
+                <p class="text-[11px] text-gray-500 mt-0.5">${note}</p>
             </div>
             <button type="button" role="switch" aria-checked="false" data-disclosure-example="${_escapeHtml(text)}"
                 title="Include this disclosure"
@@ -6733,7 +7076,7 @@ function _hydrateAutoPublish(data) {
           <label class="flex items-center justify-between gap-4 p-3 border border-gray-200 rounded-lg ${inert ? '' : 'cursor-pointer hover:bg-gray-50'}">
             <span>
               <span class="block text-sm font-bold text-gray-900">${p.label}</span>
-              <span class="block text-xs ${inert ? 'text-gray-400' : 'text-gray-500'} mt-0.5">${subtitle}</span>
+              <span class="block text-xs ${inert ? 'text-gray-500' : 'text-gray-500'} mt-0.5">${subtitle}</span>
             </span>
             <span class="relative inline-flex shrink-0">
               <input type="checkbox" data-autopublish-platform="${p.value}" class="sr-only peer" ${on ? 'checked' : ''} ${inert ? 'disabled' : ''}>
@@ -6872,7 +7215,7 @@ function _vbPaint() {
     const sel = (key, opts) => `<select data-vb-select="${key}" class="w-full border border-gray-300 rounded-lg p-2 text-sm bg-white">${opts.map(([v, l]) => `<option value="${v}" ${_vb[key] === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
     host.innerHTML = `
       <div>
-        <p class="text-sm font-bold text-gray-700 mb-1">Personality <span class="font-normal text-gray-400">— pick up to two</span></p>
+        <p class="text-sm font-bold text-gray-700 mb-1">Personality <span class="font-normal text-gray-500">— pick up to two</span></p>
         <div class="flex flex-wrap gap-2">${window.VoiceBuilder.personalities.map((p) => `<button type="button" data-vb-personality="${esc(p.key)}" class="${chip(_vb.personalities.includes(p.key))}">${esc(p.label)}</button>`).join('')}</div>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
@@ -6890,7 +7233,7 @@ function _vbPaint() {
       <div>
         <p class="text-sm font-bold text-gray-700 mb-1">Never say</p>
         <p class="text-xs text-gray-500 mb-2">Words and phrases your assistant must never use. Add your own, or pick from the suggestions below.</p>
-        <div class="flex flex-wrap gap-1.5 mb-2">${_vb.neverSay.map((p, i) => `<span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-full bg-gray-100 border border-gray-200 text-gray-700">${esc(p)}<button type="button" data-vb-remove-never="${i}" aria-label="Remove ${esc(p)}" class="w-4 h-4 inline-flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 cursor-pointer">&times;</button></span>`).join('') || '<span class="text-xs text-gray-400">Nothing banned yet.</span>'}</div>
+        <div class="flex flex-wrap gap-1.5 mb-2">${_vb.neverSay.map((p, i) => `<span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-full bg-gray-100 border border-gray-200 text-gray-700">${esc(p)}<button type="button" data-vb-remove-never="${i}" aria-label="Remove ${esc(p)}" class="w-4 h-4 inline-flex items-center justify-center rounded-full text-gray-500 hover:text-gray-700 cursor-pointer">&times;</button></span>`).join('') || '<span class="text-xs text-gray-500">Nothing banned yet.</span>'}</div>
         <div class="flex gap-2"><input type="text" data-vb-never-input maxlength="60" placeholder="Add a word or phrase, then Enter" class="flex-1 border border-gray-300 rounded-lg p-2 text-sm">
           <button type="button" data-vb-add-never class="btn-secondary px-3 py-2 text-xs font-bold border rounded-lg cursor-pointer">Add</button></div>
         ${(() => {
@@ -6901,7 +7244,7 @@ function _vbPaint() {
         })()}
       </div>
       <div>
-        <p class="text-sm font-bold text-gray-700 mb-1">Write like this <span class="font-normal text-gray-400">— optional style reference</span></p>
+        <p class="text-sm font-bold text-gray-700 mb-1">Write like this <span class="font-normal text-gray-500">— optional style reference</span></p>
         <textarea data-vb-sample rows="3" maxlength="1500" placeholder="Paste something you wrote yourself — an email, a post, your About page. Your assistant copies its rhythm and word choice, not its words." class="w-full border border-gray-300 rounded-lg p-3 text-sm resize-y">${esc(_vb.sample || '')}</textarea>
       </div>
       <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
@@ -6963,7 +7306,7 @@ document.addEventListener('click', async (e) => {
             if (!res.ok) throw new Error(d.error || 'Could not write a preview.');
             if (out) out.innerHTML = (d.samples || []).map((s) => `<div class="bg-white border border-gray-200 rounded-lg p-3" data-vb-sample-card>
                 <div class="flex items-center justify-between gap-2 mb-1">
-                  <p class="text-[11px] font-bold uppercase tracking-wide text-gray-400">${_escapeHtml(s.shape || 'Sample')}</p>
+                  <p class="text-[11px] font-bold uppercase tracking-wide text-gray-500">${_escapeHtml(s.shape || 'Sample')}</p>
                   ${'speechSynthesis' in window ? '<button type="button" data-vb-say class="link text-xs font-semibold">🔊 Read aloud</button>' : ''}
                 </div>
                 <p class="text-sm text-gray-800 whitespace-pre-line" data-vb-sample-text>${_escapeHtml(s.text)}</p>
@@ -7021,7 +7364,7 @@ function _buildStrictRuleRow(text) {
     row.innerHTML = `
         <textarea rows="1" placeholder="e.g. Always use British English spelling"
             class="sr-input flex-1 min-w-0 w-full px-3 py-2 text-sm rounded-lg border border-transparent hover:border-gray-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none bg-transparent focus:bg-white resize-none overflow-hidden">${_escapeHtml(text || '')}</textarea>
-        <button type="button" class="sr-del text-gray-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 mt-1.5" aria-label="Delete rule" title="Delete rule">
+        <button type="button" class="sr-del text-gray-500 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 mt-1.5" aria-label="Delete rule" title="Delete rule">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
         </button>`;
     return row;
@@ -7935,7 +8278,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
             btn.className = `activity-tf-btn px-2.5 py-1 text-xs font-bold rounded-md transition ${active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
             btn.setAttribute('aria-pressed', String(active));
         });
-        activityList.innerHTML = '<div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading activity…</div>';
+        activityList.innerHTML = '<div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Loading activity…</div>';
         try {
             const res = await fetch(`${_activityUrl}?id=${assistantId}&timeframe=${timeframe}`);
             if (res.ok) {
@@ -8023,13 +8366,13 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                                     <p class="text-sm text-gray-700">${_escapeHtml(log.description || log.actionType)}</p>
                                     ${statusTag(log.status)}
                                 </div>
-                                <p class="text-xs text-gray-400 mt-0.5">${log.createdAt ? new Date(log.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</p>
+                                <p class="text-xs text-gray-500 mt-0.5">${log.createdAt ? new Date(log.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</p>
                                 ${tuneBtn}
                                 ${failureHtml}
                             </div>
                         </div>`;
                     };
-                    const sectionLabel = (txt) => `<p class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1.5">${txt}</p>`;
+                    const sectionLabel = (txt) => `<p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5">${txt}</p>`;
                     // Pin Failed + Needs-Input into a "Needs attention" group above the chronological list.
                     const attention = logs.filter(l => l.status === 'failed' || l.status === 'needs_input');
                     const rest = logs.filter(l => l.status !== 'failed' && l.status !== 'needs_input');
@@ -8039,7 +8382,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                         if (attention.length) html += '<div class="h-4"></div>';
                         html += sectionLabel('Recent') + rest.map(l => rowHtml(l, false)).join('');
                     }
-                    activityList.innerHTML = html || '<p class="text-sm text-gray-400 text-center py-3">No activity yet.</p>';
+                    activityList.innerHTML = html || '<p class="text-sm text-gray-500 text-center py-3">No activity yet.</p>';
                     // Arrived from a "couldn't write a post" notification: bring that row into view, once.
                     if (window._activityFocusJobId) {
                         const row = activityList.querySelector(`[data-gen-job="${window._activityFocusJobId}"]`);
@@ -8047,26 +8390,42 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                         if (row) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
                     }
                 } else {
-                    activityList.innerHTML = '<p class="text-sm text-gray-400 text-center py-3">No activity yet — your assistant is ready to get to work.</p>';
+                    // Name the range: "No activity yet" over a one-day window read as an idle assistant
+                    // on roles that work weekly (review, 2026-10-22).
+                    activityList.innerHTML = timeframe === 'all'
+                        ? '<p class="text-sm text-gray-500 text-center py-3">No activity yet — your assistant is ready to get to work.</p>'
+                        : `<p class="text-sm text-gray-500 text-center py-3">Nothing in the ${_ACTIVITY_TF_WORDS[timeframe] || 'selected period'}. Pick a longer range above to see earlier work.</p>`;
                 }
             } else {
-                activityList.innerHTML = '<p class="text-sm text-gray-400 text-center py-3">No activity yet.</p>';
+                _activityLoadFailed();
             }
         } catch {
-            activityList.innerHTML = '<p class="text-sm text-gray-400 text-center py-3">No activity yet.</p>';
+            _activityLoadFailed();
         }
         }; // end loadActivity
+        // A failed read is not an empty history — it used to say "No activity yet" either way.
+        const _activityLoadFailed = () => {
+            activityList.innerHTML = `<div class="text-center py-3">
+                <p class="text-sm text-gray-700">Couldn’t load activity just now.</p>
+                <button type="button" data-activity-retry class="btn-secondary min-h-[44px] sm:min-h-0 mt-2 px-3 py-1.5 border text-xs font-bold rounded-lg transition">Try again</button>
+            </div>`;
+            activityList.querySelector('[data-activity-retry]')?.addEventListener('click', () => loadActivity(_activityTf));
+        };
 
-        let _activityTf = '1d';
+        // Only a social-posting role fans one post out to several platforms; elsewhere the
+        // control would be a switch that changes nothing. ⚠️ `__defaulted` is the registry's
+        // placeholder queue for roles with NONE (the Brand Designer) — it reads kind 'posts' but is
+        // not one, and the switch showed on its Activity tab.
+        const _rq = _activityCfg.reviewQueue || {};
+        const _crossPosts = _activityCfg.activitySource !== 'lead' && _rq.kind === 'posts' && !_rq.source && !_rq.__defaulted;
+        // A social assistant posts daily, so a day is a full screen. Every other role works weekly or
+        // less — one day was usually empty — so they open on a month.
+        let _activityTf = _crossPosts ? '1d' : '30d';
         document.querySelectorAll('.activity-tf-btn').forEach(btn => {
             btn.addEventListener('click', () => { _activityTf = btn.dataset.tf; loadActivity(_activityTf); });
         });
         // "Combine platforms" (crosspost-view.js) — the server merges, so a change is a re-fetch of
         // the timeframe on screen. This view is rebuilt per navigation: replace, never stack.
-        // Only a social-posting role fans one post out to several platforms; elsewhere the
-        // control would be a switch that changes nothing.
-        const _rq = _activityCfg.reviewQueue || {};
-        const _crossPosts = _activityCfg.activitySource !== 'lead' && _rq.kind === 'posts' && !_rq.source;
         const _cpWrap = document.getElementById('activity-crosspost-toggle');
         if (_cpWrap) { _cpWrap.classList.toggle('hidden', !_crossPosts); _cpWrap.style.display = _crossPosts ? '' : 'none'; }
         window.CrossPostView?.hydrate();
@@ -8136,6 +8495,13 @@ async function _prefetchDetailRqBadge(assistantId) {
             if (!posts) return;
             const wanted = new Set(['draft', 'pending_approval', 'in_review']);
             count = posts.filter((p) => wanted.has(p.status)).length;
+        } else if (rq.source === 'newsletter_issues') {
+            // Email Marketing: the Review column's statuses. This fell through to get-social-drafts,
+            // which holds no emails, and zeroed the Emails badge and the Autopilot card's waiting
+            // count after the queue had painted them (2026-10-22).
+            const res = await fetch(`/.netlify/functions/newsletter-issues?assistantId=${assistantId}`);
+            if (!res.ok) return;
+            count = ((await res.json()).issues || []).filter((i) => _RQ_NEWSLETTER_WAITING.includes(i.status)).length;
         } else {
             const res = await fetch(`/.netlify/functions/get-social-drafts?status=pending_approval&assistantId=${assistantId}`);
             if (!res.ok) return;
@@ -8143,7 +8509,7 @@ async function _prefetchDetailRqBadge(assistantId) {
         }
         _setDetailRqTabBadge(count);
         window._setPendingReviewCount?.(count);
-        // Feed the operational status pill (Epic 1 AC1.1.2): pending drafts → "Awaiting Human Review".
+        // Feed the operational status pill (Epic 1 AC1.1.2): pending drafts → "Needs you".
         window._updateOpSignals?.({ pendingReview: count });
     } catch { /* non-critical */ }
 }
@@ -8254,7 +8620,9 @@ async function _fetchAndRenderLeadRoi(assistantId, period = 'all') {
 }
 
 /**
- * The hero's Time Saved / Money Saved strip for the Blog Writer (registry `roiSource: 'blog'`).
+ * The hero's Time Saved / Money Saved strip for the Blog Writer (registry `roiSource: 'blog'`)
+ * and the Email Marketing Assistant (`roiSource: 'newsletter'`). The registry declared 'newsletter'
+ * from 2026-08-20 but nothing here read it, so that strip never appeared (review, 2026-10-22).
  *
  * Same endpoint as the social path — get-assistant-metrics, whose hours come from
  * src/utils/roi-activity.ts, and that module already counts blog_posts. What it does NOT do is
@@ -8265,7 +8633,20 @@ async function _fetchAndRenderLeadRoi(assistantId, period = 'all') {
  * The markup, the period toggle and the wording are the shared ones, deliberately: this exists so
  * the same figure looks the same on all three assistants, not so the blog gets a third variant.
  */
-async function _fetchAndRenderBlogRoi(assistantId, period = 'all') {
+// What the hours on the strip stand for, per roiSource — the one line that differs between them.
+const _WRITTEN_ROI_HOURS_NOTE = {
+    // Not "~N min per post": that multiplier prices a SOCIAL post, and a long-form article is
+    // not one. The rate card is the platform's, and the strip says whose work it is costing.
+    blog: 'Researching, drafting and formatting long-form posts',
+    newsletter: 'Planning, writing and laying out your emails',
+    // Campaign briefs and decisions are priced in roi-activity.ts (campaign_managed) — the strip was
+    // simply never switched on for this role (review, 2026-10-22).
+    campaign: 'Planning campaigns and briefing your other assistants',
+    // Pictures you chose (roi-activity.ts `pictures`, platform-config picture_chosen) — 2026-10-22.
+    brand: 'Finding and making on-brand pictures',
+};
+
+async function _fetchAndRenderWrittenRoi(assistantId, period = 'all') {
     const roiStrip = document.getElementById('detail-roi-strip');
     if (!roiStrip || roiStrip.dataset.roleHidden === '1') return;
     const el = id => document.getElementById(id);
@@ -8276,7 +8657,7 @@ async function _fetchAndRenderBlogRoi(assistantId, period = 'all') {
         const active = btn.dataset.period === period;
         btn.className = `metrics-period-btn min-h-[44px] sm:min-h-0 px-2.5 py-1 text-[11px] font-bold rounded-md transition ${active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
         btn.setAttribute('aria-pressed', String(active));
-        btn.onclick = active ? null : () => _fetchAndRenderBlogRoi(assistantId, btn.dataset.period);
+        btn.onclick = active ? null : () => _fetchAndRenderWrittenRoi(assistantId, btn.dataset.period);
     });
 
     try {
@@ -8304,10 +8685,8 @@ async function _fetchAndRenderBlogRoi(assistantId, period = 'all') {
         if (hoursLabel) hoursLabel.textContent = 'Time Saved';
         const hours = el('metrics-hours-saved');
         if (hours) { hours.textContent = `~${d.hoursSaved}h`; hours.title = ''; }
-        // Not "~N min per post": that multiplier prices a SOCIAL post, and a long-form article is
-        // not one. The rate card is the platform's, and the strip says whose work it is costing.
         const hoursNote = el('metrics-hours-note');
-        if (hoursNote) hoursNote.textContent = 'Researching, drafting and formatting long-form posts';
+        if (hoursNote) hoursNote.textContent = _WRITTEN_ROI_HOURS_NOTE[roiStrip.dataset.roiSource] || _WRITTEN_ROI_HOURS_NOTE.blog;
 
         const gbp = el('metrics-gbp-saved');
         const roiNote = el('metrics-roi-note');
@@ -8363,6 +8742,10 @@ async function _renderAssistantTaskShare(assistantId) {
     const strip = document.getElementById('detail-task-share');
     if (!strip) return;
     strip.classList.add('hidden');
+    // The Campaign Orchestrator's Budget & Control strip already states the month's allowance, with
+    // the work committed to campaigns beside it — two counts of one number (review, 2026-10-22).
+    const roleKey = (window._detailCurrentData || {}).roleKey;
+    if ((window.AssistantDashboardRegistry?.get?.(roleKey) || {}).allowanceInControlStrip) return;
     try {
         const get = (u) => (window.bmsCachedFetch ? window.bmsCachedFetch(u) : fetch(u)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
         const [cap, us] = await Promise.all([get('/.netlify/functions/check-capacity'), get('/.netlify/functions/get-usage-summary')]);
@@ -8390,6 +8773,9 @@ async function _renderAssistantTaskShare(assistantId) {
     } catch { /* the strip just stays hidden */ }
 }
 
+// The Activity timeframe buttons, in words, for the empty state.
+const _ACTIVITY_TF_WORDS = { '1d': 'last day', '7d': 'last 7 days', '30d': 'last 30 days', '90d': 'last 90 days' };
+
 async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
     // Remembered for _refreshAssistantMetrics above — the period toggle calls straight back into
     // here, so this is the one place that knows which view is on screen.
@@ -8410,8 +8796,8 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
     if (roiStrip && roiStrip.dataset.roiSource === 'lead') {
         return _fetchAndRenderLeadRoi(assistantId, period);
     }
-    if (roiStrip && roiStrip.dataset.roiSource === 'blog') {
-        return _fetchAndRenderBlogRoi(assistantId, period);
+    if (roiStrip && ['blog', 'newsletter', 'campaign', 'brand'].includes(roiStrip.dataset.roiSource)) {
+        return _fetchAndRenderWrittenRoi(assistantId, period);
     }
     if (!card) return;
     // Non-social roles have no post-based ROI — the registry marks both role-hidden; respect it.
@@ -8526,7 +8912,7 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
                 const pct = Math.round((v.created / maxCreated) * 100);
                 return `<div title="${label}: ${v.created} sent or queued · ${v.scheduled} scheduled · ${v.published} published (per-platform, so a cross-post counts here once per platform)">
                     <div class="flex items-center justify-between text-xs font-semibold mb-1">
-                        <span class="flex items-center gap-1.5 text-gray-700"><span class="text-gray-400">${icon}</span>${label}</span>
+                        <span class="flex items-center gap-1.5 text-gray-700"><span class="text-gray-500">${icon}</span>${label}</span>
                         <span class="text-gray-500" style="font-variant-numeric:tabular-nums">${v.published}/${v.created}</span>
                     </div>
                     <div class="rounded-full overflow-hidden" style="height:8px;background:#f3f4f6;">
@@ -8613,7 +8999,7 @@ async function _fetchAndRenderBlogDestinations() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const { destinations } = await res.json();
         if (!Array.isArray(destinations) || !destinations.length) {
-            list.innerHTML = '<p class="text-xs text-gray-400 py-1">No blog platforms available to connect.</p>';
+            list.innerHTML = '<p class="text-xs text-gray-500 py-1">No blog platforms available to connect.</p>';
             setFooter('');
             return;
         }
@@ -8632,7 +9018,7 @@ async function _fetchAndRenderBlogDestinations() {
             const account = r.accountLabel ? ` · ${_escapeHtml(r.accountLabel)}` : '';
             const state = r.connected
                 ? `<span class="text-[11px] font-semibold text-emerald-700">${_escapeHtml(mode)}${account}</span>`
-                : '<span class="text-[11px] text-gray-400">Not connected</span>';
+                : '<span class="text-[11px] text-gray-500">Not connected</span>';
             const dot = r.connected ? 'bg-emerald-500' : 'bg-gray-200';
             return `<div class="flex items-center justify-between gap-3">
                 <span class="flex items-center gap-2 text-xs font-semibold text-gray-700 min-w-0">
@@ -8652,7 +9038,7 @@ async function _fetchAndRenderBlogDestinations() {
         console.error('[blog-destinations] load failed:', err);
         // Its own copy, for the same reason the KPI cards keep error and no-data apart: a network
         // blip must never be reported to the user as "you have nothing connected".
-        list.innerHTML = '<p class="text-xs text-gray-400 py-1">Couldn\'t load your publishing destinations just now.</p>';
+        list.innerHTML = '<p class="text-xs text-gray-500 py-1">Couldn\'t load your publishing destinations just now.</p>';
         setFooter('');
     }
 }
@@ -8712,7 +9098,7 @@ async function _fetchAndRenderNewsletterList() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (data.needsSetup) {
-            list.innerHTML = '<p class="text-xs text-gray-400 py-1">The audience tables have not been set up on this environment yet.</p>';
+            list.innerHTML = '<p class="text-xs text-gray-500 py-1">The audience tables have not been set up on this environment yet.</p>';
             setFooter('');
             return;
         }
@@ -8737,7 +9123,7 @@ async function _fetchAndRenderNewsletterList() {
         if (!total) {
             // ⚠️ Its own state, and it is an INSTRUCTION rather than a report. "0 subscribers" on a
             // brand-new workspace is not news; where to get the first one is.
-            list.innerHTML = `<p class="text-xs text-gray-400 py-1">Nobody on your list yet — add a sign-up form to your site, or import the people who have already said yes, from the ${audienceLink('Audience page')}.</p>`;
+            list.innerHTML = `<p class="text-xs text-gray-500 py-1">Nobody on your list yet — add a sign-up form to your site, or import the people who have already said yes, from the ${audienceLink('Audience page')}.</p>`;
             setFooter('');
             return;
         }
@@ -8769,7 +9155,7 @@ async function _fetchAndRenderNewsletterList() {
     } catch (err) {
         console.error('[newsletter-list] load failed:', err);
         // A network blip must never be reported to the user as "your list is empty".
-        list.innerHTML = '<p class="text-xs text-gray-400 py-1">Couldn\'t load your list just now.</p>';
+        list.innerHTML = '<p class="text-xs text-gray-500 py-1">Couldn\'t load your list just now.</p>';
         setFooter('');
     }
 }
@@ -8808,7 +9194,7 @@ async function _fetchAndRenderFollowerCounts() {
     // An empty chart still gets its axis-less track row per platform we know about, so the block has
     // the same shape whether or not there are numbers in it.
     const emptyState = (msg) => {
-        list.innerHTML = `<p class="text-xs text-gray-400 py-1">${msg}</p>`;
+        list.innerHTML = `<p class="text-xs text-gray-500 py-1">${msg}</p>`;
     };
 
     try {
@@ -8841,7 +9227,7 @@ async function _fetchAndRenderFollowerCounts() {
             const unit = r.platform === 'youtube' ? 'subscribers' : 'followers';
             const has = r.available && r.count != null;
             const pct = has ? Math.round((r.count / maxCount) * 100) : 0;
-            const labelSpan = `<span class="flex items-center gap-1.5 text-xs font-semibold text-gray-700 min-w-0"><span class="text-gray-400 shrink-0" style="width:14px">${icon}</span><span class="truncate">${label}</span></span>`;
+            const labelSpan = `<span class="flex items-center gap-1.5 text-xs font-semibold text-gray-700 min-w-0"><span class="text-gray-500 shrink-0" style="width:14px">${icon}</span><span class="truncate">${label}</span></span>`;
             const value = has
                 ? `<span class="text-sm font-black text-gray-900" style="font-variant-numeric:tabular-nums">${_formatFollowerCount(r.count)}</span>`
                 : `<span class="text-sm font-black text-gray-300">—</span>`;
@@ -8864,12 +9250,12 @@ async function _fetchAndRenderFollowerCounts() {
                 // "as of {date}" sits UNDER the bar, not in the top row: these columns are ~215px wide
                 // on a desktop Overview, and label + count + date + Update in one line squeezed the
                 // platform name down to an unreadable "L…".
-                const asOf = r.recordedAt ? `<p class="text-[10px] text-gray-400 mt-1">Entered by you, as of ${new Date(r.recordedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>` : '';
+                const asOf = r.recordedAt ? `<p class="text-[10px] text-gray-500 mt-1">Entered by you, as of ${new Date(r.recordedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>` : '';
                 // Say where else this number goes. It is the ONE input for a LinkedIn goal now, and
                 // without this line people kept typing it into the goal as well.
                 // Unconditional: this card can paint before the goals have loaded.
                 const feedsGoal = r.platform === 'linkedin'
-                    ? '<p class="text-[10px] text-gray-400 mt-0.5">This figure also drives any LinkedIn Followers goal.</p>' : '';
+                    ? '<p class="text-[10px] text-gray-500 mt-0.5">This figure also drives any LinkedIn Followers goal.</p>' : '';
                 const cta = r.available ? 'Update' : 'Add';
                 return `<div title="${rowTitle}">
                     <div class="flex items-center justify-between gap-3 mb-1">
@@ -9025,7 +9411,7 @@ function _rbcRender(items) {
     const progress = document.getElementById('rbc-progress');
     if (!list) return;
     if (!items.length) {
-        list.innerHTML = '<p class="text-sm text-gray-400 text-center py-3">No checklist items today.</p>';
+        list.innerHTML = '<p class="text-sm text-gray-500 text-center py-3">No checklist items today.</p>';
         if (progress) progress.textContent = '';
         return;
     }
@@ -9043,7 +9429,7 @@ function _rbcRender(items) {
             <input type="checkbox" ${item.completed ? 'checked' : ''} onchange="window._rbcToggle(${item.id}, this.checked)" class="mt-0.5 w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500 cursor-pointer">
             <span class="flex-1 min-w-0">
                 <span class="flex items-center gap-2 flex-wrap">
-                    <span class="text-sm font-semibold ${item.completed ? 'text-gray-400 line-through' : 'text-gray-800'}" id="rbc-title-${item.id}">${esc(item.title)}</span>
+                    <span class="text-sm font-semibold ${item.completed ? 'text-gray-500 line-through' : 'text-gray-800'}" id="rbc-title-${item.id}">${esc(item.title)}</span>
                     ${badge}
                 </span>
                 ${item.description ? `<span class="block text-xs text-gray-500 mt-0.5">${esc(item.description)}</span>` : ''}
@@ -9097,7 +9483,7 @@ window._rbcRegenerate = async function () {
     const btn = document.getElementById('rbc-regenerate-btn');
     const list = document.getElementById('rbc-list');
     if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
-    if (list) list.innerHTML = '<div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Generating a fresh checklist…</div>';
+    if (list) list.innerHTML = '<div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Generating a fresh checklist…</div>';
     try {
         const res = await fetch('/.netlify/functions/relationship-checklist', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -9141,7 +9527,12 @@ window._goToDisclosureField = function() {
 function _kickoffFixLink(key) {
     const fix = _KICKOFF_FIX[key];
     if (!fix) return '';
-    return ` <button type="button" onclick="${fix.go}" title="Opens ${fix.where}" class="link font-semibold cursor-pointer">${fix.label || 'Do this now →'}</button>`;
+    // The strategy card is retitled per role ("Brand Knowledge" for roles that post nothing), so read
+    // the name off the card rather than promising "What I post about" (review, 2026-10-22).
+    const where = key === 'brand_strategy'
+        ? (document.getElementById('opcard-strategy-title')?.textContent.trim() || fix.where)
+        : fix.where;
+    return ` <button type="button" onclick="${fix.go}" title="Opens ${_escapeHtml(where)}" class="link font-semibold cursor-pointer">${fix.label || 'Do this now →'}</button>`;
 }
 
 // Kick Off Meeting — readiness checklist + activation gate. Fetches
@@ -9258,7 +9649,7 @@ async function _renderKickOff(assistantId) {
             <li class="flex items-start gap-3">
                 ${it.done ? bTick : bCross}
                 <span class="min-w-0">
-                    <span class="block text-sm font-semibold ${it.done ? 'text-gray-800' : 'text-red-700'}">${it.label}${it.required ? '' : ' <span class="text-xs font-normal text-gray-400">(recommended)</span>'}</span>
+                    <span class="block text-sm font-semibold ${it.done ? 'text-gray-800' : 'text-red-700'}">${it.label}${it.required ? '' : ' <span class="text-xs font-normal text-gray-500">(recommended)</span>'}</span>
                     ${it.done ? '' : `<span class="block text-xs text-red-500 mt-0.5">${it.hint || ''}${_kickoffFixLink(it.key)}</span>`}
                 </span>
             </li>`).join('') || '';
@@ -9279,10 +9670,10 @@ async function _renderKickOff(assistantId) {
         <li class="flex items-start gap-3">
             ${it.done ? tick : cross}
             <span class="min-w-0">
-                <span class="block text-sm font-semibold ${it.done ? 'text-gray-800' : 'text-gray-500'}">${_escapeHtml(it.label)}${it.required ? '' : ' <span class="text-xs font-normal text-gray-400">(recommended)</span>'}</span>
-                ${it.done ? '' : `<span class="block text-xs text-gray-400 mt-0.5">${_escapeHtml(it.hint || '')}${_kickoffFixLink(it.key)}</span>`}
+                <span class="block text-sm font-semibold ${it.done ? 'text-gray-800' : 'text-gray-500'}">${_escapeHtml(it.label)}${it.required ? '' : ' <span class="text-xs font-normal text-gray-500">(recommended)</span>'}</span>
+                ${it.done ? '' : `<span class="block text-xs text-gray-500 mt-0.5">${_escapeHtml(it.hint || '')}${_kickoffFixLink(it.key)}</span>`}
             </span>
-        </li>`).join('') || '<li class="text-sm text-gray-400">No checklist items.</li>';
+        </li>`).join('') || '<li class="text-sm text-gray-500">No checklist items.</li>';
 
     // US3 AC3.1: summary — primary directive + active connections the user reviews before confirming.
     const summaryEl = document.getElementById('kickoff-summary');
@@ -9292,12 +9683,12 @@ async function _renderKickOff(assistantId) {
         const conns = (sm.connections || []);
         const connPills = conns.length
             ? conns.map(c => `<span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700 bg-white border border-gray-200 px-2 py-0.5 rounded-full">${CONN_LABELS[c] || (c.charAt(0).toUpperCase() + c.slice(1))}</span>`).join(' ')
-            : '<span class="text-xs text-gray-400 italic">No connected accounts yet</span>';
+            : '<span class="text-xs text-gray-500 italic">No connected accounts yet</span>';
         summaryEl.className = 'mb-5 p-4 rounded-xl bg-gray-50 border border-gray-100' + (data.working ? ' hidden' : '');
         summaryEl.innerHTML = `
-            <p class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Primary directive</p>
+            <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Primary directive</p>
             <p class="text-sm font-semibold text-gray-800 mb-3">${sm.directive || 'Digital Assistant'}</p>
-            <p class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Active connections</p>
+            <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Active connections</p>
             <div class="flex flex-wrap gap-1.5">${connPills}</div>`;
     }
 
@@ -9390,7 +9781,7 @@ function _renderMeetingsBrief(data) {
 
     content.innerHTML = rows.map(r => `
         <div class="border-t border-gray-100 pt-4 first:border-t-0 first:pt-0">
-          <p class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">${r.label}</p>
+          <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">${r.label}</p>
           <p class="text-sm text-gray-800">${r.value}</p>
         </div>`).join('');
     card.classList.remove('hidden');
@@ -9795,11 +10186,11 @@ function _renderBlogReaders(readers) {
         const swanCell = !p.swan
             ? '<span class="text-gray-300" title="Not sent to The Swan Index">—</span>'
             : p.swan.url
-                ? `<a href="${esc(p.swan.url)}" target="_blank" rel="noopener" class="font-semibold text-gray-900 hover:underline">${n(p.swan.views)}<span class="sr-only"> (opens in new tab)</span></a> <span class="text-gray-400">· ${n(p.swan.reads)} engaged</span>`
-                : `<span class="text-gray-400">${p.swan.status === 'pending' ? 'Waiting for an editor' : 'Not on the site'}</span>`;
+                ? `<a href="${esc(p.swan.url)}" target="_blank" rel="noopener" class="font-semibold text-gray-900 hover:underline">${n(p.swan.views)}<span class="sr-only"> (opens in new tab)</span></a> <span class="text-gray-500">· ${n(p.swan.reads)} engaged</span>`
+                : `<span class="text-gray-500">${p.swan.status === 'pending' ? 'Waiting for an editor' : 'Not on the site'}</span>`;
         return `<tr class="border-t border-gray-100">
           <td class="py-2 pr-3 min-w-0"><p class="font-semibold text-gray-900" style="overflow-wrap:break-word" title="${esc(p.title)}">${esc(p.title)}</p>
-            ${p.publishedAt ? `<p class="text-[11px] text-gray-400">${esc(new Date(p.publishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }))}</p>` : ''}</td>
+            ${p.publishedAt ? `<p class="text-[11px] text-gray-500">${esc(new Date(p.publishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }))}</p>` : ''}</td>
           <td class="py-2 px-3 text-right whitespace-nowrap font-semibold text-gray-900">${n(p.blogReads)}</td>
           <td class="py-2 px-3 text-right whitespace-nowrap text-gray-600">${secs(p.avgReadSeconds)}</td>
           ${onSwan ? `<td class="py-2 pl-3 text-right">${swanCell}</td>` : ''}
@@ -9813,7 +10204,7 @@ function _renderBlogReaders(readers) {
         const swan = !onSwan ? '' : !p.swan ? '<span class="text-gray-300">Not on The Swan Index</span>'
             : p.swan.url
                 ? `<a href="${esc(p.swan.url)}" target="_blank" rel="noopener" class="font-semibold text-gray-900 hover:underline">${n(p.swan.views)} Swan Index views<span class="sr-only"> (opens in new tab)</span></a>`
-                : `<span class="text-gray-400">Swan Index: ${p.swan.status === 'pending' ? 'waiting for an editor' : 'not on the site'}</span>`;
+                : `<span class="text-gray-500">Swan Index: ${p.swan.status === 'pending' ? 'waiting for an editor' : 'not on the site'}</span>`;
         return `<li class="py-2 border-t border-gray-100">
           <p class="font-semibold text-gray-900" style="overflow-wrap:break-word">${esc(p.title)}</p>
           <p class="text-xs text-gray-600 mt-0.5">${date(p) ? `${date(p)} · ` : ''}<span class="font-semibold text-gray-900">${n(p.blogReads)}</span> reads · ${secs(p.avgReadSeconds)} avg</p>
@@ -9824,7 +10215,7 @@ function _renderBlogReaders(readers) {
     panel.innerHTML = `
       <div class="flex flex-wrap items-baseline justify-between gap-2 mb-3">
         <h4 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Readers</h4>
-        <span class="text-xs text-gray-400 font-medium">Since tracking began</span>
+        <span class="text-xs text-gray-500 font-medium">Since tracking began</span>
       </div>
       <div class="grid grid-cols-1 ${onSwan ? 'sm:grid-cols-2' : ''} gap-3 mb-4">
         <div class="rounded-xl bg-gray-50 border border-gray-100 p-3">
@@ -9839,7 +10230,7 @@ function _renderBlogReaders(readers) {
       <ul class="sm:hidden text-sm">${stacked}</ul>
       <div class="hidden sm:block overflow-x-auto">
         <table class="w-full text-sm">
-          <thead><tr class="text-[11px] text-gray-400 uppercase tracking-wide">
+          <thead><tr class="text-[11px] text-gray-500 uppercase tracking-wide">
             <th class="text-left font-bold pb-1 pr-3">Post</th>
             <th class="text-right font-bold pb-1 px-3">Reads</th>
             <th class="text-right font-bold pb-1 px-3">Avg read</th>
@@ -9848,7 +10239,7 @@ function _renderBlogReaders(readers) {
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <p class="text-[11px] text-gray-400 mt-3">Counted anonymously when someone reads a post on your embedded blog, your hosted blog pages${onSwan ? ' or The Swan Index' : ''}. Readers with JavaScript turned off, and copies you paste elsewhere, aren't counted.</p>`;
+      <p class="text-[11px] text-gray-500 mt-3">Counted anonymously when someone reads a post on your embedded blog, your hosted blog pages${onSwan ? ' or The Swan Index' : ''}. Readers with JavaScript turned off, and copies you paste elsewhere, aren't counted.</p>`;
     panel.classList.remove('hidden');
 }
 
@@ -10423,7 +10814,7 @@ async function _fetchAndRenderWorkspaceDefaults(assistantId, currentData, trigge
                         <li class="flex items-center justify-between gap-3 px-4 py-3">
                             <div class="min-w-0">
                                 <p class="text-sm font-semibold text-gray-800 truncate">${_escapeHtml(a.name)}</p>
-                                <p class="text-xs text-gray-400 mt-0.5">${a.isFile ? 'Document' : 'Link'} · ${_escapeHtml(catLabel(a.category))}</p>
+                                <p class="text-xs text-gray-500 mt-0.5">${a.isFile ? 'Document' : 'Link'} · ${_escapeHtml(catLabel(a.category))}</p>
                             </div>
                             ${(a.externalUrl && !a.isFile) ? `<a href="${_escapeHtml(a.externalUrl)}" target="_blank" rel="noopener" class="text-xs font-bold text-emerald-700 hover:underline shrink-0">Open</a>` : ''}
                         </li>`).join('')}
@@ -10436,15 +10827,15 @@ async function _fetchAndRenderWorkspaceDefaults(assistantId, currentData, trigge
         // Muted section for assets that exist but aren't feeding the assistant yet.
         const pendingList = pending.length ? `
                 <div class="mt-4">
-                    <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Not applied yet</p>
+                    <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Not applied yet</p>
                     <ul class="divide-y divide-gray-100 border border-dashed border-gray-200 rounded-xl overflow-hidden">
                         ${pending.map(a => `
                             <li class="flex items-center justify-between gap-3 px-4 py-3 bg-gray-50/50">
                                 <div class="min-w-0">
                                     <p class="text-sm font-semibold text-gray-500 truncate">${_escapeHtml(a.name)}</p>
-                                    <p class="text-xs text-gray-400 mt-0.5">${a.isFile ? 'Document' : 'Link'} · ${_escapeHtml(catLabel(a.category))}</p>
+                                    <p class="text-xs text-gray-500 mt-0.5">${a.isFile ? 'Document' : 'Link'} · ${_escapeHtml(catLabel(a.category))}</p>
                                 </div>
-                                <span class="text-xs font-medium text-gray-400 shrink-0" title="${_escapeHtml(notAppliedHint(a.status))}">${_escapeHtml(a.status)}</span>
+                                <span class="text-xs font-medium text-gray-500 shrink-0" title="${_escapeHtml(notAppliedHint(a.status))}">${_escapeHtml(a.status)}</span>
                             </li>`).join('')}
                     </ul>
                 </div>` : '';
@@ -10596,13 +10987,13 @@ function _buildRuleRow(catId, placeholder, rule) {
     tr.innerHTML = `
         <div class="flex-1 min-w-0">
             <textarea rows="1" placeholder="${_escapeHtml(placeholder || 'Describe the rule…')}"
-                class="ar-input w-full px-3 py-2 text-sm rounded-lg border border-transparent hover:border-gray-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none bg-transparent focus:bg-white resize-none overflow-hidden ${active ? '' : 'text-gray-400 line-through'}">${_escapeHtml(rule?.ruleText || '')}</textarea>
+                class="ar-input w-full px-3 py-2 text-sm rounded-lg border border-transparent hover:border-gray-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none bg-transparent focus:bg-white resize-none overflow-hidden ${active ? '' : 'text-gray-500 line-through'}">${_escapeHtml(rule?.ruleText || '')}</textarea>
             ${isFeedback ? '<p class="text-xs text-amber-600 font-semibold px-3 mt-0.5">From rejected-post feedback</p>' : ''}
         </div>
         <button type="button" aria-checked="${active}" class="ar-toggle relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none mt-1 ${active ? 'bg-emerald-500' : 'bg-gray-300'}">
             <span class="${active ? 'translate-x-5' : 'translate-x-0'} pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ease-in-out"></span>
         </button>
-        <button type="button" class="ar-del text-gray-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 mt-1.5">
+        <button type="button" class="ar-del text-gray-500 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 mt-1.5">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
         </button>`;
 
@@ -10889,7 +11280,7 @@ async function _fetchAndRenderGoals(assistantId) {
     _applyMediaSourcesUi();
 
     if (!goals.length) {
-        list.innerHTML = `<div class="py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-lg border border-dashed border-gray-200">
+        list.innerHTML = `<div class="py-8 text-center text-sm text-gray-500 bg-gray-50 rounded-lg border border-dashed border-gray-200">
             No goals yet. Click <span class="font-bold text-emerald-600">Add New Goal</span> to set your first target.</div>`;
         return;
     }
@@ -10989,7 +11380,7 @@ function _renderGoalProgressCard() {
         // Two different truths: "you have no goals" invites a goal, "we couldn't load them" must not.
         body.innerHTML = _goalsLoadFailed
             ? `<div class="flex items-start gap-4">
-                    <span aria-hidden="true" class="shrink-0 w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-400">
+                    <span aria-hidden="true" class="shrink-0 w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-500">
                         <svg class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M10 6.5v5m0 2.5h.01M10 2.5 2.5 16.5h15L10 2.5Z" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </span>
                     <div class="min-w-0">
@@ -11137,7 +11528,7 @@ function _buildGoalProgressTile(g) {
                     <p class="text-sm font-bold text-gray-900 truncate">${_escapeHtml(g.title || label)}</p>
                     ${g.isPrimary ? '<span class="text-[10px] font-bold uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded">Primary</span>' : ''}
                 </div>
-                <p class="text-[11px] text-gray-400 mt-0.5 truncate">${_escapeHtml(label)}${due ? ' · by ' + due : ''}</p>
+                <p class="text-[11px] text-gray-500 mt-0.5 truncate">${_escapeHtml(label)}${due ? ' · by ' + due : ''}</p>
             </div>
             <span class="inline-flex items-center gap-1.5 text-[11px] font-bold shrink-0 ${meta.text}">
                 <span class="w-2 h-2 rounded-full ${meta.dot}"></span>${meta.label}
@@ -11147,7 +11538,7 @@ function _buildGoalProgressTile(g) {
             <div class="h-full ${meta.dot} transition-all" style="width:${pct}%"></div>
         </div>
         <div class="flex items-center justify-between gap-3 mt-1.5">
-            <p class="text-xs font-semibold text-gray-600 truncate">${pending ? `<span class="font-medium text-gray-400">${pending}</span>` : _escapeHtml(_fmtGoalPair(latest, target, unit))}</p>
+            <p class="text-xs font-semibold text-gray-600 truncate">${pending ? `<span class="font-medium text-gray-500">${pending}</span>` : _escapeHtml(_fmtGoalPair(latest, target, unit))}</p>
             <p class="text-xs font-bold text-gray-500 shrink-0">${pending ? _escapeHtml(`Target ${_fmtGoalValue(target, unit)}`) : pct + '%'}</p>
         </div>
     </button>`;
@@ -11298,7 +11689,7 @@ function _buildGoalCard(g) {
                     ${g.isPrimary ? '<span class="text-[10px] font-bold uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded">Primary</span>' : ''}
                 </div>
                 <p class="text-xs text-gray-500 mt-0.5">${g.title ? _escapeHtml(label) + ' — t' : 'T'}arget: <span class="font-semibold text-gray-700">${_escapeHtml(fmt(target))}</span> by ${due}</p>
-                ${g.rationale ? `<p class="text-xs text-gray-400 mt-1.5 italic border-l-2 border-emerald-100 pl-2">${_escapeHtml(g.rationale)}</p>` : ''}
+                ${g.rationale ? `<p class="text-xs text-gray-500 mt-1.5 italic border-l-2 border-emerald-100 pl-2">${_escapeHtml(g.rationale)}</p>` : ''}
             </div>
             <div class="flex items-center gap-3 shrink-0">
                 <span class="inline-flex items-center gap-1.5 text-xs font-bold ${meta.text}">
@@ -11313,7 +11704,7 @@ function _buildGoalCard(g) {
             </div>
         </div>
         <div class="mt-3">
-            <div class="flex items-center justify-between text-[11px] text-gray-400 mb-1">
+            <div class="flex items-center justify-between text-[11px] text-gray-500 mb-1">
                 <span>${latest != null ? _escapeHtml(fmt(latest)) : (g.isManual ? 'No figure entered yet' : 'Awaiting first data sync')}</span>
                 <span>${latest != null ? pct + '%' : ''}</span>
             </div>
@@ -11350,7 +11741,7 @@ function _buildManualEntryRow(g) {
         : (g.updateCadenceDays ? `You'll update this every ${g.updateCadenceDays} days` : '');
 
     return `<div class="mt-3 pt-3 border-t border-dashed border-gray-200">
-        <p class="text-[11px] text-gray-400 mb-2">${history}${next ? ' · ' + next : ''}</p>
+        <p class="text-[11px] text-gray-500 mb-2">${history}${next ? ' · ' + next : ''}</p>
         <div class="flex items-center gap-2">
             <input type="number" min="0" step="any" id="manual-value-${g.id}"
                 placeholder="${/^[£$€]$/.test(unit) ? `Current amount in ${_escapeHtml(unit)}` : `Current ${_escapeHtml(unit || 'value')}`}"
@@ -11687,7 +12078,7 @@ window._renderReviewChart = async function (goalId) {
     const banner = document.getElementById('review-status-banner');
     const footer = document.getElementById('review-footer');
     if (!chart) return;
-    chart.innerHTML = '<span class="text-sm text-gray-400">Loading chart…</span>';
+    chart.innerHTML = '<span class="text-sm text-gray-500">Loading chart…</span>';
     if (banner) banner.innerHTML = '';
     if (footer) footer.innerHTML = '';
 
@@ -11744,7 +12135,7 @@ window._editBriefFromReview = function () {
 // Dependency-free line chart: actual (solid emerald) vs required trajectory (dashed grey).
 function _buildTelemetrySvg(actual, trajectory) {
     const all = [...actual, ...trajectory];
-    if (!all.length) return '<span class="text-sm text-gray-400">No data yet — the first sync will populate this chart.</span>';
+    if (!all.length) return '<span class="text-sm text-gray-500">No data yet — the first sync will populate this chart.</span>';
 
     const W = 560, H = 220, PAD = { l: 52, r: 16, t: 14, b: 28 };
     const xs = all.map(p => new Date(p.date).getTime());
@@ -11898,18 +12289,18 @@ function _applyMediaSourcesUi() {
         const arrows = on ? `
             <div class="flex flex-col">
               <button type="button" aria-label="Move up" onclick="window._reorderMediaSource('${src}',-1)"
-                class="px-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 disabled:hover:text-gray-400 cursor-pointer leading-none" ${idx === 0 ? 'disabled' : ''}>&#9650;</button>
+                class="px-1 text-gray-500 hover:text-gray-700 disabled:opacity-30 disabled:hover:text-gray-400 cursor-pointer leading-none" ${idx === 0 ? 'disabled' : ''}>&#9650;</button>
               <button type="button" aria-label="Move down" onclick="window._reorderMediaSource('${src}',1)"
-                class="px-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 disabled:hover:text-gray-400 cursor-pointer leading-none" ${idx === enabled.length - 1 ? 'disabled' : ''}>&#9660;</button>
+                class="px-1 text-gray-500 hover:text-gray-700 disabled:opacity-30 disabled:hover:text-gray-400 cursor-pointer leading-none" ${idx === enabled.length - 1 ? 'disabled' : ''}>&#9660;</button>
             </div>` : '<div class="w-[18px]"></div>';
-        const badge = on ? `<span class="text-xs font-bold text-gray-400 w-5 text-center">${idx + 1}</span>` : '<span class="w-5"></span>';
+        const badge = on ? `<span class="text-xs font-bold text-gray-500 w-5 text-center">${idx + 1}</span>` : '<span class="w-5"></span>';
         return `
         <div class="flex items-center gap-3 border ${on ? 'border-gray-200 bg-white' : 'border-dashed border-gray-200 bg-gray-50'} rounded-xl px-4 py-3">
           ${badge}
           ${arrows}
           <div class="flex-1 min-w-0">
             <p class="text-sm font-bold ${on ? 'text-gray-900' : 'text-gray-500'} inline-flex items-center" data-explain="media-source-${src}">${meta.label}</p>
-            <p class="text-xs text-gray-400">${meta.desc}</p>
+            <p class="text-xs text-gray-500">${meta.desc}</p>
           </div>
           <button type="button" role="switch" aria-checked="${on}" aria-label="${on ? 'Disable' : 'Enable'} ${meta.label}"
             onclick="window._toggleMediaSource('${src}')"
@@ -11968,7 +12359,7 @@ window._getAiRecommendations = async function (goalId) {
         return _openUpgrade('AI Recommendations are available on The Busywork Buster plan and above.');
     }
     const box = document.getElementById('review-recommendations');
-    if (box) { box.classList.remove('hidden'); box.innerHTML = '<p class="text-sm text-gray-400 mt-3">Analysing your goal…</p>'; }
+    if (box) { box.classList.remove('hidden'); box.innerHTML = '<p class="text-sm text-gray-500 mt-3">Analysing your goal…</p>'; }
     try {
         const res = await fetch(GOAL_AI_API, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -11990,7 +12381,7 @@ window._getAiRecommendations = async function (goalId) {
                 <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">${_escapeHtml(assistantName)}'s Recommendations</p>
                 ${funnelTag}
             </div>
-            <p class="text-xs text-gray-400">Select the recommendations you'd like to progress, then click <strong>Progress Selected</strong>.</p>
+            <p class="text-xs text-gray-500">Select the recommendations you'd like to progress, then click <strong>Progress Selected</strong>.</p>
             <div class="space-y-2" id="recs-list">
                 ${data.recommendations.map((r, i) => `<label class="flex items-start gap-3 text-sm text-gray-700 bg-emerald-50/60 border border-emerald-100 rounded-lg px-3 py-2.5 cursor-pointer hover:bg-emerald-50 transition has-[:checked]:border-emerald-400 has-[:checked]:bg-emerald-50">
                     <input type="checkbox" data-rec-idx="${i}" class="rec-checkbox mt-0.5 accent-emerald-600 shrink-0 w-4 h-4 cursor-pointer">
@@ -12156,7 +12547,7 @@ window._openStrategyFix = async function (goalId) {
     const footer = document.getElementById('strategy-fix-footer');
     if (!modal || !body) return;
     footer?.classList.add('hidden');
-    body.innerHTML = '<div class="flex items-center justify-center py-10 text-sm text-gray-400">Analysing your strategy…</div>';
+    body.innerHTML = '<div class="flex items-center justify-center py-10 text-sm text-gray-500">Analysing your strategy…</div>';
     modal.classList.remove('hidden');
 
     try {
@@ -12211,7 +12602,7 @@ function _renderStrategyFix(data) {
             <div class="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-gray-200">
                 <div class="p-3 bg-red-50/40">
                     <p class="text-[10px] font-bold uppercase tracking-wide text-red-400 mb-1">− Current</p>
-                    <p class="text-sm text-gray-600 whitespace-pre-wrap">${c.current ? _escapeHtml(c.current) : '<span class="italic text-gray-400">(empty)</span>'}</p>
+                    <p class="text-sm text-gray-600 whitespace-pre-wrap">${c.current ? _escapeHtml(c.current) : '<span class="italic text-gray-500">(empty)</span>'}</p>
                 </div>
                 <div class="p-3 bg-emerald-50/50">
                     <p class="text-[10px] font-bold uppercase tracking-wide text-emerald-600 mb-1">+ AI-Suggested</p>

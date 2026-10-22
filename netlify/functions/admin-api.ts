@@ -37,7 +37,7 @@ import {
     agentAnomalies, agentAnomalyThresholds, taskRuns,
     legalHolds, jwtBlocklist, stripeDisputes, storageUsage, helpArticles,
     rewardAudits, userOrganisations,
-    leadReplies, contactTasks, issueReports, notifications,
+    leadReplies, contactTasks, issueReports, notifications, loginEvents,
 } from '../../db/schema';
 import { createNotification, ADMIN_MESSAGE_TYPE } from '../../src/utils/notify';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
@@ -1427,15 +1427,82 @@ export default withLambda(async (event) => {
             const filterAction = qs.action || null;
             const filterTarget = qs.targetType || null;
             const fromDate     = qs.from ? new Date(qs.from) : null;
-            const toDate       = qs.to   ? new Date(qs.to)   : null;
+            // 'to' is a calendar day from <input type="date">, so it runs to the END of that day.
+            // (It used to mean midnight at its start, so "to: today" hid everything from today.)
+            const toDate       = qs.to   ? new Date(new Date(qs.to).getTime() + 24 * 60 * 60 * 1000) : null;
             const filterReason = qs.reason ? qs.reason.trim() : null;
+
+            // ── 'login' is not an admin action: it reads login_events (src/utils/login-events.ts)
+            // and returns rows in the SAME shape, so the viewer renders them unchanged. The person
+            // who signed in goes in the admin columns, the method in Reason. Only shown when the
+            // filter asks for it: every user sign-in under "All Actions" would bury the admin actions.
+            if (filterAction === 'login') {
+                const LOGIN_METHOD_LABEL: Record<string, string> = {
+                    magic_link: 'Magic link', review_login: 'Platform reviewer password', invite: 'Accepted an invite',
+                };
+                if (filterTarget && filterTarget !== 'workspace') {
+                    return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ logs: [], total: 0, page, pageSize: 50 }) };
+                }
+                const loginConds: any[] = [];
+                if (filterAdmin) loginConds.push(eq(loginEvents.userId, filterAdmin));
+                if (fromDate)    loginConds.push(gte(loginEvents.createdAt, fromDate));
+                if (toDate)      loginConds.push(sql`${loginEvents.createdAt} < ${toDate.toISOString()}`);
+                if (filterReason) loginConds.push(ilike(loginEvents.method, `%${filterReason}%`));
+                const loginWhere = loginConds.length ? and(...loginConds) : undefined;
+
+                const loginRows = await db
+                    .select({
+                        id:          loginEvents.id,
+                        method:      loginEvents.method,
+                        ip:          loginEvents.ip,
+                        userAgent:   loginEvents.userAgent,
+                        orgId:       loginEvents.organisationId,
+                        orgName:     organisations.name,
+                        createdAt:   loginEvents.createdAt,
+                        userId:      loginEvents.userId,
+                        email:       users.email,
+                        firstName:   users.firstName,
+                        lastName:    users.lastName,
+                    })
+                    .from(loginEvents)
+                    .leftJoin(users, eq(users.id, loginEvents.userId))
+                    .leftJoin(organisations, eq(organisations.id, loginEvents.organisationId))
+                    .where(loginWhere)
+                    .orderBy(desc(loginEvents.createdAt))
+                    .limit(50)
+                    .offset(page * 50);
+                const [{ c: loginTotal }] = await db.select({ c: count() }).from(loginEvents).where(loginWhere);
+
+                const logs = loginRows.map((r: any) => ({
+                    id:             `login-${r.id}`,
+                    action:         'login',
+                    targetType:     r.orgId ? 'workspace' : null,
+                    targetId:       r.orgId,
+                    targetName:     r.orgName || null,
+                    previousState:  null,
+                    newState:       null,
+                    reason:         LOGIN_METHOD_LABEL[r.method] || r.method,
+                    metadata:       { userAgent: r.userAgent },
+                    ipAddress:      r.ip,
+                    createdAt:      r.createdAt,
+                    adminId:        r.userId,
+                    adminEmail:     r.email,
+                    adminFirstName: r.firstName,
+                    adminLastName:  r.lastName,
+                }));
+                return {
+                    statusCode: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ logs, total: loginTotal, page, pageSize: 50 }),
+                };
+            }
 
             const conditions: any[] = [];
             if (filterAdmin)  conditions.push(eq(adminAuditLog.adminId, filterAdmin));
             if (filterAction) conditions.push(eq(adminAuditLog.action, filterAction));
             if (filterTarget) conditions.push(eq(adminAuditLog.targetType, filterTarget));
             if (fromDate)     conditions.push(gte(adminAuditLog.createdAt, fromDate));
-            if (toDate)       conditions.push(lte(adminAuditLog.createdAt, toDate));
+            if (toDate)       conditions.push(sql`${adminAuditLog.createdAt} < ${toDate.toISOString()}`);
             if (filterReason) conditions.push(ilike(adminAuditLog.reason, `%${filterReason}%`));
 
             const where = conditions.length ? and(...conditions) : undefined;
@@ -2592,45 +2659,12 @@ export default withLambda(async (event) => {
         }
 
         // ── US-HELP-1.3.1: Help Articles (AC14–AC17) ─────────────────────────
+        // ⚠️ RETIRED 2026-10-22 (owner): the help seed must not run again — it re-applied
+        // db/seed-help-articles.sql (now db/_retired-seed-help-articles.sql), whose older bodies
+        // would overwrite later rewrites. Refused outright rather than left reachable.
         if (resource === 'help-articles-seed') {
-            const SEED_ARTICLES = [
-                { category: 'Getting Started', sortOrder: 10, title: 'What is Be More Swan?' },
-                { category: 'Getting Started', sortOrder: 20, title: 'Your Dashboard Overview' },
-                { category: 'Getting Started', sortOrder: 30, title: 'Setting Up Your First Assistant' },
-                { category: 'Your Assistants', sortOrder: 10, title: 'How Lead Scoring Works (And How to Trust It)' },
-                { category: 'Your Assistants', sortOrder: 20, title: 'Setting Up Lead Scoring: Simple Mode vs. Advanced Mode' },
-                { category: 'Lead Management', sortOrder: 10, title: "Why Is My Lead Stuck in 'Pending Merge'?" },
-                { category: 'Lead Management', sortOrder: 20, title: 'Understanding Email Verification' },
-                { category: 'Lead Management', sortOrder: 30, title: 'How Automated Data Enrichment Works' },
-                { category: 'Lead Management', sortOrder: 40, title: 'Exporting Leads: CRM Sync vs. CSV Download' },
-                { category: 'Integrations & Connections', sortOrder: 10, title: 'Connecting Apps & Integrations' },
-                { category: 'Billing & Your Plan', sortOrder: 10, title: 'Billing & Your Plan' },
-                { category: 'Troubleshooting & Quick Fixes', sortOrder: 10, title: 'Common Issues: Symptoms, Causes & Fixes' },
-            ];
-            const existing = await db.select({ id: helpArticles.id, title: helpArticles.title }).from(helpArticles);
-            const existingTitles = new Set(existing.map(r => r.title));
-            const preview = SEED_ARTICLES.map(a => ({
-                title: a.title,
-                category: a.category,
-                action: existingTitles.has(a.title) ? 'update' : 'insert',
-            }));
-            const archiveCandidate = existing.find(r => r.title === 'Troubleshooting' && !SEED_ARTICLES.find(s => s.title === r.title));
-            if (archiveCandidate) preview.push({ title: 'Troubleshooting', category: '—', action: 'archive' });
-
-            if (event.httpMethod === 'GET') {
-                return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ preview }) };
-            }
-            if (event.httpMethod === 'POST') {
-                // Execute the seed SQL file via DB raw queries — articles are upserted by title
-                const fs = await import('fs');
-                const path = await import('path');
-                const sqlPath = path.join(process.cwd(), 'db', 'seed-help-articles.sql');
-                const sql = fs.readFileSync(sqlPath, 'utf8');
-                await db.execute(sql as any);
-                return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: true, applied: SEED_ARTICLES.length }) };
-            }
+            return { statusCode: 410, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'The help article seed is retired. Change help copy with a dated db/help-articles-*.sql file.' }) };
         }
-
         if (resource === 'help-articles') {
             if (event.httpMethod === 'GET') {
                 const rows = await db

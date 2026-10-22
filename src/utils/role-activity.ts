@@ -103,8 +103,8 @@ export async function roleActivityItems(db: Db, args: {
             .from(newsletterSequences).where(and(eq(newsletterSequences.organisationId, orgId), eq(newsletterSequences.assistantId, assistantId), ...since(newsletterSequences.updatedAt)))
             .orderBy(desc(newsletterSequences.updatedAt)).limit(limit);
         for (const q of seqs) {
-            if (!cutoff || q.createdAt >= cutoff) items.push({ id: `seq-${q.id}`, type: 'newsletter_sequence', icon: 'edit', description: `Wrote the email campaign "${clip(q.name)}".`, createdAt: q.createdAt, status: 'info' });
-            if (q.enabledAt && (!cutoff || q.enabledAt >= cutoff)) items.push({ id: `seq-on-${q.id}`, type: 'newsletter_sequence_on', icon: 'rocket', description: `The email campaign "${clip(q.name)}" was switched on.`, createdAt: q.enabledAt, status: 'success' });
+            if (!cutoff || q.createdAt >= cutoff) items.push({ id: `seq-${q.id}`, type: 'newsletter_sequence', icon: 'edit', description: `Wrote the email flow "${clip(q.name)}".`, createdAt: q.createdAt, status: 'info' });
+            if (q.enabledAt && (!cutoff || q.enabledAt >= cutoff)) items.push({ id: `seq-on-${q.id}`, type: 'newsletter_sequence_on', icon: 'rocket', description: `The email flow "${clip(q.name)}" was switched on.`, createdAt: q.enabledAt, status: 'success' });
         }
     }
 

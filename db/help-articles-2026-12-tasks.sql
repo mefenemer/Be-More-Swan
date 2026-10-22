@@ -57,7 +57,7 @@ The pricing page lists everything else each plan includes — app connections, A
 
 ## One task allowance
 
-Since **17 October 2026** there is just one allowance. A task is **one finished piece of work** — a social post, a blog article, a lead search, an email or email campaign, an outreach email, or a website audit or draft. A post that goes out to several platforms counts once. Work is counted only once it's delivered, so a failure or a retry never costs you a task.
+Since **17 October 2026** there is just one allowance. A task is **one finished piece of work** — a social post, a blog article, a lead search, an email or email flow, an outreach email, or a website audit or draft. A post that goes out to several platforms counts once. Work is counted only once it's delivered, so a failure or a retry never costs you a task.
 
 AI media comes out of the same allowance. An AI image is 1 task, an AI video or music track is 20, and a post to X with a link is 10. See [What Counts as a Task](#what-counts-as-a-task) for the full list.
 
@@ -105,7 +105,7 @@ Your plan has **one monthly task allowance**. A task is one finished piece of wo
 | A social post — once, however many platforms it goes to | 1 |
 | A blog article | 1 |
 | A lead search — once, however many leads it finds | 1 |
-| An email, or an email campaign | 1 |
+| An email, or an email flow | 1 |
 | An outreach email to a lead | 1 |
 | A website audit, draft or rewrite of a page's words | 1 |
 | An AI image | 1 |
@@ -120,7 +120,7 @@ Your plan has **one monthly task allowance**. A task is one finished piece of wo
 |-----------|---------------|
 | **Social Media Assistant** | Each drafted post, plus any AI image, video or music made for it, and X posts that carry a link |
 | **Blog Writing Assistant** | Each drafted article, plus any AI images for it |
-| **Email Marketing Assistant** | Each drafted email, and each email campaign written for a Marketing Campaign Orchestrator order |
+| **Email Marketing Assistant** | Each drafted email, and each email flow written for a Marketing Campaign Orchestrator order |
 | **Lead Generation Assistant** | Each finished lead search, and each outreach email it drafts |
 | **Marketing Campaign Orchestrator** | Nothing itself — the posts, articles, searches and emails it asks your other assistants for are counted where they're made |
 

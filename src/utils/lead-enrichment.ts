@@ -8,7 +8,7 @@
 // any job. The obvious move — copy the persistence out of the worker — would have created a
 // second writer of `enrichAttemptedAt`, `contactEmail`, `emailKind`, `emailSource` and
 // `socialHandles`, across TWO tables that have to agree (src/config/lead-contact-state.ts holds
-// the Searches aggregate and the Enrichment table in step by reading both).
+// the Searches aggregate and the Found leads table in step by reading both).
 //
 // The notify.ts rule applies: one write path, or the vocabularies stop being enforceable. So the
 // function moved here whole and the worker imports it.
@@ -47,7 +47,7 @@ export interface EnrichmentFound {
  * Persist one enrichment outcome. Always stamps `enrichAttemptedAt` (so a miss isn't
  * retried forever) and mirrors that stamp — plus, on a hit, the address — onto the linked
  * assistant_record, so lead-generation.ts `send_outreach` resolves `data.contactEmail` with no
- * change there and the Enrichment tab can say which leads have actually been looked at.
+ * change there and the Found leads tab can say which leads have actually been looked at.
  *
  * `socialHandles` rides the SAME merge as the address, deliberately. A handle is worth most on the
  * leads where the email search MISSED — "no published address, here is their LinkedIn" — so it must
@@ -137,7 +137,7 @@ export async function recordEnrichment(
     // outreach send both see the address.
     //
     // ⚠️ The ATTEMPT stamp crosses over on a MISS too — `stamp` already carries
-    // `enrichAttemptedAt` either way. Without it the Enrichment tab could not tell "we looked and
+    // `enrichAttemptedAt` either way. Without it the Found leads tab could not tell "we looked and
     // this company publishes no address" from "nobody has looked yet", and those are different
     // facts with different remedies: the first sends the user off to find an address by hand, the
     // second says the lead scored cold and it is the TARGETING that needs fixing. The Contact
@@ -461,7 +461,7 @@ export async function deepEnrichLead(
                     previousRating: current.rating,
                 },
             })}::jsonb`,
-            // The rating column is the Enrichment table's own "Rating" cell and the Searches
+            // The rating column is the Found leads table's own "Rating" cell and the Searches
             // aggregate reads it too — leaving it stale would show a cold chip over a card that now
             // says 78.
             status: next.rating,

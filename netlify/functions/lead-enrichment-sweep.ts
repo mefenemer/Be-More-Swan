@@ -6,7 +6,7 @@
 // Deep enrichment on demand (lead-generation.ts `enrich_lead`) requires someone to press a button
 // on a lead they are already looking at — which means it only ever reaches the leads a user already
 // suspects are worth more. The leads that most need re-reading are the ones nobody is looking at:
-// scored cold in June, sitting in the Enrichment tab, and now hiring, funded, or opening a second
+// scored cold in June, sitting in the Found leads tab, and now hiring, funded, or opening a second
 // site. Nothing would ever revisit them.
 //
 // ── ⚠️ WHAT THIS IS NOT, since 2026-08-25 (§6) ───────────────────────────────

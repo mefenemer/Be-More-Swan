@@ -26,7 +26,7 @@
     issues: [], segments: [], customFields: [], sendTimezone: '', current: null, dirty: false,
     // Config the server owns — purposes and templates are not duplicated in the browser.
     purposes: [], templates: [],
-    // The email campaign builder's starting shapes (src/config/email-campaign-cadences.ts), and the
+    // The email flow builder's starting shapes (src/config/email-campaign-cadences.ts), and the
     // campaign being built: its plan, then the emails the assistant wrote for it.
     campaignCadences: [], campaign: null,
     // The organisation's colours, resolved server-side from its brand kit (src/utils/brand-theme.ts)
@@ -280,7 +280,7 @@
             </div>
             <p class="text-xs text-gray-500 mt-0.5">${esc(String(x.steps || 0))} email${x.steps === 1 ? '' : 's'} · ${x.triggerEvent === 'subscribed' ? 'everyone who subscribes' : 'people who fill in a linked form'}</p>
           </button></li>`).join('')
-        : '<li class="px-4 py-4 text-xs text-gray-500">None yet. Use <span class="font-bold">New email campaign</span> to create one.</li>';
+        : '<li class="px-4 py-4 text-xs text-gray-500">None yet. Use <span class="font-bold">New email flow</span> to create one.</li>';
     } catch { host.innerHTML = ''; }
   }
 
@@ -2154,7 +2154,7 @@
   }
 
   // ── Campaign settings + performance (2026-10-06) ─────────────────────────────────────────────
-  // Editing a campaign used to show only its emails: nothing said WHO it reaches (which sign-up
+  // Editing a flow used to show only its emails: nothing said WHO it reaches (which sign-up
   // forms start it, and the segment each form adds people to), when it was switched on, or how it
   // was performing. Settings are read-only here because linking is done on the form itself.
   function renderSeqSettings(seq) {
@@ -2168,10 +2168,10 @@
     const who = seq.triggerEvent === 'form'
       ? (forms.length
         ? `<p class="text-sm text-gray-700">Starts when someone fills in ${forms.length === 1 ? 'this sign-up form' : 'any of these sign-up forms'}:</p><ul class="mt-1 divide-y divide-gray-100">${forms.map(formLine).join('')}</ul>`
-        : `<p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">No sign-up form starts this campaign yet, so nobody will receive it. Link one in <button type="button" data-seq-open-forms class="link font-semibold">Audience ▸ Sign-up forms</button> (the form's "Email campaign" setting).</p>`)
-      : `<p class="text-sm text-gray-700">Starts when someone joins your list through a form that is not linked to a campaign of its own${forms.length ? ':' : '.'}</p>${forms.length ? `<ul class="mt-1 divide-y divide-gray-100">${forms.map(formLine).join('')}</ul>` : ''}`;
+        : `<p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">No sign-up form starts this flow yet, so nobody will receive it. Link one in <button type="button" data-seq-open-forms class="link font-semibold">Audience ▸ Sign-up forms</button> (the form's "Email flow" setting).</p>`)
+      : `<p class="text-sm text-gray-700">Starts when someone joins your list through a form that is not linked to a flow of its own${forms.length ? ':' : '.'}</p>${forms.length ? `<ul class="mt-1 divide-y divide-gray-100">${forms.map(formLine).join('')}</ul>` : ''}`;
     return `<div class="rounded-xl border border-gray-200 p-4 mb-4">
-      <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Campaign settings</p>
+      <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Flow settings</p>
       <dl class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mb-3">
         <div><dt class="text-[11px] text-gray-500">Who receives it</dt><dd>
           <select id="nl-seq-trigger" class="mt-0.5 w-full px-2 py-1.5 rounded-lg border border-gray-300 text-sm font-semibold text-gray-900 bg-white cursor-pointer">
@@ -2188,7 +2188,7 @@
 
   function renderSeqStats(stats) {
     if (!stats) {
-      return `<div class="rounded-xl border border-gray-200 p-4 mb-4 text-sm text-gray-500">Performance figures start with the next email this campaign sends.</div>`;
+      return `<div class="rounded-xl border border-gray-200 p-4 mb-4 text-sm text-gray-500">Performance figures start with the next email this flow sends.</div>`;
     }
     const t = stats.totals;
     const pct = (v) => (v == null ? '—' : `${v}%`);
@@ -2240,10 +2240,10 @@
     if (!seq) {
       body.innerHTML = `
         <div class="text-center py-8">
-          <p class="text-sm text-gray-600 mb-1">You do not have a campaign for everyone who subscribes yet.</p>
+          <p class="text-sm text-gray-600 mb-1">You do not have a flow for everyone who subscribes yet.</p>
           <p class="text-xs text-gray-400 mb-4">Right now a new subscriber hears nothing until your next email.</p>
           <button type="button" id="nl-seq-create"
-            class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Create a welcome campaign</button>
+            class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Create a welcome flow</button>
         </div>`;
       $('nl-seq-create')?.addEventListener('click', async () => {
         try {
@@ -2267,7 +2267,7 @@
     const isFormSeq = seq.triggerEvent === 'form';
     body.innerHTML = `
       <div class="mb-4">
-        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1" for="nl-seq-name">Campaign name</label>
+        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1" for="nl-seq-name">Flow name</label>
         <div class="flex items-center gap-2">
           <input type="text" id="nl-seq-name" maxlength="80" value="${esc(seq.name || '')}"
             class="flex-1 px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm font-bold">
@@ -2276,8 +2276,8 @@
         <p class="text-[11px] text-gray-400 mt-1">Only you see this.${isFormSeq ? ' Who receives these emails is set by the sign-up form you link it to.' : ''}</p>
       </div>
       ${isFormSeq ? '' : `<div class="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 mb-4 text-sm text-sky-900">
-        <p class="font-bold">This campaign goes to everyone who subscribes.</p>
-        <p>It goes to <strong>everyone who joins your list</strong>, from any sign-up form that is not linked to a campaign of its own. For one group only — such as beta testers — create a separate campaign with <strong>New email campaign → People who fill in a form</strong>, and link it to that group’s form. Only one campaign for everyone can be on at a time — switching another on offers to swap them.</p>
+        <p class="font-bold">This flow goes to everyone who subscribes.</p>
+        <p>It goes to <strong>everyone who joins your list</strong>, from any sign-up form that is not linked to a flow of its own. For one group only — such as beta testers — create a separate flow with <strong>New email flow → People who fill in a form</strong>, and link it to that group’s form. Only one flow for everyone can be on at a time — switching another on offers to swap them.</p>
       </div>`}
       <div class="flex items-center justify-between rounded-xl border border-gray-200 p-4 mb-4">
         <div>
@@ -2369,7 +2369,7 @@
       </div>
       <div class="flex justify-end mt-4">
         <button type="button" data-seq-delete-all
-          class="btn-destructive px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Delete this campaign</button>
+          class="btn-destructive px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Delete this flow</button>
       </div>`;
 
     // Every label that names the assistant, including the two just rendered into this modal.
@@ -2524,7 +2524,7 @@
       const ok = await window.confirmModal(
         turningOn
           ? (seq.triggerEvent === 'form'
-            ? 'From now on, everyone who fills in a sign-up form linked to this campaign (and confirms) will receive these emails automatically, without anyone reading them again first.'
+            ? 'From now on, everyone who fills in a sign-up form linked to this flow (and confirms) will receive these emails automatically, without anyone reading them again first.'
             : 'From now on, everyone who confirms their subscription will receive these emails automatically, without anyone reading them again first.')
           : `Switch off "${seq.name}"? ${active.toLocaleString()} ${active === 1 ? 'person is' : 'people are'} part way through and will not receive the rest.`,
         {
@@ -2543,8 +2543,8 @@
         // Only one "everyone who subscribes" campaign can be on — offer the swap (2026-10-06).
         if (r.status === 409 && res.code === 'ANOTHER_EVERYONE_ON') {
           const swap = await window.confirmModal(
-            `"${res.otherName}" is on and already goes to everyone who subscribes. Only one such campaign can be on at a time. Switch "${res.otherName}" off and this one on? People part way through "${res.otherName}" will not receive the rest of it.`,
-            { title: 'Swap campaigns?', confirmLabel: 'Swap', cancelLabel: 'Keep as it is' });
+            `"${res.otherName}" is on and already goes to everyone who subscribes. Only one such flow can be on at a time. Switch "${res.otherName}" off and this one on? People part way through "${res.otherName}" will not receive the rest of it.`,
+            { title: 'Swap flows?', confirmLabel: 'Swap', cancelLabel: 'Keep as it is' });
           if (!swap) return;
           r = await send(true);
           res = await r.json().catch(() => ({}));
@@ -2555,12 +2555,12 @@
       } catch (err) { window.showToast(err.message); }
     });
 
-    // Who receives it — the welcome sequence is just a campaign with the "everyone" audience.
+    // Who receives it — the welcome sequence is just a flow with the "everyone" audience.
     $('nl-seq-trigger')?.addEventListener('change', async (e) => {
       const to = e.target.value;
       try {
         await seqApi({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'setTrigger', trigger: to }) });
-        window.showToast(to === 'subscribed' ? 'This campaign now goes to everyone who subscribes.' : 'This campaign now goes to people who fill in a linked sign-up form.');
+        window.showToast(to === 'subscribed' ? 'This flow now goes to everyone who subscribes.' : 'This flow now goes to people who fill in a linked sign-up form.');
         await openWelcomeModal();
       } catch (err) { window.showToast(err.message); e.target.value = seq.triggerEvent; }
     });
@@ -2796,7 +2796,7 @@
   // ── Wiring ─────────────────────────────────────────────────────────────────
 
 
-  // ── New email campaign ─────────────────────────────────────────────────────
+  // ── New email flow ─────────────────────────────────────────────────────
   //
   // The chat card's job, for people who do not use the chat: plan a series, have the assistant
   // write every email, read them, save. It saves through the SAME two endpoints the card does —
@@ -2811,7 +2811,7 @@
 
   function openCampaignModal() {
     const first = state.campaignCadences[0];
-    if (!first) { window.showToast('Could not load the campaign shapes — refresh the page and try again.'); return; }
+    if (!first) { window.showToast('Could not load the flow shapes — refresh the page and try again.'); return; }
     state.campaign = { stage: 'plan', type: '', who: 'subscribed', steps: [], draft: null };
     $('nl-cmp-facts').value = '';
     $('nl-cmp-avoid').value = '';
@@ -2844,7 +2844,7 @@
       .map((c) => tile(cmp.type === c.type, c.label, c.description, `data-cmp-kind="${esc(c.type)}"`)).join('');
     $('nl-cmp-who').innerHTML =
       tile(cmp.who === 'subscribed', 'Everyone who subscribes',
-        'Starts by itself the moment someone joins your list. Saved as a new campaign, switched off until you turn it on.', 'data-cmp-who="subscribed"')
+        'Starts by itself the moment someone joins your list. Saved as a new flow, switched off until you turn it on.', 'data-cmp-who="subscribed"')
       + tile(cmp.who === 'form', 'People who fill in a form',
         'Starts by itself when someone fills in a sign-up form you link it to — a guide download, a waitlist, a purchase registration. Switched off until you turn it on.', 'data-cmp-who="form"')
       + tile(cmp.who === 'custom', 'A group I choose',
@@ -2874,7 +2874,7 @@
   function showCampaignPane(which) {
     if (which === 'plan') { show($('nl-cmp-plan'), 'block'); hide($('nl-cmp-review')); }
     else { hide($('nl-cmp-plan')); show($('nl-cmp-review'), 'block'); }
-    $('nl-cmp-title').textContent = which === 'plan' ? 'New email campaign' : 'Read your emails';
+    $('nl-cmp-title').textContent = which === 'plan' ? 'New email flow' : 'Read your emails';
   }
 
   async function writeCampaign() {
@@ -2922,9 +2922,9 @@
     const isForm = d.trigger && d.trigger.event === 'form';
     const n = d.newsletters.length;
     $('nl-cmp-review-note').textContent = isForm
-      ? `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — it becomes an email campaign under Email Campaigns, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on. Nobody is emailed by saving.`
+      ? `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — it becomes an email flow under Email Flows, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on. Nobody is emailed by saving.`
       : automatic
-      ? `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — it becomes a campaign for everyone who subscribes, switched off until you turn it on under Email Campaigns. Nobody is emailed by saving.`
+      ? `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — it becomes a flow for everyone who subscribes, switched off until you turn it on under Email Flows. Nobody is emailed by saving.`
       : `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — each email becomes a draft you send to the right people on its day. Nothing is sent by saving.`;
     const warn = $('nl-cmp-warnings');
     if (d.warnings && d.warnings.length) {
@@ -2945,7 +2945,7 @@
           class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm font-mono">${esc(e.bodyMarkdown)}</textarea>
         ${e.callToAction ? `<p class="text-xs text-gray-600 mt-1">Asks them to: <span class="font-bold">${esc(e.callToAction.label)}</span>${e.callToAction.url ? '' : ' <span class="text-amber-700 font-bold">· needs a link — add it to the copy</span>'}</p>` : ''}
       </div>`).join('');
-    $('nl-cmp-save').textContent = isForm ? 'Save as form email campaign' : automatic ? 'Save as email campaign' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
+    $('nl-cmp-save').textContent = isForm ? 'Save as form email flow' : automatic ? 'Save as email flow' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
   }
 
   async function saveCampaign() {
@@ -2973,9 +2973,9 @@
       state.campaign = null;
       loadAutoList();
       if (d.trigger.event === 'form') {
-        window.showToast(data.deduped ? 'Already saved — it is under Email Campaigns.' : 'Saved as an email campaign, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on under Email Campaigns.');
+        window.showToast(data.deduped ? 'Already saved — it is under Email Flows.' : 'Saved as an email flow, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on under Email Flows.');
       } else if (automatic) {
-        window.showToast(data.deduped ? 'Already saved — it is under Email Campaigns.' : 'Saved as an email campaign for everyone who subscribes, switched off. Turn it on under Email Campaigns when you are ready.');
+        window.showToast(data.deduped ? 'Already saved — it is under Email Flows.' : 'Saved as an email flow for everyone who subscribes, switched off. Turn it on under Email Flows when you are ready.');
       } else {
         window.showToast(data.deduped ? 'Already saved — these are in your list.' : `Saved ${data.created} draft ${data.created === 1 ? 'email' : 'emails'}. Send each one on its day.`);
         await refreshList();
@@ -3036,19 +3036,19 @@
     if (!seq) return;
     const isForm = seq.triggerEvent === 'form';
     if (seq.isEnabled) {
-      window.showToast('Switch this campaign off first — then you can delete it.');
+      window.showToast('Switch this flow off first — then you can delete it.');
       return;
     }
     const ok = await window.confirmModal(
-      `Delete "${seq.name}" and its ${seqState.steps.length} ${seqState.steps.length === 1 ? 'email' : 'emails'}? This cannot be undone.${isForm ? ' Any sign-up form linked to it will send new sign-ups to your "everyone who subscribes" campaign instead.' : ''}`,
-      { title: 'Delete this campaign?', confirmLabel: 'Delete', confirmColor: '#dc2626' });
+      `Delete "${seq.name}" and its ${seqState.steps.length} ${seqState.steps.length === 1 ? 'email' : 'emails'}? This cannot be undone.${isForm ? ' Any sign-up form linked to it will send new sign-ups to your "everyone who subscribes" flow instead.' : ''}`,
+      { title: 'Delete this flow?', confirmLabel: 'Delete', confirmColor: '#dc2626' });
     if (!ok) return;
     if (seqSaver) seqSaver.cancel();
     try {
       await seqApi({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'deleteSequence' }) });
       seqState.selectedId = null;
       hide($('nl-welcome-modal'));
-      window.showToast('Campaign deleted.');
+      window.showToast('Flow deleted.');
       loadAutoList();
     } catch (err) {
       window.showToast(err.message);
@@ -3096,7 +3096,7 @@
       seqState.selectedId = Number(e.target.value) || null;
       openWelcomeModal();
     });
-    // New email campaign — bound once per view mount, delegated, never from a render path.
+    // New email flow — bound once per view mount, delegated, never from a render path.
     $('nl-campaign')?.addEventListener('click', openCampaignModal);
     // Opened IN PLACE — closing it leaves the person in the Studio, where they were.
     $('nl-forms')?.addEventListener('click', () => window.SignupForms?.open());
@@ -3343,7 +3343,7 @@
     const wanted = window._newsletterInitialIssueId;
     window._newsletterInitialIssueId = null;
     await loadIssues(wanted || undefined);
-    // From the assistant page's Campaigns tab: open that campaign, or start a new one. Consumed on
+    // From the assistant page's Campaigns tab: open that flow, or start a new one. Consumed on
     // read, like the issue deep link above. The welcome sequence is addressed by its id too —
     // seqApi() passes ?sequenceId=, which the GET resolves for either kind.
     const wantedSeq = window._newsletterInitialSequenceId;

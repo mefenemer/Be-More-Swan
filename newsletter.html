@@ -35,7 +35,7 @@
   <div id="nl-head" class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
     <div>
       <h1 class="text-3xl font-extrabold text-gray-900">Email Studio</h1>
-      <p class="text-gray-500 mt-1">Draft an email or a whole email campaign, see exactly what lands in the inbox, then approve it for sending.</p>
+      <p class="text-gray-500 mt-1">Draft an email or a whole email flow, see exactly what lands in the inbox, then approve it for sending.</p>
     </div>
     <!-- Grouped so five buttons wrap as a row on narrower screens instead of squeezing each label onto three lines. -->
     <div id="nl-head-actions" class="flex flex-wrap gap-2 justify-end">
@@ -58,7 +58,7 @@
     <button type="button" id="nl-campaign"
       class="btn-secondary flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-colors border cursor-pointer">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h10"/></svg>
-      New email campaign
+      New email flow
     </button>
     <button type="button" id="nl-new"
       class="btn-primary flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-colors cursor-pointer">
@@ -81,12 +81,12 @@
         </ul>
       </div>
 
-      <!-- The series that send BY THEMSELVES — the welcome sequence and every email campaign a sign-up
+      <!-- The series that send BY THEMSELVES — the welcome sequence and every email flow a sign-up
            form starts. They are not one-off emails, so they are not in the list above; without this
-           card an email campaign saved as one of them was invisible from the Studio. -->
+           card an email flow saved as one of them was invisible from the Studio. -->
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mt-4">
         <div class="px-4 py-3 border-b border-gray-100">
-          <p class="text-sm font-bold text-gray-900">Email Campaigns</p>
+          <p class="text-sm font-bold text-gray-900">Email Flows</p>
           <p class="text-[11px] text-gray-500">Series of emails that send by themselves when someone subscribes or fills in a form. Click one to edit its emails or switch it on.</p>
         </div>
         <ul id="nl-auto-list" class="divide-y divide-gray-100"></ul>
@@ -262,12 +262,12 @@
     <div class="absolute inset-0 bg-black/40" data-nl-welcome-close></div>
     <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl p-6 max-h-[92vh] overflow-auto">
       <div class="flex items-start justify-between mb-1">
-        <h2 class="text-lg font-extrabold text-gray-900">Email campaign</h2>
+        <h2 class="text-lg font-extrabold text-gray-900">Email flow</h2>
         <button type="button" data-nl-welcome-close class="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 cursor-pointer">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
-      <p class="text-sm text-gray-500 mb-5">A campaign sends its emails on its own — to everyone who confirms their subscription, or to people who fill in a sign-up form linked to it. Everything else you might want to send — a product update, a notice that something is fixed, a change to your terms — is a one-off: you write it as a new email and pick what kind of email it is.</p>
+      <p class="text-sm text-gray-500 mb-5">A flow sends its emails on its own — to everyone who confirms their subscription, or to people who fill in a sign-up form linked to it. Everything else you might want to send — a product update, a notice that something is fixed, a change to your terms — is a one-off: you write it as a new email and pick what kind of email it is.</p>
       <div id="nl-seq-picker"></div>
       <div id="nl-welcome-body"></div>
     </div>
@@ -302,14 +302,14 @@
     </div>
   </div>
 
-  <!-- New email campaign: a series of emails with one goal. Two panes in one dialog — the PLAN
+  <!-- New email flow: a series of emails with one goal. Two panes in one dialog — the PLAN
        (kind, goal, who is in it, and the day + job of each email) and the REVIEW (every email,
        written by the assistant, editable). Nothing is saved until Save is pressed on the review. -->
   <div id="nl-campaign-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
     <div class="absolute inset-0 bg-black/40" data-nl-campaign-close></div>
     <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl p-6 max-h-[90vh] overflow-auto">
       <div class="flex items-start justify-between mb-1">
-        <h2 class="text-lg font-extrabold text-gray-900" id="nl-cmp-title">New email campaign</h2>
+        <h2 class="text-lg font-extrabold text-gray-900" id="nl-cmp-title">New email flow</h2>
         <button type="button" data-nl-campaign-close class="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 cursor-pointer">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
@@ -354,7 +354,7 @@
 
         <div class="flex items-center justify-between mb-2">
           <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">The emails</p>
-          <p class="text-[11px] text-gray-400">Day 1 is the day someone enters the campaign.</p>
+          <p class="text-[11px] text-gray-400">Day 1 is the day someone enters the flow.</p>
         </div>
         <div id="nl-cmp-steps" class="space-y-2 mb-2"></div>
         <button type="button" id="nl-cmp-add" class="text-xs font-bold text-emerald-700 hover:underline cursor-pointer mb-6">+ Add an email</button>

@@ -47,7 +47,7 @@ type Db = ReturnType<typeof getDb>;
 
 /**
  * Everything a definition has to pass before it is stored, beyond what the normaliser can know on its
- * own: that the segment, the email campaign and the logo belong to THIS organisation, that each
+ * own: that the segment, the email flow and the logo belong to THIS organisation, that each
  * allowed website is a real origin, and that the page address is not someone else's.
  *
  * `strictSlug`: the builder wants a clear "that address is taken" (409) so the person picks another;
@@ -66,7 +66,7 @@ async function prepareDefinition(db: Db, orgId: number, raw: unknown, opts: { fo
     if (def.campaign.sequenceId) {
         const [seq] = await db.select({ id: newsletterSequences.id }).from(newsletterSequences)
             .where(and(eq(newsletterSequences.id, def.campaign.sequenceId), eq(newsletterSequences.organisationId, orgId))).limit(1);
-        if (!seq) { def.campaign = { sequenceId: null, skipWelcome: false }; warnings.push('The chosen email campaign no longer exists, so the form was unlinked.'); }
+        if (!seq) { def.campaign = { sequenceId: null, skipWelcome: false }; warnings.push('The chosen email flow no longer exists, so the form was unlinked.'); }
     }
     if (def.style.logo) {
         // ⚠️ The logo is drawn through a SIGNED, permanent, public URL. Signing an asset id that

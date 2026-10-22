@@ -504,7 +504,7 @@ async function judgeEmailOrder(
     if (order.artefactKind === 'newsletter_sequence') {
         const [seq] = await db.select({ isEnabled: newsletterSequences.isEnabled })
             .from(newsletterSequences).where(eq(newsletterSequences.id, order.artefactId)).limit(1);
-        if (!seq) return { kind: 'rejected', summary: 'Email campaign deleted in Email Studio' };
+        if (!seq) return { kind: 'rejected', summary: 'Email flow deleted in Email Studio' };
         return seq.isEnabled
             ? { kind: 'delivered', summary: 'Switched on — following up everyone who signs up through the form' }
             : { kind: 'in_review', summary: 'Emails written — switched off in Email Studio until you review them' };

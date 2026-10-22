@@ -1,6 +1,6 @@
 // src/components/assistant-email-campaigns.js
-// Email Marketing Assistant ▸ Campaigns tab — every automatic email campaign (the welcome sequence
-// and each campaign a sign-up form starts), with what it is doing and how it is performing.
+// Email Marketing Assistant ▸ Campaigns tab — every automatic email flow (the welcome sequence
+// and each flow a sign-up form starts), with what it is doing and how it is performing.
 //
 // Why (2026-10-06): campaigns lived only inside the Email Studio's dialog, so the assistant's own
 // page — where every other assistant shows its work moving through a lifecycle — had no sign of
@@ -23,7 +23,7 @@
 
   function setBadge() {
     // How many campaigns, on the label — the same "Name (n)" every other tab uses.
-    window.AssistantDashboardRegistry?.setTabCount('email-campaigns-tab-label', 'Campaigns', (state.campaigns || []).length);
+    window.AssistantDashboardRegistry?.setTabCount('email-campaigns-tab-label', 'Email Flows', (state.campaigns || []).length);
     // Amber count = campaigns that are written but switched off — the ones waiting on the owner.
     const b = document.getElementById('email-campaigns-badge');
     if (!b) return;
@@ -37,7 +37,7 @@
     try {
       const res = await fetch(API);
       const d = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(d.error || 'Could not load campaigns.');
+      if (!res.ok) throw new Error(d.error || 'Could not load email flows.');
       state.campaigns = d.campaigns || [];
       state.error = null;
     } catch (e) {
@@ -79,17 +79,17 @@
     if (!h) return;
     const head = `<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div>
-          <h2 class="text-lg font-extrabold text-gray-900">Email campaigns</h2>
+          <h2 class="text-lg font-extrabold text-gray-900">Email flows</h2>
           <p class="text-sm text-gray-500 mt-1">Series of emails that send by themselves when someone subscribes or fills in a sign-up form.</p>
         </div>
-        <button type="button" data-email-campaign-new class="btn-assistant px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">+ New email campaign</button>
+        <button type="button" data-email-campaign-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">+ New email flow</button>
       </div>`;
     if (state.error) { h.innerHTML = head + `<p class="text-sm text-red-600">${esc(state.error)}</p>`; return; }
-    if (!state.campaigns) { h.innerHTML = head + '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>'; return; }
+    if (!state.campaigns) { h.innerHTML = head + '<p class="text-sm text-gray-500 py-10 text-center">Loading…</p>'; return; }
     h.innerHTML = head + (state.campaigns.length
       ? `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm divide-y divide-gray-100">${state.campaigns.map(row).join('')}</div>
          <p class="text-[11px] text-gray-500 mt-2">Open and click rates count emails sent through a verified sending domain; a connected mailbox cannot report them.</p>`
-      : '<div class="bg-white rounded-2xl border border-gray-200 p-10 text-center text-sm text-gray-500">No campaigns yet. A welcome campaign for everyone who subscribes is the best first one — it greets everyone who joins your list.</div>');
+      : '<div class="bg-white rounded-2xl border border-gray-200 p-10 text-center text-sm text-gray-500">No email flows yet. A welcome flow for everyone who subscribes is the best first one — it greets everyone who joins your list.</div>');
   }
 
   document.addEventListener('click', (e) => {
@@ -118,7 +118,7 @@
       // it carries the "written but switched off" note. Redraw it once, only when there is a note.
       const reviewOpen = !document.getElementById('maintab-review-queue')?.classList.contains('hidden');
       if (this.waiting().length && reviewOpen && typeof window.detailRqOpenStatus === 'function'
-          && document.querySelector('.detail-rq-col[data-status="review"]')?.classList.contains('border-emerald-600')) {
+          && document.querySelector('.detail-rq-col[data-status="review"]')?.classList.contains('border-emerald-800')) {
         window.detailRqOpenStatus('review');
       }
     },

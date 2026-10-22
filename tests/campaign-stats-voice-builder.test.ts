@@ -114,12 +114,12 @@ check('the preview can rewrite the owner\'s own words, and refuses invented clai
     assert.match(a, /\.filter\(\(f\) => !\(f\.key === 'tone_of_voice' && _VB_ROLES\.includes\(data\.roleKey\)\)\)/);
 });
 
-check('header quick switcher, Emails/Campaigns labels, welcome rename, header spacing', () => {
+check('header quick switcher, Emails/Email Flows labels, welcome rename, header spacing', () => {
     const w = read('workspace.html');
     assert.match(w, /id="nav-assistant-switcher-btn"/);
     assert.match(w, /window\.routeToAssistantDetail\?\.\(a\.getAttribute\('data-switcher-assistant'\)\)/);
     assert.match(read('src/components/assistant-dashboard-registry.js'), /reviewQueue: \{ kind: 'newsletter', source: 'newsletter_issues', label: 'Emails' \},/);
-    assert.match(read('src/components/assistant-email-campaigns.js'), /setTabCount\('email-campaigns-tab-label', 'Campaigns'/);
+    assert.match(read('src/components/assistant-email-campaigns.js'), /setTabCount\('email-campaigns-tab-label', 'Email Flows'/);
     const n = read('newsletter.js');
     assert.ok(n.indexOf('id="nl-seq-name"') > 0 && !/\$\{isFormSeq \? `<div class="mb-4">/.test(n), 'the welcome sequence still has no name field');
     const nav = read('components/nav.html');

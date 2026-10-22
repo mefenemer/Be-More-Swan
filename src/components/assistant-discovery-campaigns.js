@@ -570,7 +570,7 @@
         <p class="text-xs font-bold text-blue-900">There may be a complete list of ${sector}</p>
         <p class="text-xs text-blue-800 mt-1">
           Web searches sample a market; they cannot enumerate one. ${register}
-          If it does, importing that list into your Enrichment tab gives you every one of them — and this
+          If it does, importing that list into your Found leads tab gives you every one of them — and this
           assistant can then score and write to them, which is the part searching cannot replace.
         </p>
       </div>`;
@@ -597,7 +597,7 @@
     return `
       <div class="border border-gray-200 rounded-xl p-4">
         <p class="font-bold text-gray-900">Here’s what it will search</p>
-        <p class="text-xs text-gray-500 mt-0.5">These are the exact web searches. Edit or remove any that look wrong — each one costs a search, and a bad one fills your Enrichment tab with things you can’t sell to.</p>
+        <p class="text-xs text-gray-500 mt-0.5">These are the exact web searches. Edit or remove any that look wrong — each one costs a search, and a bad one fills your Found leads tab with things you can’t sell to.</p>
         ${groups}
 
         <div class="mt-4 pt-3 border-t border-gray-100">
@@ -767,7 +767,7 @@
       });
       window.showToast?.(data.alreadyRunning
         ? 'A run is already in progress.'
-        : `Approved — running ${data.queryCount} search${data.queryCount === 1 ? '' : 'es'}. Leads appear in your Enrichment tab as they’re found.`);
+        : `Approved — running ${data.queryCount} search${data.queryCount === 1 ? '' : 'es'}. Leads appear in your Found leads tab as they’re found.`);
       window._leadIdeasDidAddLeads = true;
       await refresh();
     } catch (err) {
@@ -1297,7 +1297,7 @@
    * keep a dead search on their list forever rather than risk it.
    */
   async function archive(campaignId, onDone) {
-    const msg = 'It stops running and leaves your Searches list. Companies it already found stay in your Leads tab.';
+    const msg = 'It stops running and leaves your Searches list. Companies it already found stay in your Found leads tab.';
     const ok = window.confirmModal
       ? await window.confirmModal(msg, { title: 'Archive this search?', confirmLabel: 'Archive' })
       : window.confirm(`Archive this search? ${msg}`);

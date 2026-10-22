@@ -106,7 +106,7 @@ await check('the builder\'s handlers are bound once in wire(), never from a rend
     const wire = STUDIO.slice(landmark(STUDIO, 'function wire() {'));
     for (const id of ['nl-campaign', 'nl-cmp-write', 'nl-cmp-save', 'nl-cmp-steps', 'nl-cmp-emails']) assert.ok(wire.includes(`$('${id}')`), `${id} is wired`);
     assert.match(STUDIO_HTML, /id="nl-campaign-modal"/);
-    assert.match(STUDIO_HTML, /New email campaign/);
+    assert.match(STUDIO_HTML, /New email flow/);
 });
 
 // ── 5. The rename ───────────────────────────────────────────────────────────

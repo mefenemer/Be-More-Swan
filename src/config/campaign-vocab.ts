@@ -102,7 +102,7 @@ export const CAMPAIGN_OUTCOME_SOURCES: Record<CampaignOutcomeMetric, string> = {
  * Outcomes that cannot be counted yet. The UI must not offer these as a target: an objective the
  * platform can never score is worse than no objective, because the campaign will read as failing
  * forever. Empty since §9.7: `signups` left in §9.6 (Form Builder signups bind to tracked links
- * through campaign_attributions) and `email_engagement` in §9.7 (an email campaign now records the
+ * through campaign_attributions) and `email_engagement` in §9.7 (an email flow now records the
  * order that commissioned it). Keep the list — the next unbuilt metric belongs here, not offered.
  */
 export const UNAVAILABLE_OUTCOME_METRICS: readonly CampaignOutcomeMetric[] = [];
@@ -272,7 +272,7 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
     },
     draft_email_campaign: {
         roleKey: NEWSLETTER_ROLE_KEY,
-        label: 'Write an email campaign',
+        label: 'Write an email flow',
         description: 'Briefs the Email Marketing Assistant to write a short series of emails on this campaign\u2019s message — a follow-up for people who sign up through a form, or emails you send to a group yourself. Saved switched off in Email Studio: nothing is sent until you turn it on or send it.',
         // Per email. Above a post (each email is a full piece with a subject and a job in a
         // series) and well below a pillar article.

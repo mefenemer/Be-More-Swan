@@ -74,7 +74,7 @@
       return;
     }
 
-    host.innerHTML = '<div class="flex items-center justify-center py-20 text-gray-400 text-sm">Loading calendar…</div>';
+    host.innerHTML = '<div class="flex items-center justify-center py-20 text-gray-500 text-sm">Loading calendar…</div>';
     try {
       const res = await fetch(FRAGMENT_URL);
       if (!res.ok) throw new Error(`Calendar failed to load (${res.status}).`);
@@ -91,6 +91,9 @@
         await window.initCalendar({
           assistantId: state.assistantId,
           publishesContent: publishesContent(),
+          // One channel, nothing to filter: the Email Marketing Assistant's emails are its only
+          // content, and it kept the social platform dropdown (review, 2026-10-22).
+          platformFilter: (window.AssistantDashboardRegistry?.get(state.roleKey) || {}).reviewQueue?.source !== 'newsletter_issues',
           leadOutreach: hasLeadOutreach(),
           // Invoices / meetings (records) or briefs (Brand Designer) on their own dates — the
           // registry's calendarItems. Without it those calendars showed only completed runs.

@@ -422,6 +422,7 @@
         <div class="flex flex-wrap gap-3 mb-5">
           <select id="audit-filter-action" onchange="loadAuditLog()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:ring-2 focus:ring-indigo-400 outline-none">
             <option value="">All Actions</option>
+            <option value="login">Login (users signing in)</option>
             <option value="impersonate_start">Impersonate Start</option>
             <option value="impersonate_end">Impersonate End</option>
             <option value="password_reset">Password Reset</option>
@@ -461,7 +462,7 @@
             <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide">
               <tr>
                 <th class="px-4 py-3 text-left">Time</th>
-                <th class="px-4 py-3 text-left">Admin</th>
+                <th id="audit-col-who" class="px-4 py-3 text-left">Admin</th>
                 <th class="px-4 py-3 text-left">Action</th>
                 <th class="px-4 py-3 text-left">Target</th>
                 <th class="px-4 py-3 text-left">Reason</th>
@@ -691,23 +692,8 @@
           <div class="flex items-center justify-between mb-3">
             <h2 class="text-sm font-bold text-gray-700">Help Articles</h2>
             <div class="flex items-center gap-3">
-              <button onclick="mdPreviewHelpSeed()" class="btn-utility text-xs border font-semibold px-3 py-1.5 rounded-lg transition">Seed Preview (Dry Run)</button>
               <a href="/help.html" target="_blank" class="text-xs text-emerald-700 hover:underline font-semibold">View public Help Center →</a>
             </div>
-          </div>
-          <!-- Seed dry-run preview panel -->
-          <div id="md-help-seed-preview" class="hidden mb-4 bg-indigo-50 border border-indigo-200 rounded-xl p-4">
-            <div class="flex items-center justify-between mb-3">
-              <h3 class="text-sm font-bold text-indigo-800">Seed Preview</h3>
-              <div class="flex gap-2">
-                <button onclick="mdApplyHelpSeed()" class="btn-primary text-xs font-semibold px-3 py-1.5 rounded-lg transition">Apply Seed</button>
-                <button onclick="document.getElementById('md-help-seed-preview').classList.add('hidden')" class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold px-2 py-1.5">Dismiss</button>
-              </div>
-            </div>
-            <table class="w-full text-xs">
-              <thead><tr class="text-left text-indigo-600 font-semibold"><th class="pb-1 pr-4">Title</th><th class="pb-1 pr-4">Category</th><th class="pb-1">Action</th></tr></thead>
-              <tbody id="md-help-seed-tbody"></tbody>
-            </table>
           </div>
           <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
             <table class="w-full text-sm admin-responsive-table">
@@ -8144,7 +8130,10 @@ async function loadAuditLog() {
   if (to)         url += '&to='         + encodeURIComponent(to);
   try {
     const d = await api(url);
-    document.getElementById('audit-log-count').textContent = `${d.total} total entries`;
+    // 'login' rows come from login_events: the person in the first column signed in; they are not an admin.
+    const isLogin = action === 'login';
+    document.getElementById('audit-col-who').textContent = isLogin ? 'User' : 'Admin';
+    document.getElementById('audit-log-count').textContent = `${d.total} total ${isLogin ? 'logins' : 'entries'}`;
     document.getElementById('audit-log-prev').disabled = _auditPage === 0;
     document.getElementById('audit-log-next').disabled = (_auditPage + 1) * 50 >= d.total;
     const ACTION_COLOUR = {
@@ -8152,7 +8141,9 @@ async function loadAuditLog() {
       account_lock:'bg-red-100 text-red-700', account_unlock:'bg-emerald-100 text-emerald-800',
       gdpr_erasure:'bg-red-200 text-red-900', account_delete:'bg-red-200 text-red-900',
       tier_change:'bg-blue-100 text-blue-700', comp_credit:'bg-purple-100 text-purple-700',
+      login:'bg-sky-100 text-sky-800',
     };
+    const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
     tbody.innerHTML = (d.logs || []).map(l => {
       const adminName = [l.adminFirstName, l.adminLastName].filter(Boolean).join(' ') || l.adminEmail || `#${l.adminId}`;
       const cls = ACTION_COLOUR[l.action] || 'bg-gray-100 text-gray-700';
@@ -8165,8 +8156,8 @@ async function loadAuditLog() {
         <td class="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">${fmt(l.createdAt)}</td>
         <td class="px-4 py-3 text-xs text-gray-700">${adminName}</td>
         <td class="px-4 py-3"><span class="text-xs font-bold px-2 py-0.5 rounded ${cls}">${l.action}</span></td>
-        <td class="px-4 py-3 text-xs text-gray-500">${l.targetType || '—'}${l.targetId ? ' #' + l.targetId : ''}</td>
-        <td class="px-4 py-3 text-xs text-gray-500 max-w-xs truncate">${l.reason || '—'}</td>
+        <td class="px-4 py-3 text-xs text-gray-500">${l.targetName ? esc(l.targetName) + ' #' + l.targetId : (l.targetType || '—') + (l.targetId ? ' #' + l.targetId : '')}</td>
+        <td class="px-4 py-3 text-xs text-gray-500 max-w-xs truncate"${l.metadata && l.metadata.userAgent ? ` title="${esc(l.metadata.userAgent)}"` : ''}>${l.reason || '—'}</td>
         <td class="px-4 py-3 text-xs font-mono text-gray-400">${l.ipAddress || '—'}</td>
         <td class="px-4 py-3">${diffBtn}</td>
       </tr>`;
@@ -8333,8 +8324,8 @@ const KILL_SWITCH_DEFS = [
   { key: 'global_ai_disabled',    label: 'Global AI Disable',           desc: 'Blocks ALL AI calls platform-wide. Users get a 503 response.',          danger: true },
   { key: 'maintenance_mode',      label: 'Maintenance Mode',            desc: 'Non-admin users see /maintenance.html. Admins unaffected.',               danger: true },
   { key: 'new_registration_lock', label: 'New Registration Lock',       desc: 'Blocks all new sign-ups. The public site switches to waitlist mode: sign-up buttons become “Join the waitlist” and /register redirects to /waitlist. Existing users log in and work as normal.', danger: false },
-  { key: 'waitlist_form_key',     label: 'Waitlist Form Key (text)',    desc: 'Public key (aud_…) of the Email Marketing sign-up form in Be More Swan’s own workspace that /waitlist shows. Its linked email campaign sends the “you’re on the list” email. Allow this site’s origin on the form.', danger: false, type: 'text', placeholder: 'aud_…' },
-  { key: 'beta_form_key',         label: 'Beta Tester Form Key (text)', desc: 'Public key (aud_…) of the SEPARATE “Become a beta tester” sign-up form that /beta shows (homepage beta notice + “Become a Beta Tester” button). Link it to its own email campaign so testers get their own welcome.', danger: false, type: 'text', placeholder: 'aud_…' },
+  { key: 'waitlist_form_key',     label: 'Waitlist Form Key (text)',    desc: 'Public key (aud_…) of the Email Marketing sign-up form in Be More Swan’s own workspace that /waitlist shows. Its linked email flow sends the “you’re on the list” email. Allow this site’s origin on the form.', danger: false, type: 'text', placeholder: 'aud_…' },
+  { key: 'beta_form_key',         label: 'Beta Tester Form Key (text)', desc: 'Public key (aud_…) of the SEPARATE “Become a beta tester” sign-up form that /beta shows (homepage beta notice + “Become a Beta Tester” button). Link it to its own email flow so testers get their own welcome.', danger: false, type: 'text', placeholder: 'aud_…' },
   { key: 'maintenance_message',   label: 'Maintenance Message (text)',  desc: 'Message shown on the maintenance page. Leave blank for default.',         danger: false, type: 'text' },
 ];
 
@@ -11735,36 +11726,8 @@ function escAdm(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-async function mdPreviewHelpSeed() {
-  const panel = document.getElementById('md-help-seed-preview');
-  const tbody = document.getElementById('md-help-seed-tbody');
-  tbody.innerHTML = '<tr><td colspan="3" class="py-2 text-indigo-400 animate-pulse">Loading preview…</td></tr>';
-  panel.classList.remove('hidden');
-  try {
-    const d = await api('/.netlify/functions/admin-api?resource=help-articles-seed');
-    const actionColor = { insert: 'text-emerald-700', update: 'text-amber-600', archive: 'text-red-500' };
-    tbody.innerHTML = (d.preview || []).map(r => `
-      <tr class="border-t border-indigo-100">
-        <td class="py-1.5 pr-4 font-medium text-gray-800">${escAdm(r.title)}</td>
-        <td class="py-1.5 pr-4 text-gray-500">${escAdm(r.category)}</td>
-        <td class="py-1.5 font-bold ${actionColor[r.action] || 'text-gray-600'}">${r.action}</td>
-      </tr>`).join('');
-  } catch (e) {
-    tbody.innerHTML = '<tr><td colspan="3" class="py-2 text-red-400">Preview failed: ' + escAdm(e.message || e) + '</td></tr>';
-  }
-}
-
-async function mdApplyHelpSeed() {
-  if (!(await window.confirmModal('Existing articles with matching titles will be updated in place.', { title: 'Apply the help article seed?' }))) return;
-  try {
-    const d = await api('/.netlify/functions/admin-api?resource=help-articles-seed', { method: 'POST' });
-    window.showToast?.(`Seed applied — ${d.applied} articles upserted.`, { icon: '✅' });
-    document.getElementById('md-help-seed-preview').classList.add('hidden');
-    await mdLoadHelpArticles();
-  } catch (e) {
-    window.showToast?.('Seed failed: ' + (e.message || e), { icon: '⚠️' });
-  }
-}
+// The help article seed (Seed Preview / Apply Seed) was retired 2026-10-22: it re-ran an old file
+// whose bodies would overwrite later rewrites. Help copy changes through dated db/help-articles-*.sql files.
 
 // ── Plan Features matrix (DB-driven pricing features) ───────────────────────
 // Loads the feature catalog + per-plan values, renders an editable matrix, and saves changes

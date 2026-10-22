@@ -455,7 +455,7 @@ export default withLambda(async (event) => {
 
             // ── The human override on top of it: data.outreachStage ─────────────────────────
             // The filter above is automatic and it is right about the automatic case, but it was
-            // the ONLY thing separating the Enrichment tab from the Outreach tab's Review column —
+            // the ONLY thing separating the Found leads tab from the Outreach tab's Review column —
             // both are `pending_approval` — so a person had no way to move a lead between the two.
             // Enrichment's promote button had to write `approved` to make the lead go anywhere,
             // which walked it straight past the review gate, and "Send back to review" on a lead
@@ -480,10 +480,10 @@ export default withLambda(async (event) => {
             // ── Retention filter (?retention=live|deleted|all) ───────────────────────────────
             // Which side of the 30-day sweep to read (src/config/lead-retention.ts). A lead the
             // sweep has moved carries `data.retention.deletedAt` and belongs in exactly one place:
-            // the Deleted section of the Enrichment tab.
+            // the Deleted section of the Found leads tab.
             //
             // ⚠️ 'live' is the DEFAULT, and that default is the whole point of the parameter. Every
-            // existing caller — the Enrichment table, all four Outreach columns, the CSV export,
+            // existing caller — the Found leads table, all four Outreach columns, the CSV export,
             // the chat prompt's lead counts — asked a question about leads the user can still act
             // on, and none of them knew this state was coming. Defaulting to 'all' would leave a
             // moved lead sitting in the Review column it was just swept out of, which is the one
@@ -739,7 +739,7 @@ export default withLambda(async (event) => {
         }
 
         if (event.httpMethod === 'PATCH') {
-            let body: { id?: number; ids?: unknown; title?: unknown; status?: unknown; data?: unknown; approvalStatus?: unknown; scheduledFor?: unknown; reason?: unknown; feedback?: unknown };
+            let body: { id?: number; ids?: unknown; title?: unknown; status?: unknown; data?: unknown; approvalStatus?: unknown; scheduledFor?: unknown; reason?: unknown; feedback?: unknown; dataMerge?: unknown };
             try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
             // ── Bulk REJECT ─────────────────────────────────────────────────────────────
@@ -876,6 +876,18 @@ export default withLambda(async (event) => {
                 if (!body.data || typeof body.data !== 'object') return json(400, { error: 'data must be an object.' });
                 if (JSON.stringify(body.data).length > MAX_DATA_CHARS) return json(400, { error: 'data payload too large.' });
                 patch.data = body.data;
+            } else if (body.dataMerge !== undefined) {
+                // Top-level keys merged onto the STORED data, server-side. For a caller that does not
+                // hold the whole record — the chat's "Move to Outreach" card sets one key, and `data`
+                // above replaces wholesale, which would cost the lead its score, intel and draft.
+                if (!body.dataMerge || typeof body.dataMerge !== 'object' || Array.isArray(body.dataMerge)) return json(400, { error: 'dataMerge must be an object.' });
+                const [current] = await db.select({ data: assistantRecords.data }).from(assistantRecords)
+                    .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
+                    .limit(1);
+                const base = (current?.data && typeof current.data === 'object' && !Array.isArray(current.data)) ? current.data as Record<string, unknown> : {};
+                const merged = { ...base, ...(body.dataMerge as Record<string, unknown>) };
+                if (JSON.stringify(merged).length > MAX_DATA_CHARS) return json(400, { error: 'data payload too large.' });
+                patch.data = merged;
             }
             // ── Move the due date, and ONLY the due date ──────────────────────────────────────
             // Dragging a chip on the Calendar tab to another day. Deliberately a separate shape

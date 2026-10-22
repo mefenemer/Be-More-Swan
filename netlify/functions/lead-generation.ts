@@ -77,6 +77,7 @@ import { checkSuppression } from '../../src/utils/suppression';
 import { enrolInSequence, haltEnrolmentsForRecord } from '../../src/utils/outreach-sequences';
 import { OUTREACH_SUBJECT_RULES } from '../../src/constants/outreach-subject';
 import { evaluateDoNotContact } from '../../src/config/do-not-contact';
+import { outreachDraftFingerprint } from '../../src/utils/chat-lead-action';
 // One normaliser for the lead_scoring_card wire shape, shared with discovery scoring — the
 // do-not-contact gate reads the card this produces, so the two paths must not drift apart.
 import { normaliseLeadCard, type LeadScoringCard } from '../../src/lib/discovery-scoring';
@@ -177,7 +178,7 @@ export default withLambda(async (event) => {
     // confirmChange: the caller has explicitly OK'd overwriting a deal outcome already recorded.
     let body: {
         action?: string; assistantId?: number; ideaId?: number; recordId?: number;
-        lead?: Record<string, unknown>; confirmPersonal?: boolean; reason?: string;
+        lead?: Record<string, unknown>; confirmPersonal?: boolean; reason?: string; expectDraftHash?: string; checkOnly?: boolean;
         outcome?: string; lossReason?: string; valueGbp?: number | string | null; confirmChange?: boolean;
         editReason?: string; provider?: string; note?: string;
         email?: string; confirmErase?: boolean; eraseScope?: string;
@@ -1203,6 +1204,19 @@ ${OUTREACH_SUBJECT_RULES}`;
             const recipient = str(draft?.to as string, 200) || str(data.contactEmail as string, 200) || str(leadObj.email as string, 200);
             if (!recipient) return json(200, { sent: false, reason: 'no_recipient' });
 
+            // The chat's confirm card (src/utils/chat-lead-action.ts) shows the stored draft word for
+            // word and sends its fingerprint. If the draft was edited after the card was drawn — on
+            // the Outreach tab, or by a re-score — this is not the email the user agreed to, so
+            // nothing is sent. Also refuses when there is no stored draft: generating one here would
+            // send words nobody has read. Callers without a card (the tab's own buttons) omit it.
+            if (typeof body.expectDraftHash === 'string') {
+                const storedBody = str(draft?.body as string, 4000);
+                const storedSubject = str(draft?.subject as string, 300) || `Quick note for ${rec.title}`;
+                if (!storedBody || outreachDraftFingerprint(recipient, storedSubject, storedBody) !== body.expectDraftHash) {
+                    return json(200, { sent: false, reason: 'draft_changed', to: recipient });
+                }
+            }
+
             // Do-not-contact gate. Checked FIRST — before suppression, the personal-inbox gate and
             // any generation — because it is the cheapest check and the only one that says this
             // lead should never have reached a send path at all. The qualification pass can decide
@@ -1294,6 +1308,11 @@ ${OUTREACH_SUBJECT_RULES}`;
             if (metered && !(await hasTaskCapacity(db, orgId))) {
                 return json(200, { sent: false, reason: 'task_limit', detail: TASK_LIMIT_MESSAGE, to: recipient });
             }
+
+            // Every gate above, and nothing after: no draft written, no thread minted, nothing sent.
+            // The chat card runs this BEFORE approving the lead, so a send that would be refused
+            // leaves the lead exactly where it was instead of approved-and-unsent.
+            if (body.checkOnly === true) return json(200, { sent: false, ready: true, to: recipient });
 
             // Use the stored draft if present; otherwise generate one from the lead's details.
             let subject = str(draft?.subject as string, 300);
@@ -1848,7 +1867,7 @@ Return STRICT JSON only (no markdown), an array of exactly 3 objects:
                 jobId,
                 searchConfigured: isSearchConfigured(),
                 message: isSearchConfigured()
-                    ? 'Discovery run started — found leads will appear in your Enrichment tab for approval shortly.'
+                    ? 'Discovery run started — found leads will appear in your Found leads tab for approval shortly.'
                     : 'Idea approved, but no web search provider is connected yet — connect one to start discovering real leads.',
             });
         }

@@ -155,11 +155,9 @@
       myContentTab: { label: 'My Content' },
     },
 
-    // Content Engine — Blog Writer. Uses assistant-detail.html, but its primary action is
-    // special-cased in assistants.js to open the Blog Studio modal ("Write Blog Post") rather
-    // than the social post sheet. Long-form drafts live in blog_posts (surfaced via Blog Studio),
-    // NOT assistant_records — so no hubTab. All social-only modules are off (it has its own
-    // review/approval + scheduling inside Blog Studio, not the social Review Queue / Posting Schedule).
+    // Email Marketing Assistant. Its primary action ("Write Email") is special-cased in assistants.js
+    // to open the Email Studio view. Single emails live in newsletter_issues and its automatic series
+    // ("Email Flows" to the user) in newsletter_sequences — NOT assistant_records.
     newsletter_editor: {
       // Rules tab: its drafting reads blueprint §4 (newsletter-generate.ts → buildBlueprintGuardrailsBlock),
       // so its rules DO reach every email — the review-queue kind ('newsletter') cannot say that.
@@ -214,7 +212,6 @@
       audienceSource: 'newsletter_list',
       modules: {
         // Every social-only module off: this role writes no posts and has no social strategy.
-        hasReviewQueue: true,
         hasPostingSchedule: true,
         // ⚠️ hasPostingSchedule stays true so its emails show on the Calendar — but the SOCIAL
         // schedule card (frequency, preferred days/times, "generate posts ahead") drives nothing
@@ -265,6 +262,9 @@
       },
     },
 
+    // Content Engine — Blog Writer. Its primary action is special-cased in assistants.js to open the
+    // Blog Studio modal ("Write Blog Post"). Long-form drafts live in blog_posts, NOT
+    // assistant_records — so no hubTab, and its review and scheduling happen in Blog Studio.
     blog_writer: {
       // ⚠️ These four labels must describe what get-blog-performance.ts actually returns. They used
       // to sit over cards fed by get-assistant-performance (engagement rate, reach growth, CTR,
@@ -476,15 +476,17 @@
       // Data Hub = ORDERS, not artefacts. This is the role's defining difference: its workspace is
       // a ledger of instructions it issued to other assistants. The Result column carries the chain
       // objective → order → artefact, which nothing else in the product can show.
+      // Shown as "Briefs" (owner, 2026-10-22): "Orders" also named the Website Assistant's shop
+      // orders. Internally these stay campaign_orders; only the words the user reads changed.
       hubTab: {
         id: 'datahub',
-        label: 'Orders',
+        label: 'Briefs',
         recordType: 'campaign_order',
         // The Be More Swan "i" explainer on the heading (explainers.js GLOSSARY).
         explain: 'campaign-orders',
-        description: 'Every instruction this assistant has issued to your other assistants — what it asked for, what it cost, and what came back.',
+        description: 'Every brief this assistant has given your other assistants — what it asked for, what it cost, and what came back.',
         columns: [
-          { key: 'title', label: 'Order' },
+          { key: 'title', label: 'Brief' },
           { key: 'campaign', label: 'Campaign' },
           { key: 'assignedTo', label: 'Assigned to' },
           { key: 'taskCost', label: 'Tasks' },
@@ -511,6 +513,14 @@
       // rather than relying on _activateDefaultMainTab's "first visible tab" fallback, which gives
       // the right answer only by accident of tab order.
       defaultMainTab: 'campaigns',
+      // The Calendar draws each campaign's start and end (calendar.js datedItems 'campaigns').
+      calendarItems: 'campaigns',
+      // Its Budget & Control strip shows the month's allowance, so the hero's "Tasks this month"
+      // strip is not drawn as well (_renderAssistantTaskShare).
+      allowanceInControlStrip: true,
+      // ⊕ The hero's Time Saved / Money Saved strip, from get-assistant-metrics: roi-activity.ts
+      // prices this role's campaign briefs and decisions (campaign_managed).
+      roiSource: 'campaign',
       // A campaign's target IS its goal. A Goals tab beside it was a second place to say what
       // success is, and the owner found it confusing (docs/campaign-orchestrator-flow.md §3).
       hideGoals: true,
@@ -528,6 +538,9 @@
       // shared post_insights endpoint, which would report hasData:false for ever — this assistant
       // publishes nothing.
       metricsSource: 'brand',
+      // ⊕ The hero's Time Saved / Money Saved strip: each picture you choose is priced in
+      // roi-activity.ts (picture_chosen, 10 min by default, admin-tunable). Hidden until one is.
+      roiSource: 'brand',
       kpis: [
         {
           label: 'Pictures Approved',
@@ -558,10 +571,9 @@
         hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
         hasContentPublishing: false,
       },
-      // A brief CAN be a conversation ("a square image for the spring offer, warm"), and the chat
-      // turns it into a card the user saves — so chat is an honest primary action. The Briefs tab's
-      // "New brief" form is the other door to the same server action.
-      primaryAction: { label: 'Brief a Picture', kind: 'chat' },
+      // No primaryAction: it rendered only inside the Data Hub, which this role hides, so "Brief a
+      // Picture" could never appear. "New brief" on the Briefs tab and the header Chat button are
+      // the two doors to a brief.
       // ⚠️ If you rename this tab, grep the chat-orchestrator prompt: it names the tab to the
       // assistant, and tests/brand-designer.test.ts fails until both agree.
       briefsTab: {
@@ -828,7 +840,7 @@
         // in chat-orchestrator.ts names the tab too — the assistant tells users which tab to go
         // to, and a stale name there sends them to a tab that does not exist. Same coupling the
         // reviewQueue label above carries.
-        label: 'Enrichment',
+        label: 'Found leads',
         recordType: 'lead',
         // ⚠️ The last two sentences state the RETENTION RULES, and they belong here rather than
         // only on the Deleted section below. The table on this tab carries a "Deletes in" column
@@ -846,15 +858,20 @@
         // ⚠️ Says "moved", never "permanently deleted". A retained lead is still readable, still
         // countable and still recoverable through "Send back for enrichment"; overstating it would
         // make the Deleted section that follows look like a bug rather than the destination.
+        // One line up front; the retention rules behind a disclosure (descriptionMore) — five sentences
+        // of them were the tab's whole introduction (review, 2026-10-22). Wording unchanged.
         description: 'Every lead this assistant has scored — with its outreach draft — plus any lead lists you import. '
-          + 'This is where a lead is enriched: contact details found, details corrected, and cold leads worked up into warm ones. '
-          + `A lead you delete, and any lead left sitting in Outreach ▸ Review or ▸ Archived for ${(window.LeadRetention && window.LeadRetention.DAYS) || 30} days without a decision, `
+          + 'This is where a lead is enriched: contact details found, details corrected, and cold leads worked up into warm ones.',
+        descriptionMore: { summary: 'How long leads are kept', text: `A lead you delete, and any lead left sitting in Outreach ▸ Review or ▸ Archived for ${(window.LeadRetention && window.LeadRetention.DAYS) || 30} days without a decision, `
           + 'is moved to the Deleted section at the foot of this tab — nothing is destroyed, and the reason it was dropped is kept with it '
           + 'so a later search does not put the same company back in front of you as though it were new. '
-          + 'Any action on a lead restarts its clock, and "Send back for enrichment" returns it to the pipeline.',
+          + 'Any action on a lead restarts its clock, and "Send back for enrichment" returns it to the pipeline.' },
         // Manual entry: the Data Hub shows an "Add Lead" button (assistant-data-hub.js) that
         // scores a single hand-typed lead via netlify/functions/lead-generation.ts (score_lead).
         manualAdd: true,
+        // Below sm the table restacks as one card per lead (assistant-data-hub.js, .hub-cards): eight
+        // columns plus a checkbox scrolled sideways on a phone, with the actions off-screen.
+        phoneCards: true,
         // `approvalStatus` sits second, right after the name: this tab holds every lead in every
         // state, so "where is it in the gate" is the first thing you need after "which one is it".
         // Without it a pending, an approved and a rejected lead were pixel-identical here — which
@@ -869,7 +886,10 @@
           { key: 'title', label: 'Lead' },
           { key: 'approvalStatus', label: 'Approval' },
           { key: 'contact', label: 'Contact' },
-          { key: 'score', label: 'Score' },
+          // `phone: false` — left off the phone card layout (hubTab.phoneCards); the row's detail
+          // panel still shows it. Lead, Approval, Contact, Rating and Next step are what a decision
+          // on a phone needs.
+          { key: 'score', label: 'Score', phone: false },
           { key: 'status', label: 'Rating' },
           { key: 'suggestedNextStep', label: 'Next step' },
           // The 30-day retention countdown (src/config/lead-retention.ts). SYNTHETIC, like
@@ -880,8 +900,8 @@
           // directions: Updated is when the clock last restarted, Deletes in is what that means
           // for this lead. Reading them side by side is what makes the countdown explicable
           // rather than arbitrary.
-          { key: 'retention', label: 'Deletes in' },
-          { key: 'updatedAt', label: 'Updated' },
+          { key: 'retention', label: 'Deletes in', phone: false },
+          { key: 'updatedAt', label: 'Updated', phone: false },
         ],
         importHint: 'Upload a CSV of inbound leads — one row per lead. Exporting from Excel or Google Sheets? Use File → Download → CSV.',
         importColumns: ['name', 'company', 'email', 'website', 'industry', 'headcount', 'notes'],
@@ -892,7 +912,7 @@
       ideasReview: {
         label: 'Review Lead Ideas',
         title: 'Lead Ideas',
-        description: 'Ideas for where to find your next customers. Approve one and the {role:lead_qualifier} finds matching companies, scores them into your Enrichment tab, and suggests the next best action for each.',
+        description: 'Ideas for where to find your next customers. Approve one and the {role:lead_qualifier} finds matching companies, scores them into your Found leads tab, and suggests the next best action for each.',
       },
       // "Find New Leads" (assistant-discovery-campaigns.js) — the outbound discovery engine:
       // author an Idea/Blueprint + cadence + guardrails; a background run searches the web,

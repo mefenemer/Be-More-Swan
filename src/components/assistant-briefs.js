@@ -51,6 +51,8 @@
     notes: {},
     showCancelled: false,
     pollTimer: null,
+    /** The HTML each brief card and the toolbar were last painted with — what a poll diffs against. */
+    painted: { cards: new Map(), toolbar: '' },
   };
 
   function esc(v) {
@@ -87,7 +89,8 @@
     return (data && data.error) || `Request failed (HTTP ${status}).`;
   }
 
-  async function load() {
+  /** `poll` — a background refresh while a round runs: repaint only what changed (see repaintChanged). */
+  async function load({ poll = false } = {}) {
     if (!state.assistantId) return;
     try {
       const data = await post({ action: 'list', assistantId: state.assistantId });
@@ -104,7 +107,7 @@
       state.loadError = err.message;
     }
     state.loaded = true;
-    rerender();
+    if (poll && state.rendered) { updateBadge(); repaintChanged(); } else rerender();
     schedulePoll();
   }
 
@@ -113,7 +116,7 @@
     clearTimeout(state.pollTimer);
     const making = state.briefs.some((b) => b.status === 'generating');
     syncBusy(making);
-    if (making) state.pollTimer = setTimeout(load, POLL_MS);
+    if (making) state.pollTimer = setTimeout(() => load({ poll: true }), POLL_MS);
   }
 
   /**
@@ -135,6 +138,9 @@
     // A brief with every picture it needs chosen is finished — leftover options do not ask for anything.
     const n = state.briefs.filter((b) => b.options.some((o) => o.status === 'proposed') && b.status !== 'cancelled' && !progress(b).done).length;
     el.textContent = n > 99 ? '99+' : String(n);
+    // The page's Needs-you strip counts the same briefs as this badge.
+    window._setNeedsYouCount?.(n);
+    window._setNextUp?.(nextUpLine());
     el.classList.toggle('hidden', n === 0);
     // `hidden` loses to inline-flex (equal specificity, later in style.css) — pin it inline too.
     el.style.display = n === 0 ? 'none' : '';
@@ -144,11 +150,22 @@
   function chip(b) {
     const base = 'inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border';
     const waiting = b.options.filter((o) => o.status === 'proposed').length;
-    if (b.status === 'generating') return `<span class="${base} bg-indigo-50 text-indigo-700 border-indigo-200">Making options</span>`;
+    if (b.status === 'generating') return `<span class="${base} bg-emerald-50 text-emerald-800 border-emerald-200">Making options</span>`;
     if (b.status === 'cancelled') return `<span class="${base} bg-gray-50 text-gray-500 border-gray-200">Cancelled</span>`;
     if (b.status === 'approved') return `<span class="${base} bg-emerald-50 text-emerald-800 border-emerald-200">Approved</span>`;
     if (waiting) return `<span class="${base} bg-amber-50 text-amber-800 border-amber-200">Needs you</span>`;
     return `<span class="${base} bg-gray-50 text-gray-600 border-gray-200">Not started</span>`;
+  }
+
+  /** "What happens next" for the page's Needs-you strip. */
+  function nextUpLine() {
+    const making = state.briefs.find((b) => b.status === 'generating');
+    if (making) return `${name()} is making options for “${making.title}” now.`;
+    const due = state.briefs
+      .filter((b) => b.status !== 'cancelled' && b.dueDate && !progress(b).done)
+      .sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)))[0];
+    if (due) return `“${due.title}” is due ${new Date(`${due.dueDate}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}.`;
+    return state.briefs.length ? 'Nothing is being made right now.' : `No briefs yet — press “New brief”, or tell ${name()} in chat what you need.`;
   }
 
   /** How many pictures this brief is for, and how many are chosen. */
@@ -222,35 +239,37 @@
     const img = o.url && isVideo
       ? `<video src="${esc(o.url)}" controls muted playsinline preload="metadata" class="w-full h-full object-cover"></video>`
       : o.url
-      ? `<img src="${esc(o.url)}" alt="${esc(sourceLabel(o.source))} option" loading="lazy" class="w-full h-full object-cover">`
-      : '<div class="w-full h-full flex items-center justify-center text-xs text-gray-400">No preview</div>';
+      ? `<img src="${esc(o.url)}" alt="${esc(`${sourceLabel(o.source)} option for “${b.title || 'this brief'}”`)}" loading="lazy" class="w-full h-full object-cover">`
+      : '<div class="w-full h-full flex items-center justify-center text-xs text-gray-500">No preview</div>';
     const credit = (o.source === 'stock' || o.source === 'stock_video') && o.attributionName
       ? `<p class="text-[11px] text-gray-500 mt-1 truncate">Photo by ${o.attributionUrl ? `<a href="${esc(o.attributionUrl)}" target="_blank" rel="noopener" class="underline">${esc(o.attributionName)}</a>` : esc(o.attributionName)} on Pexels</p>`
       : '';
     let actions = '';
     if (o.status === 'approved') {
-      actions = '<p class="text-xs font-bold text-emerald-700 mt-2">✓ In your library</p>';
+      // Approved pictures go to My Content, which this page has no tab for — so say where, and link
+      // it (review, 2026-10-22).
+      actions = '<p class="text-xs font-bold text-emerald-800 mt-2">✓ In your library · <button type="button" data-brief-library class="btn-swan-link text-xs font-bold">See it in My Content</button></p>';
     } else if (state.rejecting === o.id) {
       actions = `
         <div class="mt-2 space-y-1" data-brief-reject-panel="${o.id}">
           <p class="text-[11px] font-bold text-gray-700">What is wrong with it?</p>
           <div class="flex flex-wrap gap-1">
             ${V().rejectReasons.map((r) => `<button type="button" data-brief-reject-reason="${esc(r.key)}" data-option="${o.id}"
-              class="btn-secondary px-2 py-1 border text-[11px] font-bold rounded-lg">${esc(r.label)}</button>`).join('')}
+              class="btn-secondary min-h-[44px] sm:min-h-0 px-2 py-1 border text-xs font-bold rounded-lg">${esc(r.label)}</button>`).join('')}
           </div>
-          <input type="text" data-brief-reject-note="${o.id}" maxlength="300" placeholder="In your words (optional)"
-            class="w-full mt-1 px-2 py-1 border border-gray-200 rounded-lg text-xs">
-          <button type="button" data-brief-reject-cancel class="text-[11px] text-gray-500 underline">Keep it</button>
+          <input type="text" data-brief-reject-note="${o.id}" maxlength="300" placeholder="In your words (optional)" aria-label="Why not this one (optional)"
+            class="w-full mt-1 px-2 py-1 border border-gray-200 rounded-lg text-base sm:text-xs">
+          <button type="button" data-brief-reject-cancel class="btn-swan-link min-h-[44px] sm:min-h-0 px-1 py-1 text-xs font-bold">Keep it</button>
         </div>`;
     } else if (o.status === 'proposed' && b.status !== 'cancelled' && !progress(b).done) {
       actions = `
         <div class="flex gap-1 mt-2">
-          <button type="button" data-brief-approve="${o.id}" class="btn-primary flex-1 px-2 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">Use this</button>
-          <button type="button" data-brief-reject="${o.id}" class="btn-secondary flex-1 px-2 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">Not this</button>
+          <button type="button" data-brief-approve="${o.id}" class="btn-golive min-h-[44px] sm:min-h-0 flex-1 px-2 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">Use this</button>
+          <button type="button" data-brief-reject="${o.id}" class="btn-secondary min-h-[44px] sm:min-h-0 flex-1 px-2 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">Not this</button>
         </div>`;
     }
     return `
-      <div class="bg-white border ${o.status === 'approved' ? 'border-emerald-300' : 'border-gray-200'} rounded-xl p-2">
+      <div class="bg-white border ${o.status === 'approved' ? 'border-emerald-700' : 'border-gray-200'} rounded-xl p-2">
         <div class="relative rounded-lg overflow-hidden bg-gray-100" style="aspect-ratio:${esc(ratio)}">${img}</div>
         <p class="text-[11px] font-bold text-gray-600 mt-1">${esc(sourceLabel(o.source).replace(/s$/, ''))} · round ${o.round}</p>
         ${credit}
@@ -294,18 +313,18 @@
         </label>
         <p class="text-xs font-bold text-gray-600">…or choose from your library <span class="font-normal text-gray-500">(designs you imported from Canva are here too)</span></p>
         ${o.error ? `<p class="text-xs text-red-600">${esc(o.error)}</p>`
-          : !lib ? '<p class="text-xs text-gray-400">Loading your library…</p>'
+          : !lib ? '<p class="text-xs text-gray-500">Loading your library…</p>'
           : !lib.length ? '<p class="text-xs text-gray-500">Your library is empty.</p>'
           : `<div class="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-64 overflow-y-auto">${lib.map((a) => `
               <button type="button" data-brief-own-pick="${a.id}" title="${esc(a.name)}"
-                class="relative rounded-lg overflow-hidden border-2 ${o.selected.has(a.id) ? 'border-emerald-500' : 'border-transparent'} bg-gray-100" style="aspect-ratio:1 / 1">
+                class="relative rounded-lg overflow-hidden border-2 ${o.selected.has(a.id) ? 'border-emerald-700' : 'border-transparent'} bg-gray-100" style="aspect-ratio:1 / 1">
                 ${a.url ? (a.assetType === 'video'
                   ? `<video src="${esc(a.url)}" muted preload="metadata" class="w-full h-full object-cover"></video>`
                   : `<img src="${esc(a.url)}" alt="" loading="lazy" class="w-full h-full object-cover">`)
-                  : '<span class="text-[10px] text-gray-400">No preview</span>'}
+                  : '<span class="text-[10px] text-gray-500">No preview</span>'}
                 ${a.fromCanva ? '<span class="absolute bottom-0 left-0 right-0 bg-white/80 text-[10px] font-bold text-gray-700">Canva</span>' : ''}
               </button>`).join('')}</div>`}
-        ${o.status ? `<p class="text-xs font-semibold text-indigo-700">${esc(o.status)}</p>` : ''}
+        ${o.status ? `<p class="text-xs font-semibold text-gray-700">${esc(o.status)}</p>` : ''}
         <div class="flex gap-2">
           <button type="button" data-brief-own-add="${b.id}" ${o.selected.size && !o.busy ? '' : 'disabled'}
             class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Add ${o.selected.size || ''} to this brief</button>
@@ -350,13 +369,13 @@
           </div>
           ${chip(b)}
         </div>
-        ${b.scheduledPostId ? '<p class="text-xs text-indigo-700 mt-1">For a social post that found no picture — the one you approve goes onto that post if it still has none.</p>' : ''}
-        ${b.campaign ? `<p class="text-xs text-indigo-700 mt-1 break-words">For the campaign “${esc(b.campaign.objective)}” — the picture you approve joins that campaign's pictures.</p>` : ''}
+        ${b.scheduledPostId ? '<p class="text-xs text-gray-700 mt-1">For a social post that found no picture — the one you approve goes onto that post if it still has none.</p>' : ''}
+        ${b.campaign ? `<p class="text-xs text-gray-700 mt-1 break-words">For the campaign “${esc(b.campaign.objective)}” — the picture you approve joins that campaign's pictures.</p>` : ''}
         ${b.message ? `<p class="text-sm text-gray-700 mt-2 break-words">${esc(b.message)}</p>` : ''}
         ${b.headline ? `<p class="text-xs text-gray-600 mt-1">Words on the card: <span class="font-bold">${esc(b.headline)}</span></p>` : ''}
         <p class="text-xs text-gray-600 mt-2 flex items-center gap-2">${b.status === 'generating' && window.bmsSpinnerHtml ? window.bmsSpinnerHtml(14) : ''}<span>${esc(activityLine(b))}</span></p>
         ${b.generationNote ? `<p class="text-xs text-amber-700 mt-1">${esc(b.generationNote)}</p>` : ''}
-        ${note ? `<p class="text-xs mt-1 ${note.tone === 'error' ? 'text-red-600' : 'text-indigo-700'} font-semibold">${esc(note.text)}</p>` : ''}
+        ${note ? `<p class="text-xs mt-1 ${note.tone === 'error' ? 'text-red-600' : 'text-emerald-800'} font-semibold">${esc(note.text)}</p>` : ''}
         ${visible.length ? `<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">${visible.map((o) => optionTile(b, o)).join('')}</div>` : ''}
         ${rejected ? `<p class="text-[11px] text-gray-500 mt-2">${rejected} turned down — the next round reads why.</p>` : ''}
         ${artDirectionHtml(b)}
@@ -370,7 +389,7 @@
             <button type="button" data-brief-edit="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
               class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">Edit brief</button>
             <button type="button" data-brief-chat="${b.id}"
-              class="btn-assistant px-3 py-1.5 text-xs font-bold rounded-lg transition">Talk it through with ${esc(name())}</button>
+              class="btn-swan-link min-h-[44px] sm:min-h-0 px-1 py-1.5 text-xs font-bold">Talk it through with ${esc(name())}</button>
             <button type="button" data-brief-cancel="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
               class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">Cancel brief</button>
           </div>
@@ -390,7 +409,7 @@
       </label>`;
     const input = (name, val, ph, max) => `<input type="text" data-keep="brief-${name}" name="${name}" value="${esc(val || '')}" maxlength="${max}" placeholder="${esc(ph)}" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">`;
     return `
-      <form data-brief-form class="bg-white rounded-2xl border-2 border-indigo-200 shadow-sm p-5 mb-4 space-y-3">
+      <form data-brief-form class="bg-white rounded-2xl border-2 border-emerald-200 shadow-sm p-5 mb-4 space-y-3">
         <p class="text-sm font-bold text-gray-900">${editing ? 'Edit brief' : 'New brief'}</p>
         ${field('Name', input('title', v.title, 'e.g. Spring launch — hero image', 120))}
         ${field('What should it show, or say?', `<textarea data-keep="brief-message" name="message" maxlength="1000" rows="3" placeholder="e.g. A small team celebrating in a bright studio — the feeling of finally having time back" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">${esc(v.message || '')}</textarea>`)}
@@ -412,7 +431,7 @@
           <div class="mt-1 space-y-1">
             ${V().sources.map((s) => {
               const off = sourceBlocked(s.key);
-              return `<label class="flex items-start gap-2 text-sm ${off ? 'text-gray-400' : 'text-gray-700'}">
+              return `<label class="flex items-start gap-2 text-sm ${off ? 'text-gray-500' : 'text-gray-700'}">
                 <input type="checkbox" data-keep="brief-src-${esc(s.key)}" name="source" value="${esc(s.key)}" ${v.sources.includes(s.key) && !off ? 'checked' : ''} ${off ? 'disabled' : ''} class="mt-1">
                 <span>${esc(s.label)} <span class="text-xs text-gray-500">— ${esc(off || s.cost)}</span></span>
               </label>`;
@@ -431,14 +450,14 @@
   function toolbarHtml() {
     const credits = state.credits == null ? '' : `<span class="text-xs text-gray-500">AI credits left this month: <span class="font-bold">${esc(state.credits)}</span></span>`;
     return `
-      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4" data-brief-toolbar>
         <div>
           <h2 class="text-base font-bold text-gray-900"><span data-explain="brand-briefs">Briefs</span></h2>
           <p class="text-xs text-gray-500">Say what a picture is for. Approve the option that fits — it goes into your library for every assistant to use.</p>
         </div>
         <div class="flex items-center gap-3">
           ${credits}
-          ${state.form ? '' : '<button type="button" data-brief-new class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">New brief</button>'}
+          ${state.form ? '' : '<button type="button" data-brief-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New brief</button>'}
         </div>
       </div>`;
   }
@@ -470,7 +489,7 @@
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center">
         <p class="text-sm font-bold text-gray-700">No briefs yet</p>
-        <p class="text-xs text-gray-500 mt-2">Press "New brief", or tell ${esc(state.assistantName || 'your Brand Designer')} in chat what you need — "a square image for our spring offer, warm and bright". Either way, nothing is made until you press "Make options", and nothing is used until you approve it.</p>
+        <p class="text-xs text-gray-500 mt-2">Press "New brief", or tell ${esc(state.assistantName || 'your Brand Designer')} in chat what you need — "a square image for our spring offer, warm and bright". Either way, nothing is made until you press "Ask ${esc(name())} for options" on the brief, and nothing is used until you press "Use this".</p>
       </div>`;
   }
 
@@ -487,7 +506,7 @@
       return;
     }
     if (!state.loaded) {
-      host.innerHTML = '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center"><p class="text-sm text-gray-400">Loading briefs…</p></div>';
+      host.innerHTML = '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center"><p class="text-sm text-gray-500">Loading briefs…</p></div>';
       return;
     }
     // The poll re-renders every few seconds while a round runs — carry typed values across it.
@@ -516,6 +535,54 @@
     host.querySelectorAll('[data-brief-reject-note]').forEach((el) => {
       if (keptNotes[el.dataset.briefRejectNote] != null) el.value = keptNotes[el.dataset.briefRejectNote];
     });
+    state.painted.cards = new Map(state.briefs.map((b) => [b.id, briefCard(b)]));
+    state.painted.toolbar = toolbarHtml();
+  }
+
+  /** The brief ids in the order render() lays them out — live first, then cancelled when shown. */
+  function paintedOrder() {
+    const live = state.briefs.filter((b) => b.status !== 'cancelled');
+    const cancelled = state.showCancelled ? state.briefs.filter((b) => b.status === 'cancelled') : [];
+    return [...live, ...cancelled].map((b) => String(b.id));
+  }
+
+  /**
+   * The poll's repaint. render() replaces the whole tab, and every 4 s while a round ran that threw
+   * away focus, the caret, scroll inside the grid and any video that was playing — on a phone the
+   * keyboard closed mid-word (review, 2026-10-22). Only the cards whose HTML actually changed (the one
+   * being made, as a rule) are swapped; the form, the guidelines and every other card are left alone.
+   * A brief appearing, disappearing or changing section falls back to the full render.
+   */
+  function repaintChanged() {
+    const host = document.getElementById('briefs-host');
+    if (!host) return;
+    const onScreen = Array.from(host.querySelectorAll('[data-brief-card]')).map((el) => el.dataset.briefCard);
+    const wanted = paintedOrder();
+    if (onScreen.length !== wanted.length || onScreen.some((id, i) => id !== wanted[i])) { render(); return; }
+
+    const toolbar = toolbarHtml();
+    if (toolbar !== state.painted.toolbar) {
+      const el = host.querySelector('[data-brief-toolbar]');
+      if (el) el.outerHTML = toolbar;
+      state.painted.toolbar = toolbar;
+    }
+    for (const b of state.briefs) {
+      const html = briefCard(b);
+      if (state.painted.cards.get(b.id) === html) continue;
+      state.painted.cards.set(b.id, html);
+      const el = host.querySelector(`[data-brief-card="${b.id}"]`);
+      if (!el) continue;
+      // A half-typed "why not" note in this card survives the swap, as it does a full render.
+      const notes = {};
+      el.querySelectorAll('[data-brief-reject-note]').forEach((n) => { notes[n.dataset.briefRejectNote] = n.value; });
+      const tpl = document.createElement('template');
+      tpl.innerHTML = html.trim();
+      const fresh = tpl.content.firstElementChild;
+      fresh.querySelectorAll('[data-brief-reject-note]').forEach((n) => {
+        if (notes[n.dataset.briefRejectNote] != null) n.value = notes[n.dataset.briefRejectNote];
+      });
+      el.replaceWith(fresh);
+    }
   }
 
   function rerender() {
@@ -602,6 +669,7 @@
       return;
     }
 
+    if (t('[data-brief-library]')) { window.loadView?.('my-content'); return; }
     const chat = t('[data-brief-chat]');
     if (chat) {
       const b = state.briefs.find((x) => x.id === Number(chat.dataset.briefChat));

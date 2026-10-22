@@ -3082,6 +3082,125 @@
   }
 
   register('email_action_proposal', renderEmailActionProposalCard);
+
+  // ── Built-in: Lead Action Proposal Card (Lead Generation chat) ─────────────
+  // { type: 'lead_action_proposal', action: 'send'|'move_to_outreach'|'reject'|'set_outcome', recordId,
+  //   assistantId, title, rating, approvalStatus, to, subject, body, signature, footerName,
+  //   footerAddress, personalInbox, approveFirst, draftHash, followUps, hasEmail, outcome,
+  //   outcomeLabel, lossReason, lossReasonLabel, valueGbp, currentOutcome, blocked, settled? }
+  //
+  // The Enrichment, Outreach and Conversations buttons, from chat. Every fact comes from the lead's
+  // row (src/utils/chat-lead-action.ts) — for "send", the stored email word for word, which is the
+  // owner's condition for letting the chat send at all: nothing reaches a stranger that was not on
+  // this card. The click dispatches `lead:action`; chat-session.js calls the tabs' own endpoints.
+  const LEAD_ACTION_COPY = {
+    send: { head: 'Send this outreach email', busy: 'Sending…' },
+    move_to_outreach: { head: 'Move this lead to Outreach', button: 'Move to Outreach', busy: 'Moving…' },
+    reject: { head: 'Turn this lead down', button: 'Turn it down', busy: 'Turning it down…' },
+    set_outcome: { head: 'Record how this deal ended', busy: 'Recording…' },
+  };
+
+  function renderLeadActionProposalCard(ui, esc) {
+    const copy = LEAD_ACTION_COPY[ui.action];
+    const recordId = Number(ui.recordId);
+    if (!copy || !Number.isInteger(recordId)) return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const isSend = ui.action === 'send';
+    const gbp = (n) => `£${Number(n).toLocaleString('en-GB', { maximumFractionDigits: 0 })}`;
+    const buttonLabel = isSend ? (ui.approveFirst ? 'Approve & send email' : 'Send email now')
+      : ui.action === 'set_outcome' ? `Mark as ${ui.outcomeLabel || ui.outcome}`
+      : copy.button;
+    const buttonCls = ui.action === 'reject' ? 'btn-destructive' : isSend ? 'btn-golive' : 'btn-primary';
+
+    // The email, exactly as send_outreach will send it: the stored draft, then the signature, then
+    // the footer the server appends. Shown even when blocked — it is what the user asked about.
+    const emailHtml = isSend && ui.body ? `
+      <dl class="mt-3 text-sm space-y-1">
+        <div class="flex gap-2"><dt class="font-bold text-gray-700 shrink-0">To:</dt><dd class="text-gray-900 break-all">${esc(ui.to || 'no address')}</dd></div>
+        <div class="flex gap-2"><dt class="font-bold text-gray-700 shrink-0">Subject:</dt><dd class="text-gray-900 break-words">${esc(ui.subject || '')}</dd></div>
+      </dl>
+      ${ui.personalInbox && !blocked ? `<p class="mt-2 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">This address looks like a named person’s own inbox — it was found for this company, not given to you by them. Pressing the button below confirms you’re happy to email this person.</p>` : ''}
+      <div class="mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 max-h-72 overflow-y-auto" tabindex="0" aria-label="The email that will be sent">
+        <p class="text-sm text-gray-900 whitespace-pre-wrap break-words">${esc(ui.body)}</p>
+        ${ui.signature ? `<p class="text-sm text-gray-700 whitespace-pre-wrap break-words mt-3">${esc(ui.signature)}</p>` : ''}
+        <p class="text-xs text-gray-500 mt-3">Added at the very bottom, as the law requires: a one-click unsubscribe line and ${esc(ui.footerName || 'your business name')}${ui.footerAddress ? `, ${esc(ui.footerAddress)}` : ' and postal address'}.</p>
+      </div>` : '';
+
+    let followHtml = '';
+    if (isSend && !blocked) {
+      const f = ui.followUps;
+      if (f && f.enabled && Array.isArray(f.steps) && f.steps.length) {
+        followHtml = `
+          <div class="mt-3">
+            <p class="text-sm font-bold text-gray-900">If they don’t reply: ${f.steps.length} follow-up${f.steps.length === 1 ? '' : 's'}, sent automatically</p>
+            <ol class="mt-1 space-y-1.5">
+              ${f.steps.map((st) => `<li class="text-xs text-gray-700"><span class="font-bold text-gray-900">Day ${esc(String(st.daysAfterOpener))}:</span> ${esc(st.brief)}</li>`).join('')}
+            </ol>
+            <p class="text-xs text-gray-500 mt-1.5">These aren’t written yet — each one is written when it’s due, from the brief above, and they stop the moment they reply. To send one email only, change “Chase leads who do not reply?” in Assistant Profile.</p>
+          </div>`;
+      } else if (f && !f.enabled) {
+        followHtml = '<p class="mt-3 text-xs text-gray-600">No follow-ups: this assistant is set to send one email only.</p>';
+      } else {
+        followHtml = '<p class="mt-3 text-xs text-amber-800">I couldn’t check whether follow-ups would start. If this assistant chases automatically, up to three more emails follow unless they reply.</p>';
+      }
+    }
+
+    let actionHtml = '';
+    if (!blocked) {
+      if (isSend) actionHtml = `<p class="text-xs text-gray-600 mt-3">${ui.approveFirst ? 'Pressing the button approves the lead and sends this email now' : 'Pressing the button sends this email now'} from your connected inbox, then sets a reminder to chase.</p>`;
+      if (ui.action === 'move_to_outreach') actionHtml = `<p class="text-xs text-gray-600 mt-3">It moves to the Outreach tab’s Review column. ${ui.hasEmail ? 'Its drafted email waits there for you to read.' : 'It has no email written or no address yet, so there will be nothing to send until it does.'} Nothing is sent.</p>`;
+      if (ui.action === 'reject') actionHtml = '<p class="text-xs text-gray-600 mt-3">It’s turned down and nothing is sent. Turned-down leads teach your searches what to skip.</p>';
+      if (ui.action === 'set_outcome') {
+        actionHtml = `<p class="text-sm text-gray-700 mt-3"><span class="font-bold">${esc(ui.outcomeLabel || ui.outcome || '')}</span>${ui.lossReasonLabel ? ` — ${esc(ui.lossReasonLabel)}` : ''}${ui.valueGbp != null ? ` · ${esc(gbp(ui.valueGbp))}` : ''}</p>
+          ${ui.currentOutcome ? `<p class="text-xs text-amber-800 mt-1">It’s marked ${esc(ui.currentOutcome)} now — this changes it.</p>` : ''}
+          <p class="text-xs text-gray-600 mt-1">Any follow-ups still running for this lead stop.</p>`;
+      }
+    }
+
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-lg';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      <p class="text-xs text-gray-500 mt-2">#${recordId}${ui.rating ? ` · ${esc(ui.rating)}` : ''}</p>
+      ${ui.title ? `<p class="text-sm font-bold text-gray-900 mt-1 break-words">${esc(ui.title)}</p>` : ''}
+      ${emailHtml}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${followHtml}
+      ${actionHtml}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-lap-go class="${buttonCls} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(buttonLabel)}</button>
+        <button type="button" data-lap-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-lap-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-lap-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-lap-go], [data-lap-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-lap-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-lap-go]')) return;
+      setBusy(true);
+      say(copy.busy);
+      el.dispatchEvent(new CustomEvent('lead:action', {
+        bubbles: true,
+        detail: {
+          action: ui.action, recordId, assistantId: Number(ui.assistantId) || null,
+          draftHash: ui.draftHash || null, personalInbox: !!ui.personalInbox, approveFirst: !!ui.approveFirst,
+          outcome: ui.outcome || null, lossReason: ui.lossReason || null, valueGbp: ui.valueGbp ?? null,
+          confirmChange: !!ui.currentOutcome,
+          respond({ ok, message, error, final }) {
+            if (ok) { say(message || 'Done.'); return; }
+            // A refusal that settles the matter (the draft changed, it was already sent) keeps the
+            // button off; a failure worth retrying gives it back.
+            if (!final) setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('lead_action_proposal', renderLeadActionProposalCard);
   register('SocialPostDraftCard', renderSocialPostDraftCard);
 
   // ── Built-in: Blog Post Draft Card ──────────────────────────────────────────
@@ -3386,7 +3505,7 @@
     const isDraft = ui.stage === 'draft' && emails.every((n) => typeof n.bodyMarkdown === 'string' && n.bodyMarkdown.trim());
     const trigger = ui.trigger && typeof ui.trigger === 'object' ? ui.trigger : {};
     // Re-derived rather than trusted, same as the server: 'subscribed' (the welcome sequence) and
-    // 'form' (an email campaign a sign-up form starts) start by themselves; anything else does not.
+    // 'form' (an email flow a sign-up form starts) start by themselves; anything else does not.
     // ⚠️ The model's guess is only the STARTING choice for an automatic series. It once filed a
     // "beta testers" campaign as the welcome sequence — Save then tried to overwrite the LIVE
     // waitlist welcome sequence, and the user had no way to say "no, this is for a form". The card
@@ -3401,14 +3520,14 @@
     const lastDay = Number(emails[emails.length - 1].sendDay) || 1;
     const typeLabel = CAMPAIGN_TYPE_LABELS[ui.campaignType] || 'Custom';
     const n = emails.length;
-    const saveLabelFor = () => isForm ? 'Save as form email campaign' : automatic ? 'Save as email campaign' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
+    const saveLabelFor = () => isForm ? 'Save as form email flow' : automatic ? 'Save as email flow' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
     const startsLabelFor = () => isForm ? 'Starts when someone fills in a form' : 'Starts when someone subscribes';
     const statusFor = () => isForm
-      ? 'Saving creates this email campaign under Email Campaigns in the Email Studio, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on — nobody is emailed by saving.'
+      ? 'Saving creates this email flow under Email Flows in the Email Studio, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on — nobody is emailed by saving.'
       : automatic
-        ? 'Saving makes this a new campaign for everyone who subscribes, under Email Campaigns in the Email Studio. It stays switched off until you turn it on there — nobody is emailed by saving.'
+        ? 'Saving makes this a new email flow for everyone who subscribes, under Email Flows in the Email Studio. It stays switched off until you turn it on there — nobody is emailed by saving.'
         : 'Saving puts each email in your Emails tab as a draft. Nothing is sent to anyone: you send each one to the right people on the right day from the Email Studio.';
-    const eyebrow = (s) => `${isDraft ? 'Email campaign draft' : 'Email campaign plan'} · ${s}`;
+    const eyebrow = (s) => `${isDraft ? 'Email flow draft' : 'Email flow plan'} · ${s}`;
 
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-lg';
@@ -3438,7 +3557,7 @@
         </label>
         <label class="flex items-start gap-2 text-sm text-gray-800 cursor-pointer">
           <input type="radio" name="${whoName}" value="subscribed" class="mt-1" ${isForm ? '' : 'checked'}>
-          <span>Everyone who joins your list <span class="text-gray-500">— saved as a new campaign; your current one is not touched.</span></span>
+          <span>Everyone who joins your list <span class="text-gray-500">— saved as a new email flow; your current one is not touched.</span></span>
         </label>
       </fieldset>` : ''}
 
@@ -3512,12 +3631,12 @@
               setEyebrow('Saved');
               if (isForm) {
                 say(deduped
-                  ? 'Already saved — it is under Email Campaigns in the Email Studio.'
-                  : `Saved as an email campaign — ${stepCount || n} emails, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on under Email Campaigns.`);
+                  ? 'Already saved — it is under Email Flows in the Email Studio.'
+                  : `Saved as an email flow — ${stepCount || n} emails, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on under Email Flows.`);
               } else if (automatic) {
                 say(deduped
-                  ? 'Already saved — it is under Email Campaigns in the Email Studio.'
-                  : `Saved as a new email campaign for everyone who subscribes — ${stepCount || n} emails, switched off. Turn it on under Email Campaigns in the Email Studio when you are ready.`);
+                  ? 'Already saved — it is under Email Flows in the Email Studio.'
+                  : `Saved as a new email flow for everyone who subscribes — ${stepCount || n} emails, switched off. Turn it on under Email Flows in the Email Studio when you are ready.`);
               } else {
                 say(deduped
                   ? 'Already saved — these are in your Emails tab.'
@@ -3527,7 +3646,7 @@
             }
             setBusy(false);
             setEyebrow('Not saved yet');
-            say(error || 'Could not save this campaign — please try again.', 'error');
+            say(error || 'Could not save this email flow — please try again.', 'error');
           },
         },
       }));
@@ -3605,7 +3724,7 @@
         <button type="button" data-afd-save class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save form</button>
         <button type="button" data-afd-discard class="btn-destructive px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Discard</button>
       </div>
-      <p class="mt-2 text-xs font-semibold text-indigo-700" data-afd-status>Saving keeps it switched off. Open it in the form builder to link an email campaign, check it, and publish it — nobody can sign up until you do.</p>
+      <p class="mt-2 text-xs font-semibold text-indigo-700" data-afd-status>Saving keeps it switched off. Open it in the form builder to link an email flow, check it, and publish it — nobody can sign up until you do.</p>
     `;
 
     // The preview — only when the renderer is on this page (the workspace loads it; a standalone
@@ -3639,7 +3758,7 @@
             eyebrow('Saved · switched off');
             el._savedForm = form;
             const extra = (more || []).length ? ` (${more.join(' ')})` : '';
-            say(`Saved, switched off. Open it in the form builder to link an email campaign and publish it.${extra}`);
+            say(`Saved, switched off. Open it in the form builder to link an email flow and publish it.${extra}`);
             const actions = el.querySelector('[data-afd-actions]');
             if (actions && window.FormBuilder) {
               actions.innerHTML = '<button type="button" data-afd-open class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg transition border">Open in the form builder</button>';

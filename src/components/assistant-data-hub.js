@@ -212,10 +212,13 @@
   function retentionCell(record) {
     const R = window.LeadRetention;
     const swept = record.approvalStatus === 'pending_approval' || record.approvalStatus === 'rejected';
-    if (!R || !swept || R.isDeleted(record.data)) return { text: '—', html: '<span class="text-gray-400">—</span>' };
+    if (!R || !swept || R.isDeleted(record.data)) return { text: '—', html: '<span class="text-gray-500">—</span>' };
     const days = R.daysRemaining(record.updatedAt);
     const text = R.countdownLabel(days);
-    if (!text) return { text: '—', html: '<span class="text-gray-400">—</span>' };
+    if (!text) return { text: '—', html: '<span class="text-gray-500">—</span>' };
+    // A coloured countdown chip on every row read as a threat before anything had explained it
+    // (review, 2026-10-22). Plain text until the last week, when it is worth drawing the eye.
+    if (days !== null && days > 7) return { text, html: `<span class="text-xs text-gray-500 whitespace-nowrap">${esc(text)}</span>` };
     const cls = RETENTION_URGENCY_CLS[R.urgency(days)] || RETENTION_URGENCY_CLS.low;
     return {
       text,
@@ -249,7 +252,7 @@
     // merged. Empty on every hub but the Lead Generator's.
     deletedRecords: [],
     // Is the Deleted section folded open? Collapsed by default: it is a graveyard, and a user
-    // arriving at the Enrichment tab is there for live leads. Part of the view state rather than
+    // arriving at the Found leads tab is there for live leads. Part of the view state rather than
     // the DOM for the same reason `collapsed` below is — the section is re-rendered on every
     // refresh and a fold recorded in the markup would spring open.
     deletedOpen: false,
@@ -300,7 +303,7 @@
    *
    * Leads only, and fetched separately rather than filtered out of one big response, for two
    * reasons. The graveyard grows without bound while the live list does not, so folding them into
-   * the same fetch would make every Enrichment tab load pay for every lead ever dropped. And
+   * the same fetch would make every Found leads tab load pay for every lead ever dropped. And
    * `state.records` is read by nine other things (table, filters, groups, counts, selection,
    * paging, CSV, deep-link focus); a single array holding two populations would need each of them
    * to remember which one it meant.
@@ -431,7 +434,7 @@
     dl.className = 'grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3';
     dl.innerHTML = entries.map(([k, v]) => `
       <div>
-        <dt class="text-xs font-bold text-gray-400 uppercase tracking-wide">${esc(k)}</dt>
+        <dt class="text-xs font-bold text-gray-500 uppercase tracking-wide">${esc(k)}</dt>
         <dd class="text-sm text-gray-900 mt-0.5 whitespace-pre-line">${esc(v)}</dd>
       </div>`).join('') || '<p class="text-sm text-gray-500">No details stored for this record.</p>';
     return dl;
@@ -565,7 +568,7 @@
     wrap.className = 'mb-4';
     wrap.innerHTML = `
       <div class="flex flex-wrap items-center gap-2">
-        <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Profiles</span>
+        <span class="text-xs font-bold text-gray-500 uppercase tracking-wide">Profiles</span>
         ${links.join('')}
       </div>
       <p class="text-xs text-gray-500 mt-1.5">${esc(note)}</p>`;
@@ -645,8 +648,8 @@
     wrap.className = 'mb-4 rounded-xl border border-gray-200 bg-white p-3';
     wrap.innerHTML = `
       <div class="flex flex-wrap items-center gap-2 mb-2">
-        <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Research</span>
-        <span class="text-xs text-gray-400">${esc(fmtDate(intel.gatheredAt))}</span>
+        <span class="text-xs font-bold text-gray-500 uppercase tracking-wide">Research</span>
+        <span class="text-xs text-gray-500">${esc(fmtDate(intel.gatheredAt))}</span>
         ${moved
           ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-800 border-emerald-200">${esc(intel.changeSummary)}</span>`
           : ''}
@@ -667,7 +670,7 @@
         </ul>` : ''}
 
       ${people.length ? `
-        <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">Named on their site</p>
+        <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Named on their site</p>
         <ul class="space-y-1 mb-3">
           ${people.map((p) => `<li class="text-sm text-gray-700">
             <span class="font-semibold">${esc(p.name)}</span>${p.title ? ` — ${esc(p.title)}` : ''}
@@ -678,7 +681,7 @@
         <p class="text-xs text-gray-500 mb-3">Taken from the company's own pages. We have no email address for these people, and nothing here contacts them.</p>` : ''}
 
       ${hooks.length ? `
-        <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">Openers</p>
+        <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Openers</p>
         <ul class="list-disc pl-4 space-y-0.5 mb-3">
           ${hooks.map((h) => `<li class="text-sm text-gray-700">${esc(h)}</li>`).join('')}
         </ul>` : ''}
@@ -863,7 +866,7 @@
       <p class="text-[11px] text-gray-500 mb-2">Adds the domain to this search’s exclusions. You can remove it later by editing the search.</p>
       <div class="flex flex-wrap gap-1.5">
         <button type="button" class="btn-primary px-2 py-1 text-[11px] font-bold rounded-lg transition cursor-pointer" data-hub-exclude>Yes, exclude it</button>
-        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-400 hover:text-gray-600 transition cursor-pointer" data-hub-exclude-skip>No thanks</button>
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-600 transition cursor-pointer" data-hub-exclude-skip>No thanks</button>
       </div>
       <p class="hidden text-[11px] font-semibold mt-1.5" data-hub-exclude-status></p>`;
 
@@ -1299,13 +1302,13 @@
     wrap.innerHTML = `
       ${data.meetingSummary ? `<p class="text-sm text-gray-700 whitespace-pre-line mb-4">${esc(data.meetingSummary)}</p>` : ''}
       ${tasks.length ? `
-        <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Action items</p>
+        <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Action items</p>
         <ul class="space-y-2">
           ${tasks.map((t, i) => `
             <li class="flex items-start gap-2.5">
               <input type="checkbox" data-task-check="${i}" ${t.done ? 'checked' : ''}
                 class="mt-0.5 w-4 h-4 rounded border-gray-300 text-emerald-700 focus:ring-emerald-700 cursor-pointer">
-              <span class="text-sm ${t.done ? 'text-gray-400 line-through' : 'text-gray-900'}" data-task-label="${i}">
+              <span class="text-sm ${t.done ? 'text-gray-500 line-through' : 'text-gray-900'}" data-task-label="${i}">
                 ${esc(t.description)}
                 <span class="text-gray-500">— ${esc(t.assignee) || 'Unassigned'}${t.dueDate ? `, due ${esc(t.dueDate)}` : ''}</span>
               </span>
@@ -1956,7 +1959,7 @@
     wrap.innerHTML = `
       ${body ? `<p class="text-sm text-gray-800 whitespace-pre-line">${esc(body)}</p>` : '<p class="text-sm text-gray-500">No content yet.</p>'}
       ${tags ? `<p class="text-xs text-emerald-700 mt-3">${esc(tags)}</p>` : ''}
-      <p class="text-xs text-gray-400 mt-4 pt-3 border-t border-gray-100">Approve or reject this in <span class="font-semibold text-gray-600">Review</span>; scheduled posts appear on the <span class="font-semibold text-gray-600">Calendar</span>.</p>
+      <p class="text-xs text-gray-500 mt-4 pt-3 border-t border-gray-100">Approve or reject this in <span class="font-semibold text-gray-600">Review</span>; scheduled posts appear on the <span class="font-semibold text-gray-600">Calendar</span>.</p>
     `;
     if (record.status === 'failed') wrap.insertBefore(failureBanner(record), wrap.firstChild);
     return wrap;
@@ -2298,7 +2301,7 @@
         const s = approvalChip(record);
         cell = s
           ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${s.cls} whitespace-nowrap">${esc(s.short)}</span>`
-          : '<span class="text-gray-400">—</span>';
+          : '<span class="text-gray-500">—</span>';
       } else if (c.key === 'contact') {
         // The chip carries the STATE; the address itself rides in the tooltip. A column of raw
         // addresses would be unscannable, and would put a hundred people's contact details on
@@ -2323,10 +2326,10 @@
       } else {
         cell = esc(cellValue(record, c.key));
       }
-      return `<td class="px-4 py-3 ${i === 0 ? 'font-semibold text-gray-900' : 'text-gray-700'}">${cell}</td>`;
+      return `<td class="px-4 py-3 ${i === 0 ? 'font-semibold text-gray-900 hub-cell-title' : 'text-gray-700'}${c.phone === false ? ' hub-cell-secondary' : ''}" data-label="${esc(c.label)}">${cell}</td>`;
     }).join('');
     return `${pick}${cols}
-      <td class="px-4 py-3 text-right">
+      <td class="px-4 py-3 text-right hub-cell-chevron">
         <svg class="w-4 h-4 text-gray-400 inline transition-transform" data-row-chevron fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
       </td>`;
   }
@@ -2385,7 +2388,7 @@
       if (chosen && !options.includes(chosen)) options.push(chosen);
       return `
       <label class="inline-flex items-center gap-1.5">
-        <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">${esc(c.label)}</span>
+        <span class="text-xs font-bold text-gray-500 uppercase tracking-wide">${esc(c.label)}</span>
         <select data-hub-filter="${esc(c.key)}" class="${selectCls}">
           <option value="">All</option>
           ${options.map((val) => `<option value="${esc(val)}"${chosen === val ? ' selected' : ''}>${esc(val)}</option>`).join('')}
@@ -2400,7 +2403,7 @@
           class="px-3 py-1.5 text-sm border border-gray-200 rounded-lg w-full sm:w-64 focus:outline-none focus:border-emerald-400">
         ${filters}
         <label class="inline-flex items-center gap-1.5">
-          <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Group by</span>
+          <span class="text-xs font-bold text-gray-500 uppercase tracking-wide">Group by</span>
           <select data-hub-group class="${selectCls}">
             <option value="">Nothing</option>
             ${hub.columns.map((c) => `<option value="${esc(c.key)}"${v.groupKey === c.key ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}
@@ -2571,7 +2574,7 @@
           <button type="button" data-hub-group-toggle aria-expanded="${collapsed ? 'false' : 'true'}"
             class="w-full flex items-center gap-2 px-4 py-2 text-left cursor-pointer hover:bg-gray-100 transition-colors">
             <svg class="w-3.5 h-3.5 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${chevron}"/></svg>
-            <span class="text-xs font-bold text-gray-600 uppercase tracking-wide">${esc(group.label)} <span class="text-gray-400 normal-case">· ${group.records.length}</span></span>
+            <span class="text-xs font-bold text-gray-600 uppercase tracking-wide">${esc(group.label)} <span class="text-gray-500 normal-case">· ${group.records.length}</span></span>
           </button>
         </td>`;
         head.querySelector('[data-hub-group-toggle]').addEventListener('click', () => {
@@ -2687,11 +2690,37 @@
     bar.querySelector('[data-hub-bulkdelete]').textContent = `Delete ${n}`;
   }
 
+  // Phone cards (hubTab.phoneCards): below 640px each row restacks as a card — every cell on its own
+  // line under its column name, the less important columns (`phone: false`) left to the detail
+  // panel. CSS only, so selection, row-click-to-open, grouping and paging behave exactly as in the
+  // table. Injected once: the rules are scoped to .hub-cards, which only a phoneCards hub sets.
+  function ensurePhoneCardStyle() {
+    if (document.getElementById('hub-cards-style')) return;
+    const st = document.createElement('style');
+    st.id = 'hub-cards-style';
+    st.textContent = `@media (max-width: 639px) {
+      .hub-cards table, .hub-cards tbody, .hub-cards tr, .hub-cards td { display: block; width: 100%; }
+      .hub-cards thead { display: none; }
+      .hub-cards tr.hidden { display: none; }
+      .hub-cards tr[data-record-id] { position: relative; padding: 0.75rem 1rem; }
+      .hub-cards tr[data-record-id] > td { padding: 0.125rem 0; display: flex; align-items: center; gap: 0.5rem; min-height: 1.75rem; }
+      .hub-cards tr[data-record-id] > td[data-label]::before { content: attr(data-label); flex: 0 0 6.5rem; font-size: 11px; font-weight: 700; color: #787263; text-transform: uppercase; letter-spacing: 0.04em; }
+      .hub-cards tr[data-record-id] > td.hub-cell-title::before { display: none; }
+      .hub-cards tr[data-record-id] > td.hub-cell-title { font-size: 0.9375rem; padding-right: 2.5rem; }
+      .hub-cards tr[data-record-id] > td.hub-cell-secondary { display: none; }
+      .hub-cards tr[data-record-id] > td.hub-cell-chevron { position: absolute; top: 0.75rem; right: 1rem; width: auto; }
+      .hub-cards tr[data-record-id] > td:first-child:has(input[data-hub-select]) { position: absolute; top: 0.85rem; right: 2.75rem; width: auto; }
+    }`;
+    document.head.appendChild(st);
+  }
+
   function renderTable() {
     updateTabCount();
     const host = document.getElementById('datahub-table-host');
     if (!host) return;
     const hub = state.hub;
+    host.classList.toggle('hub-cards', !!hub.phoneCards);
+    if (hub.phoneCards) ensurePhoneCardStyle();
 
     if (state.records.length === 0) {
       state.selected.clear();
@@ -2838,7 +2867,7 @@
         <div class="${open ? '' : 'hidden'}" data-deleted-body>
           <p class="px-4 pb-3 text-xs text-gray-500">${esc(R.DELETED_NOTICE)}</p>
           ${noticeHtml}
-          ${rows.length ? body : '<p class="px-4 pb-4 text-xs text-gray-400">Nothing else has been dropped.</p>'}
+          ${rows.length ? body : '<p class="px-4 pb-4 text-xs text-gray-500">Nothing else has been dropped.</p>'}
         </div>
       </div>`;
   }
@@ -2988,7 +3017,7 @@
             <h3 class="text-lg font-bold text-gray-900">${esc(record ? record.title : 'Record')}</h3>
             <p class="text-sm text-gray-500 mt-0.5">${esc(state.hub.label || '')}</p>
           </div>
-          <button type="button" data-record-close class="text-gray-400 hover:text-gray-600 text-2xl leading-none cursor-pointer shrink-0">&times;</button>
+          <button type="button" data-record-close class="text-gray-500 hover:text-gray-600 text-2xl leading-none cursor-pointer shrink-0">&times;</button>
         </div>
         <div class="overflow-y-auto" data-record-body></div>
       </div>`;
@@ -3024,6 +3053,7 @@
         <div class="min-w-0">
           <h3 class="text-lg font-bold text-gray-900"${hub.explain ? ` data-explain="${esc(hub.explain)}"` : ''}>${esc(hub.label)}</h3>
           <p class="text-sm text-gray-500 mt-1 max-w-2xl">${esc(hub.description)}</p>
+          ${hub.descriptionMore ? `<details class="mt-1 max-w-2xl"><summary class="text-sm font-semibold text-gray-700 cursor-pointer">${esc(hub.descriptionMore.summary)}</summary><p class="text-sm text-gray-500 mt-1">${esc(hub.descriptionMore.text)}</p></details>` : ''}
         </div>
         <button type="button" id="datahub-create-post"
           class="btn-primary inline-flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap shrink-0">
@@ -3050,6 +3080,7 @@
         <div class="min-w-0">
           <h3 class="text-lg font-bold text-gray-900"${hub.explain ? ` data-explain="${esc(hub.explain)}"` : ''}>${esc(hub.label)}</h3>
           <p class="text-sm text-gray-500 mt-1 max-w-2xl">${esc(hub.description)}</p>
+          ${hub.descriptionMore ? `<details class="mt-1 max-w-2xl"><summary class="text-sm font-semibold text-gray-700 cursor-pointer">${esc(hub.descriptionMore.summary)}</summary><p class="text-sm text-gray-500 mt-1">${esc(hub.descriptionMore.text)}</p></details>` : ''}
         </div>
         <!-- flex-wrap, not nowrap: every button is whitespace-nowrap, so without it the row's
              min-content width is the SUM of all three (~425px on a 375px phone) and, since a flex
@@ -3141,7 +3172,7 @@
             <h3 class="text-lg font-bold text-gray-900">${esc(title)}</h3>
             ${subtitle ? `<p class="text-sm text-gray-500 mt-0.5">${esc(subtitle)}</p>` : ''}
           </div>
-          <button type="button" data-hubmodal-close class="text-gray-400 hover:text-gray-600 text-2xl leading-none cursor-pointer shrink-0">&times;</button>
+          <button type="button" data-hubmodal-close class="text-gray-500 hover:text-gray-600 text-2xl leading-none cursor-pointer shrink-0">&times;</button>
         </div>
         <div class="p-5 overflow-y-auto space-y-4" data-hubmodal-body>${bodyHtml}</div>
       </div>`;
@@ -3293,7 +3324,7 @@
         <div class="border border-gray-200 rounded-xl p-4">
           <p class="text-sm font-bold text-gray-900">Or send them across automatically</p>
           <p class="text-xs text-gray-500 mt-0.5">Connect your CRM once and every lead you approve is pushed over with its score, summary and where it came from &mdash; no file, no re-import.</p>
-          <div class="mt-2" data-recipes><p class="text-xs text-gray-400 py-3">Checking your connections…</p></div>
+          <div class="mt-2" data-recipes><p class="text-xs text-gray-500 py-3">Checking your connections…</p></div>
         </div>`,
     });
 
@@ -3369,7 +3400,7 @@
             <h3 class="text-lg font-bold text-gray-900">Add a lead</h3>
             <p class="text-sm text-gray-500 mt-0.5">The Lead Generation Assistant scores it against your ideal customer profile as it's saved.</p>
           </div>
-          <button type="button" data-add-close class="text-gray-400 hover:text-gray-600 text-2xl leading-none cursor-pointer">&times;</button>
+          <button type="button" data-add-close class="text-gray-500 hover:text-gray-600 text-2xl leading-none cursor-pointer">&times;</button>
         </div>
         <form data-add-form class="p-5 space-y-4">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -3504,7 +3535,7 @@
       <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div class="flex items-start justify-between gap-4 p-5 border-b border-gray-100">
           <h3 class="text-lg font-bold text-gray-900">Edit lead</h3>
-          <button type="button" data-edit-close class="text-gray-400 hover:text-gray-600 text-2xl leading-none cursor-pointer">&times;</button>
+          <button type="button" data-edit-close class="text-gray-500 hover:text-gray-600 text-2xl leading-none cursor-pointer">&times;</button>
         </div>
         <form data-edit-form class="p-5 space-y-4">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -3590,7 +3621,7 @@
     state.returnedNotice = null;
     renderToolbar();
     const host = document.getElementById('datahub-table-host');
-    if (host) host.innerHTML = '<p class="text-sm text-gray-400">Loading…</p>';
+    if (host) host.innerHTML = '<p class="text-sm text-gray-500">Loading…</p>';
     try {
       await fetchRecords();
       renderTable();

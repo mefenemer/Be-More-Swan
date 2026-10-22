@@ -38,7 +38,7 @@
  * `sequence_enrolments` and the LEAD record's `data`, both through their own owners' helpers.
  *
  * ── Reading the list ─────────────────────────────────────────────────────────
- * Search / per-column filters / group-by / sort / paging, matching the Enrichment tab
+ * Search / per-column filters / group-by / sort / paging, matching the Found leads tab
  * (assistant-data-hub.js) control for control, because they are the same job on the same funnel and
  * two different answers to "how do I find the one I want?" is one answer too many. As there, every
  * control compares the RENDERED cell — the string in the column — which is the only definition that
@@ -72,7 +72,7 @@
    */
   const MAX_THREADS = 1000;
 
-  /** Rows per page. Matches the Enrichment tab, for the same reason: one row is one line. */
+  /** Rows per page. Matches the Found leads tab, for the same reason: one row is one line. */
   const ROWS_PER_PAGE = 25;
 
   let state = {
@@ -229,7 +229,7 @@
 
   // ── The columns ────────────────────────────────────────────────────────────
   //
-  // Declared as data, exactly like the Enrichment tab's hub.columns, because everything below —
+  // Declared as data, exactly like the Found leads tab's hub.columns, because everything below —
   // the filter dropdowns, the group-by menu, the sort headings, the search haystack — is generic
   // over this list. Adding a column is one entry here and one case in cellValue().
   //
@@ -338,7 +338,7 @@
   }
 
   /**
-   * Which columns get a dropdown. Same rule as the Enrichment tab: a <select> beats the search box
+   * Which columns get a dropdown. Same rule as the Found leads tab: a <select> beats the search box
    * only while the list is short enough to read, so the one-value-per-row columns (Lead, Last
    * activity) are covered by the search box instead.
    */
