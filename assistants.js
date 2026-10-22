@@ -12311,6 +12311,20 @@ document.addEventListener('assistant:scheduleChanged', (e) => {
     window._renderAutopilotCard?.(data);
 });
 
+// The "Use for this assistant" switches changed — from the chat's platforms card, or from the switch
+// itself (integrations.js). Both save through update-assistant-context.ts, but this page's autosave
+// spreads its OWN copy of the context and configuration back over the row, so without this the next
+// autosave here would put the old switches back. integrations.js repaints the switches.
+document.addEventListener('assistant:platformsChanged', (e) => {
+    const id = Number(e.detail?.assistantId);
+    const data = window._detailCurrentData;
+    if (!id || Number(window._currentAssistantId) !== id || !data || !Array.isArray(e.detail?.linked_integrations)) return;
+    const linked = e.detail.linked_integrations;
+    data.context = { ...(data.context || {}), primary_platforms: e.detail.primary_platforms || [], linked_integrations: linked };
+    const cfg = data.configuration || {};
+    data.configuration = { ...cfg, appliedDefaults: { ...(cfg.appliedDefaults || {}), platforms: linked } };
+});
+
 // A rule changed from the assistant's chat (rule card → chat-session.js → content-rules.ts). Reload
 // both lists that show rules if this page is that assistant's. Bound once at load on document.
 document.addEventListener('assistant:rulesChanged', (e) => {

@@ -76,6 +76,7 @@ import { buildRulesListBlock, resolveRuleProposal, ruleProposalFromUiElement, ru
 import { buildPlanSnapshot } from '../../src/utils/chat-plan-snapshot';
 import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGoalProposal, type GoalCard } from '../../src/utils/chat-goals';
 import { resolveScheduleProposal, scheduleProposalFromUiElement, schedulePromptBlock, type ScheduleCard } from '../../src/utils/chat-schedule';
+import { buildPlatformsBlock, platformsProposalFromUiElement, resolvePlatformsProposal, type PlatformsCard } from '../../src/utils/chat-platforms';
 import { isInOutreachReview } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
 import { LOSS_REASONS } from '../../src/config/revenue-events';
@@ -2854,7 +2855,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const goalsBlock = await buildGoalsBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey);
     const goalsCardBlock = route !== defaultRoute ? goalsPromptBlock() : null;
     const scheduleBlock = route !== defaultRoute ? schedulePromptBlock(assistantRow.roleKey, assistantRow.onboardingContext) : null;
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, scheduleBlock].filter(Boolean).join('\n\n');
+    // The "Use for this assistant" switches, for the roles whose Connections card shows them
+    // (src/utils/chat-platforms.ts). Null for every other role; never throws.
+    const platformsBlock = route !== defaultRoute ? await buildPlatformsBlock(db, orgId, userId, session.aiAssistantId) : null;
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, scheduleBlock, platformsBlock].filter(Boolean).join('\n\n');
 
     const system = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -3093,8 +3097,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             uiElement = scheduleCard;
             if (!scheduleCard) content = 'I couldn’t read your posting schedule just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Profile.';
         }
+        // Which connected platforms it posts to (src/utils/chat-platforms.ts) — the click saves through
+        // update-assistant-context.ts exactly as the "Use for this assistant" switch does.
+        let platformsCard: PlatformsCard | null = null;
+        const platformsReq = route !== defaultRoute && !settingsReq && !ruleReq && !goalReq && !scheduleReq ? platformsProposalFromUiElement(uiElement) : null;
+        if (platformsReq) {
+            platformsCard = await resolvePlatformsProposal(db, orgId, userId, session.aiAssistantId, platformsReq);
+            uiElement = platformsCard;
+            if (!platformsCard) content = 'I couldn’t read your connections just now, so I haven’t changed anything. Please try again in a moment, or use Assistant Profile ▸ Connections.';
+        }
         // One card for the "keep it" checks below: a change to the assistant's own profile.
-        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard;
+        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard;
         // The Blog Writer's twin (src/utils/chat-blog-action.ts): same checks, built from blog_posts
         // rows; a time in the user's words is worked out here so the card shows the exact instant.
         let blogAction: BlogActionCard | null = null;

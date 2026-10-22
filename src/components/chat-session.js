@@ -1079,6 +1079,38 @@
       }
     }
 
+    // Platforms cards → update-assistant-context.ts, exactly as the "Use for this assistant" switch saves
+    // (integrations.js _intToggleUseForAssistant). The context is replaced wholesale, so read it NOW; and
+    // if the switches moved since the card was drawn, refuse rather than overwrite them.
+    async function onPlatformsChange(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const id = Number(d.assistantId);
+      try {
+        const got = await fetch(`/.netlify/functions/get-assistant-context?id=${id}`, { credentials: 'same-origin' });
+        const data = await got.json().catch(() => ({}));
+        if (!got.ok || !data || typeof data.context !== 'object') throw new Error(data.error || 'Your connections couldn’t be read just now — please try again.');
+        const ids = new Set();
+        for (const list of [data.context?.linked_integrations, data.configuration?.appliedDefaults?.platforms]) {
+          if (Array.isArray(list)) list.map(Number).filter((n) => Number.isInteger(n) && n !== 0).forEach((n) => ids.add(n));
+        }
+        const now = [...ids].sort((a, b) => a - b).join();
+        if (now !== (d.before || []).join()) throw new Error('The switches have changed since I made this card — ask me again.');
+        const linked = (d.linked || []).map(Number);
+        const codes = d.codes || [];
+        const res = await fetch('/.netlify/functions/update-assistant-context', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify({ assistantId: id, newContext: { ...data.context, primary_platforms: codes, linked_integrations: linked }, appliedDefaults: { platforms: linked } }),
+        });
+        const out = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(out.error || `That didn’t work (HTTP ${res.status}).`);
+        respond({ ok: true, message: 'Saved — new drafts go to these platforms.' });
+        document.dispatchEvent(new CustomEvent('assistant:platformsChanged', { detail: { assistantId: id, primary_platforms: codes, linked_integrations: linked } }));
+      } catch (err) {
+        respond({ ok: false, error: err.message });
+      }
+    }
+
     async function onLeadAction(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -1630,6 +1662,7 @@
     container.addEventListener('rule:change', onRuleChange);
     container.addEventListener('goal:change', onGoalChange);
     container.addEventListener('schedule:change', onScheduleChange);
+    container.addEventListener('platforms:change', onPlatformsChange);
     container.addEventListener('brief:review', onBriefReview);
     container.addEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
     container.addEventListener('siteaudit:check', onSiteAuditCheck);
@@ -1698,6 +1731,7 @@
         container.removeEventListener('rule:change', onRuleChange);
         container.removeEventListener('goal:change', onGoalChange);
         container.removeEventListener('schedule:change', onScheduleChange);
+        container.removeEventListener('platforms:change', onPlatformsChange);
         container.removeEventListener('brief:review', onBriefReview);
         container.removeEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
         container.removeEventListener('siteaudit:check', onSiteAuditCheck);

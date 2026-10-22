@@ -3503,6 +3503,55 @@
   }
 
   register('schedule_proposal', renderScheduleProposalCard);
+
+  // ── Built-in: Platforms Proposal Card (chats whose Connections card has the switches) ────
+  // { type: 'platforms_proposal', assistantId, nowOn, afterOn, changes, before, linked, codes, blocked, settled? }
+  // Built by src/utils/chat-platforms.ts. The click dispatches `platforms:change`; chat-session.js
+  // saves the lists through update-assistant-context.ts, as the "Use for this assistant" switch does.
+  function renderPlatformsProposalCard(ui, esc) {
+    const assistantId = Number(ui.assistantId);
+    if (!Number.isInteger(assistantId) || !Array.isArray(ui.linked)) return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const list = (a) => (Array.isArray(a) && a.length ? a.map((x) => esc(String(x))).join(', ') : 'none');
+    const changes = Array.isArray(ui.changes) ? ui.changes : [];
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Where I post · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      ${!blocked && changes.length ? `<ul class="mt-2 space-y-1">${changes.map((c) => `<li class="text-sm text-gray-900 break-words"><span class="font-bold">${c.on ? 'Turn on' : 'Turn off'}:</span> ${esc(String(c.platform))}</li>`).join('')}</ul>` : ''}
+      <p class="text-sm text-gray-700 mt-2 break-words"><span class="font-bold">On now:</span> ${list(ui.nowOn)}</p>
+      ${!blocked ? `<p class="text-sm text-gray-900 mt-1 break-words"><span class="font-bold">After:</span> ${list(ui.afterOn)}</p>` : ''}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${!blocked ? '<p class="text-xs text-gray-600 mt-3">New drafts follow this from now on. Posts already drafted or booked keep their place.</p>' : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-pp-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save</button>
+        <button type="button" data-pp-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-pp-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-pp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-pp-go], [data-pp-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-pp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-pp-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('platforms:change', {
+        bubbles: true,
+        detail: {
+          assistantId, before: ui.before || [], linked: ui.linked, codes: ui.codes || [],
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Saved.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('platforms_proposal', renderPlatformsProposalCard);
   register('SocialPostDraftCard', renderSocialPostDraftCard);
 
   // ── Built-in: Blog Post Draft Card ──────────────────────────────────────────

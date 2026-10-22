@@ -616,6 +616,9 @@ window._intToggleUseForAssistant = async function (connId, checked) {
         });
         if (r.ok) {
             window.cachedContext = updatedContext;
+            // The detail page keeps its own copy for its autosave — tell it, or the next autosave
+            // there writes the old switches back (assistants.js, assistant:platformsChanged).
+            document.dispatchEvent(new CustomEvent('assistant:platformsChanged', { detail: { assistantId: Number(_selectedAssistantId), primary_platforms: checkedKeys, linked_integrations: checkedIds } }));
             _setPlatformSaveStatus('✓ Saved');
             setTimeout(() => {
                 const el = document.getElementById('platforms-save-status');
@@ -628,6 +631,17 @@ window._intToggleUseForAssistant = async function (connId, checked) {
         _setPlatformSaveStatus('Error saving');
     }
 };
+
+// The switches changed from the assistant's chat (platforms card → update-assistant-context.ts).
+// Repaint them if this is that assistant's Connections card. Bound once at load on document; also
+// fired by the switch itself above, where the state is already current and this is a no-op redraw.
+document.addEventListener('assistant:platformsChanged', (e) => {
+    const d = e.detail || {};
+    if (!_assistantScoped || Number(_selectedAssistantId) !== Number(d.assistantId) || !Array.isArray(d.linked_integrations)) return;
+    _assistantSelectedIds = new Set(d.linked_integrations.map(Number));
+    window.cachedContext = { ...(window.cachedContext || {}), primary_platforms: d.primary_platforms || [], linked_integrations: d.linked_integrations };
+    _renderConnectionsGrid();
+});
 
 // ── Load & render platform cards ─────────────────────────────────
 async function _loadConnections() {
