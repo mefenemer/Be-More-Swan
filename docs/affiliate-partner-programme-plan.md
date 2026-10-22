@@ -217,7 +217,9 @@ no consent banner question. Three routes in:
 - On every paid invoice (both first-payment paths and `invoice.paid`), with `amount > 0`:
   referred user → approved partner → within the locked duration from `subscribed_at` → commission
   at the **locked** rate → insert `pending` with `available_at = now + holding_days`. Commission is
-  on the subtotal **excluding VAT**.
+  on the subtotal **excluding VAT**, **after costs** (owner 2026-10-22, Partner Terms 1.1): each rate
+  period carries a `cost_deduction_bps` (default 20%) taken off first, locked onto the customer with
+  the rate — `floor(net × (1 − deduction) × rate)`. `db/z-affiliate-partner-cost-deduction.sql`.
 - `charge.refunded` / `charge.dispute.created` → void pending or payable rows. Already paid → a
   negative adjustment carried into the next payout.
 - Nightly: `pending` past `available_at` → `payable`. Add to the existing nightly sweep, and ⚠️

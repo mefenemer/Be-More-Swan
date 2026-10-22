@@ -8,7 +8,7 @@
 // bound to fail; admin-partners.ts checks again when it is clicked (state may have moved on).
 // Pure — the caller loads the periods and partners.
 
-import { ukMidnightUtc, validatePeriodChanges, type PeriodChange, type RatePeriod } from './partner-rate-periods';
+import { DEFAULT_COST_DEDUCTION_BPS, ukMidnightUtc, validatePeriodChanges, type PeriodChange, type RatePeriod } from './partner-rate-periods';
 import { validatePartnerCode } from './invite-codes';
 
 export interface PartnerLite { id: number; status: string; name: string | null; email: string | null; hasAccount?: boolean }
@@ -44,6 +44,16 @@ function toBps(ratePercent: unknown): number | null {
     const n = Number(ratePercent);
     return Number.isFinite(n) && n >= 0 && n <= 100 ? Math.round(n * 100) : null;
 }
+/** Not given → the programme's newest deduction, so a new rate keeps the costs basis partners were told. */
+function toDeductionBps(costDeductionPercent: unknown, periods: RatePeriod[]): number | null {
+    if (costDeductionPercent == null || costDeductionPercent === '') {
+        const latest = [...periods.filter((p) => p.partnerId === null)].sort((a, b) => +a.startsAt - +b.startsAt).pop();
+        return latest?.costDeductionBps ?? DEFAULT_COST_DEDUCTION_BPS;
+    }
+    const n = Number(costDeductionPercent);
+    return Number.isFinite(n) && n >= 0 && n < 100 ? Math.round(n * 100) : null;
+}
+const afterCosts = (bps: number) => bps > 0 ? ` of what each customer pays after a ${pct(bps)} cost deduction` : ' of what each customer pays';
 function toMonths(m: unknown): number | null | 'invalid' {
     if (m == null) return null;
     const n = Number(m);
@@ -57,8 +67,8 @@ function checkRates(periods: RatePeriod[], partnerId: number | null, changes: Ar
         const ex = c.op === 'update' ? scope.find((p) => p.id === c.id) : undefined;
         const day = (v: unknown, keep: Date | null | undefined) => v === undefined ? keep ?? null : (v === null ? null : ukMidnightUtc(String(v)));
         return c.op === 'update'
-            ? { op: 'update', id: c.id, period: { partnerId, rateBps: c.period.rateBps ?? ex!.rateBps, durationMonths: c.period.durationMonths === undefined ? ex!.durationMonths : c.period.durationMonths, startsAt: day(c.period.startsOn, ex?.startsAt)!, endsAt: day(c.period.endsOn, ex?.endsAt) } }
-            : { op: 'create', period: { partnerId, rateBps: c.period.rateBps, durationMonths: c.period.durationMonths, startsAt: day(c.period.startsOn, null)!, endsAt: day(c.period.endsOn, null) } };
+            ? { op: 'update', id: c.id, period: { partnerId, rateBps: c.period.rateBps ?? ex!.rateBps, costDeductionBps: c.period.costDeductionBps ?? ex!.costDeductionBps, durationMonths: c.period.durationMonths === undefined ? ex!.durationMonths : c.period.durationMonths, startsAt: day(c.period.startsOn, ex?.startsAt)!, endsAt: day(c.period.endsOn, ex?.endsAt) } }
+            : { op: 'create', period: { partnerId, rateBps: c.period.rateBps, costDeductionBps: c.period.costDeductionBps, durationMonths: c.period.durationMonths, startsAt: day(c.period.startsOn, null)!, endsAt: day(c.period.endsOn, null) } };
     });
     if (parsed.some((c) => c.op !== 'delete' && !c.period.startsAt)) return ['That is not a real date — use YYYY-MM-DD.'];
     return validatePeriodChanges(scope, parsed, now);
@@ -82,40 +92,44 @@ export function proposeDecision(partners: PartnerLite[], input: { partnerId: unk
         request: { action: 'decide', partnerId: p.id, decision, note } } };
 }
 
-export function proposeProgrammeRate(periods: RatePeriod[], input: { ratePercent: unknown; durationMonths: unknown; startsOn: unknown }, now = new Date()): ProposalResult {
+export function proposeProgrammeRate(periods: RatePeriod[], input: { ratePercent: unknown; costDeductionPercent?: unknown; durationMonths: unknown; startsOn: unknown }, now = new Date()): ProposalResult {
     const rateBps = toBps(input.ratePercent);
+    const costDeductionBps = toDeductionBps(input.costDeductionPercent, periods);
     const durationMonths = toMonths(input.durationMonths);
     const startsOn = String(input.startsOn ?? '');
     if (rateBps === null) return { error: 'The rate must be between 0% and 100%.' };
+    if (costDeductionBps === null) return { error: 'The cost deduction must be at least 0% and less than 100%.' };
     if (durationMonths === 'invalid') return { error: 'The length must be 1–120 months, or null for lifetime.' };
     if (!ukMidnightUtc(startsOn)) return { error: 'The start date must be a real date, YYYY-MM-DD.' };
     const latest = [...periods.filter((p) => p.partnerId === null)].sort((a, b) => +a.startsAt - +b.startsAt).pop();
     const changes: Array<Record<string, any>> = [];
     if (latest) changes.push({ op: 'update', id: latest.id, period: { endsOn: startsOn } });
-    changes.push({ op: 'create', period: { rateBps, durationMonths, startsOn, endsOn: null, label: null } });
+    changes.push({ op: 'create', period: { rateBps, costDeductionBps, durationMonths, startsOn, endsOn: null, label: null } });
     const errors = checkRates(periods, null, changes, now);
     if (errors.length) return { error: errors.join(' ') };
     return { card: { kind: 'programme_rate', title: `Programme rate ${pct(rateBps)} from ${ukDate(startsOn)}`,
-        summary: `New partner customers who first pay from ${ukDate(startsOn)} earn their partner ${pct(rateBps)} ${len(durationMonths)}. The current rate ends that day; customers who already paid keep their rate.`,
+        summary: `New partner customers who first pay from ${ukDate(startsOn)} earn their partner ${pct(rateBps)}${afterCosts(costDeductionBps)}, ${len(durationMonths)}. The current rate ends that day; customers who already paid keep their rate.`,
         request: { action: 'rates', partnerId: null, changes } } };
 }
 
 export function proposeSpecialRate(periods: RatePeriod[], partners: PartnerLite[],
-    input: { partnerId: unknown; ratePercent: unknown; durationMonths: unknown; startsOn: unknown; endsOn: unknown }, now = new Date()): ProposalResult {
+    input: { partnerId: unknown; ratePercent: unknown; costDeductionPercent?: unknown; durationMonths: unknown; startsOn: unknown; endsOn: unknown }, now = new Date()): ProposalResult {
     const p = partners.find((x) => x.id === Number(input.partnerId));
     if (!p) return { error: `There is no partner #${input.partnerId}.` };
     const rateBps = toBps(input.ratePercent);
+    const costDeductionBps = toDeductionBps(input.costDeductionPercent, periods);
     const durationMonths = toMonths(input.durationMonths);
     const startsOn = String(input.startsOn ?? '');
     const endsOn = input.endsOn == null || input.endsOn === '' ? null : String(input.endsOn);
     if (rateBps === null) return { error: 'The rate must be between 0% and 100%.' };
+    if (costDeductionBps === null) return { error: 'The cost deduction must be at least 0% and less than 100%.' };
     if (durationMonths === 'invalid') return { error: 'The length must be 1–120 months, or null for lifetime.' };
     if (!ukMidnightUtc(startsOn) || (endsOn && !ukMidnightUtc(endsOn))) return { error: 'Dates must be real dates, YYYY-MM-DD.' };
-    const changes = [{ op: 'create', period: { rateBps, durationMonths, startsOn, endsOn, label: null } }];
+    const changes = [{ op: 'create', period: { rateBps, costDeductionBps, durationMonths, startsOn, endsOn, label: null } }];
     const errors = checkRates(periods, p.id, changes, now);
     if (errors.length) return { error: errors.join(' ') };
     return { card: { kind: 'special_rate', title: `${pct(rateBps)} special rate for ${who(p)}`,
-        summary: `Their new customers who first pay from ${ukDate(startsOn)}${endsOn ? ` until ${ukDate(endsOn)}` : ''} earn them ${pct(rateBps)} ${len(durationMonths)}, instead of the programme rate.`,
+        summary: `Their new customers who first pay from ${ukDate(startsOn)}${endsOn ? ` until ${ukDate(endsOn)}` : ''} earn them ${pct(rateBps)}${afterCosts(costDeductionBps)}, ${len(durationMonths)}, instead of the programme rate.`,
         request: { action: 'rates', partnerId: p.id, changes } } };
 }
 

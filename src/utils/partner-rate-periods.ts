@@ -11,7 +11,8 @@
 //   - no two periods in the same scope (programme-wide, or one partner) overlap;
 //   - programme-wide periods have no gaps, and the latest is open-ended — some programme rate
 //     always applies, so a customer can never land on "no rate";
-//   - once a period has started its rate, duration and start are frozen and it cannot be deleted;
+//   - once a period has started its rate, cost deduction, duration and start are frozen and it
+//     cannot be deleted;
 //     only its end date may move, and never into the past.
 //
 // Pure functions, no DB — the caller loads the periods and passes them in.
@@ -21,6 +22,7 @@ export interface RatePeriod {
     id: number;
     partnerId: number | null;
     rateBps: number;              // 2500 = 25%
+    costDeductionBps: number;     // taken off the payment for costs before the rate; 2000 = 20%
     durationMonths: number | null; // null = lifetime
     startsAt: Date;
     endsAt: Date | null;          // null = open-ended; exclusive
@@ -30,6 +32,7 @@ export interface RatePeriod {
 export interface LockedTerms {
     ratePeriodId: number;
     rateBps: number;
+    costDeductionBps: number;
     durationMonths: number | null;
 }
 
@@ -40,6 +43,8 @@ export type PeriodChange =
     | { op: 'delete'; id: number };
 
 export const MAX_RATE_BPS = 10000;
+/** Partner Terms 1.1 (owner 2026-10-22): 20% off for costs, unless a period says otherwise. */
+export const DEFAULT_COST_DEDUCTION_BPS = 2000;
 export const MAX_DURATION_MONTHS = 120;
 
 function covers(p: RatePeriod, at: Date): boolean {
@@ -63,7 +68,7 @@ export function resolvePeriodAt(periods: RatePeriod[], partnerId: number, at: Da
 }
 
 export function lockTerms(period: RatePeriod): LockedTerms {
-    return { ratePeriodId: period.id, rateBps: period.rateBps, durationMonths: period.durationMonths };
+    return { ratePeriodId: period.id, rateBps: period.rateBps, costDeductionBps: period.costDeductionBps, durationMonths: period.durationMonths };
 }
 
 /** Calendar months later, in UTC, clamped to the month's last day (31 Jan + 1 → 28/29 Feb). */
@@ -83,16 +88,24 @@ export function isWithinCommissionWindow(subscribedAt: Date, durationMonths: num
     return paidAt.getTime() < addMonthsUtc(subscribedAt, durationMonths).getTime();
 }
 
-/** Commission on a payment excluding VAT. Rounded DOWN to the penny. */
-export function commissionPence(netAmountPence: number, rateBps: number): number {
-    if (netAmountPence <= 0 || rateBps <= 0) return 0;
-    return Math.floor((netAmountPence * rateBps) / MAX_RATE_BPS);
+/**
+ * Commission on a payment excluding VAT, after costs: the cost deduction comes off the payment
+ * first, then the rate applies to what is left. One rounding, DOWN to the penny.
+ * £79 net, 20% costs, 50% rate → floor(7900 × 0.8 × 0.5) = 3160p.
+ */
+export function commissionPence(netAmountPence: number, rateBps: number, costDeductionBps = 0): number {
+    if (netAmountPence <= 0 || rateBps <= 0 || costDeductionBps >= MAX_RATE_BPS) return 0;
+    const afterCosts = MAX_RATE_BPS - Math.max(0, costDeductionBps);
+    return Math.floor((netAmountPence * afterCosts * rateBps) / (MAX_RATE_BPS * MAX_RATE_BPS));
 }
 
 function shapeErrors(p: Omit<RatePeriod, 'id'>): string[] {
     const errors: string[] = [];
     if (!Number.isInteger(p.rateBps) || p.rateBps < 0 || p.rateBps > MAX_RATE_BPS) {
         errors.push('The rate must be between 0% and 100%.');
+    }
+    if (!Number.isInteger(p.costDeductionBps) || p.costDeductionBps < 0 || p.costDeductionBps >= MAX_RATE_BPS) {
+        errors.push('The cost deduction must be at least 0% and less than 100%.');
     }
     if (p.durationMonths !== null
         && (!Number.isInteger(p.durationMonths) || p.durationMonths < 1 || p.durationMonths > MAX_DURATION_MONTHS)) {
@@ -145,8 +158,9 @@ export function validatePeriodChanges(existing: RatePeriod[], changes: PeriodCha
         errors.push(...shapeErrors(next));
         if (current && !sameScope(current, next)) errors.push('A period cannot be moved between partners.');
         if (current && started) {
-            if (next.rateBps !== current.rateBps || next.durationMonths !== current.durationMonths) {
-                errors.push('This period has started, so its rate and length are fixed — end it and add a new period instead.');
+            if (next.rateBps !== current.rateBps || next.costDeductionBps !== current.costDeductionBps
+                || next.durationMonths !== current.durationMonths) {
+                errors.push('This period has started, so its rate, cost deduction and length are fixed — end it and add a new period instead.');
             }
             if (next.startsAt.getTime() !== current.startsAt.getTime()) {
                 errors.push('This period has started, so its start date is fixed.');

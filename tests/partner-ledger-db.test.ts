@@ -117,6 +117,21 @@ async function main() {
             assert.ok(out2.recorded, 'lifetime duration from the partner period keeps earning');
         });
 
+        await check('commission is after costs: the period\'s deduction is locked on the customer and comes off before the rate', async () => {
+            await sql.unsafe(`INSERT INTO partner_rate_periods (partner_id, rate_bps, cost_deduction_bps, duration_months, starts_at, ends_at)
+                              VALUES (${p1.id}, 5000, 2000, 12, '2027-03-01', NULL)`);
+            await sql.unsafe(`INSERT INTO user_referrals (referrer_id, referred_user_id, referral_code) VALUES (100, 206, 'p1')`);
+            const out = await pay(206, 'in_k1', 7900, d('2027-03-10'));
+            assert.ok(out.recorded && out.commissionPence === 3160, JSON.stringify(out));   // £79 − 20% = £63.20 × 50%
+            const [row] = await commissions('in_k1');
+            assert.strictEqual(row.cost_deduction_bps, 2000);
+            assert.strictEqual(row.net_amount_pence, 7900);                                   // the customer's payment, before costs
+            const [pr] = await sql.unsafe(`SELECT pr.* FROM partner_referrals pr JOIN user_referrals ur ON ur.id = pr.referral_id WHERE ur.referred_user_id = 206`);
+            assert.strictEqual(pr.cost_deduction_bps, 2000);
+            await reversePartnerCommission(db, { paymentIntentId: 'pi_in_k1', amountRefundedPence: 900, kind: 'refund' });
+            assert.strictEqual((await commissions('in_k1'))[0].commission_pence, 2800);     // (7900 − 900) × 0.8 × 0.5
+        });
+
         await check('nothing is earned once the 12-month window has passed', async () => {
             assert.deepStrictEqual(await pay(200, 'in_a13', 2900, d('2027-11-05')), { recorded: false, reason: 'outside_window' });
             assert.ok((await pay(200, 'in_a12', 2900, d('2027-10-05'))).recorded, 'month 12 still earns');

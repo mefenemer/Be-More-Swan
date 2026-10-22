@@ -36,8 +36,8 @@ const api = read('netlify/functions/admin-partners.ts');
 const html = read('admin.html');
 
 const NOW = new Date('2026-11-20T12:00:00Z');
-const LAUNCH: RatePeriod = { id: 1, partnerId: null, rateBps: 2500, durationMonths: 12, startsAt: new Date('2026-10-18T00:00:00Z'), endsAt: null };
-const VIP: RatePeriod = { id: 2, partnerId: 7, rateBps: 3000, durationMonths: null, startsAt: new Date('2026-11-01T00:00:00Z'), endsAt: new Date('2027-01-01T00:00:00Z') };
+const LAUNCH: RatePeriod = { id: 1, partnerId: null, rateBps: 2500, costDeductionBps: 0, durationMonths: 12, startsAt: new Date('2026-10-18T00:00:00Z'), endsAt: null };
+const VIP: RatePeriod = { id: 2, partnerId: 7, rateBps: 3000, costDeductionBps: 0, durationMonths: null, startsAt: new Date('2026-11-01T00:00:00Z'), endsAt: new Date('2027-01-01T00:00:00Z') };
 const PARTNERS: PartnerLite[] = [
     { id: 7, status: 'approved', name: 'Sam Partner', email: 'sam@example.com' },
     { id: 8, status: 'applied', name: null, email: 'jo@example.com' },
@@ -62,8 +62,18 @@ check('a programme rate ends the latest period and starts the new one — sendin
     const c = card(proposeProgrammeRate([LAUNCH, VIP], { ratePercent: 20, durationMonths: 12, startsOn: '2026-12-01' }, NOW));
     assert.deepStrictEqual(c.request, { action: 'rates', partnerId: null, changes: [
         { op: 'update', id: 1, period: { endsOn: '2026-12-01' } },
-        { op: 'create', period: { rateBps: 2000, durationMonths: 12, startsOn: '2026-12-01', endsOn: null, label: null } },
+        { op: 'create', period: { rateBps: 2000, costDeductionBps: 0, durationMonths: 12, startsOn: '2026-12-01', endsOn: null, label: null } },
     ] });
+});
+
+check('a new rate keeps the programme cost deduction unless one is given, and the card says commission is after costs', () => {
+    const withCosts: RatePeriod = { ...LAUNCH, costDeductionBps: 2000 };
+    const kept = card(proposeProgrammeRate([withCosts], { ratePercent: 30, durationMonths: 12, startsOn: '2026-12-01' }, NOW));
+    assert.strictEqual((kept.request as any).changes[1].period.costDeductionBps, 2000);
+    assert.match(kept.summary, /30% of what each customer pays after a 20% cost deduction/);
+    const angela = card(proposeSpecialRate([withCosts], PARTNERS, { partnerId: 7, ratePercent: 50, costDeductionPercent: 20, durationMonths: 12, startsOn: '2026-12-01', endsOn: null }, NOW));
+    assert.strictEqual((angela.request as any).changes[0].period.costDeductionBps, 2000);
+    assert.match(err(proposeSpecialRate([withCosts], PARTNERS, { partnerId: 7, ratePercent: 50, costDeductionPercent: 100, durationMonths: 12, startsOn: '2026-12-01', endsOn: null }, NOW)), /cost deduction/);
 });
 
 check('a programme rate in the past is refused before any card is shown', () => {
@@ -74,7 +84,7 @@ check('a programme rate in the past is refused before any card is shown', () => 
 check('a special rate that overlaps an existing one is refused; a clear one is offered', () => {
     assert.match(err(proposeSpecialRate([LAUNCH, VIP], PARTNERS, { partnerId: 7, ratePercent: 35, durationMonths: null, startsOn: '2026-12-15', endsOn: null }, NOW)), /overlap/);
     const c = card(proposeSpecialRate([LAUNCH, VIP], PARTNERS, { partnerId: 7, ratePercent: 35, durationMonths: 6, startsOn: '2027-01-01', endsOn: '2027-02-01' }, NOW));
-    assert.deepStrictEqual(c.request, { action: 'rates', partnerId: 7, changes: [{ op: 'create', period: { rateBps: 3500, durationMonths: 6, startsOn: '2027-01-01', endsOn: '2027-02-01', label: null } }] });
+    assert.deepStrictEqual(c.request, { action: 'rates', partnerId: 7, changes: [{ op: 'create', period: { rateBps: 3500, costDeductionBps: 0, durationMonths: 6, startsOn: '2027-01-01', endsOn: '2027-02-01', label: null } }] });
 });
 
 check("ending a partner's special rate sends only the new end date", () => {

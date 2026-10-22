@@ -65,11 +65,11 @@ export default withLambda(async (event) => {
                 partnerCode: p.status === 'approved' ? p.promoCode : null,
             } : null,
             terms: current ? {
-                rateBps: current.rateBps, durationMonths: current.durationMonths,
+                rateBps: current.rateBps, costDeductionBps: current.costDeductionBps, durationMonths: current.durationMonths,
                 special: current.partnerId === p.id, specialUntil: current.partnerId === p.id ? current.endsAt : null,
             } : null,
             stats, commissions: commissions.map((c) => ({
-                id: c.id, kind: c.kind, status: c.status, amountPence: c.commission_pence, rateBps: c.rate_bps,
+                id: c.id, kind: c.kind, status: c.status, amountPence: c.commission_pence, rateBps: c.rate_bps, costDeductionBps: c.cost_deduction_bps ?? 0,
                 availableAt: c.available_at, createdAt: c.created_at, paidAt: c.paid_at, voidReason: c.void_reason,
                 customer: c.kind === 'invoice' && c.customer_no ? `Customer ${c.customer_no}` : null,
             })),

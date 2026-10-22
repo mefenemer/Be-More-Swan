@@ -4,7 +4,7 @@
 // hard-coding "25%" in the page would go stale the first time one is scheduled (memory
 // public-copy-claims-vs-system).
 //
-//   GET → { rateBps, durationMonths, minPayoutPence, holdingDays } | { rateBps: null }
+//   GET → { rateBps, costDeductionBps, durationMonths, minPayoutPence, holdingDays } | { rateBps: null }
 //
 // Programme-wide rate only — partners' special rates are private.
 
@@ -24,6 +24,7 @@ export default withLambda(async (event) => {
         const [settings] = await db.select().from(partnerProgrammeSettings).where(eq(partnerProgrammeSettings.id, 1)).limit(1);
         return { statusCode: 200, headers, body: JSON.stringify({
             rateBps: current?.rateBps ?? null,
+            costDeductionBps: current?.costDeductionBps ?? null,
             durationMonths: current ? current.durationMonths : null,
             minPayoutPence: settings?.minPayoutPence ?? null,
             holdingDays: settings?.holdingDays ?? null,

@@ -38,7 +38,7 @@ check('the page states the version and date the code records, and stays out of t
 });
 
 check('it says what we decided: ad labels, no voucher sites, rates fixed per customer, holding period, minimum, forfeit on fraud', () => {
-    for (const phrase of ['clearly identifiable as advertising', 'coupon, voucher, deal or cashback sites', 'a change never reduces the rate on customers who have already paid',
+    for (const phrase of ['clearly identifiable as advertising', 'coupon, voucher, deal or cashback sites', 'a change never reduces the rate, or increases the cost deduction, on customers who have already paid', 'Commission is worked out after costs',
         'holding period', 'currently £50', 'forfeited', 'excluding VAT', 'England and Wales']) {
         assert.ok(terms.includes(phrase), `missing: ${phrase}`);
     }
