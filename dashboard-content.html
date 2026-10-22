@@ -203,7 +203,7 @@
       <div class="dw-tray-head">
         <div>
           <h4 class="dw-tray-title">Widget library</h4>
-          <p class="dw-tray-sub">Toggle widgets on or off, then drag cards to reorder.</p>
+          <p class="dw-tray-sub">Turn widgets on or off. Reorder with the arrows, or drag the cards.</p>
         </div>
         <button id="dw-tray-close" type="button" class="dw-tray-close">Done</button>
       </div>
@@ -761,6 +761,12 @@
     box-shadow: -20px 0 50px -20px rgba(0,0,0,0.4); transform: translateX(100%);
     transition: transform .28s cubic-bezier(.2,.8,.2,1); display: flex; flex-direction: column; }
   .dw-tray.open { transform: none; }
+  .dw-move { display: inline-flex; gap: 2px; flex: none; }
+  .dw-move button { width: 36px; height: 36px; border: 1px solid #e5e7eb; background: #fff; border-radius: 8px; font-size: 15px; color: #334155; cursor: pointer; }
+  .dw-move button:hover:not(:disabled) { background: #f6f3eb; }
+  .dw-move button:disabled { opacity: .35; cursor: default; }
+  @media (max-width: 639px) { .dw-move button { width: 44px; height: 44px; } }
+  .dw-move button:focus-visible { outline: 2px solid #ff007f; outline-offset: 1px; }
   /* Closed, it sits just past the right edge — without this its shadow bled onto the page. */
   .dw-tray:not(.open) { box-shadow: none; }
   .dw-tray-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 20px; border-bottom: 1px solid #f1f5f9; }
@@ -837,23 +843,32 @@
       // properties of null (reading 'style')" into the error banner on whatever page came next
       // (2026-10-19). A grid no longer on the page has nothing to draw.
       if (!grid.isConnected) return;
-      grid.innerHTML = '';
-      const enabled = layout.filter(w => w.enabled);
+      const enabled = layout.filter(w => w.enabled && CATALOG[w.key]);
       // Drive visibility via inline style (not Tailwind .hidden) so it works regardless
       // of whether the prebuilt CSS has the utility compiled.
       const empty = document.getElementById('dw-empty');
       if (empty) empty.style.display = enabled.length > 0 ? 'none' : 'block';
+      // Reconcile, don't rebuild (layout review, 2026-10-22): a card already on the page is kept and
+      // moved into place, so toggling one widget, reordering, or entering/leaving Customize fetches
+      // only a widget that has just appeared — it used to wipe the grid and refetch all of them.
+      const have = new Map([...grid.querySelectorAll('.dw-card')].map(c => [c.dataset.key, c]));
+      const want = new Set(enabled.map(w => w.key));
+      have.forEach((card, key) => { if (!want.has(key)) card.remove(); });
       enabled.forEach(w => {
-        const meta = CATALOG[w.key]; if (!meta) return;
-        const card = document.createElement('div');
-        card.className = 'dw-card'; card.dataset.key = w.key; card.draggable = editing;
-        card.innerHTML = `<button class="dw-card-remove" title="Remove" aria-label="Remove">×</button>
-          <div class="dw-card-head"><span class="dw-card-ico">${meta.icon}</span><span class="dw-card-title">${esc(meta.title)}</span></div>
-          <div class="dw-card-body"><div class="dw-skel" style="width:80%"></div><div class="dw-skel" style="width:55%"></div></div>`;
-        card.querySelector('.dw-card-remove').onclick = e => { e.stopPropagation(); toggle(w.key, false); };
-        grid.appendChild(card);
-        try { meta.render(card.querySelector('.dw-card-body')); } catch (_) {}
-        bindDnD(card);
+        let card = have.get(w.key);
+        if (!card) {
+          const meta = CATALOG[w.key];
+          card = document.createElement('div');
+          card.className = 'dw-card'; card.dataset.key = w.key;
+          card.innerHTML = `<button class="dw-card-remove" title="Remove" aria-label="Remove ${esc(meta.title)}">×</button>
+            <div class="dw-card-head"><span class="dw-card-ico">${meta.icon}</span><span class="dw-card-title">${esc(meta.title)}</span></div>
+            <div class="dw-card-body"><div class="dw-skel" style="width:80%"></div><div class="dw-skel" style="width:55%"></div></div>`;
+          card.querySelector('.dw-card-remove').onclick = e => { e.stopPropagation(); toggle(w.key, false); };
+          try { meta.render(card.querySelector('.dw-card-body')); } catch (_) {}
+          bindDnD(card);
+        }
+        card.draggable = editing;
+        grid.appendChild(card); // appends a new card, or moves an existing one into layout order
       });
       section.classList.toggle('editing', editing);
     }
@@ -861,6 +876,17 @@
     function toggle(key, on) {
       const item = layout.find(w => w.key === key); if (!item) return;
       item.enabled = on; renderGrid(); renderTray(); save();
+    }
+
+    // Reorder without dragging (layout review, 2026-10-22): HTML5 drag does nothing on a touch
+    // screen or from the keyboard, so the tray's up/down buttons move a widget one place.
+    function move(key, dir) {
+      const i = layout.findIndex(w => w.key === key);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= layout.length) return;
+      [layout[i], layout[j]] = [layout[j], layout[i]];
+      renderGrid(); renderTray(); save();
+      document.querySelector(`#dw-tray-list [data-dw-move="${key}"][data-dir="${dir}"]`)?.focus();
     }
 
     // ── AC2: drag-and-drop reorder with snap ──
@@ -892,13 +918,19 @@
     function renderTray() {
       const list = document.getElementById('dw-tray-list'); if (!list) return;
       list.innerHTML = '';
-      layout.forEach(w => {
-        const meta = CATALOG[w.key]; if (!meta) return;
+      const shown = layout.filter(w => CATALOG[w.key]);
+      shown.forEach((w, idx) => {
+        const meta = CATALOG[w.key];
         const row = document.createElement('div'); row.className = 'dw-tray-item';
         row.innerHTML = `<span class="ico">${meta.icon}</span>
           <div class="meta"><div class="n">${esc(meta.title)}</div><div class="d">${esc(meta.desc || '')}</div></div>
-          <label class="dw-switch"><input type="checkbox" ${w.enabled ? 'checked' : ''}><span></span></label>`;
+          <span class="dw-move">
+            <button type="button" data-dw-move="${w.key}" data-dir="-1" aria-label="Move ${esc(meta.title)} up" ${idx === 0 ? 'disabled' : ''}>↑</button>
+            <button type="button" data-dw-move="${w.key}" data-dir="1" aria-label="Move ${esc(meta.title)} down" ${idx === shown.length - 1 ? 'disabled' : ''}>↓</button>
+          </span>
+          <label class="dw-switch"><input type="checkbox" aria-label="Show ${esc(meta.title)}" ${w.enabled ? 'checked' : ''}><span></span></label>`;
         row.querySelector('input').onchange = e => toggle(w.key, e.target.checked);
+        row.querySelectorAll('[data-dw-move]').forEach(b => { b.onclick = () => move(w.key, Number(b.dataset.dir)); });
         list.appendChild(row);
       });
     }

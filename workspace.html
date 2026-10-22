@@ -3080,9 +3080,10 @@ function formatCurrency(amount, currency) {
         // Map internal action anchors
         const internalCatalogLink = document.getElementById('route-to-catalog');
         if (internalCatalogLink) {
-          internalCatalogLink.addEventListener('click', async (e) => {
+          internalCatalogLink.addEventListener('click', (e) => {
             e.preventDefault();
-            await loadView('catalog');
+            // The same hire route as every other "Hire an assistant" (assistants.js).
+            if (window.openHireCatalogue) window.openHireCatalogue(); else loadView('catalog');
           });
         }
 
@@ -22239,7 +22240,13 @@ async function gpSubmitReject() {
     const a = e.target.closest('[data-switcher-assistant]');
     if (a) { setOpen(false); window.routeToAssistantDetail?.(a.getAttribute('data-switcher-assistant')); return; }
     const go = e.target.closest('[data-switcher-go]');
-    if (go) { setOpen(false); window.loadView?.(go.getAttribute('data-switcher-go')); }
+    if (go) {
+      setOpen(false);
+      const where = go.getAttribute('data-switcher-go');
+      // "+ Hire an assistant" takes the same hire route as every other hire button (assistants.js).
+      if (where === 'catalog' && window.openHireCatalogue) window.openHireCatalogue();
+      else window.loadView?.(where);
+    }
   });
   document.addEventListener('click', (e) => { if (!e.target.closest('#nav-assistant-switcher')) setOpen(false); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setOpen(false); });

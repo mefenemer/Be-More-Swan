@@ -104,6 +104,10 @@
       #aud-import-btn, #aud-export-btn { display: none !important; }
       .aud-more-wrap { display: block; }
       #aud-add-btn { order: -1; }
+      /* Thumb-sized targets (44px): the bulk bar's buttons and the sidebar's small edit / × controls
+         were ~28px and ~20px. */
+      #aud-bulk button { min-height: 44px; }
+      .aud-x { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
       /* Two count tiles, not four: Unsubscribed and Total stay one tap away in the status filter. */
       #aud-kpis [data-kpi-filter="unsubscribed"], #aud-kpis [data-kpi-filter=""] { display: none; }
     }
@@ -470,7 +474,7 @@
           <div class="flex flex-wrap gap-2 mt-2">
             <button type="button" data-rv-edit="${r.id}" class="btn-utility text-xs font-bold px-2.5 py-1 rounded">Edit</button>
             <button type="button" data-rv-toggle="${r.id}" class="btn-utility text-xs font-bold px-2.5 py-1 rounded">${r.status === 'hidden' ? 'Show on website' : 'Hide from website'}</button>
-            <button type="button" data-rv-delete="${r.id}" class="btn-utility text-xs font-bold px-2.5 py-1 rounded">Delete</button>
+            <button type="button" data-rv-delete="${r.id}" class="btn-destructive text-xs font-bold px-2.5 py-1 rounded">Delete</button>
           </div>
         </div>`).join('') : '<p class="text-sm text-gray-500">No reviews yet. Add your first one above.</p>';
     }
@@ -695,7 +699,7 @@
 
       <div class="flex justify-end gap-2 mt-6">
         <button type="button" data-aud-import-close data-dialog-cancel class="btn-secondary px-4 py-2 text-sm font-bold border rounded-lg cursor-pointer">Cancel</button>
-        <button type="button" id="aud-import-start" class="btn-utility px-4 py-2 text-sm font-bold rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" disabled>Import</button>
+        <button type="button" id="aud-import-start" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" disabled>Import</button>
       </div>
     </div>
   </div>

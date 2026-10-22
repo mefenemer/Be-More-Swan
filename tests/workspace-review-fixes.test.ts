@@ -172,4 +172,42 @@ check('Audience on a phone: list first, Manage folded, segment dropdown, Import 
     assert.ok(aud.includes("if (!window._audMoreOutsideBound) {"), 'the document listener is bound once');
 });
 
+check('every Hire an assistant button takes one route, catalogue first', () => {
+    const ws = read('workspace.html');
+    assert.ok(cards.includes('window.openHireCatalogue = function()'));
+    assert.ok(cards.includes("catalogBtn.addEventListener('click', () => window.openHireCatalogue());"), 'My Assistants header');
+    assert.ok(cards.includes('onclick="window.openHireCatalogue()"'), 'placeholder cards');
+    assert.ok(cards.includes('onclick="window.openHireCatalogue(); return false" class="link">Hire an assistant'), 'empty-team link');
+    assert.ok(ws.includes('if (window.openHireCatalogue) window.openHireCatalogue(); else loadView(\'catalog\');'), 'Dashboard banner');
+    assert.ok(ws.includes("if (where === 'catalog' && window.openHireCatalogue) window.openHireCatalogue();"), 'sidebar switcher');
+    assert.ok(cards.includes('window._hasWorkingAssistants = visible.length > 0;'), 'a first hire keeps the plain catalogue route');
+});
+
+check('Audience: Import is the primary action, review Delete is destructive, small targets grow on phones', () => {
+    const html = read('audience.html');
+    assert.ok(html.includes('<button type="button" id="aud-import-start" class="btn-primary'));
+    assert.ok(html.includes('data-rv-delete="${r.id}" class="btn-destructive'));
+    assert.ok(html.includes('#aud-bulk button { min-height: 44px; }'));
+    assert.ok(html.includes('.aud-x { min-width: 44px; min-height: 44px;'));
+    assert.strictEqual((aud.match(/class="aud-x /g) || []).length, 3, 'field ×, segment edit, segment ×');
+    assert.ok(!/text-gray-300 hover:text-red-500/.test(aud), 'the × buttons were too faint');
+});
+
+check('Dashboard widgets: kept on the page between toggles, and reorderable without dragging', () => {
+    const grid = dash.slice(dash.indexOf('function renderGrid() {'), dash.indexOf('function toggle(key, on) {'));
+    assert.ok(grid.length > 200, 'renderGrid found');
+    assert.ok(!grid.includes("grid.innerHTML = ''"), 'no wipe-and-refetch');
+    assert.ok(grid.includes('const have = new Map(') && grid.includes('if (!card) {'), 'reuses existing cards');
+    assert.ok(grid.indexOf('meta.render(') > grid.indexOf('if (!card) {'), 'renders data only for a new card');
+    assert.ok(dash.includes('function move(key, dir) {'));
+    assert.ok(dash.includes('aria-label="Move ${esc(meta.title)} up"') && dash.includes('aria-label="Show ${esc(meta.title)}"'));
+});
+
+check('Audience bulk delete runs in parallel through the single-contact DELETE', () => {
+    const fn = aud.slice(aud.indexOf('async function bulkDelete()'), aud.indexOf('// ── Growth chart'));
+    assert.ok(fn.includes('const DELETE_POOL = 6;') && fn.includes('await Promise.all('));
+    assert.ok(fn.includes("api(`${CONTACTS_API}?id=${id}`, { method: 'DELETE' })"), 'keeps THE DELETE RULE path');
+    assert.ok(!/for \(const id of ids\) \{\s*try \{ await api/.test(fn), 'no one-after-another loop');
+});
+
 console.log(`\n${passed} checks passed${process.exitCode ? ' — with FAILURES above' : ''}`);

@@ -505,8 +505,8 @@
         <span class="px-3 py-1.5 text-xs font-bold text-gray-700">${esc(f.label)}
           <span class="text-gray-400 font-mono">${esc(f.key)}</span>
         </span>
-        <button type="button" data-field-delete="${f.id}" title="Delete field"
-          class="pr-3 pl-1 text-xs text-gray-300 hover:text-red-500 cursor-pointer">&times;</button>
+        <button type="button" data-field-delete="${f.id}" title="Delete field" aria-label="Delete the ${esc(f.label)} field"
+          class="aud-x pr-3 pl-1 text-xs text-gray-500 hover:text-red-600 cursor-pointer">&times;</button>
       </span>`).join('');
 
     host.querySelectorAll('[data-field-delete]').forEach((btn) => btn.addEventListener('click', async () => {
@@ -637,9 +637,9 @@
         </button>
         <span class="aud-side-actions flex items-center shrink-0 pr-1">
           ${dyn ? `<button type="button" data-segment-rules="${s.id}" title="Edit the rule" aria-label="Edit the rule for ${esc(s.name)}"
-            class="p-1 text-xs text-gray-400 hover:text-emerald-700 cursor-pointer">edit</button>` : ''}
+            class="aud-x p-1 text-xs text-gray-500 hover:text-emerald-700 cursor-pointer">edit</button>` : ''}
           <button type="button" data-segment-delete="${s.id}" title="Delete" aria-label="Delete ${esc(s.name)}"
-            class="p-1 text-sm leading-none text-gray-300 hover:text-red-500 cursor-pointer">&times;</button>
+            class="aud-x p-1 text-sm leading-none text-gray-500 hover:text-red-600 cursor-pointer">&times;</button>
         </span>
       </div>`;
     }).join('');
@@ -1641,9 +1641,18 @@
     if (!ok) return;
     let done = 0;
     let failed = 0;
-    for (const id of ids) {
-      try { await api(`${CONTACTS_API}?id=${id}`, { method: 'DELETE' }); done++; } catch { failed++; }
-    }
+    // Six at a time rather than one after another (review, 2026-10-22). Still the single-contact
+    // DELETE, deliberately: it carries THE DELETE RULE (opt-out kept first, then the row, then the
+    // erasure event), and a second bulk path on the server would have to repeat it exactly.
+    const DELETE_POOL = 6;
+    let next = 0;
+    const worker = async () => {
+      while (next < ids.length) {
+        const id = ids[next++];
+        try { await api(`${CONTACTS_API}?id=${id}`, { method: 'DELETE' }); done++; } catch { failed++; }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(DELETE_POOL, ids.length) }, worker));
     window.showToast(failed
       ? `Deleted ${done}; ${failed} could not be deleted — please try those again.`
       : `Deleted ${done} ${done === 1 ? 'contact' : 'contacts'}.`);

@@ -495,6 +495,22 @@ window.generateAssistantCardHTML = function(assistant) {
 };
 
 // ==========================================
+// 0. HIRE — ONE ENTRY POINT
+// ==========================================
+// Every "Hire an assistant" button lands on the catalogue (owner, 2026-10-22). With a team already
+// working, it goes through SetupWizard.openForNewAssistant, which ALSO lands on the catalogue but
+// first scopes the wizard to the new hire (held back until a role is picked) — before, only the My
+// Assistants header did that and the other buttons skipped it. A workspace with no working assistant
+// is still on its first-hire onboarding, which the plain catalogue route already drives.
+window.openHireCatalogue = function() {
+    if (window._hasWorkingAssistants && window.SetupWizard?.openForNewAssistant) {
+        window.SetupWizard.openForNewAssistant();
+        return;
+    }
+    window.loadView && window.loadView('catalog');
+};
+
+// ==========================================
 // 1a. DASHBOARD ROSTER + FIRST-HIRE CARD
 // ==========================================
 // One row per assistant: icon, name, role and the same status badge as its card. Styled by the
@@ -546,8 +562,8 @@ window.generateAddAssistantPlaceholderHTML = function(index) {
     const plus = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>`;
     return `
     <div class="add-asst-card" role="button" tabindex="0" aria-label="${copy.title}"
-         onclick="loadView('catalog')"
-         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();loadView('catalog');}">
+         onclick="window.openHireCatalogue()"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.openHireCatalogue();}">
         <div class="add-asst-ico">${plus}</div>
         <h3 class="add-asst-title">${copy.title}</h3>
         <p class="add-asst-sub">${copy.sub}</p>
@@ -627,6 +643,8 @@ window.fetchAndRenderAssistants = async function(containerId, options) {
         // workspace.html because it owns the toast + validation-meta state; called here because this is
         // the render it needs to re-trigger.
         const startPoll = () => window._maybeStartProvisioningPoll?.(containerId, inProgress);
+        // Read by openHireCatalogue: "add another assistant" vs a first hire.
+        window._hasWorkingAssistants = visible.length > 0;
 
         // The Dashboard's grid is a one-line-per-assistant roster (layout review, 2026-10-22): the
         // full cards live on My Assistants. Read from the container, not only `opts`, because
@@ -666,7 +684,7 @@ window.fetchAndRenderAssistants = async function(containerId, options) {
         if (visible.length === 0 && inProgress.length === 0) {
             container.innerHTML = `
               <div class="col-span-full py-12 text-center text-gray-500 font-medium bg-white rounded-2xl border border-gray-100 shadow-sm">
-                  Your team is currently empty. <a href="#" onclick="loadView('catalog'); return false" class="link">Hire an assistant</a>.
+                  Your team is currently empty. <a href="#" onclick="window.openHireCatalogue(); return false" class="link">Hire an assistant</a>.
               </div>`;
             return;
         }
@@ -734,12 +752,8 @@ window.initAssistantsDirectory = async function(loadViewCb) {
     // the user had made this session.
     if (catalogBtn && !catalogBtn.dataset.bound) {
         catalogBtn.dataset.bound = 'true';
-        // US8 AC3 — "Hire an assistant" re-opens the wizard at Step 6 (secondary onboarding), and
-        // only falls back to the catalog when the wizard isn't available.
-        catalogBtn.addEventListener('click', () => {
-            if (window.SetupWizard?.openForNewAssistant) window.SetupWizard.openForNewAssistant();
-            else loadViewCb('catalog');
-        });
+        // US8 AC3 — the catalogue first; see openHireCatalogue.
+        catalogBtn.addEventListener('click', () => window.openHireCatalogue());
     }
 
     // Issue #134: disabled ("coming soon") in the markup — no click routing to wire up.
