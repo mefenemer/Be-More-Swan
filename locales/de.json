@@ -1,7 +1,7 @@
 {
   "nav": {
     "how_it_works": "So funktioniert es",
-    "assistant_library": "Assistentenbibliothek",
+    "assistant_library": "Lernen Sie die Assistenten kennen",
     "pricing": "Preise",
     "about": "Über uns",
     "faqs": "FAQ",
@@ -19,7 +19,7 @@
     "tagline_sub": "Ihre Assistenten übernehmen das Schreiben, Posten und Nachfassen – Sie geben nur frei, bevor etwas rausgeht. Kein zusätzliches Personal, keine zusätzliche Software, keine Überraschungen.",
     "platform": "Plattform",
     "how_it_works": "So funktioniert es",
-    "assistant_library": "Assistentenbibliothek",
+    "assistant_library": "Lernen Sie die Assistenten kennen",
     "connections": "Verbindungen",
     "pricing": "Preise",
     "faqs": "FAQ",
@@ -86,7 +86,7 @@
     "currency_label": "Währung"
   },
   "assistants": {
-    "page_title": "Assistentenbibliothek",
+    "page_title": "Lernen Sie die Assistenten kennen",
     "page_subtitle": "Durchsuchen Sie unseren Katalog von KI-Assistenten. Jeder ist für eine bestimmte Geschäftsrolle entwickelt.",
     "join_waitlist": "Warteliste beitreten",
     "notify_me": "Benachrichtige mich",

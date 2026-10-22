@@ -101,6 +101,7 @@
     try {
       state.data = await post({ action: 'get', assistantId: state.assistantId });
       state.loadError = null;
+      if (state.note?.whileRunning && !inFlight()) state.note = null;
     } catch (err) {
       console.error('[AssistantSiteAudit] load failed:', err);
       state.loadError = err.message;
@@ -136,7 +137,7 @@
 
   function noteHtml() {
     if (!state.note) return '';
-    return `<p class="text-xs font-semibold ${state.note.tone === 'error' ? 'text-red-600' : 'text-indigo-700'} mt-3">${esc(state.note.text)}</p>`;
+    return `<p class="text-xs font-semibold ${state.note.tone === 'error' ? 'text-red-600' : 'text-emerald-800'} mt-3">${esc(state.note.text)}</p>`;
   }
 
   function settingsForm(audit) {
@@ -332,7 +333,7 @@
 
   function statusLine(audit, latest) {
     const run = inFlight();
-    if (run) return `<p class="text-sm font-semibold text-indigo-700">Checking ${esc(host(audit.url))} now — this takes a minute or two. You can leave this page.</p>`;
+    if (run) return `<p class="text-sm font-semibold text-emerald-800">Checking ${esc(host(audit.url))} now — this takes a minute or two. You can leave this page.</p>`;
     const newest = (state.data?.runs || [])[0];
     if (!newest) return '<p class="text-sm text-gray-600">No check has run yet.</p>';
     if (newest.status === 'failed' || newest.status === 'unreadable') {
@@ -361,7 +362,7 @@
         <p class="text-xs text-gray-700 mt-2">${esc(f.whyItMatters || f.problem)}</p>
         <div class="grid gap-2 mt-3 md:grid-cols-2">
           <div class="bg-gray-50 rounded-lg p-3"><p class="text-[10px] font-bold text-gray-500 uppercase">On your site now</p><p class="text-sm text-gray-700 mt-1 break-words">${esc(f.beforeText)}</p></div>
-          <div class="bg-indigo-50/60 rounded-lg p-3"><p class="text-[10px] font-bold text-indigo-700 uppercase">Suggested</p><p class="text-sm text-gray-900 mt-1 break-words">${esc(f.afterText)}</p></div>
+          <div class="bg-emerald-50 rounded-lg p-3"><p class="text-[10px] font-bold text-emerald-800 uppercase">Suggested</p><p class="text-sm text-gray-900 mt-1 break-words">${esc(f.afterText)}</p></div>
         </div>
         ${/\[[^\]]+\]/.test(f.afterText || '') ? '<p class="text-xs text-amber-700 mt-2">Fill in the parts in [square brackets] with your own real details before you use it.</p>' : ''}
         ${(state.data?.stalled || []).includes(f.id) ? stalledNudge(f) : ''}
@@ -381,7 +382,7 @@
   function stalledNudge(f) {
     const done = fixBrief(f.id);
     if (done) {
-      return `<p class="mt-3 text-xs text-indigo-700">You briefed ${esc(done.targetName || 'your Social Media Assistant')} on ${esc(when(done.createdAt))} to post the new wording while this waits — it's in In progress.</p>`;
+      return `<p class="mt-3 text-xs text-emerald-800">You briefed ${esc(done.targetName || 'your Social Media Assistant')} on ${esc(when(done.createdAt))} to post the new wording while this waits — it's in In progress.</p>`;
     }
     const social = teamFor('social_media_manager');
     return `
@@ -473,7 +474,7 @@
           </div>
           <div class="grid gap-2 mt-2 md:grid-cols-2">
             <div class="bg-gray-50 rounded-lg p-2"><p class="text-[10px] font-bold text-gray-500 uppercase">${live ? 'Was' : 'On your site'}</p><p class="text-xs text-gray-700 mt-0.5 break-words">${esc(f.beforeText)}</p></div>
-            <div class="bg-indigo-50/60 rounded-lg p-2"><p class="text-[10px] font-bold text-indigo-700 uppercase">${live ? 'Now' : 'Suggested'}</p><p class="text-xs text-gray-900 mt-0.5 break-words">${esc(f.afterText)}</p></div>
+            <div class="bg-emerald-50 rounded-lg p-2"><p class="text-[10px] font-bold text-emerald-800 uppercase">${live ? 'Now' : 'Suggested'}</p><p class="text-xs text-gray-900 mt-0.5 break-words">${esc(f.afterText)}</p></div>
           </div>
           ${confirmed ? '' : live
             ? `<button type="button" data-sa-fix="${esc(f.id)}" data-status="accepted" class="mt-2 text-xs text-gray-500 underline">Not done after all</button>`
@@ -498,7 +499,7 @@
       return `
         <li class="border border-gray-200 rounded-xl p-4">
           <div class="flex flex-wrap items-center gap-2">
-            ${pill(`Briefed ${b.targetName || roleLabel(b.targetRole)}`, 'bg-indigo-50 text-indigo-700')}
+            ${pill(`Briefed ${b.targetName || roleLabel(b.targetRole)}`, 'bg-emerald-50 text-emerald-800')}
             ${b.title ? `<span class="text-xs font-bold text-gray-900">${esc(b.title)}</span>` : ''}
             <span class="text-[10px] text-gray-500">${esc(when(b.createdAt))} · ${esc(SOURCE_WORDS[b.source] || '')}</span>
           </div>
@@ -721,7 +722,9 @@
     if (state.rendered) render();
   }
 
-  function say(text, tone) { state.note = text ? { text, tone } : null; rerender(); }
+  // `whileRunning`: a note about a check in flight ("Checking your site…") clears itself when the
+  // check ends — it used to stay on screen above the finished results.
+  function say(text, tone, whileRunning) { state.note = text ? { text, tone, whileRunning: !!whileRunning } : null; rerender(); }
 
   function readSettings(form) {
     const fd = new FormData(form);
@@ -804,7 +807,7 @@
       run.disabled = true;
       try {
         const data = await post({ action: 'run', assistantId: state.assistantId });
-        say(data.alreadyRunning ? 'A check is already running.' : 'Checking your site…');
+        say(data.alreadyRunning ? 'A check is already running.' : 'Checking your site…', null, true);
       } catch (err) { say(err.message, 'error'); }
       await load();
       return;

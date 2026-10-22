@@ -585,9 +585,8 @@ window.initAssistantConnections = async function (assistantId, currentData) {
 
 };
 
-// The same save feedback drives the Connections drawer header and the Overview status card,
-// either of which may be the one the user is looking at when they flip a switch.
-const _SAVE_STATUS_IDS = ['platforms-save-status', 'connections-save-status'];
+// Save feedback for the Connections drawer header.
+const _SAVE_STATUS_IDS = ['platforms-save-status'];
 function _setPlatformSaveStatus(text) {
     _SAVE_STATUS_IDS.forEach(id => {
         const el = document.getElementById(id);
@@ -601,9 +600,6 @@ function _setPlatformSaveStatus(text) {
 window._intToggleUseForAssistant = async function (connId, checked) {
     connId = Number(connId);
     if (checked) _assistantSelectedIds.add(connId); else _assistantSelectedIds.delete(connId);
-    // Repaint the Overview card off the new state so its pill/headline track the switch the
-    // user just flipped, wherever they flipped it. The drawer grid re-renders on next open.
-    window._renderConnectionsStatusCard();
     const checkedIds = Array.from(_assistantSelectedIds);
     const activeConns = _userConnections.filter(c => c.status === 'active' && c.userId);
     const checkedKeys = activeConns
@@ -678,10 +674,6 @@ async function _loadConnections() {
 function _renderConnectionsGrid() {
     const grid = document.getElementById('connections-grid');
     if (!grid) return;
-
-    // Overview status card first — it lives outside this grid and must render on every path,
-    // including the "nothing relevant to connect" empty state below.
-    window._renderConnectionsStatusCard();
 
     grid.innerHTML = '';
     const platforms = _relevantPlatforms();
@@ -1596,61 +1588,6 @@ function _sourceStatusRow(source, conn) {
             ${control}
         </div>`;
 }
-
-// Rendered from whatever _loadConnections last fetched, so it never issues its own request.
-// Self-hides for roles with no connectors at all (their integrations are recipes in the
-// Connections drawer's "Synced actions" list, which carry their own enable toggles).
-window._renderConnectionsStatusCard = function () {
-    const card = document.getElementById('connections-status-card');
-    if (!card) return;
-    const platforms = _assistantScoped ? _relevantPlatforms() : [];
-    const sources = _assistantScoped ? _relevantSources() : [];
-    // Blog destinations (cms) are org-wide like sources — a connected one is "on" with no switch.
-    const blogDests = _assistantScoped ? _blogDestinations : [];
-    // ⚠️ Outreach mailboxes count. Gmail/Outlook are real connector cards in the grid — the server
-    // sends `mailboxProviders` only for MAILBOX_ROLES (see connection-map.ts) — but this emptiness
-    // test predated them and never counted them. On the Lead Generator, whose ONLY connectors are
-    // those two, that hid this whole card, and with it the only "Manage connections" button on the
-    // page: the tab was reachable from nowhere but the Connections tab itself.
-    const mailboxes = _assistantScoped ? _mailboxProviders : [];
-    // Search Console counts for the same reason the mailboxes do: it is a real card in the grid, so
-    // a role whose only connector were this one would otherwise lose the whole status card and the
-    // one "Manage connections" button with it.
-    const searchConsole = _assistantScoped ? _searchConsole : null;
-    const nothingRelevant = !platforms.length && !sources.length && !blogDests.length && !mailboxes.length && !searchConsole;
-    // A social media assistant always keeps its Connections card — even before anything is
-    // connected the user needs a permanent place to add a channel, so it shows an empty state
-    // rather than vanishing. Other roles (whose "connectors" are Synced-action recipes living
-    // in the drawer) still hide the card when they have none.
-    const keepForSocial = window._detailCurrentData?.roleKey === 'social_media_manager';
-    // This function owns ONE question — does this role have connectors at all — and the answer is
-    // published here so _syncManageConnectionsPlacement (assistants.js) can read it rather than
-    // re-derive it from a second copy of the fetched arrays. That function owns the other question:
-    // WHERE the "Manage connections" button goes, since roles whose Overview already lists their
-    // destinations carry it in that list and hide this strip. It has the last word on `hidden`,
-    // which is why both exits from here end by calling it.
-    card.dataset.hasConnectors = (nothingRelevant && !keepForSocial) ? '0' : '1';
-    if (nothingRelevant && !keepForSocial) {
-        card.classList.add('hidden');
-        window._syncStatusRow && window._syncStatusRow();
-        window._syncManageConnectionsPlacement && window._syncManageConnectionsPlacement();
-        return;
-    }
-    card.classList.remove('hidden');
-
-    // The "N of M on" pill and the "Posting to Facebook, Instagram, …" headline were computed here
-    // and are gone. Both were derived state — every fact in them is on the Connections tab, one
-    // click away behind "Manage connections" — and deriving them was the slowest thing on Overview:
-    // it needed _userConnections, _assistantSelectedIds, the relevant-platform and relevant-source
-    // maps and the blog destinations to have ALL loaded before it could render a single word, so the
-    // card sat on a skeleton waiting for the last of them.
-    //
-    // What remains is the label and the button, which need nothing fetched at all. The per-connection
-    // list and toggles went the same way earlier, for the same reason.
-    window._syncStatusRow && window._syncStatusRow();
-    // …and this may hide the strip again, on the roles that carry the button in their own list.
-    window._syncManageConnectionsPlacement && window._syncManageConnectionsPlacement();
-};
 
 // Status row for a blog destination in the Overview card. Same shell as _sourceStatusRow, no switch
 // (org-wide): a connected blog is simply on. Connect opens the Connections tab where the card lives.

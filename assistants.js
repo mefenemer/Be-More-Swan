@@ -4261,7 +4261,7 @@ window._detailRqBlogAct = async function (btn, action) {
             } else if (!sent.length) {
                 // The case that started all this: nothing connected, so nothing happened, and the
                 // old code path said nothing at all.
-                showErr('No other platforms are connected — use Manage connections on this page to add one first.');
+                showErr('No other platforms are connected — add one in Assistant Profile ▸ Connections first.');
             } else {
                 window.showToast?.(`Sent to ${sent.map((d) => d.label).join(', ')}.`);
             }
@@ -4810,40 +4810,6 @@ window._syncStatusRow = function() {
     const autopilotShown = !document.getElementById('autopilot-status-card')?.classList.contains('hidden');
     row.style.display = autopilotShown ? '' : 'none';
     row.classList.remove('lg:grid-cols-2');
-};
-
-// ── Where the "Manage connections" button lives ───────────────────────────────
-// It used to sit in the hero strip on every role, two cards above the thing it manages. On the
-// roles whose Overview ALREADY lists what they connect to — the Blog Writer's "Publishing to"
-// list of blog destinations, a social role's per-account Audience bars — that strip added a
-// second "Connections" heading saying nothing the list didn't, and the button was nowhere near
-// the list a user is looking at when they decide to change one.
-//
-// So on those roles the button moves into the list itself (#btn-audience-connections) and the
-// hero strip hides; roles with no such list keep the hero button, which is still their only route
-// into the Connections panel (see tests/outreach-connect-return.test.ts for the Lead Generator,
-// whose only connectors are mailboxes).
-//
-// ⚠️ `inAudience` is decided from the ROLE, not from whether #autopilot-audience has un-hidden
-// itself. The destination/follower fetches that reveal it are deliberately not awaited, so reading
-// that block's `hidden` class would leave BOTH buttons off the page for the length of a request.
-window._syncManageConnectionsPlacement = function() {
-    const strip = document.getElementById('connections-status-card');
-    const audienceBtn = document.getElementById('btn-audience-connections');
-    const autopilot = document.getElementById('autopilot-status-card');
-    // Whether this role has any connectors at all stays _renderConnectionsStatusCard's verdict —
-    // it is the one that knows what _loadConnections fetched. It records the answer on the dataset
-    // so this only has to choose a location, never re-derive the gate.
-    const hasConnectors = strip?.dataset.hasConnectors === '1';
-    // The audience block is a child of the Autopilot card, so a role without one never shows it.
-    const audienceShown = !!autopilot && !autopilot.classList.contains('hidden');
-    // ⚠️ Not every audience block is a connections list. The Email Marketing Assistant's is "Your list"
-    // — subscriber counts for a mailing list that lives in this product, with nothing connected to
-    // manage — so that role keeps the hero button.
-    const audienceSource = window.AssistantDashboardRegistry?.get?.(window._detailCurrentData?.roleKey)?.audienceSource;
-    const inAudience = hasConnectors && audienceShown && audienceSource !== 'newsletter_list';
-    if (audienceBtn) audienceBtn.classList.toggle('hidden', !inAudience);
-    if (strip) strip.classList.toggle('hidden', !hasConnectors || inAudience);
 };
 
 // The Posting Schedule controls drive both autopilot engines off the same context keys, so the
@@ -6373,10 +6339,6 @@ function _applyDashboardRegistry(data) {
     // Connections card, hides itself once integrations.js knows whether this role has any connectors.
     toggle('autopilot-status-card', mods.hasPostingSchedule !== false);
     window._syncStatusRow();
-    // Showing/hiding the Autopilot card just decided whether this role HAS an audience block, which
-    // is half of where the "Manage connections" button goes. Re-run the placement so a role loaded
-    // after the connections fetch resolved still lands its button in the right card.
-    window._syncManageConnectionsPlacement();
     toggle('module-social-strategy', mods.hasSocialStrategy !== false);
 
     // Overview — the post-based Impact & ROI card is meaningless for non-social roles (they publish
@@ -8182,20 +8144,6 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // state), and the goals fetch is late in this function's sequence, so without a placeholder the
     // card sits visibly blank while everything below it fills in. Cleared by _renderGoalProgressCard.
     _beginCardLoading('goal-progress-panel');
-    // Connections no longer skeletons — it PAINTS. Its card carried a "N of M on" pill and a
-    // "Posting to …" headline, and computing those needed initAssistantConnections to have
-    // finished, so the card sat on a spinner until the slowest load on Overview came back. Both are
-    // gone; what is left is a label and a button that need nothing fetched.
-    //
-    // Shown up front only for the social role, which is the one role guaranteed to keep the card
-    // (connections-card-social-always-visible). Every other role's card self-hides when it has no
-    // connectors, so revealing it here would flash a card that then disappears — the same reason the
-    // skeleton was guarded this way.
-    if (currentData.roleKey === 'social_media_manager') {
-        document.getElementById('connections-status-card')?.classList.remove('hidden');
-        window._syncStatusRow?.();
-    }
-
     // ── Icon colour picker ────────────────────────────────────────
     // Sits beside the name because the name and the colour are the same thing to a user: which
     // assistant this is. The chosen colour is stored on the assistant (configuration.avatarColor)
@@ -9112,7 +9060,7 @@ async function _fetchAndRenderBlogDestinations() {
         // own blog first. A reader seeing "0 connected" should not conclude nothing gets published.
         setFooter(connectedCount
             ? 'Every published post goes to your own blog first, then syndicates to the platforms above.'
-            : 'Published posts go to your own blog. Use <span class="font-semibold">Manage connections</span> to syndicate them further.');
+            : 'Published posts go to your own blog. Add more in <span class="font-semibold">Assistant Profile ▸ Connections</span> to syndicate them further.');
     } catch (err) {
         console.error('[blog-destinations] load failed:', err);
         // Its own copy, for the same reason the KPI cards keep error and no-data apart: a network

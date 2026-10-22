@@ -183,7 +183,7 @@ check('both old URLs redirect permanently to the new page', () => {
 });
 
 check('the footer link and the result email point at the new page', () => {
-    assert.match(read('components/footer.html'), /href="assistant\.html\?role=mystery_shopper#free-website-check"[^>]*data-i18n="footer\.free_website_check"/);
+    assert.match(read('components/footer.html'), /href="\/assistant\.html\?role=mystery_shopper#free-website-check"[^>]*data-i18n="footer\.free_website_check"/);
     for (const l of ['en', 'de', 'es', 'fr', 'pt']) assert.ok(JSON.parse(read(`locales/${l}.json`)).footer.free_website_check, l);
     assert.match(read('src/utils/site-audit.ts'), /\/assistant\.html\?role=mystery_shopper&r=\$\{runId\}&t=\$\{token\}/);
 });

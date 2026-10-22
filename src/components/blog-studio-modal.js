@@ -1842,7 +1842,7 @@
         // Names only what the Connections tab can actually offer today — see
         // WITHHELD_BLOG_DESTINATIONS. Listing a platform here that has no card there sends the
         // author looking for a button that is not on the screen.
-        setStatus('bs-dist-status', 'No other platforms connected yet. Connect LinkedIn with Manage connections '
+        setStatus('bs-dist-status', 'No other platforms connected yet. Connect LinkedIn in Assistant Profile \u25b8 Connections '
           + 'on your assistant\u2019s page and it\u2019ll appear here.');
         return;
       }
@@ -2153,8 +2153,8 @@
               return d.label + ': ' + (d.error || 'not connected');
             }).join('; '), 'error');
           } else if (!sent.length) {
-            setBanner('bs-action-status', 'No other platforms are connected — use Manage connections on your '
-              + 'assistant\u2019s page to add one first.', 'error');
+            setBanner('bs-action-status', 'No other platforms are connected — add one in Assistant Profile \u25b8 Connections on your '
+              + 'assistant\u2019s page first.', 'error');
           } else {
             setBanner('bs-action-status', 'Sent to ' + syndicationNames(sent) + '.');
           }

@@ -210,4 +210,50 @@ check('Audience bulk delete runs in parallel through the single-contact DELETE',
     assert.ok(!/for \(const id of ids\) \{\s*try \{ await api/.test(fn), 'no one-after-another loop');
 });
 
+check('the public page is "Meet the Assistants", in its title, its eyebrow, the nav and the footer', () => {
+    const page = read('assistants.html');
+    assert.ok(page.includes('<title>Meet the Assistants | Be More Swan</title>'));
+    assert.ok(!/Assistant Library/.test(page));
+    const en = JSON.parse(read('locales/en.json'));
+    assert.strictEqual(en.nav.assistant_library, 'Meet the Assistants');
+    assert.strictEqual(en.footer.assistant_library, 'Meet the Assistants');
+    for (const f of ['components/nav.html', 'components/footer.html', 'about.html', 'blog.html', 'faq.html', 'index.html']) {
+        assert.ok(!read(f).includes('Assistant Library'), `${f} still says Assistant Library`);
+    }
+});
+
+check('the nav and footer fragments link root-relative, so a crawled /components/… page links nowhere broken', () => {
+    // Google Search Console reported /components/register.html: a relative href in a fragment that
+    // is itself a public URL resolves against /components/.
+    for (const f of ['components/nav.html', 'components/footer.html']) {
+        const rel = read(f).match(/href="(?!\/|#|https?:|mailto:)[^"]+"/g) || [];
+        assert.deepStrictEqual(rel, [], `${f} has relative links`);
+    }
+});
+
+check('Mystery Shopper: "Checking your site…" clears when the check ends, in brand colours', () => {
+    const sa = read('src/components/assistant-site-audit.js');
+    assert.ok(sa.includes("say(data.alreadyRunning ? 'A check is already running.' : 'Checking your site…', null, true);"));
+    assert.ok(sa.includes('if (state.note?.whileRunning && !inFlight()) state.note = null;'));
+    assert.ok(!/indigo/.test(sa), 'indigo is not a brand colour');
+});
+
+check('the sidebar Calendar loads every assistant\'s own dated work, not only on the assistant\'s tab', () => {
+    const cal = read('calendar.js');
+    assert.ok(cal.includes(': _globalExtraTargets(assistants || _assistants);'));
+    assert.ok(cal.includes("const datedSource = ['records', 'briefs', 'checks', 'campaigns'].includes(cfg.calendarItems)"), 'roles from the registry');
+    for (const fn of ['_datedItemsOnDate', '_scheduledRecordsOnDate', '_followUpsOnDate']) {
+        const body = cal.slice(cal.indexOf(`function ${fn}(`), cal.indexOf(`function ${fn}(`) + 300);
+        assert.ok(body.includes('_matchesAssistantFilter('), `${fn} respects the assistant filter`);
+    }
+    assert.ok(cal.includes("${blocked || !_lockedAssistant ? '' : `draggable"), 'follow-ups are view-only on the shared calendar');
+});
+
+check('Audience and Orders come after Review in the sidebar', () => {
+    const ids = [...read('components/sidebar.html').matchAll(/<a [^>]*id="(nav-[a-z-]+)"/g)].map((m) => m[1]);
+    const at = (id: string) => ids.indexOf(id);
+    assert.ok(at('nav-assistants') < at('nav-calendar') && at('nav-calendar') < at('nav-review-queue'));
+    assert.ok(at('nav-review-queue') < at('nav-audience') && at('nav-audience') < at('nav-orders'));
+});
+
 console.log(`\n${passed} checks passed${process.exitCode ? ' — with FAILURES above' : ''}`);

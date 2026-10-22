@@ -121,7 +121,7 @@ check('partners.html never hard-codes a rate — it reads the live programme ter
     assert.ok(sitemap.includes('<loc>https://bemoreswan.com/partners</loc>'));
     assert.ok(sitemap.includes('<loc>https://bemoreswan.com/partner-terms</loc>'));
     const footer = read('components/footer.html');
-    assert.ok(footer.includes('href="partners.html"') && footer.includes('href="partner-terms.html"'), 'linked from the footer');
+    assert.ok(footer.includes('href="/partners.html"') && footer.includes('href="/partner-terms.html"'), 'linked from the footer');
 });
 
 check('invite-lookup reveals only a first name and counts visits for approved partners only', () => {

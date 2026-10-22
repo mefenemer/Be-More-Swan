@@ -39,7 +39,21 @@
            the Review Queue / Calendar / Assistant Detail surfaces (window.openBlogStudio), gated on
            an active Blog Writer assistant — see src/components/blog-studio-modal.js. -->
 
-      <!-- The shared Audience. Top-level rather than a tab inside the Email Marketing Assistant:
+      <a href="#" id="nav-calendar" class="flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-colors text-gray-600 hover:bg-gray-100 hover:text-gray-900">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+        <span class="nav-label" data-i18n="workspace.nav.calendar">Calendar</span>
+      </a>
+
+      <!-- US-GOV-2.1.1: Review Queue nav item -->
+      <a href="#" id="nav-review-queue" class="flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-colors text-gray-600 hover:bg-gray-100 hover:text-gray-900">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7l2 2 4-4"/></svg>
+        <span class="nav-label">Review</span>
+        <span class="pending-badge ml-auto bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full hidden"></span>
+      </a>
+
+      <!-- Audience and Orders sit after Review (owner, 2026-10-22): Calendar and Review are the
+           assistants' work, these two are the business's own records.
+           The shared Audience. Top-level rather than a tab inside the Email Marketing Assistant:
            the contacts belong to the organisation and are read by every assistant that can send,
            so a per-assistant home would rebuild the silo this layer exists to remove. -->
       <a href="#" id="nav-audience" class="flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-colors text-gray-600 hover:bg-gray-100 hover:text-gray-900">
@@ -54,18 +68,6 @@
         <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>
         <span class="nav-label">Orders</span>
         <span id="nav-orders-badge" class="ml-auto bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full" style="display:none"></span>
-      </a>
-
-      <a href="#" id="nav-calendar" class="flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-colors text-gray-600 hover:bg-gray-100 hover:text-gray-900">
-        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-        <span class="nav-label" data-i18n="workspace.nav.calendar">Calendar</span>
-      </a>
-
-      <!-- US-GOV-2.1.1: Review Queue nav item -->
-      <a href="#" id="nav-review-queue" class="flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-colors text-gray-600 hover:bg-gray-100 hover:text-gray-900">
-        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7l2 2 4-4"/></svg>
-        <span class="nav-label">Review</span>
-        <span class="pending-badge ml-auto bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full hidden"></span>
       </a>
 
       <!-- Connections now live inside each assistant's Connections tab (assistant-detail) -->

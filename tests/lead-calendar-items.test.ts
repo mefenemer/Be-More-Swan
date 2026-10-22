@@ -134,7 +134,7 @@ check('a follow-up on a replied thread is drawn but NOT draggable', () => {
     const chip = span(calendarJs, 'function _followUpChip(', 'function _listFollowUpRow(', 'the follow-up chip');
     assert.ok(/_followUpBlocked/.test(chip), 'The follow-up chip no longer distinguishes a blocked cadence.');
     assert.ok(
-        /blocked \? '' :/.test(chip),
+        /blocked(?: \|\| !_lockedAssistant)? \? '' :/.test(chip),
         'The follow-up chip no longer withholds `draggable` when the thread has replied. '
         + 'The worker refuses to send into a thread that is not "open", so moving that date is busywork '
         + 'that implies a send which will not happen.',

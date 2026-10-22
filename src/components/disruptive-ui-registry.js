@@ -699,12 +699,12 @@
     try { payloadPreview = JSON.stringify(payload, null, 2); } catch { payloadPreview = '{}'; }
 
     const el = document.createElement('div');
-    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
       <div class="flex items-start gap-3 mb-3">
         <div class="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-xl shrink-0">🔀</div>
         <div class="min-w-0">
-          <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">System Routing · Approval needed</p>
+          <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">System Routing · Approval needed</p>
           <p class="font-bold text-gray-900 truncate">Hand off to ${esc(targetName)}</p>
         </div>
       </div>
@@ -713,7 +713,7 @@
         <p class="text-sm text-gray-700 mb-3"><span class="font-bold text-indigo-900">Why:</span> ${esc(ui.reason)}</p>` : ''}
 
       <details class="mb-4 group">
-        <summary class="text-xs font-bold text-indigo-700 cursor-pointer select-none hover:text-indigo-900">Data that will be passed</summary>
+        <summary class="text-xs font-bold text-emerald-800 cursor-pointer select-none hover:text-indigo-900">Data that will be passed</summary>
         <pre class="mt-2 bg-white border border-indigo-100 rounded-lg p-3 text-xs text-gray-600 overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap break-words">${esc(payloadPreview)}</pre>
       </details>
 
@@ -727,7 +727,7 @@
           Decline
         </button>
       </div>
-      <p class="hidden mt-1 text-xs font-semibold text-indigo-700" data-handoff-status></p>
+      <p class="hidden mt-1 text-xs font-semibold text-emerald-800" data-handoff-status></p>
     `;
 
     function settle(statusText) {
