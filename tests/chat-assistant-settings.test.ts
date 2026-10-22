@@ -180,17 +180,18 @@ async function main() {
         assert.ok(src.includes("route !== defaultRoute ? assistantSettingsPromptBlock(assistantRow.roleKey) : null"));
         assert.ok(src.includes("route !== defaultRoute ? settingsProposalFromUiElement(uiElement) : null"));
         // The blog and newsletter routes rebuild uiElement after the action cards — a settings card must survive.
-        assert.ok(src.includes('blogAction ?? settingsCard'));
-        assert.ok(src.includes('emailAction ?? audienceCard ?? settingsCard'));
+        assert.ok(src.includes('blogAction ?? profileCard'));
+        assert.ok(src.includes('emailAction ?? audienceCard ?? profileCard'));
     });
     await check('reloading a conversation re-checks stored settings cards', () => {
-        assert.ok(read('netlify/functions/get-chat-session.ts').includes('refreshSettingsCards(db, orgId, session.aiAssistantId, session.roleKey'));
+        assert.ok(read('src/utils/chat-card-refresh.ts').includes('refreshSettingsCards(db, organisationId, aiAssistantId, roleKey, out)'));
+        assert.ok(read('netlify/functions/get-chat-session.ts').includes('refreshStoredCards(db, orgId, session.aiAssistantId, session.roleKey, messages)'));
     });
     await check('the click calls the Assistant Profile\'s endpoints with their methods', () => {
         const src = read('src/components/chat-session.js');
         const start = src.indexOf('async function onSettingsChange');
         assert.ok(start >= 0, 'onSettingsChange exists');
-        const body = src.slice(start, src.indexOf('async function onLeadAction', start));
+        const body = src.slice(start, src.indexOf('async function onRuleChange', start));
         assert.ok(body.includes("call(`manage-assistant?id=${id}`, 'PATCH', { action: 'pause' })"));
         assert.ok(body.includes("call(`kickoff-assistant?id=${id}`, 'POST')"), 'resume goes through Kick Off, like the page');
         assert.ok(body.includes("call('set-draft-horizon', 'PATCH'"));

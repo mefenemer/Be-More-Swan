@@ -14,6 +14,14 @@
 // assistant on a campaign reaches that assistant's drafting through the campaign directive
 // (ownerNotesFor → blueprint section 13), and every assistant's chat reads its own thread.
 //
+// ── The one place a model writes here: a reply to a person (2026-10-22) ─────────────────────────
+// A person's note gets a REAL answer: the Team page runs a chat turn for it (chat-orchestrator.ts,
+// `teamMessageId`) in the assistant's newest conversation, and postTeamChatReply() writes that turn's
+// reply here as kind 'reply', pointing at the chat message. That reply went through every guard the
+// chat has (unbacked-draft claims, cards rebuilt from rows), and any card it carries — a settings or
+// rule change, an action on a post — is the chat's own card, confirmed by a click. Messages about
+// WORK (brief, started, ready, done…) are still never composed by a model.
+//
 // Questions carry answer buttons. Each question KEY has one handler here, and answering runs it —
 // "Start now?" releases the waiting work; "Video too?" adds video to the brief.
 //
@@ -21,7 +29,7 @@
 
 import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, campaignOrders, campaigns, contentGenerationJobs, teamMessages, teamReads, visualBriefs } from '../../db/schema';
+import { aiAssistants, campaignOrders, campaigns, chatMessages, chatSessions, contentGenerationJobs, teamMessages, teamReads, visualBriefs } from '../../db/schema';
 import { ORDER_ACTION_SPECS, isOrderAction } from '../config/campaign-vocab';
 import { asksForACall } from './callback-request';
 
@@ -29,7 +37,11 @@ type Db = ReturnType<typeof getDb>;
 
 export type TeamKind = 'brief' | 'started' | 'waiting' | 'ready' | 'done' | 'cancelled' | 'question' | 'message' | 'reply';
 /** `callback`: open Help & Support's "Request a call back" form (src/utils/callback-request.ts). */
-export interface TeamLink { assistantId: number; tab?: string; chat?: boolean; callback?: boolean; label: string }
+export interface TeamLink {
+    assistantId: number; tab?: string; chat?: boolean; callback?: boolean; label: string;
+    /** A model reply (postTeamChatReply): the chat message that holds it and its card, and the note it answers. */
+    chatSessionId?: number; chatMessageId?: number; replyTo?: number;
+}
 export interface TeamQuestion { key: QuestionKey; ref: number; choices: Array<{ value: string; label: string }> }
 export type QuestionKey = 'start_now' | 'brief_video';
 
@@ -292,6 +304,8 @@ export async function teamThreadPromptBlock(db: Db, organisationId: number, assi
 
 export interface TeamMessageView {
     id: number; createdAt: string; kind: string; body: string;
+    /** A model reply's card (the chat message's uiElement), so the feed can show it in place. */
+    card: unknown | null;
     campaignId: number | null; campaignOrderId: number | null;
     from: { kind: 'assistant' | 'user'; id: number | null; name: string; roleKey: string | null };
     to: { kind: 'assistant' | 'user' | 'none'; id: number | null; name: string | null };
@@ -314,10 +328,23 @@ export async function listTeamMessages(db: Db, orgId: number, filter: { campaign
             .from(aiAssistants).where(and(eq(aiAssistants.organisationId, orgId), inArray(aiAssistants.id, ids)));
         for (const a of as) names.set(a.id, { name: a.name, roleKey: a.type });
     }
+    // A model reply's card lives on its chat message. Read through the session's organisation, so a
+    // link can only ever resolve to this workspace's own conversation.
+    const chatIds = [...new Set(rows.map((r) => Number((r.link as TeamLink | null)?.chatMessageId)).filter((x) => Number.isInteger(x) && x > 0))];
+    const cards = new Map<number, unknown>();
+    if (chatIds.length) {
+        const cm = await db.select({ id: chatMessages.id, ui: chatMessages.uiElementJson })
+            .from(chatMessages)
+            .innerJoin(chatSessions, eq(chatSessions.id, chatMessages.chatSessionId))
+            .where(and(inArray(chatMessages.id, chatIds), eq(chatSessions.organisationId, orgId)));
+        for (const c of cm) if (c.ui) cards.set(c.id, c.ui);
+    }
     return rows.map((r) => {
         const q = r.question as TeamQuestion | null;
+        const chatMessageId = Number((r.link as TeamLink | null)?.chatMessageId);
         return {
             id: r.id, createdAt: r.createdAt.toISOString(), kind: r.kind, body: r.body,
+            card: cards.get(chatMessageId) ?? null,
             campaignId: r.campaignId, campaignOrderId: r.campaignOrderId,
             from: r.fromAssistantId
                 ? { kind: 'assistant', id: r.fromAssistantId, name: names.get(r.fromAssistantId)?.name ?? 'An assistant', roleKey: names.get(r.fromAssistantId)?.roleKey ?? null }
@@ -354,6 +381,9 @@ export async function markRead(db: Db, orgId: number, userId: number, upToId: nu
  */
 export async function sendFromUser(db: Db, args: {
     orgId: number; userId: number; assistantId: number; campaignId?: number | null; body: string;
+    /** 'model': the page runs a chat turn for this note next (chat-orchestrator.ts `teamMessageId`),
+     *  which writes the real reply — so no fixed one here. Anything else keeps the fixed reply. */
+    reply?: 'model' | 'fixed';
 }): Promise<{ ok: true; id: number } | { ok: false; status: number; error: string }> {
     const body = String(args.body || '').trim();
     if (!body) return { ok: false, status: 400, error: 'Write something first.' };
@@ -380,6 +410,7 @@ export async function sendFromUser(db: Db, args: {
             console.warn('[team-messages] recompile after a note failed — the next scheduled recompile picks it up', err instanceof Error ? err.message : err);
         }
     }
+    if (args.reply === 'model') return { ok: true, id };
     // Asking for a call or a person gets the call-back form, never "Noted" (owner, 2026-10-19: a
     // "request a call back" here was answered with the Rules-tab reply). Same check as the chat.
     const wantsACall = asksForACall(body);
@@ -395,6 +426,47 @@ export async function sendFromUser(db: Db, args: {
             : { assistantId: a.id, chat: true, label: 'Open chat' },
     });
     return { ok: true, id };
+}
+
+/**
+ * The note a Team chat turn answers (chat-orchestrator.ts `teamMessageId`): this person's own
+ * message to this assistant, in this workspace, not answered yet. Null otherwise — the turn is
+ * refused rather than answering someone else's note, or the same note twice.
+ */
+export async function teamNoteForChatTurn(db: Db, args: { orgId: number; userId: number; assistantId: number; teamMessageId: number }): Promise<{ id: number; body: string; campaignId: number | null; campaignObjective: string | null } | null> {
+    const [note] = await db.select({ id: teamMessages.id, body: teamMessages.body, campaignId: teamMessages.campaignId })
+        .from(teamMessages)
+        .where(and(
+            eq(teamMessages.id, args.teamMessageId), eq(teamMessages.organisationId, args.orgId),
+            eq(teamMessages.fromUserId, args.userId), eq(teamMessages.toAssistantId, args.assistantId),
+            eq(teamMessages.kind, 'message'),
+        ))
+        .limit(1);
+    if (!note) return null;
+    const [answered] = await db.select({ id: teamMessages.id }).from(teamMessages)
+        .where(and(eq(teamMessages.organisationId, args.orgId), eq(teamMessages.kind, 'reply'), gt(teamMessages.id, note.id),
+            sql`(${teamMessages.link} ->> 'replyTo')::int = ${note.id}`))
+        .limit(1);
+    if (answered) return null;
+    let campaignObjective: string | null = null;
+    if (note.campaignId) {
+        const [c] = await db.select({ objective: campaigns.objective }).from(campaigns)
+            .where(and(eq(campaigns.id, note.campaignId), eq(campaigns.organisationId, args.orgId))).limit(1);
+        campaignObjective = c?.objective ?? null;
+    }
+    return { ...note, campaignObjective };
+}
+
+/** Write a Team chat turn's reply under the note it answers. Never throws (postTeamMessage). */
+export async function postTeamChatReply(db: Db, r: {
+    orgId: number; assistantId: number; campaignId: number | null; replyTo: number; body: string;
+    chatSessionId: number; chatMessageId: number;
+}): Promise<number | null> {
+    return postTeamMessage(db, {
+        organisationId: r.orgId, campaignId: r.campaignId, fromAssistantId: r.assistantId, toUser: true, kind: 'reply',
+        body: r.body,
+        link: { assistantId: r.assistantId, chat: true, label: 'Open chat', chatSessionId: r.chatSessionId, chatMessageId: r.chatMessageId, replyTo: r.replyTo },
+    });
 }
 
 /** Answer a question. Runs the question's own handler; says what happened in the thread. */

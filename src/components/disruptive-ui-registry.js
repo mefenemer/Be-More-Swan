@@ -3335,6 +3335,67 @@
   }
 
   register('assistant_settings_proposal', renderAssistantSettingsProposalCard);
+
+  // ── Built-in: Rule Proposal Card (every structured chat) ──────────────────
+  // { type: 'rule_proposal', action: 'add'|'edit'|'turn_off'|'turn_on'|'delete', assistantId, ruleId,
+  //   currentText, ruleText, platform, platformLabel, isActive, blocked, settled? }
+  // A change to the assistant's Do's and don'ts, checked against content_rules by the orchestrator
+  // (src/utils/chat-rules.ts). The click dispatches `rule:change`; chat-session.js calls
+  // content-rules.ts — the endpoint the Do's and don'ts card uses.
+  const RULE_COPY = {
+    add: { head: 'Add a rule', button: 'Save rule', busy: 'Saving…' },
+    edit: { head: 'Reword a rule', button: 'Save', busy: 'Saving…' },
+    turn_off: { head: 'Switch a rule off', button: 'Switch off', busy: 'Switching off…' },
+    turn_on: { head: 'Switch a rule back on', button: 'Switch on', busy: 'Switching on…' },
+    delete: { head: 'Delete a rule', button: 'Delete rule', busy: 'Deleting…', danger: true },
+  };
+
+  function renderRuleProposalCard(ui, esc) {
+    const copy = RULE_COPY[ui.action];
+    const assistantId = Number(ui.assistantId);
+    if (!copy || !Number.isInteger(assistantId)) return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const ruleNo = Number.isInteger(Number(ui.ruleId)) && ui.ruleId ? `#${Number(ui.ruleId)}` : '';
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      <p class="text-xs text-gray-500 mt-2">Do’s and don’ts${ruleNo ? ` · rule ${ruleNo}` : ''}${ui.platformLabel ? ` · only for ${esc(ui.platformLabel)}` : ''}</p>
+      ${ui.currentText ? `<p class="text-sm text-gray-700 mt-2 break-words"><span class="font-bold">${ui.action === 'edit' ? 'Now:' : 'Rule:'}</span> ${esc(ui.currentText)}</p>` : ''}
+      ${ui.ruleText && (ui.action === 'add' || ui.action === 'edit') ? `<p class="text-sm text-gray-900 mt-1 break-words"><span class="font-bold">${ui.action === 'edit' ? 'After:' : 'Rule:'}</span> ${esc(ui.ruleText)}</p>` : ''}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${!blocked && ui.action === 'turn_off' ? '<p class="text-xs text-gray-600 mt-3">It is kept, and can be switched back on any time.</p>' : ''}
+      ${!blocked && ui.action === 'delete' ? '<p class="text-xs text-gray-600 mt-3">This removes it for good. To stop it for now instead, switch it off.</p>' : ''}
+      ${!blocked && (ui.action === 'add' || ui.action === 'edit') ? '<p class="text-xs text-gray-600 mt-3">Your assistant follows it in everything it does from your next message.</p>' : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-rp-go class="${copy.danger ? 'btn-destructive' : 'btn-primary'} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>
+        <button type="button" data-rp-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-rp-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-rp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-rp-go], [data-rp-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-rp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-rp-go]')) return;
+      setBusy(true);
+      say(copy.busy);
+      el.dispatchEvent(new CustomEvent('rule:change', {
+        bubbles: true,
+        detail: {
+          action: ui.action, assistantId, ruleId: ui.ruleId ?? null, ruleText: ui.ruleText ?? null, platform: ui.platform ?? null,
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Done.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('rule_proposal', renderRuleProposalCard);
   register('SocialPostDraftCard', renderSocialPostDraftCard);
 
   // ── Built-in: Blog Post Draft Card ──────────────────────────────────────────

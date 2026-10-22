@@ -14,7 +14,7 @@
 // Auth: aura_session + active org via requireTenant (tenant isolation on every read).
 
 import { sanitizeForModel } from '../../src/utils/text-safe';
-import { teamThreadPromptBlock } from '../../src/utils/team-messages';
+import { postTeamChatReply, teamNoteForChatTurn, teamThreadPromptBlock } from '../../src/utils/team-messages';
 import { SPECIAL_CATEGORY_RULE } from '../../src/constants/special-category-rule';
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
@@ -72,6 +72,8 @@ import { leadActionFromUiElement, resolveLeadActionProposal, sendableDraft, type
 import {
     assistantSettingsPromptBlock, buildAssistantSettingsSnapshot, resolveSettingsProposal, settingsProposalFromUiElement, type SettingsCard,
 } from '../../src/utils/chat-assistant-settings';
+import { buildRulesListBlock, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock, type RuleCard } from '../../src/utils/chat-rules';
+import { buildPlanSnapshot } from '../../src/utils/chat-plan-snapshot';
 import { isInOutreachReview } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
 import { LOSS_REASONS } from '../../src/config/revenue-events';
@@ -2514,6 +2516,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         forPostId?: number;
         /** Pictures (library assetIds) and documents (base64) — chat-attachments.ts. */
         attachments?: unknown;
+        /** A note the user just sent this assistant on the Team page (team.ts `send`, reply:'model').
+         *  The turn answers THAT note — its stored words, not `message` — in the assistant's newest
+         *  conversation, and the reply is written back to the Team feed (team-messages.ts). */
+        teamMessageId?: number;
     };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
@@ -2530,7 +2536,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         }
     }
 
-    const typed = (body.message || '').trim();
+    // ── A Team page note (team-messages.ts teamNoteForChatTurn): this person's own unanswered note to
+    // this assistant. Its stored words are the message — the client cannot substitute others.
+    let teamNote: Awaited<ReturnType<typeof teamNoteForChatTurn>> = null;
+    if (body.teamMessageId !== undefined) {
+        const assistantId = Number(body.aiAssistantId);
+        if (!Number.isInteger(assistantId) || body.chatSessionId !== undefined) return json(400, { error: 'A Team reply needs aiAssistantId and no chatSessionId.' });
+        teamNote = await teamNoteForChatTurn(db, { orgId, userId, assistantId, teamMessageId: Number(body.teamMessageId) });
+        if (!teamNote) return json(409, { error: 'That note has already been answered, or isn’t yours to answer.' });
+    }
+
+    const typed = teamNote ? teamNote.body.trim() : (body.message || '').trim();
     if (!typed && !attached.length) return json(400, { error: 'message is required' });
     if (typed.length > MAX_MESSAGE_CHARS) return json(400, { error: `Message too long (max ${MAX_MESSAGE_CHARS} characters).` });
     // What the transcript shows: their words, then what they attached.
@@ -2579,7 +2595,19 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // ── Resolve the session (continue or create) — always scoped to the caller's org ──
     let session: { id: number; aiAssistantId: number };
 
-    if (body.chatSessionId !== undefined) {
+    // A Team note continues the assistant's newest active conversation with this person — the one the
+    // chat window resumes (assistant-chat-modal.js findLatestSession) — so both windows hold one thread.
+    const [teamThread] = teamNote
+        ? await db.select({ id: chatSessions.id, aiAssistantId: chatSessions.aiAssistantId }).from(chatSessions)
+            .where(and(eq(chatSessions.organisationId, orgId), eq(chatSessions.userId, userId),
+                eq(chatSessions.aiAssistantId, Number(body.aiAssistantId)), eq(chatSessions.status, 'active')))
+            .orderBy(desc(chatSessions.updatedAt), desc(chatSessions.id))
+            .limit(1)
+        : [];
+
+    if (teamThread) {
+        session = teamThread;
+    } else if (body.chatSessionId !== undefined) {
         const [existing] = await db
             .select({ id: chatSessions.id, aiAssistantId: chatSessions.aiAssistantId, status: chatSessions.status })
             .from(chatSessions)
@@ -2811,7 +2839,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // JSON reply can also propose a change through a confirm card; the plain default route only reads.
     const settingsBlock = await buildAssistantSettingsSnapshot(db, orgId, session.aiAssistantId, assistantRow.roleKey);
     const settingsCardBlock = route !== defaultRoute ? assistantSettingsPromptBlock(assistantRow.roleKey) : null;
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock].filter(Boolean).join('\n\n');
+    // Its Do's and don'ts by id, and the card that adds, rewords, switches or deletes one
+    // (src/utils/chat-rules.ts) — the rules block above is what it FOLLOWS; this is what it can CHANGE.
+    // Plus the workspace's plan and this month's task balance (src/utils/chat-plan-snapshot.ts), the
+    // same figures as the usage bar. Both every turn, every role; both never throw.
+    const rulesListBlock = route !== defaultRoute ? await buildRulesListBlock(db, orgId, session.aiAssistantId) : null;
+    const rulesCardBlock = route !== defaultRoute ? rulesPromptBlock(assistantRow.roleKey) : null;
+    const planBlock = await buildPlanSnapshot(db, orgId);
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock].filter(Boolean).join('\n\n');
 
     const system = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -2859,7 +2894,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             role: m.role as 'user' | 'assistant',
             content: i === latestCardIdx ? `${m.content}\n\n${onScreenCardBlock(m.uiElementJson)}` : m.content,
         })),
-        { role: 'user' as const, content: recordContext ? `${recordContext}\n\n${message}` : message },
+        { role: 'user' as const, content: [
+            recordContext,
+            // Where this message came from, for the model only (the transcript keeps their words).
+            teamNote
+                ? `[Sent to you on the Team page${teamNote.campaignId ? `, on the thread for the campaign "${teamNote.campaignObjective ?? `#${teamNote.campaignId}`}" — a note there is also added to that campaign's brief, which you follow in everything you draft for it` : ''}. Your reply appears there, under their note, with any card you include.]`
+                : '',
+            message,
+        ].filter(Boolean).join('\n\n') },
     ];
 
     try {
@@ -3014,6 +3056,19 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 content = 'I couldn’t read my settings just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Profile.';
             }
         }
+        // A change to its own Do's and don'ts (src/utils/chat-rules.ts) — any structured route. Rebuilt
+        // from content_rules; the click calls content-rules.ts, the endpoint the Do's and don'ts card uses.
+        let ruleCard: RuleCard | null = null;
+        const ruleReq = route !== defaultRoute && !settingsReq ? ruleProposalFromUiElement(uiElement) : null;
+        if (ruleReq) {
+            ruleCard = await resolveRuleProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, ruleReq);
+            uiElement = ruleCard;
+            if (!ruleCard) {
+                content = 'I couldn’t read your Do’s and don’ts just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Profile.';
+            }
+        }
+        // One card for the "keep it" checks below: a settings change or a rule change.
+        const profileCard: SettingsCard | RuleCard | null = settingsCard ?? ruleCard;
         // The Blog Writer's twin (src/utils/chat-blog-action.ts): same checks, built from blog_posts
         // rows; a time in the user's words is worked out here so the card shows the exact instant.
         let blogAction: BlogActionCard | null = null;
@@ -3114,7 +3169,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         const blogDraft = route === ROUTES.blog_writer ? blogPostDraftFromUiElement(uiElement) : null;
         if (route === ROUTES.blog_writer) {
             // An action card on an existing article was already checked and rebuilt above — keep it.
-            uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft } : blogAction ?? settingsCard;
+            uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft } : blogAction ?? profileCard;
         }
 
         // Same contract for the newsletter route, and the same reason: uiElementJson is persisted
@@ -3143,7 +3198,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 : formDraft ? { type: AUDIENCE_FORM_DRAFT_TYPE, ...formDraft }
                 // An action card on an existing email, or an Audience card, was already checked and
                 // rebuilt above — keep it.
-                : emailAction ?? audienceCard ?? settingsCard;
+                : emailAction ?? audienceCard ?? profileCard;
         }
 
         // ── Reply ↔ persistence reconciliation ────────────────────────────────────
@@ -3174,7 +3229,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
         // A post-action turn is not a drafting turn: "approve it and it's scheduled" describes the
         // card, and the card is the backing — the user's click is what does it.
-        if (route === ROUTES.social_media_manager && !postActionReq && !settingsCard && replyClaimsPostSaved(content) && !alreadyApologised) {
+        if (route === ROUTES.social_media_manager && !postActionReq && !profileCard && replyClaimsPostSaved(content) && !alreadyApologised) {
             let breach: DraftClaimFailure | null = null;
             if (draftTarget) breach = 'not_saved_here';                      // saving here is wrong by design
             else if (persistedPosts?.length === 0) breach = 'persist_failed'; // valid draft, the write threw
@@ -3193,7 +3248,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // persists), so the only unbacked claim available to it is claiming an article it did not
         // write — which is the identical bug: a confident reply about a post that does not exist.
         // An action card is the thing a "scheduled" reply is about, so it is not an unbacked claim.
-        if (route === ROUTES.blog_writer && !blogDraft && !blogAction && !settingsCard && replyClaimsPostSaved(content) && !alreadyApologised) {
+        if (route === ROUTES.blog_writer && !blogDraft && !blogAction && !profileCard && replyClaimsPostSaved(content) && !alreadyApologised) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked blog draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );
@@ -3205,7 +3260,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // unbacked claim available to it is claiming an issue it did not write.
         // !emailAction / !audienceCard: a "booked for Tuesday" or "here's the segment" reply describes
         // its card, not an unbacked claim.
-        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised && !emailAction && !audienceCard && !settingsCard) {
+        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised && !emailAction && !audienceCard && !profileCard) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked newsletter draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );
@@ -3256,6 +3311,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         await db.update(chatSessions).set({ updatedAt: new Date() }).where(eq(chatSessions.id, session.id));
 
         await persistHubRecords(db, orgId, session.aiAssistantId, hubRecords);
+
+        // A Team note's answer goes back under the note (team-messages.ts postTeamChatReply), pointing at
+        // this chat message, whose card the Team feed shows in place. Never throws.
+        if (teamNote) {
+            await postTeamChatReply(db, {
+                orgId, assistantId: session.aiAssistantId, campaignId: teamNote.campaignId, replyTo: teamNote.id,
+                body: content, chatSessionId: session.id, chatMessageId: assistantMessage.id,
+            });
+        }
 
         return json(200, {
             chatSessionId: session.id,

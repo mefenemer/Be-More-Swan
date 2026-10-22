@@ -110,7 +110,7 @@ async function main() {
     await check('the email route resolves the proposal with the real parser, and keeps the card', () => {
         const o = read('netlify/functions/chat-orchestrator.ts');
         assert.match(o, /emailAction = await resolveEmailActionProposal\(db, orgId, session\.aiAssistantId, emailActionReq, snapshotTz, parseScheduleInstruction\);/);
-        assert.match(o, /: formDraft \? \{ type: AUDIENCE_FORM_DRAFT_TYPE, \.\.\.formDraft \}(?:\s*\/\/[^\n]*\n)+\s*: emailAction \?\? audienceCard \?\? settingsCard;/);
+        assert.match(o, /: formDraft \? \{ type: AUDIENCE_FORM_DRAFT_TYPE, \.\.\.formDraft \}(?:\s*\/\/[^\n]*\n)+\s*: emailAction \?\? audienceCard \?\? profileCard;/);
         assert.match(o, /"type": "email_action_proposal"/);
     });
     await check('the email list the chat reads names each email by its id', () => {
@@ -127,7 +127,8 @@ async function main() {
         assert.ok(!/action: 'send'/.test(handler), 'the chat must never send an email immediately');
     });
     await check('reopening a conversation re-checks email cards too', () => {
-        assert.match(read('netlify/functions/get-chat-session.ts'), /await refreshEmailActionCards\(db, orgId, session\.aiAssistantId,/);
+        assert.match(read('src/utils/chat-card-refresh.ts'), /await refreshEmailActionCards\(db, organisationId, aiAssistantId,/);
+        assert.ok(read('netlify/functions/get-chat-session.ts').includes('refreshStoredCards(db, orgId, session.aiAssistantId, session.roleKey, messages)'));
     });
 
     console.log(`\n${passed}/${total} checks passed`);

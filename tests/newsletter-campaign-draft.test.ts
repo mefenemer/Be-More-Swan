@@ -194,7 +194,7 @@ await check('the model can see the plan it proposed — the latest newsletter ca
     // Prod 2026-10-01: history carried reply TEXT only, so "write it" was answered with a second,
     // different plan and a reply claiming the emails were written.
     assert.match(ORCH, /uiElementJson: chatMessages\.uiElementJson, createdAt: chatMessages\.createdAt/);
-    const block = ORCH.slice(landmark(ORCH, 'const latestCardIdx = route === ROUTES.newsletter_editor'), landmark(ORCH, "{ role: 'user' as const, content: recordContext"));
+    const block = ORCH.slice(landmark(ORCH, 'const latestCardIdx = route === ROUTES.newsletter_editor'), landmark(ORCH, "{ role: 'user' as const, content: ["));
     assert.match(block, /lastIndexOf\(1\)/, 'only the LATEST card, not every redraft');
     assert.match(block, /i === latestCardIdx \? /);
     const helper = ORCH.slice(landmark(ORCH, 'function onScreenCardBlock'), landmark(ORCH, 'function parseStructuredReply'));

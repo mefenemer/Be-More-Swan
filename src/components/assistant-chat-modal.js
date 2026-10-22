@@ -264,8 +264,20 @@
     if (team) {
       setHistoryOpen(false);
       if (window.TeamFeed) window.TeamFeed.mount(el('bms-chat-team-host'), { mode: 'assistant', assistantId: state.assistantId });
+    } else if (state.staleSessionId && state.chat && state.chat.getSessionId() === state.staleSessionId) {
+      // A note sent on the Team tab was answered in THIS conversation (team-feed.js → team:chatTurn):
+      // reload it so the Chat tab shows that exchange too.
+      var sid = state.staleSessionId;
+      state.staleSessionId = null;
+      loadConversation({ assistantId: state.assistantId, sessionId: sid });
     }
   }
+
+  // Bound once, at load. Remember which conversation a Team reply landed in (see setMode).
+  document.addEventListener('team:chatTurn', function (e) {
+    var d = (e && e.detail) || {};
+    if (d.chatSessionId && Number(d.assistantId) === Number(state.assistantId)) state.staleSessionId = Number(d.chatSessionId);
+  });
 
   // The assistant's own letter and colour (assistant-colors.js), as on its card and in Team Chat.
   function paintAvatar(info) {

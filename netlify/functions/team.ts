@@ -5,6 +5,7 @@
 //   POST { action: 'unread' }                                     → { unread } — the side menu and bell badge
 //   POST { action: 'mark_read', upToId }                          → the person has seen up to here
 //   POST { action: 'send', assistantId, campaignId?, body }       → a note to an assistant (moderated)
+//        + reply: 'model' → no fixed reply; the page then runs a chat turn for it (chat-orchestrator `teamMessageId`)
 //   POST { action: 'answer', messageId, value }                   → answer an assistant's question; runs its handler
 //
 // Every write goes through src/utils/team-messages.ts. Assistant messages are never composed here:
@@ -13,9 +14,10 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
-import { aiAssistants, campaigns } from '../../db/schema';
+import { aiAssistants, campaigns, masterAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
+import { refreshStoredCards } from '../../src/utils/chat-card-refresh';
 import { answerQuestion, listTeamMessages, markRead, sendFromUser, unreadCount } from '../../src/utils/team-messages';
 
 function json(statusCode: number, body: unknown) {
@@ -65,6 +67,21 @@ export default withLambda(async (event) => {
             ? await db.select({ id: campaigns.id, objective: campaigns.objective, status: campaigns.status })
                 .from(campaigns).where(and(eq(campaigns.organisationId, orgId), inArray(campaigns.id, extra)))
             : [];
+        // A model reply's card (team-messages.ts postTeamChatReply) is re-checked against its row, the
+        // same chain a reopened chat runs (src/utils/chat-card-refresh.ts), so one already confirmed
+        // here or in the chat says so rather than offering its button again.
+        const withCards = messages.filter((m) => m.card && m.from.kind === 'assistant' && m.from.id);
+        if (withCards.length) {
+            const ids = [...new Set(withCards.map((m) => m.from.id as number))];
+            const roles = await db.select({ id: aiAssistants.id, roleKey: masterAssistants.roleKey }).from(aiAssistants)
+                .leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
+                .where(and(eq(aiAssistants.organisationId, orgId), inArray(aiAssistants.id, ids)));
+            for (const id of ids) {
+                const mine = withCards.filter((m) => m.from.id === id);
+                const fresh = await refreshStoredCards(db, orgId, id, roles.find((r) => r.id === id)?.roleKey ?? null, mine.map((m) => ({ uiElement: m.card })));
+                mine.forEach((m, i) => { m.card = fresh[i].uiElement; });
+            }
+        }
         return json(200, {
             messages,
             assistants,
@@ -88,7 +105,7 @@ export default withLambda(async (event) => {
         // any other text that reaches a model.
         const blocked = await enforcePromptModeration({ text, userId, organisationId: orgId, source: 'team' });
         if (blocked) return blocked;
-        const r = await sendFromUser(db, { orgId, userId, assistantId, campaignId: posInt(body.campaignId) ?? null, body: text });
+        const r = await sendFromUser(db, { orgId, userId, assistantId, campaignId: posInt(body.campaignId) ?? null, body: text, reply: body.reply === 'model' ? 'model' : 'fixed' });
         if (!r.ok) return json(r.status, { error: r.error });
         return json(200, { ok: true, id: r.id });
     }

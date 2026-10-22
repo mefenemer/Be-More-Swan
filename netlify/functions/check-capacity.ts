@@ -24,16 +24,16 @@
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
-import { eq, and, gte, gt, count, sum, asc, or, inArray, sql } from 'drizzle-orm';
+import { eq, and, gte, gt, count, sum, asc, or, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { plans, masterPlans, planPrices, aiAssistants, taskRuns, usageCounters, userOrganisations, users, systemConnections, organisations, partners } from '../../db/schema';
+import { plans, masterPlans, planPrices, aiAssistants, taskRuns, userOrganisations, users, systemConnections, organisations, partners } from '../../db/schema';
 import { getPeriodStart } from '../../src/utils/atomic-cap-check';
 import { effectiveLimit, effectiveFeatures, type FeatureOverrides } from '../../src/utils/plan-features';
 import { SOCIAL_PLATFORMS } from '../../src/config/platform-formats';
 import { resolveLiveSocialPlatforms } from '../../src/utils/live-social-connections';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { BETA_TIER_KEY, featureTierKey } from '../../src/config/beta-plan';
-import { TASK_WEIGHTS } from '../../src/config/task-weights';
+import { readTaskUsage, tasksRemaining as remainingTasks } from '../../src/utils/task-balance';
 import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { getTrial } from '../../src/utils/trial';
 import { resolveImpersonation } from '../../src/utils/impersonation';
@@ -211,30 +211,12 @@ export default withLambda(async (event) => {
         let unifiedTaskMetering = false;
 
         if (orgId) {
-            const [ucRow] = await db
-                .select({ taskCount: usageCounters.taskCount, tokenCount: usageCounters.tokenCount })
-                .from(usageCounters)
-                .where(and(
-                    eq(usageCounters.organisationId, orgId),
-                    eq(usageCounters.periodStart, periodStart),
-                ))
-                .limit(1);
-
-            // No counter row = nothing recorded this month. (The old fallback counted task_runs, which
-            // background work never writes, so it disagreed with what the cap check enforces.)
-            taskCount  = ucRow?.taskCount  ?? 0;
-            tokenUsage = ucRow?.tokenCount ?? 0;
-
-            // Bonus tasks (non-expiring, spent after the allowance) and media jobs still running.
-            // The weights are cast to int: an untyped parameter in SUM(CASE …) is text → 42883.
-            const [extra] = await db.execute<{ bonus: number; in_flight: number }>(sql`
-                SELECT COALESCE((SELECT bonus_tasks FROM task_bonus WHERE organisation_id = ${orgId}), 0) AS bonus,
-                       COALESCE((SELECT SUM(CASE media_type WHEN 'video' THEN ${TASK_WEIGHTS.ai_video}::int WHEN 'audio' THEN ${TASK_WEIGHTS.ai_music}::int ELSE ${TASK_WEIGHTS.ai_image}::int END)
-                                   FROM media_generation_jobs
-                                  WHERE organisation_id = ${orgId} AND status IN ('queued', 'processing')
-                                    AND created_at > now() - interval '2 hours'), 0) AS in_flight`) as unknown as Array<{ bonus: number; in_flight: number }>;
-            bonusTasks = Number(extra?.bonus ?? 0);
-            tasksInFlight = Number(extra?.in_flight ?? 0);
+            // One computation with the assistants' chat (src/utils/task-balance.ts), so the two agree.
+            const usage = await readTaskUsage(db, orgId, periodStart);
+            taskCount  = usage.taskCount;
+            tokenUsage = usage.tokenCount;
+            bonusTasks = usage.bonusTasks;
+            tasksInFlight = usage.tasksInFlight;
             unifiedTaskMetering = await isUnifiedTaskMetering(orgId);
         } else {
             // Solo user with no org — live aggregate keyed on userId
@@ -304,9 +286,7 @@ export default withLambda(async (event) => {
         // What can still be started: allowance left + bonus tasks − media jobs still running. The
         // percentage is of everything available this month, so it only reads 100 when work would
         // actually be refused (bonus tasks keep an org going past its allowance).
-        const tasksRemaining = monthlyTaskLimit === null
-            ? null
-            : Math.max(Math.max(monthlyTaskLimit - taskCount, 0) + bonusTasks - tasksInFlight, 0);
+        const tasksRemaining = remainingTasks(monthlyTaskLimit, { taskCount, bonusTasks, tasksInFlight });
         const taskPct = monthlyTaskLimit && tasksRemaining !== null
             ? Math.min(100, Math.round((taskCount / Math.max(taskCount + tasksRemaining, 1)) * 100))
             : 0;

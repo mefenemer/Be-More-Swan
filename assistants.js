@@ -12284,6 +12284,15 @@ document.addEventListener('assistant:settingsChanged', (e) => {
     }
 });
 
+// A rule changed from the assistant's chat (rule card → chat-session.js → content-rules.ts). Reload
+// both lists that show rules if this page is that assistant's. Bound once at load on document.
+document.addEventListener('assistant:rulesChanged', (e) => {
+    const id = Number(e.detail?.assistantId);
+    if (!id || Number(window._currentAssistantId) !== id) return;
+    _fetchAndRenderAssistantRules(id);
+    window._renderRunbookDirectives?.(id);
+});
+
 async function _setAutonomousMedia(patch) {
     const res = await fetch('/.netlify/functions/set-autonomous-media', {
         method: 'PATCH',

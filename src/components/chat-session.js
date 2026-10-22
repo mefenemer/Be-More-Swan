@@ -16,6 +16,8 @@
  *                                   //   uiElement | uiElementJson, createdAt }
  *     readOnly,                     // optional — an ARCHIVED transcript: renders the history
  *                                   //   with no composer, and sendMessage() is a no-op
+ *     cardOnly,                     // optional — just the cards of initialMessages, no text,
+ *                                   //   composer or footer; their buttons still work (Team feed)
  *   });
  *   chat.sendMessage(text)          // programmatic send
  *   chat.getSessionId()             // number | null (set after the first reply)
@@ -115,7 +117,11 @@
     // a composer here would only ever produce an error — the transcript is still worth reading,
     // which is the whole point of archiving rather than deleting. Restoring happens in the
     // history drawer (chat-history-panel.js), not here.
-    const readOnly = props.readOnly === true;
+    // Card-only: ONE stored card shown somewhere else — the Team feed shows a model reply's card under
+    // the reply (team-feed.js). No composer, no footer, no text bubble; the card's buttons still run
+    // through this conversation's handlers below, so they behave exactly as they do in the chat.
+    const cardOnly = props.cardOnly === true;
+    const readOnly = props.readOnly === true || cardOnly;
     const readOnlyFooterHtml = `
         <div class="border-t border-gray-200 bg-gray-50 px-4 sm:px-6 py-4 text-center" data-chat-readonly>
           <p class="text-sm font-semibold text-gray-700">This conversation is archived.</p>
@@ -146,7 +152,7 @@
           </div>`;
 
     // ── Shell ──
-    container.innerHTML = `
+    container.innerHTML = cardOnly ? '<div data-chat-root><div data-chat-scroll></div></div>' : `
       <div class="flex flex-col h-full bg-gray-50" data-chat-root>
         <div class="grow overflow-y-auto px-4 sm:px-6 py-6 space-y-4" data-chat-scroll>${emptyStateHtml}
         </div>
@@ -277,7 +283,7 @@
         bubble.innerHTML = renderMarkdown(message.content);
         softenCodeBlocks(bubble);
       }
-      row.appendChild(bubble);
+      if (!cardOnly) row.appendChild(bubble);
 
       // Disruptive UI: mount the interactive card inline, under the text bubble.
       const uiElement = message.uiElement ?? message.uiElementJson ?? null;
@@ -963,6 +969,50 @@
       }
     }
 
+    // Rule cards → content-rules.ts, the endpoint the Do's and don'ts card uses (POST create, PATCH
+    // edit / toggle, DELETE). It recompiles the brief, so autopilot follows the change too. Then
+    // `assistant:rulesChanged` on document repaints the list behind the chat.
+    async function onRuleChange(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const call = async (url, method, body) => {
+        const res = await fetch(`/.netlify/functions/${url}`, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || data.message || `That didn’t work (HTTP ${res.status}).`);
+        return data;
+      };
+      const id = Number(d.ruleId);
+      try {
+        let message = 'Saved.';
+        if (d.action === 'add') {
+          const r = await call('content-rules', 'POST', { assistantId: Number(d.assistantId), ruleText: d.ruleText, platform: d.platform || null });
+          message = r.rule?.id
+            ? `Saved as rule #${r.rule.id} — your assistant follows it from now on.`
+            : 'Saved — your assistant follows it from now on.';
+        } else if (d.action === 'edit') {
+          await call('content-rules', 'PATCH', { id, ruleText: d.ruleText });
+          message = 'Reworded — it follows the new wording from now on.';
+        } else if (d.action === 'turn_off' || d.action === 'turn_on') {
+          await call('content-rules', 'PATCH', { id, isActive: d.action === 'turn_on' });
+          message = d.action === 'turn_on' ? 'Switched back on.' : 'Switched off — it’s kept, and you can switch it back on any time.';
+        } else if (d.action === 'delete') {
+          await call(`content-rules?id=${id}`, 'DELETE');
+          message = 'Deleted.';
+        } else {
+          throw new Error('Unknown change.');
+        }
+        respond({ ok: true, message });
+        document.dispatchEvent(new CustomEvent('assistant:rulesChanged', { detail: { assistantId: Number(d.assistantId) } }));
+      } catch (err) {
+        respond({ ok: false, error: err.message });
+      }
+    }
+
     async function onLeadAction(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -1511,6 +1561,7 @@
     container.addEventListener('audience:action', onAudienceAction);
     container.addEventListener('lead:action', onLeadAction);
     container.addEventListener('settings:change', onSettingsChange);
+    container.addEventListener('rule:change', onRuleChange);
     container.addEventListener('brief:review', onBriefReview);
     container.addEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
     container.addEventListener('siteaudit:check', onSiteAuditCheck);
@@ -1576,6 +1627,7 @@
         container.removeEventListener('audience:action', onAudienceAction);
         container.removeEventListener('lead:action', onLeadAction);
         container.removeEventListener('settings:change', onSettingsChange);
+        container.removeEventListener('rule:change', onRuleChange);
         container.removeEventListener('brief:review', onBriefReview);
         container.removeEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
         container.removeEventListener('siteaudit:check', onSiteAuditCheck);
