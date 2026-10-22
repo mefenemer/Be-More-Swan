@@ -27,6 +27,8 @@ import type { getDb } from '../../db/client';
 import { blogPosts, newsletterIssues, scheduledPosts } from '../../db/schema';
 import { ATTENTION_STATUSES, AWAITING_REVIEW_STATUSES, BOOKED_STATUSES } from '../config/post-status';
 import { platformName } from './team-activity';
+import { diagnosePostFailure } from './post-failure-diagnosis';
+import { openWarnings, readCachedReview } from './post-quality-review';
 import { loadBlogReaders, renderReadersForChat } from './blog-readers';
 
 type Db = ReturnType<typeof getDb>;
@@ -36,6 +38,15 @@ export const SNAPSHOT_LIMIT = 15;
 /** A failure, or something already sent, older than this is history rather than conversation. */
 export const RECENT_DAYS = 30;
 const TEXT_MAX = 90;
+/** A reason or warning is the answer to "why?", so it gets more room than a caption. */
+const NOTE_MAX = 240;
+/** Compliance warnings listed per post; the count is always given in full. */
+const WARNINGS_MAX = 3;
+
+const clip = (s: string, n: number) => {
+    const t = s.replace(/\s+/g, ' ').trim();
+    return t.length > n ? `${t.slice(0, n)}…` : t;
+};
 
 export interface SnapshotItem {
     /** When it goes out (or went out). Null for a draft with no date yet. */
@@ -50,6 +61,8 @@ export interface SnapshotItem {
     /** The row's id, shown as "#123" so the chat can name the exact item in a post_action_proposal
      *  (social), blog_action_proposal (blog) or email_action_proposal (email). */
     ref?: number | null;
+    /** Why it stopped, or what is holding it up — one "↳" line each under the item. */
+    notes?: string[];
 }
 
 export interface SnapshotSection { title: string; items: SnapshotItem[]; total: number }
@@ -79,13 +92,13 @@ function line(p: SnapshotItem, stateWords: Record<string, string>, tz?: string |
         stateWords[p.status] ?? p.status,
         quoted,
         p.extra || null,
-    ].filter(Boolean).join(' · ')}`;
+    ].filter(Boolean).join(' · ')}${(p.notes ?? []).map((n) => `\n  ↳ ${n}`).join('')}`;
 }
 
 /** Render the block. Pure — tested without a database. */
 export function renderContentSnapshot(input: SnapshotInput): string {
     const { noun, tab, stateWords, timezone } = input;
-    const head = `YOUR ${noun.toUpperCase()} RIGHT NOW — this assistant's own ${noun}, read from its "${tab}" tab at the moment this message was sent. Times are in the business's own timezone. These are FACT: when the user asks what is coming up, what is waiting for them, or where a particular one is, answer from here, name the column it is in, and never say you cannot see their ${noun}. If they ask about one that is not listed, say you cannot see it in the list below and point them to the "${tab}" tab — never invent one.`;
+    const head = `YOUR ${noun.toUpperCase()} RIGHT NOW — this assistant's own ${noun}, read from its "${tab}" tab at the moment this message was sent. Times are in the business's own timezone. These are FACT: when the user asks what is coming up, what is waiting for them, or where a particular one is, answer from here, name the column it is in, and never say you cannot see their ${noun}. If they ask about one that is not listed, say you cannot see it in the list below and point them to the "${tab}" tab — never invent one. A "↳" line under an item is what the system recorded about it: why it failed, or what is holding it up. When the user asks why one failed or what is wrong with it, answer from that line in plain words and pass on its "what to do". If an item that failed has no "↳" line, or the line says no reason was recorded, say exactly that — never guess a cause.`;
     const body = input.sections.map((s) => {
         if (!s.total) return `${s.title}: none.`;
         const more = s.total > s.items.length ? `\n- …and ${s.total - s.items.length} more not listed here` : '';
@@ -120,6 +133,36 @@ const POST_WORDS: Record<string, string> = {
     failed: 'failed to publish',
 };
 
+/**
+ * What the Posts tab shows on a post's card that the chat needs to answer "why?": the failure
+ * diagnosis the Needs attention card shows (post-failure-diagnosis.ts — the same words, so the chat
+ * and the card never disagree), the compliance warnings approve-post gates on, and a deleted picture.
+ * Exported for tests.
+ */
+export function postNotes(r: {
+    platform: string; status: string; caption: string | null; failureReason?: unknown; qualityReview?: unknown;
+    mediaMissing?: boolean | null; mediaMissingNote?: string | null;
+}): string[] {
+    const notes: string[] = [];
+    // A pause with no reason is the reconnect park, which POST_WORDS already explains.
+    if (r.status === 'failed' || (r.status.startsWith('paused') && r.failureReason != null)) {
+        const d = diagnosePostFailure(r.failureReason as Parameters<typeof diagnosePostFailure>[0], platformName(r.platform));
+        const platformSaid = d.kind === 'unknown' && d.raw ? ` ${platformName(r.platform)} said: "${clip(d.raw, NOTE_MAX)}".` : '';
+        notes.push(`Why it stopped: ${d.title}${platformSaid} What to do: ${d.remedy}`);
+    }
+    if (r.status !== 'published') {
+        // Only warnings still open on the CURRENT caption — the ones approve-post will stop on.
+        const open = openWarnings(readCachedReview(r.qualityReview, r.caption));
+        if (open.length) {
+            const listed = open.slice(0, WARNINGS_MAX).map((w) => `"${clip(w, NOTE_MAX)}"`).join('; ');
+            const more = open.length > WARNINGS_MAX ? `; and ${open.length - WARNINGS_MAX} more` : '';
+            notes.push(`${open.length} open compliance warning${open.length === 1 ? '' : 's'}: ${listed}${more}. Approving it means the user settling or accepting these on the post itself in the "Posts" tab.`);
+        }
+    }
+    if (r.mediaMissing) notes.push(`Its picture or video was deleted from My Content${r.mediaMissingNote ? ` (${clip(r.mediaMissingNote, NOTE_MAX)})` : ''} — it needs a replacement before it can go out.`);
+    return notes;
+}
+
 export async function buildPostsSnapshot(db: Db, organisationId: number, aiAssistantId: number, timezone?: string | null): Promise<string | null> {
     try {
         const scope = and(eq(scheduledPosts.organisationId, organisationId), eq(scheduledPosts.assistantId, aiAssistantId));
@@ -131,9 +174,12 @@ export async function buildPostsSnapshot(db: Db, organisationId: number, aiAssis
         );
         const booked = inArray(scheduledPosts.status, [...BOOKED_STATUSES]);
         const failed = and(inArray(scheduledPosts.status, [...ATTENTION_STATUSES]), gte(scheduledPosts.publishDate, since(RECENT_DAYS)));
-        const cols = { id: scheduledPosts.id, platform: scheduledPosts.platform, status: scheduledPosts.status, publishDate: scheduledPosts.publishDate, caption: scheduledPosts.caption };
-        type Row = { id: number; platform: string; status: string; publishDate: Date; caption: string | null };
-        const map = (r: Row): SnapshotItem => ({ ref: r.id, when: r.publishDate, where: platformName(r.platform), status: r.status, text: r.caption });
+        const cols = {
+            id: scheduledPosts.id, platform: scheduledPosts.platform, status: scheduledPosts.status, publishDate: scheduledPosts.publishDate, caption: scheduledPosts.caption,
+            failureReason: scheduledPosts.failureReason, qualityReview: scheduledPosts.qualityReview, mediaMissing: scheduledPosts.mediaMissing, mediaMissingNote: scheduledPosts.mediaMissingNote,
+        };
+        type Row = { id: number; platform: string; status: string; publishDate: Date; caption: string | null; failureReason: unknown; qualityReview: unknown; mediaMissing: boolean; mediaMissingNote: string | null };
+        const map = (r: Row): SnapshotItem => ({ ref: r.id, when: r.publishDate, where: platformName(r.platform), status: r.status, text: r.caption, notes: postNotes(r) });
         const col = (where: SQL | undefined, order: SQL, title: string) => column(
             db.select({ n: sql<number>`count(*)::int` }).from(scheduledPosts).where(and(scope, where)),
             db.select(cols).from(scheduledPosts).where(and(scope, where)).orderBy(order).limit(SNAPSHOT_LIMIT),
@@ -167,12 +213,27 @@ const BLOG_WORDS: Record<string, string> = {
     failed: 'failed to publish',
 };
 
+/**
+ * Articles record no failure reason — publish-blog-posts sets 'failed' and logs the error to the
+ * console only. The one cause that can be read back is an empty body, which that function refuses
+ * before trying. Anything else must be admitted, not guessed. Exported for tests.
+ */
+export function blogNotes(r: { status: string; hasBody: boolean }): string[] {
+    if (r.status !== 'failed') return [];
+    return [r.hasBody
+        ? 'No reason was recorded for this failure. What to do: pick a new time in "Needs attention" to try again.'
+        : 'Why it stopped: the article has no body text, so there was nothing to publish. What to do: write the article in Blog Studio, then pick a new time.'];
+}
+
 export async function buildBlogSnapshot(db: Db, organisationId: number, aiAssistantId: number, timezone?: string | null): Promise<string | null> {
     try {
         const scope = and(eq(blogPosts.organisationId, organisationId), eq(blogPosts.assistantId, aiAssistantId));
-        const cols = { id: blogPosts.id, status: blogPosts.status, publishDate: blogPosts.publishDate, publishedAt: blogPosts.publishedAt, title: blogPosts.title };
-        type Row = { id: number; status: string; publishDate: Date | null; publishedAt: Date | null; title: string };
-        const map = (r: Row): SnapshotItem => ({ ref: r.id, when: r.publishedAt ?? r.publishDate, where: '', status: r.status, text: r.title });
+        const cols = {
+            id: blogPosts.id, status: blogPosts.status, publishDate: blogPosts.publishDate, publishedAt: blogPosts.publishedAt, title: blogPosts.title,
+            hasBody: sql<boolean>`btrim(coalesce(${blogPosts.bodyMarkdown}, '')) <> ''`,
+        };
+        type Row = { id: number; status: string; publishDate: Date | null; publishedAt: Date | null; title: string; hasBody: boolean };
+        const map = (r: Row): SnapshotItem => ({ ref: r.id, when: r.publishedAt ?? r.publishDate, where: '', status: r.status, text: r.title, notes: blogNotes(r) });
         const col = (where: SQL | undefined, order: SQL, title: string) => column(
             db.select({ n: sql<number>`count(*)::int` }).from(blogPosts).where(and(scope, where)),
             db.select(cols).from(blogPosts).where(and(scope, where)).orderBy(order).limit(SNAPSHOT_LIMIT),
@@ -210,18 +271,27 @@ const EMAIL_WORDS: Record<string, string> = {
     failed: 'failed to send',
 };
 
+/** newsletter_issues.failure_reason (newsletter-send.ts): a sentence for people on the known paths, the raw
+ *  error on the catch-all — the header tells the model to put it in plain words. Exported for tests. */
+export function emailNotes(r: { status: string; failureReason: string | null }): string[] {
+    if (r.status !== 'failed') return [];
+    const why = String(r.failureReason ?? '').trim();
+    return [why ? `Why it stopped: ${clip(why, NOTE_MAX)}` : 'No reason was recorded for this failure.'];
+}
+
 export async function buildEmailsSnapshot(db: Db, organisationId: number, aiAssistantId: number, timezone?: string | null): Promise<string | null> {
     try {
         const scope = and(eq(newsletterIssues.organisationId, organisationId), eq(newsletterIssues.assistantId, aiAssistantId));
         const cols = {
             id: newsletterIssues.id,
             status: newsletterIssues.status, subject: newsletterIssues.subject, scheduledFor: newsletterIssues.scheduledFor,
-            sentAt: newsletterIssues.sentAt, recipientCount: newsletterIssues.recipientCount,
+            sentAt: newsletterIssues.sentAt, recipientCount: newsletterIssues.recipientCount, failureReason: newsletterIssues.failureReason,
         };
-        type Row = { id: number; status: string; subject: string; scheduledFor: Date | null; sentAt: Date | null; recipientCount: number };
+        type Row = { id: number; status: string; subject: string; scheduledFor: Date | null; sentAt: Date | null; recipientCount: number; failureReason: string | null };
         const map = (r: Row): SnapshotItem => ({
             ref: r.id, when: r.sentAt ?? r.scheduledFor, where: '', status: r.status, text: r.subject,
             extra: r.status === 'sent' && r.recipientCount ? `sent to ${r.recipientCount} ${r.recipientCount === 1 ? 'person' : 'people'}` : null,
+            notes: emailNotes(r),
         });
         const col = (where: SQL | undefined, order: SQL, title: string) => column(
             db.select({ n: sql<number>`count(*)::int` }).from(newsletterIssues).where(and(scope, where)),
