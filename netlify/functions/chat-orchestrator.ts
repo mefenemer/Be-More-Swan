@@ -74,6 +74,8 @@ import {
 } from '../../src/utils/chat-assistant-settings';
 import { buildRulesListBlock, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock, type RuleCard } from '../../src/utils/chat-rules';
 import { buildPlanSnapshot } from '../../src/utils/chat-plan-snapshot';
+import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGoalProposal, type GoalCard } from '../../src/utils/chat-goals';
+import { resolveScheduleProposal, scheduleProposalFromUiElement, schedulePromptBlock, type ScheduleCard } from '../../src/utils/chat-schedule';
 import { isInOutreachReview } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
 import { LOSS_REASONS } from '../../src/config/revenue-events';
@@ -2846,7 +2848,13 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const rulesListBlock = route !== defaultRoute ? await buildRulesListBlock(db, orgId, session.aiAssistantId) : null;
     const rulesCardBlock = route !== defaultRoute ? rulesPromptBlock(assistantRow.roleKey) : null;
     const planBlock = await buildPlanSnapshot(db, orgId);
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock].filter(Boolean).join('\n\n');
+    // Its goals by id with the metrics on offer (src/utils/chat-goals.ts) — every role reads them;
+    // structured routes can propose a goal card. And, for the roles with a Posting Schedule card, the
+    // schedule and its card (src/utils/chat-schedule.ts). Neither throws.
+    const goalsBlock = await buildGoalsBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey);
+    const goalsCardBlock = route !== defaultRoute ? goalsPromptBlock() : null;
+    const scheduleBlock = route !== defaultRoute ? schedulePromptBlock(assistantRow.roleKey, assistantRow.onboardingContext) : null;
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, scheduleBlock].filter(Boolean).join('\n\n');
 
     const system = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -3067,8 +3075,26 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 content = 'I couldn’t read your Do’s and don’ts just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Profile.';
             }
         }
-        // One card for the "keep it" checks below: a settings change or a rule change.
-        const profileCard: SettingsCard | RuleCard | null = settingsCard ?? ruleCard;
+        // A goal set, changed or deleted (src/utils/chat-goals.ts) — checked with manage-goals.ts's own
+        // rules, realism included; the click calls manage-goals.ts as the Results tab does.
+        let goalCard: GoalCard | null = null;
+        const goalReq = route !== defaultRoute && !settingsReq && !ruleReq ? goalProposalFromUiElement(uiElement) : null;
+        if (goalReq) {
+            goalCard = await resolveGoalProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, goalReq);
+            uiElement = goalCard;
+            if (!goalCard) content = 'I couldn’t read your goals just now, so I haven’t set anything up. Please try again in a moment, or use the Results tab.';
+        }
+        // A posting schedule change (src/utils/chat-schedule.ts) — only the keys that change; the click
+        // saves through update-assistant-context.ts, as the Posting Schedule card does.
+        let scheduleCard: ScheduleCard | null = null;
+        const scheduleReq = route !== defaultRoute && !settingsReq && !ruleReq && !goalReq ? scheduleProposalFromUiElement(uiElement) : null;
+        if (scheduleReq) {
+            scheduleCard = await resolveScheduleProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, scheduleReq);
+            uiElement = scheduleCard;
+            if (!scheduleCard) content = 'I couldn’t read your posting schedule just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Profile.';
+        }
+        // One card for the "keep it" checks below: a change to the assistant's own profile.
+        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard;
         // The Blog Writer's twin (src/utils/chat-blog-action.ts): same checks, built from blog_posts
         // rows; a time in the user's words is worked out here so the card shows the exact instant.
         let blogAction: BlogActionCard | null = null;

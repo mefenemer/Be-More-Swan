@@ -1013,6 +1013,72 @@
       }
     }
 
+    // Goal cards → manage-goals.ts, as the Results tab calls it (POST create, PATCH with only the
+    // fields that change, DELETE). Its checks — realism, connections, main-goal rules — apply again.
+    async function onGoalChange(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const call = async (url, method, body) => {
+        const res = await fetch(`/.netlify/functions/${url}`, {
+          method, headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || data.message || `That didn’t work (HTTP ${res.status}).`);
+        return data;
+      };
+      try {
+        let message = 'Saved.';
+        if (d.action === 'create') {
+          const body = { assistantId: Number(d.assistantId), metricKey: d.metricKey, targetValue: Number(d.targetValue), targetDate: d.targetDate, isPrimary: d.isPrimary === true };
+          if (d.title !== undefined) body.title = d.title;
+          const r = await call('manage-goals', 'POST', body);
+          message = r.goal?.id ? `Goal set — it’s goal #${r.goal.id} on the Results tab.` : 'Goal set — it’s on the Results tab.';
+        } else if (d.action === 'update') {
+          const body = { id: Number(d.goalId) };
+          if (d.targetValue != null) body.targetValue = Number(d.targetValue);
+          if (d.targetDate) body.targetDate = d.targetDate;
+          if (d.title !== undefined) body.title = d.title;
+          if (d.isPrimary !== undefined) body.isPrimary = d.isPrimary;
+          await call('manage-goals', 'PATCH', body);
+          message = 'Goal changed.';
+        } else if (d.action === 'delete') {
+          await call(`manage-goals?id=${Number(d.goalId)}`, 'DELETE');
+          message = 'Goal deleted.';
+        } else {
+          throw new Error('Unknown change.');
+        }
+        respond({ ok: true, message });
+        document.dispatchEvent(new CustomEvent('assistant:goalsChanged', { detail: { assistantId: Number(d.assistantId) } }));
+      } catch (err) {
+        respond({ ok: false, error: err.message });
+      }
+    }
+
+    // Schedule cards → update-assistant-context.ts, the Posting Schedule card's endpoint. It REPLACES
+    // onboarding_context wholesale, so read the context NOW and change only the keys in `set`.
+    async function onScheduleChange(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const id = Number(d.assistantId);
+      try {
+        const got = await fetch(`/.netlify/functions/get-assistant-context?id=${id}`, { credentials: 'same-origin' });
+        const data = await got.json().catch(() => ({}));
+        if (!got.ok || !data || typeof data.context !== 'object') throw new Error(data.error || 'Your schedule couldn’t be read just now — please try again.');
+        const newContext = { ...(data.context || {}), ...(d.set || {}) };
+        const res = await fetch('/.netlify/functions/update-assistant-context', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify({ assistantId: id, newContext }),
+        });
+        const out = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(out.error || `That didn’t work (HTTP ${res.status}).`);
+        respond({ ok: true, message: 'Saved — new drafts follow the new schedule.' });
+        document.dispatchEvent(new CustomEvent('assistant:scheduleChanged', { detail: { assistantId: id, set: d.set || {} } }));
+      } catch (err) {
+        respond({ ok: false, error: err.message });
+      }
+    }
+
     async function onLeadAction(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -1562,6 +1628,8 @@
     container.addEventListener('lead:action', onLeadAction);
     container.addEventListener('settings:change', onSettingsChange);
     container.addEventListener('rule:change', onRuleChange);
+    container.addEventListener('goal:change', onGoalChange);
+    container.addEventListener('schedule:change', onScheduleChange);
     container.addEventListener('brief:review', onBriefReview);
     container.addEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
     container.addEventListener('siteaudit:check', onSiteAuditCheck);
@@ -1628,6 +1696,8 @@
         container.removeEventListener('lead:action', onLeadAction);
         container.removeEventListener('settings:change', onSettingsChange);
         container.removeEventListener('rule:change', onRuleChange);
+        container.removeEventListener('goal:change', onGoalChange);
+        container.removeEventListener('schedule:change', onScheduleChange);
         container.removeEventListener('brief:review', onBriefReview);
         container.removeEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
         container.removeEventListener('siteaudit:check', onSiteAuditCheck);

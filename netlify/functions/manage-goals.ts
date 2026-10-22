@@ -18,7 +18,8 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, desc, sql, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { goals, goalTelemetry, aiAssistants, masterAssistants, systemConnections, workspaceIntegrations } from '../../db/schema';
+import { goals, goalTelemetry, aiAssistants, masterAssistants } from '../../db/schema';
+import { connectedServices } from '../../src/utils/goal-connections';
 import { requireTenant } from '../../src/utils/tenant';
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { normalizeMediaSources } from '../../src/utils/media-sources';
@@ -129,36 +130,6 @@ function manualPrimaryError(metricKey: string): { error: string; code: string } 
             + `this assistant measurably drives the primary one.`,
         code: 'MANUAL_METRIC_NOT_PRIMARY',
     };
-}
-
-/** Active third-party services connected for this org (lowercased serviceName). */
-async function connectedServices(db: any, orgId: number): Promise<string[]> {
-    const rows = await db
-        .selectDistinct({ serviceName: systemConnections.serviceName })
-        .from(systemConnections)
-        .where(and(
-            eq(systemConnections.organisationId, orgId),
-            eq(systemConnections.status, 'active'),
-            eq(systemConnections.isActive, true),
-        ));
-
-    // Connections live in TWO tables. Social accounts (instagram, linkedin, x…) are rows in
-    // system_connections; everything OAuthed through the integrations directory — Search Console,
-    // HubSpot, Xero, Gmail… — is a workspace_integrations row keyed by `provider`. Gating only on
-    // system_connections meant a metric backed by an integration could never become available no
-    // matter what the user connected, which is why `search_clicks` needs this union.
-    const integrations = await db
-        .selectDistinct({ provider: workspaceIntegrations.provider })
-        .from(workspaceIntegrations)
-        .where(and(
-            eq(workspaceIntegrations.organisationId, orgId),
-            eq(workspaceIntegrations.status, 'active'),
-        ));
-
-    return [
-        ...rows.map((r: any) => String(r.serviceName).toLowerCase()),
-        ...integrations.map((r: any) => String(r.provider).toLowerCase()),
-    ];
 }
 
 /** Verify the assistant exists and belongs to the caller's org. */

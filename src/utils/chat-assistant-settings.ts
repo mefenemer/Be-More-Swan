@@ -1,5 +1,5 @@
 // src/utils/chat-assistant-settings.ts
-// What every assistant's chat knows about ITSELF — its status, its own settings and its goals — and
+// What every assistant's chat knows about ITSELF — its status and its own settings — and
 // its hands on those settings: pause or resume it, how far ahead it drafts, how urgently it chases
 // approvals, and whether it suggests content with AI pictures on its own.
 //
@@ -30,8 +30,7 @@
 
 import { and, desc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, goals } from '../../db/schema';
-import { getGoalMetric } from '../config/goal-metrics';
+import { aiAssistants } from '../../db/schema';
 import { MAX_HORIZON_DAYS, MIN_HORIZON_DAYS } from '../config/posting-cadence';
 
 type Db = ReturnType<typeof getDb>;
@@ -81,10 +80,6 @@ const STATUS_WORDS: Record<string, string> = {
     archived: 'archived',
 };
 
-const GOAL_STATUS_WORDS: Record<string, string> = {
-    pending: 'no figures yet', on_track: 'on track', at_risk: 'at risk', off_track: 'off track',
-    data_disconnected: 'not being measured — its connection has stopped', awaiting_update: 'waiting for the user to enter this month’s figure',
-};
 
 interface SettingsRow {
     id: number;
@@ -137,29 +132,9 @@ export async function buildAssistantSettingsSnapshot(
             lines.push(`- "Autonomous Content Suggestions" (Assistant Profile ▸ When and how I post):${suggestionsWords(row.autonomousMediaEnabled, row.autonomousMediaMonthlyCap)} — you draft posts with AI pictures on your own to fill empty slots. It stops when the plan's monthly tasks run out; nothing is ever charged extra.`);
         }
 
-        const goalRows = await db.select({
-            title: goals.title, metricKey: goals.metricKey, targetValue: goals.targetValue, latestValue: goals.latestValue,
-            targetDate: goals.targetDate, status: goals.status, isPrimary: goals.isPrimary,
-        })
-            .from(goals)
-            .where(and(eq(goals.organisationId, organisationId), eq(goals.assistantId, aiAssistantId), eq(goals.isActive, true)))
-            .orderBy(desc(goals.isPrimary), desc(goals.id))
-            .limit(5);
-        const goalLines = goalRows.map((g) => {
-            const metric = getGoalMetric(g.metricKey);
-            const name = g.title?.trim() || metric?.label || g.metricKey;
-            const unit = metric?.unit ? ` ${metric.unit}` : '';
-            const now = g.latestValue != null ? `${Number(g.latestValue)}${unit} now` : 'no figure yet';
-            const by = new Date(g.targetDate).toISOString().slice(0, 10);
-            return `- ${g.isPrimary ? '(main goal) ' : ''}${name}: ${now}, target ${Number(g.targetValue)}${unit} by ${by} — ${GOAL_STATUS_WORDS[g.status] ?? g.status}.`;
-        });
-
         return [
             `YOUR OWN SETTINGS RIGHT NOW (read this turn — the same values the user sees on your page; never guess a value that is not listed):`,
             ...lines,
-            goalLines.length
-                ? `YOUR GOALS (Results tab; set or changed only there):\n${goalLines.join('\n')}`
-                : 'YOUR GOALS: none set yet. They are set on the Results tab.',
         ].join('\n');
     } catch (err) {
         console.error('[chat-assistant-settings] snapshot read failed (non-fatal)', err);
@@ -179,7 +154,7 @@ export function assistantSettingsPromptBlock(roleKey: string | null | undefined)
     ].filter(Boolean);
     return `CHANGING YOUR OWN SETTINGS — when the user asks you to change one of the settings listed under YOUR OWN SETTINGS, put this in "uiElement" instead of anything else (one change per reply):
 ${shapes.join('\n')}
-"pause" stops everything you do until they resume you. "resume" starts you again (and starts you for the first time when you are ready but not started); it goes through the same readiness checks as Kick Off, so it can be refused. You never change a setting yourself: the user confirms on the card, and only that click changes anything. So never say a setting HAS changed — say the card is there to confirm. Only propose a setting that is listed above. Anything else on your page (your schedule's days and times, your rules, your connections, archiving you, your goals) is changed on your page: name where, using the names above.`;
+"pause" stops everything you do until they resume you. "resume" starts you again (and starts you for the first time when you are ready but not started); it goes through the same readiness checks as Kick Off, so it can be refused. You never change a setting yourself: the user confirms on the card, and only that click changes anything. So never say a setting HAS changed — say the card is there to confirm. Only propose a setting that is listed above. ${available.includes('draft_horizon') ? 'Your goals, your Do’s and don’ts and your posting schedule have' : 'Your goals and your Do’s and don’ts have'} cards of their own (below). Anything else on your page (your connections, archiving you) is changed on your page: name where, using the names above.`;
 }
 
 // ── Propose ──────────────────────────────────────────────────────────────────────────────────────

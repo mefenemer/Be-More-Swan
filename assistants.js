@@ -6753,15 +6753,10 @@ window._setStrategyAgentEntitled = function (entitled) {
     _applyStrategyAgentUi();
 };
 
-function _detailHydrate(data) {
-    const ctx = data.context || {};
-    const cfg = data.configuration || {};
-    const inputs = cfg.inputs || {};
-
-    _detailSetVal('edit_problem', ctx.problem_statement || inputs.problem || '');
-    _setFrequencySelect(ctx.posting_frequency || _POSTING_DEFAULT_FREQ);
-
-    // ── Posting Schedule: days / times / timezone / draft horizon ──
+// The Posting Schedule controls (days, times, timezone, draft horizon) painted from a context — on load
+// (_detailHydrate) and when the chat changes the schedule (assistant:scheduleChanged below), so the form
+// and the in-memory context never disagree and the next autosave cannot undo the chat's change.
+function _paintPostingSchedule(ctx, data) {
     const _days = (Array.isArray(ctx.posting_days) && ctx.posting_days.length)
         ? ctx.posting_days.map(d => String(d).toLowerCase().slice(0, 3))
         : _POSTING_DEFAULT_DAYS;
@@ -6785,6 +6780,18 @@ function _detailHydrate(data) {
     if (horizonEl) horizonEl.value = data.draftHorizonDays ?? 7;
     // State the resulting plan as soon as the saved schedule is on screen, not only after an edit.
     window._syncScheduleOutcome?.();
+}
+
+function _detailHydrate(data) {
+    const ctx = data.context || {};
+    const cfg = data.configuration || {};
+    const inputs = cfg.inputs || {};
+
+    _detailSetVal('edit_problem', ctx.problem_statement || inputs.problem || '');
+    _setFrequencySelect(ctx.posting_frequency || _POSTING_DEFAULT_FREQ);
+
+    // ── Posting Schedule: days / times / timezone / draft horizon ──
+    _paintPostingSchedule(ctx, data);
 
     // Objective
     const objectiveVal = ctx.primary_objective || inputs.primary_objective || '';
@@ -12282,6 +12289,26 @@ document.addEventListener('assistant:settingsChanged', (e) => {
         if (d.autonomousMediaMonthlyCap != null) _autonomousMediaCap = d.autonomousMediaMonthlyCap;
         _applyAutonomousMediaUi();
     }
+});
+
+// A goal changed from the assistant's chat (goal card → chat-session.js → manage-goals.ts): reload the
+// Results tab's goals if this page is that assistant's. Bound once at load on document.
+document.addEventListener('assistant:goalsChanged', (e) => {
+    const id = Number(e.detail?.assistantId);
+    if (id && Number(_goalsAssistantId) === id) _fetchAndRenderGoals(id);
+});
+
+// The posting schedule changed from the chat (schedule card → update-assistant-context.ts). Put the
+// new keys into the in-memory context the autosave spreads, then repaint the controls and the Autopilot
+// card — otherwise the next autosave on this page would write the old schedule back.
+document.addEventListener('assistant:scheduleChanged', (e) => {
+    const id = Number(e.detail?.assistantId);
+    const data = window._detailCurrentData;
+    if (!id || Number(window._currentAssistantId) !== id || !data) return;
+    data.context = { ...(data.context || {}), ...(e.detail?.set || {}) };
+    if (data.context.posting_frequency) _setFrequencySelect(data.context.posting_frequency);
+    _paintPostingSchedule(data.context, data);
+    window._renderAutopilotCard?.(data);
 });
 
 // A rule changed from the assistant's chat (rule card → chat-session.js → content-rules.ts). Reload

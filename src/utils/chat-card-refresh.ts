@@ -14,6 +14,8 @@ import { refreshLeadActionCards } from './chat-lead-action';
 import { refreshAudienceCards } from './chat-audience';
 import { refreshSettingsCards } from './chat-assistant-settings';
 import { refreshRuleCards } from './chat-rules';
+import { refreshGoalCards } from './chat-goals';
+import { refreshScheduleCards } from './chat-schedule';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -26,5 +28,7 @@ export async function refreshStoredCards<M extends { uiElement: unknown }>(
     out = await refreshLeadActionCards(db, organisationId, aiAssistantId, out);
     out = await refreshAudienceCards(db, organisationId, out);
     out = await refreshSettingsCards(db, organisationId, aiAssistantId, roleKey, out);
-    return refreshRuleCards(db, organisationId, aiAssistantId, roleKey, out);
+    out = await refreshRuleCards(db, organisationId, aiAssistantId, roleKey, out);
+    out = await refreshGoalCards(db, organisationId, aiAssistantId, out);
+    return refreshScheduleCards(db, organisationId, aiAssistantId, out);
 }

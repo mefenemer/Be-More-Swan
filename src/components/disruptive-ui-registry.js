@@ -3396,6 +3396,113 @@
   }
 
   register('rule_proposal', renderRuleProposalCard);
+
+  // ── Built-in: Goal Proposal Card (every structured chat) ──────────────────
+  // { type: 'goal_proposal', action: 'create'|'update'|'delete', assistantId, goalId, metricKey,
+  //   metricLabel, unit, current, proposed, targetValue, targetDate, title?, isPrimary?, blocked, settled? }
+  // Checked with manage-goals.ts's own rules (src/utils/chat-goals.ts), realism included. The click
+  // dispatches `goal:change`; chat-session.js calls manage-goals.ts as the Results tab does.
+  const GOAL_COPY = {
+    create: { head: 'Set a goal', button: 'Set goal', busy: 'Saving…' },
+    update: { head: 'Change a goal', button: 'Save', busy: 'Saving…' },
+    delete: { head: 'Delete a goal', button: 'Delete goal', busy: 'Deleting…', danger: true },
+  };
+
+  function renderGoalProposalCard(ui, esc) {
+    const copy = GOAL_COPY[ui.action];
+    const assistantId = Number(ui.assistantId);
+    if (!copy || !Number.isInteger(assistantId)) return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      <p class="text-xs text-gray-500 mt-2">Results tab${ui.goalId ? ` · goal #${Number(ui.goalId)}` : ''}${ui.metricLabel ? ` · ${esc(ui.metricLabel)}` : ''}</p>
+      ${ui.current ? `<p class="text-sm text-gray-700 mt-2 break-words"><span class="font-bold">${ui.action === 'delete' ? 'Goal:' : 'Now:'}</span> ${esc(ui.current)}</p>` : ''}
+      ${ui.proposed && ui.action !== 'delete' ? `<p class="text-sm text-gray-900 mt-1 break-words"><span class="font-bold">${ui.action === 'create' ? 'Goal:' : 'After:'}</span> ${esc(ui.proposed)}</p>` : ''}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${!blocked && ui.action !== 'delete' ? '<p class="text-xs text-gray-600 mt-3">Your assistant steers what it drafts toward this from now on.</p>' : ''}
+      ${!blocked && ui.action === 'delete' ? '<p class="text-xs text-gray-600 mt-3">This removes the goal and its progress for good.</p>' : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-gp-go class="${copy.danger ? 'btn-destructive' : 'btn-primary'} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>
+        <button type="button" data-gp-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-gp-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-gp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-gp-go], [data-gp-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-gp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-gp-go]')) return;
+      setBusy(true);
+      say(copy.busy);
+      el.dispatchEvent(new CustomEvent('goal:change', {
+        bubbles: true,
+        detail: {
+          action: ui.action, assistantId, goalId: ui.goalId ?? null, metricKey: ui.metricKey ?? null,
+          targetValue: ui.targetValue ?? null, targetDate: ui.targetDate ?? null,
+          // Stored cards drop undefined: absent = unchanged, null = clear the name.
+          title: Object.prototype.hasOwnProperty.call(ui, 'title') ? ui.title : undefined,
+          isPrimary: typeof ui.isPrimary === 'boolean' ? ui.isPrimary : undefined,
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Done.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('goal_proposal', renderGoalProposalCard);
+
+  // ── Built-in: Schedule Proposal Card (Social Media / Blog Writer chats) ────
+  // { type: 'schedule_proposal', assistantId, current, proposed, set, blocked, settled? }
+  // `set` holds only the onboarding_context keys that change (src/utils/chat-schedule.ts). The click
+  // dispatches `schedule:change`; chat-session.js reads the current context and saves it through
+  // update-assistant-context.ts, as the Posting Schedule card does.
+  function renderScheduleProposalCard(ui, esc) {
+    const assistantId = Number(ui.assistantId);
+    if (!Number.isInteger(assistantId) || !ui.set || typeof ui.set !== 'object') return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Posting schedule · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      ${ui.current ? `<p class="text-sm text-gray-700 mt-2 break-words"><span class="font-bold">Now:</span> ${esc(ui.current)}</p>` : ''}
+      ${!blocked && ui.proposed ? `<p class="text-sm text-gray-900 mt-1 break-words"><span class="font-bold">After:</span> ${esc(ui.proposed)}</p>` : ''}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${!blocked ? '<p class="text-xs text-gray-600 mt-3">New drafts follow it from now on. Posts already booked keep their times.</p>' : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-sp-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save schedule</button>
+        <button type="button" data-sp-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-sp-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-sp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-sp-go], [data-sp-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-sp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-sp-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('schedule:change', {
+        bubbles: true,
+        detail: {
+          assistantId, set: ui.set,
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Saved.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('schedule_proposal', renderScheduleProposalCard);
   register('SocialPostDraftCard', renderSocialPostDraftCard);
 
   // ── Built-in: Blog Post Draft Card ──────────────────────────────────────────

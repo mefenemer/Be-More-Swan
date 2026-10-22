@@ -140,21 +140,18 @@ async function main() {
 
     console.log('\nThe snapshot says what is true, and only what the role has');
 
-    await check('social snapshot lists status, the three settings and goals', async () => {
-        const block = await buildAssistantSettingsSnapshot(fakeDb([row({ autonomousMediaEnabled: true })], [
-            { title: 'Grow Instagram', metricKey: 'instagram_followers', targetValue: '1200', latestValue: '950', targetDate: new Date('2026-12-31T00:00:00Z'), status: 'at_risk', isPrimary: true },
-        ]), 1, 5, 'social_media_manager');
+    // Goals moved to their own block with ids (chat-goals.ts, tests/chat-goals.test.ts).
+    await check('social snapshot lists status and the three settings', async () => {
+        const block = await buildAssistantSettingsSnapshot(fakeDb([row({ autonomousMediaEnabled: true })]), 1, 5, 'social_media_manager');
         assert.match(block, /Status: working/);
         assert.match(block, /"Generate posts ahead" \(Assistant Profile ▸ When and how I post\): 7 days/);
         assert.match(block, /"Review alerts".*Immediate/);
         assert.match(block, /Autonomous Content Suggestions.*on, up to 20/);
-        assert.match(block, /\(main goal\) Grow Instagram: 950.* target 1200.* by 2026-12-31 — at risk/);
     });
-    await check('a records role sees only its status and goals', async () => {
-        const block = await buildAssistantSettingsSnapshot(fakeDb([row({ lifecycleStatus: 'paused' })], []), 1, 5, 'crm_enricher');
+    await check('a records role sees only its status', async () => {
+        const block = await buildAssistantSettingsSnapshot(fakeDb([row({ lifecycleStatus: 'paused' })]), 1, 5, 'crm_enricher');
         assert.match(block, /Status: paused by the user/);
         assert.ok(!/Generate posts ahead|Review alerts|Autonomous/.test(block));
-        assert.match(block, /YOUR GOALS: none set yet/);
     });
     await check('a failed read says so rather than inviting a guess', async () => {
         assert.match(await buildAssistantSettingsSnapshot(throwingDb, 1, 5, 'social_media_manager'), /could not be read this turn/);
