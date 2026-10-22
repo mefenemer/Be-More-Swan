@@ -306,60 +306,60 @@
         .map(([k, lbl]) => `<option value="${k}" ${c.op === k ? 'selected' : ''}>${esc(lbl)}</option>`).join('');
       let valueInput = '';
       if (spec.value === 'source') {
-        valueInput = `<select data-rule-value="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
+        valueInput = `<select data-rule-value="${i}" aria-label="Condition ${i + 1}: source" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
           ${Object.entries(SOURCE_OPTS).map(([k, lbl]) => `<option value="${k}" ${c.value === k ? 'selected' : ''}>${esc(lbl)}</option>`).join('')}
         </select>`;
       } else if (spec.value === 'days') {
-        valueInput = `<input type="number" min="1" max="3650" data-rule-value="${i}" value="${Number(c.value) || 30}"
+        valueInput = `<input type="number" min="1" max="3650" data-rule-value="${i}" aria-label="Condition ${i + 1}: number of days" value="${Number(c.value) || 30}"
           class="w-24 px-2 py-2 rounded-lg border border-gray-300 text-sm"><span class="text-sm text-gray-500">days</span>`;
       } else if (spec.value === 'custom') {
         // Two inputs, because a custom condition has two parts: WHICH field, and what it says. The
         // presence ops take no value at all — "we hold a city for this person" is a whole question.
-        const picker = `<select data-rule-key="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
+        const picker = `<select data-rule-key="${i}" aria-label="Condition ${i + 1}: custom field" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
           ${state.customFields.map((f) => `<option value="${esc(f.key)}" ${c.key === f.key ? 'selected' : ''}>${esc(f.label)}</option>`).join('')}
         </select>`;
         const needsValue = c.op !== 'is_set' && c.op !== 'is_not_set';
         valueInput = picker + (needsValue
-          ? `<input type="text" data-rule-value="${i}" value="${esc(c.value || '')}" placeholder="Bristol"
+          ? `<input type="text" data-rule-value="${i}" aria-label="Condition ${i + 1}: value" value="${esc(c.value || '')}" placeholder="Bristol"
               class="px-2 py-2 rounded-lg border border-gray-300 text-sm">`
           : '');
       } else if (spec.value === 'tag') {
         // Tags and manual segments only — a rule built on another rule is a cycle, and the server
         // refuses it with a sentence naming the segment.
         const targets = state.segments.filter((x) => x.kind !== 'dynamic');
-        valueInput = `<select data-rule-value="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
+        valueInput = `<select data-rule-value="${i}" aria-label="Condition ${i + 1}: tag or segment" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
           ${targets.map((t) => `<option value="${t.id}" ${String(c.value) === String(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
         </select>`;
       } else if (spec.value === 'form') {
-        valueInput = `<select data-rule-value="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
+        valueInput = `<select data-rule-value="${i}" aria-label="Condition ${i + 1}: sign-up form" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
           ${ruleForms.map((f) => `<option value="${f.id}" ${String(c.value) === String(f.id) ? 'selected' : ''}>${esc(f.name)}</option>`).join('')}
         </select>`;
       } else if (spec.value === 'domain') {
-        valueInput = `<input type="text" data-rule-value="${i}" value="${esc(c.value || '')}" placeholder="gmail.com"
+        valueInput = `<input type="text" data-rule-value="${i}" aria-label="Condition ${i + 1}: email domain" value="${esc(c.value || '')}" placeholder="gmail.com"
           class="px-2 py-2 rounded-lg border border-gray-300 text-sm">`;
       }
       return `<div class="flex flex-wrap items-center gap-2 py-2">
-        <select data-rule-field="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
+        <select data-rule-field="${i}" aria-label="Condition ${i + 1}: what to check" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
           ${Object.entries(RULE_FIELDS)
             .filter(([k]) => (k !== 'form' || ruleForms.length)
               && (k !== 'tag' || state.segments.some((x) => x.kind !== 'dynamic'))
               && (k !== 'custom' || state.customFields.length))
             .map(([k, f]) => `<option value="${k}" ${c.field === k ? 'selected' : ''}>${esc(f.label)}</option>`).join('')}
         </select>
-        <select data-rule-op="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">${ops}</select>
+        <select data-rule-op="${i}" aria-label="Condition ${i + 1}: comparison" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">${ops}</select>
         ${valueInput}
-        <button type="button" data-rule-remove="${i}" class="ml-auto text-xs font-bold text-gray-400 hover:text-red-600 cursor-pointer">Remove</button>
+        <button type="button" data-rule-remove="${i}" aria-label="Remove condition ${i + 1}" class="ml-auto text-xs font-bold text-gray-400 hover:text-red-600 cursor-pointer">Remove</button>
       </div>`;
     }).join('');
 
     body.innerHTML = `
-      <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Name</label>
+      <label for="aud-rule-name" class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Name</label>
       <input type="text" id="aud-rule-name" maxlength="80" value="${esc(ruleState.name)}" placeholder="Recently engaged"
         class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-4"
         ${ruleState.id ? 'disabled' : ''}>
 
       <div class="flex items-center gap-2 mb-1">
-        <span class="text-sm text-gray-700">Match</span>
+        <label for="aud-rule-match" class="text-sm text-gray-700">Match</label>
         <select id="aud-rule-match" class="px-2 py-1.5 rounded-lg border border-gray-300 text-sm">
           <option value="all" ${ruleState.match === 'all' ? 'selected' : ''}>all of these</option>
           <option value="any" ${ruleState.match === 'any' ? 'selected' : ''}>any of these</option>

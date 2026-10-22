@@ -66,4 +66,34 @@ check('Audience loads segments and API keys alongside the list, not ahead of it'
     assert.ok(!aud.includes('await loadApiKeys();\n    await loadSegments();'));
 });
 
+check('every Audience overlay is a dialogs.js page dialog, with a close control Escape can press', () => {
+    const html = read('audience.html');
+    // Each overlay's markup runs from its own opening tag to the next overlay's.
+    const starts = [...html.matchAll(/<div id="(aud-[a-z-]+)" data-dialog/g)];
+    assert.deepStrictEqual(starts.map((m) => m[1]).sort(),
+        ['aud-add-modal', 'aud-detail', 'aud-export-modal', 'aud-import-modal', 'aud-rule-modal']);
+    starts.forEach((m, k) => {
+        const body = html.slice(m.index, starts[k + 1]?.index);
+        assert.ok(body.includes('data-dialog-cancel'), `${m[1]} has a data-dialog-cancel control`);
+    });
+    assert.ok(html.includes('<div id="aud-detail" data-dialog aria-labelledby="aud-detail-title"'), 'the slide-over has no heading; name it from its title');
+    const icons = html.match(/<button type="button" data-aud-(?:rule-)?close data-dialog-cancel[^>]*>/g) || [];
+    assert.strictEqual(icons.length, 2, 'both × buttons found');
+    for (const b of icons) assert.ok(b.includes('aria-label="Close"'), b);
+});
+
+check('the Add-contact, import and segment-builder fields have real labels', () => {
+    const html = read('audience.html');
+    for (const id of ['aud-add-email', 'aud-add-first', 'aud-add-last', 'aud-add-company', 'aud-add-segment', 'aud-import-file', 'aud-import-segment']) {
+        assert.ok(html.includes(`<label for="${id}"`), `${id} has a <label for>`);
+    }
+    assert.ok(aud.includes('<label for="aud-rule-name"') && aud.includes('<label for="aud-rule-match"'));
+    for (const attr of ['data-rule-field', 'data-rule-op', 'data-rule-key']) {
+        assert.ok(new RegExp(`<select ${attr}="\\$\\{i\\}" aria-label="Condition`).test(aud), `${attr} is named`);
+    }
+    const values = aud.match(/data-rule-value="\$\{i\}"[^>]*>/g) || [];
+    assert.ok(values.length >= 6, 'every value control found');
+    for (const v of values) assert.ok(v.includes('aria-label="Condition'), v);
+});
+
 console.log(`\n${passed} checks passed${process.exitCode ? ' — with FAILURES above' : ''}`);
