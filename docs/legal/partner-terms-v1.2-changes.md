@@ -3,7 +3,7 @@
 **Status:** PUBLISHED as v1.2 on 23 October 2026, by owner decision, ahead of legal review. The review still applies and will lead to a v1.3 if needed.
 **Text:** `partner-terms.html`; `PARTNER_TERMS_VERSION = '1.2'`. Every partner is asked to accept again, and payouts are held until they do.
 **4.5 as published:** softened by owner decision. Partners are solely responsible for their tax; VAT-registered partners give us their VAT number before the first payout, plus any tax details or forms we reasonably ask for; withholding and sanctions as drafted. The self-billing sentence and the list of tax details were cut, because neither is built.
-**Why:** a legal review of v1.1 found gaps in cross-border protection. This draft covers the High findings (H1–H6) and the Medium findings (M1–M6). The Low findings (boilerplate such as entire agreement, severability, assignment, notices and confidentiality) are not drafted yet.
+**Why:** a legal review of v1.1 found gaps in cross-border protection. This draft covers the High findings (H1–H6) and the Medium findings (M1–M6). The Low findings were added before v1.2 reached prod: 2.1 (accepting for a business) and a new section 12 (entire agreement, notices, confidentiality, transfer, severability, no waiver, no third-party rights, events beyond our control, English prevails). The customer Terms' US-style dates were changed to UK format (formatting only, no version change).
 
 Be More Swan Ltd is a UK company (ICO ZC272072). Partners can be anywhere in the world. They are paid in GBP by PayPal, Wise or UK bank transfer.
 
@@ -32,6 +32,8 @@ Be More Swan Ltd is a UK company (ICO ZC272072). Partners can be anywhere in the
 | 10.1 | Cap = commission in the prior 12 months | Standard carve-outs; excludes loss of profit and indirect loss; cap = **greater of £100** and 12 months' commission | H4 |
 | 10.2 | (new) | **Indemnity** from the partner for breach of sections 5, 6 or 9, their content, or breach of law, including regulator action against us as advertiser or instigator | H4 |
 | 11.1 | English law, exclusive English courts | + non-contractual claims; **carve-out** letting us seek injunctions or enforce in the partner's own courts | M1 |
+| 2.1 | Must be 18 and able to contract | + accepting for a business confirms authority to bind it; "you" means the business | L2 |
+| 12 | (new) | Entire agreement (incl. written special rates), notices by email, confidentiality (incl. special rates), transfer (we may, you may not), severability, no waiver, no third-party rights, events beyond our control, English prevails over translations. 7.4 now also keeps section 12 | L1 |
 
 ## How the draft matches the code
 
