@@ -98,6 +98,19 @@
   const safeUrl = (u) => (/^(\/|https:\/\/)/.test(String(u || '')) ? String(u) : '');
   const check = '<svg class="w-5 h-5 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>';
 
+  // A role's swan character, shown in the hero. Kept here, not in the showcase
+  // JSON, so adding one ships with the deploy and needs no SQL run.
+  const ILLUSTRATIONS = {
+    social_media_manager: { src: '/images/assistants/social_media_manager/swan.jpg', alt: 'A pink swan in a headset and glasses holding a phone, surrounded by likes, comments and paper planes', width: 900, height: 900 },
+    blog_writer: { src: '/images/assistants/blog_writer/swan.jpg', alt: 'A pink swan in a beret and glasses writing on a laptop, surrounded by floating article pages', width: 900, height: 900 },
+    lead_qualifier: { src: '/images/assistants/lead_qualifier/swan.jpg', alt: 'A pink swan in goggles and a waistcoat holding a glowing magnet that pulls in contact cards, stars and a sales funnel', width: 900, height: 900 },
+    mystery_shopper: { src: '/images/assistants/mystery_shopper/swan.jpg', alt: 'A pink swan detective in a hat, sunglasses and trench coat holding a magnifying glass and a shopping bag, surrounded by star ratings and checklists', width: 900, height: 900 },
+    website_assistant: { src: '/images/assistants/website_assistant/swan.jpg', alt: 'A pink swan in a hard hat, hoodie and tool belt with wings spread among floating web page layouts and a cursor', width: 900, height: 900 },
+    brand_designer: { src: '/images/assistants/brand_designer/swan.jpg', alt: 'A pink swan in a paint-splashed apron and colourful glasses holding a palette and stylus, surrounded by colour swatches, a colour wheel and type samples', width: 900, height: 900 },
+    campaign_orchestrator: { src: '/images/assistants/campaign_orchestrator/swan.jpg', alt: 'A pink swan conductor in a tailcoat and bow tie waving a glowing baton, surrounded by a megaphone, emails, campaign plans and a rocket', width: 900, height: 900 },
+    newsletter_editor: { src: '/images/assistants/newsletter_editor/swan.jpg', alt: 'A pink swan postie in a cap and satchel giving a thumbs up beside a glowing envelope, surrounded by paper planes and email reports', width: 900, height: 900 },
+  };
+
   let isLoggedIn = false;
   let waitlistOn = false;
 
@@ -135,6 +148,17 @@
     const steps = Array.isArray(s.steps) ? s.steps : [];
     const features = Array.isArray(s.features) ? s.features : [];
     const faqs = Array.isArray(s.faqs) ? s.faqs : [];
+    const art = ILLUSTRATIONS[roleKey];
+    // With a character, the swan takes the hero and the video moves down into How it works — unless
+    // there are no steps to hold it, then the video keeps the hero.
+    const heroArt = art && (!video || steps.length) ? art : null;
+    const videoBlock = video ? `
+            <div id="sc-video" class="sc-video shadow-2xl">
+              <video controls playsinline preload="metadata" ${safeUrl(video.poster) ? `poster="${esc(safeUrl(video.poster))}"` : ''}>
+                <source src="${esc(safeUrl(video.url))}" type="video/mp4">
+              </video>
+            </div>
+            <p class="text-sm text-gray-500 mt-3 text-center">${esc(video.title || 'See it in action')}</p>` : '';
     const apps = (c.integrations || []).map((a) => AssistantContent.integrationChip(a)).join('');
     const peers = AssistantContent.resolveWorksWith(c.worksWith).map((p) => p.standalone
       ? `<span class="inline-flex items-center gap-1.5 bg-gray-100 border border-gray-200 rounded-full px-3 py-1 text-xs font-semibold text-gray-600">Works on its own</span>`
@@ -166,13 +190,9 @@
           ${c.comingSoon ? '' : '<p class="text-xs text-gray-400 mt-4">Included in every plan · You approve its work before anything goes out</p>'}
         </div>
         <div>
-          ${video ? `
-            <div id="sc-video" class="sc-video shadow-2xl">
-              <video controls playsinline preload="metadata" ${safeUrl(video.poster) ? `poster="${esc(safeUrl(video.poster))}"` : ''}>
-                <source src="${esc(safeUrl(video.url))}" type="video/mp4">
-              </video>
-            </div>
-            <p class="text-sm text-gray-500 mt-3 text-center">${esc(video.title || 'See it in action')}</p>`
+          ${heroArt
+            ? `<img src="${esc(art.src)}" alt="${esc(art.alt)}" width="${art.width}" height="${art.height}" fetchpriority="high" decoding="async" class="w-full max-w-md mx-auto h-auto" style="mix-blend-mode: multiply">`
+          : video ? videoBlock
           : features[0] && safeUrl(features[0].image)
             ? `<img src="${esc(safeUrl(features[0].image))}" alt="${esc(features[0].alt || '')}" class="sc-shot" data-zoom loading="eager">`
             : ''}
@@ -202,6 +222,7 @@
           <p class="text-sm text-gray-600 leading-relaxed">${esc(st.body)}</p>
         </li>`).join('')}
       </ol>
+      ${heroArt && video ? `<div class="max-w-4xl mx-auto mt-12">${videoBlock}</div>` : ''}
     </section>` : ''}
 
     ${features.length ? `
