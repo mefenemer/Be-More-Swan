@@ -50,10 +50,12 @@ const json = (statusCode: number, body: unknown) => ({
 });
 
 const DECISIONS: Record<string, { from: string[]; to: string; label: string }> = {
-    approve:   { from: ['applied', 'rejected'], to: 'approved',  label: 'approved' },
+    approve:   { from: ['applied', 'rejected', 'ended'], to: 'approved', label: 'approved' },
     reject:    { from: ['applied'],             to: 'rejected',  label: 'rejected' },
     suspend:   { from: ['approved'],            to: 'suspended', label: 'suspended' },
     reinstate: { from: ['suspended'],           to: 'approved',  label: 'reinstated' },
+    // Terms 7.1 / 7.2: they left, or we ended it. Earns nothing new; what they earned is still paid (7.3).
+    end:       { from: ['approved', 'suspended'], to: 'ended',   label: 'ended' },
 };
 
 type RawPeriod = { rateBps?: unknown; costDeductionBps?: unknown; durationMonths?: unknown; startsOn?: unknown; endsOn?: unknown; label?: unknown };

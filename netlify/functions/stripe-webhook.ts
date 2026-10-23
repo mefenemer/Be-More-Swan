@@ -15,7 +15,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { releasePausedLimit, resolveAssistantLimit } from '../../src/utils/release-paused-limit';
 import { backfillLivePlanForOrg } from '../../src/utils/plan-stripe-refs';
 import { qualifyPendingReferral } from '../../src/utils/referral-offer';
-import { invoiceNetPence, recordPartnerPayment, reversePartnerCommission, sessionNetPence, type PartnerPayment } from '../../src/utils/partner-ledger';
+import { invoiceNetPence, recordPartnerPayment, reinstateDisputedCommission, reversePartnerCommission, sessionNetPence, type PartnerPayment } from '../../src/utils/partner-ledger';
 import { finishPlanMove } from '../../src/utils/plan-moves';
 import { planStatusForCancelFlag } from '../../src/utils/subscription-cancel-state';
 
@@ -86,14 +86,14 @@ async function _recordPartnerCommission(db: ReturnType<typeof getDb>, payment: P
     }
 }
 
-// A refund or dispute reduces or voids the partner commission on that payment. Matched on the
+// A refund or dispute reduces or voids the partner commission on that payment; a WON dispute puts it back. Matched on the
 // PaymentIntent, with the invoice it paid as a fallback (first payments taken through Checkout are
 // stored under their invoice id, without a PaymentIntent).
 async function _reversePartnerCommission(
     db: ReturnType<typeof getDb>,
     paymentIntent: string | { id: string } | null | undefined,
     amountRefundedPence: number,
-    kind: 'refund' | 'dispute',
+    kind: 'refund' | 'dispute' | 'dispute_won',
     at: Date,
 ): Promise<void> {
     const paymentIntentId = typeof paymentIntent === 'string' ? paymentIntent : paymentIntent?.id ?? null;
@@ -106,6 +106,11 @@ async function _reversePartnerCommission(
             invoiceId = typeof inv === 'string' ? inv : inv?.id ?? null;
         } catch (lookupErr) {
             console.warn('[stripe-webhook] could not look up the invoice for a refunded payment:', (lookupErr as any)?.message);
+        }
+        if (kind === 'dispute_won') {
+            const { reinstated } = await reinstateDisputedCommission(db, { paymentIntentId, invoiceId, amountRefundedPence, at });
+            if (reinstated) console.log(`[stripe-webhook] dispute won: reinstated ${reinstated} partner commission row(s) for ${paymentIntentId}`);
+            return;
         }
         const { adjusted } = await reversePartnerCommission(db, { paymentIntentId, invoiceId, amountRefundedPence, kind, at });
         if (adjusted) console.log(`[stripe-webhook] ${kind}: adjusted ${adjusted} partner commission row(s) for ${paymentIntentId}`);
@@ -1011,8 +1016,23 @@ export default withLambda(async (event) => {
         } catch (dispErr) {
             console.warn('[stripe-webhook] dispute.created handling error (non-blocking):', dispErr);
         }
-        // A disputed payment earns its partner nothing (re-add as a bonus if the dispute is won).
+        // A disputed payment earns its partner nothing — until it's won (charge.dispute.closed below).
         await _reversePartnerCommission(db, dispute.payment_intent, dispute.amount ?? 0, 'dispute', new Date(stripeEvent.created * 1000));
+    }
+
+    // ── charge.dispute.closed — won: the partner's commission comes back ─
+    // ⚠️ Needs charge.dispute.closed enabled on the Stripe webhook endpoint (both environments).
+    // 'won' only: lost / warning_closed leave it voided. Refunds on the charge since stay unearned.
+    if (stripeEvent.type === 'charge.dispute.closed') {
+        const dispute = stripeEvent.data.object as Stripe.Dispute;
+        if (dispute.status === 'won') {
+            let refunded = 0;
+            try {
+                const chargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
+                if (chargeId) refunded = (await stripe.charges.retrieve(chargeId)).amount_refunded ?? 0;
+            } catch (e) { console.warn('[stripe-webhook] dispute.closed: could not read the charge — reinstating in full:', (e as any)?.message); }
+            await _reversePartnerCommission(db, dispute.payment_intent, refunded, 'dispute_won', new Date(stripeEvent.created * 1000));
+        }
     }
 
     // ── customer.subscription.updated — plan change / downgrade ──

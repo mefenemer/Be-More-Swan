@@ -46,7 +46,7 @@ export async function listPartnersWithNumbers(db: Db): Promise<Row[]> {
                             SUM(commission_pence) FILTER (WHERE status = 'payable') AS payable,
                             SUM(commission_pence) FILTER (WHERE status = 'paid') AS paid
                        FROM partner_commissions GROUP BY partner_id) c ON c.partner_id = p.id
-         ORDER BY CASE p.status WHEN 'applied' THEN 0 WHEN 'approved' THEN 1 WHEN 'suspended' THEN 2 ELSE 3 END,
+         ORDER BY CASE p.status WHEN 'applied' THEN 0 WHEN 'approved' THEN 1 WHEN 'suspended' THEN 2 WHEN 'ended' THEN 3 ELSE 4 END,
                   p.created_at DESC`);
 }
 

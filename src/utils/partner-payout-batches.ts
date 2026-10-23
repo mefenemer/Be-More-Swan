@@ -4,7 +4,7 @@
 // through action cards, the Partner Ops chat — one implementation for both.
 //
 // A payout run:
-//   previewPayout  → who is due: approved or suspended partners (suspended keep what they earned) who
+//   previewPayout  → who is due: approved, suspended or ended partners (they keep what they earned, Terms 7.3) who
 //                    have accepted the CURRENT Partner Terms, with CONFIRMED payout details, whose ready-to-pay balance (refund adjustments included)
 //                    reaches the minimum. Everyone else is listed with the reason they're left out.
 //   createBatch    → locks those rows into a 'draft' batch (payout_batch_id), in one transaction under
@@ -44,7 +44,7 @@ export async function addBonus(db: Db, partnerId: number, amountPence: number, n
     const why = note.trim().slice(0, 200);
     if (!why) return { ok: false, error: 'Add a note — the partner sees it as the reason for the bonus.' };
     const [p] = await db.select({ id: partners.id, status: partners.status }).from(partners).where(eq(partners.id, partnerId)).limit(1);
-    if (!p || (p.status !== 'approved' && p.status !== 'suspended')) return { ok: false, error: 'Bonuses are for approved (or suspended) partners only.' };
+    if (!p || !['approved', 'suspended', 'ended'].includes(p.status)) return { ok: false, error: 'Bonuses are for approved, suspended or ended partners only.' };
     const [row] = await db.insert(partnerCommissions).values({
         partnerId, kind: 'bonus', commissionPence: amountPence, status: 'payable', availableAt: new Date(), note: why, createdBy: adminId,
     }).returning({ id: partnerCommissions.id });
@@ -75,7 +75,8 @@ export async function previewPayout(db: Db): Promise<{ minPayoutPence: number; l
          ORDER BY amount DESC`)) as unknown as Row[];
     const lines: PayoutPreviewLine[] = rows.map((r) => {
         const amount = Number(r.amount);
-        const reason = r.status !== 'approved' && r.status !== 'suspended' ? `Partner is ${r.status}`
+        // Suspended and ended partners are still paid what they earned (Partner Terms 7.3).
+        const reason = !['approved', 'suspended', 'ended'].includes(r.status) ? `Partner is ${r.status}`
             // No contract, no payout: it waits (and rolls over) until they accept on their Partner page.
             : !hasAcceptedCurrentTerms(r.terms_version) ? `Hasn’t accepted the Partner Terms (v${PARTNER_TERMS_VERSION}) — it waits until they do`
             : !r.payout_details_confirmed_at || !r.payout_display ? 'No confirmed payout details'

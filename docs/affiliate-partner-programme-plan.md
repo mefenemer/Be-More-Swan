@@ -80,7 +80,16 @@ accepted on the application form (required tick) or on the Partner page (`accept
 `partners.terms_version` / `terms_accepted_at` (`src/config/partner-terms.ts`). **Enforced since 2026-10-23**
 (review H1, `hasAcceptedCurrentTerms`): commission still builds up, but payout runs leave out — and the Partner
 Assistant refuses — any partner who hasn't accepted the CURRENT version, admin-added partners included (they
-start with none). Admin → Partners shows each partner's accepted version. Owner decision: the customer
+start with none). Admin → Partners shows each partner's accepted version.
+**2026-10-23 also:** an `ended` partner status (`db/z-affiliate-partner-ended.sql` — ⚠️ apply to both DBs
+before deploy): Terms 7.1 left / 7.2 ended by us; no new earning, earned commission still paid (7.3), can be
+approved again; Admin → Partners "End" + Partner Ops chat `end`; their Partner page keeps earnings and payout
+details, no link or assistant. ⚠️ The sidebar Partner item (`workspace.html` partnerStatus list) doesn't include
+`ended` yet. Their invite link falls back to an ordinary customer invite (tokens), because only approved or
+suspended partners are on the partner track. **Won disputes** are reinstated automatically
+(`charge.dispute.closed`, status won → `reinstateDisputedCommission`). Refunds since then stay unearned, and
+money already clawed back is returned as a positive adjustment. ⚠️ Enable `charge.dispute.closed` (and
+`charge.refunded`) on both Stripe webhook endpoints. Owner decision: the customer
 Terms only gain clause 1.4 pointing to the Partner Terms — **no ToS version bump**, no re-acceptance prompt.
 privacy.html: partner data, invited people (first name shown; partners see "Customer N"), payout details in
 the vault, retention rows (declined applications 12 months; payout details until changed/left/erased;
