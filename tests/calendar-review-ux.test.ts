@@ -94,9 +94,10 @@ check('the bespoke reschedule modal is gone; dialogs.js confirms instead', () =>
 console.log('A failed load is said, with a retry');
 
 check('the calendar tracks a failed feed separately from an empty one', () => {
-    const load = slice(calendar, 'async function _loadAndRender(');
-    assert.match(load, /let failed = false/, '_loadAndRender no longer tracks failure');
-    assert.match(load, /_loadError = failed/, 'the failure is not committed to state');
+    // Fetching and applying were split (2026-10-23, the range cache): _fetchRange reports it,
+    // _applyRange commits it.
+    assert.match(slice(calendar, 'async function _fetchRange('), /let failed = false/, '_fetchRange no longer tracks failure');
+    assert.match(slice(calendar, 'function _applyRange('), /_loadError = d\.failed/, 'the failure is not committed to state');
     assert.match(slice(calendar, 'function _render('), /role="alert"[\s\S]{0,600}_calRetry\(\)/,
         'the calendar no longer shows an error with a Try again');
     assert.match(slice(calendar, 'function _renderList('), /if \(_loading\)[\s\S]{0,400}if \(_loadError\)/,
@@ -390,6 +391,26 @@ check('chat cards, the notification, the assistant tab and Blog Studio use the s
     const studio = read('src/components/blog-studio-modal.js');
     assert.match(studio, /Remove draft/);
     assert.match(studio, /'Reject and redraft' : 'Reject \(no redraft\)'/);
+});
+
+// ── 10. Performance (2026-10-23) ─────────────────────────────────────────────
+console.log('The Calendar reuses what it has fetched');
+
+check('a range is fetched once, reused while fresh, and cleared by any change', () => {
+    const load = slice(calendar, 'async function _loadAndRender(');
+    assert.match(load, /if \(!fromCache\) _rangeCache\.clear\(\)/, 'a change must clear every cached month');
+    assert.match(slice(calendar, 'function _navRefresh('), /_loadAndRender\(\{ fromCache: true \}\)/);
+    assert.match(slice(calendar, 'function _rangeEntry('), /if \(d\.failed[\s\S]{0,80}_rangeCache\.delete/, 'a failed answer must not be cached');
+    assert.match(load, /_prefetchNext\(\)/);
+    // The scope is in the key: an assistant's own tab and the sidebar Calendar fetch different things.
+    assert.match(slice(calendar, 'function _rangeKey('), /_lockedAssistant \? _assistantFilter : 'all'/);
+});
+
+check('the range query sends only the columns the calendar draws', () => {
+    const range = slice(scheduledPosts, 'const calendarColumns = {', 'const [rows, awaiting]');
+    assert.ok(!/db\.select\(\)\.from\(scheduledPosts\)\s*\.where\(and\(inRange/.test(scheduledPosts), 'the range query selects every column again');
+    for (const col of ['qualityReview', 'videoEdit', 'imageOverlays', 'factualClaims']) assert.ok(!range.includes(col), `${col} is back in the calendar payload`);
+    assert.match(range, /isRevised: sql<boolean>/);
 });
 
 console.log(`\n${passed} checks passed`);

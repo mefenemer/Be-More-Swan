@@ -371,8 +371,9 @@ window.initCalendar = async function (opts = {}) {
     // from the last visit — so a return visit showed the Week or List grid under a Month button.
     // Always paint the buttons from the view actually being rendered.
     _paintViewButtons();
-    _loading = true;
-    await _loadAndRender();
+    // Coming back to the Calendar (from Review, say) reuses the month already fetched, then re-checks.
+    _loading = !_rangeCached();
+    await _loadAndRender({ fromCache: true });
 };
 
 // ── Navigation ────────────────────────────────────────────────────
@@ -388,10 +389,13 @@ window.initCalendar = async function (opts = {}) {
 // new range (chips are matched by date key), never wrong.
 function _navRefresh() {
     // Marked loading BEFORE the interim paint, so the empty new range reads "Loading…" and never
-    // "Nothing scheduled" for the second or so it takes to arrive.
-    _loading = true;
-    _render();
-    void _loadAndRender();
+    // "Nothing scheduled" for the second or so it takes to arrive. A range already in the cache
+    // skips the interim paint: _loadAndRender paints it synchronously, before its first await.
+    if (!_rangeCached()) {
+        _loading = true;
+        _render();
+    }
+    void _loadAndRender({ fromCache: true });
 }
 window._calRetry = function () { _navRefresh(); };
 
@@ -568,110 +572,194 @@ async function _loadDatedItems(t, from, to) {
     return [];
 }
 
-async function _loadAndRender() {
-    const token = ++_loadToken;
+// Everything the grid shows for one date range, as data. Changes nothing on the page, so it can run
+// ahead of time (the next month) or for a range that is no longer on screen. Throws on a network
+// failure; a non-OK feed comes back as `failed: true` with that feed left null.
+async function _fetchRange(from, to) {
+    // Posts, completed assistant activity, and the assistant list (for colours/filter) in parallel.
+    // An assistant that publishes nothing owns no posts, blog posts or emails — fetching all three
+    // on every month change was three round trips to a database across the Atlantic for rows the
+    // filter then threw away. `[]`-shaped empty answers keep the rest of the code unchanged.
+    const skipPublishing = _lockedAssistant && !_publishesContent;
+    const none = (key) => Promise.resolve({ ok: true, json: async () => ({ [key]: [] }) });
+    // Each assistant's own dated work waited for the batch below to finish before it was even
+    // asked for. Once the assistant list is known (every visit after the first), start it now.
+    const earlyExtras = !_lockedAssistant && _assistants.length
+        ? Promise.all(_globalExtraTargets(_assistants).map((t) => _loadRoleExtras(t, from, to)))
+        : null;
+    const [postsRes, actRes, asstRes, blogRes, nlRes] = await Promise.all([
+        skipPublishing ? none('posts') : fetch(`/.netlify/functions/scheduled-posts?awaiting=1&from=${from.toISOString()}&to=${to.toISOString()}`),
+        fetch(`/.netlify/functions/get-calendar-activity?from=${from.toISOString()}&to=${to.toISOString()}`),
+        _assistants.length ? Promise.resolve(null) : (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants')),
+        skipPublishing ? none('posts') : fetch(`/.netlify/functions/blog-posts?from=${from.toISOString()}&to=${to.toISOString()}`),
+        // The from/to branch of newsletter-issues.ts, NOT its list response — that one carries
+        // segments, custom fields, templates and the brand theme, and this refetches on every
+        // month change.
+        skipPublishing ? none('issues') : fetch(`/.netlify/functions/newsletter-issues?from=${from.toISOString()}&to=${to.toISOString()}`),
+    ]);
+
+    // null = "no definitive answer" (a 500, say) — leave the previous value alone rather than
+    // blanking the grid on a transient failure. [] is a real, empty answer.
+    let posts = null, activities = null, assistants = null, blogPosts = null, newsletterIssues = null, awaiting = null;
+    // Did a feed the grid depends on fail? Kept apart from "empty": an empty month is an answer,
+    // a 500 is not, and the two used to render identically. The newsletter feed is excluded on
+    // purpose — an environment without its schema answers with an error by design (see below).
+    let failed = false;
+
+    if (postsRes.ok) {
+        const pj = await postsRes.json();
+        posts = pj.posts || [];
+        awaiting = pj.awaiting || [];
+    } else if (postsRes.status === 403) {
+        // US3 AC3.3: onboarding guard rejected this — surface it gracefully, don't crash.
+        const body = await postsRes.json().catch(() => ({}));
+        if (body.error === 'onboarding_incomplete') {
+            window.showToast?.(body.message || 'Please complete your onboarding checklist to unlock this feature.');
+        }
+        posts = [];
+    } else {
+        failed = true;
+    }
+
+    if (actRes && actRes.ok) activities = (await actRes.json()).activities || [];
+    else if (actRes) failed = true;
+    if (asstRes && asstRes.ok) assistants = (await asstRes.json()).assistants || [];
+    if (blogRes && blogRes.ok) blogPosts = (await blogRes.json()).posts || [];
+    else if (blogRes) failed = true;
+    // Left null on any non-OK answer, per the rule above: an environment without the newsletter
+    // schema applied answers with an error, and blanking every OTHER kind of entry on the grid
+    // because of it would be a worse calendar than one issue short.
+    if (nlRes && nlRes.ok) newsletterIssues = (await nlRes.json()).issues || [];
+
+    // Each assistant's own kind of dated work: scheduled records, a Lead Generator's follow-up
+    // emails, a Campaign Assistant's start and end dates, a Mystery Shopper's checks, a Brand
+    // Designer's brief deadlines. The assistant Calendar tab loads its one assistant's; the
+    // sidebar Calendar loads every assistant's (review, 2026-10-22 — it used to show none of
+    // them, so those assistants looked idle there). Every item carries _assistantId, so the
+    // assistant filter and colours apply to it like to a post.
+    const extraTargets = _lockedAssistant
+        ? (_assistantFilter !== 'all'
+            ? [{ id: Number(_assistantFilter), records: true, leadOutreach: _leadOutreach, datedSource: _datedSource }]
+            : [])
+        : _globalExtraTargets(assistants || _assistants);
+    const extras = earlyExtras && !assistants ? await earlyExtras : await Promise.all(extraTargets.map((t) => _loadRoleExtras(t, from, to)));
+    const records = extras.flatMap((e) => e.records);
+    const followUps = extras.flatMap((e) => e.followUps);
+    const dated = extras.flatMap((e) => e.dated);
+
+    return { posts, awaiting, activities, assistants, blogPosts, newsletterIssues, records, followUps, dated, failed };
+}
+
+// Put one range's data on the page.
+function _applyRange(d) {
+    _datedItems = d.dated;
+    _loadError = d.failed;
+    // A failed answer leaves the PREVIOUS range's data, which can't land on this range's dates —
+    // so clear it rather than let a stale month's chips pass for this one's.
+    _posts = d.posts || [];
+    _awaiting = d.awaiting || [];
+    if (d.activities) _activities = d.activities;
+    if (d.assistants) {
+        _assistants = d.assistants;
+        // Seed the shared colour cache so chips/dots that only carry an assistantId resolve to
+        // the user's chosen colour rather than the id-derived fallback.
+        window.AssistantColors?.rememberAll(d.assistants);
+    }
+    if (d.blogPosts) _blogPosts = d.blogPosts;
+    if (d.newsletterIssues) _newsletterIssues = d.newsletterIssues;
+    _scheduledRecords = d.records;
+    _followUps = d.followUps;
+}
+
+// ── Range cache ──────────────────────────────────────────────────
+// Every month change and every visit fetched the whole range again — four to a dozen requests —
+// so stepping back to last month, or returning to the Calendar from Review, showed "Loading…" for
+// data already seen seconds before. Each range's answer (or its in-flight request) is kept for a
+// few minutes: a cached month paints at once and is re-checked quietly if it is more than a few
+// seconds old, and the next month is fetched ahead while the user reads this one.
+// Any change made here (a move, an edit, a record changed) clears the lot: _loadAndRender() with
+// no options is the "something changed" path, and a moved post can land in any cached month.
+const _RANGE_CACHE_MS = 5 * 60 * 1000;
+const _RANGE_RECHECK_MS = 15 * 1000;
+const _rangeCache = new Map();   // key → { at, promise, data }
+
+function _rangeKey(from, to) {
+    // The same dates fetch different things on an assistant's own tab, so its scope is in the key.
+    return [from.toISOString(), to.toISOString(), _lockedAssistant ? _assistantFilter : 'all',
+        _publishesContent ? 1 : 0, _leadOutreach ? 1 : 0, _datedSource || ''].join('|');
+}
+
+function _rangeEntry(from, to, { fresh = false } = {}) {
+    const key = _rangeKey(from, to);
+    const hit = _rangeCache.get(key);
+    if (!fresh && hit && Date.now() - hit.at < _RANGE_CACHE_MS) return hit;
+    const entry = { at: Date.now(), promise: null, data: null };
+    entry.promise = _fetchRange(from, to).then((d) => {
+        entry.data = d;
+        // Never keep a failed answer: the next visit should ask again, not replay the error.
+        if (d.failed && _rangeCache.get(key) === entry) _rangeCache.delete(key);
+        return d;
+    }, (err) => {
+        if (_rangeCache.get(key) === entry) _rangeCache.delete(key);
+        throw err;
+    });
+    _rangeCache.set(key, entry);
+    return entry;
+}
+
+/** Is the range on screen already in hand (so navigating needs no "Loading…")? */
+function _rangeCached() {
+    const { from, to } = _getDateRange();
+    const hit = _rangeCache.get(_rangeKey(from, to));
+    return !!(hit && hit.data && Date.now() - hit.at < _RANGE_CACHE_MS);
+}
+
+// The next range along, fetched while the user reads this one (most navigation is "next").
+function _prefetchNext() {
+    const saved = _anchor;
     try {
+        const next = new Date(_anchor);
+        if (_view === 'week') next.setDate(next.getDate() + 7);
+        else if (!(_view === 'list' && _listFilter === 'upcoming')) next.setMonth(next.getMonth() + 1, 1);
+        else return;
+        _anchor = next;
         const { from, to } = _getDateRange();
-        // Posts, completed assistant activity, and the assistant list (for colours/filter) in parallel.
-        // An assistant that publishes nothing owns no posts, blog posts or emails — fetching all three
-        // on every month change was three round trips to a database across the Atlantic for rows the
-        // filter then threw away. `[]`-shaped empty answers keep the rest of the code unchanged.
-        const skipPublishing = _lockedAssistant && !_publishesContent;
-        const none = (key) => Promise.resolve({ ok: true, json: async () => ({ [key]: [] }) });
-        // Each assistant's own dated work waited for the batch below to finish before it was even
-        // asked for. Once the assistant list is known (every visit after the first), start it now.
-        const earlyExtras = !_lockedAssistant && _assistants.length
-            ? Promise.all(_globalExtraTargets(_assistants).map((t) => _loadRoleExtras(t, from, to)))
-            : null;
-        const [postsRes, actRes, asstRes, blogRes, nlRes] = await Promise.all([
-            skipPublishing ? none('posts') : fetch(`/.netlify/functions/scheduled-posts?awaiting=1&from=${from.toISOString()}&to=${to.toISOString()}`),
-            fetch(`/.netlify/functions/get-calendar-activity?from=${from.toISOString()}&to=${to.toISOString()}`),
-            _assistants.length ? Promise.resolve(null) : (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants')),
-            skipPublishing ? none('posts') : fetch(`/.netlify/functions/blog-posts?from=${from.toISOString()}&to=${to.toISOString()}`),
-            // The from/to branch of newsletter-issues.ts, NOT its list response — that one carries
-            // segments, custom fields, templates and the brand theme, and this refetches on every
-            // month change.
-            skipPublishing ? none('issues') : fetch(`/.netlify/functions/newsletter-issues?from=${from.toISOString()}&to=${to.toISOString()}`),
-        ]);
+        _rangeEntry(from, to).promise.catch(() => {});
+    } finally {
+        _anchor = saved;
+    }
+}
 
-        // null = "no definitive answer" (a 500, say) — leave the previous value alone rather than
-        // blanking the grid on a transient failure. [] is a real, empty answer.
-        let posts = null, activities = null, assistants = null, blogPosts = null, newsletterIssues = null, awaiting = null;
-        // Did a feed the grid depends on fail? Kept apart from "empty": an empty month is an answer,
-        // a 500 is not, and the two used to render identically. The newsletter feed is excluded on
-        // purpose — an environment without its schema answers with an error by design (see below).
-        let failed = false;
-
-        if (postsRes.ok) {
-            const pj = await postsRes.json();
-            posts = pj.posts || [];
-            awaiting = pj.awaiting || [];
-        } else if (postsRes.status === 403) {
-            // US3 AC3.3: onboarding guard rejected this — surface it gracefully, don't crash.
-            const body = await postsRes.json().catch(() => ({}));
-            if (body.error === 'onboarding_incomplete') {
-                window.showToast?.(body.message || 'Please complete your onboarding checklist to unlock this feature.');
-            }
-            posts = [];
-        } else {
-            failed = true;
-        }
-
-        if (actRes && actRes.ok) activities = (await actRes.json()).activities || [];
-        else if (actRes) failed = true;
-        if (asstRes && asstRes.ok) assistants = (await asstRes.json()).assistants || [];
-        if (blogRes && blogRes.ok) blogPosts = (await blogRes.json()).posts || [];
-        else if (blogRes) failed = true;
-        // Left null on any non-OK answer, per the rule above: an environment without the newsletter
-        // schema applied answers with an error, and blanking every OTHER kind of entry on the grid
-        // because of it would be a worse calendar than one issue short.
-        if (nlRes && nlRes.ok) newsletterIssues = (await nlRes.json()).issues || [];
-
-        // Each assistant's own kind of dated work: scheduled records, a Lead Generator's follow-up
-        // emails, a Campaign Assistant's start and end dates, a Mystery Shopper's checks, a Brand
-        // Designer's brief deadlines. The assistant Calendar tab loads its one assistant's; the
-        // sidebar Calendar loads every assistant's (review, 2026-10-22 — it used to show none of
-        // them, so those assistants looked idle there). Every item carries _assistantId, so the
-        // assistant filter and colours apply to it like to a post.
-        const extraTargets = _lockedAssistant
-            ? (_assistantFilter !== 'all'
-                ? [{ id: Number(_assistantFilter), records: true, leadOutreach: _leadOutreach, datedSource: _datedSource }]
-                : [])
-            : _globalExtraTargets(assistants || _assistants);
-        const extras = earlyExtras && !assistants ? await earlyExtras : await Promise.all(extraTargets.map((t) => _loadRoleExtras(t, from, to)));
-        const records = extras.flatMap((e) => e.records);
-        const followUps = extras.flatMap((e) => e.followUps);
-        const dated = extras.flatMap((e) => e.dated);
-
+async function _loadAndRender({ fromCache = false } = {}) {
+    const token = ++_loadToken;
+    if (!fromCache) _rangeCache.clear();
+    const { from, to } = _getDateRange();
+    const paint = () => {
+        _loading = false;
+        // Always (re)populate the toolbar controls — the calendar.html fragment (and its fresh
+        // <select>) is re-injected on every view entry, even though _assistants is cached here.
+        _renderAssistantControls();
+        _render();
+    };
+    let entry = _rangeEntry(from, to);
+    // In hand already: paint it now, then re-check it quietly if it has been sitting a while.
+    if (entry.data) {
+        _applyRange(entry.data);
+        paint();
+        if (Date.now() - entry.at < _RANGE_RECHECK_MS) { _prefetchNext(); return; }
+        entry = _rangeEntry(from, to, { fresh: true });
+    }
+    try {
+        const d = await entry.promise;
         if (token !== _loadToken) return;   // superseded by a newer navigation
-
-        _datedItems = dated;
-        _loadError = failed;
-        // A failed answer leaves the PREVIOUS range's data, which can't land on this range's dates —
-        // so clear it rather than let a stale month's chips pass for this one's.
-        _posts = posts || [];
-        _awaiting = awaiting || [];
-        if (activities) _activities = activities;
-        if (assistants) {
-            _assistants = assistants;
-            // Seed the shared colour cache so chips/dots that only carry an assistantId resolve to
-            // the user's chosen colour rather than the id-derived fallback.
-            window.AssistantColors?.rememberAll(assistants);
-        }
-        if (blogPosts) _blogPosts = blogPosts;
-        if (newsletterIssues) _newsletterIssues = newsletterIssues;
-        _scheduledRecords = records;
-        _followUps = followUps;
+        _applyRange(d);
     } catch (e) {
         console.warn('Calendar load error:', e);
-        if (token === _loadToken) _loadError = true;
+        if (token !== _loadToken) return;
+        _loadError = true;
     }
-    if (token !== _loadToken) return;
-    _loading = false;
-    // Always (re)populate the toolbar controls — the calendar.html fragment (and its fresh
-    // <select>) is re-injected on every view entry, even though _assistants is cached here.
-    _renderAssistantControls();
-    _render();
+    paint();
+    if (!_loadError) _prefetchNext();
 }
 
 // Populate the assistant + platform filter dropdowns and colour legend.
