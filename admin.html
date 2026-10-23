@@ -9962,6 +9962,9 @@ function _partnersRenderList() {
           ? `<span class="text-amber-700 font-semibold">not created yet</span>${p.invitedAt ? ` — link sent ${_pDate(p.invitedAt)}${p.inviteExpiresAt && new Date(p.inviteExpiresAt) < new Date() ? ' (expired)' : ''}` : ''}
              <button type="button" onclick="partnerResendInvite(${p.id})" class="btn-utility px-2 py-0.5 text-[11px] font-bold rounded-lg">Resend account link</button>`
           : 'none — applied without one')}</span>
+        ${p.status === 'approved' || p.status === 'suspended' ? `<span>Partner Terms: ${p.termsAccepted
+          ? `v${_pEsc(p.termsVersion)} accepted${p.termsAcceptedAt ? ' ' + _pDate(p.termsAcceptedAt) : ''}`
+          : `<span class="text-amber-700 font-semibold">${p.termsVersion ? `only v${_pEsc(p.termsVersion)} accepted` : 'not accepted'}</span> — no payouts or Partner Assistant until they accept on their Partner page`}</span>` : ''}
         <span>Payout details: ${p.hasPayoutDetails ? _pEsc(p.payoutDisplay || p.payoutMethod || 'set') : '<span class="text-amber-700 font-semibold">not set yet</span>'}</span>
         ${p.decisionNote ? `<span>Last decision note: <em>${_pEsc(p.decisionNote)}</em></span>` : ''}
         ${!p.hasAccount && (p.status === 'applied' || p.status === 'rejected') ? `<button type="button" onclick="partnerEraseApplication(${p.id})" class="btn-destructive px-2 py-0.5 text-[11px] font-bold rounded-lg">Erase application</button>` : ''}

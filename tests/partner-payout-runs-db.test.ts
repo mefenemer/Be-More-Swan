@@ -11,6 +11,7 @@
 //
 // Run:  npx tsx tests/partner-payout-runs-db.test.ts
 
+import { PARTNER_TERMS_VERSION } from '../src/config/partner-terms';
 import assert from 'node:assert';
 import { randomBytes } from 'node:crypto';
 import postgres from 'postgres';
@@ -49,13 +50,17 @@ async function main() {
         await sql.unsafe(`INSERT INTO users (id, email, first_name, last_name, role) VALUES
             (1, 'ann@example.com', 'Ann', 'Bank', 'user'), (2, 'pam@example.com', 'Pam', 'Pal', 'user'),
             (3, 'nod@example.com', 'No', 'Details', 'user'), (4, 'low@example.com', 'Low', 'Balance', 'user'),
-            (5, 'sus@example.com', 'Sue', 'Spended', 'user'), (6, 'ref@example.com', 'Ref', 'Unded', 'user')`);
-        // Partners 1–6 (ids follow users): confirmed details for 1, 2, 4, 5, 6; none for 3.
+            (5, 'sus@example.com', 'Sue', 'Spended', 'user'), (6, 'ref@example.com', 'Ref', 'Unded', 'user'),
+            (7, 'old@example.com', 'Old', 'Terms', 'user')`);
+        // Partners 1–7 (ids follow users): confirmed details for 1, 2, 4, 5, 6, 7; none for 3.
+        // 1–6 accepted the current Partner Terms; 7 only an older version (or an admin added them).
         for (const [uid, status, method, display] of [[1, 'approved', 'bank', 'UK bank · Ann Bank · ****4567'], [2, 'approved', 'paypal', 'PayPal · p***@example.com'],
             [3, 'approved', null, null], [4, 'approved', 'paypal', 'PayPal · l***@example.com'], [5, 'suspended', 'paypal', 'PayPal · s***@example.com'], [6, 'approved', 'paypal', 'PayPal · r***@example.com']] as const) {
-            await sql.unsafe(`INSERT INTO partners (id, user_id, status, payout_method, payout_display, payout_details_confirmed_at)
-                              VALUES (${uid}, ${uid}, '${status}', ${method ? `'${method}'` : 'NULL'}, ${display ? `'${display}'` : 'NULL'}, ${display ? 'now()' : 'NULL'})`);
+            await sql.unsafe(`INSERT INTO partners (id, user_id, status, payout_method, payout_display, payout_details_confirmed_at, terms_version)
+                              VALUES (${uid}, ${uid}, '${status}', ${method ? `'${method}'` : 'NULL'}, ${display ? `'${display}'` : 'NULL'}, ${display ? 'now()' : 'NULL'}, '${PARTNER_TERMS_VERSION}')`);
         }
+        await sql.unsafe(`INSERT INTO partners (id, user_id, status, payout_method, payout_display, payout_details_confirmed_at, terms_version)
+                          VALUES (7, 7, 'approved', 'paypal', 'PayPal · o***@example.com', now(), '1.0')`);
         await storeSecret(db, 'aura/partner-1/payout', { method: 'bank', accountName: 'Ann Bank', sortCode: '112233', accountNumber: '01234567' });
         await storeSecret(db, 'aura/partner-2/payout', { method: 'paypal', email: 'pam.pay@example.com' });
         await storeSecret(db, 'aura/partner-5/payout', { method: 'paypal', email: 'sue.pay@example.com' });
@@ -68,6 +73,7 @@ async function main() {
         await add(4, 2000);                               // under £50 → rolls over
         await add(5, 5500);                               // suspended keeps what they earned → due
         await add(6, 6000); await add(6, -3000, 'payable', 'adjustment');   // refunded after payout: £30 net → under minimum
+        await add(7, 8000);                               // Terms not accepted → waits
         await add(1, 9999, 'pending');                    // not ready yet → never in a run
 
         await check('who is due: confirmed details, at or over the minimum, refunds netted, suspended included', async () => {
@@ -77,6 +83,8 @@ async function main() {
             assert.deepStrictEqual([by[2].due, by[5].due], [true, true]);
             assert.match(by[3].reason!, /No confirmed payout details/);
             assert.match(by[4].reason!, /Under the £50 minimum/);
+            assert.deepStrictEqual([by[7].due, by[7].amountPence], [false, 8000]);
+            assert.match(by[7].reason!, /Hasn’t accepted the Partner Terms/);
             assert.deepStrictEqual([by[6].due, by[6].amountPence], [false, 3000]);
             assert.strictEqual(p.totalDuePence, 7500 + 7525 + 5500);
         });

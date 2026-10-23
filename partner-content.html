@@ -25,7 +25,7 @@
   <!-- Partner Terms not accepted (admin-added partners, or a new version) -->
   <div id="pt-terms-banner" class="hidden bg-white border-2 border-pink-300 rounded-xl p-5 space-y-3">
     <p class="font-bold text-gray-900">Please accept the Partner Terms</p>
-    <p class="text-sm text-gray-600">They explain how you earn and get paid, and how to promote Be More Swan — including labelling your posts as ads. <a href="/partner-terms.html" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Read the Partner Terms</a> (<span id="pt-terms-version"></span>).</p>
+    <p class="text-sm text-gray-600">They explain how you earn and get paid, and how to promote Be More Swan — including labelling your posts as ads. Your commission keeps building up, but we can’t pay it, and your Partner Assistant can’t draft for you, until you accept. <a href="/partner-terms.html" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Read the Partner Terms</a> (<span id="pt-terms-version"></span>).</p>
     <button type="button" onclick="window.partnerPage.acceptTerms()" id="pt-terms-btn" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">I accept the Partner Terms</button>
   </div>
 
@@ -227,6 +227,7 @@
     document.getElementById('pt-pending').textContent = money(s.pending_pence);
     const min = data.payoutRules?.minPayoutPence ?? 0;
     document.getElementById('pt-payable-note').textContent = !s.payable_pence ? 'Nothing to pay yet.'
+      : data.partnerTerms && !data.partnerTerms.accepted ? 'Accept the Partner Terms at the top of this page so we can pay you.'
       : (s.payable_pence >= min ? (data.payout.display ? 'Included in the next monthly payout.' : 'Add your payout details below so we can pay you.')
         : `${money(min - s.payable_pence)} more to reach the ${money(min)} minimum — it rolls over until then.`);
     document.getElementById('pt-pending-note').textContent = s.next_release_at
@@ -309,6 +310,7 @@
     try {
       await post({ action: 'accept_terms' });
       show('pt-terms-banner', false);
+      if (data.partnerTerms) { data.partnerTerms.accepted = true; render(); }   // the payout note changes
       window.showToast?.('Thanks — the Partner Terms are accepted.');
     } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); btn.disabled = false; }
   }

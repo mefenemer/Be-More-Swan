@@ -14,7 +14,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { finaliseDraft, hasDisclosure, hasPartnerLink } from '../src/utils/partner-promo';
+import { AD_LABELS, finaliseDraft, handoffBrief, hasDisclosure, hasPartnerLink, hasUpfrontDisclosure } from '../src/utils/partner-promo';
 import { LIST_PRICE_PER_1K } from '../src/utils/ai-usage';
 
 let passed = 0;
@@ -28,11 +28,18 @@ const ctx = { inviteUrl: 'https://bemoreswan.com/invite/SAMP4567', partnerCode: 
 
 console.log('every draft carries the link and an ad label');
 
-check('a draft with neither gets both added; a social post is labelled #ad', () => {
+check('a draft with neither gets both added; a social post OPENS with #ad (not hidden behind "see more")', () => {
     const out = finaliseDraft('linkedin', 'Be More Swan saves me hours every week.', ctx);
     assert.ok(out.addedLink && out.addedDisclosure);
     assert.ok(out.text.includes('https://bemoreswan.com/invite/SAMP4567 (or use code SAMSWAN)'));
-    assert.ok(out.text.trim().endsWith('#ad — I earn a commission if you join through my link.'));
+    assert.ok(out.text.startsWith('#ad — I earn a commission if you join through my link.'));
+});
+
+check('a label only at the END does not count — one is added at the top (legal review 2026-10-23, H2)', () => {
+    const t = 'Be More Swan saves me hours.\n\nbemoreswan.com/invite/SAMP4567\n\n#ad';
+    const out = finaliseDraft('social', t, ctx);
+    assert.ok(out.addedDisclosure && out.text.startsWith(AD_LABELS.post));
+    assert.ok(!hasUpfrontDisclosure('Line one.\nLine two.\nLine three — this is an affiliate link'), '"affiliate link" further down is not up front');
 });
 
 check('nothing is doubled when the model already included them', () => {
@@ -42,8 +49,11 @@ check('nothing is doubled when the model already included them', () => {
     assert.ok(hasPartnerLink('use code samswan at sign-up', ctx), 'the partner code counts as the link');
 });
 
-check('emails get a P.S. disclosure; video scripts are labelled at the START (said or shown)', () => {
-    assert.match(finaliseDraft('email', 'Hi all — try this. ' + ctx.inviteUrl, ctx).text, /P\.S\. That’s my partner link — I earn a commission/);
+check('emails and DMs open with the label (after a subject line); video scripts too (said or shown)', () => {
+    assert.ok(finaliseDraft('email', 'Hi all — try this. ' + ctx.inviteUrl, ctx).text.startsWith(AD_LABELS.message));
+    assert.ok(finaliseDraft('dm', 'Hey — thought of you. ' + ctx.inviteUrl, ctx).text.startsWith(AD_LABELS.message));
+    const e = finaliseDraft('email', 'Subject: A tool I use\nHi all — try this. ' + ctx.inviteUrl, ctx).text;
+    assert.ok(e.startsWith('Subject: A tool I use\n') && e.indexOf(AD_LABELS.message) < e.indexOf('Hi all'), 'label sits under the subject, above the greeting');
     const v = finaliseDraft('video_script', 'Scene 1: me at my desk.', ctx).text;
     assert.ok(v.startsWith('[Say or show: “This is a paid partnership'));
     assert.ok(v.includes(`[On screen / in the description: ${ctx.inviteUrl}]`));
@@ -91,6 +101,22 @@ check('hand-offs only to assistants they actually have, and only Social / Email 
     assert.ok(ep.includes("export const HANDOFF_ROLES = { social_media_manager: 'Social Media Manager', newsletter_editor: 'Email Marketing Assistant', lead_qualifier: 'Lead Generator' } as const;"));
     assert.ok(ep.includes('const who = team.find((a) => a.roleKey === target);'));
     assert.ok(ep.includes("if (!who) return { offered: false"));
+});
+
+check('hand-off briefs carry the rules: label first + link (posts, emails), consent-only email, no cold lists from leads', () => {
+    const s = handoffBrief('social_media_manager', 'Post my draft on LinkedIn.', ctx);
+    assert.ok(s.startsWith('Post my draft on LinkedIn.') && s.includes(`Start every post with “${AD_LABELS.post}”`) && s.includes(ctx.inviteUrl));
+    const n = handoffBrief('newsletter_editor', 'Email my list about it.', ctx);
+    assert.ok(n.includes(AD_LABELS.message) && n.includes('only to my own subscribers who agreed to hear from me') && n.includes(ctx.inviteUrl));
+    const l = handoffBrief('lead_qualifier', 'Find accountants near me.', ctx);
+    assert.ok(/Don’t add them to an email list or send them marketing emails/.test(l));
+    assert.ok(ep.includes('brief: handoffBrief(target, brief, { inviteUrl, partnerCode })'), 'the endpoint wraps every brief');
+    assert.ok(ep.includes('Never suggest emailing, messaging in bulk or adding to a list the people the Lead Generator finds'));
+});
+
+check('no drafting until the CURRENT Partner Terms are accepted (admin-added partners included)', () => {
+    const gate = ep.indexOf('if (!hasAcceptedCurrentTerms(p.termsVersion)) return json(403');
+    assert.ok(gate > 0 && gate < ep.indexOf("checkRateLimit(db, 'partner_assistant'"), 'checked before any message is spent');
 });
 
 check('limits and safety as the admin chat: 26s, refusal handled, results in one message, no forced tools', () => {
