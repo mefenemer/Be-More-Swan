@@ -24,6 +24,12 @@
 
     <!-- Right: assistant filter + view toggle -->
     <div class="flex items-center gap-3 flex-wrap">
+      <!-- Phone: the two dropdowns fold behind this, so the posts start higher up (the toolbar was
+           three rows before the first post). The count says a filter is on, so a filtered view is
+           never mistaken for an empty one. Desktop never sees it. -->
+      <button type="button" id="cal-filter-toggle" aria-expanded="false" aria-controls="cal-filters"
+        class="hidden btn-utility focus-ring tap-target px-3 py-1.5 text-sm font-bold rounded-lg border">Filter<span id="cal-filter-count"></span></button>
+      <div id="cal-filters" class="phone-hidden flex items-center gap-3 flex-wrap">
       <!-- Platform filter. Social/blog roles only: the per-assistant Calendar tab injects this
            same fragment for EVERY role (assistant-calendar.js), so a Lead Generator — which
            publishes nothing — was being offered an Instagram/YouTube filter over a grid that can
@@ -50,6 +56,7 @@
         class="tap-target max-w-full truncate text-sm font-semibold text-gray-700 border border-gray-300 rounded-lg px-3 py-1.5 bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-700">
         <option value="all">All assistants</option>
       </select>
+      </div>
       <!-- A segmented control: calendar.js sets aria-pressed and the look from the view on screen.
            Month and Week are hidden on a phone, where seven columns are ~48px each — which leaves only
            List, so the whole control goes there. -->

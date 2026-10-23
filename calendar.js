@@ -31,9 +31,26 @@ const PLATFORM_META = {
 };
 
 // Returns a circular platform avatar (logo on brand bg) for list/panel use.
+// Each logo once, as a <symbol>, referenced by <use>. A month grid inlined the full path data in
+// every chip (the Instagram mark alone is ~1.4KB) and rebuilt all of it on every repaint.
+function _ensureLogoSprite() {
+    if (document.getElementById('cal-logo-sprite')) return;
+    const symbols = Object.entries(PLATFORM_LOGOS).map(([key, svg]) => {
+        const inner = svg.replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
+        const viewBox = (svg.match(/viewBox="([^"]+)"/) || [])[1] || '0 0 24 24';
+        return `<symbol id="cal-logo-${key}" viewBox="${viewBox}">${inner}</symbol>`;
+    }).join('');
+    const holder = document.createElement('div');
+    holder.innerHTML = `<svg id="cal-logo-sprite" xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">${symbols}</svg>`;
+    document.body.appendChild(holder.firstChild);
+}
+
 function _platAvatar(platform, sizePx = 36) {
     const meta = PLATFORM_META[platform];
-    const logo = PLATFORM_LOGOS[platform];
+    if (PLATFORM_LOGOS[platform]) _ensureLogoSprite();
+    const logo = PLATFORM_LOGOS[platform]
+        ? `<svg viewBox="0 0 24 24" fill="currentColor" class="w-full h-full" aria-hidden="true"><use href="#cal-logo-${platform}"/></svg>`
+        : null;
     const bg = meta ? meta.bg : '#9ca3af';
     const inner = logo
         ? `<span style="display:flex;width:${Math.round(sizePx*0.5)}px;height:${Math.round(sizePx*0.5)}px;color:#fff">${logo}</span>`
@@ -388,6 +405,26 @@ function _paintViewButtons() {
 }
 
 // Phone only: the two legend strips fold behind a "Key" button so the posts start higher up.
+// The phone's "Filter" button: shown on a phone when there is a filter to show, with how many are on.
+function _syncFilterToggle() {
+    const btn = document.getElementById('cal-filter-toggle');
+    if (!btn) return;
+    const shown = ['cal-platform-filter', 'cal-assistant-filter']
+        .filter(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); });
+    btn.classList.toggle('hidden', !shown.length || !_isPhone());
+    const on = (_platformFilterOn && _platformFilter !== 'all' ? 1 : 0) + (!_lockedAssistant && _assistantFilter !== 'all' ? 1 : 0);
+    const count = document.getElementById('cal-filter-count');
+    if (count) count.textContent = on ? ` (${on} on)` : '';
+    if (!btn.dataset.bound) {
+        btn.dataset.bound = '1';
+        btn.addEventListener('click', () => {
+            const open = btn.getAttribute('aria-expanded') !== 'true';
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            document.getElementById('cal-filters')?.classList.toggle('phone-hidden', !open);
+        });
+    }
+}
+
 function _toggleKey() {
     const btn = document.getElementById('cal-key-toggle');
     const open = btn?.getAttribute('aria-expanded') !== 'true';
@@ -541,6 +578,11 @@ async function _loadAndRender() {
         // filter then threw away. `[]`-shaped empty answers keep the rest of the code unchanged.
         const skipPublishing = _lockedAssistant && !_publishesContent;
         const none = (key) => Promise.resolve({ ok: true, json: async () => ({ [key]: [] }) });
+        // Each assistant's own dated work waited for the batch below to finish before it was even
+        // asked for. Once the assistant list is known (every visit after the first), start it now.
+        const earlyExtras = !_lockedAssistant && _assistants.length
+            ? Promise.all(_globalExtraTargets(_assistants).map((t) => _loadRoleExtras(t, from, to)))
+            : null;
         const [postsRes, actRes, asstRes, blogRes, nlRes] = await Promise.all([
             skipPublishing ? none('posts') : fetch(`/.netlify/functions/scheduled-posts?awaiting=1&from=${from.toISOString()}&to=${to.toISOString()}`),
             fetch(`/.netlify/functions/get-calendar-activity?from=${from.toISOString()}&to=${to.toISOString()}`),
@@ -596,7 +638,7 @@ async function _loadAndRender() {
                 ? [{ id: Number(_assistantFilter), records: true, leadOutreach: _leadOutreach, datedSource: _datedSource }]
                 : [])
             : _globalExtraTargets(assistants || _assistants);
-        const extras = await Promise.all(extraTargets.map((t) => _loadRoleExtras(t, from, to)));
+        const extras = earlyExtras && !assistants ? await earlyExtras : await Promise.all(extraTargets.map((t) => _loadRoleExtras(t, from, to)));
         const records = extras.flatMap((e) => e.records);
         const followUps = extras.flatMap((e) => e.followUps);
         const dated = extras.flatMap((e) => e.dated);
@@ -646,7 +688,7 @@ function _renderAssistantControls() {
             sel.value = String(_assistantFilter);
             if (!sel.dataset.bound) {
                 sel.dataset.bound = '1';
-                sel.addEventListener('change', () => { _assistantFilter = sel.value; _render(); });
+                sel.addEventListener('change', () => { _assistantFilter = sel.value; _syncFilterToggle(); _render(); });
             }
         }
     }
@@ -662,10 +704,11 @@ function _renderAssistantControls() {
         psel.classList.toggle('hidden', !_platformFilterOn);
         if (!psel.dataset.bound) {
             psel.dataset.bound = '1';
-            psel.addEventListener('change', () => { _platformFilter = psel.value; _render(); });
+            psel.addEventListener('change', () => { _platformFilter = psel.value; _syncFilterToggle(); _render(); });
         }
         psel.value = _platformFilter;
     }
+    _syncFilterToggle();
 
     const legend = document.getElementById('cal-legend');
     if (legend) {
@@ -793,6 +836,20 @@ window._calNewPost = function (dateKey) {
     window.openGeneratePostSheet(id);
 };
 
+const _MONTH_CELL_MAX = 3;
+
+/** "+N more": the List view on that day, scrolled to it. */
+window._calShowDay = function (dateKey) {
+    const [y, m, d] = String(dateKey).split('-').map(Number);
+    _anchor = new Date(y, m - 1, d);
+    _listFilter = 'all';
+    _listFilterChosen = true;
+    _scrolledToTodayFor = `${y}-${m - 1}`;   // don't let the "scroll to today" pass win
+    _pendingScrollDate = dateKey;   // _render scrolls there once the list has loaded
+    _setView('list');
+};
+let _pendingScrollDate = null;
+
 /** True when nothing at all falls on a day of the month or week on screen. */
 function _gridIsEmpty() {
     const { from, to } = _getDateRange();
@@ -881,6 +938,10 @@ function _render() {
         const todayEl = main.querySelector('[data-cal-today]');
         if (todayEl && _scrolledToTodayFor !== key) { _scrolledToTodayFor = key; todayEl.scrollIntoView({ block: 'start' }); }
     }
+    if (_view === 'list' && _pendingScrollDate && !_loading) {
+        main.querySelector(`[data-list-date="${_pendingScrollDate}"]`)?.scrollIntoView({ block: 'start' });
+        _pendingScrollDate = null;
+    }
 }
 
 // ── Per-paint day buckets ─────────────────────────────────────────
@@ -948,7 +1009,18 @@ function _renderMonth() {
         const dayFollowUps = _followUpsOnDate(date);
         // Pending outreach sits ABOVE the reminders and the completed runs: it is the only entry
         // in the cell that is going to do something on its own.
-        html += `<div class="space-y-1">${dayGroups.map(g => _postChip(g, 'month')).join('')}${_awaitingOnDate(date).map(g => _awaitingChip(g)).join('')}${dayBlogs.map(b => _blogChip(b, 'month')).join('')}${dayIssues.map(_issueChip).join('')}${dayFollowUps.map(f => _followUpChip(f, 'month')).join('')}${dayRecords.map(r => _recordChip(r, 'month')).join('')}${_datedItemsOnDate(date).map(_datedChip).join('')}${dayActs.map(a => _activityChip(a, 'month')).join('')}</div>`;
+        const entries = [
+            ...dayGroups.map(g => _postChip(g, 'month')), ..._awaitingOnDate(date).map(g => _awaitingChip(g)),
+            ...dayBlogs.map(b => _blogChip(b, 'month')), ...dayIssues.map(_issueChip),
+            ...dayFollowUps.map(f => _followUpChip(f, 'month')), ...dayRecords.map(r => _recordChip(r, 'month')),
+            ..._datedItemsOnDate(date).map(_datedChip), ...dayActs.map(a => _activityChip(a, 'month')),
+        ];
+        // At most three per cell: one busy day used to stretch its whole week's row. The rest are a
+        // click away, on that day in the List view.
+        const more = entries.length - _MONTH_CELL_MAX;
+        html += `<div class="space-y-1">${(more > 0 ? entries.slice(0, _MONTH_CELL_MAX) : entries).join('')}${more > 0
+            ? `<button type="button" onclick="window._calShowDay('${dateKey}')" class="btn-utility focus-ring w-full text-left px-2 py-0.5 text-[11px] font-bold rounded-lg">+${more} more</button>`
+            : ''}</div>`;
         html += `</div>`;
     }
 
@@ -1110,7 +1182,7 @@ function _renderList() {
         const isToday = _dateKey(date) === _dateKey(today);
         const isTomorrow = _dateKey(date) === _dateKey(tomorrow);
         const pill = isToday ? 'Today' : isTomorrow ? 'Tomorrow' : '';
-        html += `<div${isToday ? ' data-cal-today' : ''} style="scroll-margin-top:3.5rem">
+        html += `<div${isToday ? ' data-cal-today' : ''} data-list-date="${_dateKey(date)}" style="scroll-margin-top:3.5rem">
             <div class="flex items-center gap-3 mb-3">
                 <h3 class="text-sm font-extrabold ${isToday ? 'text-emerald-800' : 'text-gray-700'}">
                     ${date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
@@ -1307,6 +1379,9 @@ function _ensurePreviewEl() {
     if (_previewEl) return _previewEl;
     _previewEl = document.createElement('div');
     _previewEl.className = 'cal-hover-preview';
+    // A tooltip for the focused chip (aria-describedby is set on focus, below).
+    _previewEl.id = 'cal-hover-preview';
+    _previewEl.setAttribute('role', 'tooltip');
     _previewEl.addEventListener('mouseenter', () => {
         if (_previewHideTimer) { clearTimeout(_previewHideTimer); _previewHideTimer = null; }
     });
@@ -1348,6 +1423,9 @@ function _renderPreviewContent(post, assets) {
 
 // Hover-intent delay avoids firing a fetch for every chip the cursor sweeps past.
 window._calShowPreview = function (event, postId) {
+    // On a touch screen a tap fires mouseenter too, which started a preview fetch while the editor
+    // was already opening on the same tap.
+    if (event.type === 'mouseenter' && window.matchMedia && window.matchMedia('(hover: none)').matches) return;
     const anchorEl = event.currentTarget;
     if (_previewShowTimer) clearTimeout(_previewShowTimer);
     if (_previewHideTimer) { clearTimeout(_previewHideTimer); _previewHideTimer = null; }
@@ -1536,9 +1614,9 @@ function _listFollowUpRow(f) {
         ? 'bg-gray-50 border-gray-200'
         : 'bg-indigo-50 border-indigo-200 hover:border-indigo-300';
     const movable = !blocked && _lockedAssistant;
-    return `<div role="button" tabindex="0" data-cal-activate onclick="window._calOpenFollowUp(${f.threadId})"
-        class="focus-ring flex items-start gap-4 ${shell} border rounded-xl px-5 py-4 cursor-pointer transition"
+    return `<div class="relative flex items-start gap-4 ${shell} border rounded-xl px-5 py-4 transition"
         style="border-left:3px solid ${blocked ? '#9ca3af' : '#6366f1'}">
+        ${_rowOpener(`window._calOpenFollowUp(${f.threadId})`, `${f.title || 'Lead'}, follow-up ${f.nextStep} at ${time}${blocked ? ', on hold' : ''}`)}
         <span class="w-9 h-9 rounded-full ${blocked ? 'bg-gray-100' : 'bg-indigo-100'} flex items-center justify-center text-base shrink-0" aria-hidden="true">✉</span>
         <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-1">
@@ -1560,10 +1638,9 @@ function _listFollowUpRow(f) {
 function _listRecordRow(rec) {
     const color = _assistantColor(rec._assistantId ?? (_assistantFilter === 'all' ? null : Number(_assistantFilter)));
     const time = new Date(rec.scheduledFor).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    return `<div role="button" tabindex="0" data-cal-activate
-        onclick="window._calOpenRecord(${rec.id})"
-        class="focus-ring flex items-start gap-4 bg-yellow-50 border border-yellow-200 hover:border-yellow-300 rounded-xl px-5 py-4 cursor-pointer transition"
+    return `<div class="relative flex items-start gap-4 bg-yellow-50 border border-yellow-200 hover:border-yellow-300 rounded-xl px-5 py-4 transition"
         style="border-left:3px solid ${color}">
+        ${_rowOpener(`window._calOpenRecord(${rec.id})`, `${rec.title || rec.recordType || 'Scheduled'}, ${_leadOutreach ? 'chase reminder' : 'scheduled'} at ${time}`)}
         <span class="w-9 h-9 rounded-full bg-yellow-100 flex items-center justify-center text-base shrink-0" aria-hidden="true">🗓</span>
         <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-1">
@@ -1621,8 +1698,8 @@ function _listRow(group) {
            </span>`
         : '';
 
-    return `<div role="button" tabindex="0" data-cal-activate onclick="window._calOpenPost(${post.id})"
-        class="focus-ring flex items-start gap-4 ${failedMember ? 'bg-red-50 border-red-200' : 'bg-white border-gray-200'} border rounded-xl px-5 py-4 hover:border-emerald-200 hover:shadow-sm cursor-pointer transition">
+    return `<div class="relative flex items-start gap-4 ${failedMember ? 'bg-red-50 border-red-200' : 'bg-white border-gray-200'} border rounded-xl px-5 py-4 hover:border-emerald-200 hover:shadow-sm transition">
+        ${_rowOpener(`window._calOpenPost(${post.id})`, `${multi ? 'Multiple platforms' : plat.label}, ${time}, ${_statusLabel(status)}: ${(post.caption || '').substring(0, 80)}`)}
         ${multi ? _multiAvatar(36) : _platAvatar(post.platform, 36)}
         <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-1 flex-wrap">
@@ -1645,7 +1722,16 @@ function _listRow(group) {
 // Same rules and endpoints as a drop; the date/time dialog is its own confirmation.
 function _moveButton(kind, id) {
     return `<button type="button" onclick="event.stopPropagation(); window._calMove('${kind}', ${Number(id)})"
-        class="btn-secondary focus-ring tap-target mt-2 px-2.5 py-1 text-xs font-bold rounded-lg border">Move…</button>`;
+        class="relative z-10 btn-secondary focus-ring tap-target mt-2 px-2.5 py-1 text-xs font-bold rounded-lg border">Move…</button>`;
+}
+
+// A list row's "open" action: a real button laid over the whole row, underneath "Move…" (which is
+// z-10). The row used to BE a role="button" with Move… inside it — a button within a button, which
+// screen readers flatten into one long label and phones mis-tap. Now they are siblings: Tab reaches
+// "open" (with a short name of its own) and then "Move…".
+function _rowOpener(onclick, label) {
+    return `<button type="button" onclick="${onclick}" aria-label="${_escHtml(label)}"
+        class="focus-ring absolute inset-0 w-full h-full rounded-xl cursor-pointer"></button>`;
 }
 
 // ── Open Format panel ────────────────────────────────────────
@@ -1811,7 +1897,14 @@ async function _refusePast(newDate, what, originalIso, howToNow) {
     return true;
 }
 
+// "Undo" on a move's toast: the same move back to where it was, through the same path (so a time
+// that has passed since is refused like any other).
+function _undoMove(back) {
+    return { label: 'Undo', onClick: back };
+}
+
 async function _movePost(post, newDate, { confirm = false } = {}) {
+    const was = new Date(post.publishDate);   // for Undo, taken before anything can change it
     const what = (post.caption || '').trim().substring(0, 40) || 'This post';
     if (await _refusePast(newDate, what, post.publishDate, 'To post it now, open it and choose <strong>Post now</strong>.')) return;
 
@@ -1846,7 +1939,10 @@ async function _movePost(post, newDate, { confirm = false } = {}) {
                 : `Rescheduled, but ${failed.length} of ${results.length} platforms could not be moved. Please check the calendar.`,
                 { icon: '⚠️' });
         } else {
-            window.showToast?.(`Moved to ${newLabel}.`, { icon: '📅' });
+            window.showToast?.(`Moved to ${newLabel}.`, { icon: '📅', duration: 8000, action: _undoMove(() => {
+                const now = _posts.find(x => x.id === post.id);
+                if (now) _movePost(now, was);
+            }) });
         }
     } catch (e) { window.showToast?.('Reschedule failed. Please try again.', { icon: '⚠️' }); }
     await _loadAndRender();
@@ -1917,6 +2013,7 @@ async function _dropFollowUp(threadId, dateKey) {
 async function _moveFollowUp(threadId, newDate) {
     const f = _followUps.find(x => x.threadId === threadId);
     if (!f) return;
+    const was = new Date(f.nextSendAt);
     // "Move…" can pick a time earlier today, which the day-level check above can't see.
     if (await _refusePast(newDate, `The follow-up to ${f.title || 'this lead'}`, f.nextSendAt, '')) return;
 
@@ -1934,7 +2031,7 @@ async function _moveFollowUp(threadId, newDate) {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'Could not move that follow-up.');
-        window.showToast?.(`Follow-up to ${f.title || 'this lead'} moved to ${_dayLabel(newDate)}.`);
+        window.showToast?.(`Follow-up to ${f.title || 'this lead'} moved to ${_dayLabel(newDate)}.`, { duration: 8000, action: _undoMove(() => _moveFollowUp(threadId, was)) });
     } catch (err) {
         window.showToast?.(err.message || 'Could not move that follow-up.', { icon: '⚠️' });
     }
@@ -1970,6 +2067,7 @@ async function _dropRecord(recordId, dateKey) {
 async function _moveRecord(recordId, newDate) {
     const rec = _scheduledRecords.find(r => r.id === recordId);
     if (!rec) return;
+    const was = new Date(rec.scheduledFor);
     // Same rule as the drop, at day level: a reminder set for earlier today is still today's.
     const today = new Date(); today.setHours(0, 0, 0, 0);
     if (newDate < today) {
@@ -1988,7 +2086,7 @@ async function _moveRecord(recordId, newDate) {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'Could not move that item.');
-        window.showToast?.(`${rec.title || 'Item'} moved to ${_dayLabel(newDate)}.`);
+        window.showToast?.(`${rec.title || 'Item'} moved to ${_dayLabel(newDate)}.`, { duration: 8000, action: _undoMove(() => _moveRecord(recordId, was)) });
     } catch (err) {
         window.showToast?.(err.message || 'Could not move that item.', { icon: '⚠️' });
     }
@@ -2045,7 +2143,7 @@ async function _moveBlog(blogId, newDate) {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'Could not move that post.');
-        window.showToast?.(`${post.title || 'Post'} moved to ${_dayLabel(newDate)}.`);
+        window.showToast?.(`${post.title || 'Post'} moved to ${_dayLabel(newDate)}.`, { duration: 8000, action: _undoMove(() => _moveBlog(blogId, original)) });
     } catch (err) {
         window.showToast?.(err.message || 'Could not move that post.', { icon: '⚠️' });
     }
@@ -2069,6 +2167,17 @@ if (!window._calDelegatesBound) {
         if (!el || !el.matches || !el.matches('[data-cal-activate]')) return;
         e.preventDefault();
         el.click();
+    });
+    // The caption-and-picture preview was mouse-only. A post chip that gains keyboard focus shows it
+    // too, described by it, and loses it with focus.
+    document.addEventListener('focusin', (e) => {
+        const chip = e.target && e.target.matches && e.target.matches('#cal-main [data-post-id][onmouseenter]') ? e.target : null;
+        if (!chip) return;
+        chip.setAttribute('aria-describedby', 'cal-hover-preview');
+        window._calShowPreview({ type: 'focus', currentTarget: chip }, Number(chip.dataset.postId));
+    });
+    document.addEventListener('focusout', (e) => {
+        if (e.target && e.target.matches && e.target.matches('#cal-main [data-post-id][onmouseenter]')) window._calHidePreview();
     });
     // M on a focused chip that can be dragged opens "Move to…" — the same dialog and save path as
     // the List view's "Move…" button. Dragging was the ONLY way to reschedule on the grids, so the
@@ -2226,15 +2335,19 @@ function _blogChip(post, viewType) {
     const isDraggable = post.status === 'scheduled' && viewType !== 'list';
     // In the list view a scheduled article gets the "Move…" button instead of a drag.
     const movableInList = post.status === 'scheduled' && viewType === 'list';
-    return `<div role="button" tabindex="0" data-cal-activate
-        onclick="window._calOpenBlog(${post.id})"
+    // With "Move…" inside it (the List view), the chip is a plain box over a _rowOpener, so the two
+    // buttons are siblings rather than one nested in the other.
+    const blogLabel = `${time} · Blog · ${title} · ${_statusLabel(post.status)}${failedBlog && post.failureReason ? ': ' + post.failureReason : ''}`;
+    return `<div ${movableInList ? '' : 'role="button" tabindex="0" data-cal-activate'}
+        ${movableInList ? '' : `onclick="window._calOpenBlog(${post.id})"`}
         ${isDraggable ? `draggable="true" ondragstart="window._calDragStart(event, { kind: 'blog', id: ${post.id} })" data-cal-move="blog:${post.id}" aria-keyshortcuts="M"` : ''}
         data-blog-id="${post.id}"
         ${isDraggable ? `data-cal-blog-id="${post.id}"` : ''}
-        class="group focus-ring ${movableInList ? 'flex-wrap' : ''} flex items-center gap-1.5 px-2 py-1 rounded-lg ${chipBg} shadow-sm cursor-pointer transition select-none text-left w-full"
+        class="group ${movableInList ? 'relative flex-wrap' : 'focus-ring cursor-pointer'} flex items-center gap-1.5 px-2 py-1 rounded-lg ${chipBg} shadow-sm transition select-none text-left w-full"
         style="border-left:3px solid #7c3aed"
-        aria-label="${time} · Blog · ${_escHtml(title)} · ${_statusLabel(post.status)}${failedBlog && post.failureReason ? ': ' + _escHtml(post.failureReason) : ''}"
+        ${movableInList ? '' : `aria-label="${_escHtml(blogLabel)}"`}
         ${failedBlog && post.failureReason ? `title="${_escHtml(post.failureReason)}"` : ''}>
+        ${movableInList ? _rowOpener(`window._calOpenBlog(${post.id})`, blogLabel) : ''}
         ${_platAvatar('blog', 16)}
         <div class="flex-1 min-w-0">
             <p class="text-[11px] font-bold ${timeColor} truncate">${time}${failedBlog ? ` · ${_statusLabel('failed')}` : ''}</p>
