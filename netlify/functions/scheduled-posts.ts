@@ -8,7 +8,7 @@
 
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
-import { eq, and, gte, lte, inArray } from 'drizzle-orm';
+import { eq, and, gte, lte, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, scheduledPosts, contentAssets, contentProvenance, userOrganisations } from '../../db/schema';
 import { createHmac, createHash, randomUUID } from 'crypto';
@@ -41,12 +41,14 @@ export default withLambda(async (event) => {
 
     const db = getDb();
 
-    // US3 (AC3.1/AC3.2): the Content Calendar is gated until onboarding is complete.
-    const denied = await requireOnboarding(db, userId);
+    // US3 (AC3.1/AC3.2): the Content Calendar is gated until onboarding is complete. Asked alongside
+    // the user lookup rather than before it — two independent reads, one round trip's wait.
+    const [denied, [user]] = await Promise.all([
+        requireOnboarding(db, userId),
+        db.select({ id: users.id, organisationId: userOrganisations.organisationId })
+            .from(users).leftJoin(userOrganisations, eq(users.id, userOrganisations.userId)).where(eq(users.id, userId)),
+    ]);
     if (denied) return denied;
-
-    const [user] = await db.select({ id: users.id, organisationId: userOrganisations.organisationId })
-        .from(users).leftJoin(userOrganisations, eq(users.id, userOrganisations.userId)).where(eq(users.id, userId));
     if (!user) return { statusCode: 403, body: JSON.stringify({ error: 'User not found.' }) };
 
     const qs = event.queryStringParameters || {};
@@ -112,8 +114,20 @@ export default withLambda(async (event) => {
                 gte(scheduledPosts.publishDate, from),
                 lte(scheduledPosts.publishDate, to),
             );
+            // Only what the calendar draws. `select()` sent every column of every post in the range —
+            // quality reviews, video edits, overlays, factual claims, all JSON the grid never reads —
+            // and the editor fetches its own full copy when a post is opened.
+            const calendarColumns = {
+                id: scheduledPosts.id, platform: scheduledPosts.platform, caption: scheduledPosts.caption,
+                hashtags: scheduledPosts.hashtags, status: scheduledPosts.status,
+                publishDate: scheduledPosts.publishDate, publishedAt: scheduledPosts.publishedAt,
+                assistantId: scheduledPosts.assistantId, crosspostGroupId: scheduledPosts.crosspostGroupId,
+                isAutonomous: scheduledPosts.isAutonomous, failureReason: scheduledPosts.failureReason,
+                // The chip's "Revised" badge read a field nothing sent, so it never showed.
+                isRevised: sql<boolean>`${scheduledPosts.revisedFromPostId} is not null`,
+            };
             const [rows, awaiting] = await Promise.all([
-                db.select().from(scheduledPosts)
+                db.select(calendarColumns).from(scheduledPosts)
                     .where(and(inRange, inArray(scheduledPosts.status, [...SCHEDULE_ACTIVE_STATUSES]))),
                 qs.awaiting === '1'
                     ? db.select({

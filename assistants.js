@@ -3821,9 +3821,10 @@ function _rqBlogActions(p, statusKey) {
     } else {
         actions.push(btn('open', 'Open in Blog Studio', secondary));
     }
-    // Archive — available for any draft that isn't already live (published posts are blocked
-    // server-side). Recoverable from the Archive tab; it is not a delete and must not say so.
-    if (statusKey !== 'posted' && statusKey !== 'archived') actions.push(btn('delete', 'Archive', danger));
+    // "Remove" — the verb the post editor uses for "no, and nothing to learn" (2026-10-23); it was a
+    // third word, "Archive". Any draft that isn't already live (published posts are blocked
+    // server-side). Still recoverable from the Archived column; it is not a delete and must not say so.
+    if (statusKey !== 'posted' && statusKey !== 'archived') actions.push(btn('delete', 'Remove', danger));
     return `<div class="flex flex-wrap items-center gap-2 mt-3">
         ${actions.join('')}
         <div class="rq-sched-row hidden w-full flex items-center gap-2 mt-2">
@@ -4225,15 +4226,15 @@ window._detailRqBlogAct = async function (btn, action) {
     // The action key stays 'delete' because the endpoint verb does; the WORDING must not, or it
     // tells the user their draft is unrecoverable when it is one tab away.
     if (action === 'delete') {
-        if (!(await window.confirmModal('You can find it again in the Archive tab.', {
-            title: 'Archive this blog draft?', confirmLabel: 'Yes, archive', cancelLabel: 'Keep it',
+        if (!(await window.confirmModal('Nothing is learned from it and no replacement is written — to steer the next one, reject it in Blog Studio instead. You can find it again under Archived.', {
+            title: 'Remove this blog draft?', confirmLabel: 'Yes, remove it', cancelLabel: 'Keep it',
         }))) return;
         const buttons = card.querySelectorAll('button');
         buttons.forEach((b) => { b.disabled = true; });
         try {
             const res = await fetch(`/.netlify/functions/blog-posts?id=${id}`, { method: 'DELETE' });
             if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Delete failed.');
-            window.showToast?.('Blog draft archived.');
+            window.showToast?.('Blog draft removed. It’s under Archived.');
             _detailRqRenderGroups(_detailRqCurrentStatus);
             const calHost = document.getElementById('assistant-calendar-host');
             if (calHost) calHost.dataset.ready = '';

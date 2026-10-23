@@ -74,6 +74,11 @@
     canImage: false };
 
   function el(id) { return document.getElementById(id); }
+
+  function _bsSyncRejectLabel() {
+    var redraft = el('bs-reject-redraft').checked && !el('bs-reject-redraft-row').classList.contains('bs-hidden');
+    el('bs-reject-go').textContent = redraft ? 'Reject and redraft' : 'Reject (no redraft)';
+  }
   function setStatus(id, msg) { var e = el(id); if (e) e.textContent = msg; }
 
   // Coloured success/error banner — the Create Post sheet's gpSetPanelStatus, ported. Replaces the
@@ -521,7 +526,7 @@
     + '            <input id="bs-reject-redraft" type="checkbox" checked style="margin-top:3px;">'
     + '            <span>Write a replacement for this slot</span></label>'
     + '          <div class="bs-row" style="margin-top:10px;">'
-    + '            <button id="bs-reject-go" class="bs-btn bs-btn-danger" type="button">Reject draft</button>'
+    + '            <button id="bs-reject-go" class="bs-btn bs-btn-danger" type="button">Reject and redraft</button>'
     + '            <button id="bs-reject-cancel" class="bs-btn bs-btn-ghost" type="button">Cancel</button>'
     + '          </div>'
     + '        </div>'
@@ -537,7 +542,7 @@
     + '          <button id="bs-unschedule" class="bs-btn bs-btn-ghost bs-hidden">Unschedule</button>'
     + '          <button id="bs-repush" class="bs-btn bs-btn-ghost bs-hidden">Send to connected platforms</button>'
     + '          <button id="bs-unpublish" class="bs-btn bs-btn-ghost bs-hidden">Unpublish</button>'
-    + '          <button id="bs-discard" class="bs-btn bs-btn-danger">Archive draft</button>'
+    + '          <button id="bs-discard" class="bs-btn bs-btn-danger">Remove draft</button>'
     + '        </div>'
     + '        </div>'
     + '      </details>'
@@ -1035,6 +1040,7 @@
     var future = !!(post && post.publishDate && new Date(post.publishDate).getTime() > Date.now() + 3600000);
     el('bs-reject-redraft-row').classList.toggle('bs-hidden', !future);
     el('bs-reject-redraft').checked = future;
+    _bsSyncRejectLabel();
   }
 
   // An assistant-written post that arrives without search metadata gets it now, once, on open —
@@ -2012,13 +2018,18 @@
 
     // Archive — drafts only; blog-posts DELETE refuses a published post. That endpoint no longer
     // destroys the row (it sets status='archived'), so this must not warn about permanence.
+    // The submit button says what will happen: "Reject and redraft", or without a replacement when the
+    // box is unticked (or hidden, for a slot already in the past).
+    el('bs-reject-redraft').addEventListener('change', _bsSyncRejectLabel);
     el('bs-discard').addEventListener('click', async function () {
       if (!state.postId) return;
       // window.confirm() is the browser's own grey box: wrong typeface, wrong buttons, and it names
       // the site rather than the product. Every other dialog in the app goes through /dialogs.js.
       if (!(await window.confirmModal(
-        'The draft is kept — you can find it again in the Archive tab and bring it back.',
-        { title: 'Archive this draft?', confirmLabel: 'Yes, archive it', cancelLabel: 'Keep editing' },
+        // "Remove", the product's word for "no, and nothing to learn" (2026-10-23) — Reject and
+        // redraft is the other one. The draft is kept, so it must not promise permanence.
+        'Nothing is learned from it and no replacement is written. The draft is kept — you can find it again under Archived and bring it back.',
+        { title: 'Remove this draft?', confirmLabel: 'Yes, remove it', cancelLabel: 'Keep editing' },
       ))) return;
       setBanner('bs-action-status', 'Archiving…');
       setBusy(true);

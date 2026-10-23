@@ -621,11 +621,12 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
     },
     {
         templateKey: 'post_generation_queued_conversion',
-        name: 'Conversion post queued',
+        // "Sales post", the name the Review card uses (2026-10-23). The key stays conversion.
+        name: 'Sales post queued',
         category: 'Content',
         type: 'post_generation_queued',
-        title: 'Generating a conversion post…',
-        message: '{{assistant.name}} is drafting a conversion post to invite your audience to work with you. It\'ll appear in your review queue shortly.',
+        title: 'Generating a sales post…',
+        message: '{{assistant.name}} is drafting a sales post to invite your audience to work with you. It\'ll appear in Review shortly.',
         variables: [ASSISTANT_NAME],
     },
     {
