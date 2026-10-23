@@ -27,7 +27,7 @@ import {
 } from '../src/lib/brand-card';
 import { overlaysFingerprint, isBakedFor } from '../src/lib/post-render';
 import { pickFaceUrl } from '../src/lib/brand-card-webfont';
-import { rotateSources, resolveMediaForPost } from '../src/utils/media-resolver';
+import { resolveMediaForPost } from '../src/utils/media-resolver';
 import { normalizeMediaSources, DEFAULT_ORDER } from '../src/utils/media-sources';
 import { landmark } from './landmark';
 
@@ -339,18 +339,26 @@ test('brand_card is a valid media source and rides in the default matrix', () =>
     assert.ok(landmark(DEFAULT_ORDER, 'brand_card') < landmark(DEFAULT_ORDER, 'ai'), 'cards must be tried before paid AI generation');
 });
 
-test('rotation alternates stock and brand_card so neither starves', () => {
-    const order = ['manual', 'stock', 'brand_card', 'ai'] as const;
-    assert.deepEqual(rotateSources([...order], 2), ['manual', 'stock', 'brand_card', 'ai']);
-    assert.deepEqual(rotateSources([...order], 3), ['manual', 'brand_card', 'stock', 'ai']);
-    // Positions trade, so every other source keeps its own priority.
-    assert.equal(rotateSources([...order], 3)[0], 'manual');
-    assert.equal(rotateSources([...order], 3)[3], 'ai');
-});
-
-test('rotation is a no-op unless BOTH sources are enabled', () => {
-    assert.deepEqual(rotateSources(['manual', 'stock', 'ai'], 3), ['manual', 'stock', 'ai']);
-    assert.deepEqual(rotateSources(['manual', 'brand_card'], 3), ['manual', 'brand_card']);
+test('the ranked order is honoured — a lower source runs only when the ones above fail', async () => {
+    const calls: string[] = [];
+    const card = async () => { calls.push('card'); return 1; };
+    const ai = async () => { calls.push('ai'); return 2; };
+    // Many post ids, so a parity-based swap (the old stock ↔ card alternation) would show up.
+    for (let i = 0; i < 6; i++) {
+        const r = await resolveMediaForPost(noDb, {
+            assistant: { mediaSources: ['ai', 'brand_card'] },
+            orgId: 1, userId: 1, context: 'anything', mediaType: 'image',
+            generateAi: ai, renderBrandCard: card,
+        });
+        assert.equal(r.ok && r.source, 'ai');
+    }
+    assert.ok(!calls.includes('card'), 'a card was made although the source ranked above it succeeded');
+    const fallback = await resolveMediaForPost(noDb, {
+        assistant: { mediaSources: ['ai', 'brand_card'] },
+        orgId: 1, userId: 1, context: 'anything', mediaType: 'image',
+        generateAi: async () => { throw new Error('fal down'); }, renderBrandCard: card,
+    });
+    assert.equal(fallback.ok && fallback.source, 'brand_card');
 });
 
 // The resolver is where the drafting job actually reaches a card, so the wiring is worth asserting

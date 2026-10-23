@@ -1081,9 +1081,6 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                     mediaType: isVideo ? 'video' : 'image',
                     generateAi,
                     renderBrandCard: renderCard,
-                    // Alternates stock ↔ brand_card when both are enabled, so the feed mixes photos
-                    // and cards rather than the higher-priority source winning every single time.
-                    rotationKey: post.id,
                 });
                 if (resolved.ok) {
                     await attachAssetToPost(db, post.id, resolved.assetId);

@@ -18,7 +18,9 @@ import { requireOnboarding } from '../../src/utils/onboarding-guard';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { normalisePostLink } from '../../src/utils/post-link';
-import { SCHEDULE_ACTIVE_STATUSES } from '../../src/config/post-status';
+import { SCHEDULE_ACTIVE_STATUSES, AWAITING_REVIEW_STATUSES } from '../../src/config/post-status';
+import { diagnosePostFailure } from '../../src/utils/post-failure-diagnosis';
+import { PLATFORM_FORMATS } from '../../src/config/platform-formats';
 import { keepDisclosureOnCaption } from '../../src/utils/post-disclosure';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -99,15 +101,40 @@ export default withLambda(async (event) => {
             // until someone presses Schedule (approve-post.ts → 'scheduled'). Returning drafts here
             // made the calendar unreadable: unapproved work sat next to real appointments, so the
             // grid stopped answering "what is going out". Drafts live in the Review Queue.
-            const posts = await db.select().from(scheduledPosts)
-                .where(and(
-                    eq(scheduledPosts.userId, userId),
-                    gte(scheduledPosts.publishDate, from),
-                    lte(scheduledPosts.publishDate, to),
-                    inArray(scheduledPosts.status, [...SCHEDULE_ACTIVE_STATUSES]),
-                ));
+            //
+            // `awaiting=1` ALSO returns the drafts waiting for review, as a separate list the calendar
+            // draws outlined and undraggable ("Waiting for your review" on its proposed slot). Without
+            // them a week looked like it had gaps that one approval would fill, and nowhere showed
+            // "Thursday has a post if you approve it" (review, 2026-10-23). Kept apart from `posts`
+            // so every reader of `posts` still sees committed work only.
+            const inRange = and(
+                eq(scheduledPosts.userId, userId),
+                gte(scheduledPosts.publishDate, from),
+                lte(scheduledPosts.publishDate, to),
+            );
+            const [rows, awaiting] = await Promise.all([
+                db.select().from(scheduledPosts)
+                    .where(and(inRange, inArray(scheduledPosts.status, [...SCHEDULE_ACTIVE_STATUSES]))),
+                qs.awaiting === '1'
+                    ? db.select({
+                        id: scheduledPosts.id, platform: scheduledPosts.platform, caption: scheduledPosts.caption,
+                        status: scheduledPosts.status, publishDate: scheduledPosts.publishDate,
+                        assistantId: scheduledPosts.assistantId, crosspostGroupId: scheduledPosts.crosspostGroupId,
+                    }).from(scheduledPosts)
+                        .where(and(inRange, inArray(scheduledPosts.status, [...AWAITING_REVIEW_STATUSES])))
+                    : Promise.resolve([]),
+            ]);
+            // A failed post carries its plain-English cause, so the chip can say WHY without the
+            // owner opening it — the same diagnosis the Review card shows.
+            const posts = rows.map((p) => p.status !== 'failed' ? p : {
+                ...p,
+                failure: diagnosePostFailure(
+                    p.failureReason as Parameters<typeof diagnosePostFailure>[0],
+                    PLATFORM_FORMATS[p.platform as keyof typeof PLATFORM_FORMATS]?.label || 'The platform',
+                ),
+            });
 
-            return { statusCode: 200, body: JSON.stringify({ posts }) };
+            return { statusCode: 200, body: JSON.stringify({ posts, awaiting }) };
         }
 
         // ── POST: create ──────────────────────────────────────────
@@ -273,7 +300,20 @@ export default withLambda(async (event) => {
             }
 
             if (body.publishDate) {
-                updates.publishDate = new Date(body.publishDate);
+                const when = new Date(body.publishDate);
+                if (Number.isNaN(when.getTime())) {
+                    return { statusCode: 400, body: JSON.stringify({ error: 'That is not a date we can schedule for.' }) };
+                }
+                // A committed post with a past time is the publisher's "overdue" case — it goes out on
+                // the next run, i.e. NOW. Dragging a chip onto last Monday must never mean that, so the
+                // past is refused here (the calendar explains it first; this is the half that holds).
+                // A draft may carry any proposed date: approving it re-checks the time (approve-post).
+                // A minute of grace, so a drop onto "now" from a slow client isn't refused for lag.
+                const committed = !['draft', 'pending_approval', 'in_review'].includes(String(body.status || existing.status));
+                if (committed && when.getTime() < Date.now() - 60_000) {
+                    return { statusCode: 400, body: JSON.stringify({ error: 'That time has already passed. To post it now, open it and choose Post now.', code: 'PAST_DATE' }) };
+                }
+                updates.publishDate = when;
             }
 
             if (body.status) {

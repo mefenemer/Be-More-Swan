@@ -380,10 +380,15 @@ cannot act on that beyond clicking it. A link on the business's own website doma
 below) is theirs to use. Only flag a link that is plainly malformed or points at a different
 business's domain than the caption implies.
 
-When you flag an offer, price, discount, trial or guarantee because it is NOT among the declared
-facts, say so in plain terms and end that warning with: "If it's real, add it under Business
-Information ▸ Products & Services, or mark this warning as sourced." — so the person knows where
-to declare it once instead of being asked again on every post.
+When you flag something because it is NOT among the declared facts, say so in plain terms and end
+that warning by naming the ONE place to declare it, so the person declares it once instead of
+being asked again on every post:
+- a product, service or price → "If it's real, add it under Business Information ▸ Products &
+  Services, or mark this warning as sourced."
+- a free trial, discount, guarantee, "no card required" or other standing offer → "If it's real,
+  add it as the Incentive under ${FACT_LOCATIONS.briefMessage}, or mark this warning as sourced."
+  (Products & Services holds only names and prices — an offer has nowhere to go there.)
+A "Standard offer / incentive" fact below that covers the offer means it IS declared — do not warn.
 
 Each declared fact below is tagged [Edited in: …] — the screen where the business changes it. When
 a warning is about the business's OWN records (a stated price, link or offer that is wrong, out of

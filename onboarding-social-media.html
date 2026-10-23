@@ -1944,8 +1944,7 @@
       const v = document.getElementById('val_visuals')?.value || '';
       if (v.includes('Text Only')) return ['manual'];               // no auto-sourcing
       if (v.includes('Generate AI')) return ['ai', 'stock', 'manual']; // AI first, fall back
-      // Brand cards and stock ALTERNATE per post when both are on (see rotateSources), so this
-      // yields roughly half typography, half photography.
+      // Strict priority (media-resolver): cards first, stock only when a card can't be made.
       if (v.includes('Branded Text Cards')) return ['brand_card', 'stock', 'manual'];
       if (v.includes('Free Stock')) return ['stock', 'manual'];     // Pexels, then own library
       if (v.includes('provide my own')) return ['manual'];          // own library only

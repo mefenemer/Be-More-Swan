@@ -213,7 +213,9 @@
     if (t) {
       const pct = Number(t.rateBps) / 100;
       const length = t.durationMonths == null ? 'for as long as they stay' : `for their first ${t.durationMonths} month${t.durationMonths === 1 ? '' : 's'}`;
-      document.getElementById('pt-terms').innerHTML = `You earn <strong>${pct}%</strong> of what each new customer pays, ${length}.` +
+      const costs = Number(t.costDeductionBps || 0) / 100;
+      const basis = costs > 0 ? `of what each new customer pays after costs (we take ${costs}% off their payment, excluding VAT, before your rate applies)` : 'of what each new customer pays, excluding VAT';
+      document.getElementById('pt-terms').innerHTML = `You earn <strong>${pct}%</strong> ${basis}, ${length}.` +
         (t.special ? ` <span class="text-pink-700 font-semibold">Special rate${t.specialUntil ? ' until ' + esc(day(t.specialUntil)) : ''}.</span>` : '') +
         ' A customer keeps the rate in force when they first pay.';
     }

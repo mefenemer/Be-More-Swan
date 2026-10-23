@@ -1,23 +1,25 @@
-<div class="p-6">
+<div class="p-4 sm:p-6">
 
   <!-- Page header -->
   <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
     <div>
       <h1 class="text-2xl font-extrabold text-gray-900">Review</h1>
-      <p class="text-sm text-gray-500 mt-1">Review or amend anything before it goes live, and fix any post that needs attention.</p>
+      <p class="text-sm text-gray-600 mt-1">Approve or amend posts, articles and emails before they go out, and fix anything that needs attention.</p>
     </div>
-    <div class="flex items-center gap-2">
+    <!-- Wraps on a phone, where two buttons and the assistant picker don't fit one 327px row. One
+         primary: the page's job is reviewing, so the second "create" button is secondary. -->
+    <div class="flex flex-wrap items-center gap-2 max-w-full">
       <!-- Blog Studio entry — shown only when an active Blog Writer assistant exists (gated below). -->
-      <button id="rq-blog-btn" onclick="_rqOpenBlogStudio()" class="hidden btn-primary px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer items-center gap-1.5">
+      <button id="rq-blog-btn" type="button" onclick="_rqOpenBlogStudio()" class="hidden btn-secondary focus-ring tap-target px-4 py-2 text-sm font-bold rounded-lg border transition cursor-pointer items-center gap-1.5">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
         Blog Post
       </button>
       <!-- Who the post gets created under. This view is org-wide, so unlike the assistant workspace
            it has no assistant in context — revealed below only when there's a genuine choice. -->
       <select id="rq-post-assistant" aria-label="Assistant to create the post under"
-        class="hidden px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-400"></select>
+        class="hidden tap-target max-w-full truncate px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-700"></select>
       <!-- Hidden until an assistant that can post is resolved (gated below), same as the blog entry. -->
-      <button id="rq-create-post-btn" onclick="_rqCreatePost()" class="hidden btn-primary px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer items-center gap-1.5">
+      <button id="rq-create-post-btn" type="button" onclick="_rqCreatePost()" class="hidden btn-primary focus-ring tap-target px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer items-center gap-1.5">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
         Social Media Post
       </button>
@@ -31,23 +33,34 @@
     <!-- Only the columns that need the user. Approved / Scheduled / Posted / Archived were removed
          here to cut clutter and the fetch each one costs; RQ_COLUMNS in workspace.html still knows
          them, and the assistant workspace's own review tab (assistants.js) still shows them. -->
-    <div class="flex gap-1 px-4 pt-3 border-b border-gray-100 overflow-x-auto">
-      <button class="rq-col px-4 py-2 text-sm font-semibold rounded-t border-b-2 border-emerald-600 text-emerald-700 whitespace-nowrap"
+    <!-- Tabs, said as tabs (role/aria-selected — rqOpenStatus keeps them current). The active one is
+         brand deep pink: border-emerald-600 is still GREEN in this build, so the old active tab was
+         pink text over a green underline. "To approve" rather than a "Review" tab on the Review page. -->
+    <div role="tablist" aria-label="Review" class="flex gap-1 px-4 pt-3 border-b border-gray-100 overflow-x-auto">
+      <button type="button" role="tab" aria-selected="true" aria-controls="rq-groups" tabindex="0"
+        class="rq-col focus-ring tap-target px-4 py-2 text-sm font-semibold rounded-t border-b-2 border-brand text-emerald-800 whitespace-nowrap"
         data-status="review" onclick="_rqSafeOpenStatus('review', this)">
-        Review
-        <span id="rq-col-count-review" class="ml-1 bg-amber-100 text-amber-700 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
+        To approve
+        <span id="rq-col-count-review" class="ml-1 bg-amber-100 text-amber-800 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
       </button>
       <!-- Posts that tried to publish and stopped. Until this column existed they were in no
            lifecycle view at all: 'failed' is not 'rejected', so Archived never showed them, and the
            calendar was the only surface that rendered one. -->
-      <button class="rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+      <!-- Failed, plus posts paused on a dead connection or a spent X limit — the same list as the
+           Calendar's "Needs attention" tab (post-status.ts NEEDS_ATTENTION_STATUSES). -->
+      <button type="button" role="tab" aria-selected="false" aria-controls="rq-groups" tabindex="-1"
+        class="rq-col focus-ring tap-target px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
         data-status="attention" onclick="_rqSafeOpenStatus('attention', this)">Needs attention
         <span id="rq-col-count-attention" class="ml-1 bg-red-100 text-red-700 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
       </button>
     </div>
 
     <!-- Grouped, collapsible content -->
-    <div id="rq-groups" class="px-4 py-2 min-h-[200px]"></div>
+    <!-- NOT a live region: the list is rewritten wholesale (tab switch, the 60s refresh), and a live
+         list made screen readers read every card again each time. A short summary is announced
+         through #rq-status instead, on renders the person asked for. -->
+    <div id="rq-groups" role="tabpanel" class="px-4 py-2 min-h-[200px]"></div>
+    <p id="rq-status" class="sr-only" role="status" aria-live="polite"></p>
 
   </div>
 </div>
@@ -63,7 +76,23 @@
   window._rqSafeOpenStatus = function (statusKey, btn) {
     if (typeof rqOpenStatus === 'function') rqOpenStatus(statusKey, btn);
   };
-  window._rqSafeOpenStatus('review', document.querySelector('.rq-col[data-status="review"]'));
+  // Another page can ask to land on a tab (the Calendar's Needs attention links here). Consumed once.
+  var initialRq = window._rqInitialStatus === 'attention' ? 'attention' : 'review';
+  window._rqInitialStatus = null;
+  window._rqSafeOpenStatus(initialRq, document.querySelector('.rq-col[data-status="' + initialRq + '"]'));
+  // Arrow keys move between the tabs, as tabs are expected to behave.
+  var tabBar = document.querySelector('[role="tablist"][aria-label="Review"]');
+  if (tabBar && !tabBar.dataset.keys) {
+    tabBar.dataset.keys = '1';
+    tabBar.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      var tabs = Array.prototype.slice.call(tabBar.querySelectorAll('[role="tab"]'));
+      var i = tabs.indexOf(document.activeElement);
+      if (i < 0) return;
+      var next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+      next.focus(); next.click();
+    });
+  }
   // Count the Needs-attention column NOW. Opening the page only loads the Review column, and the
   // 60s badge poll writes this counter only when it happens to run while the page is up (on any
   // other view the element does not exist) — so the tab sat blank until clicked, or for up to a

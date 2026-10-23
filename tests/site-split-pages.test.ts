@@ -90,10 +90,11 @@ check('the editor proposes first; the server previews without saving; the chat k
 
 console.log('\nSide menu');
 
-check('Team Chat sits under Inbox; the collapse button\'s ring is not painted over', () => {
+check('Notifications (which holds Team Chat) sits above My Assistants; the collapse button\'s ring is not painted over', () => {
     const side = read('components/sidebar.html');
     const at = (id: string) => side.indexOf(`id="${id}"`);
-    assert.ok(at('nav-inbox') < at('nav-team') && at('nav-team') < at('nav-assistants'));
+    assert.ok(at('nav-inbox') > -1 && at('nav-inbox') < at('nav-assistants'));
+    assert.ok(at('nav-team') === -1, 'Team Chat has its own menu item again');
     const ws = read('workspace.html');
     assert.ok(ws.includes('#sidebar-collapse-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px #D6006B; }'));
     assert.ok(/#sidebar-collapse-row \{[^}]*z-index: 1;/.test(ws));

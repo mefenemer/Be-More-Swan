@@ -32,6 +32,13 @@ export default withLambda(async (event) => {
         const assistantIdFilter = event.queryStringParameters?.assistantId
             ? Number(event.queryStringParameters.assistantId)
             : null;
+        // `sort=publish`: soonest go-out time first — what an owner approving "this week's posts"
+        // needs. The default stays newest-drafted first for every other caller. Applied to the page
+        // keys AND the rows, or a page boundary would be cut in one order and drawn in the other.
+        const byPublish = event.queryStringParameters?.sort === 'publish';
+        const pageOrder = byPublish
+            ? [sql`${scheduledPosts.publishDate} ASC NULLS LAST`, desc(scheduledPosts.generatedAt)]
+            : [desc(scheduledPosts.generatedAt)];
 
         // ── Paging is OPT-IN, and it pages by GROUP ─────────────────────────────────────────────
         // Opt-in because eleven other callers hit this endpoint expecting the whole list — the post
@@ -121,7 +128,7 @@ export default withLambda(async (event) => {
                 })
                 .from(scheduledPosts)
                 .where(baseWhere)
-                .orderBy(desc(scheduledPosts.generatedAt));
+                .orderBy(...pageOrder);
 
             // Same key as the browser's _rqGroupKey, so the server's idea of "one card" and the
             // client's cannot disagree about where a page ends.
@@ -217,7 +224,7 @@ export default withLambda(async (event) => {
             // the Scheduled tab must show them). On a paged request the id list narrows it to this
             // page's groups, which is the only difference between the two modes.
             .where(paged ? and(baseWhere, inArray(scheduledPosts.id, pageIds!)) : baseWhere)
-            .orderBy(desc(scheduledPosts.generatedAt))
+            .orderBy(...pageOrder)
             // Unpaged callers keep the original ceiling. Paged ones are already bounded by pageIds,
             // and a cross-post group can be several rows wide, so a flat 50 could truncate the last
             // group of a page — the exact split this pages by group to avoid.

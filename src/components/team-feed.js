@@ -7,7 +7,7 @@
  * assistant; a note about a campaign reaches what it drafts for that campaign.
  *
  * Three places, one component:
- *   TeamFeed.mount(host, { mode: 'page' })                       — the Team page (side menu)
+ *   TeamFeed.mount(host, { mode: 'page', thread? })              — Notifications → Messages (thread: {type, id} to open on)
  *   TeamFeed.mount(host, { mode: 'assistant', assistantId })     — "From your team" on an assistant
  *   TeamFeed.mount(host, { mode: 'campaign', campaignId })       — a campaign's own conversation
  *
@@ -90,7 +90,11 @@
     inst.loaded = true;
     render(inst);
     // Reading the page reads the messages: the badge on the side menu and the bell come down.
-    if (inst.mode === 'page' && inst.messages.length) {
+    // Only in a view that shows EVERY message to the person ("Everything", "Me"): the read marker is
+    // one number per person, so marking from one assistant's thread used to read every other
+    // assistant's older messages too. Open questions are not "unread" at all — they count until
+    // answered (team-messages.ts openQuestionCount).
+    if (inst.mode === 'page' && (inst.thread.type === 'all' || inst.thread.type === 'me') && inst.messages.length) {
       const top = Math.max(...inst.messages.map((m) => m.id));
       if (top > (inst.readUpTo || 0)) {
         inst.readUpTo = top;
@@ -428,7 +432,7 @@
       id: nextId++, host, mode: opts.mode || 'page',
       assistantId: opts.assistantId ? Number(opts.assistantId) : null,
       campaignId: opts.campaignId ? Number(opts.campaignId) : null,
-      thread: { type: 'all', id: null }, messages: [], assistants: [], campaigns: [],
+      thread: opts.thread && opts.thread.type ? { type: opts.thread.type, id: opts.thread.id ?? null } : { type: 'all', id: null }, messages: [], assistants: [], campaigns: [],
       loaded: false, error: null, draft: '', to: opts.assistantId || null, sending: false, sendError: null,
       sortNewest: readSort(),
     };
@@ -450,10 +454,6 @@
     instances.delete(inst.id);
   }
 
+  // The page mode is mounted by notifications.js (the Messages tab of Notifications) since 2026-10-23.
   window.TeamFeed = { mount };
-  /** The Team page (team.html), from the workspace router. */
-  window.initTeam = async function () {
-    const host = document.getElementById('team-host');
-    if (host) mount(host, { mode: 'page' });
-  };
 })();

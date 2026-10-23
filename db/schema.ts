@@ -6085,6 +6085,7 @@ export const partnerRatePeriods = pgTable("partner_rate_periods", {
   id: serial().primaryKey(),
   partnerId: integer("partner_id").references(() => partners.id, { onDelete: "cascade" }),
   rateBps: integer("rate_bps").notNull(),
+  costDeductionBps: integer("cost_deduction_bps").notNull().default(0), // taken off for costs before the rate (2000 = 20%)
   durationMonths: integer("duration_months"),
   startsAt: timestamp("starts_at").notNull(),
   endsAt: timestamp("ends_at"),
@@ -6096,6 +6097,7 @@ export const partnerRatePeriods = pgTable("partner_rate_periods", {
   uniqueIndex("partner_rate_periods_scope_start_uq").on(sql`COALESCE(${t.partnerId}, 0)`, t.startsAt),
   index("partner_rate_periods_partner_idx").on(t.partnerId, t.startsAt),
   check("partner_rate_periods_rate_bps_check", sql`${t.rateBps} BETWEEN 0 AND 10000`),
+  check("partner_rate_periods_cost_deduction_bps_check", sql`${t.costDeductionBps} BETWEEN 0 AND 10000`),
   check("partner_rate_periods_duration_months_check", sql`${t.durationMonths} IS NULL OR ${t.durationMonths} BETWEEN 1 AND 120`),
   check("partner_rate_periods_range_check", sql`${t.endsAt} IS NULL OR ${t.endsAt} > ${t.startsAt}`),
 ]);
@@ -6110,12 +6112,14 @@ export const partnerReferrals = pgTable("partner_referrals", {
   subscribedAt: timestamp("subscribed_at"),
   ratePeriodId: integer("rate_period_id").references(() => partnerRatePeriods.id, { onDelete: "set null" }),
   rateBps: integer("rate_bps"),
+  costDeductionBps: integer("cost_deduction_bps"),
   durationMonths: integer("duration_months"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   index("partner_referrals_partner_idx").on(t.partnerId, t.createdAt),
   check("partner_referrals_source_check", sql`${t.source} IN ('link','promo_code','manual')`),
   check("partner_referrals_rate_bps_check", sql`${t.rateBps} IS NULL OR ${t.rateBps} BETWEEN 0 AND 10000`),
+  check("partner_referrals_cost_deduction_bps_check", sql`${t.costDeductionBps} IS NULL OR ${t.costDeductionBps} BETWEEN 0 AND 10000`),
   check("partner_referrals_locked_check", sql`(${t.subscribedAt} IS NULL) = (${t.rateBps} IS NULL)`),
 ]);
 
@@ -6146,6 +6150,7 @@ export const partnerCommissions = pgTable("partner_commissions", {
   stripeChargeId: text("stripe_charge_id"),
   netAmountPence: integer("net_amount_pence"),               // customer payment excl. VAT
   rateBps: integer("rate_bps"),                              // snapshot of the rate used
+  costDeductionBps: integer("cost_deduction_bps").notNull().default(0), // snapshot of the cost deduction used
   commissionPence: integer("commission_pence").notNull(),
   currency: text().notNull().default("GBP"),
   status: text().notNull().default("pending"),               // pending | payable | paid | voided
@@ -6166,6 +6171,7 @@ export const partnerCommissions = pgTable("partner_commissions", {
   check("partner_commissions_kind_check", sql`${t.kind} IN ('invoice','bonus','adjustment')`),
   check("partner_commissions_status_check", sql`${t.status} IN ('pending','payable','paid','voided')`),
   check("partner_commissions_invoice_check", sql`${t.kind} <> 'invoice' OR (${t.stripeInvoiceId} IS NOT NULL AND ${t.netAmountPence} IS NOT NULL AND ${t.rateBps} IS NOT NULL AND ${t.commissionPence} >= 0)`),
+  check("partner_commissions_cost_deduction_bps_check", sql`${t.costDeductionBps} BETWEEN 0 AND 10000`),
   check("partner_commissions_sign_check", sql`(${t.kind} = 'adjustment' AND ${t.commissionPence} < 0) OR (${t.kind} <> 'adjustment' AND ${t.commissionPence} >= 0)`),
 ]);
 

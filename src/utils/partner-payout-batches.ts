@@ -206,7 +206,7 @@ export async function listBatches(db: Db): Promise<Row[]> {
 export async function listLedger(db: Db, status: string | null, limit = 200): Promise<Row[]> {
     const st = status && ['pending', 'payable', 'paid', 'voided'].includes(status) ? status : null;
     return (await db.execute(sql`
-        SELECT c.id, c.partner_id, c.kind, c.status, c.commission_pence, c.net_amount_pence, c.rate_bps, c.stripe_invoice_id,
+        SELECT c.id, c.partner_id, c.kind, c.status, c.commission_pence, c.net_amount_pence, c.rate_bps, c.cost_deduction_bps, c.stripe_invoice_id,
                c.available_at, c.created_at, c.paid_at, c.void_reason, c.note, c.payout_batch_id,
                COALESCE(u.email, p.applicant_email) AS email,
                NULLIF(TRIM(COALESCE(u.first_name, p.applicant_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name

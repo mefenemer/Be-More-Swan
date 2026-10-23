@@ -7,7 +7,7 @@
 //   GET                                                   → { settings, programmeRates, partners, now }
 //   POST { action: 'rates', partnerId: number|null, changes: [...] }
 //        changes = { op:'create', period } | { op:'update', id, period } | { op:'delete', id }
-//        period  = { rateBps, durationMonths|null, startsOn, endsOn|null, label? } — a date is 'YYYY-MM-DD'
+//        period  = { rateBps, costDeductionBps?, durationMonths|null, startsOn, endsOn|null, label? } — a date is 'YYYY-MM-DD'
 //                  (midnight UK) or an exact ISO instant; on an update, a field not sent is kept
 //        All changes are checked together (partner-rate-periods.ts validatePeriodChanges) and saved
 //        in one transaction, so "end the current rate and start a new one" is a single edit.
@@ -35,7 +35,7 @@ import { getDb } from '../../db/client';
 import { partnerProgrammeSettings, partnerRatePeriods, partners, users } from '../../db/schema';
 import { requirePermission } from '../../src/utils/rbac';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
-import { ukMidnightUtc, validatePeriodChanges, type PeriodChange, type RatePeriod } from '../../src/utils/partner-rate-periods';
+import { DEFAULT_COST_DEDUCTION_BPS, ukMidnightUtc, validatePeriodChanges, type PeriodChange, type RatePeriod } from '../../src/utils/partner-rate-periods';
 import { listPartnersWithNumbers } from '../../src/utils/partner-ops';
 import { sendApprovalEmail } from '../../src/utils/partner-applications';
 import { setPartnerCode } from '../../src/utils/invite-codes';
@@ -55,7 +55,7 @@ const DECISIONS: Record<string, { from: string[]; to: string; label: string }> =
     reinstate: { from: ['suspended'],           to: 'approved',  label: 'reinstated' },
 };
 
-type RawPeriod = { rateBps?: unknown; durationMonths?: unknown; startsOn?: unknown; endsOn?: unknown; label?: unknown };
+type RawPeriod = { rateBps?: unknown; costDeductionBps?: unknown; durationMonths?: unknown; startsOn?: unknown; endsOn?: unknown; label?: unknown };
 
 /**
  * A date from the admin screen: 'YYYY-MM-DD' = midnight UK time that day; a full ISO timestamp =
@@ -84,11 +84,14 @@ function parsePeriod(raw: RawPeriod, partnerId: number | null, existing?: RatePe
     if (!startsAt) return { error: 'Choose a start date.' };
     const endsAt = end === undefined ? existing?.endsAt ?? null : end;
     const rateBps = raw.rateBps === undefined && existing ? existing.rateBps : Number(raw.rateBps);
+    // Not sent: an update keeps its deduction, a new period takes the programme default.
+    const costDeductionBps = raw.costDeductionBps === undefined || raw.costDeductionBps === ''
+        ? existing?.costDeductionBps ?? DEFAULT_COST_DEDUCTION_BPS : Number(raw.costDeductionBps);
     const durationMonths = raw.durationMonths === undefined && existing ? existing.durationMonths
         : (raw.durationMonths == null || raw.durationMonths === '' ? null : Number(raw.durationMonths));
     const label = raw.label === undefined && existing ? existing.label
         : (typeof raw.label === 'string' && raw.label.trim() ? raw.label.trim().slice(0, 60) : null);
-    return { period: { partnerId, rateBps, durationMonths, startsAt, endsAt }, label };
+    return { period: { partnerId, rateBps, costDeductionBps, durationMonths, startsAt, endsAt }, label };
 }
 
 export default withLambda(async (event) => {
@@ -147,7 +150,7 @@ export default withLambda(async (event) => {
         const periods = await db.select().from(partnerRatePeriods).orderBy(asc(partnerRatePeriods.startsAt));
         const rows = await listPartnersWithNumbers(db);   // shared with the Partner Ops chat
         const shape = (p: typeof periods[number]) => ({
-            id: p.id, partnerId: p.partnerId, rateBps: p.rateBps, durationMonths: p.durationMonths,
+            id: p.id, partnerId: p.partnerId, rateBps: p.rateBps, costDeductionBps: p.costDeductionBps, durationMonths: p.durationMonths,
             startsAt: p.startsAt, endsAt: p.endsAt, label: p.label,
         });
         return json(200, {
@@ -211,7 +214,7 @@ export default withLambda(async (event) => {
                         await tx.delete(partnerRatePeriods).where(eq(partnerRatePeriods.id, ch.id));
                     } else if (ch.op === 'update') {
                         await tx.update(partnerRatePeriods)
-                            .set({ rateBps: ch.period.rateBps, durationMonths: ch.period.durationMonths, startsAt: ch.period.startsAt, endsAt: ch.period.endsAt, label: labels.get(i) ?? null, updatedAt: now })
+                            .set({ rateBps: ch.period.rateBps, costDeductionBps: ch.period.costDeductionBps, durationMonths: ch.period.durationMonths, startsAt: ch.period.startsAt, endsAt: ch.period.endsAt, label: labels.get(i) ?? null, updatedAt: now })
                             .where(eq(partnerRatePeriods.id, ch.id));
                     } else {
                         await tx.insert(partnerRatePeriods).values({ ...ch.period, label: labels.get(i) ?? null, createdBy: adminId });

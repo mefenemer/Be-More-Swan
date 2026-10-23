@@ -119,8 +119,48 @@ export const BOOKED_STATUSES = ['approved', 'scheduled', 'publishing', 'paused',
 /** Waiting on a human — the Review column, and the Autopilot card's "Waiting for your review". */
 export const AWAITING_REVIEW_STATUSES = ['pending_approval', 'in_review'] as const satisfies readonly PostStatus[];
 
-/** Tried and stopped — the Needs attention column. */
+/** Tried and stopped — counted in the Overview tiles' "Needs attention" figure. */
 export const ATTENTION_STATUSES = ['failed'] as const satisfies readonly PostStatus[];
+
+/**
+ * Everything that will NOT go out without the owner doing something: failed, plus the two parked
+ * states (a dead connection, a spent X quota). The Review page's and the Content Calendar's "Needs
+ * attention" tabs both list exactly these, so the two pages can't put different posts under the same
+ * heading again (review, 2026-10-23: Review listed failed only, the Calendar all three, and a post
+ * stalled on a dead Instagram connection appeared on neither Review tab).
+ *
+ * Not the same list as ATTENTION_STATUSES on purpose: the paused pair are also BOOKED (they resume
+ * by themselves once fixed), and the Created tile is a union — adding them there would count one
+ * post twice. A TAB may list a post that a tile counts elsewhere; a tile must count it once.
+ */
+export const NEEDS_ATTENTION_STATUSES = ['failed', 'paused', 'paused_credits'] as const satisfies readonly PostStatus[];
+
+/**
+ * The words BOTH pages use for a post's state — the Review card's chip and the Calendar's badge,
+ * legend and preview. They used to disagree ("Published" vs "Posted", "Failed" vs "Failed to
+ * publish", "Pending" vs "Needs review"). Mirrored to the browser by gen-client-constants
+ * (PlatformConstants.postStatusLabel); never retype it in a page.
+ */
+export const POST_STATUS_LABELS: Record<string, string> = {
+    draft: 'Needs your review',
+    pending_approval: 'Needs your review',
+    in_review: 'Needs your review',
+    approved: 'Scheduled',
+    scheduled: 'Scheduled',
+    publishing: 'Posting now',
+    published: 'Posted',
+    paused: 'Paused · reconnect',
+    paused_credits: 'Paused · X limit',
+    failed: 'Failed to post',
+    rejected: 'Archived',
+    cancelled: 'Cancelled',
+    missed: 'Missed',
+    admin_test: 'Test',
+    // Blog posts and emails share the two pages with posts, under their own lifecycle words.
+    sending: 'Sending',
+    sent: 'Sent',
+    archived: 'Archived',
+};
 
 /**
  * Produced but deliberately shown on NO screen, so counted on none either.
@@ -155,6 +195,7 @@ export const CREATED_STATUSES = [
 export const REVIEW_QUEUE_STATUS_FAMILIES: Record<string, readonly PostStatus[]> = {
     pending_approval: AWAITING_REVIEW_STATUSES,
     scheduled: BOOKED_STATUSES,
+    attention: NEEDS_ATTENTION_STATUSES,
     archived: ['rejected', 'cancelled'],
 };
 

@@ -32,9 +32,6 @@ export interface ResolveArgs {
     // same reason: this module knows about SOURCE PRIORITY, not about satori, R2 or brand kits.
     // Omit to treat 'brand_card' as unavailable.
     renderBrandCard?: () => Promise<number>;
-    // Stable per-post number (the post id) used to alternate stock ↔ brand_card. Same value in ⇒
-    // same source out, so a retried job re-resolves the same way and a test can assert the choice.
-    rotationKey?: number;
     // The Campaign Assistant campaign this post was commissioned for, if any (§9.3). Its own
     // pictures are tried FIRST, ahead of the assistant's usual sources: the user attached them to
     // the campaign precisely so its posts share one visual identity across the flight.
@@ -45,28 +42,15 @@ export type ResolvedMedia =
     | { ok: true; assetId: number; source: MediaSource }
     | { ok: false; exhausted: true; tried: MediaSource[]; lastError?: string };
 
-/**
- * Swap the relative priority of 'stock' and 'brand_card' on odd rotation keys.
- *
- * Both sources almost always succeed, so a fixed priority order means the lower one NEVER runs —
- * an assistant with both enabled would post nothing but photos (or nothing but cards) forever.
- * Alternating by post id is what turns "both enabled" into the mixed feed it reads as. Every other
- * source keeps its position; only these two trade places.
- */
-export function rotateSources(order: MediaSource[], rotationKey: number): MediaSource[] {
-    const i = order.indexOf('stock');
-    const j = order.indexOf('brand_card');
-    if (i === -1 || j === -1) return order;
-    if (Math.abs(Math.trunc(rotationKey)) % 2 === 0) return order;
-    const out = [...order];
-    [out[i], out[j]] = [out[j], out[i]];
-    return out;
-}
-
 export async function resolveMediaForPost(db: Db, args: ResolveArgs): Promise<ResolvedMedia> {
     const { orgId, userId, context, generateAi, renderBrandCard } = args;
     const mediaType = args.mediaType ?? 'image';
-    const order = rotateSources(normalizeMediaSources(args.assistant?.mediaSources), args.rotationKey ?? 0);
+    // The user's order IS the priority — no source trades places with another. Stock and brand cards
+    // used to alternate by post-id parity regardless of rank, so a card ranked last still took half
+    // the posts; and because a two-platform cross-post burns two ids per idea, the parity could lock
+    // and hand an assistant nothing BUT cards (owner, 2026-10-22: "bottom of my priority list but it
+    // seems to be generating the majority"). A lower source now runs only when the ones above fail.
+    const order = normalizeMediaSources(args.assistant?.mediaSources);
 
     const tried: MediaSource[] = [];
     let lastError: string | undefined;

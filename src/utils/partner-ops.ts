@@ -54,7 +54,7 @@ export async function listPartnersWithNumbers(db: Db): Promise<Row[]> {
 export async function partnerDetail(db: Db, partnerId: number): Promise<{ referrals: Row[]; commissions: Row[] }> {
     const id = clampInt(partnerId, 1, 2_147_483_647, 0);
     const referrals = await rows(db, sql`
-        SELECT pr.id, pr.source, pr.subscribed_at, pr.rate_bps, pr.duration_months, pr.created_at,
+        SELECT pr.id, pr.source, pr.subscribed_at, pr.rate_bps, pr.cost_deduction_bps, pr.duration_months, pr.created_at,
                ref.email AS customer_email, ur.status AS referral_status
           FROM partner_referrals pr
           JOIN user_referrals ur ON ur.id = pr.referral_id
@@ -62,7 +62,7 @@ export async function partnerDetail(db: Db, partnerId: number): Promise<{ referr
          WHERE pr.partner_id = ${id}
          ORDER BY pr.created_at DESC LIMIT 50`);
     const commissions = await rows(db, sql`
-        SELECT id, kind, status, commission_pence, net_amount_pence, rate_bps, available_at, created_at, void_reason, note
+        SELECT id, kind, status, commission_pence, net_amount_pence, rate_bps, cost_deduction_bps, available_at, created_at, void_reason, note
           FROM partner_commissions WHERE partner_id = ${id}
          ORDER BY created_at DESC LIMIT 50`);
     return { referrals, commissions };
@@ -190,7 +190,7 @@ export async function partnerHubSummary(db: Db, partnerId: number): Promise<{ st
           (SELECT COALESCE(SUM(commission_pence), 0) FROM partner_commissions WHERE partner_id = ${id} AND status = 'paid')::int AS paid_pence,
           (SELECT MIN(available_at) FROM partner_commissions WHERE partner_id = ${id} AND status = 'pending') AS next_release_at`);
     const commissions = await rows(db, sql`
-        SELECT c.id, c.kind, c.status, c.commission_pence, c.rate_bps, c.available_at, c.created_at, c.paid_at, c.void_reason,
+        SELECT c.id, c.kind, c.status, c.commission_pence, c.rate_bps, c.cost_deduction_bps, c.available_at, c.created_at, c.paid_at, c.void_reason,
                (SELECT COUNT(*) FROM partner_referrals x WHERE x.partner_id = ${id} AND x.id <= c.partner_referral_id)::int AS customer_no
           FROM partner_commissions c
          WHERE c.partner_id = ${id}

@@ -2579,6 +2579,11 @@
           <p class="text-[11px] text-gray-400 mt-1">Months of each customer's payments. Blank = for as long as they stay.</p>
         </div>
       </div>
+      <div class="partner-rate-terms">
+        <label for="partner-rate-costs" class="text-xs font-bold text-gray-500 uppercase">Cost deduction (%) <span class="text-red-500">*</span></label>
+        <input id="partner-rate-costs" type="number" min="0" max="99" step="0.5" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+        <p class="text-[11px] text-gray-400 mt-1">Taken off what the customer paid (excluding VAT) before the commission rate applies. 20% costs + 50% commission on £79 = £31.60.</p>
+      </div>
       <div class="grid grid-cols-2 gap-3">
         <div id="partner-rate-from-wrap">
           <label for="partner-rate-from" class="text-xs font-bold text-gray-500 uppercase">From <span class="text-red-500">*</span></label>
@@ -6700,7 +6705,15 @@ async function loadSystemStatus() {
     </div>`;
   })();
 
-  panel.innerHTML = readinessBanner + data.services.map(s => `
+  // The Node version these functions are executing on right now — Netlify picks the patch
+  // release, so this is the only place to read it when a security advisory names versions.
+  const rt = data.runtime;
+  const runtimeLine = !rt?.node ? '' : `<div class="rounded-xl border border-gray-200 bg-white p-4 mb-4">
+      <p class="text-sm text-gray-700"><span class="font-semibold">Functions run on Node <span class="font-mono">${rt.node}</span></span> in ${env}.</p>
+      ${rt.pinnedMatches === false ? `<p class="text-xs mt-1 text-amber-700">⚠ Does not match the pinned NODE_VERSION ${rt.pinned} in netlify.toml.</p>` : ''}
+    </div>`;
+
+  panel.innerHTML = readinessBanner + runtimeLine + data.services.map(s => `
     <div class="bg-white border border-gray-200 rounded-xl p-4">
       <div class="flex items-start justify-between gap-3 mb-3 flex-wrap">
         <div class="min-w-0">
@@ -9874,7 +9887,7 @@ function _partnersRateRows(periods, scope) {
     return `<tr class="border-t border-gray-100">
       <td class="py-2 px-2 text-gray-700">${_pDate(p.startsAt)}</td>
       <td class="py-2 px-2 text-gray-700">${p.endsAt ? _pDate(p.endsAt) : '<span class="text-gray-400">No end</span>'}</td>
-      <td class="py-2 px-2 text-right font-mono font-bold">${_pPct(p.rateBps)}</td>
+      <td class="py-2 px-2 text-right font-mono font-bold">${_pPct(p.rateBps)}${p.costDeductionBps ? `<p class="text-[11px] text-gray-400 font-normal">after ${_pPct(p.costDeductionBps)} costs</p>` : ''}</td>
       <td class="py-2 px-2 pl-4 text-gray-700">${_pLength(p.durationMonths)}${p.label ? `<p class="text-[11px] text-gray-400">${_pEsc(p.label)}</p>` : ''}</td>
       <td class="py-2 px-2">${_pStateBadge[st]}</td>
       <td class="py-2 px-2 text-right whitespace-nowrap">${actions}</td>
@@ -9903,7 +9916,7 @@ function _partnersRenderList() {
   document.getElementById('partners-tbody').innerHTML = list.map((p) => {
     const special = p.rates.find((r) => _pState(r, now) === 'current');
     const rate = special
-      ? `<span class="font-mono font-bold">${_pPct(special.rateBps)}</span> <span class="text-[11px] text-gray-500">special${special.endsAt ? ' until ' + _pDate(special.endsAt) : ''}</span>`
+      ? `<span class="font-mono font-bold">${_pPct(special.rateBps)}</span> <span class="text-[11px] text-gray-500">special${special.costDeductionBps ? ', after ' + _pPct(special.costDeductionBps) + ' costs' : ''}${special.endsAt ? ' until ' + _pDate(special.endsAt) : ''}</span>`
       : '<span class="text-gray-500">Programme</span>';
     const btn = (label, cls, decision) => `<button type="button" onclick="partnerDecide(${p.id}, '${decision}')" class="${cls} px-2.5 py-1 text-xs font-bold rounded-lg border">${label}</button>`;
     const actions = {
@@ -10002,6 +10015,9 @@ function partnerOpenRate(ctx) {
   document.getElementById('partner-rate-from').min = minDay;
   document.getElementById('partner-rate-until').min = minDay;
   set('partner-rate-pct', period ? Number(period.rateBps) / 100 : '');
+  // A new rate starts from the programme's newest deduction, so the costs basis partners were told carries on.
+  const newestProgramme = [..._partnerPeriods(null)].sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt)).pop();
+  set('partner-rate-costs', Number((period ?? newestProgramme)?.costDeductionBps ?? 2000) / 100);
   set('partner-rate-months', period ? (period.durationMonths ?? '') : (ctx.partnerId == null ? 12 : ''));
   set('partner-rate-from', period ? _pDay(period.startsAt) : tomorrow);
   set('partner-rate-until', period?.endsAt ? _pDay(period.endsAt) : (ctx.mode === 'end' ? tomorrow : ''));
@@ -10022,8 +10038,10 @@ async function partnerSaveRate() {
   const errEl = document.getElementById('partner-rate-error');
   const val = (id) => document.getElementById(id).value.trim();
   const pct = val('partner-rate-pct');
+  const costs = val('partner-rate-costs');
   const terms = {
     rateBps: pct === '' ? NaN : Math.round(Number(pct) * 100),
+    costDeductionBps: costs === '' ? NaN : Math.round(Number(costs) * 100),
     durationMonths: val('partner-rate-months') === '' ? null : Number(val('partner-rate-months')),
     startsOn: val('partner-rate-from'),
     endsOn: ctx.partnerId != null ? (val('partner-rate-until') || null) : null,
@@ -10239,7 +10257,7 @@ async function loadLedger() {
     }).join('');
     tbody.innerHTML = _ledger.rows.map((r) => {
       const what = r.kind === 'invoice'
-        ? `${_lgKind.invoice} · ${_pPct(r.rate_bps)} of ${_pMoney(r.net_amount_pence)}`
+        ? `${_lgKind.invoice} · ${_pPct(r.rate_bps)} of ${_pMoney(r.net_amount_pence)}${r.cost_deduction_bps ? ` less ${_pPct(r.cost_deduction_bps)} costs` : ''}`
         : `${_lgKind[r.kind] || r.kind}${r.note ? ' · ' + _pEsc(r.note) : ''}`;
       const status = r.status === 'pending' ? `Waiting until ${_pDate(r.available_at)}`
         : r.status === 'voided' ? `Cancelled${r.void_reason ? ' — ' + _pEsc(r.void_reason) : ''}`

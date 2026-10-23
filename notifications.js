@@ -4,6 +4,8 @@
 // Issue #156: tracks the previous badge count across polls so we can ding only when it
 // *rises* (a new notification arrived) rather than on every poll or on the initial load.
 let _lastNotifBadgeCount = null;
+// The last needs-you number, so the screen-reader announcement fires on a rise only.
+let _lastNeedsYou = null;
 
 // ── One-time "focus the inbox" on login ───────────────────────────────────────
 // On the first badge refresh after a successful login, count the bell up from 0 to the
@@ -44,71 +46,77 @@ function _animateInboxFocus(badge, total) {
     });
 }
 
+/**
+ * Paint one badge: a red number for what needs the person, else a small grey dot for unread
+ * things to read, else nothing. The side-menu Notifications item and the header bell both use
+ * this, with the same two numbers, so they can never disagree (they used to show three counts).
+ */
+function _paintNotifBadge(numEl, dotEl, needsYou, fyi) {
+    if (numEl) {
+        numEl.textContent = needsYou > 99 ? '99+' : String(needsYou);
+        numEl.classList.toggle('hidden', needsYou === 0);
+    }
+    if (dotEl) {
+        const dot = needsYou === 0 && fyi > 0;
+        dotEl.classList.toggle('hidden', !dot);
+        // `hidden` loses to inline-block utilities on some builds — drive display too.
+        dotEl.style.display = dot ? '' : 'none';
+    }
+}
+
+/** Words for the count, for the bell's label and the screen-reader announcement. */
+function _notifCountWords(needsYou, fyi) {
+    const parts = [];
+    if (needsYou) parts.push(`${needsYou} ${needsYou === 1 ? 'needs' : 'need'} you`);
+    if (fyi) parts.push(`${fyi} unread`);
+    return parts.length ? parts.join(', ') : 'nothing new';
+}
+
 window.updateNotificationBadge = async function() {
     try {
         const res = await fetch('/.netlify/functions/notifications?action=count');
         if (res.ok) {
             const data = await res.json();
             const badge = document.getElementById('sidebar-nav-badge');
-            // Badge reflects open ACTION items + unread UPDATES. Falls back to the older
-            // actionCount / unreadCount fields if the server hasn't been updated yet.
-            let count = (typeof data.badgeCount === 'number') ? data.badgeCount
-                : (typeof data.actionCount === 'number') ? data.actionCount
-                : (data.unreadCount || 0);
+            // needsYou = open actions + unanswered Team questions; fyi = unread updates + unread Team
+            // messages. Both come from the server, Team included (notifications.ts), so there is one
+            // request and one answer. Older servers: fall back to the old single count as needsYou.
+            const needsYou = typeof data.needsYou === 'number' ? data.needsYou
+                : (typeof data.badgeCount === 'number' ? data.badgeCount : (data.actionCount || data.unreadCount || 0));
+            const fyi = typeof data.fyi === 'number' ? data.fyi : 0;
+            // `count` drives the arrival sound: anything new, of either kind, rings.
+            const count = needsYou + fyi;
+            window._notifCounts = { needsYou, fyi, openActions: data.openActions ?? null, teamQuestions: data.teamQuestions ?? 0, teamUnread: data.teamUnread ?? 0, updateUnread: data.updateUnread ?? 0 };
 
-            // The side-menu Inbox item mirrors the bell's count (same inbox, two entry points).
-            const inboxNavBadge = document.getElementById('nav-inbox-badge');
-            const setInboxNavBadge = (n) => {
-                if (!inboxNavBadge) return;
-                if (n > 0) { inboxNavBadge.textContent = n; inboxNavBadge.classList.remove('hidden'); }
-                else inboxNavBadge.classList.add('hidden');
-            };
-            setInboxNavBadge(count);
-
-            // The Team feed's unread messages: on its own side-menu item, and ADDED to the bell, so
-            // there is one place to look (owner, 2026-10-14). The Inbox item stays notifications-only.
-            // A failed read is no Team count, never a failed badge.
-            let teamUnread = 0;
-            try {
-                const t = await fetch('/.netlify/functions/team', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-                    body: JSON.stringify({ action: 'unread' }),
-                });
-                if (t.ok) teamUnread = Number((await t.json()).unread) || 0;
-            } catch (_) { /* no Team count this round */ }
-            window._teamUnread = teamUnread;
-            const teamNavBadge = document.getElementById('nav-team-badge');
-            if (teamNavBadge) {
-                teamNavBadge.textContent = teamUnread > 99 ? '99+' : String(teamUnread);
-                teamNavBadge.classList.toggle('hidden', teamUnread === 0);
-            }
-            count += teamUnread;
+            _paintNotifBadge(document.getElementById('nav-inbox-badge'), document.getElementById('nav-inbox-dot'), needsYou, fyi);
+            const bell = document.getElementById('nav-notifications');
+            if (bell) bell.setAttribute('aria-label', `Notifications: ${_notifCountWords(needsYou, fyi)}`);
+            // Say it out loud only when the needs-you number goes UP — not on every poll.
+            const live = document.getElementById('notif-count-live');
+            if (live && _lastNeedsYou !== null && needsYou > _lastNeedsYou) live.textContent = _notifCountWords(needsYou, 0);
+            _lastNeedsYou = needsYou;
+            // An open Notifications page re-reads its tab counts from the same numbers.
+            document.dispatchEvent(new CustomEvent('bms:notif-counts', { detail: window._notifCounts }));
 
             // First refresh after login: run the one-time inbox-focus count-up, then adopt
             // the count as the baseline so the normal rise-ding doesn't also fire for it.
-            if (!_inboxFocusAnimating && _lastNotifBadgeCount === null && _consumeFreshLoginFlag() && count > 0) {
+            if (!_inboxFocusAnimating && _lastNotifBadgeCount === null && _consumeFreshLoginFlag() && needsYou > 0) {
                 _inboxFocusAnimating = true;
                 // The count-up owns the login "sound moment" — silence the Aurora welcome chime
                 // so it doesn't play over the counting notification sound. Only when that sound
                 // is actually enabled: if notification sound is muted the count-up is silent, so
                 // there's nothing to clash with and the welcome chime should still play.
                 if (localStorage.getItem('bms_soundOnNotification') !== '0') window._suppressWelcomeSound?.();
-                await _animateInboxFocus(badge, count);
+                await _animateInboxFocus(badge, needsYou);
                 _inboxFocusAnimating = false;
                 _lastNotifBadgeCount = count;
+                _paintNotifBadge(badge, document.getElementById('sidebar-nav-dot'), needsYou, fyi);
                 return;
             }
             // A concurrent poll must not fight the running animation for the badge.
             if (_inboxFocusAnimating) return;
 
-            if (badge) {
-                if (count > 0) {
-                    badge.textContent = count;
-                    badge.classList.remove('hidden');
-                } else {
-                    badge.classList.add('hidden');
-                }
-            }
+            _paintNotifBadge(badge, document.getElementById('sidebar-nav-dot'), needsYou, fyi);
             if (_lastNotifBadgeCount !== null && count > _lastNotifBadgeCount) {
                 // Sound choice by the newly-arrived notification's type. The two "achievement"
                 // moments — a milestone reached, or an assistant becoming ready to work
@@ -580,23 +588,26 @@ window.NotifKit = (function () {
     };
 })();
 
-window.initNotifications = async function() {
-    // Work conversations live in Team, not here — but the bell counts both, so say where the rest are.
-    const teamBanner = document.getElementById('notif-team-banner');
-    if (teamBanner) {
-        const n = Number(window._teamUnread) || 0;
-        teamBanner.classList.toggle('hidden', n === 0);
-        teamBanner.style.display = n === 0 ? 'none' : '';
-        const label = document.getElementById('notif-team-banner-count');
-        if (label) label.textContent = `${n} unread ${n === 1 ? 'message' : 'messages'} from your assistants in Team Chat.`;
-    }
+/**
+ * The Notifications page (notifications.html): three tabs over one count.
+ *   needs    — open actions + Team questions nobody has answered. Cleared by DOING, never by reading.
+ *   messages — Team Chat (src/components/team-feed.js), mounted in place, unchanged: a conversation.
+ *   updates  — things to read. Cleared by reading.
+ * `param` (from loadView): { tab?: 'needs'|'messages'|'updates', thread?: {type, id} } — loadView('team')
+ * arrives here as { tab: 'messages' }.
+ */
+window.initNotifications = async function(param) {
     const listEl = document.getElementById('notif-list');
     const loadingEl = document.getElementById('notif-loading');
     const emptyStateEl = document.getElementById('notif-empty-state');
     const searchInput = document.getElementById('notif-search');
     const markAllBtn = document.getElementById('btn-mark-all-read');
     const groupBySelect = document.getElementById('notif-group-by');
+    const assistantSelect = document.getElementById('notif-assistant-filter');
     const expandAllBtn = document.getElementById('notif-expand-all');
+    const listPanel = document.getElementById('notif-list-panel');
+    const messagesPanel = document.getElementById('notif-messages-panel');
+    const teamHost = document.getElementById('team-host');
 
     if (!listEl) return;
 
@@ -606,6 +617,13 @@ window.initNotifications = async function() {
     }
 
     let notificationsData = [];
+    // Team questions to the person still waiting for an answer (team.ts list openQuestions), and every
+    // assistant in the workspace (for faces and the "From" filter).
+    let questions = [];
+    let teamAssistants = [];
+    // Questions answered on this visit stay in Needs you as done rows, with the assistant's reply, so
+    // the person sees the answer landed rather than the row just vanishing.
+    const answeredHere = [];
 
     // Shared classification + rendering helpers (single source of truth — see window.NotifKit).
     const {
@@ -613,13 +631,20 @@ window.initNotifications = async function() {
         dismissBtnHTML, kindOf, fmtDate, typeLabel, avatarHTML, actorEyebrowHTML, sanitizeText,
         actorColor, escHtml,
     } = window.NotifKit;
-    let activeTab = 'action';
-    // 'none' | 'type' | 'assistant'. Remembered per browser: picking a grouping and then navigating
+    const TABS = ['needs', 'messages', 'updates'];
+    // null until the first load picks the tab that has something waiting.
+    let activeTab = param && TABS.includes(param.tab) ? param.tab : null;
+    let teamThread = param && param.thread ? param.thread : null;
+    let teamFeed = null;
+    // 'none' | 'type' | 'assistant' | 'day'. Remembered per browser: picking a grouping and then navigating
     // away and back used to silently drop you into an ungrouped list, which reads as "grouping does
     // nothing" — the choice is restored below once the select is known to be present.
     const GROUP_BY_STORAGE_KEY = 'bms_notifGroupBy';
-    const GROUP_MODES = ['none', 'type', 'assistant'];
+    const GROUP_MODES = ['none', 'type', 'assistant', 'day'];
     let groupBy = 'none';
+    // "From": 'all' | 'system' | 'a:<assistantId>'. Remembered like the grouping.
+    const FROM_STORAGE_KEY = 'bms_notifFrom';
+    let fromFilter = 'all';
     // Persists across re-renders so a group stays collapsed while notifications update/resolve.
     // Keys are namespaced by grouping mode, so switching mode can't collapse an unrelated group.
     const collapsedGroups = new Set();
@@ -641,17 +666,28 @@ window.initNotifications = async function() {
         expandAllBtn.dataset.action = allCollapsed ? 'expand' : 'collapse';
     };
 
-    const tabActionBtn = document.getElementById('tab-action');
-    const tabUpdatesBtn = document.getElementById('tab-updates');
-    const tabActionCount = document.getElementById('tab-action-count');
-    const tabUpdatesCount = document.getElementById('tab-updates-count');
+    const tabBtns = { needs: document.getElementById('tab-needs'), messages: document.getElementById('tab-messages'), updates: document.getElementById('tab-updates') };
+    const tabCounts = { needs: document.getElementById('tab-needs-count'), messages: document.getElementById('tab-messages-count'), updates: document.getElementById('tab-updates-count') };
 
     const setTabStyles = () => {
-        const active = 'flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800';
-        const inactive = 'flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-transparent text-gray-500 hover:text-gray-700';
-        if (tabActionBtn) tabActionBtn.className = activeTab === 'action' ? active : inactive;
-        if (tabUpdatesBtn) tabUpdatesBtn.className = activeTab === 'updates' ? active : inactive;
+        const active = 'notif-tab flex items-center gap-1.5 px-3 text-sm font-bold rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800';
+        const inactive = 'notif-tab flex items-center gap-1.5 px-3 text-sm font-medium rounded-lg border border-transparent text-gray-500 hover:text-gray-700';
+        TABS.forEach((t) => {
+            const b = tabBtns[t];
+            if (!b) return;
+            b.className = activeTab === t ? active : inactive;
+            b.setAttribute('aria-selected', String(activeTab === t));
+            b.tabIndex = activeTab === t ? 0 : -1;
+        });
     };
+    const setCount = (tab, n) => {
+        const el = tabCounts[tab];
+        if (!el) return;
+        el.textContent = n > 99 ? '99+' : String(n);
+        el.classList.toggle('hidden', !n);
+    };
+    // Messages' number is the unread Team messages (the badge's own figure); questions are in Needs you.
+    const teamUnread = () => Number(window._notifCounts?.teamUnread) || 0;
 
     // "Group by assistant" used to be REMOVED from the select whenever the workspace had a single
     // assistant, on the reasoning that one assistant means one group. That was wrong on both counts:
@@ -659,29 +695,71 @@ window.initNotifications = async function() {
     // gets a real split — and an option that silently vanishes is indistinguishable, to the user,
     // from grouping that does not work. The option now always stands.
     const restoreGroupBy = () => {
-        if (!groupBySelect) return;
         let saved = null;
         try { saved = localStorage.getItem(GROUP_BY_STORAGE_KEY); } catch { saved = null; }
-        if (!GROUP_MODES.includes(saved)) return;
-        groupBy = saved;
-        groupBySelect.value = saved;
+        if (groupBySelect && GROUP_MODES.includes(saved)) { groupBy = saved; groupBySelect.value = saved; }
+        try { fromFilter = localStorage.getItem(FROM_STORAGE_KEY) || 'all'; } catch { fromFilter = 'all'; }
     };
 
-    const rememberGroupBy = (mode) => {
-        try { localStorage.setItem(GROUP_BY_STORAGE_KEY, mode); } catch { /* private mode — in-memory only */ }
+    const remember = (key, value) => {
+        try { localStorage.setItem(key, value); } catch { /* private mode — in-memory only */ }
     };
+
+    // A question as a row the list can sort, filter and group with the notifications around it.
+    const questionItem = (m) => {
+        const a = teamAssistants.find(x => Number(x.id) === Number(m.from.id));
+        return {
+            _q: m, id: `q${m.id}`, type: 'question', kind: 'action', createdAt: m.createdAt,
+            title: m.body, message: '',
+            actor: m.from.kind === 'assistant' && m.from.id
+                ? { assistantId: m.from.id, name: m.from.name, avatarColor: a?.avatarColor ?? null, avatarLetter: a?.avatarLetter ?? null }
+                : null,
+        };
+    };
+
+    /** The "From" choices: every assistant that has something here, or that can be written to. */
+    const syncFromOptions = () => {
+        if (!assistantSelect) return;
+        const seen = new Map();
+        [...notificationsData, ...questions.map(questionItem)].forEach((n) => {
+            if (n.actor && n.actor.name) seen.set(String(n.actor.assistantId), n.actor.name);
+        });
+        teamAssistants.forEach(a => { if (!seen.has(String(a.id))) seen.set(String(a.id), a.name); });
+        const opts = [['all', 'Everyone'], ...[...seen].map(([id, name]) => [`a:${id}`, name]), ['system', 'Be More Swan']];
+        if (!opts.some(([v]) => v === fromFilter)) fromFilter = 'all';
+        assistantSelect.innerHTML = opts.map(([v, l]) => `<option value="${escHtml(v)}">${escHtml(l)}</option>`).join('');
+        assistantSelect.value = fromFilter;
+    };
+    const fromLabel = () => assistantSelect?.selectedOptions?.[0]?.textContent || 'them';
 
     const loadData = async () => {
         try {
-            const response = await fetch('/.netlify/functions/notifications');
+            // Both halves at once. A failed Team read is no questions, never a failed page.
+            const [response, team] = await Promise.all([
+                fetch('/.netlify/functions/notifications'),
+                fetch('/.netlify/functions/team', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+                    body: JSON.stringify({ action: 'list', openQuestions: true }),
+                }).then(r => (r.ok ? r.json() : null)).catch(() => null),
+            ]);
+            if (team) {
+                questions = (team.messages || []).filter(m => m.question && !m.question.answered);
+                teamAssistants = team.assistants || [];
+                window.AssistantColors?.rememberAll?.(teamAssistants.map(a => ({ assistantId: a.id, name: a.name, avatarColor: a.avatarColor, avatarLetter: a.avatarLetter })));
+            }
             if (response.ok) {
                 const data = await response.json();
                 notificationsData = data.notifications || [];
                 // Cache each actor's chosen colour so surfaces that only hold an id (the header
                 // popover, group dots) resolve to the same colour the cards draw.
                 window.AssistantColors?.rememberAll(notificationsData.map(n => n.actor).filter(Boolean));
-                // Open the tab that has something waiting: unresolved actions first, else updates.
-                activeTab = notificationsData.some(n => kindOf(n) === 'action' && !isResolved(n)) ? 'action' : 'updates';
+                // First visit: open the tab that has something waiting — what needs you, else unread
+                // messages, else updates.
+                if (!activeTab) {
+                    const needs = notificationsData.some(n => kindOf(n) === 'action' && !isResolved(n)) || questions.length > 0;
+                    activeTab = needs ? 'needs' : teamUnread() > 0 ? 'messages' : 'updates';
+                }
+                syncFromOptions();
                 renderList();
                 // A plan change happened in-session → refresh the header plan pill (force re-fetch).
                 if (notificationsData.some(n => n.type === 'plan_upgraded' || n.type === 'plan_activated')
@@ -693,6 +771,62 @@ window.initNotifications = async function() {
             console.error('Failed to load notifications:', error);
             if (loadingEl) loadingEl.textContent = "Failed to load notifications. Please try again.";
         }
+    };
+
+    // QUESTION row: an assistant asking the person something. Answered right here with its own
+    // buttons (team.ts `answer`, which runs the question's handler); "Open conversation" goes to that
+    // assistant's thread in Messages for anything more than a button.
+    const renderQuestionItem = (item) => {
+        const m = item._q;
+        const done = item._answered || null;
+        const st = styleOf(item);
+        const li = document.createElement('li');
+        li.className = `notif-row flex items-center gap-3 p-4 ${done ? 'opacity-60' : ''}`;
+        li.style.setProperty('--notif-indent', '52px');
+        const chips = done
+            ? '<span class="text-xs font-bold text-green-700 bg-green-50 border border-green-100 px-2 py-0.5 rounded-full">Answered</span>'
+            : '<span class="text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">Question</span>';
+        li.innerHTML = `
+            ${avatarHTML(item, st)}
+            <div class="flex-1 min-w-0">
+                ${actorEyebrowHTML(item)}
+                <div class="notif-title-row flex items-center gap-2">${chips}</div>
+                <p class="text-sm font-bold text-gray-900 mt-1 whitespace-pre-line break-words">${escHtml(m.body)}</p>
+                ${done ? `<p class="text-xs text-gray-500 mt-1">You answered: <span class="font-bold text-gray-700">${escHtml(done.label)}</span></p>
+                          ${done.said ? `<p class="text-sm text-gray-700 mt-1"><span class="font-bold">${escHtml(m.from.name)}:</span> ${escHtml(done.said)}</p>` : ''}` : ''}
+                <p class="text-xs text-gray-400 mt-1">${fmtDate(m.createdAt)}</p>
+                <div class="flex flex-wrap items-center gap-2 mt-2">
+                    ${done ? '' : m.question.choices.map(c => `<button type="button" class="q-answer btn-secondary border px-3 text-sm font-bold rounded-lg disabled:opacity-50" style="min-height:44px" data-value="${escHtml(c.value)}" data-label="${escHtml(c.label)}">${escHtml(c.label)}</button>`).join('')}
+                    ${m.from.id ? '<button type="button" class="q-open btn-utility px-3 text-sm font-bold rounded-lg" style="min-height:44px">Open conversation</button>' : ''}
+                </div>
+            </div>`;
+        li.querySelectorAll('.q-answer').forEach((btn) => btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            li.querySelectorAll('.q-answer').forEach(b => { b.disabled = true; });
+            try {
+                const res = await fetch('/.netlify/functions/team', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+                    body: JSON.stringify({ action: 'answer', messageId: m.id, value: btn.dataset.value }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || 'That did not work — please try again.');
+                questions = questions.filter(q => q.id !== m.id);
+                answeredHere.push({ ...questionItem(m), _answered: { label: btn.dataset.label, said: data.said || '' } });
+                renderList();
+                window.updateNotificationBadge?.();
+                // An answer can start work or change a brief: anything showing those re-reads itself.
+                document.dispatchEvent(new CustomEvent('campaign:updated', { detail: {} }));
+            } catch (err) {
+                window.showToast?.(err.message || 'That did not work — please try again.', 'error', { icon: '⚠️' });
+                li.querySelectorAll('.q-answer').forEach(b => { b.disabled = false; });
+            }
+        }));
+        li.querySelector('.q-open')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            teamThread = { type: 'assistant', id: Number(m.from.id) };
+            showTab('messages');
+        });
+        return li;
     };
 
     // ACTION card: a bounded card with one clear CTA. "Done" appears only when the item is
@@ -795,50 +929,84 @@ window.initNotifications = async function() {
         return li;
     };
 
+    // Messages is Team Chat itself. Mounted only while its tab is open: it polls, and on its
+    // "Everything" thread a poll marks what it loaded as read — behind a hidden tab that would read
+    // messages nobody saw.
+    const syncMessagesPanel = () => {
+        const onMessages = activeTab === 'messages';
+        if (listPanel) { listPanel.classList.toggle('hidden', onMessages); listPanel.style.display = onMessages ? 'none' : ''; }
+        if (messagesPanel) { messagesPanel.classList.toggle('hidden', !onMessages); messagesPanel.style.display = onMessages ? '' : 'none'; }
+        if (onMessages && !teamFeed && teamHost && window.TeamFeed) {
+            teamFeed = window.TeamFeed.mount(teamHost, { mode: 'page', thread: teamThread || undefined });
+        } else if (!onMessages && teamFeed) {
+            teamFeed.destroy();
+            teamFeed = null;
+        }
+    };
+
+    const showTab = (tab) => {
+        if (!TABS.includes(tab)) return;
+        // A thread asked for while Messages is already open: remount on it.
+        if (tab === 'messages' && teamFeed && teamThread) { teamFeed.destroy(); teamFeed = null; }
+        activeTab = tab;
+        renderList();
+        if (tab !== 'messages') teamThread = null;
+    };
+
+    const dayOf = (d) => {
+        const x = new Date(d);
+        const today = new Date();
+        const yesterday = new Date(); yesterday.setDate(today.getDate() - 1);
+        const label = x.toDateString() === today.toDateString() ? 'Today'
+            : x.toDateString() === yesterday.toDateString() ? 'Yesterday'
+            : x.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+        return { key: `day:${x.toDateString()}`, label };
+    };
+
     const renderList = () => {
         const searchTerm = (searchInput?.value || '').toLowerCase();
-        const matchesSearch = (n) => n.title.toLowerCase().includes(searchTerm) || (n.message && n.message.toLowerCase().includes(searchTerm));
+        const matchesSearch = (n) => (n.title || '').toLowerCase().includes(searchTerm) || (n.message && n.message.toLowerCase().includes(searchTerm));
+        const matchesFrom = (n) => fromFilter === 'all'
+            || (fromFilter === 'system' ? !(n.actor && n.actor.name) : !!(n.actor && `a:${n.actor.assistantId}` === fromFilter));
 
         const actions = notificationsData.filter(n => kindOf(n) === 'action');
         const updates = notificationsData.filter(n => kindOf(n) === 'info');
-        // Count = UNREAD, unresolved actions. Marking an action read (mute) drops it from the count
-        // but keeps it in the list (greyed) until it's truly resolved — read controls the number, the
-        // resolvedAt flag controls list membership. Resolved items are auto-read, so they never count.
-        const openActions = actions.filter(n => !isResolved(n) && !n.isRead).length;
-        // Updates are cleared by reading, so their badge counts unread items (mirrors the action badge).
+        const questionItems = questions.map(questionItem);
+        // Needs you = open actions (read or not — reading an action does not do it) + open questions.
+        // The same two figures the badge counts on the server (notifications.ts needsYou).
+        const needsCount = actions.filter(n => !isResolved(n)).length + questionItems.length;
+        // Updates are cleared by reading, so their badge counts unread items.
         const unreadUpdates = updates.filter(n => !n.isRead).length;
 
-        if (tabActionCount) {
-            tabActionCount.textContent = openActions;
-            tabActionCount.classList.toggle('hidden', openActions === 0);
-        }
-        if (tabUpdatesCount) {
-            tabUpdatesCount.textContent = unreadUpdates;
-            tabUpdatesCount.classList.toggle('hidden', unreadUpdates === 0);
-        }
+        setCount('needs', needsCount);
+        setCount('messages', teamUnread());
+        setCount('updates', unreadUpdates);
         setTabStyles();
+        syncMessagesPanel();
 
-        // Mark-all-read acts on whichever tab is open: it clears the unread items in that tab. The
-        // button stays visible but is disabled + greyed when the current tab has nothing unread, so
-        // its state always reflects "is there anything here to mark read?".
+        // Mark-all-read is an Updates control: an action is cleared by doing it and a question by
+        // answering it, so "read" was never what clearing them meant.
         if (markAllBtn) {
-            const currentUnread = activeTab === 'action'
-                ? actions.filter(n => !isResolved(n) && !n.isRead).length
-                : updates.filter(n => !n.isRead).length;
-            markAllBtn.disabled = currentUnread === 0;
-            markAllBtn.style.opacity = currentUnread === 0 ? '0.5' : '';
-            markAllBtn.style.cursor = currentUnread === 0 ? 'not-allowed' : '';
+            const show = activeTab === 'updates';
+            markAllBtn.classList.toggle('hidden', !show);
+            markAllBtn.style.display = show ? 'inline-flex' : 'none';
+            markAllBtn.disabled = unreadUpdates === 0;
+            markAllBtn.style.opacity = unreadUpdates === 0 ? '0.5' : '';
+            markAllBtn.style.cursor = unreadUpdates === 0 ? 'not-allowed' : '';
         }
+        if (activeTab === 'messages') return;
 
-        let list = (activeTab === 'action' ? actions : updates).filter(matchesSearch).slice();
+        const source = activeTab === 'needs' ? [...actions, ...questionItems, ...answeredHere] : updates;
+        let list = source.filter(n => matchesSearch(n) && matchesFrom(n));
         // id as tiebreaker: rows can share an identical createdAt (e.g. created in the same
         // DB transaction), so date alone doesn't reliably keep the newest item first.
-        const byCreated = (a, b) => new Date(b.createdAt) - new Date(a.createdAt) || (b.id - a.id);
-        if (activeTab === 'action') {
-            // AC2.2/AC2.3: sort by priority weight, then newest first. Unresolved items stay
-            // above resolved ones, so critical_action (priority 1) is pinned to the very top
-            // until its completion criteria are met — this tab is about urgency, not recency.
-            list.sort((a, b) => (isResolved(a) ? 1 : 0) - (isResolved(b) ? 1 : 0) || prioOf(a) - prioOf(b) || byCreated(a, b));
+        const byCreated = (a, b) => new Date(b.createdAt) - new Date(a.createdAt) || String(b.id).localeCompare(String(a.id), undefined, { numeric: true });
+        const done = (n) => (n._q ? !!n._answered : isResolved(n));
+        if (activeTab === 'needs') {
+            // AC2.2/AC2.3: sort by priority weight, then newest first. Open items stay above done
+            // ones, so critical_action (priority 1) is pinned to the very top until its completion
+            // criteria are met — this tab is about urgency, not recency.
+            list.sort((a, b) => (done(a) ? 1 : 0) - (done(b) ? 1 : 0) || prioOf(a) - prioOf(b) || byCreated(a, b));
         } else {
             // Updates has no urgency tiers worth burying recency for — the newest update should
             // always be first, regardless of category (informational vs state_change etc.).
@@ -851,8 +1019,36 @@ window.initNotifications = async function() {
                 emptyStateEl.classList.remove('hidden');
                 const title = emptyStateEl.querySelector('[data-empty-title]');
                 const sub = emptyStateEl.querySelector('[data-empty-sub]');
-                if (title) title.textContent = activeTab === 'action' ? "You're all caught up" : 'No updates';
-                if (sub) sub.textContent = activeTab === 'action' ? 'Nothing needs your attention right now.' : "We'll let you know when something happens.";
+                const link = emptyStateEl.querySelector('[data-empty-link]');
+                const filtered = !!searchTerm || fromFilter !== 'all';
+                let linkLabel = null;
+                if (filtered) {
+                    if (title) title.textContent = searchTerm ? 'Nothing matches your search' : `Nothing from ${fromLabel()} here`;
+                    if (sub) sub.textContent = activeTab === 'needs' ? 'Other things may still need you.' : 'There may be updates from others.';
+                    linkLabel = 'Show everything';
+                } else if (activeTab === 'needs') {
+                    if (title) title.textContent = 'Nothing needs you';
+                    if (sub) sub.textContent = 'When something needs a decision or an answer from you, it appears here.';
+                    if (unreadUpdates) linkLabel = `See ${unreadUpdates} unread ${unreadUpdates === 1 ? 'update' : 'updates'}`;
+                    else if (teamUnread()) linkLabel = 'Read your messages';
+                } else {
+                    if (title) title.textContent = 'No updates';
+                    if (sub) sub.textContent = "We'll let you know when something happens.";
+                }
+                if (link) {
+                    link.textContent = linkLabel || '';
+                    link.classList.toggle('hidden', !linkLabel);
+                    link.style.display = linkLabel ? '' : 'none';
+                    link.onclick = () => {
+                        if (filtered) {
+                            if (searchInput) searchInput.value = '';
+                            fromFilter = 'all';
+                            if (assistantSelect) assistantSelect.value = 'all';
+                            remember(FROM_STORAGE_KEY, 'all');
+                            renderList();
+                        } else showTab(unreadUpdates ? 'updates' : 'messages');
+                    };
+                }
             }
             // Nothing was drawn, so there is nothing to collapse — otherwise switching to an empty
             // tab while grouped leaves "Collapse all" sitting above the empty state.
@@ -862,7 +1058,8 @@ window.initNotifications = async function() {
         }
         if (emptyStateEl) emptyStateEl.classList.add('hidden');
 
-        const renderItem = (notif) => activeTab === 'action' ? renderActionItem(notif) : renderUpdateItem(notif);
+        const renderItem = (notif) => notif._q ? renderQuestionItem(notif)
+            : activeTab === 'needs' ? renderActionItem(notif) : renderUpdateItem(notif);
 
         if (groupBy === 'none') {
             list.forEach(notif => listEl.appendChild(renderItem(notif)));
@@ -881,6 +1078,7 @@ window.initNotifications = async function() {
                     ? { key: `assistant:${a.assistantId}`, label: a.name, color: actorColor(a.assistantId, a.avatarColor) }
                     : { key: 'assistant:system', label: 'Be More Swan', color: null };
             }
+            if (groupBy === 'day') return { ...dayOf(notif.createdAt), color: null };
             const type = notif.type || 'other';
             return { key: `type:${type}`, label: typeLabel(type), color: null };
         };
@@ -1009,12 +1207,9 @@ window.initNotifications = async function() {
     if (markAllBtn) {
         markAllBtn.addEventListener('click', () => {
             if (markAllBtn.disabled) return;
-            // Scope to the open tab: mute all unread actions (read, not resolved) on the Action tab, or
-            // clear all unread updates on the Updates tab. We send the exact ids so the other tab's
-            // unread state is left untouched.
-            const isAction = activeTab === 'action';
-            const targets = notificationsData.filter(n =>
-                !n.isRead && (isAction ? (kindOf(n) === 'action' && !isResolved(n)) : kindOf(n) === 'info'));
+            // Updates only (the button is hidden elsewhere). We send the exact ids so actions keep
+            // their own read state.
+            const targets = notificationsData.filter(n => !n.isRead && kindOf(n) === 'info');
             if (!targets.length) return;
             const ids = targets.map(n => n.id);
             targets.forEach(n => n.isRead = true);
@@ -1028,15 +1223,27 @@ window.initNotifications = async function() {
         });
     }
 
-    if (tabActionBtn) tabActionBtn.addEventListener('click', () => { activeTab = 'action'; renderList(); });
-    if (tabUpdatesBtn) tabUpdatesBtn.addEventListener('click', () => { activeTab = 'updates'; renderList(); });
+    TABS.forEach((t) => tabBtns[t]?.addEventListener('click', () => showTab(t)));
+    // Arrow keys move between tabs, as in any tablist.
+    tabBtns.needs?.parentElement?.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+        const i = TABS.indexOf(activeTab);
+        const next = TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length];
+        showTab(next);
+        tabBtns[next]?.focus();
+    });
     if (searchInput) searchInput.addEventListener('input', renderList);
     if (groupBySelect) groupBySelect.addEventListener('change', () => {
         groupBy = GROUP_MODES.includes(groupBySelect.value) ? groupBySelect.value : 'none';
         // Switching mode starts every group open — carrying collapsed keys across modes would hide
         // items under a heading the user has not seen yet.
         collapsedGroups.clear();
-        rememberGroupBy(groupBy);
+        remember(GROUP_BY_STORAGE_KEY, groupBy);
+        renderList();
+    });
+    if (assistantSelect) assistantSelect.addEventListener('change', () => {
+        fromFilter = assistantSelect.value || 'all';
+        remember(FROM_STORAGE_KEY, fromFilter);
         renderList();
     });
 
@@ -1054,6 +1261,16 @@ window.initNotifications = async function() {
     if (window._notifCrossPostListener) window.removeEventListener('bms:crosspost-view', window._notifCrossPostListener);
     window._notifCrossPostListener = () => { if (document.body.contains(listEl)) loadData(); };
     window.addEventListener('bms:crosspost-view', window._notifCrossPostListener);
+    // The badge poll found something new, or its numbers moved: re-read while this page is open.
+    // Swapped, not stacked, for the same reason as above.
+    if (window._notifArrivedListener) document.removeEventListener('bms:notifications-arrived', window._notifArrivedListener);
+    window._notifArrivedListener = () => { if (document.body.contains(listEl) && activeTab !== 'messages') loadData(); };
+    document.addEventListener('bms:notifications-arrived', window._notifArrivedListener);
+    if (window._notifCountsListener) document.removeEventListener('bms:notif-counts', window._notifCountsListener);
+    window._notifCountsListener = () => { if (document.body.contains(listEl)) setCount('messages', teamUnread()); };
+    document.addEventListener('bms:notif-counts', window._notifCountsListener);
+    // Messages needs no notification data to show; open it at once rather than after the fetch.
+    if (activeTab === 'messages') renderList();
     restoreGroupBy();
     loadData();
 };
@@ -1069,18 +1286,24 @@ if (typeof window.routeToSupportTicket !== 'function') {
 }
 
 // ── Header Action Center popover ──────────────────────────────────────────────
-// Quick triage from the workspace bell: two tabs (Action required / Updates), compact
-// actor-led cards built from the SAME window.NotifKit as the full inbox page, a single
-// primary CTA per item, and "Open inbox" for batch processing. Opening the popover marks
+// Quick triage from the workspace bell: two tabs (Needs you / Updates), compact
+// actor-led cards built from the SAME window.NotifKit as the full Notifications page, a single
+// primary CTA per item, and "Open all" for the page itself. Needs you holds open actions AND
+// unanswered Team questions — the same two things the bell's red number counts. Opening the popover marks
 // nothing read/resolved — acting on an item does. Kept deliberately small: no search,
 // grouping or read-toggle here — those live on the full page.
 window.NotificationPopover = (function () {
     const K = window.NotifKit;
-    const MAX_PER_TAB = 5;        // cap the popover; overflow lives behind "Open inbox".
+    const MAX_PER_TAB = 5;        // cap the popover; overflow lives behind "Open all".
     let panel = null, listEl = null, tabActionBtn = null, tabUpdatesBtn = null, markAllBtn = null;
-    let anchorEl = null, activeTab = 'action', data = [];
+    let anchorEl = null, activeTab = 'action', data = [], questions = [];
 
-    const openInbox = () => { close(); (window.loadView ? window.loadView('notifications') : (window.location.href = 'workspace.html?view=notifications')); };
+    const openInbox = () => {
+        close();
+        const tab = activeTab === 'action' ? 'needs' : 'updates';
+        if (window.loadView) window.loadView('notifications', { tab });
+        else window.location.href = 'workspace.html?view=notifications';
+    };
 
     const ensurePanel = () => {
         if (panel) return;
@@ -1093,7 +1316,7 @@ window.NotificationPopover = (function () {
                     <span class="text-sm font-bold text-gray-900">Notifications</span>
                     <div class="flex items-center gap-3">
                         <button type="button" id="notif-pop-mark-all" class="text-xs font-semibold text-gray-500 hover:text-gray-800 disabled:opacity-40 disabled:cursor-not-allowed">Mark all read</button>
-                        <button type="button" id="notif-pop-inbox" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 inline-flex items-center gap-1">Open inbox<span aria-hidden="true">&rarr;</span></button>
+                        <button type="button" id="notif-pop-inbox" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 inline-flex items-center gap-1">Open all<span aria-hidden="true">&rarr;</span></button>
                     </div>
                 </div>
                 <div class="flex gap-1 px-3 pt-2 shrink-0">
@@ -1124,7 +1347,11 @@ window.NotificationPopover = (function () {
         if (!anchorEl) return;
         const r = anchorEl.getBoundingClientRect();
         panel.style.top = `${Math.round(r.bottom + 8)}px`;
-        panel.style.right = `${Math.round(Math.max(12, window.innerWidth - r.right))}px`;
+        // Right-aligned to the bell, but never past the left edge: on a phone the bell sits well in
+        // from the right, and the panel (as wide as the screen allows) hung 40px off the left side.
+        const w = panel.firstElementChild ? panel.firstElementChild.getBoundingClientRect().width : 0;
+        const right = Math.max(12, window.innerWidth - r.right);
+        panel.style.right = `${Math.round(Math.max(12, Math.min(right, window.innerWidth - w - 12)))}px`;
     };
 
     const patch = (id, body) => fetch('/.netlify/functions/notifications', {
@@ -1161,9 +1388,11 @@ window.NotificationPopover = (function () {
         await window.updateNotificationBadge?.();
     };
 
-    /** Enable/disable "Mark all read" for the open tab, and label it with what it will clear. */
+    /** Enable/disable "Mark all read" for the open tab, and label it with what it will clear.
+     *  Updates only: what needs you is cleared by doing it, not by reading it. */
     const syncMarkAllBtn = () => {
         if (!markAllBtn) return;
+        markAllBtn.style.display = activeTab === 'action' ? 'none' : '';
         const unread = data.filter(n => K.kindOf(n) === (activeTab === 'action' ? 'action' : 'info') && !n.isRead).length;
         markAllBtn.disabled = unread === 0;
         markAllBtn.textContent = unread > 0 ? `Mark ${unread} read` : 'Mark all read';
@@ -1215,6 +1444,25 @@ window.NotificationPopover = (function () {
         return li;
     };
 
+    // A Team question: answered on the full page, where its buttons and the reply are.
+    const questionCard = (n) => {
+        const st = K.styleOf(n);
+        const li = document.createElement('li');
+        li.className = 'flex gap-3 p-3 hover:bg-gray-50 transition-colors';
+        li.innerHTML = `
+            ${K.avatarHTML(n, st)}
+            <div class="flex-1 min-w-0">
+                ${K.actorEyebrowHTML(n)}
+                <p class="text-sm font-bold text-gray-900 line-clamp-2">${K.escHtml(n.title)}</p>
+                <div class="mt-2 flex items-center gap-2">
+                    <button type="button" class="pop-answer px-3 py-1.5 btn-primary text-xs font-bold rounded-lg transition whitespace-nowrap">Answer</button>
+                    <span class="text-[11px] text-gray-400">${K.fmtDate(n.createdAt)}</span>
+                </div>
+            </div>`;
+        li.querySelector('.pop-answer').addEventListener('click', (e) => { e.stopPropagation(); activeTab = 'action'; openInbox(); });
+        return li;
+    };
+
     const emptyRow = (msg) => {
         const li = document.createElement('li');
         li.className = 'px-4 py-10 text-center text-sm text-gray-400';
@@ -1228,20 +1476,20 @@ window.NotificationPopover = (function () {
         const pill = (n, cls) => n > 0 ? `<span class="${cls} text-[10px] font-bold px-1.5 py-0.5 rounded-full">${n}</span>` : '';
         tabActionBtn.className = activeTab === 'action' ? on : off;
         tabUpdatesBtn.className = activeTab === 'updates' ? on : off;
-        tabActionBtn.innerHTML = `Action required${pill(openActions, 'bg-red-100 text-red-700')}`;
-        tabUpdatesBtn.innerHTML = `Updates${pill(unreadUpdates, 'bg-emerald-100 text-emerald-700')}`;
+        tabActionBtn.innerHTML = `Needs you${pill(openActions, 'bg-red-100 text-red-700')}`;
+        tabUpdatesBtn.innerHTML = `Updates${pill(unreadUpdates, 'bg-gray-100 text-gray-700')}`;
     };
 
     const render = () => {
         const actions = data.filter(n => K.kindOf(n) === 'action');
         const updates = data.filter(n => K.kindOf(n) === 'info');
-        const openActions = actions.filter(n => !K.isResolved(n)).length;
+        const openActions = actions.filter(n => !K.isResolved(n)).length + questions.length;
         const unreadUpdates = updates.filter(n => !n.isRead).length;
         styleTabs(openActions, unreadUpdates);
         syncMarkAllBtn();
 
         const byCreated = (a, b) => new Date(b.createdAt) - new Date(a.createdAt) || (b.id - a.id);
-        let list = (activeTab === 'action' ? actions : updates).slice();
+        let list = (activeTab === 'action' ? [...actions, ...questions] : updates).slice();
         if (activeTab === 'action') {
             list.sort((a, b) => (K.isResolved(a) ? 1 : 0) - (K.isResolved(b) ? 1 : 0) || K.prioOf(a) - K.prioOf(b) || byCreated(a, b));
         } else {
@@ -1251,9 +1499,9 @@ window.NotificationPopover = (function () {
 
         listEl.innerHTML = '';
         if (shown.length === 0) {
-            listEl.appendChild(emptyRow(activeTab === 'action' ? "You're all caught up" : 'No updates yet'));
+            listEl.appendChild(emptyRow(activeTab === 'action' ? 'Nothing needs you' : 'No updates yet'));
         } else {
-            shown.forEach(n => listEl.appendChild(compactCard(n)));
+            shown.forEach(n => listEl.appendChild(n._q ? questionCard(n) : compactCard(n)));
             if (list.length > shown.length) {
                 const li = document.createElement('li');
                 li.className = 'px-4 py-2.5 text-center';
@@ -1268,12 +1516,26 @@ window.NotificationPopover = (function () {
         listEl.innerHTML = '';
         listEl.appendChild(emptyRow('Loading…'));
         try {
-            const res = await fetch('/.netlify/functions/notifications');
+            const [res, team] = await Promise.all([
+                fetch('/.netlify/functions/notifications'),
+                // Unanswered questions from the team. A failed read is no questions, never a failed popover.
+                fetch('/.netlify/functions/team', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+                    body: JSON.stringify({ action: 'list', openQuestions: true }),
+                }).then(r => (r.ok ? r.json() : null)).catch(() => null),
+            ]);
+            questions = ((team && team.messages) || []).filter(m => m.question && !m.question.answered).map((m) => {
+                const a = ((team && team.assistants) || []).find(x => Number(x.id) === Number(m.from.id));
+                return {
+                    _q: m, id: `q${m.id}`, type: 'question', kind: 'action', createdAt: m.createdAt, title: m.body,
+                    actor: m.from.id ? { assistantId: m.from.id, name: m.from.name, avatarColor: a?.avatarColor ?? null, avatarLetter: a?.avatarLetter ?? null } : null,
+                };
+            });
             if (res.ok) {
                 const j = await res.json();
                 data = j.notifications || [];
                 // Default to whichever tab has something waiting (mirrors the full page).
-                activeTab = data.some(n => K.kindOf(n) === 'action' && !K.isResolved(n)) ? 'action' : 'updates';
+                activeTab = data.some(n => K.kindOf(n) === 'action' && !K.isResolved(n)) || questions.length ? 'action' : 'updates';
                 render();
             } else {
                 listEl.innerHTML = '';

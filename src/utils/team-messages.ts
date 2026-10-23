@@ -313,10 +313,16 @@ export interface TeamMessageView {
     question: (TeamQuestion & { answered: boolean; answer: string | null }) | null;
 }
 
-export async function listTeamMessages(db: Db, orgId: number, filter: { campaignId?: number; assistantId?: number; mine?: boolean; beforeId?: number; limit?: number }): Promise<TeamMessageView[]> {
+/** A question to the person that nobody has answered yet. It needs them until it is answered, not
+ *  until it is seen — opening the page used to read it, and the badge forgot it was waiting. */
+const OPEN_QUESTION = sql`(${teamMessages.toUser} = true AND ${teamMessages.question} IS NOT NULL AND ${teamMessages.answeredAt} IS NULL)`;
+
+export async function listTeamMessages(db: Db, orgId: number, filter: { campaignId?: number; assistantId?: number; mine?: boolean; openQuestions?: boolean; beforeId?: number; limit?: number }): Promise<TeamMessageView[]> {
     const conds = [eq(teamMessages.organisationId, orgId)];
     // "Me": everything addressed to the person or written by them — their own inbox and outbox.
     if (filter.mine) conds.push(or(eq(teamMessages.toUser, true), sql`${teamMessages.fromUserId} IS NOT NULL`)!);
+    // Questions still waiting for the person: the Notifications page's "Needs you" view, however old.
+    if (filter.openQuestions) conds.push(OPEN_QUESTION);
     if (filter.campaignId) conds.push(eq(teamMessages.campaignId, filter.campaignId));
     if (filter.assistantId) conds.push(or(eq(teamMessages.fromAssistantId, filter.assistantId), eq(teamMessages.toAssistantId, filter.assistantId))!);
     if (filter.beforeId) conds.push(lt(teamMessages.id, filter.beforeId));
@@ -357,12 +363,20 @@ export async function listTeamMessages(db: Db, orgId: number, filter: { campaign
     });
 }
 
-/** Messages addressed to the person that they have not seen yet. */
+/** Messages addressed to the person that they have not seen yet. Open questions are not in it:
+ *  they are counted by openQuestionCount, as needing the person, whether seen or not. */
 export async function unreadCount(db: Db, orgId: number, userId: number): Promise<number> {
     const [read] = await db.select({ last: teamReads.lastReadId }).from(teamReads)
         .where(and(eq(teamReads.organisationId, orgId), eq(teamReads.userId, userId))).limit(1);
     const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(teamMessages)
-        .where(and(eq(teamMessages.organisationId, orgId), eq(teamMessages.toUser, true), gt(teamMessages.id, read?.last ?? 0)));
+        .where(and(eq(teamMessages.organisationId, orgId), eq(teamMessages.toUser, true), gt(teamMessages.id, read?.last ?? 0), sql`NOT ${OPEN_QUESTION}`));
+    return Number(n) || 0;
+}
+
+/** Questions to the person still waiting for an answer — part of the "needs you" count. */
+export async function openQuestionCount(db: Db, orgId: number): Promise<number> {
+    const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(teamMessages)
+        .where(and(eq(teamMessages.organisationId, orgId), OPEN_QUESTION));
     return Number(n) || 0;
 }
 

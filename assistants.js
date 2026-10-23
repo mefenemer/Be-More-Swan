@@ -1231,6 +1231,8 @@ const _DETAIL_RQ_COLUMNS = {
     approved:  { postStatus: 'approved' },
     scheduled: { postStatus: 'scheduled' },
     posted:    { postStatus: 'published' },
+    // 'failed' only, unlike the side-menu Review page: THIS page has a Scheduled column, which already
+    // lists paused posts (BOOKED), and each state belongs to exactly one column here.
     attention: { postStatus: 'failed' },
     archived:  { postStatus: 'archived' },
 };
@@ -11202,7 +11204,7 @@ let _mediaSources = ['manual', 'stock', 'brand_card', 'ai'];
 const _MEDIA_SOURCE_META = {
     manual:     { label: 'Manual Upload', desc: 'Pick from your uploaded content library.' },
     stock:      { label: 'AI Stock Search', desc: 'Search Pexels for a relevant photo or video.' },
-    brand_card: { label: 'Branded Text Card', desc: 'Set the post\'s key line as type in your brand colours. Free, and alternates with stock photos so your feed mixes both.' },
+    brand_card: { label: 'Branded Text Card', desc: 'Set the post\'s key line as type in your brand colours. Free, and used in the order you rank it.' },
     ai:         { label: 'AI Generation', desc: 'Generate a fresh image on demand.' },
 };
 const _ALL_MEDIA_SOURCES = ['manual', 'stock', 'brand_card', 'ai'];

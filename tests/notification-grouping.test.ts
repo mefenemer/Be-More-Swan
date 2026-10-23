@@ -41,9 +41,10 @@ const HTML = read('notifications.html');
 console.log('\nNotification grouping\n');
 
 // ── The control ─────────────────────────────────────────────────────────────────────────────────
-check('the markup offers all three grouping modes', () => {
-    const select = HTML.slice(landmark(HTML, 'id="notif-group-by"'), landmark(HTML, '</select>'));
-    for (const mode of ['none', 'type', 'assistant']) {
+check('the markup offers every grouping mode', () => {
+    const start = landmark(HTML, 'id="notif-group-by"');
+    const select = HTML.slice(start, HTML.indexOf('</select>', start));
+    for (const mode of ['none', 'type', 'assistant', 'day']) {
         assert.ok(select.includes(`value="${mode}"`), `the "${mode}" option is missing`);
     }
 });
@@ -116,7 +117,7 @@ check('one control covers both expand-all and collapse-all', () => {
 });
 
 check('the expand-all control hides itself when nothing is grouped', () => {
-    const sync = JS.slice(landmark(JS, 'const syncExpandAllBtn'), landmark(JS, 'const tabActionBtn'));
+    const sync = JS.slice(landmark(JS, 'const syncExpandAllBtn'), landmark(JS, 'const tabBtns'));
     assert.ok(sync.includes("expandAllBtn.style.display = hasGroups ? '' : 'none'"),
         'the `hidden` class loses to the button\'s own inline-flex utility, so display must be driven directly');
 });

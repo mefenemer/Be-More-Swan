@@ -64,8 +64,8 @@ export const PARTNER_OPS_TOOLS: Anthropic.Beta.BetaTool[] = [
     tool('payout_audit', 'Before a payout: ready-to-pay balance per partner (and whether it clears the minimum), payout details on file, and warning signs — same card as a referred customer, same email domain, commissions reversed in 90 days, burst of new paying customers in 7 days.'),
     tool('recruitment_candidates', 'Paying customers who are not partners yet, ranked by AI actions in the last N days (BMS does not record logins — AI actions are the activity measure).', { days: { type: 'integer' }, minActions: { type: 'integer' }, limit: { type: 'integer' } }),
     tool('propose_decision', 'Offer the admin a card to approve, reject, suspend or reinstate a partner.', { partnerId: { type: 'integer' }, decision: { type: 'string', enum: ['approve', 'reject', 'suspend', 'reinstate'] }, note: { type: ['string', 'null'] } }),
-    tool('propose_programme_rate', 'Offer a card scheduling a new programme-wide rate from a date (the current rate ends that day). durationMonths null = lifetime.', { ratePercent: { type: 'number' }, durationMonths: nullableInt, startsOn: day }),
-    tool('propose_special_rate', "Offer a card giving one partner a special rate between dates (endsOn null = no end). durationMonths null = lifetime.", { partnerId: { type: 'integer' }, ratePercent: { type: 'number' }, durationMonths: nullableInt, startsOn: day, endsOn: { type: ['string', 'null'] } }),
+    tool('propose_programme_rate', 'Offer a card scheduling a new programme-wide rate from a date (the current rate ends that day). durationMonths null = lifetime. costDeductionPercent null = keep the current programme deduction.', { ratePercent: { type: 'number' }, costDeductionPercent: { type: ['number', 'null'] }, durationMonths: nullableInt, startsOn: day }),
+    tool('propose_special_rate', "Offer a card giving one partner a special rate between dates (endsOn null = no end). durationMonths null = lifetime. costDeductionPercent null = the current programme deduction.", { partnerId: { type: 'integer' }, ratePercent: { type: 'number' }, costDeductionPercent: { type: ['number', 'null'] }, durationMonths: nullableInt, startsOn: day, endsOn: { type: ['string', 'null'] } }),
     tool('propose_end_special_rate', "Offer a card ending one partner's special rate on a date.", { partnerId: { type: 'integer' }, periodId: { type: 'integer' }, endsOn: day }),
     tool('propose_payout_rules', 'Offer a card changing the holding period (days) and minimum payout (pounds).', { holdingDays: { type: 'integer' }, minPayoutPounds: { type: 'number' } }),
     tool('propose_add_partner', 'Offer a card adding an existing Be More Swan account (by email) as an approved partner.', { email: { type: 'string' }, note: { type: ['string', 'null'] } }),
@@ -84,7 +84,8 @@ export const PARTNER_OPS_TOOLS: Anthropic.Beta.BetaTool[] = [
 const SYSTEM = `You are Partner Ops, the assistant on Be More Swan's admin screen Admin → Revenue → Partners. You help a Be More Swan admin run the affiliate partner programme: people who actively promote Be More Swan and earn CASH commission. (Customers who simply refer a friend earn tokens instead — they are not partners and you have no tools for them.)
 
 How the programme works:
-- Commission rates are dated periods. A partner's customer gets the rate in force when they FIRST PAY and keeps it for the period's length (months of their payments, or lifetime). A rate that has started can't be changed — a new period is scheduled instead. A partner can have special rates that beat the programme rate between dates.
+- Commission rates are dated periods. A partner's customer gets the rate in force when they FIRST PAY and keeps it for the period's length (months of their payments, or lifetime).
+- Commission is AFTER COSTS: each period also has a cost deduction (costDeductionBps, 2000 = 20%) taken off what the customer paid excluding VAT, then the rate applies to what is left — 50% with a 20% deduction on a £79 payment = £31.60. The deduction is locked onto the customer with the rate. A rate that has started can't be changed — a new period is scheduled instead. A partner can have special rates that beat the programme rate between dates.
 - Commission is earned on what the customer paid excluding VAT, held for the holding period (so refunds can cancel it), then becomes ready to pay. Balances under the minimum payout roll over.
 - Money in tool results is in pence; show it to the admin in pounds (£12.50). Rates are basis points in tool results (2500 = 25%).
 
@@ -160,7 +161,7 @@ export default withLambda(async (event) => {
                 return {
                     payoutRules: settings ? { holdingDays: settings.holdingDays, minPayoutPence: settings.minPayoutPence } : null,
                     programmeRates: periods.filter((p) => p.partnerId === null).sort((a, b) => +a.startsAt - +b.startsAt).map((p) => ({
-                        id: p.id, rateBps: p.rateBps, durationMonths: p.durationMonths, startsAt: p.startsAt, endsAt: p.endsAt, label: p.label,
+                        id: p.id, rateBps: p.rateBps, costDeductionBps: p.costDeductionBps, durationMonths: p.durationMonths, startsAt: p.startsAt, endsAt: p.endsAt, label: p.label,
                         state: p.endsAt && +p.endsAt <= now ? 'ended' : (+p.startsAt <= now ? 'in force' : 'upcoming'),
                     })),
                 };
@@ -172,7 +173,7 @@ export default withLambda(async (event) => {
                     payingCustomers: r.paying, totalSignups: r.referrals, pendingPence: r.pending_pence, readyToPayPence: r.payable_pence, paidPence: r.paid_pence,
                     payoutDetailsOnFile: !!r.has_payout_details, application: r.application, decisionNote: r.decision_note,
                     hasAccount: !!r.has_account, accountLinkSentAt: r.invited_at ?? null, partnerCode: r.promo_code ?? null,
-                    specialRates: periods.filter((p) => p.partnerId === r.id).map((p) => ({ id: p.id, rateBps: p.rateBps, durationMonths: p.durationMonths, startsAt: p.startsAt, endsAt: p.endsAt })),
+                    specialRates: periods.filter((p) => p.partnerId === r.id).map((p) => ({ id: p.id, rateBps: p.rateBps, costDeductionBps: p.costDeductionBps, durationMonths: p.durationMonths, startsAt: p.startsAt, endsAt: p.endsAt })),
                 }));
             }
             case 'partner_detail': return partnerDetail(db, Number(input.partnerId));

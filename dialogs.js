@@ -128,21 +128,40 @@ window.showToast = function (message, opts = {}) {
     container.style.cssText = 'position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);z-index:11000;display:flex;flex-direction:column;gap:.5rem;align-items:center;pointer-events:none;';
     document.body.appendChild(container);
   }
+  // An error stays up twice as long and is announced at once (role=alert): at 4s a phone user lost
+  // "Reschedule failed" before reading it. opts.tone:'error' says so explicitly; the ⚠️/❌ icon every
+  // existing failure toast already passes counts too, so those callers needed no change.
+  const isError = opts.tone === 'error' || opts.icon === '⚠️' || opts.icon === '❌';
   const toast = document.createElement('div');
-  toast.setAttribute('role', 'status');
+  toast.setAttribute('role', isError ? 'alert' : 'status');
   toast.style.cssText = 'pointer-events:auto;max-width:90vw;background:#1f2937;color:#fff;padding:.75rem 1rem;border-radius:.75rem;box-shadow:0 10px 25px rgba(0,0,0,.18);font-size:.875rem;font-weight:500;display:flex;align-items:center;gap:.5rem;opacity:0;transform:translateY(.5rem);transition:opacity .2s ease,transform .2s ease;';
   const icon = document.createElement('span');
   icon.textContent = opts.icon || '🔒';
   const text = document.createElement('span');
   text.textContent = message;
   toast.append(icon, text);
+  // opts.action = { label, onClick }: one button, so a toast that names a place can also take you
+  // there (the reject toast pointed at an archive with no way to reach it from the page you were on).
+  if (opts.action && opts.action.label && typeof opts.action.onClick === 'function') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = opts.action.label;
+    btn.style.cssText = 'margin-left:.25rem;flex-shrink:0;background:transparent;border:1px solid rgba(255,255,255,.45);color:#fff;font-weight:700;font-size:.8125rem;padding:.25rem .625rem;border-radius:.5rem;cursor:pointer;';
+    btn.addEventListener('click', () => { toast.remove(); opts.action.onClick(); });
+    toast.appendChild(btn);
+  }
   container.appendChild(toast);
   requestAnimationFrame(() => { toast.style.opacity = '1'; toast.style.transform = 'translateY(0)'; });
-  setTimeout(() => {
+  const hide = () => {
     toast.style.opacity = '0';
     toast.style.transform = 'translateY(.5rem)';
     setTimeout(() => toast.remove(), 250);
-  }, opts.duration || 4000);
+  };
+  const ms = opts.duration || (isError ? 8000 : 4000);
+  // Hovering holds it, so a message can be finished (or its button reached) before it goes.
+  let timer = setTimeout(hide, ms);
+  toast.addEventListener('mouseenter', () => clearTimeout(timer));
+  toast.addEventListener('mouseleave', () => { clearTimeout(timer); timer = setTimeout(hide, 2500); });
 };
 
 // ── US3: destructive confirm modal + draft cancellation ──────────────
@@ -290,7 +309,8 @@ window.choiceModal = function(message, options, opts = {}) {
  * Resolves the text that was entered, or null when the user backs out, so a call site that
  * tested `=== null` for "cancelled" reads exactly as it did against the browser's own prompt.
  * With `required`, the confirm button stays disabled until something is typed; `multiline`
- * swaps the input for a textarea. `message` is innerHTML'd — escape data-derived text.
+ * swaps the input for a textarea; `inputType` ('datetime-local', 'date', …) asks for a picker
+ * instead of free text. `message` is innerHTML'd — escape data-derived text.
  */
 window.promptModal = function(message, opts = {}) {
   return new Promise((resolve) => {
@@ -304,7 +324,10 @@ window.promptModal = function(message, opts = {}) {
     const fieldCss = 'width:100%;box-sizing:border-box;font-size:.875rem;color:#111827;background:#fff;border:1px solid #d1d5db;border-radius:.6rem;padding:.5rem .7rem;margin:0 0 1.25rem;font-family:inherit;';
     const field = opts.multiline
       ? `<textarea id="apm-input" rows="3" placeholder="${String(opts.placeholder || '').replace(/"/g, '&quot;')}" style="${fieldCss}resize:vertical;"></textarea>`
-      : `<input id="apm-input" type="text" placeholder="${String(opts.placeholder || '').replace(/"/g, '&quot;')}" style="${fieldCss}">`;
+      // `inputType` lets a caller ask for a date/time picker ('datetime-local', 'date') — the
+      // Calendar's "Move…" uses it, because dragging is the only other way to move a post and a
+      // phone or a keyboard can't drag. `min` is passed through for those types.
+      : `<input id="apm-input" type="${/^(text|date|datetime-local|time|number|email|url)$/.test(opts.inputType || '') ? opts.inputType : 'text'}"${opts.min ? ` min="${String(opts.min).replace(/"/g, '&quot;')}"` : ''} aria-label="${String(opts.inputLabel || opts.title || 'Answer').replace(/"/g, '&quot;')}" placeholder="${String(opts.placeholder || '').replace(/"/g, '&quot;')}" style="${fieldCss}">`;
     overlay.innerHTML = `
     <div style="background:#fff;border-radius:1rem;max-width:26rem;width:100%;padding:1.5rem;box-shadow:0 20px 50px rgba(0,0,0,.25);">
       <h3 style="font-size:1.05rem;font-weight:700;color:#111827;margin:0 0 .5rem;">${title}</h3>

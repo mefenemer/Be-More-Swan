@@ -46,10 +46,16 @@ const STATUS_META = {
     pending_approval:{ label: 'Pending',     badge: 'bg-amber-100 text-amber-700 border-amber-300', chipBorder: 'border-amber-400',   dot: 'bg-amber-400' },
     in_review:       { label: 'In Review',   badge: 'bg-amber-100 text-amber-700 border-amber-300', chipBorder: 'border-amber-400',   dot: 'bg-amber-400' },
     approved:        { label: 'Approved',    badge: 'bg-blue-100 text-blue-700 border-blue-300',   chipBorder: 'border-blue-500',    dot: 'bg-blue-500' },
-    scheduled:       { label: 'Scheduled',   badge: 'bg-yellow-100 text-yellow-700 border-yellow-300', chipBorder: 'border-yellow-500', dot: 'bg-yellow-500' },
+    // Blue, as on the Review page: booked and on its way. It was yellow here, so the same post was a
+    // different colour on each page, and yellow sat among the ambers that mean "needs you".
+    scheduled:       { label: 'Scheduled',   badge: 'bg-blue-100 text-blue-700 border-blue-300',   chipBorder: 'border-blue-500',    dot: 'bg-blue-500' },
     publishing:      { label: 'Publishing',  badge: 'bg-blue-100 text-blue-700 border-blue-300',   chipBorder: 'border-blue-500',    dot: 'bg-blue-500' },
-    published:       { label: 'Published',   badge: 'bg-emerald-100 text-emerald-700 border-emerald-300', chipBorder: 'border-emerald-500', dot: 'bg-emerald-500' },
-    paused:          { label: 'Paused',      badge: 'bg-gray-100 text-gray-500 border-gray-300',   chipBorder: 'border-gray-400',    dot: 'bg-gray-400' },
+    // Posted = GREEN, never emerald: emerald-* is the brand pink here (input.css), so "posted" used to
+    // render pink beside a green tick on the same chip.
+    published:       { label: 'Posted',      badge: 'bg-green-100 status-posted border-green-300', chipBorder: 'border-green-500', dot: 'bg-green-500' },
+    // Amber with the reason, like the Review card: grey "Paused" read as "I paused it", when it means
+    // a connection died and nothing will go out until it is reconnected.
+    paused:          { label: 'Paused · reconnect', badge: 'bg-amber-100 text-amber-800 border-amber-300', chipBorder: 'border-amber-400', dot: 'bg-amber-500' },
     // The X quota park. Amber, not grey: unlike 'paused' this one is waiting on something the user
     // may need to act on, and it resumes by itself only when the quota resets. Without an entry
     // here every lookup falls back to STATUS_META.draft, so a committed post parked on quota would
@@ -60,12 +66,26 @@ const STATUS_META = {
     // paused_credits above. 'sending' is blue like 'publishing', its social twin: in flight, no
     // action needed. 'sent' is emerald like 'published': done and correct.
     sending:         { label: 'Sending',     badge: 'bg-blue-100 text-blue-700 border-blue-300',   chipBorder: 'border-blue-500',    dot: 'bg-blue-500' },
-    sent:            { label: 'Sent',        badge: 'bg-emerald-100 text-emerald-700 border-emerald-300', chipBorder: 'border-emerald-500', dot: 'bg-emerald-500' },
-    failed:          { label: 'Failed',      badge: 'bg-red-100 text-red-700 border-red-300',      chipBorder: 'border-red-500',     dot: 'bg-red-500' },
+    sent:            { label: 'Sent',        badge: 'bg-green-100 status-posted border-green-300', chipBorder: 'border-green-500', dot: 'bg-green-500' },
+    failed:          { label: 'Failed to post', badge: 'bg-red-100 text-red-700 border-red-300',      chipBorder: 'border-red-500',     dot: 'bg-red-500' },
     missed:          { label: 'Missed',      badge: 'bg-orange-100 text-orange-700 border-orange-300', chipBorder: 'border-orange-300', dot: 'bg-amber-500' },
     rejected:        { label: 'Rejected',    badge: 'bg-red-100 text-red-700 border-red-300',      chipBorder: 'border-red-500',     dot: 'bg-red-500' },
-    cancelled:       { label: 'Cancelled',   badge: 'bg-gray-100 text-gray-400 border-gray-200',   chipBorder: 'border-gray-300',    dot: 'bg-gray-300' },
+    cancelled:       { label: 'Cancelled',   badge: 'bg-gray-100 text-gray-500 border-gray-200',   chipBorder: 'border-gray-300',    dot: 'bg-gray-300' },
 };
+
+// The word for a state. Read from the generated constants (src/config/post-status.ts
+// POST_STATUS_LABELS) so this page and Review say the same thing; STATUS_META's label is only the
+// fallback for a page loaded without them.
+function _statusLabel(status) {
+    const pc = window.PlatformConstants;
+    if (pc && typeof pc.postStatusLabel === 'function') return pc.postStatusLabel(status);
+    return (STATUS_META[status] || STATUS_META.draft).label;
+}
+
+// Narrow screens get the List view, and never the seven-column Week (~48px a day).
+function _isPhone() {
+    return !!(window.matchMedia && window.matchMedia('(max-width: 639px)').matches);
+}
 
 // Stacked-layers glyph for a cross-post group — one logical post going to several platforms.
 // Deliberately NOT one of the platform logos: the chip is claiming "more than one network", and
@@ -161,7 +181,12 @@ function _isOverdue(post) {
     return new Date(post.publishDate) < new Date();
 }
 
-const DAY_NAMES_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// Weeks start on MONDAY — the audience is UK businesses (every date here is en-GB). Column order is
+// DAY_NAMES_SHORT; _dayShort names a real Date whatever column it sits in.
+const DAY_NAMES_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+function _dayShort(d) { return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]; }
+// Monday = 0 … Sunday = 6.
+function _mondayIndex(d) { return (d.getDay() + 6) % 7; }
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 // ── State ─────────────────────────────────────────────────────────
@@ -176,8 +201,18 @@ let _newsletterIssues = [];
 let _openPostId = null;          // post currently open in the editor, so a refresh can clear it
 let _dragPostId = null;          // drag source
 let _dragTargetDate = null;      // drop target
-let _pendingReschedule = null;   // { postIds, newDate }
-let _listFilter = 'all';         // 'all' | 'scheduled' | 'published' | 'attention'
+// 'upcoming' = today + the next 13 days, across a month boundary — what a phone opens on, because
+// "what's going out tomorrow?" should not take a scroll past the 1st or a tap on Next.
+let _listFilter = 'all';         // 'upcoming' | 'all' | 'scheduled' | 'published' | 'attention'
+let _listFilterChosen = false;   // the user picked a list tab — stop choosing one for them
+// Drafts waiting for review, on their PROPOSED slot (scheduled-posts.ts `awaiting=1`). Drawn outlined
+// and never draggable: nothing is committed until the draft is approved in Review.
+let _awaiting = [];
+// Loading / failure state for the range on screen. A failed load used to leave an empty grid that
+// read "Nothing scheduled this month" — an all-clear from a server that simply didn't answer.
+let _loading = false;
+let _loadError = false;
+let _scrolledToTodayFor = null;  // list view jumps to today once per month shown, not on every repaint
 // #3/#4: assistant activity + per-assistant colour-coding + filter
 let _activities = [];            // completed task runs (get-calendar-activity)
 let _assistants = [];            // org assistants for names + colour assignment
@@ -298,17 +333,27 @@ window.initCalendar = async function (opts = {}) {
     document.querySelectorAll('.cal-view-btn').forEach(btn => {
         btn.addEventListener('click', () => _setView(btn.dataset.view));
     });
-    // On a phone a seven-column month is ~50px a day — every chip truncates to nothing. Open on the
-    // List view there instead (the buttons still switch to Month or Week). Set before the first
-    // load so it is one load, not a month load followed by a list load.
-    if (window.matchMedia && window.matchMedia('(max-width: 639px)').matches && _view === 'month') _view = 'list';
+    // On a phone a seven-column month or week is ~50px a day — every chip truncates to nothing. Open
+    // on the List view there instead, on "Coming up" (today onwards) unless the user has picked a
+    // tab. Set before the first load so it is one load, not a month load followed by a list load.
+    if (_isPhone()) {
+        if (_view === 'month' || _view === 'week') _view = 'list';
+        if (!_listFilterChosen) _listFilter = 'upcoming';
+    }
+    // Review's "See it on the calendar" asks for the month a post was just booked into. A whole-month
+    // view is what shows it in context, so "Coming up" steps aside for this one visit.
+    if (window._calInitialAnchor instanceof Date && !Number.isNaN(window._calInitialAnchor.getTime())) {
+        _anchor = new Date(window._calInitialAnchor); _anchor.setHours(0, 0, 0, 0);
+        if (_listFilter === 'upcoming') _listFilter = 'all';
+        _scrolledToTodayFor = null;
+    }
+    window._calInitialAnchor = null;
+    document.getElementById('cal-key-toggle')?.addEventListener('click', _toggleKey);
     // The toolbar markup is re-injected on every visit with Month highlighted, while _view survives
     // from the last visit — so a return visit showed the Week or List grid under a Month button.
     // Always paint the buttons from the view actually being rendered.
-    document.querySelectorAll('.cal-view-btn').forEach(btn => {
-        const active = btn.dataset.view === _view;
-        btn.className = `cal-view-btn px-3 py-1.5 text-sm font-bold rounded-lg transition cursor-pointer ${active ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`;
-    });
+    _paintViewButtons();
+    _loading = true;
     await _loadAndRender();
 };
 
@@ -324,8 +369,29 @@ window.initCalendar = async function (opts = {}) {
 // the network, then fill in when the fetch lands. The interim paint can only ever be empty for the
 // new range (chips are matched by date key), never wrong.
 function _navRefresh() {
+    // Marked loading BEFORE the interim paint, so the empty new range reads "Loading…" and never
+    // "Nothing scheduled" for the second or so it takes to arrive.
+    _loading = true;
     _render();
     void _loadAndRender();
+}
+window._calRetry = function () { _navRefresh(); };
+
+// The view toggle's look AND its state for assistive tech — the active view was colour-only.
+function _paintViewButtons() {
+    document.querySelectorAll('.cal-view-btn').forEach(btn => {
+        const active = btn.dataset.view === _view;
+        btn.className = `cal-view-btn focus-ring tap-target px-3 py-1.5 text-sm font-bold rounded-lg transition cursor-pointer ${active ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}${btn.dataset.view === 'week' || btn.dataset.view === 'month' ? ' phone-hidden' : ''}`;
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+}
+
+// Phone only: the two legend strips fold behind a "Key" button so the posts start higher up.
+function _toggleKey() {
+    const btn = document.getElementById('cal-key-toggle');
+    const open = btn?.getAttribute('aria-expanded') !== 'true';
+    btn?.setAttribute('aria-expanded', open ? 'true' : 'false');
+    ['cal-legend', 'cal-status-legend'].forEach(id => document.getElementById(id)?.classList.toggle('phone-hidden', !open));
 }
 // Month steps land on the 1st rather than doing setMonth() in place. setMonth() keeps the day of
 // month, so from an anchor sitting on the 29th/30th/31st it OVERFLOWS: on the 31st of July,
@@ -337,26 +403,39 @@ function _stepMonth(delta) {
     _anchor = new Date(_anchor.getFullYear(), _anchor.getMonth() + delta, 1);
     _anchor.setHours(0, 0, 0, 0);
 }
+// "Coming up" is a rolling window from today, not a month — stepping from it lands on the month
+// before or after the current one, as a whole-month list.
+function _leaveUpcoming() {
+    if (_view === 'list' && _listFilter === 'upcoming') {
+        _listFilter = 'all';
+        _anchor = new Date(); _anchor.setHours(0, 0, 0, 0);
+        return true;
+    }
+    return false;
+}
 function _navPrev() {
+    _leaveUpcoming();
     if (_view === 'week') _anchor.setDate(_anchor.getDate() - 7);
     else _stepMonth(-1);
     _navRefresh();
 }
 function _navNext() {
+    _leaveUpcoming();
     if (_view === 'week') _anchor.setDate(_anchor.getDate() + 7);
     else _stepMonth(1);
     _navRefresh();
 }
 function _navToday() {
     _anchor = new Date(); _anchor.setHours(0,0,0,0);
+    _scrolledToTodayFor = null;
     _navRefresh();
 }
 function _setView(v) {
-    _view = v;
-    document.querySelectorAll('.cal-view-btn').forEach(btn => {
-        const active = btn.dataset.view === v;
-        btn.className = `cal-view-btn px-3 py-1.5 text-sm font-bold rounded-lg transition cursor-pointer ${active ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`;
-    });
+    // Month and Week are seven ~48px columns on a phone, where chips spill into the next day and
+    // can't be dragged anyway; the toggle hides both there, and this catches a stale choice carried
+    // over from a wider window.
+    _view = ((v === 'week' || v === 'month') && _isPhone()) ? 'list' : v;
+    _paintViewButtons();
     // Month/list ⇄ week are different ranges (a week view of a month-loaded range is a subset, but
     // week→month is not), so this reloads too rather than guessing which direction is safe.
     _navRefresh();
@@ -462,7 +541,7 @@ async function _loadAndRender() {
         const skipPublishing = _lockedAssistant && !_publishesContent;
         const none = (key) => Promise.resolve({ ok: true, json: async () => ({ [key]: [] }) });
         const [postsRes, actRes, asstRes, blogRes, nlRes] = await Promise.all([
-            skipPublishing ? none('posts') : fetch(`/.netlify/functions/scheduled-posts?from=${from.toISOString()}&to=${to.toISOString()}`),
+            skipPublishing ? none('posts') : fetch(`/.netlify/functions/scheduled-posts?awaiting=1&from=${from.toISOString()}&to=${to.toISOString()}`),
             fetch(`/.netlify/functions/get-calendar-activity?from=${from.toISOString()}&to=${to.toISOString()}`),
             _assistants.length ? Promise.resolve(null) : (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants')),
             skipPublishing ? none('posts') : fetch(`/.netlify/functions/blog-posts?from=${from.toISOString()}&to=${to.toISOString()}`),
@@ -474,10 +553,16 @@ async function _loadAndRender() {
 
         // null = "no definitive answer" (a 500, say) — leave the previous value alone rather than
         // blanking the grid on a transient failure. [] is a real, empty answer.
-        let posts = null, activities = null, assistants = null, blogPosts = null, newsletterIssues = null;
+        let posts = null, activities = null, assistants = null, blogPosts = null, newsletterIssues = null, awaiting = null;
+        // Did a feed the grid depends on fail? Kept apart from "empty": an empty month is an answer,
+        // a 500 is not, and the two used to render identically. The newsletter feed is excluded on
+        // purpose — an environment without its schema answers with an error by design (see below).
+        let failed = false;
 
         if (postsRes.ok) {
-            posts = (await postsRes.json()).posts || [];
+            const pj = await postsRes.json();
+            posts = pj.posts || [];
+            awaiting = pj.awaiting || [];
         } else if (postsRes.status === 403) {
             // US3 AC3.3: onboarding guard rejected this — surface it gracefully, don't crash.
             const body = await postsRes.json().catch(() => ({}));
@@ -485,11 +570,15 @@ async function _loadAndRender() {
                 window.showToast?.(body.message || 'Please complete your onboarding checklist to unlock this feature.');
             }
             posts = [];
+        } else {
+            failed = true;
         }
 
         if (actRes && actRes.ok) activities = (await actRes.json()).activities || [];
+        else if (actRes) failed = true;
         if (asstRes && asstRes.ok) assistants = (await asstRes.json()).assistants || [];
         if (blogRes && blogRes.ok) blogPosts = (await blogRes.json()).posts || [];
+        else if (blogRes) failed = true;
         // Left null on any non-OK answer, per the rule above: an environment without the newsletter
         // schema applied answers with an error, and blanking every OTHER kind of entry on the grid
         // because of it would be a worse calendar than one issue short.
@@ -514,7 +603,11 @@ async function _loadAndRender() {
         if (token !== _loadToken) return;   // superseded by a newer navigation
 
         _datedItems = dated;
-        if (posts) _posts = posts;
+        _loadError = failed;
+        // A failed answer leaves the PREVIOUS range's data, which can't land on this range's dates —
+        // so clear it rather than let a stale month's chips pass for this one's.
+        _posts = posts || [];
+        _awaiting = awaiting || [];
         if (activities) _activities = activities;
         if (assistants) {
             _assistants = assistants;
@@ -526,8 +619,12 @@ async function _loadAndRender() {
         if (newsletterIssues) _newsletterIssues = newsletterIssues;
         _scheduledRecords = records;
         _followUps = followUps;
-    } catch (e) { console.warn('Calendar load error:', e); }
+    } catch (e) {
+        console.warn('Calendar load error:', e);
+        if (token === _loadToken) _loadError = true;
+    }
     if (token !== _loadToken) return;
+    _loading = false;
     // Always (re)populate the toolbar controls — the calendar.html fragment (and its fresh
     // <select>) is re-injected on every view entry, even though _assistants is cached here.
     _renderAssistantControls();
@@ -594,7 +691,7 @@ function _renderStatusLegend() {
     const strip = document.getElementById('cal-status-legend');
     if (!strip) return;
     const item = (marker, label) =>
-        `<span class="inline-flex items-center gap-1.5 text-xs text-gray-500">${marker} ${label}</span>`;
+        `<span class="inline-flex items-center gap-1.5 text-xs text-gray-600"><span aria-hidden="true" class="inline-flex">${marker}</span> ${label}</span>`;
     // The dated kinds this assistant's grid can actually contain — listed only when it has them.
     const datedLegend = () => {
         const kinds = _datedSource === 'briefs' ? ['brief_due'] : _datedSource === 'campaigns' ? ['campaign_start', 'campaign_end']
@@ -611,16 +708,31 @@ function _renderStatusLegend() {
         ? item('<span class="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>', 'Email to be sent')
         : '';
     strip.innerHTML = _publishesContent
-        ? item('<span class="text-emerald-600 font-extrabold">✓</span>', _platformFilterOn ? 'Posted (live)' : 'Sent') +
-          item('<span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>', 'Scheduled') +
-          item('<span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>', 'Overdue')
+        // Same words as the chips and as Review. "Failed" has its own marker now — it used to be a red
+        // dot, which is what this strip said "Overdue" looks like.
+        ? item('<span class="status-posted-tick font-extrabold">✓</span>', _platformFilterOn ? _statusLabel('published') : 'Sent') +
+          item('<span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span>', _statusLabel('scheduled')) +
+          item('<span class="w-3 h-2.5 rounded border border-dashed border-amber-400 bg-white"></span>', `${_statusLabel('pending_approval')} (not booked yet)`) +
+          item('<span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>', 'Overdue') +
+          item('<span class="w-3.5 h-3.5 rounded-full bg-red-600 text-white text-[10px] font-extrabold leading-none flex items-center justify-center">!</span>', `${_statusLabel('failed')} — open it to see why`) +
+          item('<span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>', 'Paused — needs you')
         : outreachItem + datedLegend() +
           // The Brand Designer schedules nothing: no records queue, so no yellow chip can ever appear.
           (_datedSource === 'briefs' || _datedSource === 'campaigns' ? '' : item('<span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>', _leadOutreach ? 'Chase reminder' : 'Scheduled')) +
-          item('<span class="text-gray-500 font-extrabold">✓</span>', 'Completed');
+          item('<span class="text-gray-600 font-extrabold">✓</span>', 'Completed');
+}
+
+function _upcomingDays() {
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    return Array.from({ length: 14 }, (_, i) => { const d = new Date(start); d.setDate(d.getDate() + i); return d; });
 }
 
 function _getDateRange() {
+    if (_view === 'list' && _listFilter === 'upcoming') {
+        const days = _upcomingDays();
+        const to = new Date(days[days.length - 1]); to.setHours(23, 59, 59, 999);
+        return { from: days[0], to };
+    }
     if (_view === 'week') {
         const weekStart = _weekStart(_anchor);
         const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 6); weekEnd.setHours(23,59,59,999);
@@ -632,6 +744,18 @@ function _getDateRange() {
     return { from, to };
 }
 
+/** True when nothing at all falls on a day of the month or week on screen. */
+function _gridIsEmpty() {
+    const { from, to } = _getDateRange();
+    for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+        const date = new Date(d);
+        if (_postsOnDate(date).length || _awaitingOnDate(date).length || _blogPostsOnDate(date).length
+            || _newsletterIssuesOnDate(date).length || _scheduledRecordsOnDate(date).length
+            || _followUpsOnDate(date).length || _datedItemsOnDate(date).length || _activitiesOnDate(date).length) return false;
+    }
+    return true;
+}
+
 // ── Master render ─────────────────────────────────────────────────
 function _render() {
     // Chips are about to be torn down and rebuilt — drop any open hover preview
@@ -639,10 +763,14 @@ function _render() {
     if (_previewEl) { _previewEl.classList.remove('is-open'); }
     _previewReqToken++;
 
+    _renderBuckets = null;   // rebuilt once per paint (see _byDay)
+
     // Update title
     const titleEl = document.getElementById('cal-title');
     if (titleEl) {
-        if (_view === 'month' || _view === 'list') {
+        if (_view === 'list' && _listFilter === 'upcoming') {
+            titleEl.textContent = 'Coming up';
+        } else if (_view === 'month' || _view === 'list') {
             titleEl.textContent = `${MONTH_NAMES[_anchor.getMonth()]} ${_anchor.getFullYear()}`;
         } else {
             const ws = _weekStart(_anchor);
@@ -651,27 +779,87 @@ function _render() {
         }
     }
 
+    // Icon-only arrows had no accessible name; say what they step by.
+    const unit = _view === 'week' ? 'week' : 'month';
+    document.getElementById('cal-btn-prev')?.setAttribute('aria-label', `Previous ${unit}`);
+    document.getElementById('cal-btn-next')?.setAttribute('aria-label', `Next ${unit}`);
+
     const main = document.getElementById('cal-main');
     if (!main) return;
 
-    if (_view === 'month') main.innerHTML = _renderMonth();
-    else if (_view === 'week') main.innerHTML = _renderWeek();
-    else main.innerHTML = _renderList();
+    const body = _view === 'month' ? _renderMonth() : _view === 'week' ? _renderWeek() : _renderList();
+    main.setAttribute('aria-busy', _loading ? 'true' : 'false');
+    // Error first: it says the grid below may be incomplete. Loading dims the grid rather than
+    // blanking it, so the title and days move under the click and fill in when the data lands.
+    const banner = _loadError && !_loading
+        ? `<div role="alert" class="mx-4 mt-4 mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex items-center gap-3 flex-wrap">
+              <p class="text-sm text-red-700 flex-1 min-w-0">We couldn't load everything for these dates, so some posts may be missing. Nothing has been changed.</p>
+              <button type="button" onclick="window._calRetry()" class="btn-secondary focus-ring tap-target px-3 py-1.5 text-sm font-bold rounded-lg border">Try again</button>
+           </div>`
+        : _loading
+        ? `<div class="sticky top-0 z-20 flex justify-center pointer-events-none"><span role="status" class="mt-2 inline-flex items-center gap-2 rounded-full bg-white/70 border border-gray-200 shadow-sm px-3 py-1 text-xs font-bold text-gray-600">${window.bmsSpinnerHtml ? window.bmsSpinnerHtml(14) : ''}Loading…</span></div>`
+        : (_view !== 'list' && _gridIsEmpty())
+        // The grids had no empty state: a new owner saw a month of blank cells and no next step.
+        // Same words and hand-off as the List view, above the grid rather than instead of it.
+        ? (() => {
+            const filtered = _assistantFilter !== 'all' || _platformFilter !== 'all';
+            const period = _view === 'week' ? 'this week' : 'this month';
+            const msg = filtered ? `Nothing matches these filters ${period}.` : _emptyMonthMessage().replace('this month', period);
+            const toReview = !filtered && (!_lockedAssistant || _publishesContent)
+                ? `<button type="button" onclick="window.loadView && window.loadView('review-queue')" class="btn-primary focus-ring tap-target px-3 py-1.5 text-sm font-bold rounded-lg">Go to Review</button>`
+                : '';
+            return `<div role="status" class="mx-4 mt-4 mb-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 flex items-center gap-3 flex-wrap">
+              <p class="text-sm text-gray-700 flex-1 min-w-0">${msg}</p>${toReview}
+           </div>`;
+        })()
+        : '';
+    main.innerHTML = banner + (_loading ? `<div class="opacity-60">${body}</div>` : body);
+    _renderBuckets = null;
 
-    _attachDragDrop();
+    // Month list of the CURRENT month: start at today, not the 1st — once per month shown, so a
+    // background refresh never yanks the scroll back.
+    if (_view === 'list' && _listFilter !== 'upcoming' && !_loading) {
+        const key = `${_anchor.getFullYear()}-${_anchor.getMonth()}`;
+        const todayEl = main.querySelector('[data-cal-today]');
+        if (todayEl && _scrolledToTodayFor !== key) { _scrolledToTodayFor = key; todayEl.scrollIntoView({ block: 'start' }); }
+    }
+}
+
+// ── Per-paint day buckets ─────────────────────────────────────────
+// Every day cell used to re-filter every array (and build a Date per item) — O(days × items) per
+// paint, and a paint happens on every filter click. Each list is now bucketed by day ONCE per paint.
+let _renderBuckets = null;
+function _byDay(name, items, when, keep) {
+    if (!_renderBuckets) _renderBuckets = {};
+    let m = _renderBuckets[name];
+    if (!m) {
+        m = new Map();
+        for (const it of items) {
+            const w = when(it);
+            if (!w || (keep && !keep(it))) continue;
+            const k = _dateKey(new Date(w));
+            if (!m.has(k)) m.set(k, []);
+            m.get(k).push(it);
+        }
+        _renderBuckets[name] = m;
+    }
+    return m;
+}
+function _onDay(name, items, when, keep, date) {
+    return _byDay(name, items, when, keep).get(_dateKey(date)) || [];
 }
 
 // ── Month View ────────────────────────────────────────────────────
 function _renderMonth() {
     const year = _anchor.getFullYear(), month = _anchor.getMonth();
-    const firstDay = new Date(year, month, 1).getDay();
+    const firstDay = _mondayIndex(new Date(year, month, 1));
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const today = new Date(); today.setHours(0,0,0,0);
 
     // Day headers
     let html = `<div class="sticky top-0 z-10 grid grid-cols-7 bg-white border-b border-gray-200">`;
     DAY_NAMES_SHORT.forEach(d => {
-        html += `<div class="py-2 text-center text-xs font-bold text-gray-400 uppercase tracking-wide">${d}</div>`;
+        html += `<div class="py-2 text-center text-xs font-bold text-gray-500 uppercase tracking-wide">${d}</div>`;
     });
     html += `</div><div class="grid grid-cols-7 auto-rows-[minmax(100px,auto)] border-l border-gray-200">`;
 
@@ -686,14 +874,14 @@ function _renderMonth() {
         const isToday = _dateKey(today) === dateKey;
         const dayGroups = _postsOnDate(date);
 
-        const tdClass = `relative border-r border-b border-gray-100 ${isToday ? 'bg-emerald-50/40' : 'bg-white hover:bg-gray-50/60'} transition p-1.5`;
+        const tdClass = `relative border-r border-b border-gray-100 ${isToday ? 'bg-emerald-50' : 'bg-white hover:bg-gray-50/60'} transition p-1.5`;
 
         html += `<div class="${tdClass}" data-date="${dateKey}"
             ondragover="window._calDragOver(event, '${dateKey}')"
             ondragleave="window._calDragLeave(event)"
             ondrop="window._calDrop(event, '${dateKey}')">`;
         html += `<div class="flex items-center justify-end mb-1">
-            <span class="${isToday ? 'w-6 h-6 bg-emerald-600 text-white rounded-full flex items-center justify-center text-xs font-extrabold' : 'text-xs font-bold text-gray-500 px-1'}">${day}</span>
+            <span class="${isToday ? 'w-6 h-6 brand-today rounded-full flex items-center justify-center text-xs font-extrabold' : 'text-xs font-bold text-gray-500 px-1'}"${isToday ? ' aria-label="Today"' : ''}>${day}</span>
         </div>`;
         const dayActs = _activitiesOnDate(date);
         const dayBlogs = _blogPostsOnDate(date);
@@ -702,7 +890,7 @@ function _renderMonth() {
         const dayFollowUps = _followUpsOnDate(date);
         // Pending outreach sits ABOVE the reminders and the completed runs: it is the only entry
         // in the cell that is going to do something on its own.
-        html += `<div class="space-y-1">${dayGroups.map(g => _postChip(g, 'month')).join('')}${dayBlogs.map(b => _blogChip(b, 'month')).join('')}${dayIssues.map(_issueChip).join('')}${dayFollowUps.map(f => _followUpChip(f, 'month')).join('')}${dayRecords.map(r => _recordChip(r, 'month')).join('')}${_datedItemsOnDate(date).map(_datedChip).join('')}${dayActs.map(a => _activityChip(a, 'month')).join('')}</div>`;
+        html += `<div class="space-y-1">${dayGroups.map(g => _postChip(g, 'month')).join('')}${_awaitingOnDate(date).map(g => _awaitingChip(g)).join('')}${dayBlogs.map(b => _blogChip(b, 'month')).join('')}${dayIssues.map(_issueChip).join('')}${dayFollowUps.map(f => _followUpChip(f, 'month')).join('')}${dayRecords.map(r => _recordChip(r, 'month')).join('')}${_datedItemsOnDate(date).map(_datedChip).join('')}${dayActs.map(a => _activityChip(a, 'month')).join('')}</div>`;
         html += `</div>`;
     }
 
@@ -720,8 +908,8 @@ function _renderWeek() {
         const d = new Date(ws); d.setDate(d.getDate() + i);
         const isToday = _dateKey(d) === _dateKey(today);
         html += `<div class="py-3 text-center border-r border-gray-100 last:border-0">
-            <p class="text-xs font-bold text-gray-400 uppercase">${DAY_NAMES_SHORT[d.getDay()]}</p>
-            <p class="${isToday ? 'w-7 h-7 bg-emerald-600 text-white rounded-full flex items-center justify-center text-sm font-extrabold mx-auto mt-0.5' : 'text-lg font-extrabold text-gray-800 mt-0.5'}">${d.getDate()}</p>
+            <p class="text-xs font-bold text-gray-500 uppercase">${_dayShort(d)}</p>
+            <p class="${isToday ? 'w-7 h-7 brand-today rounded-full flex items-center justify-center text-sm font-extrabold mx-auto mt-0.5' : 'text-lg font-extrabold text-gray-800 mt-0.5'}">${d.getDate()}</p>
         </div>`;
     }
     html += `</div>`;
@@ -736,7 +924,7 @@ function _renderWeek() {
             ondragover="window._calDragOver(event, '${dateKey}')"
             ondragleave="window._calDragLeave(event)"
             ondrop="window._calDrop(event, '${dateKey}')">
-            ${dayGroups.map(g => _postChip(g, 'week')).join('')}${_blogPostsOnDate(d).map(b => _blogChip(b, 'week')).join('')}${_newsletterIssuesOnDate(d).map(_issueChip).join('')}${_followUpsOnDate(d).map(f => _followUpChip(f, 'week')).join('')}${_scheduledRecordsOnDate(d).map(r => _recordChip(r, 'week')).join('')}${_datedItemsOnDate(d).map(_datedChip).join('')}${_activitiesOnDate(d).map(a => _activityChip(a, 'week')).join('')}
+            ${dayGroups.map(g => _postChip(g, 'week')).join('')}${_awaitingOnDate(d).map(g => _awaitingChip(g)).join('')}${_blogPostsOnDate(d).map(b => _blogChip(b, 'week')).join('')}${_newsletterIssuesOnDate(d).map(_issueChip).join('')}${_followUpsOnDate(d).map(f => _followUpChip(f, 'week')).join('')}${_scheduledRecordsOnDate(d).map(r => _recordChip(r, 'week')).join('')}${_datedItemsOnDate(d).map(_datedChip).join('')}${_activitiesOnDate(d).map(a => _activityChip(a, 'week')).join('')}
         </div>`;
     }
     html += `</div>`;
@@ -745,29 +933,47 @@ function _renderWeek() {
 
 // ── List View ─────────────────────────────────────────────────────
 function _renderList() {
+    const upcoming = _listFilter === 'upcoming';
     const year = _anchor.getFullYear(), month = _anchor.getMonth();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const dates = upcoming
+        ? _upcomingDays()
+        : Array.from({ length: daysInMonth }, (_, i) => new Date(year, month, i + 1));
 
-    // Filter tabs. There is no "Pending Review" tab: unapproved drafts never reach the calendar, so
-    // it could only ever have rendered an empty list. They live in the Review Queue.
+    // Filter tabs. "Coming up" is a rolling two weeks from today (the phone default); the rest are
+    // the month on screen. Drafts waiting for review show under All and Coming up, outlined, on
+    // the day they're proposed for — approving them in Review is what commits that date.
     const tabs = [
+        { key: 'upcoming',  label: 'Coming up' },
         { key: 'all',       label: 'All' },
         { key: 'scheduled', label: 'Scheduled' },
-        { key: 'published', label: 'Published' },
-        { key: 'attention', label: 'Needs Attention' },
+        { key: 'published', label: 'Posted' },
+        { key: 'attention', label: 'Needs attention' },
     ];
-    let html = `<div class="sticky top-0 z-10 bg-white border-b border-gray-200 px-4 flex gap-1 overflow-x-auto">`;
+    let html = `<div role="tablist" aria-label="Show" class="sticky top-0 z-10 bg-white border-b border-gray-200 px-4 flex gap-1 overflow-x-auto">`;
     tabs.forEach(t => {
         const active = _listFilter === t.key;
-        html += `<button type="button" onclick="window._calSetListFilter('${t.key}')"
-            class="shrink-0 px-3 py-2.5 text-xs font-bold border-b-2 transition ${active ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500 hover:text-gray-700'}">
+        // Roving tabindex + arrow keys (bound once at load), as on Review's tabs: five separate Tab
+        // stops claiming to be a tablist was the opposite of what a screen reader announces.
+        html += `<button type="button" role="tab" aria-selected="${active}" tabindex="${active ? 0 : -1}" aria-controls="cal-main" data-cal-list-tab="${t.key}" onclick="window._calSetListFilter('${t.key}')"
+            class="focus-ring tap-target shrink-0 px-3 py-2.5 text-xs font-bold border-b-2 transition ${active ? 'border-brand text-emerald-800' : 'border-transparent text-gray-500 hover:text-gray-700'}">
             ${t.label}
         </button>`;
     });
     html += `</div>`;
+    // This tab only covers the month on screen; something that failed on the 30th vanished on the
+    // 1st. Review's Needs attention is not tied to dates, so say so and link there.
+    if (_listFilter === 'attention') {
+        html += `<div class="mx-4 mt-3 flex items-center gap-3 flex-wrap rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
+            <p class="text-xs text-gray-600 flex-1 min-w-0">Showing ${_anchor.toLocaleString('en-GB', { month: 'long', year: 'numeric' })}. Review lists everything that needs fixing, from any date.</p>
+            <button type="button" onclick="window._rqInitialStatus='attention'; window.loadView && window.loadView('review-queue')" class="btn-utility focus-ring tap-target px-3 py-1 text-xs font-bold rounded-lg">Open in Review</button>
+        </div>`;
+    }
 
     // Apply filter
+    const attention = (window.PlatformConstants && window.PlatformConstants.needsAttentionStatuses) || ['failed', 'paused', 'paused_credits'];
     const statusSets = {
+        upcoming:  null,
         all:       null,
         // ⚠️ These sets span posts, blog posts AND newsletter issues, which use different words for
         // the same two moments: an issue is 'sending' where a post is 'publishing', and 'sent'
@@ -776,31 +982,31 @@ function _renderList() {
         // kind the paused_credits note below records.
         scheduled: new Set(['approved', 'scheduled', 'publishing', 'sending']),
         published: new Set(['published', 'sent']),
-        // 'paused_credits' belongs here, not under Scheduled: the post is committed but parked on
-        // spent X quota, which is the definition of needing attention. Omitting it left a parked
-        // post reachable only from the All tab — the same silent disappearance that the status
-        // itself caused before it was added to SCHEDULE_ACTIVE_STATUSES.
-        attention: new Set(['failed', 'paused', 'paused_credits']),
+        // The same list Review's "Needs attention" tab uses (post-status.ts NEEDS_ATTENTION_STATUSES):
+        // failed, plus the two parked states. 'paused_credits' is committed but parked on spent X
+        // quota, which is the definition of needing attention. A failed BLOG post lands here too.
+        attention: new Set(attention),
     };
     const allowedStatuses = statusSets[_listFilter];
+    const unfiltered = _listFilter === 'all' || upcoming;
 
     const days = [];
-    for (let d = 1; d <= daysInMonth; d++) {
-        const date = new Date(year, month, d);
+    for (const date of dates) {
         let postGroups = _postsOnDate(date);
         let blogs = _blogPostsOnDate(date);
         let issues = _newsletterIssuesOnDate(date);
+        const awaiting = unfiltered ? _awaitingOnDate(date) : [];
         // Scheduled Data Hub records are approval_status='scheduled', so they only
-        // belong under the "All" and "Scheduled" filters.
-        let records = (_listFilter === 'all' || _listFilter === 'scheduled') ? _scheduledRecordsOnDate(date) : [];
-        // Pending follow-ups belong under "All" and "Scheduled" for the same reason records do —
+        // belong under the unfiltered tabs and "Scheduled".
+        let records = (unfiltered || _listFilter === 'scheduled') ? _scheduledRecordsOnDate(date) : [];
+        // Pending follow-ups belong under the same tabs for the same reason records do —
         // they are future work, never a published or failed thing.
-        let followUps = (_listFilter === 'all' || _listFilter === 'scheduled') ? _followUpsOnDate(date) : [];
-        // Dated items are facts, not states — they belong under "All" only.
-        const dated = _listFilter === 'all' ? _datedItemsOnDate(date) : [];
+        let followUps = (unfiltered || _listFilter === 'scheduled') ? _followUpsOnDate(date) : [];
+        // Dated items are facts, not states — they belong under the unfiltered tabs only.
+        const dated = unfiltered ? _datedItemsOnDate(date) : [];
         if (allowedStatuses) {
             // Filter INSIDE each cross-post group, then drop groups the filter emptied — a post
-            // whose Instagram sibling failed still belongs under "Needs Attention", showing only
+            // whose Instagram sibling failed still belongs under "Needs attention", showing only
             // the sibling that needs it.
             postGroups = postGroups
                 .map(g => {
@@ -811,32 +1017,50 @@ function _renderList() {
             blogs = blogs.filter(p => allowedStatuses.has(p.status));
             issues = issues.filter(i => allowedStatuses.has(i.status));
         }
-        if (postGroups.length > 0 || blogs.length > 0 || issues.length > 0 || records.length > 0 || followUps.length > 0 || dated.length > 0) {
-            days.push({ date, postGroups, blogs, issues, records, followUps, dated });
+        if (postGroups.length || awaiting.length || blogs.length || issues.length || records.length || followUps.length || dated.length) {
+            days.push({ date, postGroups, awaiting, blogs, issues, records, followUps, dated });
         }
     }
 
     if (days.length === 0) {
-        html += `<div class="flex flex-col items-center justify-center py-24 text-gray-400 gap-3">
-            <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-            <p class="text-sm font-medium">${_listFilter === 'all' ? _emptyMonthMessage() : 'Nothing in this filter this month.'}</p>
+        // Never an all-clear while the answer is still coming, or when it didn't come.
+        if (_loading) {
+            html += `<div class="flex items-center justify-center py-24 text-gray-500 text-sm gap-3" role="status">${window.bmsSpinnerHtml ? window.bmsSpinnerHtml(20) : ''}Loading…</div>`;
+            return html;
+        }
+        if (_loadError) {
+            html += `<p class="py-16 text-center text-sm text-gray-600">Nothing could be loaded for these dates.</p>`;
+            return html;
+        }
+        const msg = unfiltered ? (upcoming ? _emptyUpcomingMessage() : _emptyMonthMessage()) : (upcoming ? 'Nothing in this filter in the next two weeks.' : 'Nothing in this filter this month.');
+        // Publishing calendars hand off to Review, where the drafts are — named as the page is named.
+        const toReview = unfiltered && (!_lockedAssistant || _publishesContent)
+            ? `<button type="button" onclick="window.loadView && window.loadView('review-queue')" class="btn-primary focus-ring tap-target mt-1 px-4 py-2 text-sm font-bold rounded-lg">Go to Review</button>`
+            : '';
+        html += `<div class="flex flex-col items-center justify-center py-24 text-gray-500 gap-3 px-4 text-center">
+            <svg class="w-10 h-10 text-gray-400" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+            <p class="text-sm font-medium">${msg}</p>
+            ${toReview}
         </div>`;
         return html;
     }
 
+    const today = new Date(); today.setHours(0,0,0,0);
+    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
     html += `<div class="max-w-3xl mx-auto px-4 py-6 space-y-8">`;
-    days.forEach(({ date, postGroups, blogs, issues, records, followUps, dated }) => {
-        const today = new Date(); today.setHours(0,0,0,0);
+    days.forEach(({ date, postGroups, awaiting, blogs, issues, records, followUps, dated }) => {
         const isToday = _dateKey(date) === _dateKey(today);
-        html += `<div>
+        const isTomorrow = _dateKey(date) === _dateKey(tomorrow);
+        const pill = isToday ? 'Today' : isTomorrow ? 'Tomorrow' : '';
+        html += `<div${isToday ? ' data-cal-today' : ''} style="scroll-margin-top:3.5rem">
             <div class="flex items-center gap-3 mb-3">
-                <span class="text-sm font-extrabold ${isToday ? 'text-emerald-700' : 'text-gray-700'}">
+                <h3 class="text-sm font-extrabold ${isToday ? 'text-emerald-800' : 'text-gray-700'}">
                     ${date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
-                    ${isToday ? '<span class="ml-2 text-[10px] bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-bold">Today</span>' : ''}
-                </span>
+                    ${pill ? `<span class="ml-2 text-[11px] bg-emerald-100 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full font-bold">${pill}</span>` : ''}
+                </h3>
                 <div class="flex-1 h-px bg-gray-200"></div>
             </div>
-            <div class="space-y-2">${postGroups.map(g => _listRow(g)).join('')}${(blogs || []).map(b => _blogChip(b, 'list')).join('')}${(issues || []).map(_issueChip).join('')}${(followUps || []).map(_listFollowUpRow).join('')}${(records || []).map(_listRecordRow).join('')}${(dated || []).map(_datedChip).join('')}</div>
+            <div class="space-y-2">${postGroups.map(g => _listRow(g)).join('')}${awaiting.map(g => _awaitingChip(g, 'list')).join('')}${(blogs || []).map(b => _blogChip(b, 'list')).join('')}${(issues || []).map(_issueChip).join('')}${(followUps || []).map(_listFollowUpRow).join('')}${(records || []).map(_listRecordRow).join('')}${(dated || []).map(_datedChip).join('')}</div>
         </div>`;
     });
     html += `</div>`;
@@ -844,7 +1068,15 @@ function _renderList() {
 }
 
 window._calSetListFilter = function (key) {
+    const wasUpcoming = _listFilter === 'upcoming';
     _listFilter = key;
+    _listFilterChosen = true;
+    // "Coming up" is its own date range; switching into or out of it is a reload, not a re-filter.
+    if (wasUpcoming !== (key === 'upcoming')) {
+        if (wasUpcoming) { _anchor = new Date(); _anchor.setHours(0, 0, 0, 0); }
+        _navRefresh();
+        return;
+    }
     _render();
 };
 
@@ -860,40 +1092,60 @@ function _postChip(group, viewType) {
     const sm = STATUS_META[status] || STATUS_META.draft;
     const posted = status === 'published';
     const publishing = status === 'publishing';
+    const failedPost = status === 'failed';
+    const parked = status === 'paused' || status === 'paused_credits';
     const overdue = members.some(_isOverdue);
+    // Why it failed, in the platform-neutral words the Review card uses (scheduled-posts.ts →
+    // diagnosePostFailure). Read off the failed sibling, not the representative.
+    const failedMember = members.find(m => m.status === 'failed');
+    const failWhy = failedMember && failedMember.failure && failedMember.failure.title ? failedMember.failure.title : '';
     // Posted posts show when they actually went live (publishedAt); everything else
     // shows the scheduled time.
     const stamp = posted && post.publishedAt ? new Date(post.publishedAt) : new Date(post.publishDate);
     const time = stamp.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     const isDraggable = ['approved', 'scheduled'].includes(status);
 
-    const revisedBadge = post.isRevised ? `<span class="text-[9px] font-bold text-violet-600 bg-violet-50 border border-violet-200 px-1 rounded shrink-0">Revised</span>` : '';
+    const revisedBadge = post.isRevised ? `<span class="text-[10px] font-bold text-violet-700 bg-violet-50 border border-violet-200 px-1 rounded shrink-0">Revised</span>` : '';
     // #4: left border = assistant colour; status stays glanceable via the right-hand marker.
     const asstColor = _assistantColor(post.assistantId);
     const asstName = _assistantName(post.assistantId);
 
     // Right-hand status marker + chip tint give instant confirmation of *actual* state:
-    //  • posted     → emerald tint + ✓  ("this really went out")
+    //  • posted     → green tint + ✓  ("this really went out")
+    //  • failed     → red tint + "!"   ("this did NOT go out — open it to see why"). It used to be a
+    //                 white chip with a red dot, which the legend said meant "Overdue".
+    //  • paused     → amber tint + "Paused · reconnect" (or the X limit) — waiting on the owner
     //  • publishing → pulsing blue dot   ("going out right now")
-    //  • overdue    → amber tint + pulsing amber dot ("should have posted, hasn't")
+    //  • overdue    → amber tint + pulsing red dot ("should have posted, hasn't")
     //  • otherwise  → the normal status dot.
     let chipBg = 'bg-white hover:bg-gray-50', timeColor = 'text-gray-700', marker, titleSuffix = '';
     if (posted) {
-        chipBg = 'bg-emerald-50 hover:bg-emerald-100';
-        timeColor = 'text-emerald-700';
-        marker = `<span class="text-emerald-600 text-xs font-extrabold shrink-0" title="Posted ${time}">✓</span>`;
-        titleSuffix = ` · ✓ Posted ${time}`;
+        chipBg = 'bg-green-50';
+        timeColor = 'status-posted';
+        marker = `<span class="status-posted-tick text-xs font-extrabold shrink-0" aria-hidden="true" title="Posted ${time}">✓</span>`;
+        titleSuffix = ` · Posted ${time}`;
+    } else if (failedPost) {
+        chipBg = 'bg-red-50 hover:bg-red-100';
+        timeColor = 'text-red-700';
+        marker = `<span class="w-3.5 h-3.5 rounded-full bg-red-600 text-white text-[10px] font-extrabold leading-none flex items-center justify-center shrink-0" aria-hidden="true">!</span>`;
+        titleSuffix = ` · ${_statusLabel('failed')}${failWhy ? ': ' + failWhy : ''}`;
+    } else if (parked) {
+        chipBg = 'bg-amber-50 hover:bg-amber-100';
+        timeColor = 'text-amber-800';
+        marker = `<span class="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" aria-hidden="true"></span>`;
+        titleSuffix = ` · ${_statusLabel(status)}`;
     } else if (publishing) {
         timeColor = 'text-blue-700';
-        marker = `<span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse shrink-0" title="Publishing now…"></span>`;
-        titleSuffix = ' · Publishing now…';
+        marker = `<span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse shrink-0" aria-hidden="true" title="${_statusLabel('publishing')}"></span>`;
+        titleSuffix = ` · ${_statusLabel('publishing')}`;
     } else if (overdue) {
         chipBg = 'bg-amber-50 hover:bg-amber-100';
         timeColor = 'text-amber-700';
-        marker = `<span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse shrink-0" title="Overdue — not yet posted"></span>`;
-        titleSuffix = ' · ⚠ Overdue — not yet posted';
+        marker = `<span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse shrink-0" aria-hidden="true" title="Overdue — not yet posted"></span>`;
+        titleSuffix = ' · Overdue — not yet posted';
     } else {
-        marker = `<span class="w-1.5 h-1.5 rounded-full ${sm.dot} shrink-0" title="${sm.label}"></span>`;
+        marker = `<span class="w-1.5 h-1.5 rounded-full ${sm.dot} shrink-0" aria-hidden="true" title="${_statusLabel(status)}"></span>`;
+        titleSuffix = ` · ${_statusLabel(status)}`;
     }
 
     // The one-line identity of the chip. A cross-post reads "Multiple" rather than naming one of its
@@ -902,22 +1154,63 @@ function _postChip(group, viewType) {
     const summary = post.caption || platLabel || post.platform || '';
     const platNames = _platformNames(group.platforms);
 
-    return `<div
+    // role="button" + tabindex rather than a <button>: Firefox will not start a drag on a button, and
+    // these chips drag. Enter/Space are handled once, at document level (see _calKeyActivate).
+    return `<div role="button" tabindex="0" data-cal-activate
         onclick="window._calOpenPost(${post.id})"
         onmouseenter="window._calShowPreview(event, ${post.id})"
         onmouseleave="window._calHidePreview()"
         ${isDraggable ? `draggable="true" ondragstart="window._calDragStart(event, ${post.id})"` : ''}
         data-post-id="${post.id}"
-        class="group flex items-center gap-1.5 px-2 py-1 rounded-lg ${chipBg} shadow-sm cursor-pointer transition select-none text-left w-full"
+        class="group focus-ring flex items-center gap-1.5 px-2 py-1 rounded-lg ${chipBg} shadow-sm cursor-pointer transition select-none text-left w-full"
         style="border-left:3px solid ${asstColor}"
-        aria-label="${_escHtml(asstName)} · ${_escHtml(platLabel)}${multi ? ` (${_escHtml(platNames)})` : ''} · ${_escHtml(post.caption || '')}${titleSuffix}">
+        aria-label="${time} · ${_escHtml(asstName)} · ${_escHtml(platLabel)}${multi ? ` (${_escHtml(platNames)})` : ''} · ${_escHtml((post.caption || '').substring(0, 80))}${_escHtml(titleSuffix)}">
         ${multi ? _multiAvatar(16) : _platAvatar(post.platform, 16)}
         <div class="flex-1 min-w-0">
-            <p class="text-[11px] font-bold ${timeColor} truncate">${overdue ? '⚠ ' : ''}${time}${multi ? ` · <span class="font-extrabold">Multiple</span>` : ''}</p>
-            <p class="text-[11px] text-gray-500 truncate leading-tight">${_escHtml(summary.substring(0, 40))}</p>
+            <p class="text-[11px] font-bold ${timeColor} truncate">${overdue ? '<span aria-hidden="true">⚠ </span>' : ''}${time}${multi ? ` · <span class="font-extrabold">Multiple</span>` : ''}</p>
+            <p class="text-[11px] ${failedPost && failWhy ? 'text-red-700' : 'text-gray-500'} truncate leading-tight">${_escHtml((failedPost && failWhy ? failWhy : summary).substring(0, 40))}</p>
         </div>
         ${revisedBadge}
         ${marker}
+    </div>`;
+}
+
+// ── Waiting-for-review chip ───────────────────────────────────────
+// A draft on the slot it is PROPOSED for. Dashed and never draggable: the date isn't committed until
+// the draft is approved, so it can't be "moved" here — opening it is the action, and the editor's
+// Approve commits the slot. Lets the owner see "Thursday has a post if I approve it".
+function _awaitingChip(group, viewType) {
+    const post = group.rep;
+    const multi = group.members.length > 1;
+    const time = new Date(post.publishDate).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const label = _statusLabel('pending_approval');
+    const platLabel = multi ? `Multiple (${group.members.length})` : ((PLATFORM_META[post.platform] || {}).label || post.platform || '');
+    const caption = (post.caption || '').trim();
+    if (viewType === 'list') {
+        return `<div role="button" tabindex="0" data-cal-activate onclick="window._calOpenPost(${post.id})"
+            class="focus-ring flex items-start gap-4 bg-white border-2 border-dashed border-amber-300 rounded-xl px-5 py-4 cursor-pointer transition hover:bg-amber-50"
+            aria-label="${time} · ${_escHtml(platLabel)} · ${label}: ${_escHtml(caption.substring(0, 80))}">
+            ${multi ? _multiAvatar(36) : _platAvatar(post.platform, 36)}
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="text-sm font-extrabold text-gray-900">${_escHtml(multi ? 'Multiple' : platLabel)}</span>
+                    <span class="text-xs font-bold text-gray-500">${time}</span>
+                </div>
+                <p class="text-sm text-gray-600 truncate">${_escHtml(caption.substring(0, 120) || '(No caption)')}</p>
+                <p class="text-xs text-gray-600 mt-1">Not booked yet — open it to approve it for this time.</p>
+            </div>
+            <span class="text-xs font-bold px-2.5 py-1 rounded-full border bg-amber-50 text-amber-800 border-amber-300 shrink-0 mt-1">${label}</span>
+        </div>`;
+    }
+    return `<div role="button" tabindex="0" data-cal-activate
+        onclick="window._calOpenPost(${post.id})"
+        class="focus-ring flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/70 border border-dashed border-amber-400 cursor-pointer transition select-none text-left w-full"
+        aria-label="${time} · ${_escHtml(platLabel)} · ${label}, not booked yet: ${_escHtml(caption.substring(0, 80))}">
+        ${multi ? _multiAvatar(16) : _platAvatar(post.platform, 16)}
+        <div class="flex-1 min-w-0">
+            <p class="text-[11px] font-bold text-amber-800 truncate">${time} · ${label}</p>
+            <p class="text-[11px] text-gray-500 truncate leading-tight">${_escHtml((caption || platLabel).substring(0, 40))}</p>
+        </div>
     </div>`;
 }
 
@@ -1048,8 +1341,8 @@ function _activityChip(act, viewType) {
         title="${_escHtml(name)} — task completed at ${time}">
         <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background:${color}"></span>
         <div class="flex-1 min-w-0">
-            <p class="text-[11px] font-semibold text-gray-600 truncate">✓ ${_escHtml(name)}</p>
-            ${viewType === 'week' ? `<p class="text-[10px] text-gray-400 truncate leading-tight">${time} · task done</p>` : ''}
+            <p class="text-[11px] font-semibold text-gray-600 truncate"><span aria-hidden="true">✓ </span>${_escHtml(name)}<span class="sr-only"> finished a task at ${time}</span></p>
+            ${viewType === 'week' ? `<p class="text-[11px] text-gray-500 truncate leading-tight">${time} · task done</p>` : ''}
         </div>
     </div>`;
 }
@@ -1058,30 +1351,34 @@ function _activityChip(act, viewType) {
 // so it reads "🗓 scheduled" rather than the activity "✓ done" chip.
 // What an empty month should say depends on what this calendar can hold. "Approve a draft in the
 // Review Queue" was shown to every assistant, including ones that draft nothing.
+function _emptyUpcomingMessage() {
+    if (!_lockedAssistant || _publishesContent) return 'Nothing going out in the next two weeks. Approve a draft in Review to put it on the calendar.';
+    return 'Nothing in the next two weeks.';
+}
 function _emptyMonthMessage() {
-    if (!_lockedAssistant || _publishesContent) return 'Nothing scheduled this month. Approve a draft in the Review Queue to put it on the calendar.';
+    if (!_lockedAssistant || _publishesContent) return 'Nothing scheduled this month. Approve a draft in Review to put it on the calendar.';
     if (_datedSource === 'briefs') return 'Nothing this month. Briefs with a due date appear here on that date.';
     if (_datedSource === 'campaigns') return 'Nothing this month. Each campaign appears on the day it starts and the day it ends.';
     const role = _roleKey || '';
     if (role === 'accounts_receivable_clerk') return 'Nothing this month. Invoices appear on their due date once your assistant has them.';
     if (role === 'meeting_note_taker') return 'Nothing this month. Meetings appear on their date once your assistant has taken notes.';
     if (_leadOutreach) return 'Nothing this month. Follow-up emails and chase reminders appear here once leads are contacted.';
-    return 'Nothing this month. Anything you schedule from the Review Queue appears here, with completed work.';
+    return 'Nothing this month. Anything you schedule from Review appears here, with completed work.';
 }
 
 function _datedItemsOnDate(date) {
-    const key = _dateKey(date);
-    return _datedItems.filter((i) => _dateKey(i.at) === key && _matchesAssistantFilter(i._assistantId));
+    return _onDay('dated', _datedItems, i => i.at, i => _matchesAssistantFilter(i._assistantId), date);
 }
 // Read-only: the date is a fact about the record (an invoice's due date, a meeting's time), so it is
 // not draggable. Clicking opens the tab where the item lives.
 function _datedChip(it) {
     const meta = DATED_KIND_META[it.kind] || { icon: '•', label: '' };
     const note = it.derived ? ' — worked out from how overdue it was when recorded' : (it.done ? ' — done' : '');
-    return `<div onclick='window._calOpenDated(${JSON.stringify(String(it.key))}, ${Number(it._assistantId) || "null"})'
-        class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-gray-50 hover:bg-gray-100 shadow-sm cursor-pointer text-left w-full"
-        style="border-left:3px solid ${_lockedAssistant ? '#6b7280' : _assistantColor(it._assistantId)}" title="${_escHtml(meta.label + ': ' + (it.title || '') + note)}">
-        <span class="text-xs shrink-0">${meta.icon}</span>
+    return `<div role="button" tabindex="0" data-cal-activate onclick='window._calOpenDated(${JSON.stringify(String(it.key))}, ${Number(it._assistantId) || "null"})'
+        class="focus-ring flex items-center gap-1.5 px-2 py-1 rounded-lg bg-gray-50 hover:bg-gray-100 shadow-sm cursor-pointer text-left w-full"
+        style="border-left:3px solid ${_lockedAssistant ? '#6b7280' : _assistantColor(it._assistantId)}" title="${_escHtml(meta.label + ': ' + (it.title || '') + note)}"
+        aria-label="${_escHtml(meta.label + ': ' + (it.title || '') + note)}">
+        <span class="text-xs shrink-0" aria-hidden="true">${meta.icon}</span>
         <div class="flex-1 min-w-0">
             <p class="text-[11px] font-bold text-gray-700 truncate">${_escHtml(meta.label)}${it.done ? ' ✓' : ''}</p>
             <p class="text-[11px] text-gray-500 truncate leading-tight">${_escHtml(String(it.title || '').substring(0, 40))}</p>
@@ -1100,8 +1397,7 @@ window._calOpenDated = function (key, assistantId) {
 };
 
 function _scheduledRecordsOnDate(date) {
-    const key = _dateKey(date);
-    return _scheduledRecords.filter(r => r.scheduledFor && _dateKey(new Date(r.scheduledFor)) === key && _matchesAssistantFilter(r._assistantId));
+    return _onDay('records', _scheduledRecords, r => r.scheduledFor, r => _matchesAssistantFilter(r._assistantId), date);
 }
 // Clicking opens the item's detail (LeadCalendarModal); dragging moves its due date. Both were
 // added in the same change and for the same reason: this chip was previously inert with a comment
@@ -1114,18 +1410,19 @@ function _recordChip(rec, viewType) {
     // (lead-generation.ts stamps it after a send). Every other records role uses the generic word,
     // because their scheduled_for means whatever their own flow put there.
     const kindWord = _leadOutreach ? 'chase reminder' : 'scheduled';
-    return `<div
+    return `<div role="button" tabindex="0" data-cal-activate
         onclick="window._calOpenRecord(${rec.id})"
         draggable="true"
         ondragstart="window._calDragStart(event, { kind: 'record', id: ${rec.id} })"
         data-cal-record-id="${rec.id}"
-        class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-yellow-50 hover:bg-yellow-100 cursor-pointer transition text-left w-full select-none"
+        class="focus-ring flex items-center gap-1.5 px-2 py-1 rounded-lg bg-yellow-50 hover:bg-yellow-100 cursor-pointer transition text-left w-full select-none"
         style="border-left:3px solid ${color}"
-        title="${_escHtml(rec.title || '')} — ${kindWord} ${time} · ${_escHtml(rec.recordType || '')}">
-        <span class="w-1.5 h-1.5 rounded-full shrink-0 bg-yellow-500"></span>
+        title="${_escHtml(rec.title || '')} — ${kindWord} ${time} · ${_escHtml(rec.recordType || '')}"
+        aria-label="${_escHtml(rec.title || '')} — ${kindWord} ${time}">
+        <span class="w-1.5 h-1.5 rounded-full shrink-0 bg-yellow-500" aria-hidden="true"></span>
         <div class="flex-1 min-w-0">
-            <p class="text-[11px] font-semibold text-gray-600 truncate">🗓 ${_escHtml(rec.title || rec.recordType || 'Scheduled')}</p>
-            ${viewType === 'week' ? `<p class="text-[10px] text-gray-400 truncate leading-tight">${time} · ${kindWord}</p>` : ''}
+            <p class="text-[11px] font-semibold text-gray-600 truncate"><span aria-hidden="true">🗓 </span>${_escHtml(rec.title || rec.recordType || 'Scheduled')}</p>
+            ${viewType === 'week' ? `<p class="text-[11px] text-gray-500 truncate leading-tight">${time} · ${kindWord}</p>` : ''}
         </div>
     </div>`;
 }
@@ -1135,8 +1432,7 @@ function _recordChip(rec, viewType) {
 // the yellow 🗓 reminder beside it: a user who cannot tell these two apart at a glance cannot tell
 // "you owe this lead a call" from "we are emailing this stranger on Thursday".
 function _followUpsOnDate(date) {
-    const key = _dateKey(date);
-    return _followUps.filter(f => f.nextSendAt && _dateKey(new Date(f.nextSendAt)) === key && _matchesAssistantFilter(f._assistantId));
+    return _onDay('followups', _followUps, f => f.nextSendAt, f => _matchesAssistantFilter(f._assistantId), date);
 }
 
 // The worker refuses to send into a thread that is no longer 'open' — Phase 2a's reply detection
@@ -1157,16 +1453,16 @@ function _followUpChip(f, viewType) {
     const title = blocked
         ? `${f.title || ''} — ${label} due ${time}, on hold: they have replied`
         : `${f.title || ''} — ${label} sends ${time}`;
-    return `<div
+    return `<div role="button" tabindex="0" data-cal-activate
         onclick="window._calOpenFollowUp(${f.threadId})"
         ${blocked || !_lockedAssistant ? '' : `draggable="true" ondragstart="window._calDragStart(event, { kind: 'followup', id: ${f.threadId} })"`}
         data-cal-followup-thread="${f.threadId}"
-        class="flex items-center gap-1.5 px-2 py-1 rounded-lg ${tone.bg} cursor-pointer transition text-left w-full select-none"
+        class="focus-ring flex items-center gap-1.5 px-2 py-1 rounded-lg ${tone.bg} cursor-pointer transition text-left w-full select-none"
         style="border-left:3px solid ${tone.edge}"
-        title="${_escHtml(title)}">
-        <span class="w-1.5 h-1.5 rounded-full shrink-0 ${tone.dot}"></span>
+        title="${_escHtml(title)}" aria-label="${_escHtml(title)}">
+        <span class="w-1.5 h-1.5 rounded-full shrink-0 ${tone.dot}" aria-hidden="true"></span>
         <div class="flex-1 min-w-0">
-            <p class="text-[11px] font-bold ${tone.text} truncate">✉ ${time}${blocked ? ' · on hold' : ''}</p>
+            <p class="text-[11px] font-bold ${tone.text} truncate"><span aria-hidden="true">✉ </span>${time}${blocked ? ' · on hold' : ''}</p>
             <p class="text-[11px] text-gray-500 truncate leading-tight">${_escHtml((f.title || 'Lead').substring(0, 40))}</p>
         </div>
     </div>`;
@@ -1180,16 +1476,18 @@ function _listFollowUpRow(f) {
     const shell = blocked
         ? 'bg-gray-50 border-gray-200'
         : 'bg-indigo-50 border-indigo-200 hover:border-indigo-300';
-    return `<div onclick="window._calOpenFollowUp(${f.threadId})"
-        class="flex items-start gap-4 ${shell} border rounded-xl px-5 py-4 cursor-pointer transition"
+    const movable = !blocked && _lockedAssistant;
+    return `<div role="button" tabindex="0" data-cal-activate onclick="window._calOpenFollowUp(${f.threadId})"
+        class="focus-ring flex items-start gap-4 ${shell} border rounded-xl px-5 py-4 cursor-pointer transition"
         style="border-left:3px solid ${blocked ? '#9ca3af' : '#6366f1'}">
-        <span class="w-9 h-9 rounded-full ${blocked ? 'bg-gray-100' : 'bg-indigo-100'} flex items-center justify-center text-base shrink-0">✉</span>
+        <span class="w-9 h-9 rounded-full ${blocked ? 'bg-gray-100' : 'bg-indigo-100'} flex items-center justify-center text-base shrink-0" aria-hidden="true">✉</span>
         <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-1">
                 <span class="text-sm font-extrabold text-gray-900 truncate">${_escHtml(f.title || 'Lead')}</span>
-                <span class="text-xs font-bold text-gray-400">${time}</span>
+                <span class="text-xs font-bold text-gray-500">${time}</span>
             </div>
             <p class="text-xs text-gray-500">Follow-up #${f.nextStep}${f.contactEmail ? ` · ${_escHtml(f.contactEmail)}` : ''}</p>
+            ${movable ? _moveButton('followup', f.threadId) : ''}
         </div>
         <span class="text-xs font-bold px-2.5 py-1 rounded-full border shrink-0 mt-1 ${
             blocked ? 'bg-gray-100 text-gray-500 border-gray-300' : 'bg-indigo-100 text-indigo-700 border-indigo-300'
@@ -1203,17 +1501,18 @@ function _listFollowUpRow(f) {
 function _listRecordRow(rec) {
     const color = _assistantColor(rec._assistantId ?? (_assistantFilter === 'all' ? null : Number(_assistantFilter)));
     const time = new Date(rec.scheduledFor).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    return `<div
+    return `<div role="button" tabindex="0" data-cal-activate
         onclick="window._calOpenRecord(${rec.id})"
-        class="flex items-start gap-4 bg-yellow-50 border border-yellow-200 hover:border-yellow-300 rounded-xl px-5 py-4 cursor-pointer transition"
+        class="focus-ring flex items-start gap-4 bg-yellow-50 border border-yellow-200 hover:border-yellow-300 rounded-xl px-5 py-4 cursor-pointer transition"
         style="border-left:3px solid ${color}">
-        <span class="w-9 h-9 rounded-full bg-yellow-100 flex items-center justify-center text-base shrink-0">🗓</span>
+        <span class="w-9 h-9 rounded-full bg-yellow-100 flex items-center justify-center text-base shrink-0" aria-hidden="true">🗓</span>
         <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-1">
                 <span class="text-sm font-extrabold text-gray-900 truncate">${_escHtml(rec.title || rec.recordType || 'Scheduled')}</span>
-                <span class="text-xs font-bold text-gray-400">${time}</span>
+                <span class="text-xs font-bold text-gray-500">${time}</span>
             </div>
             ${rec.recordType ? `<p class="text-xs text-gray-500 capitalize">${_escHtml(rec.recordType)}</p>` : ''}
+            ${_moveButton('record', rec.id)}
         </div>
         <span class="text-xs font-bold px-2.5 py-1 rounded-full border bg-yellow-100 text-yellow-700 border-yellow-300 shrink-0 mt-1">${_leadOutreach ? 'Chase reminder' : 'Scheduled'}</span>
     </div>`;
@@ -1236,19 +1535,24 @@ function _listRow(group) {
     // The scheduled time is the headline; for posted/overdue we add a second line
     // confirming what actually happened.
     const postedAt = posted && post.publishedAt ? new Date(post.publishedAt) : null;
+    const failedMember = members.find(m => m.status === 'failed');
+    const failWhy = failedMember && failedMember.failure && failedMember.failure.title ? failedMember.failure.title : '';
     const statusLine = posted
-        ? `<p class="text-xs font-bold text-emerald-600 mt-1">✓ Posted${postedAt ? ' ' + postedAt.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</p>`
+        ? `<p class="text-xs font-bold status-posted mt-1"><span aria-hidden="true">✓ </span>Posted${postedAt ? ' ' + postedAt.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</p>`
+        : failedMember
+        ? `<p class="text-xs font-bold text-red-700 mt-1">${_escHtml(failWhy || 'It did not go out.')} Open it to see what to do.</p>`
         : overdue
-        ? `<p class="text-xs font-bold text-amber-700 mt-1">⚠ Overdue — scheduled time passed, not yet posted</p>`
+        ? `<p class="text-xs font-bold text-amber-800 mt-1"><span aria-hidden="true">⚠ </span>Overdue — scheduled time passed, not yet posted</p>`
         : '';
 
     // The right-hand badge: posted gets a check, overdue is recoloured so a past
     // date never reads as a calm "Scheduled".
     const badge = posted
-        ? `<span class="text-xs font-bold px-2.5 py-1 rounded-full border bg-emerald-100 text-emerald-700 border-emerald-300 shrink-0 mt-1">✓ Posted</span>`
+        ? `<span class="text-xs font-bold px-2.5 py-1 rounded-full border bg-green-100 status-posted border-green-300 shrink-0 mt-1">${_statusLabel('published')}</span>`
         : overdue
-        ? `<span class="text-xs font-bold px-2.5 py-1 rounded-full border bg-amber-100 text-amber-700 border-amber-300 shrink-0 mt-1">Overdue</span>`
-        : `<span class="text-xs font-bold px-2.5 py-1 rounded-full border ${sm.badge} shrink-0 mt-1">${sm.label}</span>`;
+        ? `<span class="text-xs font-bold px-2.5 py-1 rounded-full border bg-amber-100 text-amber-800 border-amber-300 shrink-0 mt-1">Overdue</span>`
+        : `<span class="text-xs font-bold px-2.5 py-1 rounded-full border ${sm.badge} shrink-0 mt-1">${_statusLabel(status)}</span>`;
+    const movable = ['approved', 'scheduled'].includes(status);
 
     // Grouped rows name themselves "Multiple" and then SHOW the platforms — the list view has the
     // width the month chip doesn't, so the user gets the answer without opening anything.
@@ -1258,22 +1562,31 @@ function _listRow(group) {
            </span>`
         : '';
 
-    return `<div onclick="window._calOpenPost(${post.id})"
-        class="flex items-start gap-4 bg-white border border-gray-200 rounded-xl px-5 py-4 hover:border-emerald-300 hover:shadow-sm cursor-pointer transition">
+    return `<div role="button" tabindex="0" data-cal-activate onclick="window._calOpenPost(${post.id})"
+        class="focus-ring flex items-start gap-4 ${failedMember ? 'bg-red-50 border-red-200' : 'bg-white border-gray-200'} border rounded-xl px-5 py-4 hover:border-emerald-200 hover:shadow-sm cursor-pointer transition">
         ${multi ? _multiAvatar(36) : _platAvatar(post.platform, 36)}
         <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-1">
+            <div class="flex items-center gap-2 mb-1 flex-wrap">
                 <span class="text-sm font-extrabold text-gray-900">${multi ? 'Multiple' : plat.label}</span>
                 ${platStrip}
-                <span class="text-xs font-bold text-gray-400">${time}</span>
+                <span class="text-xs font-bold text-gray-500">${time}</span>
                 ${post.isAutonomous ? `<span class="text-[10px] font-bold text-violet-700 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded-full">Created by ${_escHtml(post.assistantId != null ? _assistantName(post.assistantId) : 'your assistant')}</span>` : ''}
             </div>
             <p class="text-sm text-gray-600 truncate">${_escHtml((post.caption || '').substring(0, 120) || '(No caption)')}</p>
             ${post.hashtags ? `<p class="text-xs text-blue-500 mt-1 truncate">${_escHtml(post.hashtags.substring(0, 80))}</p>` : ''}
             ${statusLine}
+            ${movable ? _moveButton('post', post.id) : ''}
         </div>
         ${badge}
     </div>`;
+}
+
+// "Move…" — the way to reschedule without dragging. A drag needs a mouse: it does nothing on a
+// phone (which opens on the List view, where there are no drop targets at all) or from a keyboard.
+// Same rules and endpoints as a drop; the date/time dialog is its own confirmation.
+function _moveButton(kind, id) {
+    return `<button type="button" onclick="event.stopPropagation(); window._calMove('${kind}', ${Number(id)})"
+        class="btn-secondary focus-ring tap-target mt-2 px-2.5 py-1 text-xs font-bold rounded-lg border">Move…</button>`;
 }
 
 // ── Open Format panel ────────────────────────────────────────
@@ -1344,13 +1657,17 @@ window._calRefreshAfterEdit = async function () {
 
 // ── Drag & Drop rescheduling ──────────────────────────────────────
 // FOUR kinds of thing are draggable on this grid and they move four different columns:
-//   post     → scheduled_posts.publish_date   (confirm modal, then PATCH per cross-post sibling)
+//   post     → scheduled_posts.publish_date   (confirm dialog, then PATCH per cross-post sibling; past refused)
 //   record   → assistant_records.scheduled_for (a chase reminder / due date — moves immediately)
 //   followup → sequence_enrolments.next_send_at (a real send — moves immediately, past refused)
 //   blog     → blog_posts.publish_date        (moves immediately, past refused)
 //
+// Each kind has one _move* function that takes the NEW INSTANT. A drop works out that instant from
+// the target day (keeping the time of day) and calls it; "Move…" (_calMove) asks for a date and time
+// and calls the same function — so both routes share one set of past-date rules and messages.
+//
 // `_dragItem` is the general form; `_dragPostId` is kept as-is because the post path already reads
-// it in several places and rewriting that flow was not what this change is for.
+// it in several places.
 let _dragItem = null;
 
 // A drag whose source is a post is called with a bare id (the post chips predate this and pass
@@ -1361,7 +1678,7 @@ window._calDragStart = function (e, arg) {
     _dragItem = item;
     _dragPostId = item.kind === 'post' ? item.id : null;
     e.dataTransfer.effectAllowed = 'move';
-    e.target.classList.add('opacity-50');
+    // Deferred so the browser snapshots the drag image at full opacity first.
     setTimeout(() => e.target.classList.add('opacity-50'), 0);
 };
 
@@ -1369,11 +1686,11 @@ window._calDragOver = function (e, dateKey) {
     e.preventDefault();
     _dragTargetDate = dateKey;
     const cell = e.currentTarget;
-    cell.classList.add('ring-2', 'ring-emerald-400', 'ring-inset');
+    cell.classList.add('drop-target');
 };
 
 window._calDragLeave = function (e) {
-    e.currentTarget.classList.remove('ring-2', 'ring-emerald-400', 'ring-inset');
+    e.currentTarget.classList.remove('drop-target');
 };
 
 // Is this date key strictly before today? Compared at DAY granularity, deliberately: a chip
@@ -1400,7 +1717,7 @@ function _dayLabel(date) {
 
 window._calDrop = function (e, dateKey) {
     e.preventDefault();
-    e.currentTarget.classList.remove('ring-2', 'ring-emerald-400', 'ring-inset');
+    e.currentTarget.classList.remove('drop-target');
 
     const item = _dragItem;
     if (item && item.kind === 'followup') { _dragItem = null; void _dropFollowUp(item.id, dateKey); return; }
@@ -1409,64 +1726,104 @@ window._calDrop = function (e, dateKey) {
     _dragItem = null;
 
     if (!_dragPostId) return;
-
     const post = _posts.find(p => p.id === _dragPostId);
-    if (!post) { _dragPostId = null; return; }
+    _dragPostId = null;
+    if (!post) return;
+    if (_dateKey(new Date(post.publishDate)) === dateKey) return; // same day
+    void _movePost(post, _dropTarget(dateKey, post.publishDate), { confirm: true });
+};
 
-    const [y, m, d] = dateKey.split('-').map(Number);
-    const original = new Date(post.publishDate);
-    const newDate = new Date(y, m - 1, d, original.getHours(), original.getMinutes());
+// Can't go back in time. A committed post with a past time is the publisher's "overdue" case and
+// would go out on its next run — i.e. straight away, as the silent result of a mis-aimed drag. Blog
+// posts, follow-ups and reminders already refused this; social posts were the one kind that didn't.
+// Compared as INSTANTS, like the blog path: today is fine if the post's time hasn't gone by. The
+// server refuses the same (scheduled-posts.ts PATCH, code PAST_DATE).
+async function _refusePast(newDate, what, originalIso, howToNow) {
+    if (newDate.getTime() > Date.now()) return false;
+    const original = new Date(originalIso);
+    await (window.alertModal
+        ? window.alertModal(
+            `That time has already passed. <strong>${_escHtml(what)}</strong> stays where it was, on `
+            + `${_escHtml(_dayLabel(original))} at ${_escHtml(original.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }))}.`
+            + (howToNow ? `<br><br>${howToNow}` : ''),
+            { title: `Can't move it to ${_dayLabel(newDate)}` })
+        : Promise.resolve(window.showToast?.('That time has already passed.', { icon: '⚠️' })));
+    _render();   // snap the chip back
+    return true;
+}
 
-    if (_dateKey(original) === dateKey) { _dragPostId = null; return; } // same day
+async function _movePost(post, newDate, { confirm = false } = {}) {
+    const what = (post.caption || '').trim().substring(0, 40) || 'This post';
+    if (await _refusePast(newDate, what, post.publishDate, 'To post it now, open it and choose <strong>Post now</strong>.')) return;
 
-    const oldLabel = original.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-    const newLabel = newDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-
-    // The chip is one logical post, so the drag moves every platform it goes to — leaving siblings
+    // The chip is one logical post, so a move takes every platform it goes to — leaving siblings
     // behind would silently split a cross-post across two dates.
     const siblings = _siblingsOf(post);
     const scope = siblings.length > 1 ? ` on ${_platformNames(siblings.map(s => s.platform))}` : '';
+    const newLabel = `${_dayLabel(newDate)} at ${newDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
 
-    const msgEl = document.getElementById('reschedule-msg');
-    if (msgEl) msgEl.textContent = `Move "${post.caption?.substring(0,40) || 'this post'}"${scope} from ${oldLabel} to ${newLabel}?`;
-
-    _pendingReschedule = { postIds: siblings.map(s => s.id), newDate };
-    document.getElementById('modal-reschedule')?.classList.remove('hidden');
-    _dragPostId = null;
-};
-
-window._calCancelReschedule = function () {
-    _pendingReschedule = null;
-    document.getElementById('modal-reschedule')?.classList.add('hidden');
-    _render(); // restore opacity
-};
-
-window._calConfirmReschedule = async function () {
-    if (!_pendingReschedule) return;
-    const { postIds, newDate } = _pendingReschedule;
-    document.getElementById('modal-reschedule')?.classList.add('hidden');
-    _pendingReschedule = null;
+    if (confirm) {
+        const ok = await window.confirmModal(
+            `Move <strong>${_escHtml(what)}</strong>${_escHtml(scope)} from ${_escHtml(_dayLabel(new Date(post.publishDate)))} to ${_escHtml(newLabel)}?`,
+            { title: 'Reschedule post?', confirmLabel: 'Reschedule', tone: 'primary' });
+        if (!ok) { _render(); return; }
+    }
 
     try {
         // Every sibling of the group moves to the same instant — that shared slot is what makes
         // them one post.
-        const results = await Promise.all(postIds.map(id =>
-            fetch(`/.netlify/functions/scheduled-posts?id=${id}`, {
+        const results = await Promise.all(siblings.map(sib =>
+            fetch(`/.netlify/functions/scheduled-posts?id=${sib.id}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ publishDate: newDate.toISOString() }),
             })
         ));
-        const failed = results.filter(r => !r.ok).length;
-        if (failed) {
-            window.showToast?.(failed === results.length
-                ? 'Reschedule failed. Please try again.'
-                : `Rescheduled, but ${failed} of ${results.length} platforms could not be moved. Please check the calendar.`,
+        const failed = results.filter(r => !r.ok);
+        if (failed.length) {
+            const first = await failed[0].json().catch(() => ({}));
+            window.showToast?.(failed.length === results.length
+                ? (first.error || 'Reschedule failed. Please try again.')
+                : `Rescheduled, but ${failed.length} of ${results.length} platforms could not be moved. Please check the calendar.`,
                 { icon: '⚠️' });
+        } else {
+            window.showToast?.(`Moved to ${newLabel}.`, { icon: '📅' });
         }
-        // Reload range to include new date if needed
-        await _loadAndRender();
     } catch (e) { window.showToast?.('Reschedule failed. Please try again.', { icon: '⚠️' }); }
+    await _loadAndRender();
+}
+
+// ── "Move…" — reschedule without a drag ──────────────────────────────────────
+// A local date-time string for <input type="datetime-local"> (it takes no timezone).
+function _localInputValue(d) {
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+window._calMove = async function (kind, id) {
+    window._calHidePreview?.();
+    const find = {
+        post:     () => { const p = _posts.find(x => x.id === id); return p && { at: p.publishDate, name: (p.caption || '').trim().substring(0, 60) || 'this post' }; },
+        blog:     () => { const p = _blogPosts.find(x => x.id === id); return p && { at: p.publishDate, name: p.title || 'this article' }; },
+        record:   () => { const r = _scheduledRecords.find(x => x.id === id); return r && { at: r.scheduledFor, name: r.title || 'this item' }; },
+        followup: () => { const f = _followUps.find(x => x.threadId === id); return f && { at: f.nextSendAt, name: `the follow-up to ${f.title || 'this lead'}` }; },
+    }[kind];
+    const item = find && find();
+    if (!item || !item.at || typeof window.promptModal !== 'function') return;
+
+    const value = await window.promptModal(`New date and time for <strong>${_escHtml(item.name)}</strong>.`, {
+        title: 'Move to…', confirmLabel: 'Move', inputType: 'datetime-local', inputLabel: 'New date and time',
+        value: _localInputValue(new Date(item.at)), min: _localInputValue(new Date()), required: true,
+    });
+    if (value == null) return;
+    const newDate = new Date(value);   // "YYYY-MM-DDTHH:MM" parses as LOCAL time
+    if (Number.isNaN(newDate.getTime())) { window.showToast?.('That is not a date and time.', { icon: '⚠️' }); return; }
+    if (newDate.getTime() === new Date(item.at).getTime()) return;
+
+    if (kind === 'post') return _movePost(_posts.find(x => x.id === id), newDate);
+    if (kind === 'blog') return _moveBlog(id, newDate);
+    if (kind === 'record') return _moveRecord(id, newDate);
+    if (kind === 'followup') return _moveFollowUp(id, newDate);
 };
 
 // ── Dropping a pending follow-up ─────────────────────────────────────────────
@@ -1495,6 +1852,14 @@ async function _dropFollowUp(threadId, dateKey) {
 
     const newDate = _dropTarget(dateKey, f.nextSendAt);
     if (_dateKey(new Date(f.nextSendAt)) === dateKey) return;   // same day, nothing to do
+    await _moveFollowUp(threadId, newDate);
+}
+
+async function _moveFollowUp(threadId, newDate) {
+    const f = _followUps.find(x => x.threadId === threadId);
+    if (!f) return;
+    // "Move…" can pick a time earlier today, which the day-level check above can't see.
+    if (await _refusePast(newDate, `The follow-up to ${f.title || 'this lead'}`, f.nextSendAt, '')) return;
 
     try {
         const res = await fetch('/.netlify/functions/lead-threads', {
@@ -1540,6 +1905,18 @@ async function _dropRecord(recordId, dateKey) {
 
     const newDate = _dropTarget(dateKey, rec.scheduledFor);
     if (_dateKey(new Date(rec.scheduledFor)) === dateKey) return;
+    await _moveRecord(recordId, newDate);
+}
+
+async function _moveRecord(recordId, newDate) {
+    const rec = _scheduledRecords.find(r => r.id === recordId);
+    if (!rec) return;
+    // Same rule as the drop, at day level: a reminder set for earlier today is still today's.
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    if (newDate < today) {
+        await _refusePast(newDate, rec.title || 'This item', rec.scheduledFor, '');
+        return;
+    }
 
     try {
         // Date only — no approvalStatus. See the assistant-records PATCH branch for why this is a
@@ -1579,7 +1956,13 @@ async function _dropBlog(blogId, dateKey) {
     const original = new Date(post.publishDate);
     if (_dateKey(original) === dateKey) return;   // same day — nothing to do
 
-    const newDate = _dropTarget(dateKey, post.publishDate);
+    await _moveBlog(blogId, _dropTarget(dateKey, post.publishDate));
+}
+
+async function _moveBlog(blogId, newDate) {
+    const post = _blogPosts.find(p => p.id === blogId);
+    if (!post || !post.publishDate) return;
+    const original = new Date(post.publishDate);
     if (newDate.getTime() <= Date.now()) {
         const title = post.title || 'This post';
         await (window.alertModal
@@ -1610,14 +1993,36 @@ async function _dropBlog(blogId, dateKey) {
     await _loadAndRender();
 }
 
-function _attachDragDrop() {
-    // After DOM render, add dragend listeners to chips to clean up opacity. Covers all four
-    // draggable kinds — a record, follow-up or blog chip left at 50% after a cancelled drag looks
-    // exactly like one that is mid-save.
-    document.querySelectorAll('[data-post-id], [data-cal-record-id], [data-cal-followup-thread], [data-cal-blog-id]').forEach(el => {
-        el.addEventListener('dragend', () => {
-            el.classList.remove('opacity-50');
-        });
+// One delegated listener each, bound once at load — never from a render path (re-binding on every
+// paint stacked a listener per chip per repaint).
+//  • dragend: a cancelled drag leaves its chip at 50% opacity, which looks exactly like mid-save.
+//  • Enter / Space on a chip opens it, as a click would: the chips are role="button" divs (so they
+//    can still be dragged in Firefox), which a keyboard otherwise can't activate.
+if (!window._calDelegatesBound) {
+    window._calDelegatesBound = true;
+    document.addEventListener('dragend', (e) => {
+        const el = e.target && e.target.closest ? e.target.closest('[draggable]') : null;
+        if (el) el.classList.remove('opacity-50');
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const el = e.target;
+        if (!el || !el.matches || !el.matches('[data-cal-activate]')) return;
+        e.preventDefault();
+        el.click();
+    });
+    // Left/right between the List view's tabs. The list re-renders on a switch, so focus is put on
+    // the new active tab by key afterwards.
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+        const tab = e.target && e.target.closest ? e.target.closest('[data-cal-list-tab]') : null;
+        if (!tab) return;
+        const tabs = Array.from(tab.parentNode.querySelectorAll('[data-cal-list-tab]'));
+        const next = tabs[(tabs.indexOf(tab) + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+        e.preventDefault();
+        const key = next.dataset.calListTab;
+        window._calSetListFilter(key);
+        document.querySelector(`[data-cal-list-tab="${key}"]`)?.focus();
     });
 }
 
@@ -1627,27 +2032,24 @@ function _attachDragDrop() {
 // enforces in scheduled-posts.ts: it keeps a post that was just rejected or cancelled in the panel
 // from lingering on the grid until the next reload.
 function _postsOnDate(date) {
-    const key = _dateKey(date);
-    const onDay = _posts.filter(p => {
-        if (!p.publishDate) return false;
-        if (!_scheduleActive(p.status)) return false;
-        if (!_matchesAssistantFilter(p.assistantId)) return false;
+    const onDay = _onDay('posts', _posts, p => p.publishDate, p =>
+        _scheduleActive(p.status) && _matchesAssistantFilter(p.assistantId)
         // Filtering by platform narrows a group to its matching sibling, so a cross-post shows as
         // that one platform rather than as "Multiple" the user then has to open to understand.
-        if (!_matchesPlatformFilter(p.platform)) return false;
-        return _dateKey(new Date(p.publishDate)) === key;
-    });
+        && _matchesPlatformFilter(p.platform), date);
+    return _groupPosts(onDay);
+}
+
+// Drafts waiting for review on their proposed day, grouped like posts. Same filters.
+function _awaitingOnDate(date) {
+    const onDay = _onDay('awaiting', _awaiting, p => p.publishDate, p =>
+        _matchesAssistantFilter(p.assistantId) && _matchesPlatformFilter(p.platform), date);
     return _groupPosts(onDay);
 }
 
 // #3: completed assistant activity on a given day (respects the assistant filter).
 function _activitiesOnDate(date) {
-    const key = _dateKey(date);
-    return _activities.filter(a => {
-        if (!a.at) return false;
-        if (!_matchesAssistantFilter(a.assistantId)) return false;
-        return _dateKey(new Date(a.at)) === key;
-    });
+    return _onDay('acts', _activities, a => a.at, a => _matchesAssistantFilter(a.assistantId), date);
 }
 
 function _dateKey(date) {
@@ -1657,14 +2059,10 @@ function _dateKey(date) {
 // Blog posts bucketed to a day: published shows on publishedAt, scheduled on publishDate.
 // Respects the assistant filter and the 'blog' platform filter (hidden when a social platform is picked).
 function _blogPostsOnDate(date) {
-    const key = _dateKey(date);
     if (!_matchesPlatformFilter('blog')) return [];
-    return _blogPosts.filter(p => {
-        const when = p.status === 'published' ? (p.publishedAt || p.publishDate) : p.publishDate;
-        if (!when) return false;
-        if (!_matchesAssistantFilter(p.assistantId)) return false;
-        return _dateKey(new Date(when)) === key;
-    });
+    return _onDay('blogs', _blogPosts,
+        p => (p.status === 'published' ? (p.publishedAt || p.publishDate) : p.publishDate),
+        p => _matchesAssistantFilter(p.assistantId), date);
 }
 
 // Newsletter issues falling on a date. Mirrors _blogPostsOnDate: a SENT issue is plotted on the day
@@ -1674,14 +2072,10 @@ function _blogPostsOnDate(date) {
 // recipient is done, and an issue spreading a local-time send over 24 hours would otherwise vanish
 // from the calendar for the whole day it is being sent.
 function _newsletterIssuesOnDate(date) {
-    const key = _dateKey(date);
     if (!_matchesPlatformFilter('newsletter')) return [];
-    return _newsletterIssues.filter(i => {
-        const when = i.status === 'sent' ? (i.sentAt || i.scheduledFor) : i.scheduledFor;
-        if (!when) return false;
-        if (!_matchesAssistantFilter(i.assistantId)) return false;
-        return _dateKey(new Date(when)) === key;
-    });
+    return _onDay('issues', _newsletterIssues,
+        i => (i.status === 'sent' ? (i.sentAt || i.scheduledFor) : i.scheduledFor),
+        i => _matchesAssistantFilter(i.assistantId), date);
 }
 
 // Read-only newsletter chip. Same treatment as the blog chip below and for the same reason: issues
@@ -1692,20 +2086,20 @@ function _issueChip(issue) {
     const sent = issue.status === 'sent';
     const when = sent ? (issue.sentAt || issue.scheduledFor) : issue.scheduledFor;
     const time = new Date(when).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    const chipBg = sent ? 'bg-emerald-50 hover:bg-emerald-100' : 'bg-teal-50 hover:bg-teal-100';
-    const timeColor = sent ? 'text-emerald-700' : 'text-teal-700';
+    const chipBg = sent ? 'bg-green-50' : 'bg-teal-50 hover:bg-teal-100';
+    const timeColor = sent ? 'status-posted' : 'text-teal-700';
     // The recipient count is the one fact worth the space on a sent issue — it is the answer to
     // "did that go out, and to how many people".
     const marker = sent
-        ? `<span class="text-emerald-600 text-xs font-extrabold shrink-0" title="Sent ${time}${issue.recipientCount ? ` to ${issue.recipientCount}` : ''}">✓</span>`
-        : `<span class="w-1.5 h-1.5 rounded-full ${sm.dot} shrink-0" title="${sm.label}"></span>`;
+        ? `<span class="status-posted-tick text-xs font-extrabold shrink-0" aria-hidden="true" title="Sent ${time}${issue.recipientCount ? ` to ${issue.recipientCount}` : ''}">✓</span>`
+        : `<span class="w-1.5 h-1.5 rounded-full ${sm.dot} shrink-0" aria-hidden="true" title="${_statusLabel(issue.status)}"></span>`;
     const subject = issue.subject || 'Untitled email';
-    return `<div
+    return `<div role="button" tabindex="0" data-cal-activate
         onclick="window._calOpenIssue(${issue.id})"
         data-issue-id="${issue.id}"
-        class="group flex items-center gap-1.5 px-2 py-1 rounded-lg ${chipBg} shadow-sm cursor-pointer transition select-none text-left w-full"
+        class="group focus-ring flex items-center gap-1.5 px-2 py-1 rounded-lg ${chipBg} shadow-sm cursor-pointer transition select-none text-left w-full"
         style="border-left:3px solid #0d9488"
-        aria-label="Email · ${_escHtml(subject)}">
+        aria-label="${time} · Email · ${_escHtml(subject)} · ${_statusLabel(issue.status)}">
         ${_platAvatar('newsletter', 16)}
         <div class="flex-1 min-w-0">
             <p class="text-[11px] font-bold ${timeColor} truncate">${time}</p>
@@ -1731,34 +2125,41 @@ function _blogChip(post, viewType) {
     const posted = post.status === 'published';
     const when = posted ? (post.publishedAt || post.publishDate) : post.publishDate;
     const time = new Date(when).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    const chipBg = posted ? 'bg-emerald-50 hover:bg-emerald-100' : 'bg-violet-50 hover:bg-violet-100';
-    const timeColor = posted ? 'text-emerald-700' : 'text-violet-700';
+    const failedBlog = post.status === 'failed';
+    const chipBg = posted ? 'bg-green-50' : failedBlog ? 'bg-red-50 hover:bg-red-100' : 'bg-violet-50 hover:bg-violet-100';
+    const timeColor = posted ? 'status-posted' : failedBlog ? 'text-red-700' : 'text-violet-700';
     const marker = posted
-        ? `<span class="text-emerald-600 text-xs font-extrabold shrink-0" title="Published ${time}">✓</span>`
-        : `<span class="w-1.5 h-1.5 rounded-full ${sm.dot} shrink-0" title="${sm.label}"></span>`;
+        ? `<span class="status-posted-tick text-xs font-extrabold shrink-0" aria-hidden="true" title="Posted ${time}">✓</span>`
+        : failedBlog
+        ? `<span class="w-3.5 h-3.5 rounded-full bg-red-600 text-white text-[10px] font-extrabold leading-none flex items-center justify-center shrink-0" aria-hidden="true">!</span>`
+        : `<span class="w-1.5 h-1.5 rounded-full ${sm.dot} shrink-0" aria-hidden="true" title="${_statusLabel(post.status)}"></span>`;
     const title = post.title || 'Untitled';
     // A SCHEDULED blog is the only one that moves, and only on the grids. The calendar feed
-    // (blog-posts.ts) returns 'scheduled' and 'published' only, so the status test is really
-    // "everything but published" — written as the positive test so that widening the feed later
-    // cannot silently make a LIVE article draggable. The list view is excluded because only the
+    // (blog-posts.ts) returns 'scheduled', 'published' and 'failed' — written as the positive test,
+    // which is why widening the feed to failed articles did not make them (or a LIVE one) draggable. The list view is excluded because only the
     // month and week grids carry drop targets; a draggable chip there could be picked up and never
     // put down. Dragging moves the DATE and keeps the time of day, exactly as a post chip does —
     // the time of day itself is changed in Blog Studio.
     const isDraggable = post.status === 'scheduled' && viewType !== 'list';
-    return `<div
+    // In the list view a scheduled article gets the "Move…" button instead of a drag.
+    const movableInList = post.status === 'scheduled' && viewType === 'list';
+    return `<div role="button" tabindex="0" data-cal-activate
         onclick="window._calOpenBlog(${post.id})"
         ${isDraggable ? `draggable="true" ondragstart="window._calDragStart(event, { kind: 'blog', id: ${post.id} })"` : ''}
         data-blog-id="${post.id}"
         ${isDraggable ? `data-cal-blog-id="${post.id}"` : ''}
-        class="group flex items-center gap-1.5 px-2 py-1 rounded-lg ${chipBg} shadow-sm cursor-pointer transition select-none text-left w-full"
+        class="group focus-ring ${movableInList ? 'flex-wrap' : ''} flex items-center gap-1.5 px-2 py-1 rounded-lg ${chipBg} shadow-sm cursor-pointer transition select-none text-left w-full"
         style="border-left:3px solid #7c3aed"
-        aria-label="Blog · ${_escHtml(title)}">
+        aria-label="${time} · Blog · ${_escHtml(title)} · ${_statusLabel(post.status)}${failedBlog && post.failureReason ? ': ' + _escHtml(post.failureReason) : ''}"
+        ${failedBlog && post.failureReason ? `title="${_escHtml(post.failureReason)}"` : ''}>
         ${_platAvatar('blog', 16)}
         <div class="flex-1 min-w-0">
-            <p class="text-[11px] font-bold ${timeColor} truncate">${time}</p>
+            <p class="text-[11px] font-bold ${timeColor} truncate">${time}${failedBlog ? ` · ${_statusLabel('failed')}` : ''}</p>
             <p class="text-[11px] text-gray-500 truncate leading-tight">${_escHtml(title.substring(0, 40))}</p>
+            ${failedBlog && post.failureReason && viewType === 'list' ? `<p class="text-xs text-red-700 truncate mt-0.5">${_escHtml(post.failureReason)}</p>` : ''}
         </div>
         ${marker}
+        ${movableInList ? `<span class="w-full">${_moveButton('blog', post.id)}</span>` : ''}
     </div>`;
 }
 
@@ -1771,8 +2172,7 @@ window._calOpenBlog = function (id) {
 
 function _weekStart(date) {
     const d = new Date(date);
-    const day = d.getDay(); // 0=Sun
-    d.setDate(d.getDate() - day);
+    d.setDate(d.getDate() - _mondayIndex(d));   // back to Monday
     d.setHours(0,0,0,0);
     return d;
 }

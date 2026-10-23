@@ -102,7 +102,7 @@ check('the client refuses a past drop BEFORE any network call, for both chip kin
     );
     for (const [fn, endAnchor, what] of [
         ['async function _dropFollowUp', 'async function _dropRecord', 'the follow-up drop handler'],
-        ['async function _dropRecord', 'function _attachDragDrop', 'the record drop handler'],
+        ['async function _dropRecord', 'async function _dropBlog', 'the record drop handler'],
     ] as const) {
         const body = span(calendarJs, fn, endAnchor, what);
         const guardAt = body.indexOf('_isPastDateKey');
@@ -211,7 +211,7 @@ check('a bare scheduledFor PATCH moves the date without touching the approval ga
 });
 
 check('the calendar sends a bare scheduledFor, never an approvalStatus', () => {
-    const drop = span(calendarJs, 'async function _dropRecord', 'function _attachDragDrop', 'the record drop handler');
+    const drop = span(calendarJs, 'async function _dropRecord', 'async function _dropBlog', 'the record drop handler');
     assert.ok(/scheduledFor:/.test(drop), 'The record drop no longer sends a scheduledFor.');
     assert.ok(
         !/approvalStatus/.test(drop),

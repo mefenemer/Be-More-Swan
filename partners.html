@@ -145,7 +145,9 @@
       if (t.rateBps == null) return;
       const pct = (Number(t.rateBps) / 100).toString();
       const length = t.durationMonths == null ? 'for as long as they stay a customer' : `for their first ${t.durationMonths} month${t.durationMonths === 1 ? '' : 's'}`;
-      document.getElementById('partner-term-rate').innerHTML = `<strong>${pct}% commission</strong> on what every customer you introduce pays, ${length}.`;
+      const costs = Number(t.costDeductionBps || 0) / 100;
+      const basis = costs > 0 ? `on what every customer you introduce pays after costs (${costs}% off, excluding VAT)` : 'on what every customer you introduce pays';
+      document.getElementById('partner-term-rate').innerHTML = `<strong>${pct}% commission</strong> ${basis}, ${length}.`;
       if (t.minPayoutPence != null && t.holdingDays != null) {
         document.getElementById('partner-term-payout').innerHTML =
           `<strong>Paid monthly</strong> once a payment is ${t.holdingDays} days old (so refunds can settle), when you have £${Math.round(t.minPayoutPence / 100)} or more to come.`;

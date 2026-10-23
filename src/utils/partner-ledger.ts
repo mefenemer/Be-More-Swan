@@ -94,6 +94,7 @@ async function loadPeriods(db: Db, partnerId: number): Promise<RatePeriod[]> {
         id: partnerRatePeriods.id,
         partnerId: partnerRatePeriods.partnerId,
         rateBps: partnerRatePeriods.rateBps,
+        costDeductionBps: partnerRatePeriods.costDeductionBps,
         durationMonths: partnerRatePeriods.durationMonths,
         startsAt: partnerRatePeriods.startsAt,
         endsAt: partnerRatePeriods.endsAt,
@@ -122,7 +123,7 @@ async function lockedTermsFor(db: Db, referralId: number, partnerId: number, pai
     if (!period) return null;
     const terms = lockTerms(period);
     await db.update(partnerReferrals)
-        .set({ subscribedAt: paidAt, ratePeriodId: terms.ratePeriodId, rateBps: terms.rateBps, durationMonths: terms.durationMonths })
+        .set({ subscribedAt: paidAt, ratePeriodId: terms.ratePeriodId, rateBps: terms.rateBps, costDeductionBps: terms.costDeductionBps, durationMonths: terms.durationMonths })
         .where(and(eq(partnerReferrals.id, pr.id), isNull(partnerReferrals.subscribedAt)));
     const [locked] = await db.select().from(partnerReferrals).where(eq(partnerReferrals.id, pr.id)).limit(1);
     return locked ?? null;
@@ -149,7 +150,9 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
         return { recorded: false, reason: 'outside_window' };
     }
 
-    const amount = commissionPence(payment.netAmountPence, terms.rateBps);
+    // Locked before the cost deduction existed → null → 0%: what that customer was promised stands.
+    const costDeductionBps = terms.costDeductionBps ?? 0;
+    const amount = commissionPence(payment.netAmountPence, terms.rateBps, costDeductionBps);
     const availableAt = new Date(payment.paidAt.getTime() + (await holdingDays(db)) * DAY_MS);
     const inserted = await db.insert(partnerCommissions).values({
         partnerId: ref.partnerId,
@@ -159,6 +162,7 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
         stripeChargeId: payment.paymentIntentId,
         netAmountPence: payment.netAmountPence,
         rateBps: terms.rateBps,
+        costDeductionBps,
         commissionPence: amount,
         currency: PROGRAMME_CURRENCY,
         status: 'pending',
@@ -202,7 +206,7 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
     for (const row of rows) {
         const net = row.netAmountPence ?? 0;
         const remaining = input.kind === 'dispute' ? 0 : Math.max(0, net - input.amountRefundedPence);
-        const target = commissionPence(remaining, row.rateBps ?? 0);
+        const target = commissionPence(remaining, row.rateBps ?? 0, row.costDeductionBps);
         const reason = input.kind === 'dispute' ? 'Payment disputed' : (remaining === 0 ? 'Payment refunded' : 'Payment partly refunded');
 
         if (row.status === 'voided') continue;

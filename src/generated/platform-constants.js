@@ -60,6 +60,11 @@
   var scheduleActive = {};
   for (var s = 0; s < SCHEDULE_ACTIVE_STATUSES.length; s++) scheduleActive[SCHEDULE_ACTIVE_STATUSES[s]] = true;
 
+  // The "Needs attention" tab's statuses and the user-facing word for every post state, from
+  // src/config/post-status.ts — one vocabulary for the Review page and the Content Calendar.
+  var NEEDS_ATTENTION_STATUSES = ["failed","paused","paused_credits"];
+  var POST_STATUS_LABELS = {"draft":"Needs your review","pending_approval":"Needs your review","in_review":"Needs your review","approved":"Scheduled","scheduled":"Scheduled","publishing":"Posting now","published":"Posted","paused":"Paused · reconnect","paused_credits":"Paused · X limit","failed":"Failed to post","rejected":"Archived","cancelled":"Cancelled","missed":"Missed","admin_test":"Test","sending":"Sending","sent":"Sent","archived":"Archived"};
+
   // system_connections statuses that mean "reconnect required", from
   // src/config/connection-status.ts. The hand-written copy of this list in integrations.js omitted
   // 'token_expired' — the value the Meta paths write — so a dead Facebook connection rendered as
@@ -98,6 +103,15 @@
      */
     isScheduleActive: function (status) {
       return scheduleActive[String(status == null ? '' : status)] === true;
+    },
+
+    /** Statuses listed under "Needs attention" on both the Review page and the Calendar. */
+    needsAttentionStatuses: NEEDS_ATTENTION_STATUSES,
+
+    /** The word both pages show for a post/blog/email state; the raw value only if it is unknown. */
+    postStatusLabel: function (status) {
+      var key = String(status == null ? '' : status);
+      return POST_STATUS_LABELS[key] || key;
     },
 
     /** One platform's facts. Tolerates legacy 'twitter'; returns null for anything unknown. */
