@@ -2841,7 +2841,9 @@
   // the card says so and offers the post itself, where that is settled.
   const POST_ACTION_COPY = {
     approve: { head: 'Approve this post', button: 'Approve', busy: 'Approving…' },
-    reject: { head: 'Reject this post', button: 'Reject post', busy: 'Rejecting…' },
+    // "Reject and redraft": the same words as the editor (reject-post always queues a replacement;
+    // the checkbox below only decides whether the reason is also kept as a rule).
+    reject: { head: 'Reject and redraft', button: 'Reject and redraft', busy: 'Rejecting…' },
     retry: { head: 'Try this post again', button: 'Try again now', busy: 'Putting it back in the queue…' },
     reschedule: { head: 'Move this post', button: 'Move it', busy: 'Moving…' },
   };
@@ -2874,7 +2876,7 @@
         <textarea id="pap-reason-${postId}" data-pap-reason rows="2" maxlength="500" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.reason || '')}</textarea>
         <label class="flex items-start gap-2 text-xs text-gray-700 mt-2">
           <input type="checkbox" data-pap-rule checked class="mt-0.5">
-          <span>Keep this as a rule for future posts, and write a replacement.</span>
+          <span>Also keep this as a rule for future posts. A replacement is written either way.</span>
         </label>` : ''}
       ${!blocked && ui.action === 'approve' ? '<p class="text-xs text-gray-600 mt-3">It’s booked into a free slot in your posting schedule.</p>' : ''}
       ${!blocked && ui.action === 'retry' && ui.when ? `<p class="text-sm text-gray-700 mt-3"><span class="font-bold">Try again at:</span> ${esc(ui.when)}</p>
@@ -2928,7 +2930,9 @@
     approve: { head: 'Approve this article', button: 'Approve', busy: 'Approving…' },
     schedule: { head: 'Book this article', button: 'Book it', busy: 'Booking…' },
     unschedule: { head: 'Take this article off the schedule', button: 'Unschedule', busy: 'Clearing the schedule…' },
-    reject: { head: 'Reject this article', button: 'Reject article', busy: 'Rejecting…' },
+    // Same two words as the post editor: "Reject and redraft", or — with the replacement box
+    // unticked — a reject that writes nothing new (the button follows the box, below).
+    reject: { head: 'Reject and redraft', button: 'Reject and redraft', busy: 'Rejecting…' },
   };
 
   function renderBlogActionProposalCard(ui, esc) {
@@ -2976,6 +2980,11 @@
     const status = el.querySelector('[data-bap-status]');
     const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
     const setBusy = (b) => el.querySelectorAll('[data-bap-go], [data-bap-cancel], [data-bap-reason], [data-bap-rule], [data-bap-redraft]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('change', (e) => {
+      if (!e.target.matches('[data-bap-redraft]')) return;
+      const go = el.querySelector('[data-bap-go]');
+      if (go) go.textContent = e.target.checked ? 'Reject and redraft' : 'Reject (no redraft)';
+    });
     el.addEventListener('click', (e) => {
       if (e.target.closest('[data-bap-open]')) { window.openBlogStudio?.({ postId, intent: 'review' }); return; }
       if (e.target.closest('[data-bap-cancel]')) { setBusy(true); say('Left as it is.'); return; }

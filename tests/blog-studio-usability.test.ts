@@ -179,7 +179,7 @@ check('no native confirm survives in Blog Studio', () => {
                            landmark(modal, "el('bs-gsc-connect').addEventListener"));
     assert.ok(fn.length > 200, 'the Discard slice is empty — re-anchor it');
     assert.ok(fn.includes('await window.confirmModal('), 'Discard does not go through /dialogs.js');
-    assert.ok(/confirmLabel: 'Yes, archive it'/.test(fn), 'the dialog does not name the verb it performs');
+    assert.ok(/confirmLabel: 'Yes, remove it'/.test(fn), 'the dialog does not name the verb it performs');
     // blog-posts DELETE sets status='archived' — the dialog must not promise permanence.
     assert.ok(/The draft is kept/.test(fn), 'the wording no longer says the draft survives');
 });

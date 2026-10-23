@@ -297,7 +297,10 @@ check('the Calendar can start a post, for a clicked future day', () => {
     assert.match(slice(calendar, 'window._calNewPost = function'), /_gpPrefillPublishDate/);
     assert.match(workspace, /window\._gpPrefillPublishDate \? \{ publishDate: window\._gpPrefillPublishDate \}/);
     assert.match(manualPost, /asked > now/, 'a past date must not become the draft\'s time');
-    assert.match(workspace, /\/calendar\.js\?v=20261023/, 'the script version must move when calendar.js changes');
+    // No hand-written ?v= on any local script: scripts/stamp-view-version.mjs stamps every one with
+    // the deploy's commit, but SKIPS a src that already has a query — so a manual pin froze
+    // calendar.js on 20261012 through two releases (and assistants.js on 20261021).
+    assert.ok(!/<script\b[^>]*\bsrc="\/[^"]+\.js\?v=/.test(workspace), 'a manual ?v= pin stops the build stamping that script');
 });
 
 check('a grid chip that can be dragged can be moved with M, and on touch with a button', () => {
@@ -374,6 +377,19 @@ check('two verbs for saying no, everywhere', () => {
     assert.match(workspace, /Reject and redraft/);
     assert.match(workspace, /Remove \(no redraft\)/);
     assert.match(sidebar, /id="nav-review-queue"[\s\S]*id="nav-calendar"/, 'Review sits above Calendar');
+});
+
+check('chat cards, the notification, the assistant tab and Blog Studio use the same words', () => {
+    const registry = read('src/components/disruptive-ui-registry.js');
+    assert.equal((registry.match(/reject: \{ head: 'Reject and redraft', button: 'Reject and redraft'/g) || []).length, 2,
+        'the post and article chat cards must both say Reject and redraft');
+    assert.match(registry, /A replacement is written either way/, 'the post card must not imply the checkbox controls the redraft');
+    const catalog = read('src/utils/notification-templates-catalog.ts');
+    assert.ok(!/conversion post/i.test(catalog.replace(/\/\/.*$/gm, '')), 'the notification still says conversion post');
+    assert.match(read('assistants.js'), /btn\('delete', 'Remove', danger\)/);
+    const studio = read('src/components/blog-studio-modal.js');
+    assert.match(studio, /Remove draft/);
+    assert.match(studio, /'Reject and redraft' : 'Reject \(no redraft\)'/);
 });
 
 console.log(`\n${passed} checks passed`);

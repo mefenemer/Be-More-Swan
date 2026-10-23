@@ -88,7 +88,7 @@ check('neither surface tells the user archiving cannot be undone', () => {
     const start = landmark(js, "if (action === 'delete')");
     const slice = js.slice(start, start + 700);
     assert.ok(!slice.includes('This cannot be undone.'), 'the list card still warns of permanence');
-    assert.ok(/Archive this blog draft\?/.test(slice), 'the confirm still says delete');
+    assert.ok(/Remove this blog draft\?/.test(slice), 'the confirm still says delete');
 });
 
 check('the modal notifies the host page on every lifecycle move', () => {
