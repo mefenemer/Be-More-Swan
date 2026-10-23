@@ -192,14 +192,14 @@ async function main() {
             assert.strictEqual((await releaseDueCommissions(db, d('2026-12-06'))).released, 0, 'idempotent');
         });
 
-        await check('disputed AFTER payout then won: the claw-back is returned by one positive adjustment', async () => {
+        await check('disputed AFTER payout then won: the claw-back is returned once, as a bonus row (adjustments must be negative)', async () => {
             await sql.unsafe(`UPDATE partner_commissions SET status = 'paid', paid_at = now() WHERE stripe_invoice_id = 'in_a1'`);
             await reversePartnerCommission(db, { paymentIntentId: 'pi_in_a1', amountRefundedPence: 0, kind: 'dispute' });
             const paid = (await commissions('in_a1'))[0].commission_pence;
             await reinstateDisputedCommission(db, { paymentIntentId: 'pi_in_a1' });
             await reinstateDisputedCommission(db, { paymentIntentId: 'pi_in_a1' });
             const rows = await commissions('in_a1');
-            assert.deepStrictEqual(rows.map((r: any) => [r.kind, r.commission_pence]), [['invoice', paid], ['adjustment', -paid], ['adjustment', paid]]);
+            assert.deepStrictEqual(rows.map((r: any) => [r.kind, r.commission_pence]), [['invoice', paid], ['adjustment', -paid], ['bonus', paid]]);
         });
 
         await check("a partner's referral qualifies as 'partner', never as a token", async () => {

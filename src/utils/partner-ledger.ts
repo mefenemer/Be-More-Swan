@@ -258,8 +258,8 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
  * when it opened. Idempotent:
  *   - rows voided as 'Payment disputed' go back to pending (or payable, if their hold has ended) —
  *     unless a payout run or a refund has touched them since;
- *   - money clawed back after payout ('Payment disputed after payout') is returned by a positive
- *     adjustment, net of any already returned.
+ *   - money clawed back after payout ('Payment disputed after payout') is returned as a 'bonus' row
+ *     (adjustments must be negative — partner_commissions_sign_check), net of any already returned.
  */
 export async function reinstateDisputedCommission(db: Db, input: {
     paymentIntentId: string | null; invoiceId?: string | null;
@@ -287,7 +287,7 @@ export async function reinstateDisputedCommission(db: Db, input: {
         reinstated++;
     }
 
-    const adjustments = await db.select().from(partnerCommissions).where(and(eq(partnerCommissions.kind, 'adjustment'), match));
+    const adjustments = await db.select().from(partnerCommissions).where(and(inArray(partnerCommissions.kind, ['adjustment', 'bonus']), match));
     const byPayment = new Map<string, { partnerId: number; partnerReferralId: number | null; stripeChargeId: string | null; currency: string; net: number }>();
     for (const a of adjustments) {
         if (a.note !== `${DISPUTE_REASON} after payout` && a.note !== DISPUTE_WON_NOTE) continue;
@@ -299,7 +299,7 @@ export async function reinstateDisputedCommission(db: Db, input: {
     for (const [invoiceRef, a] of byPayment) {
         if (a.net >= 0) continue;   // already returned
         await db.insert(partnerCommissions).values({
-            partnerId: a.partnerId, partnerReferralId: a.partnerReferralId, kind: 'adjustment',
+            partnerId: a.partnerId, partnerReferralId: a.partnerReferralId, kind: 'bonus',
             stripeInvoiceId: invoiceRef || null, stripeChargeId: a.stripeChargeId,
             commissionPence: -a.net, currency: a.currency, status: 'payable', availableAt: at, note: DISPUTE_WON_NOTE,
         });

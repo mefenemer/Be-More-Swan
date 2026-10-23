@@ -88,7 +88,7 @@ details, no link or assistant. ⚠️ The sidebar Partner item (`workspace.html`
 `ended` yet. Their invite link falls back to an ordinary customer invite (tokens), because only approved or
 suspended partners are on the partner track. **Won disputes** are reinstated automatically
 (`charge.dispute.closed`, status won → `reinstateDisputedCommission`). Refunds since then stay unearned, and
-money already clawed back is returned as a positive adjustment. ⚠️ Enable `charge.dispute.closed` (and
+money already clawed back is returned as a bonus row (adjustments must be negative). ⚠️ Enable `charge.dispute.closed` (and
 `charge.refunded`) on both Stripe webhook endpoints. Owner decision: the customer
 Terms only gain clause 1.4 pointing to the Partner Terms — **no ToS version bump**, no re-acceptance prompt.
 privacy.html: partner data, invited people (first name shown; partners see "Customer N"), payout details in
