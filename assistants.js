@@ -1683,10 +1683,11 @@ function _detailRqEmptyReviewHtml(emptyMsg) {
 }
 
 // ── Select several posts in Review and Remove them together ─────────────────
-// The same "Remove" as the editor's (rqReviewDiscardDraft): a soft-cancel through scheduled-posts
-// DELETE, so the posts move to Archived, nothing is learned and no replacement is written. Review
-// column only — approved and scheduled posts are booked, and moving them out is a decision to take
-// one at a time in the editor. Each ticked card stands for every platform row of its post.
+// The same "Remove" as each card's own: social posts soft-cancel through scheduled-posts DELETE
+// (as the editor's rqReviewDiscardDraft does), blog drafts archive through blog-posts DELETE (as
+// the card's Remove does). Either way they move to Archived, nothing is learned and no replacement
+// is written. Review column only — booked work is a decision to take one at a time. A social card
+// stands for every platform row of its post; a blog card is one row.
 //
 // Selection is keyed by the card's `data-rq-ids` (its rows, comma-joined) and cleared on every
 // render pass, so a refresh can never leave a tick on a post the user can no longer see.
@@ -1695,6 +1696,11 @@ const _detailRqSelected = new Set();
 function _detailRqPostRenderer(statusKey) {
     if (typeof rqRenderSocialCard !== 'function') return () => '';
     return statusKey === 'review' ? (d) => rqRenderSocialCard(d, { selectable: true }) : rqRenderSocialCard;
+}
+
+/** Which kind of Review list is on screen — decides the endpoint and the words. */
+function _detailRqBulkIsBlog() {
+    return (window._detailReviewQueue || {}).source === 'blog_posts';
 }
 
 function _detailRqBulkBar(statusKey, groupKey) {
@@ -1724,7 +1730,8 @@ function _detailRqSyncBulkBar() {
     const btn = document.getElementById('detail-rq-remove-selected');
     if (btn) {
         btn.classList.toggle('hidden', !n);
-        btn.textContent = n > 1 ? `Remove ${n} posts` : 'Remove post';
+        const noun = _detailRqBulkIsBlog() ? 'draft' : 'post';
+        btn.textContent = n > 1 ? `Remove ${n} ${noun}s` : `Remove ${noun}`;
     }
 }
 
@@ -1749,25 +1756,31 @@ window._detailRqRemoveSelected = async function() {
     const cards = [..._detailRqSelected];
     if (!cards.length) return;
     const ids = cards.flatMap(k => k.split(',').map(Number)).filter(n => Number.isInteger(n) && n > 0);
-    const what = cards.length > 1 ? `these ${cards.length} posts` : 'this post';
+    const blog = _detailRqBulkIsBlog();
+    const noun = blog ? 'blog draft' : 'post';
+    const what = cards.length > 1 ? `these ${cards.length} ${noun}s` : `this ${noun}`;
+    const them = cards.length > 1 ? 'them' : 'it';
     const ok = await window.confirmModal(
-        `They move to Archived. Your assistant won’t learn anything from ${cards.length > 1 ? 'them' : 'it'} or write a replacement — if it got something wrong, open the post and use Reject and redraft instead. If Autopilot is on, it may draft new posts for the freed dates.`,
+        blog
+            ? `${cards.length > 1 ? 'They move' : 'It moves'} to Archived. Your assistant won’t learn anything from ${them} or write a replacement — to steer the next one, open it in Blog Studio and reject it instead. If Autopilot is on, it may draft new articles for the freed slots.`
+            : `${cards.length > 1 ? 'They move' : 'It moves'} to Archived. Your assistant won’t learn anything from ${them} or write a replacement — if it got something wrong, open the post and use Reject and redraft instead. If Autopilot is on, it may draft new posts for the freed dates.`,
         { title: `Remove ${what}?`, confirmLabel: 'Yes, remove', cancelLabel: cards.length > 1 ? 'Keep them' : 'Keep it' },
     );
     if (!ok) return;
     const btn = document.getElementById('detail-rq-remove-selected');
     if (btn) { btn.disabled = true; btn.textContent = 'Removing…'; }
     try {
-        const res = await fetch(`/.netlify/functions/scheduled-posts?ids=${ids.join(',')}`, { method: 'DELETE' });
+        const res = await fetch(`/.netlify/functions/${blog ? 'blog-posts' : 'scheduled-posts'}?ids=${ids.join(',')}`, { method: 'DELETE' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'remove failed');
+        if (blog) _forgetBlogPosts();
         const skipped = new Set(data.skippedIds || []);
         const removedCards = cards.filter(k => k.split(',').some(id => !skipped.has(Number(id)))).length;
         const keptCards = cards.length - removedCards;
         window.showToast?.(
             keptCards
                 ? `Removed ${removedCards} of ${cards.length} — ${keptCards} had already gone out or changed.`
-                : `Removed ${removedCards} post${removedCards === 1 ? '' : 's'}. They’re under Archived.`,
+                : `Removed ${removedCards} ${noun}${removedCards === 1 ? '. It’s' : 's. They’re'} under Archived.`,
             { icon: keptCards ? '⚠️' : '🗑️' },
         );
     } catch {
@@ -1778,7 +1791,13 @@ window._detailRqRemoveSelected = async function() {
     }
     window.detailRqRefresh?.();
     if (typeof window.rqLoadItems === 'function') window.rqLoadItems();
-    document.dispatchEvent(new CustomEvent('posts:changed', { detail: { assistantId: window._currentAssistantId } }));
+    if (blog) {
+        // The assistant's calendar caches its articles; make it fetch again next time it opens.
+        const calHost = document.getElementById('assistant-calendar-host');
+        if (calHost) calHost.dataset.ready = '';
+    } else {
+        document.dispatchEvent(new CustomEvent('posts:changed', { detail: { assistantId: window._currentAssistantId } }));
+    }
 };
 
 function _detailRqGroupSection(g, items, render, statusKey, total) {
@@ -3986,8 +4005,14 @@ function _detailRqBlogCard(p, statusKey) {
     const when = p.publishDate
         ? `${p.status === 'failed' ? 'was due' : 'scheduled'} ${new Date(p.publishDate).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
         : (p.updatedAt ? `updated ${new Date(p.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : '');
-    return `<div class="py-4" data-rq-blog="${p.id}">
-      <div class="min-w-0">
+    // Review: a checkbox for the bulk Remove bar (_detailRqBulkBar). The card is a <div>, so the
+    // input can sit inside it.
+    const select = statusKey === 'review'
+        ? `<input type="checkbox" class="rq-select mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-emerald-800 focus:ring-emerald-700 cursor-pointer" data-rq-ids="${p.id}" aria-label="Select this draft">`
+        : '';
+    return `<div class="py-4 ${select ? 'flex items-start gap-3' : ''}" data-rq-blog="${p.id}">
+      ${select}
+      <div class="min-w-0 ${select ? 'flex-1' : ''}">
         <p class="text-sm font-bold text-gray-900 truncate">${_rqEsc(p.title || '(untitled draft)')}</p>
         ${excerpt ? `<p class="text-xs text-gray-600 mt-1 line-clamp-2">${_rqEsc(excerpt)}</p>` : ''}
         ${byline ? `<p class="text-[11px] text-gray-500 mt-1">${_rqEsc(byline)}</p>` : ''}
@@ -3997,8 +4022,9 @@ function _detailRqBlogCard(p, statusKey) {
         </div>
         ${p.status === 'failed' && p.failureReason ? `<p class="text-xs text-amber-800 mt-2 break-words"><span class="font-bold">Why:</span> ${_rqEsc(p.failureReason)}</p>` : ''}
         ${note ? `<p class="text-xs text-gray-600 mt-2">${_rqEsc(note)}</p>` : ''}
+        ${select ? _rqBlogActions(p, statusKey) : ''}
       </div>
-      ${_rqBlogActions(p, statusKey)}
+      ${select ? '' : _rqBlogActions(p, statusKey)}
     </div>`;
 }
 
@@ -4286,6 +4312,7 @@ async function _detailRqRenderBlog(statusKey) {
     const wanted = _RQ_BLOG_STATUS[statusKey] || [];
 
     _detailRqShowLoading(container);
+    _detailRqSelected.clear(); // see _detailRqRenderGroups
     if (!aid) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
 
     // Fetched BEFORE the "no such state" bail-out: the counts on the other columns are still true
@@ -4303,7 +4330,7 @@ async function _detailRqRenderBlog(statusKey) {
     const posts = all.filter((p) => wanted.includes(p.status));
 
     container.innerHTML = posts.length
-        ? `<div class="divide-y divide-gray-100">${posts.map((p) => _detailRqBlogCard(p, statusKey)).join('')}</div>`
+        ? _detailRqBulkBar(statusKey, 'posts') + `<div class="divide-y divide-gray-100">${posts.map((p) => _detailRqBlogCard(p, statusKey)).join('')}</div>`
         : (statusKey === 'review'
             ? `<div class="py-10 text-center">
                  <p class="text-sm text-gray-500">No blog drafts waiting for you. Nothing publishes until you approve it.</p>

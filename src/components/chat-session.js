@@ -827,6 +827,13 @@
         } else if (d.action === 'reject') {
           const r = await postActionCall('reject-blog-post', { id: d.postId, feedbackText: d.reason, applyAsRule: d.applyAsRule === true, redraft: d.redraft === true });
           message = 'Rejected.' + (r.ruleId ? ' Your assistant will remember why.' : '') + (r.redraftQueued ? ' A replacement is being written for this slot.' : '');
+        } else if (d.action === 'remove') {
+          // The Blogs tab's bulk Remove, for this one article.
+          const res = await fetch(`/.netlify/functions/blog-posts?ids=${d.postId}`, { method: 'DELETE', credentials: 'same-origin' });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `That didn’t work (HTTP ${res.status}).`);
+          if (!(data.archivedIds || []).length) throw new Error('It is live, publishing, or already archived.');
+          message = 'Removed — it’s in the "Archived" column.';
         } else {
           throw new Error('Unknown action.');
         }

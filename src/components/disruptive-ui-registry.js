@@ -2936,6 +2936,8 @@
     // Same two words as the post editor: "Reject and redraft", or — with the replacement box
     // unticked — a reject that writes nothing new (the button follows the box, below).
     reject: { head: 'Reject and redraft', button: 'Reject and redraft', busy: 'Rejecting…' },
+    // "Remove": the Blogs tab's word — archived, no rule, no replacement.
+    remove: { head: 'Remove this article', button: 'Remove', busy: 'Removing…' },
   };
 
   function renderBlogActionProposalCard(ui, esc) {
@@ -2963,6 +2965,7 @@
         ${ui.when ? `<p class="text-xs text-gray-500 mt-1">From “${esc(ui.when)}”. If that’s not the time you meant, press Not now and say it again.</p>` : ''}` : ''}
       ${!blocked && ui.action === 'approve' ? '<p class="text-xs text-gray-600 mt-3">Your assistant books it into the next free slot in its posting schedule. It goes live on your blog then, and to any platforms you’ve connected.</p>' : ''}
       ${!blocked && ui.action === 'unschedule' ? '<p class="text-xs text-gray-600 mt-3">It goes back to a draft in the "Review" column and won’t publish until it’s approved again.</p>' : ''}
+      ${!blocked && ui.action === 'remove' ? '<p class="text-xs text-gray-600 mt-3">It moves to Archived. Nothing is learned from it and no replacement is written.</p>' : ''}
       ${!blocked && ui.action === 'reject' ? `
         <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-reason-${postId}">What’s wrong with it</label>
         <textarea id="bap-reason-${postId}" data-bap-reason rows="2" maxlength="500" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.reason || '')}</textarea>
@@ -2975,7 +2978,7 @@
           <span>Write a replacement for this slot</span>
         </label>` : ''}
       <div class="flex flex-wrap items-center gap-2 mt-3">
-        ${blocked ? '' : `<button type="button" data-bap-go class="${ui.action === 'reject' || ui.action === 'unschedule' ? 'btn-destructive' : 'btn-primary'} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>
+        ${blocked ? '' : `<button type="button" data-bap-go class="${ui.action === 'reject' || ui.action === 'unschedule' || ui.action === 'remove' ? 'btn-destructive' : 'btn-primary'} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>
         <button type="button" data-bap-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
         ${canOpen ? '<button type="button" data-bap-open class="btn-swan-link px-1 py-2 text-sm font-bold">Open in Blog Studio</button>' : ''}
       </div>
