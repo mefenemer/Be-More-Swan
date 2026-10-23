@@ -119,9 +119,10 @@ check('partners.html never hard-codes a rate — it reads the live programme ter
     assert.ok(partnersPage.includes('<link rel="canonical" href="https://bemoreswan.com/partners">'));
     const sitemap = read('sitemap.xml');
     assert.ok(sitemap.includes('<loc>https://bemoreswan.com/partners</loc>'));
-    assert.ok(sitemap.includes('<loc>https://bemoreswan.com/partner-terms</loc>'));
+    // Partner Terms are UNLISTED, not public (owner decision 2026-10-23): no sitemap, no footer link.
+    assert.ok(!sitemap.includes('bemoreswan.com/partner-terms'));
     const footer = read('components/footer.html');
-    assert.ok(footer.includes('href="/partners.html"') && footer.includes('href="/partner-terms.html"'), 'linked from the footer');
+    assert.ok(footer.includes('href="/partners.html"') && !footer.includes('partner-terms'), 'the programme is in the footer; its Terms are not');
 });
 
 check('invite-lookup reveals only a first name and counts visits for approved partners only', () => {

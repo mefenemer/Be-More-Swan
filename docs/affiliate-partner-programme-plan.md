@@ -75,7 +75,7 @@ link for posts and emails, email only to consenting subscribers, Lead Generator 
 only — never a list (PECR / CAN-SPAM, review H3). Payout details never pass through the model (a card to the form). Also fixed:
 three Tailwind classes missing from the built CSS in both chat panels (log height now inline). Not verified:
 a live Claude conversation (same as the admin chat). Tests: `partner-assistant.test.ts`.
-**Step 9 built 2026-10-19** — `partner-terms.html` (v1.0, noindex until launch; **a draft for legal review**),
+**Step 9 built 2026-10-19** — `partner-terms.html` (v1.0; **UNLISTED since 2026-10-23**, owner decision: noindex, no canonical, out of the sitemap and footer — linked from the application form, the Partner page and customer Terms 1.4),
 accepted on the application form (required tick) or on the Partner page (`accept_terms`), recorded as
 `partners.terms_version` / `terms_accepted_at` (`src/config/partner-terms.ts`). **Enforced since 2026-10-23**
 (review H1, `hasAcceptedCurrentTerms`): commission still builds up, but payout runs leave out — and the Partner

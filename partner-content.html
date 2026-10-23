@@ -226,7 +226,8 @@
       const basis = costs > 0 ? `of what each new customer pays after costs (we take ${costs}% off their payment, excluding VAT, before your rate applies)` : 'of what each new customer pays, excluding VAT';
       document.getElementById('pt-terms').innerHTML = `You earn <strong>${pct}%</strong> ${basis}, ${length}.` +
         (t.special ? ` <span class="text-pink-700 font-semibold">Special rate${t.specialUntil ? ' until ' + esc(day(t.specialUntil)) : ''}.</span>` : '') +
-        ' A customer keeps the rate in force when they first pay.';
+        ' A customer keeps the rate in force when they first pay.' +
+        ' <a href="/partner-terms.html" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Partner Terms</a>';
     }
     document.getElementById('pt-visits').textContent = s.clicks_30d ?? 0;
     document.getElementById('pt-signups').textContent = s.signups ?? 0;
