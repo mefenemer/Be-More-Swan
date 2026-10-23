@@ -1542,6 +1542,9 @@ async function _detailRqRenderGroups(statusKey) {
     _detailRqLoadedPosts = [];
     _detailRqHasMore = false;
     _detailRqTotal = null;
+    // A ticked post in another column, or one a refresh has just moved, must never be removed by
+    // a press made while looking at this list.
+    _detailRqSelected.clear();
 
     const aid = window._currentAssistantId;
     if (!aid) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
@@ -1582,7 +1585,7 @@ async function _detailRqRenderGroups(statusKey) {
     }
 
     // Reuse the global render helper from workspace.html (rqRenderSocialCard).
-    const renderByGroup = { posts: typeof rqRenderSocialCard === 'function' ? rqRenderSocialCard : () => '' };
+    const renderByGroup = { posts: _detailRqPostRenderer(statusKey) };
     const RQ_GROUPS = [
         { key: 'posts', label: 'Social media posts', empty: 'No social media posts here.', emptyReview: 'No social media posts awaiting review.', emptyReviewHtml: _detailRqEmptyReviewHtml },
     ];
@@ -1641,9 +1644,12 @@ window._detailRqLoadMore = async function(statusKey) {
 function _detailRqRepaintPostsGroup(statusKey) {
     const body = document.querySelector('.detail-rq-group-body-posts');
     const groups = typeof rqGroupSocialDrafts === 'function' ? rqGroupSocialDrafts(_detailRqLoadedPosts) : _detailRqLoadedPosts;
-    const render = typeof rqRenderSocialCard === 'function' ? rqRenderSocialCard : () => '';
+    const render = _detailRqPostRenderer(statusKey);
     if (body && groups.length) {
-        body.innerHTML = `<div class="divide-y divide-gray-100">${groups.map(render).join('')}</div>`;
+        body.innerHTML = _detailRqBulkBar(statusKey, 'posts') + `<div class="divide-y divide-gray-100">${groups.map(render).join('')}</div>`;
+        // The new page arrives unticked; the earlier pages keep what the user had ticked.
+        body.querySelectorAll('.rq-select').forEach(cb => { cb.checked = _detailRqSelected.has(cb.dataset.rqIds); });
+        _detailRqSyncBulkBar();
         const count = body.closest('section')?.querySelector('.rq-group-count');
         if (count) count.textContent = _detailRqCountLabel(groups.length, _detailRqTotal);
     }
@@ -1676,11 +1682,110 @@ function _detailRqEmptyReviewHtml(emptyMsg) {
     </div>`;
 }
 
+// ── Select several posts in Review and Remove them together ─────────────────
+// The same "Remove" as the editor's (rqReviewDiscardDraft): a soft-cancel through scheduled-posts
+// DELETE, so the posts move to Archived, nothing is learned and no replacement is written. Review
+// column only — approved and scheduled posts are booked, and moving them out is a decision to take
+// one at a time in the editor. Each ticked card stands for every platform row of its post.
+//
+// Selection is keyed by the card's `data-rq-ids` (its rows, comma-joined) and cleared on every
+// render pass, so a refresh can never leave a tick on a post the user can no longer see.
+const _detailRqSelected = new Set();
+
+function _detailRqPostRenderer(statusKey) {
+    if (typeof rqRenderSocialCard !== 'function') return () => '';
+    return statusKey === 'review' ? (d) => rqRenderSocialCard(d, { selectable: true }) : rqRenderSocialCard;
+}
+
+function _detailRqBulkBar(statusKey, groupKey) {
+    if (statusKey !== 'review' || groupKey !== 'posts') return '';
+    return `<div id="detail-rq-bulkbar" class="flex flex-wrap items-center gap-3 py-2 border-b border-gray-100">
+      <label class="flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
+        <input type="checkbox" id="detail-rq-select-all" class="h-4 w-4 rounded border-gray-300 text-emerald-800 focus:ring-emerald-700 cursor-pointer">
+        Select all
+      </label>
+      <span id="detail-rq-select-count" class="text-xs text-gray-500" aria-live="polite"></span>
+      <button type="button" id="detail-rq-remove-selected" onclick="_detailRqRemoveSelected()"
+        class="btn-destructive hidden ml-auto px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">Remove</button>
+    </div>`;
+}
+
+/** Make the bar say what is ticked: the count, the Remove button, and a mixed "Select all". */
+function _detailRqSyncBulkBar() {
+    const boxes = [...document.querySelectorAll('#detail-rq-groups .rq-select')];
+    const n = boxes.filter(cb => cb.checked).length;
+    const all = document.getElementById('detail-rq-select-all');
+    if (all) {
+        all.checked = n > 0 && n === boxes.length;
+        all.indeterminate = n > 0 && n < boxes.length;
+    }
+    const count = document.getElementById('detail-rq-select-count');
+    if (count) count.textContent = n ? `${n} selected` : '';
+    const btn = document.getElementById('detail-rq-remove-selected');
+    if (btn) {
+        btn.classList.toggle('hidden', !n);
+        btn.textContent = n > 1 ? `Remove ${n} posts` : 'Remove post';
+    }
+}
+
+// Bound once on the document, never from a render path — the list is re-rendered constantly.
+document.addEventListener('change', (e) => {
+    const t = e.target;
+    if (!(t instanceof HTMLInputElement) || !t.closest('#detail-rq-groups')) return;
+    if (t.id === 'detail-rq-select-all') {
+        document.querySelectorAll('#detail-rq-groups .rq-select').forEach(cb => {
+            cb.checked = t.checked;
+            if (t.checked) _detailRqSelected.add(cb.dataset.rqIds); else _detailRqSelected.delete(cb.dataset.rqIds);
+        });
+    } else if (t.classList.contains('rq-select')) {
+        if (t.checked) _detailRqSelected.add(t.dataset.rqIds); else _detailRqSelected.delete(t.dataset.rqIds);
+    } else {
+        return;
+    }
+    _detailRqSyncBulkBar();
+});
+
+window._detailRqRemoveSelected = async function() {
+    const cards = [..._detailRqSelected];
+    if (!cards.length) return;
+    const ids = cards.flatMap(k => k.split(',').map(Number)).filter(n => Number.isInteger(n) && n > 0);
+    const what = cards.length > 1 ? `these ${cards.length} posts` : 'this post';
+    const ok = await window.confirmModal(
+        `They move to Archived. Your assistant won’t learn anything from ${cards.length > 1 ? 'them' : 'it'} or write a replacement — if it got something wrong, open the post and use Reject and redraft instead. If Autopilot is on, it may draft new posts for the freed dates.`,
+        { title: `Remove ${what}?`, confirmLabel: 'Yes, remove', cancelLabel: cards.length > 1 ? 'Keep them' : 'Keep it' },
+    );
+    if (!ok) return;
+    const btn = document.getElementById('detail-rq-remove-selected');
+    if (btn) { btn.disabled = true; btn.textContent = 'Removing…'; }
+    try {
+        const res = await fetch(`/.netlify/functions/scheduled-posts?ids=${ids.join(',')}`, { method: 'DELETE' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'remove failed');
+        const skipped = new Set(data.skippedIds || []);
+        const removedCards = cards.filter(k => k.split(',').some(id => !skipped.has(Number(id)))).length;
+        const keptCards = cards.length - removedCards;
+        window.showToast?.(
+            keptCards
+                ? `Removed ${removedCards} of ${cards.length} — ${keptCards} had already gone out or changed.`
+                : `Removed ${removedCards} post${removedCards === 1 ? '' : 's'}. They’re under Archived.`,
+            { icon: keptCards ? '⚠️' : '🗑️' },
+        );
+    } catch {
+        window.showToast?.('Could not remove those posts — please try again.', { icon: '⚠️' });
+        if (btn) btn.disabled = false;
+        _detailRqSyncBulkBar();
+        return;
+    }
+    window.detailRqRefresh?.();
+    if (typeof window.rqLoadItems === 'function') window.rqLoadItems();
+    document.dispatchEvent(new CustomEvent('posts:changed', { detail: { assistantId: window._currentAssistantId } }));
+};
+
 function _detailRqGroupSection(g, items, render, statusKey, total) {
     const open = _detailRqGroupOpen[g.key] !== false;
     const emptyMsg = statusKey === 'review' ? g.emptyReview : g.empty;
     const body = items.length
-        ? `<div class="divide-y divide-gray-100">${items.map(render).join('')}</div>`
+        ? _detailRqBulkBar(statusKey, g.key) + `<div class="divide-y divide-gray-100">${items.map(render).join('')}</div>`
         : (statusKey === 'review' && g.emptyReviewHtml) ? g.emptyReviewHtml(emptyMsg)
         : `<p class="text-sm text-gray-500 py-6 text-center">${emptyMsg}</p>`;
     return `<section class="border-b border-gray-100 last:border-0">

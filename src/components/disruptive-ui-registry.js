@@ -2830,7 +2830,7 @@
   register('social_post_draft', renderSocialPostDraftCard);
 
   // ── Built-in: Post Action Proposal Card (Social Media chat) ────────────────
-  // { type: 'post_action_proposal', action: 'approve'|'reject'|'retry'|'reschedule', postId,
+  // { type: 'post_action_proposal', action: 'approve'|'reject'|'retry'|'reschedule'|'remove', postId,
   //   postIds, platforms, status, publishDate, timezone, text, reason, when, blocked }
   //
   // The chat's hands on a post that already exists — the twin of the Posts tab's Approve, Reject,
@@ -2846,6 +2846,8 @@
     reject: { head: 'Reject and redraft', button: 'Reject and redraft', busy: 'Rejecting…' },
     retry: { head: 'Try this post again', button: 'Try again now', busy: 'Putting it back in the queue…' },
     reschedule: { head: 'Move this post', button: 'Move it', busy: 'Moving…' },
+    // "Remove": the editor's and the Review tab's word — no rule, no replacement.
+    remove: { head: 'Remove this post', button: 'Remove', busy: 'Removing…' },
   };
 
   function renderPostActionProposalCard(ui, esc) {
@@ -2879,6 +2881,7 @@
           <span>Also keep this as a rule for future posts. A replacement is written either way.</span>
         </label>` : ''}
       ${!blocked && ui.action === 'approve' ? '<p class="text-xs text-gray-600 mt-3">It’s booked into a free slot in your posting schedule.</p>' : ''}
+      ${!blocked && ui.action === 'remove' ? '<p class="text-xs text-gray-600 mt-3">It moves to Archived. Nothing is learned from it and no replacement is written.</p>' : ''}
       ${!blocked && ui.action === 'retry' && ui.when ? `<p class="text-sm text-gray-700 mt-3"><span class="font-bold">Try again at:</span> ${esc(ui.when)}</p>
         <p class="text-xs text-gray-500 mt-1">The exact time is worked out when you press the button, and said back to you here. If the same problem is still there, it will fail again.</p>` : ''}
       ${!blocked && ui.action === 'retry' && !ui.when ? '<p class="text-xs text-gray-600 mt-3">It goes back in the queue and publishes on the next run. If the same problem is still there, it will fail again — open the post to see why it stopped.</p>' : ''}

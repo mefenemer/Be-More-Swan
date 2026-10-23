@@ -6790,8 +6790,11 @@ function _rqHeadlinePost(group) {
 // A clean, clickable summary row. The full per-platform mock-up + approve/amend/request-changes/reject
 // actions live in openPostReview() so the list itself stays scannable (the old cramped inline-button
 // card was the source of the "confusing layout" feedback).
-function rqRenderSocialCard(draft) {
+function rqRenderSocialCard(draft, opts) {
     // `draft` is a group representative from rqGroupSocialDrafts (falls back to itself as a lone group).
+    // `opts.selectable` (the assistant's Review tab) adds a checkbox for bulk Remove. ⚠️ Callers that
+    // pass this straight to .map() hand it the INDEX, hence the object check.
+    const selectable = !!(opts && typeof opts === 'object' && opts.selectable);
     const group = draft._group || [draft];
     const multi = group.length > 1;
     rqCachePost(draft);
@@ -6881,7 +6884,9 @@ function rqRenderSocialCard(draft) {
                         ? `Suggested for ${fmt(draft.publishDate)}`
                         : (draft.publishDate ? `Goes out ${fmt(draft.publishDate)}` : '');
     // A <button>, so the card is reachable and openable from the keyboard (it was a clickable div).
-    return `<button type="button" onclick="openPostReview(${draft.id})" class="focus-ring w-full text-left py-3.5 flex items-center gap-3 cursor-pointer hover:bg-gray-50 -mx-4 px-4 transition" data-post-id="${draft.id}">
+    // Selectable: the checkbox sits BESIDE the button (an input can't live inside one), and the row
+    // takes over the bleed-to-the-edge hover the button has on its own.
+    const card = `<button type="button" onclick="openPostReview(${draft.id})" class="focus-ring ${selectable ? 'flex-1 min-w-0 pr-4 pl-1' : 'w-full -mx-4 px-4 hover:bg-gray-50'} text-left py-3.5 flex items-center gap-3 cursor-pointer transition" data-post-id="${draft.id}">
       ${thumb}
       <span class="block flex-1 min-w-0">
         <span class="flex items-center gap-2 mb-0.5 min-w-0">
@@ -6899,6 +6904,15 @@ function rqRenderSocialCard(draft) {
       ${statusChip}
       <svg class="w-4 h-4 text-gray-400 shrink-0" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
     </button>`;
+    if (!selectable) return card;
+    // Every platform row of the card goes with it — they are one post.
+    const ids = group.map(g => g.id).join(',');
+    return `<div class="flex items-stretch -mx-4 hover:bg-gray-50 transition" data-rq-select-row>
+      <label class="flex items-center pl-4 pr-2 cursor-pointer shrink-0">
+        <input type="checkbox" class="rq-select h-4 w-4 rounded border-gray-300 text-emerald-800 focus:ring-emerald-700 cursor-pointer" data-rq-ids="${ids}" aria-label="Select this post">
+      </label>
+      ${card}
+    </div>`;
 }
 
 async function sdApprove(postId, action) {

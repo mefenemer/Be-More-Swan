@@ -780,6 +780,13 @@
           const r = await postActionCall('reschedule-post-chat', { postId: first, instruction: d.when });
           for (const id of rest) await postActionCall('reschedule-post-chat', { postId: id, rescheduleAt: r.scheduledFor });
           message = r.confirmation || 'Moved.';
+        } else if (d.action === 'remove') {
+          // The Review tab's bulk Remove, for this post's platform rows.
+          const res = await fetch(`/.netlify/functions/scheduled-posts?ids=${ids.join(',')}`, { method: 'DELETE', credentials: 'same-origin' });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `That didn’t work (HTTP ${res.status}).`);
+          if (!(data.cancelledIds || []).length) throw new Error('It had already gone out or been removed.');
+          message = 'Removed — it’s in the "Archived" column.';
         } else {
           throw new Error('Unknown action.');
         }
