@@ -10,6 +10,8 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 
 import { liveRoleLabel } from '../../src/utils/live-role-label';
 import { readCombineCrossPosts, loadPostGroups, combineCrossPostNotes, expandCrossPostIds } from '../../src/utils/crosspost-view';
+import { requireTenant } from '../../src/utils/tenant';
+import { openQuestionCount, unreadCount as teamUnreadCount } from '../../src/utils/team-messages';
 const jwtSecret = process.env.JWT_SECRET;
 
 // Notification "kind" classification (action vs info) lives in src/utils/notification-actions.ts
@@ -110,23 +112,47 @@ export default withLambda(async (event: HandlerEvent) => {
                 allNotes = combineCrossPostNotes(allNotes, await loadPostGroups(db, allNotes));
             }
 
-            // Counts for the sidebar badge. actionCount = UNREAD, unresolved action items — reading
-            // (muting) an action drops it from the badge, but the item stays in the inbox list until
-            // it's truly resolved (resolvedAt). This mirrors the inbox tab pill so the two never
-            // disagree. updateUnread = unread "update" (info-kind) notifications. badgeCount combines
-            // both so the sidebar reflects unread actions AND unread updates (no double-count: a
-            // notification is either action-kind or info-kind, never both).
+            // Counts for the ONE badge (the Notifications side-menu item and the bell show the same
+            // numbers — notifications.js updateNotificationBadge). Two kinds, never mixed:
+            //   needsYou = open actions (unresolved, read or not: reading an action does not do it)
+            //            + Team questions to the person nobody has answered yet
+            //   fyi      = unread updates + unread Team messages (open questions are not in it)
+            // A notification is either action-kind or info-kind, and a Team message is either an open
+            // question or not, so nothing is counted twice. actionCount keeps its old meaning (unread,
+            // unresolved actions) for any caller still reading it.
             if (queryStringParameters && queryStringParameters.action === 'count') {
                 const unread = allNotes.filter(n => !n.isRead).length;
+                const openActions = allNotes.filter(n => !n.resolvedAt && kindOf(n.type) === 'action').length;
                 const actionCount = allNotes.filter(n => !n.resolvedAt && !n.isRead && kindOf(n.type) === 'action').length;
                 const updateUnread = allNotes.filter(n => !n.isRead && kindOf(n.type) !== 'action').length;
-                const badgeCount = actionCount + updateUnread;
+                // Team Chat lives in the workspace, not on the user row. Resolved the way team.ts does
+                // (requireTenant), so the two never disagree. A failed read is no Team count, never a
+                // failed badge.
+                let teamQuestions = 0;
+                let teamUnread = 0;
+                try {
+                    const ctx = await requireTenant(event, db);
+                    if (!('error' in ctx)) {
+                        [teamQuestions, teamUnread] = await Promise.all([
+                            openQuestionCount(db, ctx.organisationId),
+                            teamUnreadCount(db, ctx.organisationId, ctx.userId),
+                        ]);
+                    }
+                } catch (err) {
+                    console.warn('[notifications] Team counts unavailable:', err instanceof Error ? err.message : err);
+                }
+                const needsYou = openActions + teamQuestions;
+                const fyi = updateUnread + teamUnread;
+                const badgeCount = needsYou + fyi;
                 // Type of the newest visible notification (allNotes is ordered newest-first).
                 // When badgeCount rises, this is the item that just arrived — the client uses
                 // it to decide which sound to play (Aurora chime for milestones / "assistant
                 // ready to work", the Swan & Wand sound for everything else).
                 const latestType = allNotes[0]?.type ?? null;
-                return { statusCode: 200, body: JSON.stringify({ unreadCount: unread, actionCount, updateUnread, badgeCount, latestType }) };
+                return { statusCode: 200, body: JSON.stringify({
+                    unreadCount: unread, actionCount, updateUnread, badgeCount, latestType,
+                    needsYou, fyi, openActions, teamQuestions, teamUnread,
+                }) };
             }
 
             // Actor identity: resolve each assistant-attributed notification to its assistant's

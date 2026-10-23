@@ -91,20 +91,36 @@ check('the endpoint is tenant-scoped and moderates what reaches a prompt', () =>
     assert.ok(team.includes('eq(aiAssistants.organisationId, args.orgId)') && team.includes('eq(campaigns.organisationId, args.orgId)'), 'could write to another workspace\'s assistant or campaign');
 });
 
-check('Team is in the side menu with its own badge, and the bell adds it in', () => {
+check('Team Chat is the Messages tab of Notifications; one count, one request', () => {
     const side = read('components/sidebar.html');
-    assert.ok(side.includes('id="nav-team"') && side.includes('id="nav-team-badge"'));
+    assert.ok(!side.includes('id="nav-team"') && !side.includes('id="nav-team-badge"'), 'the separate menu item is back');
+    assert.ok(side.includes('<span class="nav-label">Notifications</span>') && side.includes('id="nav-inbox-dot"'));
     const ws = read('workspace.html');
-    assert.ok(ws.includes("'team': { file: 'team.html'") && ws.includes("'team': document.getElementById('nav-team')") && ws.includes('<script src="/src/components/team-feed.js"></script>'));
+    assert.ok(!ws.includes("'team': { file: 'team.html'") && ws.includes("if (routeKey === 'team') { routeKey = 'notifications'; param = { tab: 'messages' }; }"), 'loadView(\'team\') no longer lands anywhere');
+    assert.ok(ws.includes('<script src="/src/components/team-feed.js"></script>') && ws.includes('id="sidebar-nav-dot"'));
     const n = read('notifications.js');
-    assert.ok(n.includes('count += teamUnread;'), 'the bell does not count Team');
-    assert.ok(n.indexOf('setInboxNavBadge(count);') < n.indexOf('count += teamUnread;'), 'the Inbox item would count Team messages it cannot show');
+    // The badge reads needsYou/fyi from ONE call; Team is counted on the server, never added again here.
+    assert.ok(n.includes("_paintNotifBadge(document.getElementById('nav-inbox-badge'), document.getElementById('nav-inbox-dot'), needsYou, fyi);"));
+    assert.ok(!n.includes("JSON.stringify({ action: 'unread' })"), 'a second Team count request is back');
+    assert.ok(n.includes("window.TeamFeed.mount(teamHost, { mode: 'page', thread: teamThread || undefined })"));
+    const fn = read('netlify/functions/notifications.ts');
+    assert.ok(fn.includes('const needsYou = openActions + teamQuestions;') && fn.includes('const fyi = updateUnread + teamUnread;'));
+    assert.ok(fn.includes("allNotes.filter(n => !n.resolvedAt && kindOf(n.type) === 'action').length"), 'reading an action would take it off the needs-you count');
+});
+
+check('a question counts until it is answered, and one thread never reads the others', () => {
+    // Open questions are their own count and are left out of "unread", so reading cannot hide them.
+    assert.ok(team.includes('export async function openQuestionCount(') && team.includes('sql`NOT ${OPEN_QUESTION}`'));
+    assert.ok(team.includes("${teamMessages.question} IS NOT NULL AND ${teamMessages.answeredAt} IS NULL"));
+    // The read marker is one number per person: only views showing every message may move it.
+    const f = read('src/components/team-feed.js');
+    assert.ok(f.includes("(inst.thread.type === 'all' || inst.thread.type === 'me') && inst.messages.length"));
 });
 
 check('the feed is in every assistant\'s chat (Team switch) and every campaign; not on the assistant page', () => {
     const m = read('src/components/assistant-chat-modal.js');
     assert.ok(m.includes("window.TeamFeed.mount(el('bms-chat-team-host'), { mode: 'assistant', assistantId: state.assistantId })"));
-    assert.ok(m.includes('id="bms-chat-mode-team"') && m.includes("closeAssistantChat();\n      if (typeof window.loadView === 'function') window.loadView('team');"));
+    assert.ok(m.includes('id="bms-chat-mode-team"') && m.includes("window.loadView('notifications', id ? { tab: 'messages', thread: { type: 'assistant', id: id } } : { tab: 'messages' })"));
     assert.ok(!read('assistant-detail.html').includes('id="team-panel-host"'), 'the duplicate card is back');
     assert.ok(!read('assistants.js').includes("getElementById('team-panel-host')"));
     assert.ok(read('src/components/assistant-campaigns.js').includes("window.TeamFeed?.mount(el, { mode: 'campaign'"));
@@ -152,9 +168,8 @@ check('set from the form, the chat and stated on the card', () => {
 
 // ── Owner's changes, 2026-10-14 ──────────────────────────────────────────────
 check('it is called Team Chat everywhere the person reads it', () => {
-    assert.ok(read('components/sidebar.html').includes('<span class="nav-label">Team Chat</span>'));
-    assert.ok(read('team.html').includes('>Team Chat</span></h1>'));
-    assert.ok(read('notifications.html').includes('Open Team Chat'));
+    assert.ok(read('notifications.html').includes('<span data-explain="team-feed">Team Chat</span>'));
+    assert.ok(read('src/components/assistant-chat-modal.js').includes('>Open Team Chat</button>'));
 });
 
 check('newest first by default, either order on request, remembered per browser', () => {

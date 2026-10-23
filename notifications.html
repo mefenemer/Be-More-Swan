@@ -1,80 +1,101 @@
-<div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full pb-20">
+<!-- notifications.html — Notifications: what needs you, your assistants' messages (Team Chat), and
+     updates, in one place (owner, 2026-10-23). Controller: notifications.js (window.initNotifications);
+     the Messages tab is src/components/team-feed.js mounted in place. "Inbox" is kept free for email. -->
+<div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full pb-20">
 
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
             <h1 class="text-3xl font-extrabold text-gray-900">Notifications</h1>
-            <p class="text-gray-500 mt-1">Stay updated on your workspace and assistant activities.</p>
+            <p class="text-gray-500 mt-1">What needs you, what your assistants are telling you, and what has happened.</p>
         </div>
-        <button id="btn-mark-all-read" class="hidden btn-secondary sm:flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-colors border">
+        <!-- Updates tab only: actions clear by doing them and questions by answering, never by reading. -->
+        <button id="btn-mark-all-read" class="hidden btn-secondary items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-colors border" style="display:none">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
             Mark all as read
         </button>
     </div>
 
-    <!-- Team messages are counted on the bell too; they are read in Team, so say so here. -->
-    <div id="notif-team-banner" class="hidden mb-4 flex flex-wrap items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3" style="display:none">
-        <p id="notif-team-banner-count" class="text-sm text-gray-800 flex-1"></p>
-        <button type="button" onclick="window.loadView && window.loadView('team')" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg">Open Team Chat</button>
-    </div>
-
-    <!-- Action required vs Updates: actions are cleared by doing, updates by reading. -->
-    <div class="flex gap-2 mb-4">
-        <button type="button" id="tab-action" class="btn-secondary flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg border">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
-            Action required
-            <span id="tab-action-count" class="hidden bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full">0</span>
+    <!-- Needs you: cleared by doing. Messages: Team Chat, read and answered as a conversation.
+         Updates: cleared by reading. Wraps on a phone rather than scrolling sideways. -->
+    <div role="tablist" aria-label="Notifications" class="flex flex-wrap gap-1 mb-4">
+        <button type="button" role="tab" id="tab-needs" aria-controls="notif-list-panel" aria-selected="true" class="notif-tab flex items-center gap-1.5 px-3 text-sm rounded-lg border" style="min-height:44px">
+            Needs you
+            <span id="tab-needs-count" class="hidden bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full">0</span>
         </button>
-        <button type="button" id="tab-updates" class="btn-secondary flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
+        <button type="button" role="tab" id="tab-messages" aria-controls="notif-messages-panel" aria-selected="false" class="notif-tab flex items-center gap-1.5 px-3 text-sm rounded-lg border" style="min-height:44px">
+            Messages
+            <span id="tab-messages-count" class="hidden bg-gray-100 text-gray-700 text-xs font-bold px-2 py-0.5 rounded-full">0</span>
+        </button>
+        <button type="button" role="tab" id="tab-updates" aria-controls="notif-list-panel" aria-selected="false" class="notif-tab flex items-center gap-1.5 px-3 text-sm rounded-lg border" style="min-height:44px">
             Updates
-            <span id="tab-updates-count" class="hidden bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-0.5 rounded-full">0</span>
+            <span id="tab-updates-count" class="hidden bg-gray-100 text-gray-700 text-xs font-bold px-2 py-0.5 rounded-full">0</span>
         </button>
     </div>
 
-    <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-6 flex flex-col sm:flex-row sm:items-center gap-3">
-        <div class="relative flex-1">
-            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+    <div id="notif-list-panel" role="tabpanel">
+        <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-6 flex flex-col gap-3">
+            <div class="relative">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                </div>
+                <input type="text" id="notif-search" aria-label="Search notifications" placeholder="Search notifications..." class="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-700 outline-none text-sm transition-all">
             </div>
-            <input type="text" id="notif-search" placeholder="Search notifications..." class="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm transition-all">
+            <!-- Filter and grouping. Every option always stands: even a single-assistant workspace splits
+                 into that assistant and "Be More Swan" (system notifications). The choices are remembered
+                 in localStorage by notifications.js, so they survive navigating away and back. -->
+            <div class="flex items-center gap-3 flex-wrap">
+                <label class="flex items-center gap-2 text-sm font-medium text-gray-600">
+                    From
+                    <select id="notif-assistant-filter" class="py-2.5 pl-3 pr-8 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-700 focus:ring-2 focus:ring-emerald-700 outline-none transition-all cursor-pointer" style="max-width:12rem">
+                        <option value="all">Everyone</option>
+                    </select>
+                </label>
+                <label class="flex items-center gap-2 text-sm font-medium text-gray-600">
+                    Group by
+                    <select id="notif-group-by" class="py-2.5 pl-3 pr-8 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-700 focus:ring-2 focus:ring-emerald-700 outline-none transition-all cursor-pointer">
+                        <option value="none">Nothing</option>
+                        <option value="type">Type</option>
+                        <option value="assistant">Assistant</option>
+                        <option value="day">Day</option>
+                    </select>
+                </label>
+                <!-- One notification per cross-post rather than one per platform. Server-side
+                     (notifications.ts), saved to the profile — see src/components/crosspost-view.js. -->
+                <label class="flex items-center gap-2 text-sm font-medium text-gray-600 cursor-pointer select-none" title="When a post goes to several platforms, show it once instead of once per platform">
+                    <input type="checkbox" data-crosspost-toggle checked class="h-4 w-4 rounded border-gray-300 text-emerald-700 focus:ring-emerald-700 cursor-pointer">
+                    Combine platforms
+                </label>
+                <!-- Shown by notifications.js only while a grouping is active; its label flips between
+                     "Collapse all" and "Expand all" to match what the click will do. -->
+                <button type="button" id="notif-expand-all" style="display:none"
+                    class="hidden btn-utility shrink-0 whitespace-nowrap px-3 py-2.5 text-sm font-bold border rounded-lg transition-colors cursor-pointer">Collapse all</button>
+            </div>
         </div>
-        <!-- Grouping. Every option always stands: even a single-assistant workspace splits into
-             that assistant and "Be More Swan" (system notifications). The choice is remembered in
-             localStorage by notifications.js, so it survives navigating away and back. -->
-        <div class="flex items-center gap-3 shrink-0 flex-wrap">
-            <!-- One notification per cross-post rather than one per platform. Server-side
-                 (notifications.ts), saved to the profile — see src/components/crosspost-view.js. -->
-            <label class="flex items-center gap-2 text-sm font-medium text-gray-600 cursor-pointer select-none" title="When a post goes to several platforms, show it once instead of once per platform">
-                <input type="checkbox" data-crosspost-toggle checked class="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer">
-                Combine platforms
-            </label>
-            <label class="flex items-center gap-2 text-sm font-medium text-gray-600 cursor-pointer select-none">
-                Group by
-                <select id="notif-group-by" class="py-2.5 pl-3 pr-8 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none transition-all cursor-pointer">
-                    <option value="none">Nothing</option>
-                    <option value="type">Type</option>
-                    <option value="assistant">Assistant</option>
-                </select>
-            </label>
-            <!-- Shown by notifications.js only while a grouping is active; its label flips between
-                 "Collapse all" and "Expand all" to match what the click will do. -->
-            <button type="button" id="notif-expand-all" style="display:none"
-                class="hidden btn-utility shrink-0 whitespace-nowrap px-3 py-2.5 text-sm font-bold border rounded-lg transition-colors cursor-pointer">Collapse all</button>
+
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <ul id="notif-list" class="divide-y divide-gray-100">
+                <li class="p-8 text-center text-gray-500" id="notif-loading">Loading notifications...</li>
+            </ul>
+
+            <div id="notif-empty-state" class="hidden py-16 px-6 text-center">
+                <div class="mx-auto w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4">
+                    <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path></svg>
+                </div>
+                <h3 class="text-sm font-bold text-gray-900" data-empty-title>All caught up!</h3>
+                <p class="text-sm text-gray-500 mt-1" data-empty-sub>No notifications match your current view.</p>
+                <button type="button" data-empty-link class="hidden mt-3 text-sm font-bold text-emerald-700 hover:text-emerald-800" style="display:none"></button>
+            </div>
         </div>
     </div>
 
-    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-        <ul id="notif-list" class="divide-y divide-gray-100">
-            <li class="p-8 text-center text-gray-500" id="notif-loading">Loading notifications...</li>
-        </ul>
-
-        <div id="notif-empty-state" class="hidden py-16 px-6 text-center">
-            <div class="mx-auto w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4">
-                <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path></svg>
-            </div>
-            <h3 class="text-sm font-bold text-gray-900" data-empty-title>All caught up!</h3>
-            <p class="text-sm text-gray-500 mt-1" data-empty-sub>No notifications match your current view.</p>
-        </div>
+    <!-- Team Chat, unchanged: threads by assistant and campaign, a composer, real replies. -->
+    <div id="notif-messages-panel" role="tabpanel" class="hidden" style="display:none">
+        <style>
+            /* Two columns from md up; one on a phone. Inline because the prebuilt style.css has no such grid utility. */
+            @media (min-width: 768px) { #team-host .team-grid { grid-template-columns: 16rem minmax(0, 1fr); } }
+        </style>
+        <p class="text-sm text-gray-500 mb-3"><span data-explain="team-feed">Team Chat</span>: what your assistants are doing, in their words, and where you can tell them something or answer their questions.</p>
+        <div id="team-host"></div>
     </div>
 
 </div>

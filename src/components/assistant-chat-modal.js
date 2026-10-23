@@ -132,9 +132,11 @@
     el('bms-chat-close').addEventListener('click', closeAssistantChat);
     el('bms-chat-mode-chat').addEventListener('click', function () { setMode('chat'); });
     el('bms-chat-mode-team').addEventListener('click', function () { setMode('team'); });
+    // Team Chat is Notifications → Messages now; open it on this assistant's thread.
     el('bms-chat-team-open').addEventListener('click', function () {
+      var id = Number(state.assistantId) || null;
       closeAssistantChat();
-      if (typeof window.loadView === 'function') window.loadView('team');
+      if (typeof window.loadView === 'function') window.loadView('notifications', id ? { tab: 'messages', thread: { type: 'assistant', id: id } } : { tab: 'messages' });
     });
     el('bms-chat-new-btn').addEventListener('click', function () {
       if (!state.assistantId) return;

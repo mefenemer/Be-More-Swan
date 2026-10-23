@@ -36,7 +36,8 @@ check('it has breadcrumbs back, and leaving for another page closes it', () => {
     assert.match(W, /<nav id="post-review-crumbs"/);
     assert.match(W, /_rqRenderPostCrumbs\(post\);/);
     const lv = W.slice(landmark(W, 'async function loadView(routeKey, param = null) {'));
-    assert.match(lv.slice(0, 900), /if \(postEditor && !postEditor\.classList\.contains\('hidden'\) && typeof closePostReview === 'function'\) closePostReview\(\);/);
+    // 1300: loadView now starts by redirecting the old 'team' key (Team Chat → Notifications, 2026-10-23).
+    assert.match(lv.slice(0, 1300), /if \(postEditor && !postEditor\.classList\.contains\('hidden'\) && typeof closePostReview === 'function'\) closePostReview\(\);/);
 });
 
 const BS = read('src/components/blog-studio-modal.js');

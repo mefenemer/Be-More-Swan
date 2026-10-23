@@ -1,8 +1,9 @@
 // netlify/functions/team.ts
 // The Team feed — docs/campaign-orchestrator-flow.md §4. One endpoint, tenant-scoped.
 //
-//   POST { action: 'list', campaignId?, assistantId?, mine?, beforeId? } → messages (newest first), assistants, campaigns
-//   POST { action: 'unread' }                                     → { unread } — the side menu and bell badge
+//   POST { action: 'list', campaignId?, assistantId?, mine?, openQuestions?, beforeId? } → messages (newest first), assistants, campaigns
+//        openQuestions: only questions to the person still unanswered (Notifications → Needs you)
+//   POST { action: 'unread' }                                     → { unread, questions } (the badge itself comes from notifications?action=count)
 //   POST { action: 'mark_read', upToId }                          → the person has seen up to here
 //   POST { action: 'send', assistantId, campaignId?, body }       → a note to an assistant (moderated)
 //        + reply: 'model' → no fixed reply; the page then runs a chat turn for it (chat-orchestrator `teamMessageId`)
@@ -18,7 +19,7 @@ import { aiAssistants, campaigns, masterAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { refreshStoredCards } from '../../src/utils/chat-card-refresh';
-import { answerQuestion, listTeamMessages, markRead, sendFromUser, unreadCount } from '../../src/utils/team-messages';
+import { answerQuestion, listTeamMessages, markRead, openQuestionCount, sendFromUser, unreadCount } from '../../src/utils/team-messages';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -42,12 +43,12 @@ export default withLambda(async (event) => {
     const action = String(body.action || '');
 
     if (action === 'unread') {
-        return json(200, { unread: await unreadCount(db, orgId, userId) });
+        return json(200, { unread: await unreadCount(db, orgId, userId), questions: await openQuestionCount(db, orgId) });
     }
 
     if (action === 'list') {
         const messages = await listTeamMessages(db, orgId, {
-            campaignId: posInt(body.campaignId), assistantId: posInt(body.assistantId), mine: body.mine === true, beforeId: posInt(body.beforeId),
+            campaignId: posInt(body.campaignId), assistantId: posInt(body.assistantId), mine: body.mine === true, openQuestions: body.openQuestions === true, beforeId: posInt(body.beforeId),
         });
         // Everyone who can be written to, and every campaign a thread can be about — so the page can
         // show an assistant with no messages yet, and name a campaign thread by its objective.
