@@ -15,10 +15,9 @@ export type MediaSource = 'manual' | 'stock' | 'brand_card' | 'ai';
 // AC3.1 default priority matrix: Check Manual Library → Search Pexels → Brand Card → Generate with AI.
 //
 // brand_card sits ahead of AI generation because it is free, deterministic and auto-publishable,
-// and behind stock only nominally: the resolver ALTERNATES the two per post (see media-resolver),
-// so a default assistant produces a feed that mixes photography with brand typography instead of
-// one or the other. Only assistants with no stored preference get this — an assistant configured
-// through onboarding keeps its explicit list untouched.
+// and behind stock: the order is a strict priority (media-resolver), so a default assistant posts
+// photos and falls back to a card only when stock finds nothing. Only assistants with no stored
+// preference get this — an assistant configured through onboarding keeps its explicit list untouched.
 export const DEFAULT_ORDER: MediaSource[] = ['manual', 'stock', 'brand_card', 'ai'];
 
 const VALID = new Set<MediaSource>(['manual', 'stock', 'brand_card', 'ai']);

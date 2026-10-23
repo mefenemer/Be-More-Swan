@@ -2,8 +2,7 @@
 //
 // The fourth media source. Manual/stock/AI all hand back a PHOTOGRAPH; this one renders the post's
 // own idea as typography in the org's colours, which is what a quote-card, stat-card or hot-take
-// post actually wants. Alternated with stock (see media-resolver) so a feed mixes cards and imagery
-// rather than becoming a wall of either.
+// post actually wants. Used in the place the user ranks it among the media sources (media-resolver).
 //
 // WHY NOT AI IMAGE GENERATION: because the card is mostly words. Diffusion models still mangle
 // rendered text — a misspelled headline on a brand card is worse than no card at all — and the
