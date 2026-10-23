@@ -128,8 +128,12 @@ window.showToast = function (message, opts = {}) {
     container.style.cssText = 'position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);z-index:11000;display:flex;flex-direction:column;gap:.5rem;align-items:center;pointer-events:none;';
     document.body.appendChild(container);
   }
+  // An error stays up twice as long and is announced at once (role=alert): at 4s a phone user lost
+  // "Reschedule failed" before reading it. opts.tone:'error' says so explicitly; the ⚠️/❌ icon every
+  // existing failure toast already passes counts too, so those callers needed no change.
+  const isError = opts.tone === 'error' || opts.icon === '⚠️' || opts.icon === '❌';
   const toast = document.createElement('div');
-  toast.setAttribute('role', 'status');
+  toast.setAttribute('role', isError ? 'alert' : 'status');
   toast.style.cssText = 'pointer-events:auto;max-width:90vw;background:#1f2937;color:#fff;padding:.75rem 1rem;border-radius:.75rem;box-shadow:0 10px 25px rgba(0,0,0,.18);font-size:.875rem;font-weight:500;display:flex;align-items:center;gap:.5rem;opacity:0;transform:translateY(.5rem);transition:opacity .2s ease,transform .2s ease;';
   const icon = document.createElement('span');
   icon.textContent = opts.icon || '🔒';
@@ -148,11 +152,16 @@ window.showToast = function (message, opts = {}) {
   }
   container.appendChild(toast);
   requestAnimationFrame(() => { toast.style.opacity = '1'; toast.style.transform = 'translateY(0)'; });
-  setTimeout(() => {
+  const hide = () => {
     toast.style.opacity = '0';
     toast.style.transform = 'translateY(.5rem)';
     setTimeout(() => toast.remove(), 250);
-  }, opts.duration || 4000);
+  };
+  const ms = opts.duration || (isError ? 8000 : 4000);
+  // Hovering holds it, so a message can be finished (or its button reached) before it goes.
+  let timer = setTimeout(hide, ms);
+  toast.addEventListener('mouseenter', () => clearTimeout(timer));
+  toast.addEventListener('mouseleave', () => { clearTimeout(timer); timer = setTimeout(hide, 2500); });
 };
 
 // ── US3: destructive confirm modal + draft cancellation ──────────────

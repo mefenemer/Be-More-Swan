@@ -76,7 +76,10 @@
   window._rqSafeOpenStatus = function (statusKey, btn) {
     if (typeof rqOpenStatus === 'function') rqOpenStatus(statusKey, btn);
   };
-  window._rqSafeOpenStatus('review', document.querySelector('.rq-col[data-status="review"]'));
+  // Another page can ask to land on a tab (the Calendar's Needs attention links here). Consumed once.
+  var initialRq = window._rqInitialStatus === 'attention' ? 'attention' : 'review';
+  window._rqInitialStatus = null;
+  window._rqSafeOpenStatus(initialRq, document.querySelector('.rq-col[data-status="' + initialRq + '"]'));
   // Arrow keys move between the tabs, as tabs are expected to behave.
   var tabBar = document.querySelector('[role="tablist"][aria-label="Review"]');
   if (tabBar && !tabBar.dataset.keys) {

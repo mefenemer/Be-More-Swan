@@ -744,6 +744,18 @@ function _getDateRange() {
     return { from, to };
 }
 
+/** True when nothing at all falls on a day of the month or week on screen. */
+function _gridIsEmpty() {
+    const { from, to } = _getDateRange();
+    for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+        const date = new Date(d);
+        if (_postsOnDate(date).length || _awaitingOnDate(date).length || _blogPostsOnDate(date).length
+            || _newsletterIssuesOnDate(date).length || _scheduledRecordsOnDate(date).length
+            || _followUpsOnDate(date).length || _datedItemsOnDate(date).length || _activitiesOnDate(date).length) return false;
+    }
+    return true;
+}
+
 // ── Master render ─────────────────────────────────────────────────
 function _render() {
     // Chips are about to be torn down and rebuilt — drop any open hover preview
@@ -786,6 +798,20 @@ function _render() {
            </div>`
         : _loading
         ? `<div class="sticky top-0 z-20 flex justify-center pointer-events-none"><span role="status" class="mt-2 inline-flex items-center gap-2 rounded-full bg-white/70 border border-gray-200 shadow-sm px-3 py-1 text-xs font-bold text-gray-600">${window.bmsSpinnerHtml ? window.bmsSpinnerHtml(14) : ''}Loading…</span></div>`
+        : (_view !== 'list' && _gridIsEmpty())
+        // The grids had no empty state: a new owner saw a month of blank cells and no next step.
+        // Same words and hand-off as the List view, above the grid rather than instead of it.
+        ? (() => {
+            const filtered = _assistantFilter !== 'all' || _platformFilter !== 'all';
+            const period = _view === 'week' ? 'this week' : 'this month';
+            const msg = filtered ? `Nothing matches these filters ${period}.` : _emptyMonthMessage().replace('this month', period);
+            const toReview = !filtered && (!_lockedAssistant || _publishesContent)
+                ? `<button type="button" onclick="window.loadView && window.loadView('review-queue')" class="btn-primary focus-ring tap-target px-3 py-1.5 text-sm font-bold rounded-lg">Go to Review</button>`
+                : '';
+            return `<div role="status" class="mx-4 mt-4 mb-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 flex items-center gap-3 flex-wrap">
+              <p class="text-sm text-gray-700 flex-1 min-w-0">${msg}</p>${toReview}
+           </div>`;
+        })()
         : '';
     main.innerHTML = banner + (_loading ? `<div class="opacity-60">${body}</div>` : body);
     _renderBuckets = null;
@@ -927,12 +953,22 @@ function _renderList() {
     let html = `<div role="tablist" aria-label="Show" class="sticky top-0 z-10 bg-white border-b border-gray-200 px-4 flex gap-1 overflow-x-auto">`;
     tabs.forEach(t => {
         const active = _listFilter === t.key;
-        html += `<button type="button" role="tab" aria-selected="${active}" onclick="window._calSetListFilter('${t.key}')"
+        // Roving tabindex + arrow keys (bound once at load), as on Review's tabs: five separate Tab
+        // stops claiming to be a tablist was the opposite of what a screen reader announces.
+        html += `<button type="button" role="tab" aria-selected="${active}" tabindex="${active ? 0 : -1}" aria-controls="cal-main" data-cal-list-tab="${t.key}" onclick="window._calSetListFilter('${t.key}')"
             class="focus-ring tap-target shrink-0 px-3 py-2.5 text-xs font-bold border-b-2 transition ${active ? 'border-brand text-emerald-800' : 'border-transparent text-gray-500 hover:text-gray-700'}">
             ${t.label}
         </button>`;
     });
     html += `</div>`;
+    // This tab only covers the month on screen; something that failed on the 30th vanished on the
+    // 1st. Review's Needs attention is not tied to dates, so say so and link there.
+    if (_listFilter === 'attention') {
+        html += `<div class="mx-4 mt-3 flex items-center gap-3 flex-wrap rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
+            <p class="text-xs text-gray-600 flex-1 min-w-0">Showing ${_anchor.toLocaleString('en-GB', { month: 'long', year: 'numeric' })}. Review lists everything that needs fixing, from any date.</p>
+            <button type="button" onclick="window._rqInitialStatus='attention'; window.loadView && window.loadView('review-queue')" class="btn-utility focus-ring tap-target px-3 py-1 text-xs font-bold rounded-lg">Open in Review</button>
+        </div>`;
+    }
 
     // Apply filter
     const attention = (window.PlatformConstants && window.PlatformConstants.needsAttentionStatuses) || ['failed', 'paused', 'paused_credits'];
@@ -999,7 +1035,7 @@ function _renderList() {
         const msg = unfiltered ? (upcoming ? _emptyUpcomingMessage() : _emptyMonthMessage()) : (upcoming ? 'Nothing in this filter in the next two weeks.' : 'Nothing in this filter this month.');
         // Publishing calendars hand off to Review, where the drafts are — named as the page is named.
         const toReview = unfiltered && (!_lockedAssistant || _publishesContent)
-            ? `<button type="button" onclick="window.loadView && window.loadView('review-queue')" class="btn-secondary focus-ring tap-target mt-1 px-4 py-2 text-sm font-bold rounded-lg border">Go to Review</button>`
+            ? `<button type="button" onclick="window.loadView && window.loadView('review-queue')" class="btn-primary focus-ring tap-target mt-1 px-4 py-2 text-sm font-bold rounded-lg">Go to Review</button>`
             : '';
         html += `<div class="flex flex-col items-center justify-center py-24 text-gray-500 gap-3 px-4 text-center">
             <svg class="w-10 h-10 text-gray-400" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
@@ -1974,6 +2010,19 @@ if (!window._calDelegatesBound) {
         if (!el || !el.matches || !el.matches('[data-cal-activate]')) return;
         e.preventDefault();
         el.click();
+    });
+    // Left/right between the List view's tabs. The list re-renders on a switch, so focus is put on
+    // the new active tab by key afterwards.
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+        const tab = e.target && e.target.closest ? e.target.closest('[data-cal-list-tab]') : null;
+        if (!tab) return;
+        const tabs = Array.from(tab.parentNode.querySelectorAll('[data-cal-list-tab]'));
+        const next = tabs[(tabs.indexOf(tab) + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+        e.preventDefault();
+        const key = next.dataset.calListTab;
+        window._calSetListFilter(key);
+        document.querySelector(`[data-cal-list-tab="${key}"]`)?.focus();
     });
 }
 

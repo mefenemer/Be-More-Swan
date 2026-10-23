@@ -241,4 +241,42 @@ check('Month view is not offered on a phone', () => {
     assert.match(slice(calendar, 'function _setView('), /v === 'week' \|\| v === 'month'\) && _isPhone\(\)/);
 });
 
+// ── 7. Third pass (2026-10-23) ───────────────────────────────────────────────
+console.log('Empty states, confirmations and announcements');
+
+check('"Publish again now" confirms first; "Re-queue for then" does not', () => {
+    const fn = slice(workspace, 'async function rqFailedRetry(');
+    assert.match(fn, /if \(!publishDate\)[\s\S]{0,400}confirmModal/, 'an immediate republish must confirm');
+});
+
+check('the "Ready? Open Schedule & publish" hint hides while that step is open', () => {
+    assert.match(slice(workspace, 'function _railRender('), /post-review-draft-hint'\)\?\.classList\.toggle\('hidden', _railOpen === 'when'\)/);
+});
+
+check('the Calendar grids say when there is nothing on them, and Review has one all-clear', () => {
+    assert.match(slice(calendar, 'function _render('), /_gridIsEmpty\(\)/);
+    assert.match(slice(workspace, 'async function rqRenderGroups('), /allEmpty[\s\S]{0,200}rqAllClear\(statusKey\)/);
+    assert.match(slice(workspace, 'function rqAllClear('), /You’re all caught up/);
+});
+
+check('error toasts are announced and stay up longer', () => {
+    const fn = slice(dialogs, 'window.showToast = function', '\n};');
+    assert.match(fn, /isError \? 'alert' : 'status'/);
+    assert.match(fn, /isError \? 8000 : 4000/);
+});
+
+check("the Calendar's Needs attention tab states its scope and links to Review's", () => {
+    assert.match(slice(calendar, 'function _renderList('), /_rqInitialStatus='attention'/);
+    assert.match(reviewHtml, /window\._rqInitialStatus === 'attention'/);
+});
+
+check('the Calendar list tabs rove, with arrow keys', () => {
+    assert.match(slice(calendar, 'function _renderList('), /tabindex="\$\{active \? 0 : -1\}"/);
+    assert.match(calendar, /closest\('\[data-cal-list-tab\]'\)/);
+});
+
+check('pulsing markers respect reduced motion', () => {
+    for (const css of [inputCss, styleCss]) assert.match(css, /prefers-reduced-motion: reduce\)[\s\S]{0,80}animation: none !important/);
+});
+
 console.log(`\n${passed} checks passed`);

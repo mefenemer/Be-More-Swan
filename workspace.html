@@ -1897,8 +1897,8 @@ window.showComplianceModals = function showComplianceModals(force) {
           class="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-gray-200 text-left hover:border-emerald-300 hover:bg-emerald-50 transition cursor-pointer">
           <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
           <span class="min-w-0 flex-1">
-            <span class="block text-xs font-bold text-gray-800" id="post-review-when-assistant-label">Let your assistant choose the time</span>
-            <span class="block text-[10px] text-gray-400">Publishes at the next good slot</span>
+            <span class="block text-xs font-bold text-gray-800" id="post-review-when-assistant-label">Approve</span>
+            <span class="block text-[10px] text-gray-500" id="post-review-when-assistant-sub">Your assistant picks the next free slot</span>
           </span>
         </button>
 
@@ -6406,8 +6406,13 @@ async function rqRenderGroups(statusKey, opts = {}) {
     const refocusSel = active && container.contains(active)
         ? (active.dataset?.postId ? `[data-post-id="${CSS.escape(active.dataset.postId)}"]` : active.id ? `#${CSS.escape(active.id)}` : null)
         : null;
-    container.innerHTML = groups.map(g => rqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey, totalByGroup[g.key])).join('')
-        + rqMoreButton(statusKey);
+    const allEmpty = groups.every(g => !(totalByGroup[g.key] || 0));
+    container.innerHTML = allEmpty
+        // One all-clear with a next step, instead of a collapsible heading and a grey sentence per
+        // group — three "nothing here"s read as three things to check.
+        ? rqAllClear(statusKey)
+        : groups.map(g => rqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey, totalByGroup[g.key])).join('')
+            + rqMoreButton(statusKey);
     if (refocusSel) container.querySelector(refocusSel)?.focus({ preventScroll: true });
     // One short sentence instead of the whole list — and only when the person asked for this view,
     // never on the quiet refresh.
@@ -6446,6 +6451,25 @@ function rqRenderEmailCard(issue) {
 }
 
 /** "Show more" under the list, or nothing when the last page is already on screen. */
+// The empty state when every group under a tab is empty: what that means, and where to go next.
+// "New social post" only when the header's own create button is offered (an assistant that can
+// post exists), so this never offers what the page itself would refuse.
+function rqAllClear(statusKey) {
+    const attention = statusKey === 'attention';
+    const canCreate = !document.getElementById('rq-create-post-btn')?.classList.contains('hidden');
+    return `<div class="flex flex-col items-center justify-center text-center py-14 px-4 gap-2">
+      <svg class="w-10 h-10 status-posted-tick" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <p class="text-base font-bold text-gray-900">${attention ? 'Nothing needs fixing' : 'You’re all caught up'}</p>
+      <p class="text-sm text-gray-600 max-w-sm">${attention
+          ? 'Anything that fails to post, or is paused waiting on a connection, shows up here.'
+          : 'Your assistants put new drafts here for you to approve. Booked posts are on the calendar.'}</p>
+      <div class="flex flex-wrap justify-center gap-2 mt-2">
+        <button type="button" onclick="window.loadView && window.loadView('calendar')" class="btn-secondary focus-ring tap-target px-4 py-2 text-sm font-bold rounded-lg border">See the calendar</button>
+        ${!attention && canCreate ? `<button type="button" onclick="document.getElementById('rq-create-post-btn')?.click()" class="btn-primary focus-ring tap-target px-4 py-2 text-sm font-bold rounded-lg">New social post</button>` : ''}
+      </div>
+    </div>`;
+}
+
 function rqMoreButton(statusKey) {
     if (!_rqPostsHasMore) return '';
     const shown = rqGroupSocialDrafts(_rqLoadedPosts).length;
@@ -11775,6 +11799,18 @@ function _rqFailedBusy(postId, message, tone) {
  * that already went out.
  */
 async function rqFailedRetry(postId, publishDate) {
+    // "Publish again now" is as public and as final as "Post it now", which confirms — so this does
+    // too. A retry for a later time ("Re-queue for then") is reversible and goes straight through.
+    if (!publishDate) {
+        const pl = _rqPostCache[postId]?.platform;
+        const where = (pl && rqPlatformLabel(pl)) || 'the platform';
+        const ok = await window.confirmModal("It goes out on the next publishing run, within a few minutes, and can't be unpublished from here.", {
+            title: `Publish to ${_rqEsc(where)} again now?`,
+            confirmLabel: 'Yes, publish again',
+            cancelLabel: 'Not yet',
+        });
+        if (!ok) return;
+    }
     _rqFailedBusy(postId, 'Putting it back in the queue…', 'busy');
     try {
         const res = await fetch('/.netlify/functions/retry-failed-post', {
@@ -13583,6 +13619,8 @@ function _railRender() {
     // without re-applying the layout — so the list reappeared under the caption and stayed. The
     // source of that is fixed; this is the line that makes it stay fixed, whatever un-hides it next.
     document.getElementById('pce-layers-block')?.classList.add('hidden');
+    // The footer's "Ready? Open Schedule & publish" points at that step; hide it while it is open.
+    document.getElementById('post-review-draft-hint')?.classList.toggle('hidden', _railOpen === 'when');
 
     // The quality panel is the one borrowed block whose home is the CANVAS column rather than a
     // pane — so restoring it puts it back somewhere this layout still shows, and the same verdict
