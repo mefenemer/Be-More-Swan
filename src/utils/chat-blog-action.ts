@@ -1,6 +1,7 @@
 // src/utils/chat-blog-action.ts
 // The Blog Writer chat's hands on articles that ALREADY exist: approve one (the assistant picks the
-// time), book one for a time the user names, take one off the schedule, and reject one with a reason.
+// time), book one for a time the user names, take one off the schedule, reject one with a reason,
+// and remove one nobody wants (archived, as the Blogs tab's Remove does).
 //
 // ── Why ──────────────────────────────────────────────────────────────────────────────────────────
 // Every capability is meant to be reachable from the GUI and from chat, through the same server
@@ -16,7 +17,7 @@
 // the model said with what is true (title, status, current time). For "schedule" it also works out
 // the exact time from the user's words NOW, so the card shows the instant the user is agreeing to.
 // The card (disruptive-ui-registry.js) acts only on a click, and the click calls the SAME endpoints
-// Blog Studio does (schedule-blog, reject-blog-post), so their gates apply here too. Nothing here
+// Blog Studio does (schedule-blog, reject-blog-post; blog-posts DELETE for remove), so their gates apply here too. Nothing here
 // writes.
 //
 // There is no "publish now" action, deliberately: going live at once is the one step the chat
@@ -31,7 +32,7 @@ import { blogPosts } from '../../db/schema';
 type Db = ReturnType<typeof getDb>;
 
 export const BLOG_ACTION_PROPOSAL_TYPE = 'blog_action_proposal';
-export const BLOG_ACTIONS = ['approve', 'schedule', 'unschedule', 'reject'] as const;
+export const BLOG_ACTIONS = ['approve', 'schedule', 'unschedule', 'reject', 'remove'] as const;
 export type BlogAction = typeof BLOG_ACTIONS[number];
 
 /** Which statuses each action applies to. Mirrors the Blogs tab's columns (assistants.js). */
@@ -45,6 +46,8 @@ const ACTIONABLE: Record<BlogAction, readonly string[]> = {
     unschedule: ['scheduled'],
     // reject-blog-post's REJECTABLE.
     reject: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled'],
+    // blog-posts DELETE (archive): anything not live. Never 'publishing' — the bulk path refuses it.
+    remove: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'failed', 'paused', 'rejected'],
 };
 
 /** Said on the card when the article is not in a state the action applies to. */
@@ -53,6 +56,7 @@ const NOT_NOW: Record<BlogAction, string> = {
     schedule: 'This article can’t be given a new time: it is live, publishing right now, or was turned down.',
     unschedule: 'This article isn’t booked to publish, so there is no schedule to clear.',
     reject: 'This article can no longer be rejected — it has already gone out, or was already turned down or archived.',
+    remove: 'This article can’t be removed: it is live, publishing right now, or already archived.',
 };
 
 const TITLE_MAX = 200;

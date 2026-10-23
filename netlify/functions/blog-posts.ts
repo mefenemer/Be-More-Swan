@@ -8,6 +8,7 @@
 // DELETE /.netlify/functions/blog-posts?id=<n>   → ARCHIVE a draft (status='archived'; org-scoped;
 //                                                  published posts blocked). The verb is kept for the
 //                                                  existing callers; the row is never destroyed.
+// DELETE /.netlify/functions/blog-posts?ids=1,2,3 → the same for many (Blogs Review tab bulk Remove)
 
 import { HandlerEvent } from '@netlify/functions';
 import { and, desc, eq, gte, inArray, lte, or, sql } from 'drizzle-orm';
@@ -210,6 +211,25 @@ export default withLambda(async (event: HandlerEvent) => {
     }
 
     // ---- Delete ----
+    if (event.httpMethod === 'DELETE' && event.queryStringParameters?.ids) {
+        // Bulk Remove from the assistant's Blogs Review tab (and the blog chat's remove card): the
+        // same archive as the single path below, for every ticked draft in one request. Rows that
+        // can't go (live, mid-publish, already archived, another org's) are skipped and reported.
+        const ids = [...new Set(String(event.queryStringParameters.ids).split(',').map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))];
+        if (!ids.length) return { statusCode: 400, body: JSON.stringify({ error: 'ids required.' }) };
+        if (ids.length > 500) return { statusCode: 400, body: JSON.stringify({ error: 'Too many posts at once (500 max).' }) };
+        const archived = await db.update(blogPosts)
+            .set({ status: 'archived', updatedAt: new Date() })
+            .where(and(
+                inArray(blogPosts.id, ids),
+                eq(blogPosts.organisationId, ctx.organisationId),
+                sql`${blogPosts.status} NOT IN ('published', 'publishing', 'archived')`,
+            ))
+            .returning({ id: blogPosts.id });
+        const done = new Set(archived.map((r) => r.id));
+        return { statusCode: 200, body: JSON.stringify({ archivedIds: [...done], skippedIds: ids.filter((id) => !done.has(id)) }) };
+    }
+
     if (event.httpMethod === 'DELETE') {
         const idParam = event.queryStringParameters?.id;
         const id = Number(idParam);
