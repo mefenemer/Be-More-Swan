@@ -5,6 +5,7 @@
 // POST                      → create draft post
 // PATCH  ?id=N              → update status / caption / publishDate (reschedule)
 // DELETE ?id=N              → cancel + soft-delete (status=cancelled)
+// DELETE ?ids=1,2,3         → the same for many (Review tab bulk Remove); skips what can't go
 
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
@@ -410,6 +411,29 @@ export default withLambda(async (event) => {
         }
 
         // ── DELETE: cancel/remove ─────────────────────────────────
+        if (event.httpMethod === 'DELETE' && qs.ids) {
+            // Bulk Remove from the assistant's Review tab: one request for every selected card (and
+            // every platform row under each), not one per row. Same soft-cancel as the single path;
+            // rows already out of reach (published, publishing, already cancelled, not this user's)
+            // are skipped and reported back rather than failing the whole batch.
+            const ids = [...new Set(String(qs.ids).split(',').map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))];
+            if (!ids.length) return { statusCode: 400, body: JSON.stringify({ error: 'ids required.' }) };
+            if (ids.length > 500) return { statusCode: 400, body: JSON.stringify({ error: 'Too many posts at once (500 max).' }) };
+
+            const cancelled = await db.update(scheduledPosts).set({
+                status: 'cancelled',
+                cancelledAt: new Date(),
+                updatedAt: new Date(),
+            }).where(and(
+                inArray(scheduledPosts.id, ids),
+                eq(scheduledPosts.userId, userId),
+                sql`${scheduledPosts.status} NOT IN ('published', 'publishing', 'cancelled')`,
+            )).returning({ id: scheduledPosts.id });
+
+            const done = new Set(cancelled.map((r) => r.id));
+            return { statusCode: 200, body: JSON.stringify({ cancelledIds: [...done], skippedIds: ids.filter((id) => !done.has(id)) }) };
+        }
+
         if (event.httpMethod === 'DELETE') {
             const postId = parseInt(qs.id || '');
             if (!postId) return { statusCode: 400, body: JSON.stringify({ error: 'id required.' }) };
