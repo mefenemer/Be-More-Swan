@@ -1231,6 +1231,8 @@ const _DETAIL_RQ_COLUMNS = {
     approved:  { postStatus: 'approved' },
     scheduled: { postStatus: 'scheduled' },
     posted:    { postStatus: 'published' },
+    // 'failed' only, unlike the side-menu Review page: THIS page has a Scheduled column, which already
+    // lists paused posts (BOOKED), and each state belongs to exactly one column here.
     attention: { postStatus: 'failed' },
     archived:  { postStatus: 'archived' },
 };

@@ -109,9 +109,13 @@ check('the calendar range query filters on the shared status list', () => {
     const src = read('netlify/functions/scheduled-posts.ts');
     assert.match(src, /from\s+'\.\.\/\.\.\/src\/config\/post-status'/,
         'scheduled-posts.ts must import the status rule rather than inlining a status list');
-    const rangeQuery = src.slice(landmark(src, 'const posts = await db.select()'));
+    // `posts` is the committed list; the opt-in `awaiting` list (drafts on their proposed slot) is a
+    // separate query the calendar draws apart, so it must not leak into `posts`.
+    const rangeQuery = src.slice(landmark(src, 'const [rows, awaiting] = await Promise.all(['));
     assert.match(rangeQuery.slice(0, 500), /inArray\(scheduledPosts\.status,\s*\[\.\.\.SCHEDULE_ACTIVE_STATUSES\]\)/,
         'the GET ?from&to range query must exclude posts whose schedule is not live');
+    assert.match(rangeQuery.slice(0, 1400), /qs\.awaiting === '1'[\s\S]{0,600}AWAITING_REVIEW_STATUSES/,
+        'drafts may only come back through the opt-in awaiting list, never in posts');
 });
 
 check('calendar.js asks the generated mirror instead of hardcoding statuses', () => {

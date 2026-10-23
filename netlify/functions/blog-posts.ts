@@ -34,7 +34,9 @@ export default withLambda(async (event: HandlerEvent) => {
         const assistantIdFilter = assistantIdParam != null && assistantIdParam !== '' && Number.isFinite(Number(assistantIdParam))
             ? Number(assistantIdParam) : null;
 
-        // Calendar feed (US 4.1 calendar view): scheduled/published posts whose date falls in range.
+        // Calendar feed (US 4.1 calendar view): scheduled/published posts whose date falls in range,
+        // plus FAILED ones on the day they were due — a failed article used to appear on neither the
+        // calendar nor Review (review, 2026-10-23). The client draws it red and never draggable.
         if (fromParam && toParam) {
             const fromD = new Date(fromParam);
             const toD = new Date(toParam);
@@ -54,7 +56,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 .from(blogPosts)
                 .where(and(
                     eq(blogPosts.organisationId, ctx.organisationId),
-                    inArray(blogPosts.status, ['scheduled', 'published']),
+                    inArray(blogPosts.status, ['scheduled', 'published', 'failed']),
                     or(
                         and(gte(blogPosts.publishDate, fromD), lte(blogPosts.publishDate, toD)),
                         and(gte(blogPosts.publishedAt, fromD), lte(blogPosts.publishedAt, toD)),

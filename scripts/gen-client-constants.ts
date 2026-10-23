@@ -25,7 +25,7 @@ import { PLATFORM_FORMATS, SOCIAL_PLATFORMS } from '../src/config/platform-forma
 import { POST_FORMATS } from '../src/config/post-formats';
 import { SOCIAL_POST_SHAPES, BLOG_ARTICLE_TYPES } from '../src/utils/content-shapes';
 import { VOICE_PERSONALITIES, DEFAULT_NEVER_SAY } from '../src/utils/voice-profile';
-import { SCHEDULE_ACTIVE_STATUSES } from '../src/config/post-status';
+import { SCHEDULE_ACTIVE_STATUSES, NEEDS_ATTENTION_STATUSES, POST_STATUS_LABELS } from '../src/config/post-status';
 import { DEAD_CONNECTION_STATUSES } from '../src/config/connection-status';
 import { OVERLAY_ANIM_S, OVERLAY_ANIMS } from '../src/lib/overlay-geometry';
 import {
@@ -172,6 +172,11 @@ ${formatRows}
   var scheduleActive = {};
   for (var s = 0; s < SCHEDULE_ACTIVE_STATUSES.length; s++) scheduleActive[SCHEDULE_ACTIVE_STATUSES[s]] = true;
 
+  // The "Needs attention" tab's statuses and the user-facing word for every post state, from
+  // src/config/post-status.ts — one vocabulary for the Review page and the Content Calendar.
+  var NEEDS_ATTENTION_STATUSES = ${JSON.stringify(NEEDS_ATTENTION_STATUSES)};
+  var POST_STATUS_LABELS = ${JSON.stringify(POST_STATUS_LABELS)};
+
   // system_connections statuses that mean "reconnect required", from
   // src/config/connection-status.ts. The hand-written copy of this list in integrations.js omitted
   // 'token_expired' — the value the Meta paths write — so a dead Facebook connection rendered as
@@ -210,6 +215,15 @@ ${formatRows}
      */
     isScheduleActive: function (status) {
       return scheduleActive[String(status == null ? '' : status)] === true;
+    },
+
+    /** Statuses listed under "Needs attention" on both the Review page and the Calendar. */
+    needsAttentionStatuses: NEEDS_ATTENTION_STATUSES,
+
+    /** The word both pages show for a post/blog/email state; the raw value only if it is unknown. */
+    postStatusLabel: function (status) {
+      var key = String(status == null ? '' : status);
+      return POST_STATUS_LABELS[key] || key;
     },
 
     /** One platform's facts. Tolerates legacy 'twitter'; returns null for anything unknown. */

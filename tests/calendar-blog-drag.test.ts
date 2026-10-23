@@ -8,7 +8,7 @@
 //
 //   1. _blogChip      emits  ondragstart="…_calDragStart(event, { kind: 'blog', … })"
 //   2. _calDrop       routes  item.kind === 'blog'  →  _dropBlog
-//   3. _attachDragDrop clears the drag opacity via the chip's data attribute
+//   3. one delegated document `dragend` listener clears the drag opacity on any [draggable] chip
 //
 // Break any one and the chip either refuses to lift, silently does nothing when dropped, or stays
 // at 50% opacity looking like it is mid-save forever. All three failures look like "drag and drop
@@ -69,8 +69,8 @@ function windowFnBody(source: string, name: string): string {
 }
 
 const blogChip = fnBody(calendar, '_blogChip');
-const dropBlog = fnBody(calendar, '_dropBlog');
-const attach = fnBody(calendar, '_attachDragDrop');
+// The drop works out the instant; _moveBlog (shared with "Move…") persists it. Read as one path.
+const dropBlog = fnBody(calendar, '_dropBlog') + fnBody(calendar, '_moveBlog');
 const calDrop = windowFnBody(calendar, '_calDrop');
 
 // ── 1. The chip can be picked up ─────────────────────────────────────────────
@@ -121,15 +121,19 @@ check('_dropBlog keeps the time of day and refuses the past', () => {
 });
 
 // ── 4. The chip is cleaned up after the drag ─────────────────────────────────
-check('_attachDragDrop clears drag opacity on blog chips too', () => {
-    assert.ok(/data-cal-blog-id/.test(attach),
-        '_attachDragDrop does not select [data-cal-blog-id], so a blog chip left after a cancelled '
-        + 'drag stays at 50% opacity — indistinguishable from one that is mid-save.');
+// One delegated listener at load, not one per chip per paint (re-binding from a render path stacked
+// listeners). It matches any [draggable] element, which a draggable blog chip is by construction.
+check('a delegated dragend clears drag opacity on every draggable chip, blog included', () => {
+    assert.ok(/document\.addEventListener\('dragend'[\s\S]{0,200}closest\('\[draggable\]'\)[\s\S]{0,120}classList\.remove\('opacity-50'\)/.test(calendar),
+        'No document-level dragend listener clears opacity-50 from the dragged [draggable] element, so a '
+        + 'chip left after a cancelled drag stays at 50% opacity — indistinguishable from one mid-save.');
+    assert.ok(!/function _attachDragDrop\(/.test(calendar),
+        'The per-render _attachDragDrop binder is back — bind once at load instead.');
 });
 
-check('the chip actually carries the attribute _attachDragDrop looks for', () => {
+check('the chip still carries its drag data attribute', () => {
     assert.ok(/data-cal-blog-id="\$\{post\.id\}"/.test(blogChip),
-        '_blogChip no longer emits data-cal-blog-id — the selector in _attachDragDrop matches nothing.');
+        '_blogChip no longer emits data-cal-blog-id.');
 });
 
 console.log(`\n${passed} checks passed`);

@@ -290,7 +290,8 @@ window.choiceModal = function(message, options, opts = {}) {
  * Resolves the text that was entered, or null when the user backs out, so a call site that
  * tested `=== null` for "cancelled" reads exactly as it did against the browser's own prompt.
  * With `required`, the confirm button stays disabled until something is typed; `multiline`
- * swaps the input for a textarea. `message` is innerHTML'd — escape data-derived text.
+ * swaps the input for a textarea; `inputType` ('datetime-local', 'date', …) asks for a picker
+ * instead of free text. `message` is innerHTML'd — escape data-derived text.
  */
 window.promptModal = function(message, opts = {}) {
   return new Promise((resolve) => {
@@ -304,7 +305,10 @@ window.promptModal = function(message, opts = {}) {
     const fieldCss = 'width:100%;box-sizing:border-box;font-size:.875rem;color:#111827;background:#fff;border:1px solid #d1d5db;border-radius:.6rem;padding:.5rem .7rem;margin:0 0 1.25rem;font-family:inherit;';
     const field = opts.multiline
       ? `<textarea id="apm-input" rows="3" placeholder="${String(opts.placeholder || '').replace(/"/g, '&quot;')}" style="${fieldCss}resize:vertical;"></textarea>`
-      : `<input id="apm-input" type="text" placeholder="${String(opts.placeholder || '').replace(/"/g, '&quot;')}" style="${fieldCss}">`;
+      // `inputType` lets a caller ask for a date/time picker ('datetime-local', 'date') — the
+      // Calendar's "Move…" uses it, because dragging is the only other way to move a post and a
+      // phone or a keyboard can't drag. `min` is passed through for those types.
+      : `<input id="apm-input" type="${/^(text|date|datetime-local|time|number|email|url)$/.test(opts.inputType || '') ? opts.inputType : 'text'}"${opts.min ? ` min="${String(opts.min).replace(/"/g, '&quot;')}"` : ''} aria-label="${String(opts.inputLabel || opts.title || 'Answer').replace(/"/g, '&quot;')}" placeholder="${String(opts.placeholder || '').replace(/"/g, '&quot;')}" style="${fieldCss}">`;
     overlay.innerHTML = `
     <div style="background:#fff;border-radius:1rem;max-width:26rem;width:100%;padding:1.5rem;box-shadow:0 20px 50px rgba(0,0,0,.25);">
       <h3 style="font-size:1.05rem;font-weight:700;color:#111827;margin:0 0 .5rem;">${title}</h3>

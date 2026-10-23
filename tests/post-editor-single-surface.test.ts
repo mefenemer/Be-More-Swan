@@ -232,9 +232,12 @@ check('the calendar\'s own post panel is deleted', () => {
         assert.ok(!calendarHtml.includes(`id="${id}"`),
             `#${id} is part of the calendar's old post editor — it was replaced by openPostReview`);
     }
-    // The drag-to-another-day confirmation is the calendar's OWN gesture and stays.
-    assert.ok(calendarHtml.includes('id="modal-reschedule"'),
-        'dragging a chip to another day is the calendar\'s own gesture and keeps its confirmation');
+    // The drag-to-another-day confirmation is the calendar's OWN gesture and stays — now through
+    // /dialogs.js like every other dialog (2026-10-23), not a hand-built modal without focus or Esc.
+    assert.ok(!calendarHtml.includes('id="modal-reschedule"'),
+        'the bespoke reschedule modal is back — confirm through window.confirmModal instead');
+    assert.match(calendarJs, /async function _movePost[\s\S]{0,1500}window\.confirmModal\(/,
+        'dragging a post to another day must still ask before it moves the post');
 });
 
 check('nothing still calls the deleted panel actions', () => {

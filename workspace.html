@@ -1876,7 +1876,7 @@ window.showComplianceModals = function showComplianceModals(force) {
         <label class="block text-xs font-semibold text-gray-600">Reason for rejecting (required)</label>
         <textarea id="post-review-reason" rows="2" maxlength="300" placeholder="This will be archived for 30 days, then deleted." class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-300"></textarea>
         <div class="flex gap-2">
-          <button id="post-review-reject-btn" onclick="rqReviewReject()" class="btn-destructive flex-1 py-2.5 text-xs font-bold rounded-lg cursor-pointer">Reject &amp; archive</button>
+          <button id="post-review-reject-btn" type="button" onclick="rqReviewReject()" data-rq-commit class="btn-destructive flex-1 py-2.5 text-xs font-bold rounded-lg cursor-pointer">Reject &amp; archive</button>
           <button onclick="rqReviewToggle()" class="py-2.5 px-4 text-xs font-bold text-gray-500 hover:bg-gray-50 rounded-lg cursor-pointer">Cancel</button>
         </div>
       </div>
@@ -2005,7 +2005,12 @@ window.showComplianceModals = function showComplianceModals(force) {
       <div id="post-review-approved" class="hidden text-center space-y-2">
         <p class="text-sm font-extrabold text-emerald-700">✓ Approved</p>
         <p id="post-review-approved-msg" class="text-xs text-gray-600"></p>
-        <button onclick="_rqReviewRefresh()" class="btn-primary w-full py-2.5 text-sm font-bold rounded-lg transition cursor-pointer">Done</button>
+        <!-- Approving ten posts used to be open → approve → Done → find the next card, ten times. -->
+        <button type="button" id="post-review-next-btn" onclick="rqReviewNextDraft()" class="hidden btn-primary w-full py-2.5 text-sm font-bold rounded-lg transition cursor-pointer">Review next draft →</button>
+        <div class="flex gap-2">
+          <button type="button" onclick="rqReviewSeeOnCalendar()" class="btn-secondary flex-1 py-2.5 text-sm font-bold rounded-lg border transition cursor-pointer">See it on the calendar</button>
+          <button type="button" onclick="_rqReviewRefresh()" class="btn-secondary flex-1 py-2.5 text-sm font-bold rounded-lg border transition cursor-pointer">Done</button>
+        </div>
       </div>
     </div>
   </div>
@@ -6059,10 +6064,12 @@ let _rqLastSocialCount = null;
  * Visibility-checked via offsetParent so this doesn't re-fetch for a surface that is in the DOM but
  * hidden behind another view — the badge is enough for those.
  */
-function rqRefreshVisibleReviewSurface() {
+function rqRefreshVisibleReviewSurface(opts = {}) {
     const groups = document.getElementById('rq-groups');
-    if (groups && groups.offsetParent !== null && typeof rqLoadItems === 'function') {
-        try { rqLoadItems(); } catch { /* non-blocking */ }
+    if (groups && groups.offsetParent !== null && typeof rqRenderGroups === 'function') {
+        // `quiet` (the background poll): no "Loading…" flash, and every page already shown is kept —
+        // a poll used to throw someone scrolling page 3 back to the first ten cards.
+        try { rqRenderGroups(_rqCurrentStatus, { quiet: !!opts.quiet }); } catch { /* non-blocking */ }
     }
     if (typeof window.detailRqRefresh === 'function') {
         try { window.detailRqRefresh(); } catch { /* non-blocking */ }
@@ -6104,24 +6111,40 @@ async function refreshPendingBadge() {
         // column. The second one is polled here rather than computed when the column is opened,
         // because a badge you only see after clicking the tab tells you nothing you didn't already
         // learn by clicking it.
-        const [socialRes, failedRes] = await Promise.all([
+        // `attention` = the tab's family; emails come from newsletter-issues `review=1` (see below).
+        const [socialRes, failedRes, emailRes] = await Promise.all([
             fetch('/.netlify/functions/get-social-drafts?status=pending_approval&limit=1&offset=0'),
-            fetch('/.netlify/functions/get-social-drafts?status=failed&limit=1&offset=0'),
+            fetch('/.netlify/functions/get-social-drafts?status=attention&limit=1&offset=0'),
+            fetch('/.netlify/functions/newsletter-issues?review=1').catch(() => null),
         ]);
         const body = socialRes.ok ? await socialRes.json() : {};
         // `total` is the grouped count. Fall back to grouping the page only if it is missing.
         const socialCount = typeof body.total === 'number'
             ? body.total
             : rqGroupSocialDrafts(body.drafts || []).length;
+        // Emails waiting for approval or failed: the page lists them, so the pill that sends you there
+        // counts them. That feed failing (no newsletter schema) just counts no emails.
+        const emails = emailRes && emailRes.ok ? await emailRes.json().catch(() => ({})) : {};
+        const emailAwaiting = Number(emails.awaiting) || 0;
+        const emailFailed = Number(emails.failed) || 0;
+        const reviewCount = socialCount + emailAwaiting;
 
         document.querySelectorAll('.pending-badge').forEach(el => {
-            el.textContent = socialCount || '';
-            el.classList.toggle('hidden', !socialCount);
+            el.textContent = reviewCount || '';
+            el.classList.toggle('hidden', !reviewCount);
         });
 
         if (failedRes.ok) {
             const fb = await failedRes.json();
-            _rqSetAttentionBadge(typeof fb.total === 'number' ? fb.total : rqGroupSocialDrafts(fb.drafts || []).length);
+            const attention = (typeof fb.total === 'number' ? fb.total : rqGroupSocialDrafts(fb.drafts || []).length) + emailFailed;
+            _rqSetAttentionBadge(attention);
+            // The sidebar shows problems too, in red beside the amber review count — a failed or
+            // stalled post was invisible until you were already on the page.
+            document.querySelectorAll('.attention-badge').forEach(el => {
+                el.textContent = attention || '';
+                el.classList.toggle('hidden', !attention);
+                el.setAttribute('aria-label', `${attention} need${attention === 1 ? 's' : ''} attention`);
+            });
         }
 
         // A newly-drafted post landing while the user is ALREADY looking at the review list used to
@@ -6131,10 +6154,10 @@ async function refreshPendingBadge() {
         //
         // Fires on any change, not just an increase: approving elsewhere (another tab, the calendar)
         // should also drop the item from a list that is on screen.
-        if (_rqLastSocialCount !== null && socialCount !== _rqLastSocialCount) {
-            rqRefreshVisibleReviewSurface();
+        if (_rqLastSocialCount !== null && reviewCount !== _rqLastSocialCount) {
+            rqRefreshVisibleReviewSurface({ quiet: true });
         }
-        _rqLastSocialCount = socialCount;
+        _rqLastSocialCount = reviewCount;
     } catch { /* non-blocking */ }
 }
 
@@ -6169,34 +6192,48 @@ function _rqSetAttentionBadge(count) {
 // It is inside the 'scheduled' family too, so a legacy row holding it is listed twice rather than
 // not at all; that is the deliberate direction, since "counted in the tile, listed nowhere" is the
 // bug this vocabulary exists to prevent.
+// `sort: 'publish'` asks for soonest go-out time first — the order an owner approves a week in.
+// `attention` is a family too (failed + paused + paused_credits): this page shows no Scheduled tab,
+// so a post stalled on a dead connection would otherwise be on no tab here at all. (The assistant's
+// own Review tab HAS a Scheduled column, which lists paused, so its attention stays 'failed'.)
 const RQ_COLUMNS = {
-    review:    { label: 'Review',    postStatus: 'pending_approval' },
-    approved:  { label: 'Approved',  postStatus: 'approved' },
-    scheduled: { label: 'Scheduled', postStatus: 'scheduled' },
+    review:    { label: 'To approve', postStatus: 'pending_approval', sort: 'publish' },
+    approved:  { label: 'Approved',  postStatus: 'approved', sort: 'publish' },
+    scheduled: { label: 'Scheduled', postStatus: 'scheduled', sort: 'publish' },
     posted:    { label: 'Posted',    postStatus: 'published' },
-    attention: { label: 'Needs attention', postStatus: 'failed' },
+    attention: { label: 'Needs attention', postStatus: 'attention', sort: 'publish' },
     archived:  { label: 'Archived',  postStatus: 'archived' },
 };
+function _rqPostsUrl(col, limit, offset) {
+    return `/.netlify/functions/get-social-drafts?status=${col.postStatus}&limit=${limit}&offset=${offset}${col.sort ? `&sort=${col.sort}` : ''}`;
+}
 
 // Content groups for this assistant type. Each: how to fetch its items for a column + how to render.
 const RQ_GROUPS = [
-    { key: 'posts', label: 'Social media posts', empty: 'No social media posts here.',  emptyReview: 'No social media posts awaiting review.' },
+    { key: 'posts', label: 'Social media posts', empty: 'No social media posts here.',  emptyReview: 'Nothing to approve. Your assistants will put new drafts here.' },
 ];
 
 // Content Engine — blog posts share the same lifecycle columns, shown as their own group only when
 // the org has an active Blog Writer assistant. These statuses map onto the blog_posts lifecycle.
+// A failed or paused article needs the owner, so it sits under Needs attention — it used to be filed
+// under Archived, a tab this page doesn't have, and so appeared nowhere.
 const RQ_BLOG_STATUSES = {
     review:    ['draft', 'pending_approval', 'in_review'],
     approved:  ['approved'],
     scheduled: ['scheduled', 'publishing'],
     posted:    ['published'],
-    archived:  ['rejected', 'archived', 'paused', 'failed'],
+    attention: ['failed', 'paused'],
+    archived:  ['rejected', 'archived'],
 };
-const RQ_BLOG_GROUP = { key: 'blog', label: 'Blog posts', empty: 'No blog posts here.', emptyReview: 'No blog posts awaiting review.' };
+const RQ_BLOG_GROUP = { key: 'blog', label: 'Blog posts', empty: 'No blog posts here.', emptyReview: 'No blog posts to approve.' };
+// Emails (newsletter-issues `review=1`): waiting for approval under To approve, failed sends under
+// Needs attention. Reviewed and sent in the Email Studio, which the row opens.
+const RQ_EMAIL_STATUSES = { review: ['pending_approval', 'in_review'], attention: ['failed'] };
+const RQ_EMAIL_GROUP = { key: 'email', label: 'Emails', empty: 'No emails here.', emptyReview: 'No emails waiting for your approval.' };
 let _rqBlogWriterActive = false;
 
 let _rqCurrentStatus = 'review';
-const _rqGroupOpen = { posts: true, blog: true };
+const _rqGroupOpen = { posts: true, blog: true, email: true };
 
 // Back-compat shim: several callers (gen-post success, modal refresh) still call rqLoadItems()/rqSetTab().
 function rqLoadItems() { rqRenderGroups(_rqCurrentStatus); }
@@ -6205,12 +6242,21 @@ function rqSetTab() { rqRenderGroups(_rqCurrentStatus); }
 function rqOpenStatus(statusKey, btn) {
     if (!RQ_COLUMNS[statusKey]) return;
     _rqCurrentStatus = statusKey;
+    // Brand deep pink for the active tab (emerald-600 is still GREEN, so it used to be pink text on a
+    // green underline), and the state said for assistive tech, not by colour alone.
     document.querySelectorAll('.rq-col').forEach(t => {
-        t.classList.remove('border-b-2', 'border-emerald-600', 'text-emerald-700');
-        t.classList.add('text-gray-500');
+        t.classList.remove('border-brand', 'text-emerald-800');
+        t.classList.add('border-transparent', 'text-gray-500');
+        t.setAttribute('aria-selected', 'false');
+        t.setAttribute('tabindex', '-1');
     });
     const active = btn || document.querySelector(`.rq-col[data-status="${statusKey}"]`);
-    if (active) { active.classList.add('border-b-2', 'border-emerald-600', 'text-emerald-700'); active.classList.remove('text-gray-500'); }
+    if (active) {
+        active.classList.add('border-brand', 'text-emerald-800');
+        active.classList.remove('border-transparent', 'text-gray-500');
+        active.setAttribute('aria-selected', 'true');
+        active.setAttribute('tabindex', '0');
+    }
     return rqRenderGroups(statusKey);
 }
 
@@ -6233,81 +6279,154 @@ let _rqLoadedPosts = [];
 let _rqPostsHasMore = false;
 let _rqPostsTotal = null;
 
-async function rqRenderGroups(statusKey) {
+// Blog posts arrive as one unpaged list; switching tabs used to download it again each time.
+// Kept for 30s (a quiet poll or an approval still refetches after that).
+let _rqBlogCache = null;   // { at, posts }
+async function _rqFetchBlogPosts(force) {
+    if (!force && _rqBlogCache && Date.now() - _rqBlogCache.at < 30000) return _rqBlogCache.posts;
+    const res = await fetch('/.netlify/functions/blog-posts');
+    if (!res.ok) throw new Error('blog load failed');
+    const posts = (await res.json()).posts || [];
+    _rqBlogCache = { at: Date.now(), posts };
+    return posts;
+}
+
+// Only the newest render may paint: a quiet poll landing after a tab click must not repaint the
+// previous tab's cards over the new one.
+let _rqRenderSeq = 0;
+
+/** The "couldn't load" state: never an empty list (which reads as "all clear"), always a retry. */
+function _rqRenderLoadError(container) {
+    container.innerHTML = `<div role="alert" class="py-10 text-center">
+        <p class="text-sm text-red-700">We couldn't load this list, so it may not be empty. Nothing has been changed.</p>
+        <button type="button" onclick="rqRenderGroups(_rqCurrentStatus)" class="btn-secondary focus-ring tap-target mt-3 px-4 py-2 text-sm font-bold rounded-lg border">Try again</button>
+      </div>`;
+}
+
+async function rqRenderGroups(statusKey, opts = {}) {
     const col = RQ_COLUMNS[statusKey] || RQ_COLUMNS.review;
     const container = document.getElementById('rq-groups');
     if (!container) return;
-    container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>';
-    _rqLoadedPosts = [];
-    _rqPostsHasMore = false;
+    const quiet = !!opts.quiet && statusKey === _rqCurrentStatus && container.childElementCount > 0;
+    const seq = ++_rqRenderSeq;
+    // A quiet refresh re-reads as many cards as are on screen, so "Show more" pages survive it.
+    const shownGroups = quiet ? rqGroupSocialDrafts(_rqLoadedPosts).length : 0;
+    const limit = Math.min(50, Math.max(RQ_PAGE_SIZE, shownGroups));
+    if (!quiet) {
+        container.setAttribute('aria-busy', 'true');
+        container.innerHTML = '<p class="text-sm text-gray-500 py-10 text-center" role="status">Loading…</p>';
+        _rqLoadedPosts = [];
+        _rqPostsHasMore = false;
+    }
 
     // One-time gate: does the org have an active Blog Writer? (drives the Blog posts group).
     if (!_rqBlogWriterActive && typeof window.resolveBlogWriter === 'function') {
         try { _rqBlogWriterActive = !!(await window.resolveBlogWriter()); } catch { /* non-blocking */ }
     }
 
-    let posts = [], blogPosts = [];
+    let posts = [], blogPosts = [], emails = [], emailsShown = false;
+    let pj;
     try {
-        const [pRes, bRes] = await Promise.all([
-            fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}&limit=${RQ_PAGE_SIZE}&offset=0`),
-            _rqBlogWriterActive ? fetch('/.netlify/functions/blog-posts') : Promise.resolve(null),
+        const wantEmail = !!RQ_EMAIL_STATUSES[statusKey];
+        const [pRes, allBlog, eRes] = await Promise.all([
+            fetch(_rqPostsUrl(col, limit, 0)),
+            _rqBlogWriterActive ? _rqFetchBlogPosts(quiet) : Promise.resolve(null),
+            wantEmail ? fetch('/.netlify/functions/newsletter-issues?review=1').catch(() => null) : Promise.resolve(null),
         ]);
-        if (pRes.ok) {
-            const pj = await pRes.json();
-            posts = pj.drafts || [];
-            _rqLoadedPosts = posts;
-            _rqPostsHasMore = !!pj.hasMore;
-            // The badge counts everything awaiting review, not what has been fetched so far — the
-            // server counts in groups for exactly this reason, so "24" matches the 24 cards you get
-            // once you have paged through them all.
-            _rqPostsTotal = typeof pj.total === 'number' ? pj.total : null;
-            // Workspace-wide footer state drives whether the per-post disclosure toggle appears.
-            window._rqDisclosureFooterEnabled = !!pj.disclosureFooterEnabled;
-        }
-        if (bRes && bRes.ok) {
-            const allBlog = (await bRes.json()).posts || [];
+        // A non-OK answer is a FAILURE, not "no posts": it used to render "No social media posts
+        // awaiting review", a false all-clear from a server that didn't answer.
+        if (!pRes.ok) throw new Error('posts load failed');
+        pj = await pRes.json();
+        if (allBlog) {
             const wanted = RQ_BLOG_STATUSES[statusKey] || [];
             blogPosts = allBlog.filter(p => wanted.includes(p.status));
         }
+        // The email group appears only where this workspace has emails at all — an org that
+        // doesn't send them sees no empty "Emails" heading. Its feed failing hides only the group.
+        if (eRes && eRes.ok) {
+            const ej = await eRes.json().catch(() => ({}));
+            const all = ej.issues || [];
+            const wanted = RQ_EMAIL_STATUSES[statusKey] || [];
+            emails = all.filter(i => wanted.includes(i.status));
+            emailsShown = all.length > 0;
+        }
     } catch {
-        container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">Failed to load.</p>';
+        if (seq !== _rqRenderSeq) return;
+        container.removeAttribute('aria-busy');
+        // A quiet refresh that fails leaves what is on screen alone; the next poll tries again.
+        if (!quiet) _rqRenderLoadError(container);
         return;
     }
+    if (seq !== _rqRenderSeq) return;
+    container.removeAttribute('aria-busy');
+
+    posts = pj.drafts || [];
+    _rqLoadedPosts = posts;
+    _rqPostsHasMore = !!pj.hasMore;
+    // The badge counts everything awaiting review, not what has been fetched so far — the
+    // server counts in groups for exactly this reason, so "24" matches the 24 cards you get
+    // once you have paged through them all.
+    _rqPostsTotal = typeof pj.total === 'number' ? pj.total : null;
+    // Workspace-wide footer state drives whether the per-post disclosure toggle appears.
+    window._rqDisclosureFooterEnabled = !!pj.disclosureFooterEnabled;
 
     // Collapse per-platform rows into one representative per logical post before counting/rendering,
     // so "3 posts across 3 platforms" reads as 3 cards, not 9.
-    const postGroups = rqGroupSocialDrafts(posts);
+    const postGroups = rqGroupSocialDrafts(posts, { sort: col.sort });
 
-    // Needs-attention badge. The markup has declared this counter since the column shipped and
-    // nothing ever wrote to it, so a workspace with three failed posts looked exactly like one with
-    // none. refreshPendingBadge polls the count so it is right before you ever open the column; this
-    // corrects it from the authoritative number the moment you do.
-    if (statusKey === 'attention') _rqSetAttentionBadge(_rqPostsTotal ?? postGroups.length);
+    // Needs-attention badge. refreshPendingBadge polls the count so it is right before you ever
+    // open the column; this corrects it from the authoritative number the moment you do.
+    if (statusKey === 'attention') _rqSetAttentionBadge((_rqPostsTotal ?? postGroups.length) + (_rqBlogWriterActive ? blogPosts.length : 0) + emails.length);
 
-    // Keep the Review column badge in sync with the number of posts awaiting review (grouped count).
+    // Keep the To approve tab badge in sync with what is awaiting review (grouped count).
     if (statusKey === 'review') {
         // The server's group total when paging, the rendered count otherwise — never the length of
         // the current page, which would report "10 awaiting review" on a queue of 24.
         const pending = _rqPostsTotal ?? postGroups.length;
-        // The TAB counts every group under it, blog drafts included, so the group pills add up to it.
-        // The sidebar pill below stays social-only: it is also written by the 60s poll, which counts
-        // social posts alone, and two writers disagreeing would make it flicker.
-        const tabCount = pending + (_rqBlogWriterActive ? blogPosts.length : 0);
+        // The TAB counts every group under it, so the group pills add up to it.
+        const tabCount = pending + (_rqBlogWriterActive ? blogPosts.length : 0) + emails.length;
         const badge = document.getElementById('rq-col-count-review');
         if (badge) { badge.textContent = tabCount || ''; badge.classList.toggle('hidden', !tabCount); }
+        // The sidebar pill: posts + emails, the same sum the 60s poll writes, so the two writers
+        // can't make it flicker. (Blog drafts are counted on the tab only, as before.)
         document.querySelectorAll('.pending-badge').forEach(el => {
-            el.textContent = pending || '';
-            el.classList.toggle('hidden', !pending);
+            el.textContent = (pending + emails.length) || '';
+            el.classList.toggle('hidden', !(pending + emails.length));
         });
     }
 
-    const groups = _rqBlogWriterActive ? [...RQ_GROUPS, RQ_BLOG_GROUP] : RQ_GROUPS;
-    const itemsByGroup = { posts: postGroups, blog: blogPosts };
-    const renderByGroup = { posts: rqRenderSocialCard, blog: rqRenderBlogCard };
-    // Posts are paged by the server; blog posts arrive whole, so their loaded count IS their total.
-    const totalByGroup = { posts: _rqPostsTotal ?? postGroups.length, blog: blogPosts.length };
+    const groups = [...RQ_GROUPS, ...(_rqBlogWriterActive ? [RQ_BLOG_GROUP] : []), ...(emailsShown ? [RQ_EMAIL_GROUP] : [])];
+    const itemsByGroup = { posts: postGroups, blog: blogPosts, email: emails };
+    const renderByGroup = { posts: rqRenderSocialCard, blog: rqRenderBlogCard, email: rqRenderEmailCard };
+    // Posts are paged by the server; blog posts and emails arrive whole, so loaded count IS total.
+    const totalByGroup = { posts: _rqPostsTotal ?? postGroups.length, blog: blogPosts.length, email: emails.length };
     container.innerHTML = groups.map(g => rqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey, totalByGroup[g.key])).join('')
         + rqMoreButton(statusKey);
+}
+
+// An email row: opens the Email Studio on that issue, where it is read, approved and sent — the
+// same hand-off the Calendar's email chip and the assistant's own Review tab use.
+function rqRenderEmailCard(issue) {
+    const waiting = (RQ_EMAIL_STATUSES.review || []).includes(issue.status);
+    const label = window.PlatformConstants?.postStatusLabel ? window.PlatformConstants.postStatusLabel(issue.status) : issue.status;
+    const when = issue.scheduledFor
+        ? `${issue.status === 'failed' ? 'Was due' : 'Goes out'} ${new Date(issue.scheduledFor).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+        : (issue.updatedAt ? `Updated ${rqTimeAgo(issue.updatedAt)}` : '');
+    const chip = issue.status === 'failed'
+        ? 'bg-red-50 border-red-200 text-red-700'
+        : 'bg-amber-50 border-amber-200 text-amber-800';
+    return `<button type="button" onclick="window._newsletterInitialIssueId=${Number(issue.id)}; window.loadView && window.loadView('newsletter')"
+        class="focus-ring w-full text-left flex items-center gap-3 py-3 cursor-pointer hover:bg-gray-50 -mx-2 px-2 rounded-lg">
+        <span class="w-8 h-8 shrink-0 rounded-lg bg-teal-50 text-teal-700 flex items-center justify-center" aria-hidden="true">
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M20 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V6a2 2 0 00-2-2zm0 4.24l-8 4.62-8-4.62V6l8 4.62L20 6v2.24z"/></svg>
+        </span>
+        <span class="flex-1 min-w-0">
+          <span class="block text-sm font-semibold text-gray-900 truncate">${_rqEsc(issue.subject || '(untitled email)')}</span>
+          <span class="block text-xs text-gray-600 truncate">${_rqEsc(when)}${waiting ? ' · open it in the Email Studio to approve' : ' · open it to see why'}</span>
+          <span class="sm:hidden inline-flex mt-1 text-[11px] font-bold px-2 py-0.5 rounded-full border ${chip}">${_rqEsc(label)}</span>
+        </span>
+        <span class="hidden sm:inline-flex shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border ${chip}">${_rqEsc(label)}</span>
+      </button>`;
 }
 
 /** "Show more" under the list, or nothing when the last page is already on screen. */
@@ -6320,7 +6439,7 @@ function rqMoreButton(statusKey) {
         class="btn-secondary px-4 py-2 text-xs font-bold rounded-lg border transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
         Show more
       </button>
-      <p class="text-[11px] text-gray-400 mt-1.5">Showing ${shown} of ${total}</p>
+      <p class="text-[11px] text-gray-500 mt-1.5" aria-live="polite">Showing ${shown} of ${total}</p>
     </div>`;
 }
 
@@ -6337,7 +6456,7 @@ async function rqLoadMorePosts(statusKey) {
     if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
     const offset = rqGroupSocialDrafts(_rqLoadedPosts).length;
     try {
-        const res = await fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}&limit=${RQ_PAGE_SIZE}&offset=${offset}`);
+        const res = await fetch(_rqPostsUrl(col, RQ_PAGE_SIZE, offset));
         if (!res.ok) throw new Error('load failed');
         const pj = await res.json();
         // rqGroupSocialDrafts caches every row it sees, so appending rather than replacing keeps
@@ -6356,7 +6475,7 @@ async function rqLoadMorePosts(statusKey) {
 /** Repaint only the Posts group + the More button, leaving the Blog group and its fetch alone. */
 function rqRepaintPostsGroup(statusKey) {
     const body = document.querySelector('.rq-group-body-posts');
-    const groups = rqGroupSocialDrafts(_rqLoadedPosts);
+    const groups = rqGroupSocialDrafts(_rqLoadedPosts, { sort: (RQ_COLUMNS[statusKey] || {}).sort });
     if (body) {
         body.innerHTML = groups.length
             ? `<div class="divide-y divide-gray-100">${groups.map(rqRenderSocialCard).join('')}</div>`
@@ -6377,22 +6496,27 @@ function rqRepaintPostsGroup(statusKey) {
 function rqRenderBlogCard(post) {
     const title = _rqEsc(post.title || 'Untitled draft');
     const when = post.publishedAt || post.publishDate;
-    const meta = when ? new Date(when).toLocaleString() : (post.updatedAt ? 'Updated ' + rqTimeAgo(post.updatedAt) : '');
+    const stamp = when ? new Date(when).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+    const meta = when
+        ? (post.status === 'published' ? `Posted ${stamp}` : post.status === 'failed' ? `Was due ${stamp}` : `Goes out ${stamp}`)
+        : (post.updatedAt ? 'Updated ' + rqTimeAgo(post.updatedAt) : '');
     const inReview = (RQ_BLOG_STATUSES.review || []).includes(post.status);
+    // The state in the words both pages use, never the raw value ("pending_approval").
+    const label = window.PlatformConstants?.postStatusLabel ? window.PlatformConstants.postStatusLabel(post.status) : post.status;
     const approveBtn = inReview
-        ? `<span class="px-3 py-1.5 text-xs font-bold border border-gray-200 text-gray-700 rounded-lg whitespace-nowrap">Review →</span>`
+        ? `<span aria-hidden="true" class="px-3 py-1.5 text-xs font-bold border border-gray-200 text-gray-700 rounded-lg whitespace-nowrap">Review →</span>`
         : '';
-    return `<div onclick="window.openBlogStudio&&window.openBlogStudio({postId:${post.id}})"
-        class="flex items-center gap-3 py-3 cursor-pointer hover:bg-gray-50 -mx-2 px-2 rounded-lg">
-        <span class="w-8 h-8 shrink-0 rounded-lg bg-pink-50 text-pink-600 flex items-center justify-center">
+    return `<button type="button" onclick="window.openBlogStudio&&window.openBlogStudio({postId:${post.id}})"
+        class="focus-ring w-full text-left flex items-center gap-3 py-3 cursor-pointer hover:bg-gray-50 -mx-2 px-2 rounded-lg">
+        <span class="w-8 h-8 shrink-0 rounded-lg bg-pink-50 text-pink-600 flex items-center justify-center" aria-hidden="true">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
         </span>
-        <div class="flex-1 min-w-0">
-          <p class="text-sm font-semibold text-gray-900 truncate">${title}</p>
-          <p class="text-xs text-gray-500 truncate">${_rqEsc(post.status)}${meta ? ' · ' + _rqEsc(meta) : ''}</p>
-        </div>
+        <span class="flex-1 min-w-0">
+          <span class="block text-sm font-semibold text-gray-900 truncate">${title}</span>
+          <span class="block text-xs ${post.status === 'failed' ? 'text-red-700' : 'text-gray-600'} truncate">${_rqEsc(label)}${meta ? ' · ' + _rqEsc(meta) : ''}</span>
+        </span>
         ${approveBtn}
-      </div>`;
+      </button>`;
 }
 
 function _rqEsc(s) {
@@ -6414,14 +6538,15 @@ function rqGroupSection(g, items, render, statusKey, total) {
     const emptyMsg = statusKey === 'review' ? g.emptyReview : g.empty;
     const body = items.length
         ? `<div class="divide-y divide-gray-100">${items.map(render).join('')}</div>`
-        : `<p class="text-sm text-gray-400 py-6 text-center">${emptyMsg}</p>`;
+        : `<p class="text-sm text-gray-500 py-6 text-center">${emptyMsg}</p>`;
     return `<section class="border-b border-gray-100 last:border-0">
-      <button onclick="rqToggleGroup('${g.key}')" class="w-full flex items-center gap-2 py-3 text-left cursor-pointer group">
-        <svg class="rq-group-chevron-${g.key} w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      <button type="button" onclick="rqToggleGroup('${g.key}')" aria-expanded="${open}" aria-controls="rq-group-body-${g.key}"
+        class="rq-group-toggle-${g.key} focus-ring w-full flex items-center gap-2 py-3 text-left cursor-pointer group">
+        <svg class="rq-group-chevron-${g.key} w-4 h-4 text-gray-500 transition-transform ${open ? 'rotate-90' : ''}" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
         <span class="text-sm font-bold text-gray-900">${g.label}</span>
-        <span class="rq-group-count text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">${rqGroupCountLabel(items.length, total)}</span>
+        <span class="rq-group-count text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">${rqGroupCountLabel(items.length, total)}</span>
       </button>
-      <div class="rq-group-body-${g.key} ${open ? '' : 'hidden'} pb-1">${body}</div>
+      <div id="rq-group-body-${g.key}" class="rq-group-body-${g.key} ${open ? '' : 'hidden'} pb-1">${body}</div>
     </section>`;
 }
 
@@ -6433,6 +6558,7 @@ function rqToggleGroup(key) {
     const chev = document.querySelector('.rq-group-chevron-' + key);
     if (body) body.classList.toggle('hidden', wasOpen);
     if (chev) chev.classList.toggle('rotate-90', !wasOpen);
+    document.querySelector('.rq-group-toggle-' + key)?.setAttribute('aria-expanded', String(!wasOpen));
 }
 
 // ── Origin pill ───────────────────────────────────────────────────────────────
@@ -6478,21 +6604,22 @@ function rqOriginPill(draft) {
 // splitting on status, a cross-post whose Instagram row is paused and whose LinkedIn row is still
 // scheduled is one card, and both facts have to reach the screen.
 const RQ_STATE_CHIP = {
-    pending_approval: { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Needs review' },
-    draft:            { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Needs review' },
-    in_review:        { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Needs review' },
-    approved:         { cls: 'bg-emerald-50 border-emerald-200 text-emerald-700', label: 'Approved' },
+    pending_approval: { cls: 'bg-amber-50 border-amber-200 text-amber-800',       label: 'Needs your review' },
+    draft:            { cls: 'bg-amber-50 border-amber-200 text-amber-800',       label: 'Needs your review' },
+    in_review:        { cls: 'bg-amber-50 border-amber-200 text-amber-800',       label: 'Needs your review' },
+    approved:         { cls: 'bg-blue-50 border-blue-200 text-blue-700',          label: 'Approved' },
     scheduled:        { cls: 'bg-blue-50 border-blue-200 text-blue-700',          label: 'Scheduled' },
     // Both were unreachable while the Scheduled column asked for ['scheduled','paused_credits'] —
     // a post in either sat in the Scheduled TILE and in no tab. They have entries now for the same
     // reason 'failed' got one: without one the chip renders empty and the card states nothing.
     publishing:       { cls: 'bg-blue-50 border-blue-200 text-blue-700',          label: 'Publishing…' },
-    paused:           { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Paused · reconnect' },
-    paused_credits:   { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Paused · X limit' },
-    published:        { cls: 'bg-emerald-50 border-emerald-200 text-emerald-700', label: 'Posted' },
+    paused:           { cls: 'bg-amber-50 border-amber-200 text-amber-800',       label: 'Paused · reconnect' },
+    paused_credits:   { cls: 'bg-amber-50 border-amber-200 text-amber-800',       label: 'Paused · X limit' },
+    // Green, not emerald: emerald-* is the brand PINK here, and "posted" is a success state.
+    published:        { cls: 'bg-green-50 border-green-300 text-green-700',       label: 'Posted' },
     // Alongside the 'Needs attention' and widened 'Archived' columns. Without an entry the chip
     // renders empty, so a failed post would show a card with no state on it at all.
-    failed:           { cls: 'bg-red-50 border-red-200 text-red-700',             label: 'Failed to publish' },
+    failed:           { cls: 'bg-red-50 border-red-200 text-red-700',             label: 'Failed to post' },
     cancelled:        { cls: 'bg-gray-100 border-gray-200 text-gray-500',         label: 'Cancelled' },
     rejected:         { cls: 'bg-gray-100 border-gray-200 text-gray-500',         label: 'Archived' },
 };
@@ -6513,8 +6640,12 @@ const RQ_STATE_PRIORITY = [
 
 /** The chip for ONE post row. `rejected` carries its own deletion countdown, so it is per-post. */
 function _rqStateChip(post) {
-    const base = RQ_STATE_CHIP[post?.status];
-    if (!base) return { cls: 'bg-gray-100 border-gray-200 text-gray-500', label: post?.status || '' };
+    const raw = RQ_STATE_CHIP[post?.status];
+    if (!raw) return { cls: 'bg-gray-100 border-gray-200 text-gray-600', label: post?.status || '' };
+    // The word comes from the shared vocabulary (post-status.ts POST_STATUS_LABELS) so the card and
+    // the Calendar never name the same state differently; this table only owns the colour.
+    const pc = window.PlatformConstants;
+    const base = pc && pc.postStatusLabel ? { ...raw, label: pc.postStatusLabel(post.status) } : raw;
     if (post.status === 'rejected' && post.daysRemaining != null) {
         return { ...base, label: `Archived · ${post.daysRemaining}d left` };
     }
@@ -6553,11 +6684,13 @@ function rqRenderSocialCard(draft) {
     // 'rejected' alone left a cancelled post styled like a live one.
     const isArchived = headline.status === 'rejected' || headline.status === 'cancelled';
     const isVideo = _rqMediaIsVideo(draft);
+    // preload="metadata": a 64px thumbnail needs the first frame, not the whole file — with no preload
+    // hint each video row on a page could start downloading its video just to sit in a list.
     const thumb = draft.thumbnailUrl
         ? (isVideo
-            ? `<video src="${draft.thumbnailUrl}" muted class="w-16 h-16 rounded-lg object-cover bg-black shrink-0"></video>`
-            : `<img src="${draft.thumbnailUrl}" alt="" class="w-16 h-16 rounded-lg object-cover shrink-0">`)
-        : `<div class="w-16 h-16 rounded-lg bg-gray-100 flex items-center justify-center text-gray-300 text-[10px] shrink-0">no media</div>`;
+            ? `<video src="${draft.thumbnailUrl}" muted preload="metadata" aria-hidden="true" tabindex="-1" class="w-16 h-16 rounded-lg object-cover bg-black shrink-0"></video>`
+            : `<img src="${draft.thumbnailUrl}" alt="" loading="lazy" decoding="async" class="w-16 h-16 rounded-lg object-cover shrink-0">`)
+        : `<span class="w-16 h-16 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-[10px] shrink-0">no media</span>`;
     // A pending/rendering/failed video render OVERRIDES the status chip. The post's own status still
     // reads 'scheduled', but every publisher skips it while render_status is non-terminal — so the
     // plain "Scheduled" chip is an outright lie: it promises a post that cannot go out. On 'failed'
@@ -6571,23 +6704,26 @@ function rqRenderSocialCard(draft) {
         failed:    { cls: 'bg-red-50 border-red-200 text-red-700',          label: 'Render failed' },
     };
     const chip = RENDER_CHIP[renderState] || _rqStateChip(headline);
-    const statusChip = `<span class="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border ${chip.cls}">${_rqEsc(chip.label)}</span>`;
+    // Drawn in one of two places by width: beside the text on a wider screen, UNDER it on a phone —
+    // at 375px the chip beside the text squeezed the title, date and caption into ~50px.
+    const statusChip = `<span class="hidden sm:inline-flex shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border ${chip.cls}">${_rqEsc(chip.label)}</span>`;
+    const statusChipPhone = `<span class="sm:hidden inline-flex mt-1 text-[11px] font-bold px-2 py-0.5 rounded-full border ${chip.cls}">${_rqEsc(chip.label)}</span>`;
     // Title: single platform reads "Instagram post"; a group reads "Post · N platforms" with a chip
     // per platform so the reviewer sees the reach at a glance without opening it.
     const title = multi
-        ? `Post <span class="text-gray-400 font-medium">· ${group.length} platforms</span>`
+        ? `Post <span class="text-gray-500 font-medium">· ${group.length} platforms</span>`
         : `${_rqEsc(rqPlatformLabel(draft.platform))} post`;
     // Platform chips. They normally just name the reach; when the platforms are in different states
     // each chip carries its OWN, because the headline pill above can only say one thing and the
     // point of collapsing these into a single card is that nothing hides behind a sibling. Without
     // this, "Paused · reconnect" over a three-platform card would read as all three being stuck.
     const chips = multi
-        ? `<div class="flex flex-wrap items-center gap-1 mt-1">${group.map(g => {
+        ? `<span class="flex flex-wrap items-center gap-1 mt-1">${group.map(g => {
               const label = _rqEsc(rqPlatformLabel(g.platform));
               if (!mixedState) return `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">${label}</span>`;
               const st = _rqStateChip(g);
               return `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${st.cls}">${label} · ${_rqEsc(st.label)}</span>`;
-          }).join('')}</div>`
+          }).join('')}</span>`
         : '';
     const anyMediaMissing = group.some(g => g.mediaMissing);
     // Why it failed, on the card. "Failed to publish" alone made the Needs-attention column a list
@@ -6597,24 +6733,42 @@ function rqRenderSocialCard(draft) {
     // Read off the HEADLINE, not the representative: in a mixed group the failed sibling is the one
     // with something to explain, and the representative was picked for its thumbnail.
     const failureLine = headline.status === 'failed' && (headline.failure?.title || headline.failureMessage)
-        ? `<p class="text-xs text-red-600 truncate mt-0.5">${_rqEsc(headline.failure?.title || headline.failureMessage)}</p>`
+        ? `<span class="block text-xs text-red-700 truncate mt-0.5">${_rqEsc(headline.failure?.title || headline.failureMessage)}</span>`
         : '';
-    return `<div onclick="openPostReview(${draft.id})" class="py-3.5 flex items-center gap-3 cursor-pointer hover:bg-gray-50 -mx-4 px-4 transition" data-post-id="${draft.id}">
+    // WHEN it goes out is the line that matters to someone approving a week — every card used to
+    // say only how long ago the AI wrote it, so the owner had to open each one to learn its date.
+    // Posted cards say when they went out instead; archived ones keep the drafted time.
+    const fmt = (iso) => new Date(iso).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const whenLine = isArchived
+        ? ''
+        : headline.status === 'published' && (headline.publishedAt || draft.publishedAt)
+            ? `Posted ${fmt(headline.publishedAt || draft.publishedAt)}`
+            // A failed post did NOT go out, and a paused one won't until it's fixed — "Goes out" would
+            // promise something that isn't happening.
+            : headline.status === 'failed' && draft.publishDate
+                ? `Was due ${fmt(draft.publishDate)}`
+                : (headline.status === 'paused' || headline.status === 'paused_credits') && draft.publishDate
+                    ? `Due ${fmt(draft.publishDate)} — on hold`
+                    : (draft.publishDate ? `Goes out ${fmt(draft.publishDate)}` : '');
+    // A <button>, so the card is reachable and openable from the keyboard (it was a clickable div).
+    return `<button type="button" onclick="openPostReview(${draft.id})" class="focus-ring w-full text-left py-3.5 flex items-center gap-3 cursor-pointer hover:bg-gray-50 -mx-4 px-4 transition" data-post-id="${draft.id}">
       ${thumb}
-      <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2 mb-0.5">
-          <p class="text-sm font-semibold text-gray-900 truncate">${title}</p>
-          ${!isArchived ? `<span class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${origin.cls}"${origin.title ? ` title="${_rqEsc(origin.title)}"` : ''}>${_rqEsc(origin.label)}</span>` : ''}
-        </div>
-        <p class="text-xs text-gray-500 truncate">${isArchived ? _rqEsc(draft.assistantName || 'AI Assistant') + ' · ' : ''}${ago}</p>
-        ${draft.caption ? `<p class="text-xs text-gray-600 truncate mt-0.5 ${isArchived ? 'line-through opacity-60' : ''}">${_rqEsc(draft.caption)}</p>` : ''}
+      <span class="block flex-1 min-w-0">
+        <span class="flex items-center gap-2 mb-0.5 min-w-0">
+          <span class="text-sm font-semibold text-gray-900 truncate shrink-0 max-w-full">${title}</span>
+          ${!isArchived ? `<span class="min-w-0 truncate text-[10px] font-bold px-1.5 py-0.5 rounded-full ${origin.cls}"${origin.title ? ` title="${_rqEsc(origin.title)}"` : ''}>${_rqEsc(origin.label)}</span>` : ''}
+        </span>
+        ${whenLine ? `<span class="block text-xs font-semibold text-gray-800 truncate">${_rqEsc(whenLine)}</span>` : ''}
+        <span class="block text-[11px] text-gray-500 truncate">${isArchived ? _rqEsc(draft.assistantName || 'AI Assistant') + ' · ' : ''}drafted ${ago}</span>
+        ${draft.caption ? `<span class="block text-xs text-gray-600 truncate mt-0.5 ${isArchived ? 'line-through opacity-60' : ''}">${_rqEsc(draft.caption)}</span>` : ''}
         ${failureLine}
         ${chips}
-      </div>
-      ${anyMediaMissing ? '<span class="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border bg-red-50 border-red-200 text-red-700">⚠ Media deleted</span>' : ''}
+        ${statusChipPhone}
+      </span>
+      ${anyMediaMissing ? '<span class="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border bg-red-50 border-red-200 text-red-700"><span aria-hidden="true">⚠ </span>Media deleted</span>' : ''}
       ${statusChip}
-      <svg class="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-    </div>`;
+      <svg class="w-4 h-4 text-gray-400 shrink-0" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+    </button>`;
 }
 
 async function sdApprove(postId, action) {
@@ -6688,9 +6842,8 @@ function rqRenderCard(item) {
     return html;
 }
 
-function _rqEsc(s) {
-    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
+// (A second, later _rqEsc lived here and silently won — its `String(s || '')` turned 0 into "".
+// The one above, which keeps 0, is the only definition now.)
 
 // ── Review Queue → clickable post review modal (per-platform mock-up) ─────────
 // Cards (social drafts, AI drafts, archive) stash their full post object here so the modal can
@@ -6738,8 +6891,9 @@ const _rqGroupMembers = {};
 
 // Collapse a flat drafts list into representative cards. Caches every sibling and records the
 // membership map so openPostReview can rebuild the group from an id alone. Returns representatives
-// (newest first), each carrying _group (platform-sorted siblings) and _platforms.
-function rqGroupSocialDrafts(posts) {
+// (newest first — or soonest go-out time first with { sort: 'publish' }, matching the server's
+// `sort=publish` page order), each carrying _group (platform-sorted siblings) and _platforms.
+function rqGroupSocialDrafts(posts, opts = {}) {
     const byKey = new Map();
     for (const p of (posts || [])) {
         rqCachePost(p);
@@ -6758,7 +6912,12 @@ function rqGroupSocialDrafts(posts) {
         rep._platforms = siblings.map(s => s.platform);
         reps.push(rep);
     }
-    reps.sort((a, b) => new Date(b.generatedAt || b.rejectedAt || 0) - new Date(a.generatedAt || a.rejectedAt || 0));
+    if (opts.sort === 'publish') {
+        const t = (p) => (p.publishDate ? new Date(p.publishDate).getTime() : Infinity);
+        reps.sort((a, b) => (t(a) - t(b)) || (new Date(b.generatedAt || 0) - new Date(a.generatedAt || 0)));
+    } else {
+        reps.sort((a, b) => new Date(b.generatedAt || b.rejectedAt || 0) - new Date(a.generatedAt || a.rejectedAt || 0));
+    }
     return reps;
 }
 
@@ -10537,7 +10696,16 @@ document.addEventListener('click', (e) => {
     if (act === 'assistants') window.loadView?.('assistants');
 });
 
+// The element that opened the editor, so closing it puts keyboard focus back there instead of at the
+// top of the page — the card, chip or button the person was on. Not overwritten while the editor is
+// already open (switching platform tabs re-enters openPostReview).
+let _rqReturnFocusEl = null;
 async function openPostReview(postId, opts = {}) {
+    const editorEl = document.getElementById('post-review-modal');
+    if (!editorEl || !editorEl.classList.contains('flex')) {
+        const el = document.activeElement;
+        _rqReturnFocusEl = el && el !== document.body ? el : null;
+    }
     _rqSetBusyCursor(true);
     try {
         return await _rqOpenPostReview(postId, opts);
@@ -17728,6 +17896,17 @@ function closePostReview() {
     // schedule-active (rejected here, say) leave the grid without a page refresh. No-op on every
     // other view: the function only exists while calendar.js is mounted.
     window._calRefreshAfterEdit?.();
+    // Back to where the person was. A list that re-rendered has replaced that node; then the same
+    // post's new card (by id) is the next best place, and failing that focus simply stays put.
+    const back = _rqReturnFocusEl;
+    _rqReturnFocusEl = null;
+    if (back) {
+        setTimeout(() => {
+            const target = back.isConnected ? back
+                : (back.dataset && back.dataset.postId ? document.querySelector(`[data-post-id="${back.dataset.postId}"]`) : null);
+            try { target?.focus({ preventScroll: true }); } catch { /* focus is best-effort */ }
+        }, 0);
+    }
 }
 
 // ── "💬 Chat" card action — mounts the shared ChatSession widget in a modal instead of
@@ -18239,13 +18418,51 @@ function _rqShowApprovedPanel(targets, action, scheduledFor) {
     document.getElementById('post-review-buttons')?.classList.add('hidden');
     document.getElementById('post-review-connect')?.classList.add('hidden');
     panel.classList.remove('hidden');
+    // Remembered for "See it on the calendar" (opens that month) and "Review next draft" (the next
+    // card after this one in the queue on screen, skipping this post's own siblings).
+    _rqApprovedAt = at || null;
+    _rqApprovedIds = targets.map(t => t.id);
+    const nextBtn = document.getElementById('post-review-next-btn');
+    // Worked out NOW, before the list below reloads, so the answer can't depend on a fetch in flight.
+    _rqApprovedNextId = _rqNextDraftId();
+    if (nextBtn) {
+        const next = _rqApprovedNextId;
+        nextBtn.classList.toggle('hidden', !next);
+        // `hidden` alone loses to a display utility elsewhere; set the style too.
+        nextBtn.style.display = next ? '' : 'none';
+    }
     // The list behind the modal is now wrong (this post has left the pending queue), so refresh it
     // WITHOUT closing — the user may dismiss this with the × rather than Done, and a stale card for
-    // a post they just approved is how you end up approving it twice.
-    rqRenderGroups(_rqCurrentStatus);
+    // a post they just approved is how you end up approving it twice. Quiet: no "Loading…" flash
+    // behind the modal, and the pages already shown stay shown.
+    rqRenderGroups(_rqCurrentStatus, { quiet: true });
     if (typeof refreshPendingBadge === 'function') { try { refreshPendingBadge(); } catch { /* ignore */ } }
     if (typeof window.detailRqRefresh === 'function') { try { window.detailRqRefresh(); } catch { /* ignore */ } }
     return true;
+}
+
+let _rqApprovedAt = null;
+let _rqApprovedIds = [];
+let _rqApprovedNextId = null;
+// The first card in the queue on screen that isn't the post just approved (or a sibling of it).
+function _rqNextDraftId() {
+    if (_rqCurrentStatus !== 'review') return null;
+    const skip = new Set(_rqApprovedIds);
+    const reps = rqGroupSocialDrafts(_rqLoadedPosts, { sort: RQ_COLUMNS.review.sort });
+    const next = reps.find(r => !(r._group || [r]).some(m => skip.has(m.id)));
+    return next ? next.id : null;
+}
+function rqReviewNextDraft() {
+    const next = _rqApprovedNextId || _rqNextDraftId();
+    closePostReview();
+    if (next) openPostReview(next);
+}
+// Opens the Content Calendar on the month the post was booked into.
+function rqReviewSeeOnCalendar() {
+    const at = _rqApprovedAt;
+    closePostReview();
+    if (at) window._calInitialAnchor = new Date(at);
+    if (window.loadView) window.loadView('calendar');
 }
 
 // A SECOND rqReviewPublishNow lived here and, being later in the file, silently won — so every
@@ -18655,6 +18872,11 @@ async function rqReviewReject() {
     if (!reason) { window.showToast?.('Please enter a reason for rejecting.', { icon: '⚠️' }); return; }
     const targets = _rqReviewTargets();
     if (!targets.length) return;
+    // Busy like Approve: a double tap used to send two rejections — two content rules, two redrafts.
+    if (_rqCommitBusyDepth > 0) return;
+    const rejectBtn = document.getElementById('post-review-reject-btn');
+    _rqSetCommitBusy(true);
+    rejectBtn?.setAttribute('aria-busy', 'true');
     try {
         const res = await fetch('/.netlify/functions/reject-post', {
             method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
@@ -18669,21 +18891,30 @@ async function rqReviewReject() {
         // Say what actually happened. The redraft is best-effort by design (no blueprint, queue
         // full, enqueue failed) and the response reports which — promising a rewrite that was
         // skipped is the same failure as a chat assistant claiming a draft it never saved.
+        // Say WHERE the archive is. The Review page has no Archived tab, so "moved to the Archive"
+        // pointed at nothing; it lives on the assistant's own page.
         const n = (d.rejectedPostIds || []).length || targets.length;
+        const who = targets[0]?.assistantName;
+        const where = who ? `${who} › Review › Archived` : 'the assistant’s Review › Archived';
         const archived = n > 1
-            ? `All ${n} platforms rejected and archived (kept 30 days).`
-            : 'Post rejected and moved to the Archive (kept for 30 days).';
+            ? `All ${n} platforms rejected. Kept for 30 days under ${where}.`
+            : `Post rejected. Kept for 30 days under ${where}.`;
         window.showToast?.(d.revisionQueued
             ? `${archived} Your assistant is drafting a replacement — it'll appear here shortly.`
-            : archived);
+            : archived, { icon: '🗂️', duration: 7000 });
         _rqReviewRefresh();
     } catch { window.showToast?.('Network error — please try again.', { icon: '⚠️' }); }
+    finally {
+        _rqSetCommitBusy(false);
+        rejectBtn?.removeAttribute('aria-busy');
+    }
 }
 
 function rqTimeAgo(ts) {
     if (!ts) return '—';
     const diff = Math.floor((Date.now() - new Date(ts)) / 1000);
-    if (diff < 60) return `${diff}s ago`;
+    // Under a minute — or a clock a little ahead of ours — is "just now", never "-12s ago".
+    if (diff < 60) return 'just now';
     if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
     if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
     return `${Math.floor(diff/86400)}d ago`;

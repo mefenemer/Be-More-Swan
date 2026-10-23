@@ -169,6 +169,33 @@ export default withLambda(async (event: HandlerEvent) => {
         const orgId = ctx.organisationId;
         const idParam = event.queryStringParameters?.id;
 
+        // ── The Review page's feed ───────────────────────────────────────────────────────────
+        // Org-wide, and only what needs the owner: emails waiting for approval and emails that
+        // failed to send. The Review page says it holds "anything before it goes live", yet an
+        // email awaiting sign-off was reviewable only on its assistant's own tab and counted in no
+        // badge (review, 2026-10-23). Light on purpose — the sidebar badge polls this every minute,
+        // so none of the list response's segments, templates or theme.
+        if (event.queryStringParameters?.review === '1') {
+            const rows = await db
+                .select({
+                    id: newsletterIssues.id,
+                    subject: newsletterIssues.subject,
+                    status: newsletterIssues.status,
+                    scheduledFor: newsletterIssues.scheduledFor,
+                    assistantId: newsletterIssues.assistantId,
+                    updatedAt: newsletterIssues.updatedAt,
+                })
+                .from(newsletterIssues)
+                .where(and(
+                    eq(newsletterIssues.organisationId, orgId),
+                    inArray(newsletterIssues.status, ['pending_approval', 'in_review', 'failed']),
+                ))
+                .orderBy(sql`${newsletterIssues.scheduledFor} ASC NULLS LAST`, desc(newsletterIssues.updatedAt))
+                .limit(200);
+            const awaiting = rows.filter((r) => r.status !== 'failed').length;
+            return { statusCode: 200, body: JSON.stringify({ issues: rows, awaiting, failed: rows.length - awaiting }) };
+        }
+
         // ── Calendar feed ────────────────────────────────────────────────────────────────────
         // Mirrors the blog-posts.ts branch of the same shape, and exists for the same reason: the
         // full list response below carries segments, custom fields, purposes, templates, the brand

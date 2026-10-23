@@ -185,7 +185,8 @@ check('the Needs-attention badge is counted before the column is opened', () => 
     // It was declared in review-queue.html from the day the column shipped and nothing ever wrote to
     // it, so a workspace with three failed posts looked exactly like one with none.
     const src = ws();
-    assert.match(src, /status=failed&limit=1&offset=0/, 'the poll must count failed posts');
+    // The Needs-attention FAMILY since 2026-10-23 (failed + paused + paused_credits) — what the tab lists.
+    assert.match(src, /status=attention&limit=1&offset=0/, 'the poll must count what the Needs attention tab lists');
     assert.match(src, /function _rqSetAttentionBadge/);
     const page = readFileSync(path.join(import.meta.dirname, '..', 'review-queue.html'), 'utf8');
     assert.ok(page.includes('rq-col-count-attention'), 'the element the badge writes to must still exist');
