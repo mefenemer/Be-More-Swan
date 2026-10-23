@@ -327,6 +327,7 @@ window.initCalendar = async function (opts = {}) {
         _leadOutreach = false;
     }
     _renderStatusLegend();
+    _calResolveCreate();
     document.getElementById('cal-btn-prev')?.addEventListener('click', _navPrev);
     document.getElementById('cal-btn-next')?.addEventListener('click', _navNext);
     document.getElementById('cal-btn-today')?.addEventListener('click', _navToday);
@@ -744,6 +745,54 @@ function _getDateRange() {
     return { from, to };
 }
 
+// ── Creating from the calendar ────────────────────────────────────
+// The assistants that can start a social post (the same resolver Review's create button uses).
+// null until resolved; [] when none can, which keeps the button hidden and day clicks inert.
+let _calPosters = null;
+
+async function _calResolveCreate() {
+    _calPosters = null;
+    // A records role's calendar (invoices, meetings, follow-ups) has nothing to post.
+    if (_lockedAssistant && !_publishesContent) return;
+    const list = typeof window.resolvePostingAssistants === 'function' ? await window.resolvePostingAssistants().catch(() => []) : [];
+    _calPosters = Array.isArray(list) ? list : [];
+    if (!_calCreateAssistantId()) return;
+    const btn = document.getElementById('cal-new-post');
+    // Both: `hidden` alone loses to a display utility (memory: hidden-class-loses-to-inline-flex).
+    if (btn) { btn.classList.remove('hidden'); btn.classList.add('inline-flex'); }
+}
+
+/** Who a post started here belongs to: the assistant on screen, else the first that can post. */
+function _calCreateAssistantId() {
+    if (!_calPosters || !_calPosters.length) return null;
+    if (_assistantFilter !== 'all') {
+        const hit = _calPosters.find(a => String(a.id) === String(_assistantFilter));
+        // On an assistant's own calendar, only that assistant — never someone else's post there.
+        if (hit) return hit.id;
+        if (_lockedAssistant) return null;
+    }
+    return _calPosters[0].id;
+}
+
+/**
+ * Start a post. With a day, the draft is proposed for that day at 09:00 — or, for today once 09:00
+ * has passed, the next whole hour — and approving it is still what books it (create-manual-post
+ * takes the date as the draft's suggestion).
+ */
+window._calNewPost = function (dateKey) {
+    const id = _calCreateAssistantId();
+    if (!id || typeof window.openGeneratePostSheet !== 'function') return;
+    let at = null;
+    if (dateKey) {
+        const [y, m, d] = String(dateKey).split('-').map(Number);
+        at = new Date(y, m - 1, d, 9, 0, 0, 0);
+        const soon = new Date(); soon.setMinutes(0, 0, 0); soon.setHours(soon.getHours() + 1);
+        if (at < soon) at = soon;
+    }
+    window._gpPrefillPublishDate = at ? at.toISOString() : null;
+    window.openGeneratePostSheet(id);
+};
+
 /** True when nothing at all falls on a day of the month or week on screen. */
 function _gridIsEmpty() {
     const { from, to } = _getDateRange();
@@ -814,6 +863,15 @@ function _render() {
         })()
         : '';
     main.innerHTML = banner + (_loading ? `<div class="opacity-60">${body}</div>` : body);
+    // Fingers can't drag here (HTML drag and drop is mouse-only), so on a touch screen every chip that
+    // could be dragged also gets the List view's "Move…" button.
+    if (_view !== 'list' && window.matchMedia && window.matchMedia('(hover: none)').matches) {
+        main.querySelectorAll('[data-cal-move]').forEach((chip) => {
+            const [kind, id] = chip.dataset.calMove.split(':');
+            chip.classList.add('flex-wrap');
+            chip.insertAdjacentHTML('beforeend', `<span class="w-full">${_moveButton(kind, Number(id))}</span>`);
+        });
+    }
     _renderBuckets = null;
 
     // Month list of the CURRENT month: start at today, not the 1st — once per month shown, so a
@@ -1160,7 +1218,7 @@ function _postChip(group, viewType) {
         onclick="window._calOpenPost(${post.id})"
         onmouseenter="window._calShowPreview(event, ${post.id})"
         onmouseleave="window._calHidePreview()"
-        ${isDraggable ? `draggable="true" ondragstart="window._calDragStart(event, ${post.id})"` : ''}
+        ${isDraggable ? `draggable="true" ondragstart="window._calDragStart(event, ${post.id})" data-cal-move="post:${post.id}" aria-keyshortcuts="M"` : ''}
         data-post-id="${post.id}"
         class="group focus-ring flex items-center gap-1.5 px-2 py-1 rounded-lg ${chipBg} shadow-sm cursor-pointer transition select-none text-left w-full"
         style="border-left:3px solid ${asstColor}"
@@ -1414,6 +1472,7 @@ function _recordChip(rec, viewType) {
         onclick="window._calOpenRecord(${rec.id})"
         draggable="true"
         ondragstart="window._calDragStart(event, { kind: 'record', id: ${rec.id} })"
+        ${viewType === 'list' ? '' : `data-cal-move="record:${rec.id}" aria-keyshortcuts="M"`}
         data-cal-record-id="${rec.id}"
         class="focus-ring flex items-center gap-1.5 px-2 py-1 rounded-lg bg-yellow-50 hover:bg-yellow-100 cursor-pointer transition text-left w-full select-none"
         style="border-left:3px solid ${color}"
@@ -1455,7 +1514,7 @@ function _followUpChip(f, viewType) {
         : `${f.title || ''} — ${label} sends ${time}`;
     return `<div role="button" tabindex="0" data-cal-activate
         onclick="window._calOpenFollowUp(${f.threadId})"
-        ${blocked || !_lockedAssistant ? '' : `draggable="true" ondragstart="window._calDragStart(event, { kind: 'followup', id: ${f.threadId} })"`}
+        ${blocked || !_lockedAssistant ? '' : `draggable="true" ondragstart="window._calDragStart(event, { kind: 'followup', id: ${f.threadId} })" data-cal-move="followup:${f.threadId}" aria-keyshortcuts="M"`}
         data-cal-followup-thread="${f.threadId}"
         class="focus-ring flex items-center gap-1.5 px-2 py-1 rounded-lg ${tone.bg} cursor-pointer transition text-left w-full select-none"
         style="border-left:3px solid ${tone.edge}"
@@ -2011,6 +2070,30 @@ if (!window._calDelegatesBound) {
         e.preventDefault();
         el.click();
     });
+    // M on a focused chip that can be dragged opens "Move to…" — the same dialog and save path as
+    // the List view's "Move…" button. Dragging was the ONLY way to reschedule on the grids, so the
+    // keyboard (and a screen reader, via aria-keyshortcuts) had no way to do it there.
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'm' && e.key !== 'M') return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        const chip = e.target && e.target.matches && e.target.matches('[data-cal-move]') ? e.target : null;
+        if (!chip) return;
+        const [kind, id] = chip.dataset.calMove.split(':');
+        e.preventDefault();
+        window._calMove(kind, Number(id));
+    });
+    // A click on the empty part of a future day starts a post for that day. Chips and buttons keep
+    // their own clicks; past days are ignored (a post can't be suggested for yesterday). Keyboard
+    // users have the toolbar's "New post", so cells stay out of the Tab order.
+    document.addEventListener('click', (e) => {
+        const cell = e.target && e.target.closest ? e.target.closest('#cal-main [data-date]') : null;
+        if (!cell || e.target.closest('button, a, [role="button"], [draggable="true"]')) return;
+        if (!_calCreateAssistantId()) return;
+        const [y, m, d] = cell.dataset.date.split('-').map(Number);
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        if (new Date(y, m - 1, d) < today) return;
+        window._calNewPost(cell.dataset.date);
+    });
     // Left/right between the List view's tabs. The list re-renders on a switch, so focus is put on
     // the new active tab by key afterwards.
     document.addEventListener('keydown', (e) => {
@@ -2145,7 +2228,7 @@ function _blogChip(post, viewType) {
     const movableInList = post.status === 'scheduled' && viewType === 'list';
     return `<div role="button" tabindex="0" data-cal-activate
         onclick="window._calOpenBlog(${post.id})"
-        ${isDraggable ? `draggable="true" ondragstart="window._calDragStart(event, { kind: 'blog', id: ${post.id} })"` : ''}
+        ${isDraggable ? `draggable="true" ondragstart="window._calDragStart(event, { kind: 'blog', id: ${post.id} })" data-cal-move="blog:${post.id}" aria-keyshortcuts="M"` : ''}
         data-blog-id="${post.id}"
         ${isDraggable ? `data-cal-blog-id="${post.id}"` : ''}
         class="group focus-ring ${movableInList ? 'flex-wrap' : ''} flex items-center gap-1.5 px-2 py-1 rounded-lg ${chipBg} shadow-sm cursor-pointer transition select-none text-left w-full"

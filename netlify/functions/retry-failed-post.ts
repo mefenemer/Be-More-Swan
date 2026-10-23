@@ -1,7 +1,9 @@
 // netlify/functions/retry-failed-post.ts
 // Group D / Request 6: recover a post that failed to publish.
 //
-// POST { postId, publishDate?, mode? } → gets the post out of 'failed'.
+// POST { postId, publishDate?, instruction?, mode? } → gets the post out of 'failed'.
+//   `instruction` is a time in words ("Friday at 9am"), read in the assistant's posting timezone —
+//   the chat's way of saying "try it again then", which the page does with a date picker.
 //   mode omitted / 'retry', no publishDate  → "Try again now": status 'scheduled', publish_date =
 //                                             now(), so the next publisher tick picks it up.
 //   mode omitted / 'retry', with publishDate → "Reschedule": status 'scheduled' at the chosen time.
@@ -28,8 +30,9 @@
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, auditLogs } from '../../db/schema';
+import { scheduledPosts, auditLogs, aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { parseScheduleInstruction } from '../../src/utils/parse-schedule-instruction';
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
@@ -40,11 +43,12 @@ export default withLambda(async (event) => {
     const { userId, organisationId } = ctx;
     if (!organisationId) return { statusCode: 400, body: JSON.stringify({ error: 'No organisation.' }) };
 
-    let postId: number; let publishDateRaw: string | null; let mode: string;
+    let postId: number; let publishDateRaw: string | null; let mode: string; let instruction: string;
     try {
         const body = JSON.parse(event.body || '{}');
         postId = Number(body.postId);
         publishDateRaw = body.publishDate ? String(body.publishDate) : null;
+        instruction = typeof body.instruction === 'string' ? body.instruction.trim() : '';
         mode = body.mode ? String(body.mode) : 'retry';
     } catch {
         return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON body' }) };
@@ -54,6 +58,9 @@ export default withLambda(async (event) => {
     }
     if (mode !== 'retry' && mode !== 'edit') {
         return { statusCode: 400, body: JSON.stringify({ error: `Unknown mode '${mode}'.` }) };
+    }
+    if (instruction.length > 300) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'The time must be 300 characters or fewer.' }) };
     }
 
     let publishDate = new Date();
@@ -67,7 +74,7 @@ export default withLambda(async (event) => {
 
     // Scope by organisation as well as id, so a post id from another tenant is a 404, not a retry.
     const [post] = await db
-        .select({ id: scheduledPosts.id, status: scheduledPosts.status, platform: scheduledPosts.platform })
+        .select({ id: scheduledPosts.id, status: scheduledPosts.status, platform: scheduledPosts.platform, assistantId: scheduledPosts.assistantId })
         .from(scheduledPosts)
         .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.organisationId, organisationId)))
         .limit(1);
@@ -75,6 +82,32 @@ export default withLambda(async (event) => {
     if (!post) return { statusCode: 404, body: JSON.stringify({ error: 'That post could not be found.' }) };
     if (post.status !== 'failed') {
         return { statusCode: 409, body: JSON.stringify({ error: `This post is ${post.status}, not failed — there is nothing to retry.` }) };
+    }
+
+    // A time in words: read it in the assistant's posting timezone, as reschedule-post-chat does, and
+    // refuse one that is not in the future rather than publishing at once.
+    if (instruction && !publishDateRaw && mode === 'retry') {
+        let timezone = 'Europe/London';
+        if (post.assistantId) {
+            const [assistant] = await db.select({ onboardingContext: aiAssistants.onboardingContext })
+                .from(aiAssistants).where(eq(aiAssistants.id, post.assistantId)).limit(1);
+            const oc = (assistant?.onboardingContext ?? {}) as Record<string, unknown>;
+            const tz = oc.posting_timezone ?? oc.timezone;
+            if (typeof tz === 'string' && tz) timezone = tz;
+        }
+        let parsed: Date | null = null;
+        try { parsed = await parseScheduleInstruction(instruction, new Date(), timezone); } catch (err) {
+            console.error('[retry-failed-post] time parse failed', err);
+            return { statusCode: 502, body: JSON.stringify({ error: 'The assistant could not reach the AI service. Please try again.' }) };
+        }
+        if (!parsed) {
+            return { statusCode: 422, body: JSON.stringify({ error: 'Your assistant couldn\'t work out a date and time from that. Try something like "Friday at 9am".' }) };
+        }
+        if (parsed <= new Date()) {
+            return { statusCode: 422, body: JSON.stringify({ error: `That reads as ${parsed.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: timezone })}, which has passed. Say a future time.` }) };
+        }
+        publishDate = parsed;
+        publishDateRaw = parsed.toISOString();
     }
 
     // 'edit' keeps the post's existing publish_date: it is a PROPOSAL again from here, and moving it

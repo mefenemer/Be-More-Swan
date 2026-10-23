@@ -51,7 +51,7 @@ const NOT_NOW: Record<PostAction, string> = {
     approve: 'This post is not waiting for approval, so there is nothing to approve.',
     reject: 'This post can no longer be rejected — it has already gone out, or was already turned down.',
     retry: 'Only a post that failed to publish can be tried again.',
-    reschedule: 'This post can’t be moved from here: it has gone out, failed, or is publishing right now. A failed post gets a new time from the "Needs attention" column of the "Posts" tab.',
+    reschedule: 'This post can’t be moved: it has gone out, failed, or is publishing right now. A failed post is tried again instead — ask to try it again at the time you want.',
 };
 
 const TEXT_MAX = 200;
@@ -63,7 +63,8 @@ export interface PostActionRequest {
     postId: number;
     /** Reject: what is wrong, in the user's terms. Becomes the redraft's steer (and a rule, if kept). */
     reason: string | null;
-    /** Reschedule: the time in the user's own words; reschedule-post-chat reads it. */
+    /** Reschedule (required) or retry (optional): the time in the user's own words. reschedule-post-chat
+     *  or retry-failed-post reads it; a retry without one goes out on the next run. */
     when: string | null;
 }
 
@@ -80,7 +81,7 @@ export function postActionFromUiElement(uiElement: unknown): PostActionRequest |
     const when = str(ui.when, WHEN_MAX);
     // An action that cannot be carried out without its input is not a proposal.
     if (action === 'reschedule' && !when) return null;
-    return { action, postId, reason: action === 'reject' ? reason : null, when: action === 'reschedule' ? when : null };
+    return { action, postId, reason: action === 'reject' ? reason : null, when: action === 'reschedule' || action === 'retry' ? when : null };
 }
 
 export interface PostActionCard {

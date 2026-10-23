@@ -9,6 +9,10 @@
     <!-- Wraps on a phone, where two buttons and the assistant picker don't fit one 327px row. One
          primary: the page's job is reviewing, so the second "create" button is secondary. -->
     <div class="flex flex-wrap items-center gap-2 max-w-full">
+      <!-- The page's own job: go through the waiting posts one after another, each decision moving
+           straight on to the next. Shown by rqRenderGroups on To approve when posts are waiting; it
+           takes the primary colour then, and the create button steps down to secondary. -->
+      <button id="rq-review-all-btn" type="button" onclick="rqReviewAll()" class="hidden btn-primary focus-ring tap-target px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer"></button>
       <!-- Blog Studio entry — shown only when an active Blog Writer assistant exists (gated below). -->
       <button id="rq-blog-btn" type="button" onclick="_rqOpenBlogStudio()" class="hidden btn-secondary focus-ring tap-target px-4 py-2 text-sm font-bold rounded-lg border transition cursor-pointer items-center gap-1.5">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>

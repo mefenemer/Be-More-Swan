@@ -978,6 +978,8 @@ window.showComplianceModals = function showComplianceModals(force) {
       <div class="min-w-0">
         <nav id="post-review-crumbs" aria-label="Breadcrumb" class="flex flex-wrap items-center gap-1.5 text-sm text-gray-500 mb-0.5"></nav>
         <h2 id="post-review-title" class="text-base font-extrabold text-gray-900">Review post</h2>
+        <!-- "Post 2 of 12" while going through the queue with Review all. -->
+        <p id="post-review-progress" class="hidden text-xs font-bold text-gray-600"></p>
         <!-- The subtitle here read "<Assistant> · 4 platforms · planned for Tue 28 Jul, 11:38".
              Every part of it is said better elsewhere and the last part was actively misleading: the
              platforms are named on the tabs above the post, and "planned for" printed a DRAFT's
@@ -1982,6 +1984,17 @@ window.showComplianceModals = function showComplianceModals(force) {
            screen at once, and two places to reject from. What is left is the pair that genuinely has
            no step: keeping the post for later, and throwing it away. -->
       <div id="post-review-buttons" class="space-y-2">
+        <!-- Phone and tablet: the decision itself, pinned in this footer. Below 1024px the steps stack
+             ABOVE the post, so the decision (step 7) was a scroll past the post and back, then a tap
+             to expand it. Shown by _rqSyncDecisionBar for an assistant's draft; "More options" opens
+             the full step (pick a time, post now, reject). -->
+        <div id="post-review-decide-bar" class="hidden gap-2">
+          <button type="button" id="post-review-decide-approve" onclick="rqReviewApprove()" data-rq-commit
+            class="btn-primary focus-ring tap-target flex-1 min-w-0 truncate px-3 py-2.5 text-sm font-bold rounded-lg">Approve</button>
+          <button type="button" onclick="_railOpen = 'when'; _railRender(); document.getElementById('rail-panel-when')?.scrollIntoView({ block: 'start', behavior: 'smooth' });"
+            class="btn-secondary focus-ring tap-target shrink-0 px-3 py-2.5 text-sm font-bold rounded-lg border">More options</button>
+        </div>
+        <p id="post-review-decide-locked" class="hidden text-[11px] text-center text-amber-800"></p>
         <p id="post-review-draft-hint" class="text-[11px] text-center text-gray-500">
           Ready? Open
           <button type="button" onclick="_railOpen = 'when'; _railRender(); document.getElementById('rail-panel-when')?.scrollIntoView({ block: 'nearest' });"
@@ -6033,7 +6046,7 @@ function formatCurrency(amount, currency) {
      email). Must load BEFORE calendar.js is USED, not before it is parsed — calendar.js only
      looks the component up inside a click handler — but keeping it above avoids the question. -->
 <script src="/src/components/lead-calendar-modal.js"></script>
-<script src="/calendar.js?v=20261012-created-by"></script>
+<script src="/calendar.js?v=20261023-calendar-review"></script>
 <!-- Per-assistant Calendar tab on assistant-detail.html — reuses calendar.js rendering
      scoped to the current assistant (scheduled posts + records with scheduled_for + task runs,
      plus the pending outreach emails on the lead roles). -->
@@ -6112,10 +6125,12 @@ async function refreshPendingBadge() {
         // because a badge you only see after clicking the tab tells you nothing you didn't already
         // learn by clicking it.
         // `attention` = the tab's family; emails come from newsletter-issues `review=1` (see below).
-        const [socialRes, failedRes, emailRes] = await Promise.all([
+        // Articles count too (the To approve tab includes them) — see _rqBlogReviewCount.
+        const [socialRes, failedRes, emailRes, blogAwaiting] = await Promise.all([
             fetch('/.netlify/functions/get-social-drafts?status=pending_approval&limit=1&offset=0'),
             fetch('/.netlify/functions/get-social-drafts?status=attention&limit=1&offset=0'),
             fetch('/.netlify/functions/newsletter-issues?review=1').catch(() => null),
+            _rqBlogReviewCount(),
         ]);
         const body = socialRes.ok ? await socialRes.json() : {};
         // `total` is the grouped count. Fall back to grouping the page only if it is missing.
@@ -6127,12 +6142,8 @@ async function refreshPendingBadge() {
         const emails = emailRes && emailRes.ok ? await emailRes.json().catch(() => ({})) : {};
         const emailAwaiting = Number(emails.awaiting) || 0;
         const emailFailed = Number(emails.failed) || 0;
-        const reviewCount = socialCount + emailAwaiting;
-
-        document.querySelectorAll('.pending-badge').forEach(el => {
-            el.textContent = reviewCount || '';
-            el.classList.toggle('hidden', !reviewCount);
-        });
+        const reviewCount = socialCount + emailAwaiting + blogAwaiting;
+        _rqSetPendingBadge(reviewCount);
 
         if (failedRes.ok) {
             const fb = await failedRes.json();
@@ -6172,6 +6183,28 @@ function _rqSetAttentionBadge(count) {
     if (!badge) return;
     badge.textContent = count || '';
     badge.classList.toggle('hidden', !count);
+}
+
+/** The amber sidebar pill. Labelled, so a screen reader hears "5 to approve", not a bare "5". */
+function _rqSetPendingBadge(n) {
+    document.querySelectorAll('.pending-badge').forEach(el => {
+        el.textContent = n || '';
+        el.classList.toggle('hidden', !n);
+        el.setAttribute('aria-label', `${n} to approve`);
+    });
+}
+
+// Articles waiting in To approve. Without them the pill said "3" over a tab saying "5". Asked only
+// once a Blog Writer is known to exist (the page's own gate), and as a count, never the list.
+async function _rqBlogReviewCount() {
+    if (!_rqBlogWriterActive && typeof window.resolveBlogWriter === 'function') {
+        try { _rqBlogWriterActive = !!(await window.resolveBlogWriter()); } catch { /* non-blocking */ }
+    }
+    if (!_rqBlogWriterActive) return 0;
+    try {
+        const res = await fetch('/.netlify/functions/blog-posts?countReview=1');
+        return res.ok ? (Number((await res.json()).count) || 0) : 0;
+    } catch { return 0; }
 }
 
 // ── Review Queue ─────────────────────────────────────────────────────────────
@@ -6387,13 +6420,12 @@ async function rqRenderGroups(statusKey, opts = {}) {
         const tabCount = pending + (_rqBlogWriterActive ? blogPosts.length : 0) + emails.length;
         const badge = document.getElementById('rq-col-count-review');
         if (badge) { badge.textContent = tabCount || ''; badge.classList.toggle('hidden', !tabCount); }
-        // The sidebar pill: posts + emails, the same sum the 60s poll writes, so the two writers
-        // can't make it flicker. (Blog drafts are counted on the tab only, as before.)
-        document.querySelectorAll('.pending-badge').forEach(el => {
-            el.textContent = (pending + emails.length) || '';
-            el.classList.toggle('hidden', !(pending + emails.length));
-        });
+        // The sidebar pill: the same sum as the tab and as the 60s poll, so the two writers can't
+        // make it flicker.
+        _rqSetPendingBadge(tabCount);
     }
+    // The cards on screen — a session covers what is loaded, and says so at the end if more wait.
+    _rqSyncReviewAllButton(statusKey === 'review' ? postGroups.length : 0);
 
     const groups = [...RQ_GROUPS, ...(_rqBlogWriterActive ? [RQ_BLOG_GROUP] : []), ...(emailsShown ? [RQ_EMAIL_GROUP] : [])];
     const itemsByGroup = { posts: postGroups, blog: blogPosts, email: emails };
@@ -10761,10 +10793,40 @@ async function openPostReview(postId, opts = {}) {
     try {
         const result = await _rqOpenPostReview(postId, opts);
         if (freshOpen) _railOpenDecisionForDraft();
+        _rqSyncSessionProgress(postId);
         return result;
     } finally {
         _rqSetBusyCursor(false);
     }
+}
+
+/**
+ * The narrow-screen decision bar (see #post-review-decide-bar). Returns whether it is showing.
+ * Only for an assistant's draft awaiting review, below 1024px (where the rail stacks above the
+ * post). When the decision step is locked, the bar is replaced by the reason, so a disabled
+ * Approve never sits there unexplained.
+ */
+function _rqSyncDecisionBar(post) {
+    const bar = document.getElementById('post-review-decide-bar');
+    const locked = document.getElementById('post-review-decide-locked');
+    if (!bar || !locked) return false;
+    const narrow = !!(window.matchMedia && window.matchMedia('(max-width: 1023px)').matches);
+    const awaiting = !!post && ['pending_approval', 'in_review'].includes(post.status);
+    const reason = awaiting ? _pceNotReadyReason(post) : null;
+    const show = narrow && awaiting && !reason;
+    bar.classList.toggle('hidden', !show);
+    bar.classList.toggle('flex', show);
+    locked.classList.toggle('hidden', !(narrow && awaiting && reason));
+    locked.textContent = reason ? `To approve: ${reason}.` : '';
+    if (show) {
+        // Shorter than step 7's label (no weekday): at 375px the full one is cut off beside
+        // "More options". The step itself still says it in full.
+        const ms = post.publishDate ? new Date(post.publishDate).getTime() : NaN;
+        document.getElementById('post-review-decide-approve').textContent = Number.isFinite(ms) && ms > Date.now()
+            ? `Approve for ${new Date(ms).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+            : 'Approve';
+    }
+    return show || !!(narrow && awaiting && reason);
 }
 
 // An assistant's draft is opened to be DECIDED on, and the decision was the last of seven closed
@@ -13619,8 +13681,10 @@ function _railRender() {
     // without re-applying the layout — so the list reappeared under the caption and stayed. The
     // source of that is fixed; this is the line that makes it stay fixed, whatever un-hides it next.
     document.getElementById('pce-layers-block')?.classList.add('hidden');
-    // The footer's "Ready? Open Schedule & publish" points at that step; hide it while it is open.
-    document.getElementById('post-review-draft-hint')?.classList.toggle('hidden', _railOpen === 'when');
+    // The footer's "Ready? Open Schedule & publish" points at that step; hide it while it is open,
+    // and on a narrow screen where the decision bar replaces it.
+    const decideBar = _rqSyncDecisionBar(post);
+    document.getElementById('post-review-draft-hint')?.classList.toggle('hidden', _railOpen === 'when' || decideBar);
 
     // The quality panel is the one borrowed block whose home is the CANVAS column rather than a
     // pane — so restoring it puts it back somewhere this layout still shows, and the same verdict
@@ -14486,6 +14550,8 @@ function _pceShowDestinations() {
 }
 
 function pceCloseDestinations() {
+    // A Calendar day's date belongs to the one post it was clicked for, created or not.
+    window._gpPrefillPublishDate = null;
     const m = document.getElementById('pce-dest-modal');
     if (!m) return;
     m.classList.add('hidden');
@@ -14619,7 +14685,9 @@ async function pceConfirmDestinations() {
             busy = true;
             const res = await fetch('/.netlify/functions/create-manual-post', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ assistantId: _pceDestAssistantId, destinations, blank: true }),
+                // A post started from a Calendar day carries that day (calendar.js _calNewPost).
+                body: JSON.stringify({ assistantId: _pceDestAssistantId, destinations, blank: true,
+                    ...(window._gpPrefillPublishDate ? { publishDate: window._gpPrefillPublishDate } : {}) }),
             });
             const d = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(d.error || 'Could not start a new post.');
@@ -17652,15 +17720,16 @@ function _rqReviewRenderActive() {
     const assistantName = post.assistantName || 'your assistant';
     // Say the time approving actually lands on. The option used to read "Let Nova choose the time ·
     // Publishes at the next good slot" while the card above it said "Goes out Tue 09:00" — but
-    // approve-post KEEPS the suggested slot when it is a future, free cadence slot, and only rehomes
-    // a past or taken one. So: name the suggested time, and say when it can move.
+    // approve-post KEEPS the suggested slot when it is a future, free cadence slot, and rehomes a
+    // past, taken or off-schedule one (a day picked on the Calendar, say). So: name the suggested
+    // time, and say when it can move.
     const whenLabel = document.getElementById('post-review-when-assistant-label');
     const whenSub = document.getElementById('post-review-when-assistant-sub');
     const suggestedMs = post.publishDate ? new Date(post.publishDate).getTime() : NaN;
     if (Number.isFinite(suggestedMs) && suggestedMs > Date.now()) {
         const at = new Date(suggestedMs).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
         if (whenLabel) whenLabel.textContent = `Approve for ${at}`;
-        if (whenSub) whenSub.textContent = `${assistantName} moves it to the next free slot if that one is taken`;
+        if (whenSub) whenSub.textContent = `Kept if it fits ${assistantName}’s posting schedule and is free; otherwise the next free slot. To keep an exact time, pick it yourself.`;
     } else {
         if (whenLabel) whenLabel.textContent = 'Approve';
         if (whenSub) whenSub.textContent = `${assistantName} picks the next free slot`;
@@ -17964,6 +18033,7 @@ async function rqReviewDiscardDraft() {
     // Whichever review surface is on screen listed it a moment ago. closePostReview already asks
     // the calendar to reload, so this covers the queue and the assistant-detail list.
     rqRefreshVisibleReviewSurface();
+    _rqSessionContinue(ids[0]);
 }
 
 function closePostReview() {
@@ -18525,7 +18595,17 @@ function _rqShowApprovedPanel(targets, action, scheduledFor) {
         nextBtn.classList.toggle('hidden', !next);
         // `hidden` alone loses to a display utility elsewhere; set the style too.
         nextBtn.style.display = next ? '' : 'none';
+        const pos = _rqSessionIndex(next);
+        nextBtn.textContent = pos >= 0 ? `Next: post ${pos + 1} of ${_rqSession.groups.length} →` : 'Review next draft →';
+        if (!next && _rqSession && _rqApprovedIds.some(id => _rqSessionIndex(id) >= 0)) {
+            msg.textContent += _rqSession.more ? ' That was the last one on screen; more are waiting in Review.' : ' That was the last post waiting.';
+            _rqSession = null;
+        }
     }
+    // The button that held focus has just been hidden; put focus on the next step, so a keyboard
+    // user isn't dropped to the top of the page.
+    panel.setAttribute('role', 'status');
+    (nextBtn && nextBtn.style.display !== 'none' ? nextBtn : panel.querySelector('button:last-of-type'))?.focus();
     // The list behind the modal is now wrong (this post has left the pending queue), so refresh it
     // WITHOUT closing — the user may dismiss this with the × rather than Done, and a stale card for
     // a post they just approved is how you end up approving it twice. Quiet: no "Loading…" flash
@@ -18539,8 +18619,77 @@ function _rqShowApprovedPanel(targets, action, scheduledFor) {
 let _rqApprovedAt = null;
 let _rqApprovedIds = [];
 let _rqApprovedNextId = null;
+// ── Review all: the waiting posts, one after another ─────────────────────────────────────────
+// Approving ten posts was open → approve → find the next card, ten times. A session fixes the order
+// when it starts (the cards on screen, in the tab's order), so a quiet refresh behind the editor
+// can't reshuffle it, and every decision — approve, reject, discard — moves on to the next one.
+// No bulk approve: each post is still opened and read before it is decided.
+let _rqSession = null;   // { groups: number[][] (row ids per card), done: Set<number> (card index) }
+
+function _rqSyncReviewAllButton(n) {
+    const btn = document.getElementById('rq-review-all-btn');
+    const create = document.getElementById('rq-create-post-btn');
+    if (!btn) return;
+    btn.textContent = n ? `Review all (${n})` : '';
+    btn.classList.toggle('hidden', !n);
+    // One primary per header: while there is reviewing to do, that is the page's main action.
+    if (create) {
+        create.classList.toggle('btn-primary', !n);
+        create.classList.toggle('btn-secondary', !!n);
+        create.classList.toggle('border', !!n);
+    }
+}
+
+function rqReviewAll() {
+    const reps = rqGroupSocialDrafts(_rqLoadedPosts, { sort: RQ_COLUMNS.review.sort });
+    if (!reps.length) return;
+    _rqSession = { groups: reps.map(r => (r._group || [r]).map(m => m.id)), done: new Set(), more: !!_rqPostsHasMore };
+    openPostReview(reps[0].id);
+}
+
+function _rqSessionIndex(postId) {
+    if (!_rqSession || postId == null) return -1;
+    return _rqSession.groups.findIndex(g => g.includes(Number(postId)));
+}
+
+/** Mark the card holding `postId` decided and return the next undecided card's first row, or null. */
+function _rqSessionAdvance(postId) {
+    const i = _rqSessionIndex(postId);
+    if (i < 0) return null;
+    _rqSession.done.add(i);
+    const n = _rqSession.groups.length;
+    for (let k = 1; k <= n; k++) {
+        const j = (i + k) % n;
+        if (!_rqSession.done.has(j)) return _rqSession.groups[j][0];
+    }
+    return null;
+}
+
+/** "Post 2 of 12" on the editor while a session is running and this post is in it. */
+function _rqSyncSessionProgress(postId) {
+    const el = document.getElementById('post-review-progress');
+    if (!el) return;
+    const i = _rqSessionIndex(postId);
+    el.classList.toggle('hidden', i < 0);
+    el.textContent = i < 0 ? '' : `Post ${i + 1} of ${_rqSession.groups.length}`;
+}
+
+/** After a reject or discard inside a session: open the next one, or say the run is finished. */
+function _rqSessionContinue(decidedId) {
+    if (_rqSessionIndex(decidedId) < 0) return false;
+    const next = _rqSessionAdvance(decidedId);
+    if (next) { openPostReview(next); return true; }
+    const more = _rqSession.more;
+    _rqSession = null;
+    window.showToast?.(more ? 'That’s all the posts that were on screen. More are waiting — press Review all again.' : 'That’s every post that was waiting.', { icon: '✅' });
+    return true;
+}
+
 // The first card in the queue on screen that isn't the post just approved (or a sibling of it).
+// Inside a Review all session, the session's next card instead.
 function _rqNextDraftId() {
+    const inSession = _rqApprovedIds.find(id => _rqSessionIndex(id) >= 0);
+    if (inSession != null) return _rqSessionAdvance(inSession);
     if (_rqCurrentStatus !== 'review') return null;
     const skip = new Set(_rqApprovedIds);
     const reps = rqGroupSocialDrafts(_rqLoadedPosts, { sort: RQ_COLUMNS.review.sort });
@@ -19010,6 +19159,7 @@ async function rqReviewReject() {
                     : null,
             });
         _rqReviewRefresh();
+        _rqSessionContinue(targets[0]?.id);
     } catch { window.showToast?.('Network error — please try again.', { icon: '⚠️' }); }
     finally {
         _rqSetCommitBusy(false);

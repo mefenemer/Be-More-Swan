@@ -2877,9 +2877,11 @@
           <span>Keep this as a rule for future posts, and write a replacement.</span>
         </label>` : ''}
       ${!blocked && ui.action === 'approve' ? '<p class="text-xs text-gray-600 mt-3">It’s booked into a free slot in your posting schedule.</p>' : ''}
-      ${!blocked && ui.action === 'retry' ? '<p class="text-xs text-gray-600 mt-3">It goes back in the queue and publishes on the next run. If the same problem is still there, it will fail again — open the post to see why it stopped.</p>' : ''}
+      ${!blocked && ui.action === 'retry' && ui.when ? `<p class="text-sm text-gray-700 mt-3"><span class="font-bold">Try again at:</span> ${esc(ui.when)}</p>
+        <p class="text-xs text-gray-500 mt-1">The exact time is worked out when you press the button, and said back to you here. If the same problem is still there, it will fail again.</p>` : ''}
+      ${!blocked && ui.action === 'retry' && !ui.when ? '<p class="text-xs text-gray-600 mt-3">It goes back in the queue and publishes on the next run. If the same problem is still there, it will fail again — open the post to see why it stopped.</p>' : ''}
       <div class="flex flex-wrap items-center gap-2 mt-3">
-        ${blocked ? '' : `<button type="button" data-pap-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>
+        ${blocked ? '' : `<button type="button" data-pap-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(ui.action === 'retry' && ui.when ? 'Try again then' : copy.button)}</button>
         <button type="button" data-pap-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
         ${canOpen ? `<button type="button" data-pap-open class="btn-swan-link px-1 py-2 text-sm font-bold">Open the post</button>` : ''}
       </div>
