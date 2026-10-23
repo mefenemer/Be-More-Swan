@@ -22,10 +22,15 @@
     <p class="text-sm text-gray-600 mt-1">You don't earn commission on new payments while it's paused. Commission you've already earned is kept. Reply to our email, or contact us, if you'd like to talk about it.</p>
   </div>
 
+  <div id="pt-ended" class="hidden bg-gray-50 border border-gray-200 rounded-xl p-5">
+    <p class="font-bold text-gray-900">Your partnership has ended</p>
+    <p class="text-sm text-gray-600 mt-1">You no longer earn commission on new payments. Commission you earned before it ended is still paid to the details below, as it becomes ready. Contact us if you'd like to rejoin.</p>
+  </div>
+
   <!-- Partner Terms not accepted (admin-added partners, or a new version) -->
   <div id="pt-terms-banner" class="hidden bg-white border-2 border-pink-300 rounded-xl p-5 space-y-3">
     <p class="font-bold text-gray-900">Please accept the Partner Terms</p>
-    <p class="text-sm text-gray-600">They explain how you earn and get paid, and how to promote Be More Swan — including labelling your posts as ads. <a href="/partner-terms.html" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Read the Partner Terms</a> (<span id="pt-terms-version"></span>).</p>
+    <p class="text-sm text-gray-600">They explain how you earn and get paid, and how to promote Be More Swan — including labelling your posts as ads. Your commission keeps building up, but we can’t pay it, and your Partner Assistant can’t draft for you, until you accept. <a href="/partner-terms.html" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Read the Partner Terms</a> (<span id="pt-terms-version"></span>).</p>
     <button type="button" onclick="window.partnerPage.acceptTerms()" id="pt-terms-btn" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">I accept the Partner Terms</button>
   </div>
 
@@ -43,7 +48,7 @@
   <div id="pt-content" class="hidden space-y-6">
 
     <!-- Invite link -->
-    <div class="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-3">
+    <div id="pt-invite-card" class="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-3">
       <div class="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h2 class="font-semibold text-gray-800">Your invite link</h2>
@@ -65,7 +70,7 @@
 
     <!-- Partner Assistant (partner-assistant.ts): drafts in their voice with their link + an ad label,
          answers about their money, hands off to their own assistants. Free, 50 messages in 30 days. -->
-    <div class="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+    <div id="pt-assistant-card" class="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
       <div class="flex items-start justify-between gap-3 flex-wrap mb-3">
         <div>
           <h2 class="font-semibold text-gray-800">Partner Assistant</h2>
@@ -190,9 +195,10 @@
     const status = data.partner.status;
     show('pt-applied', status === 'applied');
     show('pt-suspended', status === 'suspended');
-    show('pt-terms-banner', (status === 'approved' || status === 'suspended') && !!data.partnerTerms && !data.partnerTerms.accepted);
+    show('pt-ended', status === 'ended');
+    show('pt-terms-banner', (status === 'approved' || status === 'suspended' || status === 'ended') && !!data.partnerTerms && !data.partnerTerms.accepted);
     if (data.partnerTerms) document.getElementById('pt-terms-version').textContent = `version ${data.partnerTerms.version}, ${data.partnerTerms.updated}`;
-    if (status === 'approved' || status === 'suspended') render();
+    if (status === 'approved' || status === 'suspended' || status === 'ended') render();
     const cap = await (window.checkCapacity ? window.checkCapacity() : null);
     show('pt-upsell', !!cap?.noPlan && status !== 'applied');
 
@@ -205,6 +211,9 @@
 
   function render() {
     show('pt-content');
+    // Ended: earnings and payout details only — no link to share, no Partner Assistant.
+    show('pt-invite-card', data.partner.status !== 'ended');
+    show('pt-assistant-card', data.partner.status !== 'ended');
     const l = data.link, t = data.terms, s = data.stats || {};
     document.getElementById('pt-link').value = l ? l.inviteUrl : '';
     document.getElementById('pt-code').textContent = l ? l.code : '—';
@@ -227,6 +236,7 @@
     document.getElementById('pt-pending').textContent = money(s.pending_pence);
     const min = data.payoutRules?.minPayoutPence ?? 0;
     document.getElementById('pt-payable-note').textContent = !s.payable_pence ? 'Nothing to pay yet.'
+      : data.partnerTerms && !data.partnerTerms.accepted ? 'Accept the Partner Terms at the top of this page so we can pay you.'
       : (s.payable_pence >= min ? (data.payout.display ? 'Included in the next monthly payout.' : 'Add your payout details below so we can pay you.')
         : `${money(min - s.payable_pence)} more to reach the ${money(min)} minimum — it rolls over until then.`);
     document.getElementById('pt-pending-note').textContent = s.next_release_at
@@ -309,6 +319,7 @@
     try {
       await post({ action: 'accept_terms' });
       show('pt-terms-banner', false);
+      if (data.partnerTerms) { data.partnerTerms.accepted = true; render(); }   // the payout note changes
       window.showToast?.('Thanks — the Partner Terms are accepted.');
     } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); btn.disabled = false; }
   }

@@ -47,8 +47,9 @@ export default withLambda(async (event) => {
 
     if (event.httpMethod === 'GET') {
         if (!p || p.status === 'rejected') return json(200, { partner: null });
-        const live = p.status === 'approved' || p.status === 'suspended';
-        const code = live ? await ensureReferralCode(db, userId) : null;
+        // 'ended' (Terms 7.1/7.2) still sees what it earned and where it's paid, but no invite link.
+        const live = p.status === 'approved' || p.status === 'suspended' || p.status === 'ended';
+        const code = live && p.status !== 'ended' ? await ensureReferralCode(db, userId) : null;
         const periods = await db.select().from(partnerRatePeriods).where(or(isNull(partnerRatePeriods.partnerId), eq(partnerRatePeriods.partnerId, p.id)));
         const now = new Date();
         const current = resolvePeriodAt(periods, p.id, now);
@@ -84,7 +85,7 @@ export default withLambda(async (event) => {
 
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed.' });
     if (impersonating) return json(403, { error: 'Action blocked during impersonation session.' });
-    if (!p || (p.status !== 'approved' && p.status !== 'suspended')) return json(403, { error: 'This is only for approved partners.' });
+    if (!p || !['approved', 'suspended', 'ended'].includes(p.status)) return json(403, { error: 'This is only for approved partners.' });
     let body: Record<string, unknown>;
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid request.' }); }
 

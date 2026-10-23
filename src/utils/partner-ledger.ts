@@ -15,7 +15,8 @@
 //     a redelivered webhook a no-op.
 //   - Each row is 'pending' until the holding period ends, then the nightly sweep makes it
 //     'payable'. Refunds and disputes reduce or void unpaid rows; an already-PAID row gets a
-//     negative 'adjustment' carried into the next payout.
+//     negative 'adjustment' carried into the next payout. A dispute we WIN undoes the dispute's
+//     part (reinstateDisputedCommission).
 //
 // stripe_charge_id holds the payment's PaymentIntent id (pi_…), not a charge id: since Stripe API
 // 'dahlia' an invoice exposes its PaymentIntent, not a charge, and refunds and disputes both carry
@@ -35,6 +36,9 @@ type Db = ReturnType<typeof getDb>;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const PROGRAMME_CURRENCY = 'GBP';
+/** What a dispute writes, and what a WON dispute looks for to undo it (reinstateDisputedCommission). */
+export const DISPUTE_REASON = 'Payment disputed';
+const DISPUTE_WON_NOTE = 'Dispute won — commission returned';
 
 export interface PartnerPayment {
     /** The referred customer who paid. */
@@ -207,7 +211,7 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
         const net = row.netAmountPence ?? 0;
         const remaining = input.kind === 'dispute' ? 0 : Math.max(0, net - input.amountRefundedPence);
         const target = commissionPence(remaining, row.rateBps ?? 0, row.costDeductionBps);
-        const reason = input.kind === 'dispute' ? 'Payment disputed' : (remaining === 0 ? 'Payment refunded' : 'Payment partly refunded');
+        const reason = input.kind === 'dispute' ? DISPUTE_REASON : (remaining === 0 ? 'Payment refunded' : 'Payment partly refunded');
 
         if (row.status === 'voided') continue;
         if (row.status === 'pending' || row.status === 'payable') {
@@ -247,6 +251,61 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
         }
     }
     return { adjusted };
+}
+
+/**
+ * A dispute we WON (charge.dispute.closed, status 'won'): undo what reversePartnerCommission did
+ * when it opened. Idempotent:
+ *   - rows voided as 'Payment disputed' go back to pending (or payable, if their hold has ended) —
+ *     unless a payout run or a refund has touched them since;
+ *   - money clawed back after payout ('Payment disputed after payout') is returned as a 'bonus' row
+ *     (adjustments must be negative — partner_commissions_sign_check), net of any already returned.
+ */
+export async function reinstateDisputedCommission(db: Db, input: {
+    paymentIntentId: string | null; invoiceId?: string | null;
+    /** Refunded on the charge so far (charge.amount_refunded) — that part stays unearned. */
+    amountRefundedPence?: number; at?: Date;
+}): Promise<{ reinstated: number }> {
+    const keys = [input.paymentIntentId, input.invoiceId].filter((k): k is string => !!k);
+    if (!keys.length) return { reinstated: 0 };
+    const at = input.at ?? new Date();
+    const match = or(inArray(partnerCommissions.stripeChargeId, keys), inArray(partnerCommissions.stripeInvoiceId, keys));
+    let reinstated = 0;
+
+    const voided = await db.select().from(partnerCommissions).where(and(
+        eq(partnerCommissions.kind, 'invoice'), eq(partnerCommissions.status, 'voided'),
+        eq(partnerCommissions.voidReason, DISPUTE_REASON), isNull(partnerCommissions.payoutBatchId), match,
+    ));
+    for (const row of voided) {
+        const remaining = Math.max(0, (row.netAmountPence ?? 0) - (input.amountRefundedPence ?? 0));
+        const amount = commissionPence(remaining, row.rateBps ?? 0, row.costDeductionBps);
+        if (amount <= 0) continue;   // refunded in full meanwhile: stays voided
+        const status = row.availableAt && row.availableAt <= at ? 'payable' : 'pending';
+        await db.update(partnerCommissions)
+            .set({ status, commissionPence: amount, voidedAt: null, voidReason: null, note: `Dispute won — reinstated ${at.toISOString().slice(0, 10)}` })
+            .where(and(eq(partnerCommissions.id, row.id), eq(partnerCommissions.status, 'voided')));
+        reinstated++;
+    }
+
+    const adjustments = await db.select().from(partnerCommissions).where(and(inArray(partnerCommissions.kind, ['adjustment', 'bonus']), match));
+    const byPayment = new Map<string, { partnerId: number; partnerReferralId: number | null; stripeChargeId: string | null; currency: string; net: number }>();
+    for (const a of adjustments) {
+        if (a.note !== `${DISPUTE_REASON} after payout` && a.note !== DISPUTE_WON_NOTE) continue;
+        const key = a.stripeInvoiceId ?? '';
+        const cur = byPayment.get(key) ?? { partnerId: a.partnerId, partnerReferralId: a.partnerReferralId, stripeChargeId: a.stripeChargeId, currency: a.currency, net: 0 };
+        cur.net += a.commissionPence;
+        byPayment.set(key, cur);
+    }
+    for (const [invoiceRef, a] of byPayment) {
+        if (a.net >= 0) continue;   // already returned
+        await db.insert(partnerCommissions).values({
+            partnerId: a.partnerId, partnerReferralId: a.partnerReferralId, kind: 'bonus',
+            stripeInvoiceId: invoiceRef || null, stripeChargeId: a.stripeChargeId,
+            commissionPence: -a.net, currency: a.currency, status: 'payable', availableAt: at, note: DISPUTE_WON_NOTE,
+        });
+        reinstated++;
+    }
+    return { reinstated };
 }
 
 /** Nightly: pending commissions whose holding period has ended become payable. */

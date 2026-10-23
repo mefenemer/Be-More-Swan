@@ -15,7 +15,7 @@ export interface PartnerLite { id: number; status: string; name: string | null; 
 
 /** What the card's button POSTs to admin-partners.ts, verbatim. */
 export type AdminPartnersRequest =
-    | { action: 'decide'; partnerId: number; decision: 'approve' | 'reject' | 'suspend' | 'reinstate'; note: string | null }
+    | { action: 'decide'; partnerId: number; decision: 'approve' | 'reject' | 'suspend' | 'reinstate' | 'end'; note: string | null }
     | { action: 'rates'; partnerId: number | null; changes: Array<Record<string, unknown>> }
     | { action: 'settings'; holdingDays: number; minPayoutPence: number }
     | { action: 'create'; email: string; note: string | null }
@@ -33,7 +33,7 @@ export type ProposalResult = { card: ActionCard } | { error: string };
 
 // A partner approved without an account gets a one-time sign-up link by email (partner-applications.ts).
 const DECISION_FROM: Record<string, string[]> = {
-    approve: ['applied', 'rejected'], reject: ['applied'], suspend: ['approved'], reinstate: ['suspended'],
+    approve: ['applied', 'rejected', 'ended'], reject: ['applied'], suspend: ['approved'], reinstate: ['suspended'], end: ['approved', 'suspended'],
 };
 const pct = (bps: number) => `${bps / 100}%`;
 const len = (m: number | null) => m == null ? 'for as long as the customer stays' : `for ${m} month${m === 1 ? '' : 's'} of each customer's payments`;
@@ -77,16 +77,17 @@ function checkRates(periods: RatePeriod[], partnerId: number | null, changes: Ar
 export function proposeDecision(partners: PartnerLite[], input: { partnerId: unknown; decision: unknown; note?: unknown }): ProposalResult {
     const p = partners.find((x) => x.id === Number(input.partnerId));
     if (!p) return { error: `There is no partner #${input.partnerId}.` };
-    const decision = String(input.decision) as 'approve' | 'reject' | 'suspend' | 'reinstate';
-    if (!DECISION_FROM[decision]) return { error: 'The decision must be approve, reject, suspend or reinstate.' };
-    if (!DECISION_FROM[decision].includes(p.status)) return { error: `${who(p)} is ${p.status}, so they cannot be ${decision === 'reinstate' ? 'reinstated' : decision + 'd'}.` };
+    const decision = String(input.decision) as 'approve' | 'reject' | 'suspend' | 'reinstate' | 'end';
+    if (!DECISION_FROM[decision]) return { error: 'The decision must be approve, reject, suspend, reinstate or end.' };
+    if (!DECISION_FROM[decision].includes(p.status)) return { error: `${who(p)} is ${p.status}, so they cannot be ${decision === 'reinstate' ? 'reinstated' : decision === 'end' ? 'ended' : decision + 'd'}.` };
     const note = typeof input.note === 'string' && input.note.trim() ? input.note.trim().slice(0, 500) : null;
-    const verb = { approve: 'Approve', reject: 'Reject', suspend: 'Suspend', reinstate: 'Reinstate' }[decision];
+    const verb = { approve: 'Approve', reject: 'Reject', suspend: 'Suspend', reinstate: 'Reinstate', end: 'End the partnership with' }[decision];
     const effect = {
         approve: 'They start earning cash on customers who first pay from now on.',
         reject: 'Their application is turned down. They can be approved later.',
         suspend: 'They stop earning on new payments straight away. Commission already earned is kept.',
         reinstate: 'They start earning again on new payments.',
+        end: 'They left, or we are ending it (Partner Terms 7.1 / 7.2). They stop earning on new payments, including from customers they introduced earlier. Their partner code stops working, and their invite link becomes an ordinary customer invite (free months, not cash). Commission they earned before today is still paid. They can be approved again later.',
     }[decision];
     return { card: { kind: 'decision', title: `${verb} ${who(p)}`, summary: effect + (note ? ` Reason: ${note}` : ''),
         request: { action: 'decide', partnerId: p.id, decision, note } } };

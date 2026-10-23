@@ -81,7 +81,7 @@ check('a field the screen does not send keeps its stored value (no date round-tr
 
 check('decisions are conditional on the status that was read (two admins cannot both win)', () => {
     assert.ok(api.includes('.where(and(eq(partners.id, partnerId), eq(partners.status, before.status)))'));
-    assert.ok(api.includes("approve:   { from: ['applied', 'rejected'], to: 'approved'"));
+    assert.ok(api.includes("approve:   { from: ['applied', 'rejected', 'ended'], to: 'approved'"));
     assert.ok(api.includes("suspend:   { from: ['approved'],            to: 'suspended'"));
 });
 

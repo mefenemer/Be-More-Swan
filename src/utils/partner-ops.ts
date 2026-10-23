@@ -27,7 +27,7 @@ const clampInt = (v: unknown, min: number, max: number, dflt: number) => {
 export async function listPartnersWithNumbers(db: Db): Promise<Row[]> {
     return rows(db, sql`
         SELECT p.id, p.user_id, p.status, p.application, p.decision_note, p.decided_at, p.created_at,
-               p.promo_code, p.payout_method, p.payout_display, (p.payout_details_confirmed_at IS NOT NULL AND p.payout_display IS NOT NULL) AS has_payout_details,
+               p.promo_code, p.terms_version, p.terms_accepted_at, p.payout_method, p.payout_display, (p.payout_details_confirmed_at IS NOT NULL AND p.payout_display IS NOT NULL) AS has_payout_details,
                COALESCE(u.email, p.applicant_email) AS email,
                COALESCE(u.first_name, p.applicant_name) AS first_name,
                CASE WHEN u.id IS NULL THEN NULL ELSE u.last_name END AS last_name,
@@ -46,7 +46,7 @@ export async function listPartnersWithNumbers(db: Db): Promise<Row[]> {
                             SUM(commission_pence) FILTER (WHERE status = 'payable') AS payable,
                             SUM(commission_pence) FILTER (WHERE status = 'paid') AS paid
                        FROM partner_commissions GROUP BY partner_id) c ON c.partner_id = p.id
-         ORDER BY CASE p.status WHEN 'applied' THEN 0 WHEN 'approved' THEN 1 WHEN 'suspended' THEN 2 ELSE 3 END,
+         ORDER BY CASE p.status WHEN 'applied' THEN 0 WHEN 'approved' THEN 1 WHEN 'suspended' THEN 2 WHEN 'ended' THEN 3 ELSE 4 END,
                   p.created_at DESC`);
 }
 

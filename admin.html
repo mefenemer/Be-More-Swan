@@ -9853,6 +9853,7 @@ const _pStatusBadge = {
   approved: '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">Approved</span>',
   suspended: '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700">Suspended</span>',
   rejected: '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-gray-100 text-gray-500">Rejected</span>',
+  ended: '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-gray-200 text-gray-700">Ended</span>',
 };
 
 async function loadPartners() {
@@ -9904,7 +9905,7 @@ function _partnersRenderRates() {
 function _partnersRenderList() {
   const all = _partners.data.partners;
   const counts = all.reduce((acc, p) => { acc[p.status] = (acc[p.status] || 0) + 1; return acc; }, {});
-  const chips = [['all', `All (${all.length})`], ['applied', `Applications (${counts.applied || 0})`], ['approved', `Approved (${counts.approved || 0})`], ['suspended', `Suspended (${counts.suspended || 0})`], ['rejected', `Rejected (${counts.rejected || 0})`]];
+  const chips = [['all', `All (${all.length})`], ['applied', `Applications (${counts.applied || 0})`], ['approved', `Approved (${counts.approved || 0})`], ['suspended', `Suspended (${counts.suspended || 0})`], ['ended', `Ended (${counts.ended || 0})`], ['rejected', `Rejected (${counts.rejected || 0})`]];
   document.getElementById('partners-filter').innerHTML = chips.map(([val, label]) => {
     const on = _partners.filter === val;
     return `<button type="button" onclick="partnerSetFilter('${val}')" class="px-2.5 py-1 rounded-full text-xs font-bold border cursor-pointer"
@@ -9921,9 +9922,10 @@ function _partnersRenderList() {
     const btn = (label, cls, decision) => `<button type="button" onclick="partnerDecide(${p.id}, '${decision}')" class="${cls} px-2.5 py-1 text-xs font-bold rounded-lg border">${label}</button>`;
     const actions = {
       applied: btn('Approve', 'btn-golive', 'approve') + ' ' + btn('Reject', 'btn-destructive', 'reject'),
-      approved: btn('Suspend', 'btn-destructive', 'suspend'),
-      suspended: btn('Reinstate', 'btn-secondary', 'reinstate'),
+      approved: btn('Suspend', 'btn-destructive', 'suspend') + ' ' + btn('End', 'btn-destructive', 'end'),
+      suspended: btn('Reinstate', 'btn-secondary', 'reinstate') + ' ' + btn('End', 'btn-destructive', 'end'),
       rejected: btn('Approve', 'btn-golive', 'approve'),
+      ended: btn('Approve again', 'btn-golive', 'approve'),
     }[p.status] || '';
     const open = _partners.open.has(p.id);
     const main = `<tr class="border-t border-gray-100">
@@ -9962,6 +9964,9 @@ function _partnersRenderList() {
           ? `<span class="text-amber-700 font-semibold">not created yet</span>${p.invitedAt ? ` — link sent ${_pDate(p.invitedAt)}${p.inviteExpiresAt && new Date(p.inviteExpiresAt) < new Date() ? ' (expired)' : ''}` : ''}
              <button type="button" onclick="partnerResendInvite(${p.id})" class="btn-utility px-2 py-0.5 text-[11px] font-bold rounded-lg">Resend account link</button>`
           : 'none — applied without one')}</span>
+        ${['approved', 'suspended', 'ended'].includes(p.status) ? `<span>Partner Terms: ${p.termsAccepted
+          ? `v${_pEsc(p.termsVersion)} accepted${p.termsAcceptedAt ? ' ' + _pDate(p.termsAcceptedAt) : ''}`
+          : `<span class="text-amber-700 font-semibold">${p.termsVersion ? `only v${_pEsc(p.termsVersion)} accepted` : 'not accepted'}</span> — no payouts or Partner Assistant until they accept on their Partner page`}</span>` : ''}
         <span>Payout details: ${p.hasPayoutDetails ? _pEsc(p.payoutDisplay || p.payoutMethod || 'set') : '<span class="text-amber-700 font-semibold">not set yet</span>'}</span>
         ${p.decisionNote ? `<span>Last decision note: <em>${_pEsc(p.decisionNote)}</em></span>` : ''}
         ${!p.hasAccount && (p.status === 'applied' || p.status === 'rejected') ? `<button type="button" onclick="partnerEraseApplication(${p.id})" class="btn-destructive px-2 py-0.5 text-[11px] font-bold rounded-lg">Erase application</button>` : ''}
@@ -10130,13 +10135,15 @@ async function partnerDecide(id, decision) {
   if (!p) return;
   const who = `<strong>${_pEsc(p.name || p.email || 'this partner')}</strong>`;
   let note = null;
-  if (decision === 'reject' || decision === 'suspend') {
+  if (decision === 'reject' || decision === 'suspend' || decision === 'end') {
     const msg = decision === 'reject'
       ? `Reject ${who}'s application? They can be approved later if you change your mind.`
-      : `Suspend ${who}? They stop earning on new payments straight away, and their customers don't earn them tokens either. Commission already earned is kept.`;
+      : decision === 'end'
+        ? `End the partnership with ${who}? Use this when they've left, or you're ending it (Partner Terms 7.1 / 7.2). They stop earning on new payments, including from customers they introduced earlier. Their partner code stops working, and their invite link becomes an ordinary customer invite. Commission they earned before today is still paid. They can be approved again later.`
+        : `Suspend ${who}? They stop earning on new payments straight away, and their customers don't earn them tokens either. Commission already earned is kept.`;
     note = await window.promptModal(msg + '<br><br>Reason (admins only, optional):', {
-      title: decision === 'reject' ? 'Reject application' : 'Suspend partner',
-      confirmLabel: decision === 'reject' ? 'Reject' : 'Suspend', multiline: true,
+      title: { reject: 'Reject application', suspend: 'Suspend partner', end: 'End partnership' }[decision],
+      confirmLabel: { reject: 'Reject', suspend: 'Suspend', end: 'End partnership' }[decision], multiline: true,
     });
     if (note === null) return;
   } else if (decision === 'approve') {
@@ -10145,7 +10152,7 @@ async function partnerDecide(id, decision) {
   }
   try {
     const d = await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'decide', partnerId: id, decision, note }) });
-    window.showToast?.({ approve: _partnerEmailedLine('Partner approved.', d.emailed), reject: 'Application rejected.', suspend: 'Partner suspended.', reinstate: 'Partner reinstated.' }[decision]);
+    window.showToast?.({ approve: _partnerEmailedLine('Partner approved.', d.emailed), reject: 'Application rejected.', suspend: 'Partner suspended.', reinstate: 'Partner reinstated.', end: 'Partnership ended.' }[decision]);
     loadPartners();
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
@@ -10293,7 +10300,7 @@ async function ledgerVoid(id) {
 
 function ledgerOpenBonus() {
   const sel = document.getElementById('ledger-bonus-partner');
-  const eligible = (_partners.data?.partners || []).filter((p) => p.status === 'approved' || p.status === 'suspended');
+  const eligible = (_partners.data?.partners || []).filter((p) => p.status === 'approved' || p.status === 'suspended' || p.status === 'ended');
   sel.innerHTML = eligible.map((p) => `<option value="${p.id}">${_pEsc(p.name || p.email || 'Partner ' + p.id)}</option>`).join('') || '<option value="">No approved partners</option>';
   document.getElementById('ledger-bonus-amount').value = '';
   document.getElementById('ledger-bonus-note').value = '';

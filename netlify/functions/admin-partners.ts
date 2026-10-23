@@ -40,6 +40,7 @@ import { listPartnersWithNumbers } from '../../src/utils/partner-ops';
 import { sendApprovalEmail } from '../../src/utils/partner-applications';
 import { setPartnerCode } from '../../src/utils/invite-codes';
 import { deleteApplicantOnly } from '../../src/utils/partner-erasure';
+import { hasAcceptedCurrentTerms } from '../../src/config/partner-terms';
 import { addBonus, voidCommission, batchLines, buildExport, cancelBatch, createBatch, listBatches, listLedger, markBatchPaid, markExported, previewPayout, type ExportFormat } from '../../src/utils/partner-payout-batches';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -49,10 +50,12 @@ const json = (statusCode: number, body: unknown) => ({
 });
 
 const DECISIONS: Record<string, { from: string[]; to: string; label: string }> = {
-    approve:   { from: ['applied', 'rejected'], to: 'approved',  label: 'approved' },
+    approve:   { from: ['applied', 'rejected', 'ended'], to: 'approved', label: 'approved' },
     reject:    { from: ['applied'],             to: 'rejected',  label: 'rejected' },
     suspend:   { from: ['approved'],            to: 'suspended', label: 'suspended' },
     reinstate: { from: ['suspended'],           to: 'approved',  label: 'reinstated' },
+    // Terms 7.1 / 7.2: they left, or we ended it. Earns nothing new; what they earned is still paid (7.3).
+    end:       { from: ['approved', 'suspended'], to: 'ended',   label: 'ended' },
 };
 
 type RawPeriod = { rateBps?: unknown; costDeductionBps?: unknown; durationMonths?: unknown; startsOn?: unknown; endsOn?: unknown; label?: unknown };
@@ -163,6 +166,8 @@ export default withLambda(async (event) => {
                 name: [r.first_name, r.last_name].filter(Boolean).join(' ') || null, email: r.email ?? null,
                 referralCode: r.referral_code ?? null, partnerCode: r.promo_code ?? null,
                 hasAccount: !!r.has_account, invitedAt: r.invited_at ?? null, inviteExpiresAt: r.invite_expires_at ?? null,
+                // Partner Terms: payouts wait until the current version is accepted (partner-terms.ts).
+                termsAccepted: hasAcceptedCurrentTerms(r.terms_version), termsVersion: r.terms_version ?? null, termsAcceptedAt: r.terms_accepted_at ?? null,
                 payoutMethod: r.payout_method, payoutDisplay: r.has_payout_details ? r.payout_display : null, hasPayoutDetails: !!r.has_payout_details,
                 referrals: r.referrals, paying: r.paying,
                 pendingPence: r.pending_pence, payablePence: r.payable_pence, paidPence: r.paid_pence,

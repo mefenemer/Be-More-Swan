@@ -19,7 +19,7 @@ import assert from 'node:assert';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import {
-    isPartnerReferrer, recordPartnerPayment, releaseDueCommissions, reversePartnerCommission,
+    isPartnerReferrer, recordPartnerPayment, reinstateDisputedCommission, releaseDueCommissions, reversePartnerCommission,
 } from '../src/utils/partner-ledger';
 import { qualifyPendingReferral } from '../src/utils/referral-offer';
 
@@ -172,12 +172,34 @@ async function main() {
             assert.strictEqual(row.void_reason, 'Payment disputed');
         });
 
+        await check('a WON dispute reinstates the voided commission, once; a refund since stays unearned', async () => {
+            const before = (await commissions('in_v1'))[0].commission_pence;
+            assert.strictEqual((await reinstateDisputedCommission(db, { paymentIntentId: 'pi_in_v1', at: d('2026-10-23') })).reinstated, 1);
+            const [row] = await commissions('in_v1');
+            assert.deepStrictEqual([row.status !== 'voided', row.void_reason, row.commission_pence], [true, null, before]);
+            assert.strictEqual((await reinstateDisputedCommission(db, { paymentIntentId: 'pi_in_v1' })).reinstated, 0, 'redelivery is a no-op');
+            // Refunded in full while disputed → nothing to put back.
+            await sql.unsafe(`UPDATE partner_commissions SET status = 'voided', void_reason = 'Payment disputed' WHERE stripe_invoice_id = 'in_v1'`);
+            assert.strictEqual((await reinstateDisputedCommission(db, { paymentIntentId: 'pi_in_v1', amountRefundedPence: 1_000_000 })).reinstated, 0);
+            assert.strictEqual((await commissions('in_v1'))[0].status, 'voided');
+        });
+
         await check('the nightly sweep releases only commissions past their holding period', async () => {
             const { released } = await releaseDueCommissions(db, d('2026-12-06'));   // in_a1 due 2026-12-05
             assert.strictEqual(released, 1);
             assert.strictEqual((await commissions('in_a1'))[0].status, 'payable');
             assert.strictEqual((await commissions('in_a12'))[0].status, 'pending');
             assert.strictEqual((await releaseDueCommissions(db, d('2026-12-06'))).released, 0, 'idempotent');
+        });
+
+        await check('disputed AFTER payout then won: the claw-back is returned once, as a bonus row (adjustments must be negative)', async () => {
+            await sql.unsafe(`UPDATE partner_commissions SET status = 'paid', paid_at = now() WHERE stripe_invoice_id = 'in_a1'`);
+            await reversePartnerCommission(db, { paymentIntentId: 'pi_in_a1', amountRefundedPence: 0, kind: 'dispute' });
+            const paid = (await commissions('in_a1'))[0].commission_pence;
+            await reinstateDisputedCommission(db, { paymentIntentId: 'pi_in_a1' });
+            await reinstateDisputedCommission(db, { paymentIntentId: 'pi_in_a1' });
+            const rows = await commissions('in_a1');
+            assert.deepStrictEqual(rows.map((r: any) => [r.kind, r.commission_pence]), [['invoice', paid], ['adjustment', -paid], ['bonus', paid]]);
         });
 
         await check("a partner's referral qualifies as 'partner', never as a token", async () => {

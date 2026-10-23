@@ -6034,7 +6034,7 @@ export const partnerProgrammeSettings = pgTable("partner_programme_settings", {
 export const partners = pgTable("partners", {
   id: serial().primaryKey(),
   userId: integer("user_id").unique().references(() => users.id, { onDelete: "set null" }),
-  status: text().notNull().default("applied"),               // applied | approved | rejected | suspended
+  status: text().notNull().default("applied"),               // applied | approved | rejected | suspended | ended (z-affiliate-partner-ended.sql)
   application: jsonb().$type<Record<string, unknown>>().notNull().default({}),
   stripeCouponId: text("stripe_coupon_id"),                  // UNUSED — partner codes are BMS codes, see promoCode
   stripePromoCodeId: text("stripe_promo_code_id").unique(),  // UNUSED

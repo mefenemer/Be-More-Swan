@@ -66,15 +66,30 @@ Not browser-checked: the plan-picker box (it lives inside the signed-in workspac
 (`partner-assistant.ts`, Claude Opus 5.5 low effort + Opus 4.8 refusal fallback, 21s budget). Owner decision:
 **free, 50 messages in any 30 days, not counted as plan tasks** (usage still logged). Drafts go through
 `deliver_draft` → `src/utils/partner-promo.ts`, which guarantees their link (or partner code) and an ad label
-(#ad / P.S. / spoken for video — CAP Code). Describes BMS ONLY from `bms_facts` (live plan prices; names no
+**at the START** (#ad first line / "Ad:" line under an email subject / spoken for video — CAP Code, DMCCA, FTC;
+a label only at the end doesn't count — 2026-10-23 legal review H2). Describes BMS ONLY from `bms_facts` (live plan prices; names no
 social networks or integrations). Answers money questions from their real numbers; suggests next steps.
 Hand-offs (cards) open THEIR Social Media Manager / Email Marketing / Lead Generator chat with the brief typed
-in — only assistants they have. Payout details never pass through the model (a card to the form). Also fixed:
+in — only assistants they have. Since 2026-10-23 every brief carries the rules (`handoffBrief`): label first +
+link for posts and emails, email only to consenting subscribers, Lead Generator finds are for personal contact
+only — never a list (PECR / CAN-SPAM, review H3). Payout details never pass through the model (a card to the form). Also fixed:
 three Tailwind classes missing from the built CSS in both chat panels (log height now inline). Not verified:
 a live Claude conversation (same as the admin chat). Tests: `partner-assistant.test.ts`.
 **Step 9 built 2026-10-19** — `partner-terms.html` (v1.0, noindex until launch; **a draft for legal review**),
 accepted on the application form (required tick) or on the Partner page (`accept_terms`), recorded as
-`partners.terms_version` / `terms_accepted_at` (`src/config/partner-terms.ts`). Owner decision: the customer
+`partners.terms_version` / `terms_accepted_at` (`src/config/partner-terms.ts`). **Enforced since 2026-10-23**
+(review H1, `hasAcceptedCurrentTerms`): commission still builds up, but payout runs leave out — and the Partner
+Assistant refuses — any partner who hasn't accepted the CURRENT version, admin-added partners included (they
+start with none). Admin → Partners shows each partner's accepted version.
+**2026-10-23 also:** an `ended` partner status (`db/z-affiliate-partner-ended.sql` — ⚠️ apply to both DBs
+before deploy): Terms 7.1 left / 7.2 ended by us; no new earning, earned commission still paid (7.3), can be
+approved again; Admin → Partners "End" + Partner Ops chat `end`; their Partner page keeps earnings and payout
+details, no link or assistant. ⚠️ The sidebar Partner item (`workspace.html` partnerStatus list) doesn't include
+`ended` yet. Their invite link falls back to an ordinary customer invite (tokens), because only approved or
+suspended partners are on the partner track. **Won disputes** are reinstated automatically
+(`charge.dispute.closed`, status won → `reinstateDisputedCommission`). Refunds since then stay unearned, and
+money already clawed back is returned as a bonus row (adjustments must be negative). ⚠️ Enable `charge.dispute.closed` (and
+`charge.refunded`) on both Stripe webhook endpoints. Owner decision: the customer
 Terms only gain clause 1.4 pointing to the Partner Terms — **no ToS version bump**, no re-acceptance prompt.
 privacy.html: partner data, invited people (first name shown; partners see "Customer N"), payout details in
 the vault, retention rows (declined applications 12 months; payout details until changed/left/erased;
