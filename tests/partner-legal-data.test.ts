@@ -28,11 +28,13 @@ const read = (p: string) => readFileSync(join(root, p), 'utf8');
 console.log('Partner Terms');
 const terms = read('partner-terms.html');
 
-check('the page states the version and date the code records, and stays out of the index until launch', () => {
+check('the page states the version and date the code records, and is unlisted (not in search)', () => {
     assert.ok(terms.includes(`Version ${PARTNER_TERMS_VERSION} &middot; Last updated: ${PARTNER_TERMS_UPDATED}`));
-    // Public since the programme opened: indexed, canonical, in the sitemap and linked from the footer.
-    assert.ok(!terms.includes('noindex'), 'partner terms are public');
-    assert.ok(terms.includes('<link rel="canonical" href="https://bemoreswan.com/partner-terms">'));
+    // Unlisted, not public (owner decision 2026-10-23): reachable from the application form, the Partner
+    // page and the customer Terms, but noindex, no canonical, out of the sitemap and the footer.
+    assert.ok(terms.includes('<meta name="robots" content="noindex,nofollow">'), 'partner terms stay out of search');
+    assert.ok(!terms.includes('rel="canonical"'));
+    assert.ok(read('partner-content.html').includes('<a href="/partner-terms.html" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Partner Terms</a>'), 'partners can always reread them');
     const relative = [...terms.matchAll(/(?:href|src)=["'](?!\/|https?:|#|mailto:)([^"']+)["']/g)].map((m) => m[1]);
     assert.deepStrictEqual(relative, []);
 });
