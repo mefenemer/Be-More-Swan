@@ -56,7 +56,11 @@
     </div>
 
     <!-- Grouped, collapsible content -->
-    <div id="rq-groups" role="tabpanel" aria-live="polite" class="px-4 py-2 min-h-[200px]"></div>
+    <!-- NOT a live region: the list is rewritten wholesale (tab switch, the 60s refresh), and a live
+         list made screen readers read every card again each time. A short summary is announced
+         through #rq-status instead, on renders the person asked for. -->
+    <div id="rq-groups" role="tabpanel" class="px-4 py-2 min-h-[200px]"></div>
+    <p id="rq-status" class="sr-only" role="status" aria-live="polite"></p>
 
   </div>
 </div>

@@ -136,6 +136,16 @@ window.showToast = function (message, opts = {}) {
   const text = document.createElement('span');
   text.textContent = message;
   toast.append(icon, text);
+  // opts.action = { label, onClick }: one button, so a toast that names a place can also take you
+  // there (the reject toast pointed at an archive with no way to reach it from the page you were on).
+  if (opts.action && opts.action.label && typeof opts.action.onClick === 'function') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = opts.action.label;
+    btn.style.cssText = 'margin-left:.25rem;flex-shrink:0;background:transparent;border:1px solid rgba(255,255,255,.45);color:#fff;font-weight:700;font-size:.8125rem;padding:.25rem .625rem;border-radius:.5rem;cursor:pointer;';
+    btn.addEventListener('click', () => { toast.remove(); opts.action.onClick(); });
+    toast.appendChild(btn);
+  }
   container.appendChild(toast);
   requestAnimationFrame(() => { toast.style.opacity = '1'; toast.style.transform = 'translateY(0)'; });
   setTimeout(() => {

@@ -6,6 +6,9 @@
 //   • "Needs attention" meant different posts on the two pages
 //   • the two pages used different words for the same state
 //   • Review cards never said when a post goes out, and were ordered by when the AI wrote them
+//   • (second pass) approve said "Let Nova choose the time" beside a card saying "Goes out Tue 09:00",
+//     the Calendar sent you to Review to approve what it could open itself, "Posted" was ~2.5:1 ink,
+//     and the whole Review list was a live region that screen readers re-read on every refresh
 //
 // No database: pure-function checks plus source-consistency checks, like the rest of tests/.
 // Run:  npx tsx tests/calendar-review-ux.test.ts
@@ -34,6 +37,10 @@ const reviewHtml = read('review-queue.html');
 const scheduledPosts = read('netlify/functions/scheduled-posts.ts');
 const socialDrafts = read('netlify/functions/get-social-drafts.ts');
 const generated = read('src/generated/platform-constants.js');
+const blogPostsFn = read('netlify/functions/blog-posts.ts');
+const dialogs = read('dialogs.js');
+const inputCss = read('input.css');
+const styleCss = read('style.css');
 
 /** Text from `start` up to the next top-level function (or `end`), asserting the marker exists. */
 function slice(src: string, start: string, end = '\nfunction '): string {
@@ -161,6 +168,7 @@ check('the To approve tab asks for that order and the card states the date', () 
     assert.match(workspace, /review:\s*\{ label: 'To approve', postStatus: 'pending_approval', sort: 'publish' \}/);
     const card = slice(workspace, 'function rqRenderSocialCard(');
     assert.match(card, /Goes out \$\{fmt\(draft\.publishDate\)\}/, 'the card no longer says when it goes out');
+    assert.match(card, /Suggested for \$\{fmt\(draft\.publishDate\)\}/, 'an unapproved draft must say its date is a suggestion');
     assert.match(card, /Was due/, 'a failed post must not claim it "goes out"');
     assert.match(card, /<button type="button" onclick="openPostReview/, 'the card is no longer a keyboard-reachable button');
 });
@@ -178,6 +186,59 @@ check('calendar chips are focusable buttons, activated by one delegated listener
 check('the Review tabs are tabs', () => {
     assert.match(reviewHtml, /role="tablist"/);
     assert.match(slice(workspace, 'function rqOpenStatus('), /setAttribute\('aria-selected', 'true'\)/);
+});
+
+// ── 6. Second pass (2026-10-23) ──────────────────────────────────────────────
+console.log('Approving says what happens, and the two pages agree');
+
+check('the approve option names the suggested time, not "let the assistant choose"', () => {
+    assert.ok(!workspace.includes('>Publishes at the next good slot<'), 'the old approve subtitle is back');
+    assert.match(workspace, /textContent = `Approve for \$\{at\}`/, 'approve no longer names the time it lands on');
+});
+
+check('an assistant draft opens on the decision step, unless it is locked', () => {
+    const fn = slice(workspace, 'function _railOpenDecisionForDraft(');
+    assert.match(fn, /'pending_approval', 'in_review'/);
+    assert.match(fn, /step\.enabled && !step\.enabled\(post\)/, 'a locked step must not be opened');
+    assert.match(slice(workspace, 'async function openPostReview('), /if \(freshOpen\) _railOpenDecisionForDraft\(\)/);
+});
+
+check('the Calendar draft chip no longer sends you to Review to approve', () => {
+    assert.ok(!calendar.includes('approve it in Review'), 'the chip opens the editor; it must say so');
+});
+
+check('the reject toast can take you to the archive it names', () => {
+    assert.match(dialogs, /opts\.action && opts\.action\.label/);
+    const fn = slice(workspace, 'async function rqReviewReject(');
+    assert.match(fn, /_assistantDetailInitialRqStatus = 'archived'/);
+});
+
+check('failed articles say why, on the Review card and the Calendar chip', () => {
+    assert.match(slice(workspace, 'function rqRenderBlogCard('), /post\.failureReason/);
+    assert.match(slice(calendar, 'function _blogChip('), /post\.failureReason/);
+    const range = slice(blogPostsFn, 'if (fromParam && toParam)', 'return { statusCode: 200');
+    assert.match(range, /failureReason: blogPosts\.failureReason/, 'the calendar range query must return the reason');
+});
+
+check('"Posted" uses the readable ink, and Scheduled is blue on both pages', () => {
+    assert.ok(inputCss.includes('.status-posted { color: #0a6b30; }') && styleCss.includes('.status-posted { color: #0a6b30; }'),
+        'the .status-posted component must be in input.css AND the compiled style.css');
+    assert.ok(!/text-green-700/.test(calendar), 'calendar.js went back to the ~2.5:1 neon green');
+    assert.match(workspace, /published:\s+\{ cls: '[^']*status-posted/);
+    assert.match(calendar, /scheduled:\s+\{ label: 'Scheduled',\s+badge: 'bg-blue-100/);
+});
+
+check('the Review list is not a live region; a short summary is announced instead', () => {
+    assert.ok(!/id="rq-groups"[^>]*aria-live/.test(reviewHtml), '#rq-groups is a live region again');
+    assert.match(reviewHtml, /id="rq-status"[^>]*aria-live="polite"/);
+    const fn = slice(workspace, 'async function rqRenderGroups(');
+    assert.match(fn, /if \(!quiet\)[\s\S]{0,200}rq-status/, 'the summary must not be announced on the quiet refresh');
+    assert.match(fn, /refocusSel/, 'a refresh must put keyboard focus back');
+});
+
+check('Month view is not offered on a phone', () => {
+    assert.match(calendarHtml, /id="view-month"[\s\S]{0,120}phone-hidden/);
+    assert.match(slice(calendar, 'function _setView('), /v === 'week' \|\| v === 'month'\) && _isPhone\(\)/);
 });
 
 console.log(`\n${passed} checks passed`);

@@ -46,11 +46,13 @@ const STATUS_META = {
     pending_approval:{ label: 'Pending',     badge: 'bg-amber-100 text-amber-700 border-amber-300', chipBorder: 'border-amber-400',   dot: 'bg-amber-400' },
     in_review:       { label: 'In Review',   badge: 'bg-amber-100 text-amber-700 border-amber-300', chipBorder: 'border-amber-400',   dot: 'bg-amber-400' },
     approved:        { label: 'Approved',    badge: 'bg-blue-100 text-blue-700 border-blue-300',   chipBorder: 'border-blue-500',    dot: 'bg-blue-500' },
-    scheduled:       { label: 'Scheduled',   badge: 'bg-yellow-100 text-yellow-700 border-yellow-300', chipBorder: 'border-yellow-500', dot: 'bg-yellow-500' },
+    // Blue, as on the Review page: booked and on its way. It was yellow here, so the same post was a
+    // different colour on each page, and yellow sat among the ambers that mean "needs you".
+    scheduled:       { label: 'Scheduled',   badge: 'bg-blue-100 text-blue-700 border-blue-300',   chipBorder: 'border-blue-500',    dot: 'bg-blue-500' },
     publishing:      { label: 'Publishing',  badge: 'bg-blue-100 text-blue-700 border-blue-300',   chipBorder: 'border-blue-500',    dot: 'bg-blue-500' },
     // Posted = GREEN, never emerald: emerald-* is the brand pink here (input.css), so "posted" used to
     // render pink beside a green tick on the same chip.
-    published:       { label: 'Posted',      badge: 'bg-green-100 text-green-700 border-green-300', chipBorder: 'border-green-500', dot: 'bg-green-500' },
+    published:       { label: 'Posted',      badge: 'bg-green-100 status-posted border-green-300', chipBorder: 'border-green-500', dot: 'bg-green-500' },
     // Amber with the reason, like the Review card: grey "Paused" read as "I paused it", when it means
     // a connection died and nothing will go out until it is reconnected.
     paused:          { label: 'Paused · reconnect', badge: 'bg-amber-100 text-amber-800 border-amber-300', chipBorder: 'border-amber-400', dot: 'bg-amber-500' },
@@ -64,7 +66,7 @@ const STATUS_META = {
     // paused_credits above. 'sending' is blue like 'publishing', its social twin: in flight, no
     // action needed. 'sent' is emerald like 'published': done and correct.
     sending:         { label: 'Sending',     badge: 'bg-blue-100 text-blue-700 border-blue-300',   chipBorder: 'border-blue-500',    dot: 'bg-blue-500' },
-    sent:            { label: 'Sent',        badge: 'bg-green-100 text-green-700 border-green-300', chipBorder: 'border-green-500', dot: 'bg-green-500' },
+    sent:            { label: 'Sent',        badge: 'bg-green-100 status-posted border-green-300', chipBorder: 'border-green-500', dot: 'bg-green-500' },
     failed:          { label: 'Failed to post', badge: 'bg-red-100 text-red-700 border-red-300',      chipBorder: 'border-red-500',     dot: 'bg-red-500' },
     missed:          { label: 'Missed',      badge: 'bg-orange-100 text-orange-700 border-orange-300', chipBorder: 'border-orange-300', dot: 'bg-amber-500' },
     rejected:        { label: 'Rejected',    badge: 'bg-red-100 text-red-700 border-red-300',      chipBorder: 'border-red-500',     dot: 'bg-red-500' },
@@ -379,7 +381,7 @@ window._calRetry = function () { _navRefresh(); };
 function _paintViewButtons() {
     document.querySelectorAll('.cal-view-btn').forEach(btn => {
         const active = btn.dataset.view === _view;
-        btn.className = `cal-view-btn focus-ring tap-target px-3 py-1.5 text-sm font-bold rounded-lg transition cursor-pointer ${active ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}${btn.dataset.view === 'week' ? ' phone-hidden' : ''}`;
+        btn.className = `cal-view-btn focus-ring tap-target px-3 py-1.5 text-sm font-bold rounded-lg transition cursor-pointer ${active ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}${btn.dataset.view === 'week' || btn.dataset.view === 'month' ? ' phone-hidden' : ''}`;
         btn.setAttribute('aria-pressed', active ? 'true' : 'false');
     });
 }
@@ -429,9 +431,10 @@ function _navToday() {
     _navRefresh();
 }
 function _setView(v) {
-    // Week is seven ~48px columns on a phone; the toggle hides it there, and this catches a stale
-    // choice carried over from a wider window.
-    _view = (v === 'week' && _isPhone()) ? 'list' : v;
+    // Month and Week are seven ~48px columns on a phone, where chips spill into the next day and
+    // can't be dragged anyway; the toggle hides both there, and this catches a stale choice carried
+    // over from a wider window.
+    _view = ((v === 'week' || v === 'month') && _isPhone()) ? 'list' : v;
     _paintViewButtons();
     // Month/list ⇄ week are different ranges (a week view of a month-loaded range is a subset, but
     // week→month is not), so this reloads too rather than guessing which direction is safe.
@@ -707,8 +710,8 @@ function _renderStatusLegend() {
     strip.innerHTML = _publishesContent
         // Same words as the chips and as Review. "Failed" has its own marker now — it used to be a red
         // dot, which is what this strip said "Overdue" looks like.
-        ? item('<span class="text-green-600 font-extrabold">✓</span>', _platformFilterOn ? _statusLabel('published') : 'Sent') +
-          item('<span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>', _statusLabel('scheduled')) +
+        ? item('<span class="status-posted-tick font-extrabold">✓</span>', _platformFilterOn ? _statusLabel('published') : 'Sent') +
+          item('<span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span>', _statusLabel('scheduled')) +
           item('<span class="w-3 h-2.5 rounded border border-dashed border-amber-400 bg-white"></span>', `${_statusLabel('pending_approval')} (not booked yet)`) +
           item('<span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>', 'Overdue') +
           item('<span class="w-3.5 h-3.5 rounded-full bg-red-600 text-white text-[10px] font-extrabold leading-none flex items-center justify-center">!</span>', `${_statusLabel('failed')} — open it to see why`) +
@@ -1082,8 +1085,8 @@ function _postChip(group, viewType) {
     let chipBg = 'bg-white hover:bg-gray-50', timeColor = 'text-gray-700', marker, titleSuffix = '';
     if (posted) {
         chipBg = 'bg-green-50';
-        timeColor = 'text-green-700';
-        marker = `<span class="text-green-600 text-xs font-extrabold shrink-0" aria-hidden="true" title="Posted ${time}">✓</span>`;
+        timeColor = 'status-posted';
+        marker = `<span class="status-posted-tick text-xs font-extrabold shrink-0" aria-hidden="true" title="Posted ${time}">✓</span>`;
         titleSuffix = ` · Posted ${time}`;
     } else if (failedPost) {
         chipBg = 'bg-red-50 hover:bg-red-100';
@@ -1158,7 +1161,7 @@ function _awaitingChip(group, viewType) {
                     <span class="text-xs font-bold text-gray-500">${time}</span>
                 </div>
                 <p class="text-sm text-gray-600 truncate">${_escHtml(caption.substring(0, 120) || '(No caption)')}</p>
-                <p class="text-xs text-gray-600 mt-1">Not booked yet — approve it in Review to post it at this time.</p>
+                <p class="text-xs text-gray-600 mt-1">Not booked yet — open it to approve it for this time.</p>
             </div>
             <span class="text-xs font-bold px-2.5 py-1 rounded-full border bg-amber-50 text-amber-800 border-amber-300 shrink-0 mt-1">${label}</span>
         </div>`;
@@ -1499,7 +1502,7 @@ function _listRow(group) {
     const failedMember = members.find(m => m.status === 'failed');
     const failWhy = failedMember && failedMember.failure && failedMember.failure.title ? failedMember.failure.title : '';
     const statusLine = posted
-        ? `<p class="text-xs font-bold text-green-700 mt-1"><span aria-hidden="true">✓ </span>Posted${postedAt ? ' ' + postedAt.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</p>`
+        ? `<p class="text-xs font-bold status-posted mt-1"><span aria-hidden="true">✓ </span>Posted${postedAt ? ' ' + postedAt.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</p>`
         : failedMember
         ? `<p class="text-xs font-bold text-red-700 mt-1">${_escHtml(failWhy || 'It did not go out.')} Open it to see what to do.</p>`
         : overdue
@@ -1509,7 +1512,7 @@ function _listRow(group) {
     // The right-hand badge: posted gets a check, overdue is recoloured so a past
     // date never reads as a calm "Scheduled".
     const badge = posted
-        ? `<span class="text-xs font-bold px-2.5 py-1 rounded-full border bg-green-100 text-green-700 border-green-300 shrink-0 mt-1">${_statusLabel('published')}</span>`
+        ? `<span class="text-xs font-bold px-2.5 py-1 rounded-full border bg-green-100 status-posted border-green-300 shrink-0 mt-1">${_statusLabel('published')}</span>`
         : overdue
         ? `<span class="text-xs font-bold px-2.5 py-1 rounded-full border bg-amber-100 text-amber-800 border-amber-300 shrink-0 mt-1">Overdue</span>`
         : `<span class="text-xs font-bold px-2.5 py-1 rounded-full border ${sm.badge} shrink-0 mt-1">${_statusLabel(status)}</span>`;
@@ -2035,11 +2038,11 @@ function _issueChip(issue) {
     const when = sent ? (issue.sentAt || issue.scheduledFor) : issue.scheduledFor;
     const time = new Date(when).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     const chipBg = sent ? 'bg-green-50' : 'bg-teal-50 hover:bg-teal-100';
-    const timeColor = sent ? 'text-green-700' : 'text-teal-700';
+    const timeColor = sent ? 'status-posted' : 'text-teal-700';
     // The recipient count is the one fact worth the space on a sent issue — it is the answer to
     // "did that go out, and to how many people".
     const marker = sent
-        ? `<span class="text-green-600 text-xs font-extrabold shrink-0" aria-hidden="true" title="Sent ${time}${issue.recipientCount ? ` to ${issue.recipientCount}` : ''}">✓</span>`
+        ? `<span class="status-posted-tick text-xs font-extrabold shrink-0" aria-hidden="true" title="Sent ${time}${issue.recipientCount ? ` to ${issue.recipientCount}` : ''}">✓</span>`
         : `<span class="w-1.5 h-1.5 rounded-full ${sm.dot} shrink-0" aria-hidden="true" title="${_statusLabel(issue.status)}"></span>`;
     const subject = issue.subject || 'Untitled email';
     return `<div role="button" tabindex="0" data-cal-activate
@@ -2075,9 +2078,9 @@ function _blogChip(post, viewType) {
     const time = new Date(when).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     const failedBlog = post.status === 'failed';
     const chipBg = posted ? 'bg-green-50' : failedBlog ? 'bg-red-50 hover:bg-red-100' : 'bg-violet-50 hover:bg-violet-100';
-    const timeColor = posted ? 'text-green-700' : failedBlog ? 'text-red-700' : 'text-violet-700';
+    const timeColor = posted ? 'status-posted' : failedBlog ? 'text-red-700' : 'text-violet-700';
     const marker = posted
-        ? `<span class="text-green-600 text-xs font-extrabold shrink-0" aria-hidden="true" title="Posted ${time}">✓</span>`
+        ? `<span class="status-posted-tick text-xs font-extrabold shrink-0" aria-hidden="true" title="Posted ${time}">✓</span>`
         : failedBlog
         ? `<span class="w-3.5 h-3.5 rounded-full bg-red-600 text-white text-[10px] font-extrabold leading-none flex items-center justify-center shrink-0" aria-hidden="true">!</span>`
         : `<span class="w-1.5 h-1.5 rounded-full ${sm.dot} shrink-0" aria-hidden="true" title="${_statusLabel(post.status)}"></span>`;
@@ -2098,11 +2101,13 @@ function _blogChip(post, viewType) {
         ${isDraggable ? `data-cal-blog-id="${post.id}"` : ''}
         class="group focus-ring ${movableInList ? 'flex-wrap' : ''} flex items-center gap-1.5 px-2 py-1 rounded-lg ${chipBg} shadow-sm cursor-pointer transition select-none text-left w-full"
         style="border-left:3px solid #7c3aed"
-        aria-label="${time} · Blog · ${_escHtml(title)} · ${_statusLabel(post.status)}">
+        aria-label="${time} · Blog · ${_escHtml(title)} · ${_statusLabel(post.status)}${failedBlog && post.failureReason ? ': ' + _escHtml(post.failureReason) : ''}"
+        ${failedBlog && post.failureReason ? `title="${_escHtml(post.failureReason)}"` : ''}>
         ${_platAvatar('blog', 16)}
         <div class="flex-1 min-w-0">
             <p class="text-[11px] font-bold ${timeColor} truncate">${time}${failedBlog ? ` · ${_statusLabel('failed')}` : ''}</p>
             <p class="text-[11px] text-gray-500 truncate leading-tight">${_escHtml(title.substring(0, 40))}</p>
+            ${failedBlog && post.failureReason && viewType === 'list' ? `<p class="text-xs text-red-700 truncate mt-0.5">${_escHtml(post.failureReason)}</p>` : ''}
         </div>
         ${marker}
         ${movableInList ? `<span class="w-full">${_moveButton('blog', post.id)}</span>` : ''}

@@ -52,6 +52,8 @@ export default withLambda(async (event: HandlerEvent) => {
                     assistantId: blogPosts.assistantId,
                     publishDate: blogPosts.publishDate,
                     publishedAt: blogPosts.publishedAt,
+                    // A failed chip says why, as the Review card does — not just "Failed".
+                    failureReason: blogPosts.failureReason,
                 })
                 .from(blogPosts)
                 .where(and(

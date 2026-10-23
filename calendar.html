@@ -51,10 +51,11 @@
         <option value="all">All assistants</option>
       </select>
       <!-- A segmented control: calendar.js sets aria-pressed and the look from the view on screen.
-           Week is hidden on a phone, where seven columns are ~48px each. -->
-      <div class="flex items-center gap-1 bg-gray-100 rounded-xl p-1" role="group" aria-label="View">
+           Month and Week are hidden on a phone, where seven columns are ~48px each — which leaves only
+           List, so the whole control goes there. -->
+      <div class="phone-hidden flex items-center gap-1 bg-gray-100 rounded-xl p-1" role="group" aria-label="View">
         <button type="button" data-view="month" id="view-month" aria-pressed="true"
-          class="cal-view-btn focus-ring tap-target px-3 py-1.5 text-sm font-bold rounded-lg transition cursor-pointer bg-white shadow text-gray-900">
+          class="cal-view-btn focus-ring tap-target phone-hidden px-3 py-1.5 text-sm font-bold rounded-lg transition cursor-pointer bg-white shadow text-gray-900">
           Month
         </button>
         <button type="button" data-view="week" id="view-week" aria-pressed="false"

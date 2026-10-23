@@ -6400,8 +6400,24 @@ async function rqRenderGroups(statusKey, opts = {}) {
     const renderByGroup = { posts: rqRenderSocialCard, blog: rqRenderBlogCard, email: rqRenderEmailCard };
     // Posts are paged by the server; blog posts and emails arrive whole, so loaded count IS total.
     const totalByGroup = { posts: _rqPostsTotal ?? postGroups.length, blog: blogPosts.length, email: emails.length };
+    // The write replaces every node, so a keyboard user on card 6 was dropped back to <body> by the
+    // background refresh. Remember the focused card (or control) and put focus back on its successor.
+    const active = document.activeElement;
+    const refocusSel = active && container.contains(active)
+        ? (active.dataset?.postId ? `[data-post-id="${CSS.escape(active.dataset.postId)}"]` : active.id ? `#${CSS.escape(active.id)}` : null)
+        : null;
     container.innerHTML = groups.map(g => rqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey, totalByGroup[g.key])).join('')
         + rqMoreButton(statusKey);
+    if (refocusSel) container.querySelector(refocusSel)?.focus({ preventScroll: true });
+    // One short sentence instead of the whole list — and only when the person asked for this view,
+    // never on the quiet refresh.
+    if (!quiet) {
+        const n = groups.reduce((sum, g) => sum + (totalByGroup[g.key] || 0), 0);
+        const status = document.getElementById('rq-status');
+        if (status) status.textContent = statusKey === 'attention'
+            ? (n ? `${n} need${n === 1 ? 's' : ''} attention` : 'Nothing needs fixing')
+            : (n ? `${n} to approve` : 'Nothing to approve');
+    }
 }
 
 // An email row: opens the Email Studio on that issue, where it is read, approved and sent — the
@@ -6410,7 +6426,7 @@ function rqRenderEmailCard(issue) {
     const waiting = (RQ_EMAIL_STATUSES.review || []).includes(issue.status);
     const label = window.PlatformConstants?.postStatusLabel ? window.PlatformConstants.postStatusLabel(issue.status) : issue.status;
     const when = issue.scheduledFor
-        ? `${issue.status === 'failed' ? 'Was due' : 'Goes out'} ${new Date(issue.scheduledFor).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+        ? `${issue.status === 'failed' ? 'Was due' : waiting ? 'Suggested for' : 'Goes out'} ${new Date(issue.scheduledFor).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
         : (issue.updatedAt ? `Updated ${rqTimeAgo(issue.updatedAt)}` : '');
     const chip = issue.status === 'failed'
         ? 'bg-red-50 border-red-200 text-red-700'
@@ -6498,9 +6514,14 @@ function rqRenderBlogCard(post) {
     const when = post.publishedAt || post.publishDate;
     const stamp = when ? new Date(when).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
     const meta = when
-        ? (post.status === 'published' ? `Posted ${stamp}` : post.status === 'failed' ? `Was due ${stamp}` : `Goes out ${stamp}`)
+        ? (post.status === 'published' ? `Posted ${stamp}` : post.status === 'failed' ? `Was due ${stamp}`
+            : (RQ_BLOG_STATUSES.review || []).includes(post.status) ? `Suggested for ${stamp}` : `Goes out ${stamp}`)
         : (post.updatedAt ? 'Updated ' + rqTimeAgo(post.updatedAt) : '');
     const inReview = (RQ_BLOG_STATUSES.review || []).includes(post.status);
+    // Why it failed, on the card — social cards already say; articles made you open each one.
+    const failureLine = post.status === 'failed' && post.failureReason
+        ? `<span class="block text-xs text-red-700 truncate mt-0.5">${_rqEsc(post.failureReason)}</span>`
+        : '';
     // The state in the words both pages use, never the raw value ("pending_approval").
     const label = window.PlatformConstants?.postStatusLabel ? window.PlatformConstants.postStatusLabel(post.status) : post.status;
     const approveBtn = inReview
@@ -6514,6 +6535,7 @@ function rqRenderBlogCard(post) {
         <span class="flex-1 min-w-0">
           <span class="block text-sm font-semibold text-gray-900 truncate">${title}</span>
           <span class="block text-xs ${post.status === 'failed' ? 'text-red-700' : 'text-gray-600'} truncate">${_rqEsc(label)}${meta ? ' · ' + _rqEsc(meta) : ''}</span>
+          ${failureLine}
         </span>
         ${approveBtn}
       </button>`;
@@ -6616,7 +6638,7 @@ const RQ_STATE_CHIP = {
     paused:           { cls: 'bg-amber-50 border-amber-200 text-amber-800',       label: 'Paused · reconnect' },
     paused_credits:   { cls: 'bg-amber-50 border-amber-200 text-amber-800',       label: 'Paused · X limit' },
     // Green, not emerald: emerald-* is the brand PINK here, and "posted" is a success state.
-    published:        { cls: 'bg-green-50 border-green-300 text-green-700',       label: 'Posted' },
+    published:        { cls: 'bg-green-50 border-green-300 status-posted',        label: 'Posted' },
     // Alongside the 'Needs attention' and widened 'Archived' columns. Without an entry the chip
     // renders empty, so a failed post would show a card with no state on it at all.
     failed:           { cls: 'bg-red-50 border-red-200 text-red-700',             label: 'Failed to post' },
@@ -6749,7 +6771,11 @@ function rqRenderSocialCard(draft) {
                 ? `Was due ${fmt(draft.publishDate)}`
                 : (headline.status === 'paused' || headline.status === 'paused_credits') && draft.publishDate
                     ? `Due ${fmt(draft.publishDate)} — on hold`
-                    : (draft.publishDate ? `Goes out ${fmt(draft.publishDate)}` : '');
+                    // Not approved yet, so nothing is booked: the date is a suggestion, and approving
+                    // can move it (a past or taken slot is rehomed). "Goes out" promised it.
+                    : ['pending_approval', 'draft', 'in_review'].includes(headline.status) && draft.publishDate
+                        ? `Suggested for ${fmt(draft.publishDate)}`
+                        : (draft.publishDate ? `Goes out ${fmt(draft.publishDate)}` : '');
     // A <button>, so the card is reachable and openable from the keyboard (it was a clickable div).
     return `<button type="button" onclick="openPostReview(${draft.id})" class="focus-ring w-full text-left py-3.5 flex items-center gap-3 cursor-pointer hover:bg-gray-50 -mx-4 px-4 transition" data-post-id="${draft.id}">
       ${thumb}
@@ -10702,16 +10728,34 @@ document.addEventListener('click', (e) => {
 let _rqReturnFocusEl = null;
 async function openPostReview(postId, opts = {}) {
     const editorEl = document.getElementById('post-review-modal');
-    if (!editorEl || !editorEl.classList.contains('flex')) {
+    const freshOpen = !editorEl || !editorEl.classList.contains('flex');
+    if (freshOpen) {
         const el = document.activeElement;
         _rqReturnFocusEl = el && el !== document.body ? el : null;
     }
     _rqSetBusyCursor(true);
     try {
-        return await _rqOpenPostReview(postId, opts);
+        const result = await _rqOpenPostReview(postId, opts);
+        if (freshOpen) _railOpenDecisionForDraft();
+        return result;
     } finally {
         _rqSetBusyCursor(false);
     }
+}
+
+// An assistant's draft is opened to be DECIDED on, and the decision was the last of seven closed
+// steps — with a footer button whose only job was to open it. Open it for them. Only on a fresh
+// open (a re-render keeps whatever the person has open), only for the assistant's drafts (a post
+// you started yourself still needs writing), only when nothing else claimed a step during the
+// open, and never when the step is locked — a disabled step must not show its controls.
+function _railOpenDecisionForDraft() {
+    if (_railOpen != null || _rqReviewPostId == null) return;
+    const post = _rqPostCache[_rqReviewPostId];
+    if (!post || !['pending_approval', 'in_review'].includes(post.status)) return;
+    const step = _RAIL.find(s => s.key === 'when');
+    if (!step || (step.enabled && !step.enabled(post))) return;
+    _railOpen = 'when';
+    _railRender();
 }
 
 async function _rqOpenPostReview(postId, opts = {}) {
@@ -17568,8 +17612,21 @@ function _rqReviewRenderActive() {
     // The footer's own Approve/Reject buttons are gone: approving and rejecting BOTH live in step 7
     // now, and having them here as well put two Approve buttons on screen at the same time.
     const assistantName = post.assistantName || 'your assistant';
+    // Say the time approving actually lands on. The option used to read "Let Nova choose the time ·
+    // Publishes at the next good slot" while the card above it said "Goes out Tue 09:00" — but
+    // approve-post KEEPS the suggested slot when it is a future, free cadence slot, and only rehomes
+    // a past or taken one. So: name the suggested time, and say when it can move.
     const whenLabel = document.getElementById('post-review-when-assistant-label');
-    if (whenLabel) whenLabel.textContent = `Let ${assistantName} choose the time`;
+    const whenSub = document.getElementById('post-review-when-assistant-sub');
+    const suggestedMs = post.publishDate ? new Date(post.publishDate).getTime() : NaN;
+    if (Number.isFinite(suggestedMs) && suggestedMs > Date.now()) {
+        const at = new Date(suggestedMs).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        if (whenLabel) whenLabel.textContent = `Approve for ${at}`;
+        if (whenSub) whenSub.textContent = `${assistantName} moves it to the next free slot if that one is taken`;
+    } else {
+        if (whenLabel) whenLabel.textContent = 'Approve';
+        if (whenSub) whenSub.textContent = `${assistantName} picks the next free slot`;
+    }
 
     // Reject reads "all" for a group — it is one post to the reviewer, however many rows it is.
     const rejectBtn = document.getElementById('post-review-reject-btn');
@@ -18899,9 +18956,21 @@ async function rqReviewReject() {
         const archived = n > 1
             ? `All ${n} platforms rejected. Kept for 30 days under ${where}.`
             : `Post rejected. Kept for 30 days under ${where}.`;
+        // The archive is on another page, so the toast takes you there rather than only naming it.
+        const archiveAssistantId = targets[0]?.assistantId;
         window.showToast?.(d.revisionQueued
             ? `${archived} Your assistant is drafting a replacement — it'll appear here shortly.`
-            : archived, { icon: '🗂️', duration: 7000 });
+            : archived, {
+                icon: '🗂️', duration: 9000,
+                action: archiveAssistantId && typeof window.routeToAssistantDetail === 'function'
+                    ? { label: 'View', onClick: () => {
+                        if (_rqReviewPostId != null) closePostReview();
+                        window._assistantDetailInitialTab = 'review-queue';
+                        window._assistantDetailInitialRqStatus = 'archived';
+                        window.routeToAssistantDetail(archiveAssistantId);
+                    } }
+                    : null,
+            });
         _rqReviewRefresh();
     } catch { window.showToast?.('Network error — please try again.', { icon: '⚠️' }); }
     finally {
