@@ -40,7 +40,7 @@ check('discard soft-cancels through scheduled-posts DELETE — never reject-post
     assert.ok(!fn.includes('reject-post') && !fn.includes('approve-post'), 'discard must not create a rule');
 });
 check('the confirm for an assistant draft points to Reject for real feedback', () => {
-    assert.ok(fn.includes('use Reject instead'));
+    assert.ok(fn.includes('use Reject and redraft instead'));
     assert.ok(fn.includes("status === 'draft'"));
 });
 check('the server cancels anything unpublished (so a pending_approval draft can be discarded)', () => {

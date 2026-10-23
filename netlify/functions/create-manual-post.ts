@@ -47,6 +47,8 @@ export default withLambda(async (event) => {
         hashtags?: string;
         contentAssetIds?: number[];
         blank?: boolean;
+        /** ISO. The day the Calendar was clicked on; used as the draft's suggested time if future. */
+        publishDate?: string;
     };
     try { body = JSON.parse(event.body || '{}'); } catch { body = {}; }
 
@@ -134,8 +136,12 @@ export default withLambda(async (event) => {
     const ownerLabel = [u?.firstName, u?.lastName].filter(Boolean).join(' ').trim() || u?.email || 'You';
 
     const now = new Date();
-    // Placeholder publish date — actual scheduling happens when the user approves the draft.
-    const publishDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    // Placeholder publish date — actual scheduling happens when the user approves the draft. A post
+    // started from a Calendar day proposes that day instead, when it is still in the future.
+    const asked = body.publishDate ? new Date(body.publishDate) : null;
+    const publishDate = asked && !Number.isNaN(asked.getTime()) && asked > now
+        ? asked
+        : new Date(now.getTime() + 24 * 60 * 60 * 1000);
     const hasMedia = contentAssetIds.length > 0;
 
     // One shared id across the fanned-out rows so the Review Queue collapses them into one card. Only

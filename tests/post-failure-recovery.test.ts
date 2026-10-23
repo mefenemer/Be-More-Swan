@@ -116,7 +116,7 @@ check('the recovery panel offers every way out, whatever the diagnosis', () => {
         assert.ok(!new RegExp(`\\?[^\`]{0,80}${action.replace('(', '\\(')}`).test(panel),
             `${action} must not be gated on the failure kind`);
     }
-    assert.ok(/f\.needsReconnect \? `<button onclick="rqFailedReconnect/.test(panel),
+    assert.ok(/f\.needsReconnect \? `<button type="button" onclick="rqFailedReconnect/.test(panel),
         'reconnect is the one action that IS conditional');
 });
 
@@ -194,7 +194,8 @@ check('the Needs-attention badge is counted before the column is opened', () => 
     // this page's markup is absent, so on arrival the tab sat blank until clicked. The page must
     // count on open, AFTER its markup exists — i.e. from its own init script.
     const init = page.slice(page.indexOf('(function initReviewQueuePage()'));
-    assert.match(init, /refreshPendingBadge\(\)/, 'review-queue.html must count Needs attention when it opens');
+    // attentionOnly since 2026-10-23: the list loading alongside writes the amber count itself.
+    assert.match(init, /refreshPendingBadge\(\{ attentionOnly: true \}\)/, 'review-queue.html must count Needs attention when it opens');
 });
 
 check('workspace.html still parses', () => {

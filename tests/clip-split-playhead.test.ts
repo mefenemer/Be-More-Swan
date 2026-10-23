@@ -89,8 +89,8 @@ check('a text row\'s playhead is placed on its BAR, not across the row with its 
     assert.match(fn, /head\.style\.left = \(b\.left - o\.left \+ frac \* b\.width\) \+ 'px';/);
 });
 
-check('the Conversion pill says what it is', () => {
-    assert.match(W, /case 'conversion':    return P\('Conversion post',   'bg-amber-100 text-amber-700',\s*`\$\{who\} writes one of these a week/);
+check('the Sales post pill says what it is', () => {
+    assert.match(W, /case 'conversion':    return P\('Sales post',   'bg-amber-100 text-amber-700',\s*`\$\{who\} writes one of these a week/);
     assert.match(W, /\$\{origin\.title \? ` title="\$\{_rqEsc\(origin\.title\)\}"` : ''\}/);
 });
 

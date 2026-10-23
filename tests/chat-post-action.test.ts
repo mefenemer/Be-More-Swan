@@ -60,7 +60,17 @@ async function main() {
         assert.strictEqual(postActionFromUiElement({ type: 'social_post_draft', caption: 'x' }), null);
     });
 
-    await check('reason rides only on reject, and the time only on reschedule', () => {
+    await check('a retry may carry a time; without one it goes out on the next run', () => {
+        const t = postActionFromUiElement({ type: 'post_action_proposal', action: 'retry', postId: 5, when: 'Friday at 9am' });
+        assert.strictEqual(t?.when, 'Friday at 9am');
+        const now = postActionFromUiElement({ type: 'post_action_proposal', action: 'retry', postId: 5 });
+        assert.strictEqual(now?.when, null);
+        const endpoint = readFileSync(path.join(ROOT, 'netlify/functions/retry-failed-post.ts'), 'utf8');
+        assert.match(endpoint, /parseScheduleInstruction\(instruction/, 'retry-failed-post must read the words');
+        assert.match(endpoint, /parsed <= new Date\(\)/, 'a time in words that has passed must be refused, not published now');
+    });
+
+    await check('reason rides only on reject, and the time only on reschedule or retry', () => {
         const r = postActionFromUiElement({ type: 'post_action_proposal', action: 'approve', postId: 3, reason: 'meh', when: 'tomorrow' });
         assert.strictEqual(r?.reason, null);
         assert.strictEqual(r?.when, null);

@@ -24,6 +24,12 @@
 
     <!-- Right: assistant filter + view toggle -->
     <div class="flex items-center gap-3 flex-wrap">
+      <!-- Phone: the two dropdowns fold behind this, so the posts start higher up (the toolbar was
+           three rows before the first post). The count says a filter is on, so a filtered view is
+           never mistaken for an empty one. Desktop never sees it. -->
+      <button type="button" id="cal-filter-toggle" aria-expanded="false" aria-controls="cal-filters"
+        class="hidden btn-utility focus-ring tap-target px-3 py-1.5 text-sm font-bold rounded-lg border">Filter<span id="cal-filter-count"></span></button>
+      <div id="cal-filters" class="phone-hidden flex items-center gap-3 flex-wrap">
       <!-- Platform filter. Social/blog roles only: the per-assistant Calendar tab injects this
            same fragment for EVERY role (assistant-calendar.js), so a Lead Generator — which
            publishes nothing — was being offered an Instagram/YouTube filter over a grid that can
@@ -50,6 +56,7 @@
         class="tap-target max-w-full truncate text-sm font-semibold text-gray-700 border border-gray-300 rounded-lg px-3 py-1.5 bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-700">
         <option value="all">All assistants</option>
       </select>
+      </div>
       <!-- A segmented control: calendar.js sets aria-pressed and the look from the view on screen.
            Month and Week are hidden on a phone, where seven columns are ~48px each — which leaves only
            List, so the whole control goes there. -->
@@ -67,6 +74,14 @@
           List
         </button>
       </div>
+      <!-- Owners plan by date ("something for Friday"), and creating used to live only on Review.
+           Revealed by calendar.js once an assistant that can post is known; clicking an empty
+           future day does the same with that day filled in. -->
+      <button type="button" id="cal-new-post" onclick="window._calNewPost()"
+        class="hidden btn-primary focus-ring tap-target px-3 py-1.5 text-sm font-bold rounded-lg items-center gap-1.5">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        New post
+      </button>
       <!-- Phone only: the two legend strips below fold behind this, so posts start higher up. -->
       <button type="button" id="cal-key-toggle" aria-expanded="false" aria-controls="cal-status-legend"
         class="sm:hidden btn-utility focus-ring tap-target px-3 py-1.5 text-sm font-bold rounded-lg border">Key</button>

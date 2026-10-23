@@ -765,8 +765,16 @@
           const r = await postActionCall('reject-post', { postId: d.postId, feedbackText: d.reason, applyAsRule: d.applyAsRule === true });
           message = r.revisionQueued ? 'Rejected. A replacement is being written — it will appear in "Review".' : 'Rejected.';
         } else if (d.action === 'retry') {
-          for (const id of ids) await postActionCall('retry-failed-post', { postId: id });
-          message = 'Back in the queue — it goes out on the next publishing run.';
+          if (d.when) {
+            // The named row reads the user's words; the rest of the group follows the time it got.
+            const [first, ...rest] = ids;
+            const r = await postActionCall('retry-failed-post', { postId: first, instruction: d.when });
+            for (const id of rest) await postActionCall('retry-failed-post', { postId: id, publishDate: r.publishDate });
+            message = `Back in the queue for ${new Date(r.publishDate).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.`;
+          } else {
+            for (const id of ids) await postActionCall('retry-failed-post', { postId: id });
+            message = 'Back in the queue — it goes out on the next publishing run.';
+          }
         } else if (d.action === 'reschedule') {
           const [first, ...rest] = ids;
           const r = await postActionCall('reschedule-post-chat', { postId: first, instruction: d.when });

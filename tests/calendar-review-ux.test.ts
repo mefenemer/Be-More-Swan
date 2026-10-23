@@ -38,6 +38,8 @@ const scheduledPosts = read('netlify/functions/scheduled-posts.ts');
 const socialDrafts = read('netlify/functions/get-social-drafts.ts');
 const generated = read('src/generated/platform-constants.js');
 const blogPostsFn = read('netlify/functions/blog-posts.ts');
+const sidebar = read('components/sidebar.html');
+const manualPost = read('netlify/functions/create-manual-post.ts');
 const dialogs = read('dialogs.js');
 const inputCss = read('input.css');
 const styleCss = read('style.css');
@@ -250,7 +252,7 @@ check('"Publish again now" confirms first; "Re-queue for then" does not', () => 
 });
 
 check('the "Ready? Open Schedule & publish" hint hides while that step is open', () => {
-    assert.match(slice(workspace, 'function _railRender('), /post-review-draft-hint'\)\?\.classList\.toggle\('hidden', _railOpen === 'when'\)/);
+    assert.match(slice(workspace, 'function _railRender('), /post-review-draft-hint'\)\?\.classList\.toggle\('hidden', _railOpen === 'when'/);
 });
 
 check('the Calendar grids say when there is nothing on them, and Review has one all-clear', () => {
@@ -277,6 +279,101 @@ check('the Calendar list tabs rove, with arrow keys', () => {
 
 check('pulsing markers respect reduced motion', () => {
     for (const css of [inputCss, styleCss]) assert.match(css, /prefers-reduced-motion: reduce\)[\s\S]{0,80}animation: none !important/);
+});
+
+// ── 8. Fourth pass (2026-10-23) ──────────────────────────────────────────────
+console.log('Badge, creating and moving from the calendar, deciding on a phone, Review all');
+
+check('the sidebar Review pill is readable, labelled, and counts articles like the tab', () => {
+    assert.match(sidebar, /pending-badge bg-amber-400 text-gray-900/);
+    assert.match(slice(workspace, 'function _rqSetPendingBadge('), /aria-label', `\$\{n\} to approve`/);
+    assert.match(slice(workspace, 'async function refreshPendingBadge('), /_rqBlogReviewCount\(\)/);
+    assert.match(slice(workspace, 'async function _rqBlogReviewCount('), /blog-posts\?countReview=1/);
+    assert.match(blogPostsFn, /countReview === '1'[\s\S]{0,400}'draft', 'pending_approval', 'in_review'/);
+});
+
+check('the Calendar can start a post, for a clicked future day', () => {
+    assert.match(calendarHtml, /id="cal-new-post"/);
+    assert.match(slice(calendar, 'window._calNewPost = function'), /_gpPrefillPublishDate/);
+    assert.match(workspace, /window\._gpPrefillPublishDate \? \{ publishDate: window\._gpPrefillPublishDate \}/);
+    assert.match(manualPost, /asked > now/, 'a past date must not become the draft\'s time');
+    assert.match(workspace, /\/calendar\.js\?v=20261023/, 'the script version must move when calendar.js changes');
+});
+
+check('a grid chip that can be dragged can be moved with M, and on touch with a button', () => {
+    for (const fn of ['function _postChip(', 'function _blogChip(', 'function _recordChip(', 'function _followUpChip(']) {
+        assert.match(slice(calendar, fn), /data-cal-move="/, `${fn} lost its move hook`);
+    }
+    assert.match(calendar, /e\.key !== 'm' && e\.key !== 'M'[\s\S]{0,400}window\._calMove\(kind, Number\(id\)\)/);
+    assert.match(slice(calendar, 'function _render('), /\(hover: none\)[\s\S]{0,400}_moveButton\(kind/);
+});
+
+check('on a narrow screen the decision is pinned in the editor footer', () => {
+    assert.match(workspace, /id="post-review-decide-bar"/);
+    const fn = slice(workspace, 'function _rqSyncDecisionBar(');
+    assert.match(fn, /max-width: 1023px/);
+    assert.match(fn, /_pceNotReadyReason\(post\)/, 'a locked decision must say why, not show a dead button');
+});
+
+check('Review all goes through the waiting posts in a fixed order, each decision moving on', () => {
+    assert.match(reviewHtml, /id="rq-review-all-btn"[^>]*onclick="rqReviewAll\(\)"/);
+    assert.match(slice(workspace, 'function _rqNextDraftId('), /_rqSessionAdvance/);
+    assert.match(slice(workspace, 'async function rqReviewReject('), /_rqSessionContinue\(/);
+    assert.match(slice(workspace, 'async function rqReviewDiscardDraft('), /_rqSessionContinue\(/);
+    assert.match(slice(workspace, 'function _rqSyncSessionProgress('), /Post \$\{i \+ 1\} of/);
+});
+
+// ── 9. Polish pass (2026-10-23) ──────────────────────────────────────────────
+console.log('Polish: list rows, previews, phone filters, busy days, undo, cards, wording');
+
+check('list rows are not buttons with a button inside', () => {
+    for (const fn of ['function _listRow(', 'function _listFollowUpRow(', 'function _listRecordRow(']) {
+        const body = slice(calendar, fn);
+        assert.ok(!/role="button"/.test(body), `${fn} is a role=button again, with Move… inside it`);
+        assert.match(body, /_rowOpener\(/);
+    }
+    assert.match(slice(calendar, 'function _moveButton('), /relative z-10/);
+});
+
+check('the preview opens on keyboard focus and not on a tap', () => {
+    assert.match(calendar, /addEventListener\('focusin'[\s\S]{0,300}_calShowPreview/);
+    assert.match(calendar, /event\.type === 'mouseenter' && window\.matchMedia[\s\S]{0,80}\(hover: none\)/);
+});
+
+check('phone filters fold behind one button, month cells cap at three', () => {
+    assert.match(calendarHtml, /id="cal-filter-toggle"[\s\S]{0,400}id="cal-filters" class="phone-hidden/);
+    assert.match(calendar, /const _MONTH_CELL_MAX = 3/);
+    assert.match(calendar, /\+\$\{more\} more/);
+});
+
+check('every move can be undone, and logos come from one sprite', () => {
+    for (const fn of ['async function _movePost(', 'async function _moveBlog(', 'async function _moveRecord(', 'async function _moveFollowUp(']) {
+        assert.match(slice(calendar, fn), /_undoMove\(/, `${fn} has no Undo`);
+    }
+    assert.match(slice(calendar, 'function _platAvatar('), /<use href="#cal-logo-/);
+});
+
+check('Review cards: colour means state, the caption gets two lines, rows line up', () => {
+    assert.match(workspace, /const RQ_ORIGIN_CLS = 'bg-gray-100 text-gray-700'/);
+    const card = slice(workspace, 'function rqRenderSocialCard(');
+    assert.match(card, /line-clamp-2/);
+    assert.match(card, /sm:hidden inline-flex[^']*Media deleted/);
+    assert.match(slice(workspace, 'function rqRenderBlogCard('), /-mx-4 px-4/);
+    assert.match(slice(workspace, 'function rqRenderEmailCard('), /-mx-4 px-4/);
+    assert.ok(!/function rqRenderCard\(/.test(workspace), 'the dead pending-action card is back');
+});
+
+check('the Review page asks for each list once as it opens', () => {
+    assert.match(reviewHtml, /refreshPendingBadge\(\{ attentionOnly: true \}\)/);
+    assert.equal((workspace.match(/fetch\('\/\.netlify\/functions\/newsletter-issues\?review=1'\)/g) || []).length, 1,
+        'newsletter-issues?review=1 must go through _rqNewsletterReviewRes only');
+});
+
+check('two verbs for saying no, everywhere', () => {
+    assert.ok(!/Reject &amp; archive|Reject & archive|Discard this draft|Archive this post/.test(workspace), 'an old reject/discard wording is back');
+    assert.match(workspace, /Reject and redraft/);
+    assert.match(workspace, /Remove \(no redraft\)/);
+    assert.match(sidebar, /id="nav-review-queue"[\s\S]*id="nav-calendar"/, 'Review sits above Calendar');
 });
 
 console.log(`\n${passed} checks passed`);

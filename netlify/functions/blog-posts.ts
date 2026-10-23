@@ -34,6 +34,21 @@ export default withLambda(async (event: HandlerEvent) => {
         const assistantIdFilter = assistantIdParam != null && assistantIdParam !== '' && Number.isFinite(Number(assistantIdParam))
             ? Number(assistantIdParam) : null;
 
+        // The sidebar Review pill's blog term: how many articles wait in Review's "To approve" (the
+        // same statuses as RQ_BLOG_STATUSES.review in workspace.html). A count, so the 60s badge poll
+        // never downloads the article list to get one number.
+        if (event.queryStringParameters?.countReview === '1') {
+            const [row] = await db
+                .select({ n: sql<number>`count(*)::int` })
+                .from(blogPosts)
+                .where(and(
+                    eq(blogPosts.organisationId, ctx.organisationId),
+                    inArray(blogPosts.status, ['draft', 'pending_approval', 'in_review']),
+                    notStillGenerating(),
+                ));
+            return { statusCode: 200, body: JSON.stringify({ count: Number(row?.n) || 0 }) };
+        }
+
         // Calendar feed (US 4.1 calendar view): scheduled/published posts whose date falls in range,
         // plus FAILED ones on the day they were due — a failed article used to appear on neither the
         // calendar nor Review (review, 2026-10-23). The client draws it red and never draggable.

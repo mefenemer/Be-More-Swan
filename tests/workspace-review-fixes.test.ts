@@ -249,11 +249,12 @@ check('the sidebar Calendar loads every assistant\'s own dated work, not only on
     assert.ok(cal.includes("${blocked || !_lockedAssistant ? '' : `draggable"), 'follow-ups are view-only on the shared calendar');
 });
 
-check('Audience and Orders come after Review in the sidebar', () => {
+check('Audience and Orders come after Review and Calendar in the sidebar', () => {
     const ids = [...read('components/sidebar.html').matchAll(/<a [^>]*id="(nav-[a-z-]+)"/g)].map((m) => m[1]);
     const at = (id: string) => ids.indexOf(id);
-    assert.ok(at('nav-assistants') < at('nav-calendar') && at('nav-calendar') < at('nav-review-queue'));
-    assert.ok(at('nav-review-queue') < at('nav-audience') && at('nav-audience') < at('nav-orders'));
+    // Review above Calendar since 2026-10-23: the work runs review first, then the calendar.
+    assert.ok(at('nav-assistants') < at('nav-review-queue') && at('nav-review-queue') < at('nav-calendar'));
+    assert.ok(at('nav-calendar') < at('nav-audience') && at('nav-audience') < at('nav-orders'));
 });
 
 console.log(`\n${passed} checks passed${process.exitCode ? ' — with FAILURES above' : ''}`);
