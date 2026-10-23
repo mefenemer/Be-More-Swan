@@ -58,6 +58,7 @@ import { MAX_CAMPAIGN_EMAILS } from '../../src/utils/newsletter-campaign-chat-dr
 import { draftCampaignEmails } from '../../src/utils/newsletter-campaign-generate';
 import { suggestEmailLine } from '../../src/utils/newsletter-suggest';
 import { CAMPAIGN_CADENCES } from '../../src/config/email-campaign-cadences';
+import { requesterNamesForOrders } from '../../src/utils/requested-by';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
 
@@ -184,8 +185,14 @@ export default withLambda(async (event: HandlerEvent) => {
                     scheduledFor: newsletterIssues.scheduledFor,
                     assistantId: newsletterIssues.assistantId,
                     updatedAt: newsletterIssues.updatedAt,
+                    // The card's two pills: who wrote it and, for a Campaign Assistant order, who asked.
+                    // One join; the requester lookup only runs when an order is on the page (rare).
+                    assistantName: aiAssistants.name,
+                    writtenByAssistant: sql<boolean>`(${newsletterIssues.generationReason} is not null or ${newsletterIssues.isAutonomous})`,
+                    campaignOrderId: newsletterIssues.campaignOrderId,
                 })
                 .from(newsletterIssues)
+                .leftJoin(aiAssistants, eq(aiAssistants.id, newsletterIssues.assistantId))
                 .where(and(
                     eq(newsletterIssues.organisationId, orgId),
                     inArray(newsletterIssues.status, ['pending_approval', 'in_review', 'failed']),
@@ -193,7 +200,9 @@ export default withLambda(async (event: HandlerEvent) => {
                 .orderBy(sql`${newsletterIssues.scheduledFor} ASC NULLS LAST`, desc(newsletterIssues.updatedAt))
                 .limit(200);
             const awaiting = rows.filter((r) => r.status !== 'failed').length;
-            return { statusCode: 200, body: JSON.stringify({ issues: rows, awaiting, failed: rows.length - awaiting }) };
+            const requesters = await requesterNamesForOrders(db, orgId, rows.map((r) => r.campaignOrderId));
+            const issues = rows.map(({ campaignOrderId, ...r }) => ({ ...r, requestedBy: campaignOrderId != null ? (requesters.get(campaignOrderId) ?? null) : null }));
+            return { statusCode: 200, body: JSON.stringify({ issues, awaiting, failed: rows.length - awaiting }) };
         }
 
         // ── Calendar feed ────────────────────────────────────────────────────────────────────
@@ -322,7 +331,7 @@ export default withLambda(async (event: HandlerEvent) => {
             filters.push(eq(newsletterIssues.assistantId, Number(assistantIdParam)));
         }
 
-        const issues = await db
+        const issueRows = await db
             .select({
                 id: newsletterIssues.id,
                 subject: newsletterIssues.subject,
@@ -343,11 +352,28 @@ export default withLambda(async (event: HandlerEvent) => {
                 sourceBlogPostId: newsletterIssues.sourceBlogPostId,
                 resendOfIssueId: newsletterIssues.resendOfIssueId,
                 updatedAt: newsletterIssues.updatedAt,
+                campaignOrderId: newsletterIssues.campaignOrderId,
+                assistantId: newsletterIssues.assistantId,
             })
             .from(newsletterIssues)
             .where(and(...filters))
             .orderBy(desc(newsletterIssues.updatedAt))
             .limit(500);
+        // "Requested by [assistant]" when a Campaign Assistant ordered the email (src/utils/requested-by.ts).
+        // And the writing assistant's current name, for the card's "Created by" pill beside it.
+        const requesters = await requesterNamesForOrders(db, orgId, issueRows.map((i) => i.campaignOrderId));
+        const writerIds = [...new Set(issueRows.map((i) => i.assistantId).filter((x): x is number => x != null))];
+        const writerNames = new Map<number, string>();
+        if (writerIds.length) {
+            const rows = await db.select({ id: aiAssistants.id, name: aiAssistants.name }).from(aiAssistants)
+                .where(and(eq(aiAssistants.organisationId, orgId), inArray(aiAssistants.id, writerIds)));
+            for (const r of rows) writerNames.set(r.id, r.name);
+        }
+        const issues = issueRows.map(({ campaignOrderId, ...i }) => ({
+            ...i,
+            assistantName: i.assistantId != null ? (writerNames.get(i.assistantId) ?? null) : null,
+            requestedBy: campaignOrderId != null ? (requesters.get(campaignOrderId) ?? null) : null,
+        }));
 
         const segments = await db
             .select({ id: audienceSegments.id, name: audienceSegments.name, kind: audienceSegments.kind })

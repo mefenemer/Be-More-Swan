@@ -22,6 +22,7 @@ import { voiceDirective } from './voice-profile';
 import { articleTypeByKey, blogArticleTypeBlock, blogArticleTypeFor } from './content-shapes';
 import { resolvePostingSchedule } from '../config/posting-cadence';
 import { assembleBlueprint } from './blueprint';
+import { businessKnowledgePromptBlock } from './business-knowledge';
 import { ASSISTANT_DRAFT_REASON } from './blog-ai-assisted';
 import { parseModelJson, salvageArrayElements } from './model-json';
 import {
@@ -92,23 +93,9 @@ export async function buildBlueprintGuardrailsBlock(
             }
         }
 
-        const knowledge = sections['11-business-knowledge']?.content ?? {};
-        const directive = typeof knowledge.directive === 'string' ? knowledge.directive : null;
-        const documents = (knowledge.documents ?? []) as Array<{ name?: string; text?: string }>;
-        const links = (knowledge.links ?? []) as Array<{ name?: string; url?: string }>;
-        if (directive && (documents.length || links.length)) {
-            const docBlocks = documents
-                .filter(d => typeof d?.text === 'string' && d.text.trim())
-                .map(d => `[${d.name ?? 'Document'}]\n${d.text!.trim()}`);
-            const linkLines = links
-                .filter(l => l?.url)
-                .map(l => `- ${l.name ?? l.url}: ${l.url}`);
-            parts.push(
-                `BUSINESS KNOWLEDGE — ${directive}\n\n` +
-                [docBlocks.join('\n\n'), linkLines.length ? `Reference links:\n${linkLines.join('\n')}` : '']
-                    .filter(Boolean).join('\n\n'),
-            );
-        }
+        // Same renderer as the chat's (src/utils/business-knowledge.ts).
+        const knowledgeBlock = businessKnowledgePromptBlock(sections['11-business-knowledge']?.content as Parameters<typeof businessKnowledgePromptBlock>[0]);
+        if (knowledgeBlock) parts.push(knowledgeBlock);
 
         // Section 12 — active SMART goals. Duplicated here rather than shared with the social path
         // on purpose: blog drafting assembles its prompt through this function, NOT through

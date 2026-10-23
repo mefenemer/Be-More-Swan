@@ -22,6 +22,7 @@ import { generateBlogSeo } from '../../src/utils/blog-seo-generate';
 import { aiAssistants, blogPosts, contentGenerationJobs } from '../../db/schema';
 import { generateBlogBody } from '../../src/utils/blog-generate';
 import { decodeInteractiveBrief } from '../../src/utils/blog-interactive-brief';
+import { resizeBlogBody } from '../../src/utils/blog-resize';
 import { ideateBlogTopic } from '../../src/utils/blog-topic-ideation';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { triggerBlogDrain } from '../../src/utils/trigger-drain';
@@ -188,6 +189,10 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
     // blog jobs as 'on_demand' as well, and those take the autopilot path. See
     // src/utils/blog-interactive-brief.ts.
     const interactive = job.result_blog_post_id != null;
+    // "Make it shorter / longer" (src/utils/blog-resize.ts) rides the interactive path: it rewrites the
+    // body of the post the author has open. Metered as a helper in generate-blog.ts, so the task
+    // check and the task charge below are skipped for it.
+    const resize = interactive ? decodeInteractiveBrief(job.context_prompt)?.resize : undefined;
 
     // Set with the 'completed' write. Everything after that point is a follow-up — a notification, a
     // hand-off — and a failure there must not re-queue a job whose post is already written: the
@@ -199,7 +204,7 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
         // Monthly task allowance (src/utils/work-metering.ts). Before any model call; terminal,
         // because the allowance does not come back until the 1st. An interactive draft's own post is
         // left untouched — the author keeps what they wrote and sees why nothing was added.
-        if (job.trigger_type !== 'admin_test' && !(await hasTaskCapacity(db, job.organisation_id))) {
+        if (!resize && job.trigger_type !== 'admin_test' && !(await hasTaskCapacity(db, job.organisation_id))) {
             console.warn(`[process-blog-jobs] job ${job.job_id}: org ${job.organisation_id} is out of tasks — not drafting.`);
             await failJob(db, job, attempt, TASK_LIMIT_MESSAGE, { terminal: true });
             return;
@@ -232,6 +237,21 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
         let notes: string | undefined;
         let tone: string | undefined;
         let articleType: string | undefined;
+
+        if (interactive && resize) {
+            const { before, after } = await resizeBlogBody(db, {
+                blogPostId: job.result_blog_post_id as number,
+                organisationId: job.organisation_id,
+                userId: job.user_id,
+                direction: resize,
+            });
+            await db.update(contentGenerationJobs)
+                .set({ status: 'completed', errorMessage: null, updatedAt: new Date() })
+                .where(eq(contentGenerationJobs.id, job.id));
+            jobCompleted = true;
+            console.log(`[process-blog-jobs] job ${job.job_id}: resized post ${job.result_blog_post_id} ${resize} (${before} → ${after} words)`);
+            return;
+        }
 
         if (interactive) {
             // The author's own words. A brief that won't decode costs the steer, not the draft —

@@ -25,7 +25,13 @@ export type InteractiveBlogBrief = {
     tone?: string;
     /** The article type picked in Blog Studio ('guide', 'story', …). Absent = the assistant chooses. */
     articleType?: string;
+    /** "Make it shorter" / "Make it longer" (src/utils/blog-resize.ts): rewrite the post's EXISTING body
+     *  to a new length instead of drafting one. Needs no topic. */
+    resize?: 'shorter' | 'longer';
 };
+
+const RESIZE = ['shorter', 'longer'] as const;
+const asResize = (v: unknown): 'shorter' | 'longer' | undefined => RESIZE.find((r) => r === v);
 
 function clip(value: unknown): string {
     return typeof value === 'string' ? value.trim().slice(0, MAX_FIELD) : '';
@@ -43,6 +49,7 @@ export function encodeInteractiveBrief(brief: InteractiveBlogBrief): string {
         tone: clip(brief.tone),
         // Optional, so v stays 1: an older worker simply ignores the key.
         articleType: clip(brief.articleType) || undefined,
+        resize: asResize(brief.resize),
     });
 }
 
@@ -61,12 +68,15 @@ export function decodeInteractiveBrief(raw: string | null | undefined): Interact
     const obj = parsed as Record<string, unknown>;
     if (obj.v !== 1) return null;
     const topic = clip(obj.topic);
-    if (!topic) return null;
+    const resize = asResize(obj.resize);
+    // A resize rewrites what is there, so it is the one brief that needs no topic.
+    if (!topic && !resize) return null;
     return {
         topic,
         keywords: clip(obj.keywords) || undefined,
         notes: clip(obj.notes) || undefined,
         tone: clip(obj.tone) || undefined,
         articleType: clip(obj.articleType) || undefined,
+        resize,
     };
 }

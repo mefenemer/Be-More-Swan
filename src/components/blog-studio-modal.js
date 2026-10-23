@@ -144,6 +144,11 @@
     var mins = Math.max(1, Math.round(words / 200));
     out.textContent = words + (words === 1 ? ' word · ' : ' words · ') + (words < 200 ? 'under a minute read' : '~' + mins + ' min read');
     out.className = 'bs-chip' + (words > 0 && words < 300 ? ' bs-chip-warn' : '');
+    // Shorter / Longer need something to work on (the server refuses under 20 words too).
+    ['bs-resize-shorter', 'bs-resize-longer'].forEach(function (id) {
+      var b = el(id);
+      if (b) b.classList.toggle('bs-hidden', words < 20 || !state.postId);
+    });
   }
 
   // ── Gate helpers ─────────────────────────────────────────────────────────────────────────────
@@ -628,6 +633,12 @@
     + '      <div class="bs-actionbar">'
     + '        <span id="bs-readout" class="bs-chip">0 words · under a minute read</span>'
     + '        <div class="bs-row">'
+    // The social post editor's two length buttons, for an article (src/utils/blog-resize.ts). Hidden
+    // until there is a body to resize — refreshReadout shows them.
+    + '          <button type="button" id="bs-resize-shorter" data-bs-resize="shorter" class="bs-btn bs-btn-ghost bs-btn-sm bs-hidden"'
+    + '            title="Rewrite this article about a third shorter — same message, nothing new added">Make it shorter</button>'
+    + '          <button type="button" id="bs-resize-longer" data-bs-resize="longer" class="bs-btn bs-btn-ghost bs-btn-sm bs-hidden"'
+    + '            title="Rewrite this article about half as long again — developing what it already says, no invented facts">Make it longer</button>'
     // "AI draft" and "Ask Swan to improve" named nobody. The work is done by the workspace's own
     // Blog Writer, who has a name the user chose — so the buttons say so. The <span>s carry
     // data-bs-assistant-label and are rewritten by applyAssistantNaming(); the wording here is the
@@ -875,6 +886,7 @@
   function aiDraftBusy(busy) {
     var go = el('bs-ai-draft-go');
     if (go) go.disabled = busy;
+    ['bs-resize-shorter', 'bs-resize-longer'].forEach(function (id) { var b = el(id); if (b) b.disabled = busy; });
     // The editor is locked while the worker writes into this post. Not decoration: MarkdownEditor
     // autosaves 1.2s after any keystroke, so typing here would race the server's write — one of
     // the two bodies wins and the other is gone, with nothing on screen to say so.
@@ -932,6 +944,67 @@
         : 'Queued. Your assistant will start on this shortly…');
       pollAiDraft(state.aiDraftJobId, topic, Date.now());
     });
+  }
+
+  // ── Make it shorter / longer (src/utils/blog-resize.ts) ─────────────────────────────────────────
+  // The same queue and poll as a draft (generate-blog with { resize }), and the same editor lock —
+  // the worker writes this post's body, so typing meanwhile would race it. What is on screen is
+  // saved first, so the rewrite works on what the author sees.
+  function runResize(direction) {
+    if (!state.postId || state.aiDraftJobId) return;
+    aiDraftBusy(true);
+    setBanner('bs-action-status', (direction === 'shorter' ? 'Making it shorter' : 'Making it longer') + '\u2026 about a minute.', 'info');
+    flushDraft().then(function () {
+      return api('generate-blog', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId, resize: direction }) });
+    }).then(function (gen) {
+      if (!gen.ok || !gen.body || !gen.body.jobId) {
+        aiDraftBusy(false);
+        setBanner('bs-action-status', (gen.body && gen.body.error) || 'Could not start that — try again.', 'error');
+        return;
+      }
+      state.aiDraftJobId = gen.body.jobId;
+      pollResize(gen.body.jobId, direction, Date.now());
+    });
+  }
+
+  function pollResize(jobId, direction, startedAt) {
+    if (state.aiDraftJobId !== jobId) return;
+    if (Date.now() - startedAt > DRAFT_POLL_TIMEOUT_MS) {
+      state.aiDraftJobId = null;
+      aiDraftBusy(false);
+      setBanner('bs-action-status', 'This is taking longer than usual. Close this post and reopen it in a minute to see the new version.', 'info');
+      return;
+    }
+    var elapsed = Date.now() - startedAt;
+    setTimeout(function () {
+      if (state.aiDraftJobId !== jobId) return;
+      api('generate-blog?jobId=' + encodeURIComponent(jobId), { method: 'GET' }).then(function (res) {
+        if (state.aiDraftJobId !== jobId) return;
+        if (!res.ok) { pollResize(jobId, direction, startedAt); return; }
+        var status = res.body && res.body.status;
+        if (status === 'failed') {
+          state.aiDraftJobId = null;
+          aiDraftBusy(false);
+          setBanner('bs-action-status', (res.body && res.body.errorMessage) || 'That didn\u2019t work. Your article is unchanged.', 'error');
+          return;
+        }
+        if (status !== 'completed') { pollResize(jobId, direction, startedAt); return; }
+        var before = state.editor ? state.editor.getMarkdown() : '';
+        api('blog-posts?id=' + encodeURIComponent(state.postId), { method: 'GET' }).then(function (p) {
+          if (state.aiDraftJobId !== jobId) return;
+          state.aiDraftJobId = null;
+          aiDraftBusy(false);
+          var md = p.ok && p.body.post ? (p.body.post.bodyMarkdown || '') : '';
+          if (!md) { setBanner('bs-action-status', 'Done, but the new version could not be loaded. Reopen this post to see it.', 'info'); return; }
+          state.editor.setMarkdown(md);
+          refreshReadout(md);
+          var count = function (t) { return (t || '').replace(/[#*_`>\-\[\]()!]/g, ' ').split(/\s+/).filter(Boolean).length; };
+          setBanner('bs-action-status', (direction === 'shorter' ? 'Shorter' : 'Longer') + ' — ' + count(before) + ' \u2192 ' + count(md) + ' words.', 'success');
+          state.contentChanged = false;
+          notifyChanged();
+        });
+      });
+    }, elapsed < 15000 ? 2000 : 5000);
   }
 
   function pollAiDraft(jobId, topic, startedAt) {
@@ -1951,6 +2024,8 @@
       if (!showing) { setStatus('bs-ai-draft-status', ''); el('bs-ai-topic').focus(); }
     });
     el('bs-ai-draft-go').addEventListener('click', runAiDraft);
+    el('bs-resize-shorter').addEventListener('click', function () { runResize('shorter'); });
+    el('bs-resize-longer').addEventListener('click', function () { runResize('longer'); });
     el('bs-ai-draft-cancel').addEventListener('click', function () { el('bs-ai-draft-form').classList.add('bs-hidden'); });
 
     // Publish now. The slowest action in the Studio — it re-renders the payload, stamps provenance

@@ -15,6 +15,9 @@
 //
 // The shape mirrors generate-post.ts, the social twin, deliberately:
 //   POST { blogPostId, topic, keywords?, notes?, tone?, articleType? } → 202 { jobId, status, started }
+//   POST { blogPostId, resize: 'shorter'|'longer' }      → 202 { jobId, … } — "Make it shorter/longer"
+//        (src/utils/blog-resize.ts): rewrites the saved body to a new length; metered as a helper,
+//        like the social post editor's same two buttons.
 //   GET  ?jobId=<uuid>                                   → 200 { status, resultBlogPostId, errorMessage }
 //
 // The job carries the blogPostId in `result_blog_post_id`, which is what tells the worker to draft
@@ -30,6 +33,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { encodeInteractiveBrief } from '../../src/utils/blog-interactive-brief';
 import { triggerBlogDrain } from '../../src/utils/trigger-drain';
+import { meterInteraction } from '../../src/utils/task-credit';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Matches generate-post.ts. A queue this deep is a stuck worker, not a busy user. */
@@ -84,18 +88,35 @@ export default withLambda(async (event: HandlerEvent) => {
     const id = Number(body.blogPostId);
     if (!Number.isFinite(id)) return { statusCode: 400, body: JSON.stringify({ error: 'blogPostId is required.' }) };
 
+    const resize = body.resize === 'shorter' || body.resize === 'longer' ? body.resize as 'shorter' | 'longer' : undefined;
     const topic = typeof body.topic === 'string' ? body.topic.trim() : '';
-    if (!topic) return { statusCode: 400, body: JSON.stringify({ error: 'Add a topic to draft from.' }) };
+    if (!topic && !resize) return { statusCode: 400, body: JSON.stringify({ error: 'Add a topic to draft from.' }) };
 
     // Ownership is settled HERE, while there is still someone to tell. The worker re-checks by
     // org-scoping its write, but it runs minutes later with no way to answer the browser — and this
     // is the request that decides whose post a queued job is allowed to overwrite.
     const [post] = await db
-        .select({ id: blogPosts.id, assistantId: blogPosts.assistantId })
+        .select({ id: blogPosts.id, assistantId: blogPosts.assistantId, status: blogPosts.status })
         .from(blogPosts)
         .where(and(eq(blogPosts.id, id), eq(blogPosts.organisationId, organisationId)))
         .limit(1);
     if (!post) return { statusCode: 404, body: JSON.stringify({ error: 'Blog post not found.' }) };
+    // A live article is not rewritten underneath its readers: the new body would sit in the editor
+    // while the published copy stayed as it was. Take it off the site first.
+    if (resize && (post.status === 'published' || post.status === 'publishing')) {
+        return { statusCode: 409, body: JSON.stringify({ error: 'This article is live. Unpublish it first, then make it shorter or longer.' }) };
+    }
+
+    // Shorter / Longer cost what the social editor's same buttons cost: a helper, under fair use —
+    // not a task, which is what a whole new article is charged. Settled here, while there is
+    // someone to tell; the worker skips the task check for these.
+    if (resize) {
+        const credit = await meterInteraction(db, organisationId, 'helpers');
+        if (!credit.allowed) {
+            const code = credit.failed ? 503 : credit.fairUse ? 429 : 403;
+            return { statusCode: code, body: JSON.stringify({ error: credit.limitMessage }) };
+        }
+    }
 
     // ⚠️ EVERYTHING BELOW IS WRAPPED. The first version of this handler was not, and an unhandled
     // throw here does NOT reach the browser as { error }: Lambda answers 500 with its own
@@ -131,6 +152,7 @@ export default withLambda(async (event: HandlerEvent) => {
             tone: typeof body.tone === 'string' ? body.tone : undefined,
             // Blog Studio's "Type of article" — validated where it is used (articleTypeByKey).
             articleType: typeof body.articleType === 'string' ? body.articleType : undefined,
+            resize,
         }),
         // ⚠️ THE DISCRIMINATOR. Pre-set to the post already open in the editor, which is what tells
         // process-blog-jobs to draft into it rather than insert a second one.

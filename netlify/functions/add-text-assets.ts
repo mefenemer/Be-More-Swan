@@ -3,6 +3,7 @@ import { HandlerEvent } from '@netlify/functions';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { workspaceAssets } from '../../db/schema';
+import { recompileOrgBlueprints } from '../../src/utils/recompile-org-blueprints';
 import { logAuditEvent } from '../../src/utils/audit';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -107,6 +108,9 @@ export default withLambda(async (event: HandlerEvent) => {
                 totalRulesInactive: insertedAssets.filter(a => !a.isActive).length
             }
         });
+
+        // The rules just replaced are Business Knowledge: refresh every assistant's snapshot.
+        await recompileOrgBlueprints(db, orgId, 'business_knowledge_rules');
 
         return { statusCode: 200, body: JSON.stringify({ success: true, count: insertedAssets.length }) };
 

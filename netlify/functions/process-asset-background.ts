@@ -6,6 +6,7 @@ import { PDFParse } from 'pdf-parse'; // pdf-parse v2 exports a named PDFParse c
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getDb } from '../../db/client';
 import { workspaceAssets } from '../../db/schema';
+import { recompileOrgBlueprints } from '../../src/utils/recompile-org-blueprints';
 import { logAuditEvent } from '../../src/utils/audit';
 import { safeFetchBinary, safeFetchText } from '../../src/utils/safe-fetch';
 import { stripPromptInjection } from '../../src/utils/prompt-injection';
@@ -179,6 +180,9 @@ export default withLambda(async (event: HandlerEvent) => {
                 newState: { status: 'ready', textLength: safeText.length }
             });
 
+            // The document is readable now: put it in every assistant's Business Knowledge.
+            await recompileOrgBlueprints(db, asset.organisationId, 'business_knowledge_ready');
+
             return { statusCode: 200, body: 'Asset processed successfully.' };
 
         } catch (extractionError: any) {
@@ -188,6 +192,8 @@ export default withLambda(async (event: HandlerEvent) => {
             await db.update(workspaceAssets)
                 .set({ status: 'failed', updatedAt: new Date() })
                 .where(eq(workspaceAssets.id, assetId));
+            // A 'confirmed' upload was already in the snapshot; a failed one must leave it.
+            await recompileOrgBlueprints(db, asset.organisationId, 'business_knowledge_failed');
 
             return { statusCode: 500, body: 'Failed to extract text.' };
         }

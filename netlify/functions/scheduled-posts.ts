@@ -23,6 +23,7 @@ import { SCHEDULE_ACTIVE_STATUSES, AWAITING_REVIEW_STATUSES } from '../../src/co
 import { diagnosePostFailure } from '../../src/utils/post-failure-diagnosis';
 import { PLATFORM_FORMATS } from '../../src/config/platform-formats';
 import { keepDisclosureOnCaption } from '../../src/utils/post-disclosure';
+import { requesterNamesForJobIds } from '../../src/utils/requested-by';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -126,6 +127,8 @@ export default withLambda(async (event) => {
                 isAutonomous: scheduledPosts.isAutonomous, failureReason: scheduledPosts.failureReason,
                 // The chip's "Revised" badge read a field nothing sent, so it never showed.
                 isRevised: sql<boolean>`${scheduledPosts.revisedFromPostId} is not null`,
+                // For "Requested by [assistant]" beside "Created by" (src/utils/requested-by.ts). Not sent.
+                jobId: scheduledPosts.jobId,
             };
             const [rows, awaiting] = await Promise.all([
                 db.select(calendarColumns).from(scheduledPosts)
@@ -141,12 +144,16 @@ export default withLambda(async (event) => {
             ]);
             // A failed post carries its plain-English cause, so the chip can say WHY without the
             // owner opening it — the same diagnosis the Review card shows.
-            const posts = rows.map((p) => p.status !== 'failed' ? p : {
-                ...p,
-                failure: diagnosePostFailure(
-                    p.failureReason as Parameters<typeof diagnosePostFailure>[0],
-                    PLATFORM_FORMATS[p.platform as keyof typeof PLATFORM_FORMATS]?.label || 'The platform',
-                ),
+            const requesters = user.organisationId != null ? await requesterNamesForJobIds(db, user.organisationId, rows.map((p) => p.jobId)) : new Map<string, string>();
+            const posts = rows.map(({ jobId, ...p }) => {
+                const withReq = { ...p, requestedBy: (jobId ? requesters.get(jobId) : undefined) ?? null };
+                return p.status !== 'failed' ? withReq : {
+                    ...withReq,
+                    failure: diagnosePostFailure(
+                        p.failureReason as Parameters<typeof diagnosePostFailure>[0],
+                        PLATFORM_FORMATS[p.platform as keyof typeof PLATFORM_FORMATS]?.label || 'The platform',
+                    ),
+                };
             });
 
             return { statusCode: 200, body: JSON.stringify({ posts, awaiting }) };

@@ -1866,6 +1866,7 @@ function _listRow(group) {
                 ${platStrip}
                 <span class="text-xs font-bold text-gray-500">${time}</span>
                 ${post.isAutonomous ? `<span class="text-[10px] font-bold text-violet-700 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded-full">Created by ${_escHtml(post.assistantId != null ? _assistantName(post.assistantId) : 'your assistant')}</span>` : ''}
+                ${(members.find(m => m.requestedBy) || post).requestedBy ? `<span class="text-[10px] font-bold text-violet-700 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded-full">Requested by ${_escHtml((members.find(m => m.requestedBy) || post).requestedBy)}</span>` : ''}
             </div>
             <p class="text-sm text-gray-600 truncate">${_escHtml((post.caption || '').substring(0, 120) || '(No caption)')}</p>
             ${post.hashtags ? `<p class="text-xs text-blue-500 mt-1 truncate">${_escHtml(post.hashtags.substring(0, 80))}</p>` : ''}

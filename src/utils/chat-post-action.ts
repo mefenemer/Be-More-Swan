@@ -1,6 +1,6 @@
 // src/utils/chat-post-action.ts
 // The Social Media chat's hands on posts that ALREADY exist: approve, reject, try a failed one
-// again, move one to another time, and remove one nobody wants.
+// again, move one to another time, remove one nobody wants, and make one shorter or longer.
 //
 // ── Why ──────────────────────────────────────────────────────────────────────────────────────────
 // Every capability is meant to be reachable from the GUI and from chat, through the same server
@@ -15,7 +15,8 @@
 // the model said about the post with what is actually true (its platforms, status, time, wording).
 // The card in disruptive-ui-registry.js shows those facts; only the user's click acts, and the click
 // calls the SAME endpoints the Posts tab does (approve-post, reject-post, retry-failed-post,
-// reschedule-post-chat, scheduled-posts DELETE for remove), so every gate those apply — a disconnected account, an open compliance
+// reschedule-post-chat, scheduled-posts DELETE for remove, rewrite-post-text + scheduled-posts PATCH
+// for shorter / longer — the post editor's own two buttons), so every gate those apply — a disconnected account, an open compliance
 // warning, a time in the past — applies here too. Nothing here writes.
 //
 // A cross-post is one post on several platforms, one row each. The Posts tab acts on the whole
@@ -30,7 +31,7 @@ import { scheduledPosts } from '../../db/schema';
 type Db = ReturnType<typeof getDb>;
 
 export const POST_ACTION_PROPOSAL_TYPE = 'post_action_proposal';
-export const POST_ACTIONS = ['approve', 'reject', 'retry', 'reschedule', 'remove'] as const;
+export const POST_ACTIONS = ['approve', 'reject', 'retry', 'reschedule', 'remove', 'shorter', 'longer'] as const;
 export type PostAction = typeof POST_ACTIONS[number];
 
 /** Which rows each action applies to — the statuses its endpoint accepts. */
@@ -47,6 +48,10 @@ const ACTIONABLE: Record<PostAction, readonly string[]> = {
     // scheduled-posts DELETE (the Review tab's Remove): anything not yet out. 'publishing' is left
     // off — it is mid-send, and the bulk path refuses it too.
     remove: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'paused', 'paused_credits', 'failed'],
+    // rewrite-post-text + scheduled-posts PATCH, which refuses only a published post. 'publishing'
+    // is left off: it is mid-send, and changing the words now would race the publisher.
+    shorter: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'paused', 'paused_credits', 'failed'],
+    longer: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'paused', 'paused_credits', 'failed'],
 };
 
 /** Said on the card when the post is not in a state the action applies to. */
@@ -56,6 +61,8 @@ const NOT_NOW: Record<PostAction, string> = {
     retry: 'Only a post that failed to publish can be tried again.',
     reschedule: 'This post can’t be moved: it has gone out, failed, or is publishing right now. A failed post is tried again instead — ask to try it again at the time you want.',
     remove: 'This post can’t be removed: it has already gone out, is publishing right now, or was already removed or rejected.',
+    shorter: 'This post’s words can’t be changed now: it has already gone out, is publishing, or was removed or rejected.',
+    longer: 'This post’s words can’t be changed now: it has already gone out, is publishing, or was removed or rejected.',
 };
 
 const TEXT_MAX = 200;
