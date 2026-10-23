@@ -6705,7 +6705,15 @@ async function loadSystemStatus() {
     </div>`;
   })();
 
-  panel.innerHTML = readinessBanner + data.services.map(s => `
+  // The Node version these functions are executing on right now — Netlify picks the patch
+  // release, so this is the only place to read it when a security advisory names versions.
+  const rt = data.runtime;
+  const runtimeLine = !rt?.node ? '' : `<div class="rounded-xl border border-gray-200 bg-white p-4 mb-4">
+      <p class="text-sm text-gray-700"><span class="font-semibold">Functions run on Node <span class="font-mono">${rt.node}</span></span> in ${env}.</p>
+      ${rt.pinnedMatches === false ? `<p class="text-xs mt-1 text-amber-700">⚠ Does not match the pinned NODE_VERSION ${rt.pinned} in netlify.toml.</p>` : ''}
+    </div>`;
+
+  panel.innerHTML = readinessBanner + runtimeLine + data.services.map(s => `
     <div class="bg-white border border-gray-200 rounded-xl p-4">
       <div class="flex items-start justify-between gap-3 mb-3 flex-wrap">
         <div class="min-w-0">
