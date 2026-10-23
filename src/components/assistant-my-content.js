@@ -36,7 +36,7 @@
     const header = host.querySelector('#mc-header');
     if (header) { header.classList.remove('justify-between', 'mb-8'); header.classList.add('justify-end', 'mb-4'); }
     const page = host.firstElementChild;
-    if (page) { page.classList.remove('py-10', 'max-w-5xl', 'px-4', 'sm:px-6', 'lg:px-8'); page.classList.add('pt-2'); }
+    if (page) { page.classList.remove('py-10', 'page-wide'); page.classList.add('pt-2'); }
   }
 
   // The assistant whose page this is — names its media in the source badges ("Created by Ava")

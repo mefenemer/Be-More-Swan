@@ -5644,3 +5644,15 @@ button:not(:disabled), [role="button"]:not([aria-disabled="true"]), summary {
     .phone-hidden { display: none !important; }
   }
 }
+
+/* .page-wide — the ONE page width in the workspace (owner, 2026-10-23): 1360px, centred, 16px sides
+   on a phone and 24px from sm up — the same box as Blog Studio's full page (.bs-page in
+   blog-studio-modal.js). Every routed page's outer wrapper uses it; tests/page-width.test.ts pins
+   the list. Exceptions: Getting Started + Assistant Setup (narrow, step-by-step) and Calendar /
+   Review / the post editor (full width). Forms and long text keep a reading width INSIDE it.
+   Vertical padding stays on the page's own utilities. Hand-copied into style.css (no full
+   rebuild — see tailwind-rebuild-drift); change both together. */
+@layer components {
+  .page-wide { width: 100%; max-width: 1360px; margin-left: auto; margin-right: auto; padding-left: 1rem; padding-right: 1rem; }
+  @media (min-width: 640px) { .page-wide { padding-left: 1.5rem; padding-right: 1.5rem; } }
+}
