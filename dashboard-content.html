@@ -64,25 +64,6 @@
     <section id="needs-you" class="ny-wrap" style="display:none" aria-label="Waiting for you"></section>
 
     <!-- ════════════════════════════════════════════════════════════════════
-         Your team (layout review, 2026-10-22). One line per assistant, near the top — the full
-         cards sat below the hero, heatmap and widgets and repeated My Assistants. Rendered by
-         fetchAndRenderAssistants in ROSTER mode (data-render, read on every re-render, including
-         workspace.html's and the provisioning poll's). With no working assistant yet it holds the
-         first-hire card, and #dash-root gets .dash-first-visit (styles below).
-         ════════════════════════════════════════════════════════════════════ -->
-    <section id="dash-team" class="mb-10" aria-labelledby="dash-team-title">
-      <div class="dash-team-head">
-        <h2 id="dash-team-title" class="dash-team-title">Your team</h2>
-        <button type="button" class="dw-link dash-team-all" onclick="window.loadView && window.loadView('assistants')">All assistants →</button>
-      </div>
-      <div id="dashboard-assistants-grid" data-render="roster" class="flex flex-col gap-4">
-        <div class="py-8 text-center text-gray-500 font-medium bg-white rounded-2xl border border-gray-100 shadow-sm animate-pulse">
-          Checking in with your team...
-        </div>
-      </div>
-    </section>
-
-    <!-- ════════════════════════════════════════════════════════════════════
          US-DASH-1: "Wow" Metrics + Activity Heatmap (Swan Command Center)
          AC1 animated Hours Saved / Tasks Handled · AC2 Estimated Money Saved
          · AC3 24/7 activity heatmap. Driven by roi-stats + dashboard-heatmap.
@@ -152,6 +133,25 @@
           <div id="cc-heatmap" class="cc-heatmap" aria-label="Assistant activity by day and hour"><div class="cc-hm-skel"></div></div>
           <p id="cc-heatmap-caption" class="cc-heatmap-caption">Loading activity…</p>
         </details>
+      </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         Your team (layout review, 2026-10-22). One line per assistant, near the top — the full
+         cards sat below the hero, heatmap and widgets and repeated My Assistants. Rendered by
+         fetchAndRenderAssistants in ROSTER mode (data-render, read on every re-render, including
+         workspace.html's and the provisioning poll's). With no working assistant yet it holds the
+         first-hire card, and #dash-root gets .dash-first-visit (styles below).
+         ════════════════════════════════════════════════════════════════════ -->
+    <section id="dash-team" class="mb-10" aria-labelledby="dash-team-title">
+      <div class="dash-team-head">
+        <h2 id="dash-team-title" class="dash-team-title">Your team</h2>
+        <button type="button" class="dw-link dash-team-all" onclick="window.loadView && window.loadView('assistants')">All assistants →</button>
+      </div>
+      <div id="dashboard-assistants-grid" data-render="roster" class="flex flex-col gap-4">
+        <div class="py-8 text-center text-gray-500 font-medium bg-white rounded-2xl border border-gray-100 shadow-sm animate-pulse">
+          Checking in with your team...
+        </div>
       </div>
     </section>
 

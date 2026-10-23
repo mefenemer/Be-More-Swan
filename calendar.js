@@ -762,6 +762,83 @@ async function _loadAndRender({ fromCache = false } = {}) {
     if (!_loadError) _prefetchNext();
 }
 
+// ── The assistant picker ─────────────────────────────────────────────────────────────────────────
+// Looks like the header's assistant quick switcher (workspace.html): a colour tile with the
+// assistant's letter, its name, and its role underneath — the tile is the colour its chips wear on
+// the grid, so the picker doubles as the key. The fragment is re-injected on every view entry, so
+// the button/panel handlers bind per element (dataset.bound); the close-on-outside-click and Escape
+// listeners bind ONCE, on document.
+function _assistantPickerOpen(open) {
+    const panel = document.getElementById('cal-assistant-filter-panel');
+    const btn = document.getElementById('cal-assistant-filter-btn');
+    if (!panel || !btn) return;
+    panel.classList.toggle('hidden', !open);
+    panel.style.display = open ? '' : 'none';
+    btn.setAttribute('aria-expanded', String(open));
+}
+
+function _paintAssistantPicker() {
+    const btn = document.getElementById('cal-assistant-filter-btn');
+    const list = document.getElementById('cal-assistant-filter-list');
+    if (!btn || !list) return;
+    const C = window.AssistantColors;
+    const tile = (a) => {
+        const color = a ? (C ? C.colorFor(a.id, a.avatarColor) : _assistantColor(a.id)) : null;
+        const letter = a ? (C ? C.letterFor(a.id, a.name, a.avatarLetter) : String(a.name || 'A')[0]) : '';
+        return a
+            ? { style: `background:${color}`, html: _escHtml(letter) }
+            // "All": a neutral tile with the team icon, so the row lines up with the others.
+            : { style: 'background:#e5e7eb;color:#4b5563', html: '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>' };
+    };
+    const current = _assistants.find(a => String(a.id) === String(_assistantFilter)) || null;
+    const t = tile(current);
+    const sw = document.getElementById('cal-assistant-filter-swatch');
+    if (sw) { sw.setAttribute('style', t.style); sw.innerHTML = t.html; }
+    const label = document.getElementById('cal-assistant-filter-label');
+    if (label) label.textContent = current ? (current.name || ('Assistant #' + current.id)) : 'All assistants';
+
+    const row = (a) => {
+        const value = a ? String(a.id) : 'all';
+        const on = String(_assistantFilter) === value;
+        const tt = tile(a);
+        return `<button type="button" role="option" aria-selected="${on}" data-cal-assistant="${_escHtml(value)}"
+            class="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-gray-50 cursor-pointer ${on ? 'bg-gray-50' : ''}">
+            <span class="w-8 h-8 rounded-lg text-white flex items-center justify-center text-sm font-bold shrink-0" style="${tt.style}">${tt.html}</span>
+            <span class="min-w-0 flex-1">
+              <span class="block text-sm font-bold text-gray-900 truncate">${a ? _escHtml(a.name || ('Assistant #' + a.id)) : 'All assistants'}</span>
+              <span class="block text-xs text-gray-500 truncate">${a ? _escHtml(a.role || '') : 'Everything on your calendar'}</span>
+            </span>
+            ${on ? '<svg class="w-4 h-4 text-gray-700 shrink-0" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>' : ''}
+          </button>`;
+    };
+    const sorted = [..._assistants].sort((x, y) => String(x.name || '').localeCompare(String(y.name || '')));
+    list.innerHTML = row(null) + sorted.map(row).join('');
+
+    if (!btn.dataset.bound) {
+        btn.dataset.bound = '1';
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const panel = document.getElementById('cal-assistant-filter-panel');
+            _assistantPickerOpen(!!panel && panel.classList.contains('hidden'));
+        });
+        list.addEventListener('click', (e) => {
+            const pick = e.target.closest('[data-cal-assistant]');
+            if (!pick) return;
+            _assistantFilter = pick.getAttribute('data-cal-assistant');
+            _assistantPickerOpen(false);
+            _paintAssistantPicker();
+            _syncFilterToggle();
+            _render();
+        });
+    }
+}
+
+if (!window._calAssistantPickerDocBound) {
+    window._calAssistantPickerDocBound = true;
+    document.addEventListener('click', (e) => { if (!e.target.closest?.('#cal-assistant-filter')) _assistantPickerOpen(false); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') _assistantPickerOpen(false); });
+}
+
 // Populate the assistant + platform filter dropdowns and colour legend.
 function _renderAssistantControls() {
     const sel = document.getElementById('cal-assistant-filter');
@@ -771,13 +848,7 @@ function _renderAssistantControls() {
             sel.classList.add('hidden');
         } else {
             sel.classList.remove('hidden');
-            sel.innerHTML = `<option value="all">All assistants</option>` +
-                _assistants.map(a => `<option value="${a.id}">${_escHtml(a.name || ('Assistant #' + a.id))}</option>`).join('');
-            sel.value = String(_assistantFilter);
-            if (!sel.dataset.bound) {
-                sel.dataset.bound = '1';
-                sel.addEventListener('change', () => { _assistantFilter = sel.value; _syncFilterToggle(); _render(); });
-            }
+            _paintAssistantPicker();
         }
     }
 

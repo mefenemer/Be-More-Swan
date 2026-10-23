@@ -46,6 +46,20 @@ export interface SyndicatablePost {
     generationReason?: string | null;
 }
 
+/**
+ * Remove the body's own leading "# Heading" line.
+ *
+ * Drafts open with the title as an H1 (the drafting worker writes it, and older posts kept it), and
+ * every destination ALSO receives the title in its own field — LinkedIn prints it as the first line
+ * of the share, WordPress/Ghost/Dev.to as the post title. The result was the headline twice in a
+ * row. The widget and the /b/:key/:slug permalink already drop the rendered <h1> for the same
+ * reason (stripLeadingH1); this is the syndicated copy's equivalent. Anchored to the START, so an
+ * H1 the author uses mid-article is left alone.
+ */
+export function stripLeadingTitleHeading(markdown: string): string {
+    return String(markdown || '').replace(/^\s*#[ \t]+[^\n]*(\n+|$)/, '');
+}
+
 /** Project a published blog_posts row into the text-only payload adapters consume, or null if empty. */
 // Async only because rendering reaches `marked` through a dynamic import — see markdown-render.ts.
 export async function projectPost(
@@ -56,7 +70,7 @@ export async function projectPost(
     // presigned/expiring and Pexels is hotlink-only, so external platforms receive no media rather
     // than links that 404 or breach a licence. bodyHtml is derived from the SAME stripped source
     // because the HTML adapters (WordPress/Ghost/WordPress.com) send `bodyHtml || bodyMarkdown`.
-    const stripped = await stripMediaForSyndication(post.bodyMarkdown || '');
+    const stripped = stripLeadingTitleHeading(await stripMediaForSyndication(post.bodyMarkdown || ''));
     if (!stripped.trim()) return null;
 
     // AI transparency (EU AI Act Art. 50). The widget and the /b/:key/:slug permalink both badge a

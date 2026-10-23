@@ -132,11 +132,12 @@ check('every Cancel on Audience is a .btn-secondary', () => {
     for (const b of cancels) assert.ok(b.includes('btn-secondary'), b);
 });
 
-check('Dashboard: the team is a one-line roster right under Needs you, not full cards at the bottom', () => {
+check('Dashboard: the value hero, then the team as a one-line roster, not full cards at the bottom', () => {
     const ny = dash.indexOf('<section id="needs-you"');
     const team = dash.indexOf('<section id="dash-team"');
     const hero = dash.indexOf('<section id="command-center-hero"');
-    assert.ok(ny > 0 && team > ny && hero > team, 'Needs you → Your team → value hero');
+    // Owner 2026-10-23: the value the team created comes first, the roster under it.
+    assert.ok(ny > 0 && hero > ny && team > hero, 'Needs you → value hero → Your team');
     assert.ok(dash.includes('<div id="dashboard-assistants-grid" data-render="roster"'), 'roster mode is on the container, so id-only re-renders keep it');
     assert.strictEqual(dash.split('id="dashboard-assistants-grid"').length, 2, 'one team grid only');
     assert.ok(cards.includes("if (opts.roster || container.dataset.render === 'roster') {"));

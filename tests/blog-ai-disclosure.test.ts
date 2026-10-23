@@ -77,7 +77,8 @@ function page(over: { aiAssisted: boolean; badgeEnabled: boolean }) {
     // ── syndicated copies ────────────────────────────────────────────────────
     console.log('\nsyndication\n');
 
-    const body = '# Title\n\nReal prose the author wrote.';
+    // No leading H1: projectPost drops that on purpose (every destination prints the title itself).
+    const body = 'Real prose the author wrote.\n\n# A heading mid-article\n\nMore prose.';
 
     await checkAsync('an AI-drafted post carries the notice to external platforms', async () => {
         const p = await projectPost({ id: 1, title: 'T', bodyMarkdown: body, generationReason: ASSISTANT_DRAFT_REASON });

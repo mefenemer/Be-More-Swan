@@ -368,7 +368,7 @@ void (async () => {
         const projected = await projectPost({
             id: 1,
             title: 'Hello World',
-            bodyMarkdown: '# Hi\n\nBody text.',
+            bodyMarkdown: '# Hello World\n\nBody text.\n\n# Later\n\nMore.',
             canonicalUrl: 'https://blog.example.com/hello-world',
             tags: ['Web Dev', 'AI'],
             metaDescription: 'A short intro.',
@@ -376,8 +376,12 @@ void (async () => {
         });
         assert.ok(projected, 'a post with text projects');
         assert.equal(projected!.title, 'Hello World');
-        assert.equal(projected!.bodyMarkdown, '# Hi\n\nBody text.');
+        // The body's own leading H1 goes (every destination prints the title itself — LinkedIn
+        // showed it twice); a heading further down is the author's and stays.
+        assert.equal(projected!.bodyMarkdown, 'Body text.\n\n# Later\n\nMore.');
         assert.ok(/<h1[ >]/.test(projected!.bodyHtml || ''), 'bodyHtml is rendered from the markdown');
+        const share = buildLinkedInShare(projected!);
+        assert.ok(share.ok && share.text.split('Hello World').length === 2, 'the LinkedIn share names the title once');
         assert.equal(projected!.canonicalUrl, 'https://blog.example.com/hello-world');
         assert.deepEqual(projected!.tags, ['Web Dev', 'AI']);
         assert.equal(projected!.coverImageUrl, null, 'media is never handed to external platforms');

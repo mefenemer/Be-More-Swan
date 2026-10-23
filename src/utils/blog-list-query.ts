@@ -44,10 +44,25 @@ export async function listBlogFacets(db: any, orgId: number): Promise<BlogFacets
              GROUP BY 1 ORDER BY 1 DESC LIMIT 120`),
     ]);
     const rows = (r: any): any[] => (Array.isArray(r) ? r : r?.rows || []);
+    const allCategories = rows(tagRows).map((r) => ({ value: String(r.value), label: String(r.value), count: Number(r.count) }));
     return {
-        categories: rows(tagRows).map((r) => ({ value: String(r.value), label: String(r.value), count: Number(r.count) })),
+        categories: menuCategories(allCategories),
         months: rows(monthRows).map((r) => ({ value: String(r.value), label: monthLabel(String(r.value)), count: Number(r.count) })),
     };
+}
+
+/** Most categories the reader's menu lists. */
+export const MAX_MENU_CATEGORIES = 12;
+
+/**
+ * The categories worth a place in the reader's menu. Tags are written per post (blog-seo-generate),
+ * and a tag only one post carries is a label, not a category — a blog of twenty posts listed
+ * forty of them. Keep the shared ones (2+ posts, most-used first, capped); a young blog where
+ * nothing is shared yet keeps its top few so the menu is not simply empty.
+ */
+export function menuCategories<T extends { count: number }>(all: T[]): T[] {
+    const shared = all.filter((c) => c.count >= 2);
+    return (shared.length >= 2 ? shared : all).slice(0, MAX_MENU_CATEGORIES);
 }
 
 export interface PublishedPostSummary {

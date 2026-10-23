@@ -785,8 +785,21 @@
     }).catch(function () { /* tone is best-effort */ });
   }
 
+  // Split a body's own leading "# Heading" off. The title field IS the headline — every public
+  // surface prints it above the article — so showing the H1 as well read as the title twice, and
+  // the two drifted apart when only one was edited. The editor shows the body without it; the next
+  // autosave stores the body without it. A heading mid-article is the author's and is left alone.
+  function splitLeadingHeading(md) {
+    var m = String(md || '').match(/^\s*#[ \t]+([^\n]*)(\n+|$)/);
+    if (!m) return { heading: '', body: String(md || '') };
+    return { heading: m[1].trim(), body: String(md).slice(m[0].length) };
+  }
+
   // Reveal the editor workspace for a post (new or existing): mount the editor + side panels.
   function openWorkspace(postId, title, md, post) {
+    var split = splitLeadingHeading(md);
+    md = split.body;
+    if (split.heading && (!title || title === 'Untitled draft')) title = split.heading;
     // Whatever was being drafted, it isn't this post — and the busy lock belongs to the editor
     // being replaced.
     stopAiDraftPoll();
@@ -980,10 +993,15 @@
       // ⚠️ The rename has to LAND before the page underneath re-renders, or the list repaints
       // itself with the title it already had — "Untitled draft", the very thing that makes a
       // finished draft look unfinished.
+      // The draft's own headline (its leading H1) is a better title than the brief it was asked
+      // for, and it comes OUT of the body so the post is not titled twice.
+      var split = splitLeadingHeading(md);
+      md = split.body;
       var titled = Promise.resolve();
       if (!el('bs-title').value.trim() || el('bs-title').value.trim() === 'Untitled draft') {
-        el('bs-title').value = topic;
-        titled = api('save-blog-draft', { method: 'POST', body: JSON.stringify({ id: state.postId, title: topic }) });
+        var newTitle = split.heading || topic;
+        el('bs-title').value = newTitle;
+        titled = api('save-blog-draft', { method: 'POST', body: JSON.stringify({ id: state.postId, title: newTitle }) });
       }
       state.editor.setMarkdown(md);
       refreshReadout(md);                      // setMarkdown doesn't fire onChange

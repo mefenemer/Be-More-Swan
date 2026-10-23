@@ -51,11 +51,22 @@
         <option value="blog">Blog</option>
         <option value="newsletter">Email</option>
       </select>
-      <!-- #4: filter calendar to a single assistant's activity -->
-      <select id="cal-assistant-filter" aria-label="Show assistant"
-        class="tap-target max-w-full truncate text-sm font-semibold text-gray-700 border border-gray-300 rounded-lg px-3 py-1.5 bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-700">
-        <option value="all">All assistants</option>
-      </select>
+      <!-- #4: filter calendar to a single assistant's activity. A picker rather than a <select>
+           (2026-10-23) so each row shows the assistant's colour tile and role, like the header's
+           assistant quick switcher — the colour is what the chips on the grid are painted in.
+           Filled and bound by calendar.js (_renderAssistantControls). -->
+      <div id="cal-assistant-filter" class="relative max-w-full" data-no-i18n>
+        <button type="button" id="cal-assistant-filter-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Show assistant"
+          class="tap-target max-w-full flex items-center gap-2 text-sm font-semibold text-gray-700 border border-gray-300 rounded-lg pl-2 pr-3 py-1.5 bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-700">
+          <span id="cal-assistant-filter-swatch" class="w-5 h-5 rounded-md text-white flex items-center justify-center text-[11px] font-bold shrink-0" aria-hidden="true"></span>
+          <span id="cal-assistant-filter-label" class="truncate">All assistants</span>
+          <svg class="w-4 h-4 text-gray-400 shrink-0" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div id="cal-assistant-filter-panel" role="listbox" aria-label="Show assistant" style="display:none;max-width:calc(100vw - 2rem)"
+          class="hidden absolute right-0 z-40 mt-2 w-80 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden">
+          <div id="cal-assistant-filter-list" class="overflow-y-auto py-1" style="max-height:20rem"></div>
+        </div>
+      </div>
       </div>
       <!-- A segmented control: calendar.js sets aria-pressed and the look from the view on screen.
            Month and Week are hidden on a phone, where seven columns are ~48px each — which leaves only

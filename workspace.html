@@ -6214,7 +6214,7 @@ function _rqSetPendingBadge(n) {
 // once a Blog Writer is known to exist (the page's own gate), and as a count, never the list.
 async function _rqBlogReviewCount() {
     if (!_rqBlogWriterActive && typeof window.resolveBlogWriter === 'function') {
-        try { _rqBlogWriterActive = !!(await window.resolveBlogWriter()); } catch { /* non-blocking */ }
+        try { const bw = await window.resolveBlogWriter(); _rqBlogWriterActive = !!bw; _rqBlogWriterName = bw?.name || null; } catch { /* non-blocking */ }
     }
     if (!_rqBlogWriterActive) return 0;
     try {
@@ -6280,6 +6280,8 @@ const RQ_BLOG_GROUP = { key: 'blog', label: 'Blog posts', empty: 'No blog posts 
 const RQ_EMAIL_STATUSES = { review: ['pending_approval', 'in_review'], attention: ['failed'] };
 const RQ_EMAIL_GROUP = { key: 'email', label: 'Emails', empty: 'No emails here.', emptyReview: 'No emails waiting for your approval.' };
 let _rqBlogWriterActive = false;
+// The Blog Writer's own name, for the "Created by …" pill on an article card (as social cards have).
+let _rqBlogWriterName = null;
 
 let _rqCurrentStatus = 'review';
 const _rqGroupOpen = { posts: true, blog: true, email: true };
@@ -6374,7 +6376,7 @@ async function rqRenderGroups(statusKey, opts = {}) {
 
     // One-time gate: does the org have an active Blog Writer? (drives the Blog posts group).
     if (!_rqBlogWriterActive && typeof window.resolveBlogWriter === 'function') {
-        try { _rqBlogWriterActive = !!(await window.resolveBlogWriter()); } catch { /* non-blocking */ }
+        try { const bw = await window.resolveBlogWriter(); _rqBlogWriterActive = !!bw; _rqBlogWriterName = bw?.name || null; } catch { /* non-blocking */ }
     }
 
     let posts = [], blogPosts = [], emails = [], emailsShown = false;
@@ -6587,32 +6589,51 @@ function rqRepaintPostsGroup(statusKey) {
 // here, which scheduled a 1,000-word article for publication without anyone having read a word of
 // it. Review means opening the post; the decision buttons live in Blog Studio, next to the text.
 function rqRenderBlogCard(post) {
+    // Laid out like rqRenderSocialCard (review, 2026-10-23): the same state chip — "Needs your
+    // review" in the same amber — the same origin pill, a bold when-line, and a two-line taste of
+    // the text. Articles used to be a grey one-liner with the state buried in the meta text, so the
+    // To approve list read as two different kinds of thing waiting for two different decisions.
     const title = _rqEsc(post.title || 'Untitled draft');
+    const isArchived = post.status === 'rejected' || post.status === 'archived' || post.status === 'cancelled';
+    const fmt = (iso) => new Date(iso).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
     const when = post.publishedAt || post.publishDate;
-    const stamp = when ? new Date(when).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
-    const meta = when
-        ? (post.status === 'published' ? `Posted ${stamp}` : post.status === 'failed' ? `Was due ${stamp}`
-            : (RQ_BLOG_STATUSES.review || []).includes(post.status) ? `Suggested for ${stamp}` : `Goes out ${stamp}`)
-        : (post.updatedAt ? 'Updated ' + rqTimeAgo(post.updatedAt) : '');
+    const whenLine = isArchived || !when ? ''
+        : post.status === 'published' ? `Posted ${fmt(when)}`
+        : post.status === 'failed' ? `Was due ${fmt(when)}`
+        : (RQ_BLOG_STATUSES.review || []).includes(post.status) ? `Suggested for ${fmt(when)}`
+        : `Goes out ${fmt(when)}`;
+    const ago = post.updatedAt ? `updated ${rqTimeAgo(post.updatedAt)}` : '';
+    const origin = post.writtenByAssistant
+        ? `Created by ${_rqBlogWriterName || 'your assistant'}`
+        : (post.writtenByAssistant === false ? 'Written by you' : '');
+    const words = Number(post.wordCount) || 0;
+    const excerpt = typeof _rqBlogExcerpt === 'function' ? _rqBlogExcerpt(post.excerptSource) : '';
     // Why it failed, on the card — social cards already say; articles made you open each one.
     const failureLine = post.status === 'failed' && post.failureReason
         ? `<span class="block text-xs text-red-700 truncate mt-0.5">${_rqEsc(post.failureReason)}</span>`
         : '';
-    // The state in the words both pages use, never the raw value ("pending_approval").
-    const label = window.PlatformConstants?.postStatusLabel ? window.PlatformConstants.postStatusLabel(post.status) : post.status;
-    // Same gutter, tile size and chevron as a social row, so the three kinds line up in one list.
-    const approveBtn = '<svg class="w-4 h-4 text-gray-400 shrink-0" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>';
+    // The same chip table as a social post, so the colour and the words cannot drift apart.
+    const chip = _rqStateChip({ status: post.status });
+    const statusChip = `<span class="hidden sm:inline-flex shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border ${chip.cls}">${_rqEsc(chip.label)}</span>`;
+    const statusChipPhone = `<span class="sm:hidden inline-flex mt-1 text-[11px] font-bold px-2 py-0.5 rounded-full border ${chip.cls}">${_rqEsc(chip.label)}</span>`;
+    // ⚠️ No approve button: the row opens the post in Blog Studio (see the note above).
     return `<button type="button" onclick="window.openBlogStudio&&window.openBlogStudio({postId:${post.id}})"
         class="focus-ring w-full text-left flex items-center gap-3 py-3.5 cursor-pointer hover:bg-gray-50 -mx-4 px-4 transition">
         <span class="w-16 h-16 shrink-0 rounded-lg bg-pink-50 text-pink-600 flex items-center justify-center" aria-hidden="true">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
         </span>
-        <span class="flex-1 min-w-0">
-          <span class="block text-sm font-semibold text-gray-900 truncate">${title}</span>
-          <span class="block text-xs ${post.status === 'failed' ? 'text-red-700' : 'text-gray-600'} truncate">${_rqEsc(label)}${meta ? ' · ' + _rqEsc(meta) : ''}</span>
+        <span class="block flex-1 min-w-0">
+          <span class="flex items-center gap-2 mb-0.5 min-w-0">
+            <span class="text-sm font-semibold text-gray-900 truncate min-w-0">${title}</span>
+            ${origin && !isArchived ? `<span class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${RQ_ORIGIN_CLS}">${_rqEsc(origin)}</span>` : ''}
+          </span>
+          <span class="block text-xs truncate">${whenLine ? `<span class="font-semibold text-gray-800">${_rqEsc(whenLine)}</span><span class="text-gray-500"> · </span>` : ''}<span class="text-gray-500">Blog post${words ? ` · ${words.toLocaleString('en-GB')} words` : ''}${ago ? ` · ${_rqEsc(ago)}` : ''}</span></span>
+          ${excerpt ? `<span class="block text-sm text-gray-700 line-clamp-2 mt-0.5 ${isArchived ? 'line-through opacity-60' : ''}">${_rqEsc(excerpt)}</span>` : ''}
           ${failureLine}
+          ${statusChipPhone}
         </span>
-        ${approveBtn}
+        ${statusChip}
+        <svg class="w-4 h-4 text-gray-400 shrink-0" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
       </button>`;
 }
 
@@ -6725,6 +6746,8 @@ const RQ_STATE_CHIP = {
     failed:           { cls: 'bg-red-50 border-red-200 text-red-700',             label: 'Failed to post' },
     cancelled:        { cls: 'bg-gray-100 border-gray-200 text-gray-500',         label: 'Cancelled' },
     rejected:         { cls: 'bg-gray-100 border-gray-200 text-gray-500',         label: 'Archived' },
+    // A blog post's archive state (blog discard archives, never deletes) — the article card reads this table too.
+    archived:         { cls: 'bg-gray-100 border-gray-200 text-gray-500',         label: 'Archived' },
 };
 
 /**
