@@ -1,4 +1,4 @@
-<div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full pb-20 relative">
+<div class="page-wide py-10 pb-20 relative">
 
     <div class="mb-8">
         <h1 class="text-3xl font-extrabold text-gray-900">Account Settings</h1>
@@ -38,7 +38,7 @@
     </div>
 
     <!-- ══ Profile Information ════════════════════════════════════ -->
-    <div class="settings-tab-panel" data-panel="profile">
+    <div class="settings-tab-panel max-w-4xl" data-panel="profile">
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
                 <h3 class="text-lg font-bold text-gray-900">Profile Information</h3>
@@ -136,7 +136,7 @@
     </div>
 
     <!-- ══ Business Information (embedded from assets.html as a sub tab) ══ -->
-    <div class="settings-tab-panel hidden" data-panel="business">
+    <div class="settings-tab-panel hidden max-w-4xl" data-panel="business">
         <div id="business-panel-loading" class="text-sm text-gray-400 py-6">Loading…</div>
     </div>
 
@@ -225,7 +225,7 @@
     </div>
 
     <!-- ══ Sounds ════════════════════════════════════════════════ -->
-    <div class="settings-tab-panel hidden" data-panel="sounds">
+    <div class="settings-tab-panel hidden max-w-4xl" data-panel="sounds">
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
                 <h3 class="text-lg font-bold text-gray-900">Sounds</h3>
@@ -287,7 +287,7 @@
          the plain-language AI/data agreement, AI content acknowledgement). Doubles as a GDPR /
          EU AI Act consent record. Outward-facing disclosure SETTINGS deliberately live in the
          Agency tab + per-assistant Guardrails, not here. -->
-    <div class="settings-tab-panel hidden space-y-6" data-panel="agreements">
+    <div class="settings-tab-panel hidden space-y-6 max-w-4xl" data-panel="agreements">
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
                 <h3 class="text-lg font-bold text-gray-900">My Agreements</h3>
@@ -354,7 +354,7 @@
         </div>
     </div>
 
-    <div class="settings-tab-panel hidden space-y-8" data-panel="agency">
+    <div class="settings-tab-panel hidden space-y-8 max-w-4xl" data-panel="agency">
         <!-- ── US-AUD-5.3.1: Agency Attribution ─────────────────── -->
         <div id="agency-attribution-section" class="hidden bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
@@ -539,7 +539,7 @@
                 // the "Account Settings" header above, so drop that outer chrome here.
                 const wrapper = panel.firstElementChild;
                 if (wrapper) {
-                    wrapper.classList.remove('max-w-5xl', 'mx-auto', 'py-10', 'pb-20');
+                    wrapper.classList.remove('page-wide', 'py-10', 'pb-20');
                     wrapper.querySelector('h1')?.closest('.mb-8')?.remove();
                 }
                 // Re-execute inline <script> blocks (browsers do not run scripts set via innerHTML)

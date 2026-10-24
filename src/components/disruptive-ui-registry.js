@@ -2848,6 +2848,9 @@
     reschedule: { head: 'Move this post', button: 'Move it', busy: 'Moving…' },
     // "Remove": the editor's and the Review tab's word — no rule, no replacement.
     remove: { head: 'Remove this post', button: 'Remove', busy: 'Removing…' },
+    // The post editor's "Make it shorter" / "Make it longer", every platform of the post.
+    shorter: { head: 'Make this post shorter', button: 'Make it shorter', busy: 'Rewriting…' },
+    longer: { head: 'Make this post longer', button: 'Make it longer', busy: 'Rewriting…' },
   };
 
   function renderPostActionProposalCard(ui, esc) {
@@ -2882,6 +2885,7 @@
         </label>` : ''}
       ${!blocked && ui.action === 'approve' ? '<p class="text-xs text-gray-600 mt-3">It’s booked into a free slot in your posting schedule.</p>' : ''}
       ${!blocked && ui.action === 'remove' ? '<p class="text-xs text-gray-600 mt-3">It moves to Archived. Nothing is learned from it and no replacement is written.</p>' : ''}
+      ${!blocked && (ui.action === 'shorter' || ui.action === 'longer') ? `<p class="text-xs text-gray-600 mt-3">${ui.action === 'shorter' ? 'About half the length — same message, nothing new added.' : 'About half as long again — it develops what the post already says, with no invented facts.'} Each platform’s caption is rewritten and saved. It stays where it is in your queue.</p>` : ''}
       ${!blocked && ui.action === 'retry' && ui.when ? `<p class="text-sm text-gray-700 mt-3"><span class="font-bold">Try again at:</span> ${esc(ui.when)}</p>
         <p class="text-xs text-gray-500 mt-1">The exact time is worked out when you press the button, and said back to you here. If the same problem is still there, it will fail again.</p>` : ''}
       ${!blocked && ui.action === 'retry' && !ui.when ? '<p class="text-xs text-gray-600 mt-3">It goes back in the queue and publishes on the next run. If the same problem is still there, it will fail again — open the post to see why it stopped.</p>' : ''}
@@ -2938,6 +2942,9 @@
     reject: { head: 'Reject and redraft', button: 'Reject and redraft', busy: 'Rejecting…' },
     // "Remove": the Blogs tab's word — archived, no rule, no replacement.
     remove: { head: 'Remove this article', button: 'Remove', busy: 'Removing…' },
+    // Blog Studio's "Make it shorter" / "Make it longer".
+    shorter: { head: 'Make this article shorter', button: 'Make it shorter', busy: 'Rewriting — about a minute…' },
+    longer: { head: 'Make this article longer', button: 'Make it longer', busy: 'Rewriting — about a minute…' },
   };
 
   function renderBlogActionProposalCard(ui, esc) {
@@ -2965,6 +2972,7 @@
         ${ui.when ? `<p class="text-xs text-gray-500 mt-1">From “${esc(ui.when)}”. If that’s not the time you meant, press Not now and say it again.</p>` : ''}` : ''}
       ${!blocked && ui.action === 'approve' ? '<p class="text-xs text-gray-600 mt-3">Your assistant books it into the next free slot in its posting schedule. It goes live on your blog then, and to any platforms you’ve connected.</p>' : ''}
       ${!blocked && ui.action === 'unschedule' ? '<p class="text-xs text-gray-600 mt-3">It goes back to a draft in the "Review" column and won’t publish until it’s approved again.</p>' : ''}
+      ${!blocked && (ui.action === 'shorter' || ui.action === 'longer') ? `<p class="text-xs text-gray-600 mt-3">${ui.action === 'shorter' ? 'About a third shorter — same message, nothing new added.' : 'About half as long again — it develops what the article already says, with no invented facts.'} Pictures and links stay. The title, SEO and schedule don’t change.</p>` : ''}
       ${!blocked && ui.action === 'remove' ? '<p class="text-xs text-gray-600 mt-3">It moves to Archived. Nothing is learned from it and no replacement is written.</p>' : ''}
       ${!blocked && ui.action === 'reject' ? `
         <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-reason-${postId}">What’s wrong with it</label>

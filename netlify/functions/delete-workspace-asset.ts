@@ -15,6 +15,7 @@ import jwt from 'jsonwebtoken';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { userOrganisations, workspaceAssets } from '../../db/schema';
+import { recompileOrgBlueprints } from '../../src/utils/recompile-org-blueprints';
 import { keyBelongsToOrg } from '../../src/utils/storage-keys';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
@@ -94,6 +95,8 @@ export default withLambda(async (event) => {
     await db.update(workspaceAssets)
         .set({ status: 'deleted', deletedAt: new Date(), updatedAt: new Date() })
         .where(eq(workspaceAssets.id, assetId));
+    // A removed document must stop steering drafts now, not at the next unrelated recompile.
+    await recompileOrgBlueprints(db, asset.organisationId, 'business_knowledge_removed');
 
     return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
 });

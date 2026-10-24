@@ -18,6 +18,7 @@ import { ASSISTANT_DRAFT_REASON } from '../../src/utils/blog-ai-assisted';
 import { MAX_BODY_CHARS, MAX_TAGS, MAX_TAG_CHARS } from '../../src/utils/blog-chat-draft';
 import { requireTenant } from '../../src/utils/tenant';
 import { notStillGenerating } from '../../src/utils/blog-still-generating';
+import { requesterNamesForBlogPosts } from '../../src/utils/requested-by';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event: HandlerEvent) => {
@@ -125,7 +126,10 @@ export default withLambda(async (event: HandlerEvent) => {
             ))
             .orderBy(desc(blogPosts.updatedAt))
             .limit(200);
-        return { statusCode: 200, body: JSON.stringify({ posts }) };
+        // "Requested by [assistant]" when a Campaign Assistant ordered the article
+        // (src/utils/requested-by.ts) — the card's second pill. Null for the writer's own work.
+        const requesters = await requesterNamesForBlogPosts(db, ctx.organisationId, posts.map((p) => p.id));
+        return { statusCode: 200, body: JSON.stringify({ posts: posts.map((p) => ({ ...p, requestedBy: requesters.get(p.id) ?? null })) }) };
     }
 
     // ---- Create ----

@@ -357,7 +357,7 @@
     const visible = b.options.filter((o) => o.status !== 'rejected');
     const rejected = b.options.length - visible.length;
     const note = state.notes[b.id];
-    const meta = [purposeLabel(b.purpose), (Number(b.picturesNeeded) || 1) > 1 ? `${b.picturesNeeded} pictures` : '', b.aspectRatio, b.sources.map(sourceLabel).join(', '), b.dueDate ? `due ${b.dueDate}` : '', b.origin === 'chat' ? 'from chat' : '', b.origin === 'campaign' ? 'from a campaign' : '', b.origin === 'assistant' ? 'raised by your Social Media Assistant' : '']
+    const meta = [purposeLabel(b.purpose), (Number(b.picturesNeeded) || 1) > 1 ? `${b.picturesNeeded} pictures` : '', b.aspectRatio, b.sources.map(sourceLabel).join(', '), b.dueDate ? `due ${b.dueDate}` : '', b.origin === 'chat' ? 'from chat' : '', b.origin === 'campaign' && !b.requestedBy ? 'from a campaign' : '', b.origin === 'assistant' && !b.requestedBy ? 'raised by your Social Media Assistant' : '']
       .filter(Boolean).map(esc).join(' · ');
     const live = b.status !== 'cancelled';
     return `
@@ -366,6 +366,7 @@
           <div class="min-w-0">
             <p class="text-sm font-bold text-gray-900 break-words">${esc(b.title)}</p>
             <p class="text-xs text-gray-500 mt-0.5">${meta}</p>
+            ${b.requestedBy && window.rqRequestedPill ? `<div class="flex mt-1.5">${window.rqRequestedPill(b.requestedBy)}</div>` : ''}
           </div>
           ${chip(b)}
         </div>

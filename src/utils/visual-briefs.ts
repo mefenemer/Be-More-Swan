@@ -933,6 +933,9 @@ export interface BriefView {
     scheduledPostId: number | null;
     /** The campaign that commissioned this brief (Phase 3), or null. Its picture joins that campaign. */
     campaign: { id: number; objective: string } | null;
+    /** The assistant that ASKED for it — the Campaign Assistant, or the assistant whose post needs the
+     *  picture — for the card's "Requested by" pill (src/utils/requested-by.ts). Null when the owner did. */
+    requestedBy: string | null;
     options: Array<{
         id: number; round: number; source: string; status: string; url: string | null; width: number | null; height: number | null; mimeType: string | null;
         prompt: string | null; attributionName: string | null; attributionUrl: string | null; rejectReason: string | null; contentAssetId: number | null;
@@ -947,10 +950,25 @@ export async function listBriefs(db: Db, orgId: number, assistantId: number, lim
     if (!briefs.length) return [];
     const campaignIds = [...new Set(briefs.map((b) => b.campaignId).filter((x): x is number => !!x))];
     const objectives = new Map<number, string>();
+    // Who asked: the Campaign Assistant that runs the campaign, or the assistant whose post this
+    // picture is for. Current names, so a rename shows through.
+    const campaignRequester = new Map<number, string>();
     if (campaignIds.length) {
-        const rows = await db.select({ id: campaigns.id, objective: campaigns.objective }).from(campaigns)
+        const rows = await db.select({ id: campaigns.id, objective: campaigns.objective, assistantName: aiAssistants.name }).from(campaigns)
+            .leftJoin(aiAssistants, eq(aiAssistants.id, campaigns.aiAssistantId))
             .where(and(eq(campaigns.organisationId, orgId), inArray(campaigns.id, campaignIds)));
-        for (const c of rows) objectives.set(c.id, c.objective);
+        for (const c of rows) {
+            objectives.set(c.id, c.objective);
+            if (c.assistantName) campaignRequester.set(c.id, c.assistantName);
+        }
+    }
+    const postIds = [...new Set(briefs.map((b) => b.scheduledPostId).filter((x): x is number => !!x))];
+    const postRequester = new Map<number, string>();
+    if (postIds.length) {
+        const rows = await db.select({ id: scheduledPosts.id, assistantName: aiAssistants.name }).from(scheduledPosts)
+            .innerJoin(aiAssistants, eq(aiAssistants.id, scheduledPosts.assistantId))
+            .where(and(eq(scheduledPosts.organisationId, orgId), inArray(scheduledPosts.id, postIds)));
+        for (const r of rows) if (r.assistantName) postRequester.set(r.id, r.assistantName);
     }
     const opts = await db.select().from(visualBriefOptions)
         .where(and(eq(visualBriefOptions.organisationId, orgId), inArray(visualBriefOptions.briefId, briefs.map((b) => b.id))))
@@ -992,6 +1010,8 @@ export async function listBriefs(db: Db, orgId: number, assistantId: number, lim
             waitingOn: b.waitingOn,
             scheduledPostId: b.scheduledPostId,
             campaign: b.campaignId && objectives.has(b.campaignId) ? { id: b.campaignId, objective: objectives.get(b.campaignId)! } : null,
+            requestedBy: (b.campaignId ? campaignRequester.get(b.campaignId) : undefined)
+                ?? (b.scheduledPostId ? postRequester.get(b.scheduledPostId) : undefined) ?? null,
             options: byBrief.get(b.id) ?? [],
         };
     });

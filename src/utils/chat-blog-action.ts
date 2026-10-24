@@ -1,7 +1,8 @@
 // src/utils/chat-blog-action.ts
 // The Blog Writer chat's hands on articles that ALREADY exist: approve one (the assistant picks the
 // time), book one for a time the user names, take one off the schedule, reject one with a reason,
-// and remove one nobody wants (archived, as the Blogs tab's Remove does).
+// remove one nobody wants (archived, as the Blogs tab's Remove does), and make one shorter or longer
+// (Blog Studio's two buttons — generate-blog { resize }, src/utils/blog-resize.ts).
 //
 // ── Why ──────────────────────────────────────────────────────────────────────────────────────────
 // Every capability is meant to be reachable from the GUI and from chat, through the same server
@@ -32,7 +33,7 @@ import { blogPosts } from '../../db/schema';
 type Db = ReturnType<typeof getDb>;
 
 export const BLOG_ACTION_PROPOSAL_TYPE = 'blog_action_proposal';
-export const BLOG_ACTIONS = ['approve', 'schedule', 'unschedule', 'reject', 'remove'] as const;
+export const BLOG_ACTIONS = ['approve', 'schedule', 'unschedule', 'reject', 'remove', 'shorter', 'longer'] as const;
 export type BlogAction = typeof BLOG_ACTIONS[number];
 
 /** Which statuses each action applies to. Mirrors the Blogs tab's columns (assistants.js). */
@@ -48,6 +49,10 @@ const ACTIONABLE: Record<BlogAction, readonly string[]> = {
     reject: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled'],
     // blog-posts DELETE (archive): anything not live. Never 'publishing' — the bulk path refuses it.
     remove: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'failed', 'paused', 'rejected'],
+    // generate-blog { resize } refuses a live or publishing article (the published copy would not
+    // change) — so does the card.
+    shorter: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'failed', 'paused'],
+    longer: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'failed', 'paused'],
 };
 
 /** Said on the card when the article is not in a state the action applies to. */
@@ -57,6 +62,8 @@ const NOT_NOW: Record<BlogAction, string> = {
     unschedule: 'This article isn’t booked to publish, so there is no schedule to clear.',
     reject: 'This article can no longer be rejected — it has already gone out, or was already turned down or archived.',
     remove: 'This article can’t be removed: it is live, publishing right now, or already archived.',
+    shorter: 'This article can’t be rewritten now: it is live or publishing (unpublish it first), or it was turned down or archived.',
+    longer: 'This article can’t be rewritten now: it is live or publishing (unpublish it first), or it was turned down or archived.',
 };
 
 const TITLE_MAX = 200;

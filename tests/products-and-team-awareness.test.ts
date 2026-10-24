@@ -163,7 +163,8 @@ check('email campaigns keep product links (grounding would otherwise strip them)
 check('chat: every role gets products, the handoff call too', () => {
     const src = code('netlify/functions/chat-orchestrator.ts');
     // The Team thread joined the list (team-messages.ts, 2026-10-14); products and activity stay on every route.
-    assert.ok(/\[rolePrompt, rulesBlock, productsBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, scheduleBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock\]/.test(src), 'not on every route');
+    // Business Information's documents joined it 2026-10-23 (src/utils/business-knowledge.ts).
+    assert.ok(/\[rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, scheduleBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock\]/.test(src), 'not on every route');
     assert.ok(/buildRolePrompt\(\{[\s\S]{0,400}\}\) \+ \(productsBlock/.test(src), 'the handoff target writes without them');
 });
 

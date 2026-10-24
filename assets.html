@@ -1,8 +1,8 @@
-<div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full pb-20 relative">
+<div class="page-wide py-10 pb-20 relative">
 
   <div class="mb-8">
     <h1 class="text-3xl font-extrabold text-gray-900">Business Information</h1>
-    <p class="text-gray-500 mt-1">Tell us about your business and upload brand assets so your assistant works the way you do.</p>
+    <p class="text-gray-500 mt-1 max-w-3xl">Tell us about your business and upload brand assets so your assistant works the way you do.</p>
   </div>
 
   <!-- ── Tabbed navigation (mirrors My Account / Account Settings) ─────────── -->
@@ -35,7 +35,7 @@
   </div>
 
   <!-- ══ Business Profile ═══════════════════════════════════════════════════ -->
-  <div class="bizinfo-tab-panel" data-panel="profile">
+  <div class="bizinfo-tab-panel max-w-4xl" data-panel="profile">
   <!-- ── Business profile (assistant-facing context) ──────────────────────── -->
   <section class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8">
     <div class="mb-5">
@@ -637,7 +637,7 @@
        are their own tab, shown only to a business that takes bookings (offer-profile.ts); Hours &
        Location only to one that customers visit or book. Both tabs are ONE settings record
        (booking-settings.ts), driven by the one script at the end of the Bookings panel. -->
-  <div class="bizinfo-tab-panel hidden" data-panel="hours">
+  <div class="bizinfo-tab-panel hidden max-w-4xl" data-panel="hours">
   <section id="bh-section" class="mb-8">
     <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
       <h2 class="text-lg font-bold text-gray-900">Opening hours</h2>
@@ -668,7 +668,7 @@
   </section>
   </div><!-- /panel: hours -->
 
-  <div class="bizinfo-tab-panel hidden" data-panel="bookings">
+  <div class="bizinfo-tab-panel hidden max-w-4xl" data-panel="bookings">
   <section id="bk-section" class="mb-8">
     <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mb-6">
       <h2 class="text-lg font-bold text-gray-900">Booking rules</h2>
@@ -1028,7 +1028,7 @@
 
 
   <!-- ══ Legal & Billing ════════════════════════════════════════════════════ -->
-  <div class="bizinfo-tab-panel hidden" data-panel="legal">
+  <div class="bizinfo-tab-panel hidden max-w-4xl" data-panel="legal">
   <!-- ── Legal & billing details (single source of truth for invoices) ─────── -->
   <section id="billing-details-section" class="mb-8">
     <div class="mb-4">
@@ -1093,7 +1093,7 @@
   </div><!-- /panel: legal -->
 
   <!-- ══ Team Members ═══════════════════════════════════════════════════════ -->
-  <div class="bizinfo-tab-panel hidden" data-panel="team">
+  <div class="bizinfo-tab-panel hidden max-w-4xl" data-panel="team">
   <!-- ── Team Members (moved here from the side menu) ─────────────────────── -->
   <section id="team-management-root" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8">
     <div class="flex items-start justify-between mb-4 gap-4 flex-wrap">

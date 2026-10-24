@@ -3994,14 +3994,29 @@ function _rqBlogExcerpt(src) {
     return text.length > 160 ? `${text.slice(0, 160).replace(/\s+\S*$/, '')}…` : text;
 }
 
+/**
+ * "Created by [writer]" and, when another assistant asked for the work, "Requested by [assistant]" —
+ * the same two pills as a social card (rqRenderSocialCard / rqRequestedPill in workspace.html),
+ * for the blog and email cards on this tab. '' when there is neither.
+ */
+function _rqOriginPills(createdBy, requestedBy) {
+    const cls = 'text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700';
+    const created = createdBy ? `<span class="${cls}">${_rqEsc(`Created by ${createdBy}`)}</span>` : '';
+    const requested = typeof window.rqRequestedPill === 'function' ? window.rqRequestedPill(requestedBy) : '';
+    return created || requested ? `<div class="flex flex-wrap items-center gap-1.5 mt-2">${created}${requested}</div>` : '';
+}
+
 function _detailRqBlogCard(p, statusKey) {
     const note = statusKey === 'attention' ? _RQ_BLOG_ATTENTION_NOTE[p.status] : null;
     const excerpt = _rqBlogExcerpt(p.excerptSource);
     const words = Number(p.wordCount) || 0;
+    // Who wrote it is a pill now (with "Requested by" beside it when another assistant asked), as on
+    // a social card; the byline keeps "Written by you" and the length.
     const byline = [
-        p.writtenByAssistant ? `Written by ${window._currentAssistantName || 'your assistant'}` : (p.writtenByAssistant === false ? 'Written by you' : ''),
+        p.writtenByAssistant === false ? 'Written by you' : '',
         words ? `${words.toLocaleString('en-GB')} words` : '',
     ].filter(Boolean).join(' · ');
+    const pills = _rqOriginPills(p.writtenByAssistant ? (window._currentAssistantName || 'your assistant') : null, p.requestedBy);
     const when = p.publishDate
         ? `${p.status === 'failed' ? 'was due' : 'scheduled'} ${new Date(p.publishDate).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
         : (p.updatedAt ? `updated ${new Date(p.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : '');
@@ -4020,6 +4035,7 @@ function _detailRqBlogCard(p, statusKey) {
           <span class="text-[11px] font-bold px-2 py-0.5 rounded-full border ${p.status === 'failed' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-gray-100 text-gray-600 border-gray-200'}">${_rqEsc(_RQ_BLOG_STATUS_LABEL[p.status] || p.status)}</span>
           ${when ? `<span class="text-[11px] font-semibold text-gray-500">${_rqEsc(when)}</span>` : ''}
         </div>
+        ${pills}
         ${p.status === 'failed' && p.failureReason ? `<p class="text-xs text-amber-800 mt-2 break-words"><span class="font-bold">Why:</span> ${_rqEsc(p.failureReason)}</p>` : ''}
         ${note ? `<p class="text-xs text-gray-600 mt-2">${_rqEsc(note)}</p>` : ''}
         ${select ? _rqBlogActions(p, statusKey) : ''}
@@ -4177,6 +4193,7 @@ function _detailRqNewsletterCard(issue, statusKey) {
           <span class="text-[11px] font-bold px-2 py-0.5 rounded-full border ${issue.status === 'failed' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-gray-100 text-gray-600 border-gray-200'}">${_rqEsc(_RQ_NEWSLETTER_STATUS_LABEL[issue.status] || issue.status)}</span>
           ${when ? `<span class="text-[11px] font-semibold text-gray-500">${_rqEsc(when)}</span>` : ''}
         </div>
+        ${_rqOriginPills((issue.generationReason || issue.isAutonomous) ? (issue.assistantName || window._currentAssistantName || 'your assistant') : null, issue.requestedBy)}
         ${issue.status === 'sent' ? _rqNewsletterResults(issue) : ''}
       </div>
       ${_rqNewsletterActions(issue, statusKey)}

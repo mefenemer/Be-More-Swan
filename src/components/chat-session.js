@@ -787,6 +787,24 @@
           if (!res.ok) throw new Error(data.error || `That didn’t work (HTTP ${res.status}).`);
           if (!(data.cancelledIds || []).length) throw new Error('It had already gone out or been removed.');
           message = 'Removed — it’s in the "Archived" column.';
+        } else if (d.action === 'shorter' || d.action === 'longer') {
+          // The post editor's two buttons, per platform: rewrite-post-text writes the new caption,
+          // the editor's own PATCH saves it. A rewrite over a platform's limit is NOT saved — the
+          // editor refuses to truncate mid-sentence, and so does this.
+          const over = [];
+          for (const id of ids) {
+            const r = await postActionCall('rewrite-post-text', { postId: id, action: d.action });
+            if (r.overLimit) { over.push(id); continue; }
+            const res = await fetch(`/.netlify/functions/scheduled-posts?id=${id}`, {
+              method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+              body: JSON.stringify({ caption: r.caption }),
+            });
+            if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `That didn’t work (HTTP ${res.status}).`);
+          }
+          const what = d.action === 'shorter' ? 'Shorter' : 'Longer';
+          message = over.length === ids.length
+            ? 'The new version ran past the platform’s limit, so nothing was changed. Open the post to edit it by hand.'
+            : `${what} — saved.${over.length ? ` ${over.length} platform${over.length === 1 ? '' : 's'} kept the old wording: the new one ran past that platform’s limit.` : ''} Open the post to read it.`;
         } else {
           throw new Error('Unknown action.');
         }
@@ -834,6 +852,25 @@
           if (!res.ok) throw new Error(data.error || `That didn’t work (HTTP ${res.status}).`);
           if (!(data.archivedIds || []).length) throw new Error('It is live, publishing, or already archived.');
           message = 'Removed — it’s in the "Archived" column.';
+        } else if (d.action === 'shorter' || d.action === 'longer') {
+          // Blog Studio's buttons: the same queued resize job, polled until it lands (about a minute).
+          const q = await postActionCall('generate-blog', { blogPostId: d.postId, resize: d.action });
+          const started = Date.now();
+          let job = null;
+          while (Date.now() - started < 180000) {
+            await new Promise((r) => setTimeout(r, Date.now() - started < 15000 ? 2000 : 5000));
+            const res = await fetch(`/.netlify/functions/generate-blog?jobId=${encodeURIComponent(q.jobId)}`, { credentials: 'same-origin' });
+            if (!res.ok) continue;
+            job = await res.json().catch(() => null);
+            if (job && (job.status === 'completed' || job.status === 'failed')) break;
+          }
+          if (!job || job.status === 'queued' || job.status === 'processing') {
+            message = 'Still rewriting — open the article in Blog Studio in a minute to read the new version.';
+          } else if (job.status === 'failed') {
+            throw new Error(job.errorMessage || 'That didn’t work. Your article is unchanged.');
+          } else {
+            message = `${d.action === 'shorter' ? 'Shorter' : 'Longer'} — saved. Open it in Blog Studio to read it.`;
+          }
         } else {
           throw new Error('Unknown action.');
         }

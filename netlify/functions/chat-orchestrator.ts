@@ -59,6 +59,7 @@ import { HANDOFF_TARGETS } from '../../src/utils/site-audit-prompts';
 
 const HANDOFF_TARGETS_PROMPT = HANDOFF_TARGETS.map((t) => `"${t}"`).join(' | ');
 import { loadProductsBlock } from '../../src/utils/org-products';
+import { loadBusinessKnowledgeBlock } from '../../src/utils/business-knowledge';
 import { buildTeamActivityBlock } from '../../src/utils/team-activity';
 import { buildBlogSnapshot, buildEmailsSnapshot, buildPostsSnapshot } from '../../src/utils/content-snapshot';
 import { postActionFromUiElement, resolvePostActionProposal, type PostActionCard } from '../../src/utils/chat-post-action';
@@ -698,7 +699,7 @@ function socialSurfaces(): string {
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
-EXISTING POSTS — you can act on the posts listed below, each named by its "#" number, in five ways: approve one waiting in "Review" (it is booked into a posting slot), reject and redraft one (say what is wrong; a replacement is written, and the user can also keep the reason as a rule), try again one in "Needs attention" (it goes back in the queue and publishes on the next run — or at a time they name, given as "when"), move one in "Review" or "Scheduled" to another time, or remove one they simply don't want (it moves to "Archived"; nothing is learned and no replacement is written — if it is wrong rather than unwanted, offer reject and redraft instead). To do any of them, emit a post_action_proposal naming the post's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say a post HAS been approved, rejected, retried, moved or removed — say the card is there to confirm. One post per reply. If you cannot tell which post they mean, ask, quoting the candidates. If a post has open compliance warnings ("↳" under it), name them before offering to approve it: the card cannot accept warnings for the user, so its click will be refused and they will need to open the post in the "Posts" tab and settle or accept the warnings there. You cannot edit an existing post's words or publish one immediately: for those, tell them which column of the "Posts" tab it is in so they can open it there. To remove several at once, they can tick them in the "Review" column and press Remove. You CAN write a new version as a fresh draft if they want one.`;
+EXISTING POSTS — you can act on the posts listed below, each named by its "#" number, in six ways: approve one waiting in "Review" (it is booked into a posting slot), reject and redraft one (say what is wrong; a replacement is written, and the user can also keep the reason as a rule), try again one in "Needs attention" (it goes back in the queue and publishes on the next run — or at a time they name, given as "when"), move one in "Review" or "Scheduled" to another time, remove one they simply don't want (it moves to "Archived"; nothing is learned and no replacement is written — if it is wrong rather than unwanted, offer reject and redraft instead), or make one shorter or longer (action "shorter" or "longer" — every platform's caption is rewritten to the new length and saved; it keeps its place in the queue). To do any of them, emit a post_action_proposal naming the post's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say a post HAS been approved, rejected, retried, moved, removed, shortened or lengthened — say the card is there to confirm. One post per reply. If you cannot tell which post they mean, ask, quoting the candidates. If a post has open compliance warnings ("↳" under it), name them before offering to approve it: the card cannot accept warnings for the user, so its click will be refused and they will need to open the post in the "Posts" tab and settle or accept the warnings there. Apart from shorter or longer, you cannot edit an existing post's words, and you cannot publish one immediately: for those, tell them which column of the "Posts" tab it is in so they can open it there. To remove several at once, they can tick them in the "Review" column and press Remove. You CAN write a new version as a fresh draft if they want one.`;
 }
 
 // ── Blog Writer and Email Marketing: their own dashboard surfaces ─────────────
@@ -721,7 +722,7 @@ function blogSurfaces(): string {
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above, or Blog Studio. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
-EXISTING ARTICLES — you can act on the articles listed below, each named by its "#" number, in five ways: approve one in "Review" (you pick the time, from its posting schedule), book one for a time the user names (in "Review", "Scheduled" or "Needs attention"), take one in "Scheduled" off the schedule (it goes back to a draft), reject and redraft one (say what is wrong; a replacement is written, and the user can also keep the reason as a rule), or remove one they simply don't want (it moves to "Archived"; nothing is learned and no replacement is written — if it is wrong rather than unwanted, offer reject and redraft instead). To do any of them, emit a blog_action_proposal naming the article's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say an article HAS been approved, scheduled, unscheduled, rejected or removed — say the card is there to confirm. One article per reply. If you cannot tell which one they mean, ask, quoting the candidates. You cannot publish one immediately or edit an existing article's words: for those, tell them which column of the "Blogs" tab it is in so they can open it in Blog Studio. To remove several at once, they can tick them in the "Review" column and press Remove. You CAN write a new version as a fresh draft if they want one.`;
+EXISTING ARTICLES — you can act on the articles listed below, each named by its "#" number, in six ways: approve one in "Review" (you pick the time, from its posting schedule), book one for a time the user names (in "Review", "Scheduled" or "Needs attention"), take one in "Scheduled" off the schedule (it goes back to a draft), reject and redraft one (say what is wrong; a replacement is written, and the user can also keep the reason as a rule), remove one they simply don't want (it moves to "Archived"; nothing is learned and no replacement is written — if it is wrong rather than unwanted, offer reject and redraft instead), or make one shorter or longer (action "shorter" or "longer" — the article is rewritten to the new length and saved, keeping its pictures, links, title and schedule; not for a live article, which must be unpublished first). To do any of them, emit a blog_action_proposal naming the article's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say an article HAS been approved, scheduled, unscheduled, rejected, removed, shortened or lengthened — say the card is there to confirm. One article per reply. If you cannot tell which one they mean, ask, quoting the candidates. You cannot publish one immediately, and apart from shorter or longer you cannot edit an existing article's words: for those, tell them which column of the "Blogs" tab it is in so they can open it in Blog Studio. To remove several at once, they can tick them in the "Review" column and press Remove. You CAN write a new version as a fresh draft if they want one.`;
 }
 
 function emailSurfaces(): string {
@@ -2348,7 +2349,7 @@ NEVER claim you have written a post unless THIS reply carries the draft object. 
 OR, to act on an article that already exists (see EXISTING ARTICLES), uiElement is instead:
 {
   "type": "blog_action_proposal",
-  "action": "approve" | "schedule" | "unschedule" | "reject" | "remove",
+  "action": "approve" | "schedule" | "unschedule" | "reject" | "remove" | "shorter" | "longer",
   "postId": <the number after # in YOUR ARTICLES RIGHT NOW>,
   "reason": "<reject only: what is wrong with it, in the user's words>" | null,
   "when": "<schedule only: the time exactly as the user said it, e.g. 'Friday at 9am'>" | null
@@ -2433,7 +2434,7 @@ NEVER say a post has been drafted, written, saved, scheduled or queued for revie
 OR, to act on a post that already exists (see EXISTING POSTS), uiElement is instead:
 {
   "type": "post_action_proposal",
-  "action": "approve" | "reject" | "retry" | "reschedule" | "remove",
+  "action": "approve" | "reject" | "retry" | "reschedule" | "remove" | "shorter" | "longer",
   "postId": <the number after # in YOUR POSTS RIGHT NOW>,
   "reason": "<reject only: what is wrong with it, in the user's words>" | null,
   "when": "<reschedule: the new time exactly as the user said it, e.g. 'next Friday at 3pm'; retry: the time to try again, only if they named one>" | null
@@ -2836,6 +2837,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     //    in the next answer. src/utils/team-activity.ts.
     // Both never throw: a failed read is a missing block, not a failed turn.
     const productsBlock = await loadProductsBlock(db, orgId, orgRow?.name ?? null);
+    // Business Information's documents and links — what the Brand Knowledge card says every
+    // assistant applies. The chat never read them before 2026-10-23, so a post or article drafted
+    // here ignored the owner's brand guide. Same loader and caps as blueprint §11. Never throws.
+    const knowledgeBlock = await loadBusinessKnowledgeBlock(db, orgId);
     const teamBlock = await buildTeamActivityBlock(db, orgId, session.aiAssistantId, {
         timezone: resolvePostingSchedule(
             assistantRow.onboardingContext && typeof assistantRow.onboardingContext === 'object' && !Array.isArray(assistantRow.onboardingContext)
@@ -2874,7 +2879,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // The signed-in user's own My Account settings, read-only (src/utils/chat-my-account.ts). Every
     // route, every role; null when the read fails.
     const myAccountBlock = await buildMyAccountBlock(db, userId, session.aiAssistantId, assistantRow.roleKey);
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, scheduleBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock].filter(Boolean).join('\n\n');
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, scheduleBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock].filter(Boolean).join('\n\n');
 
     const system = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -2987,7 +2992,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                     baseSystemPrompt: shadowRow?.systemPrompt ?? null,
                     onboardingContext: shadowRow?.onboardingContext ?? null,
                     business,
-                }) + (productsBlock ? `\n\n${productsBlock}` : ''),
+                }) + (productsBlock ? `\n\n${productsBlock}` : '') + (knowledgeBlock ? `\n\n${knowledgeBlock}` : ''),
                 shadowRow?.onboardingContext ?? null,
             );
 
