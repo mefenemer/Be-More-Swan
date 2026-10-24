@@ -19,6 +19,8 @@ import { SPECIAL_CATEGORY_RULE } from '../../src/constants/special-category-rule
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
+import { adaptForModel, replyText } from '../../src/config/model-options';
+import { loadRoleModel, withRoleModel } from '../../src/utils/assistant-model';
 import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts, scheduledPostAssets } from '../../db/schema';
@@ -1595,7 +1597,7 @@ CHANGING THE SITE. When they ask for a change, emit a site_changes card: a short
 - {"op":"set_theme","theme":{"primaryColor":"#rrggbb","textColor":"#rrggbb","backgroundColor":"#rrggbb","font":"sans|serif|rounded|system","radius":"none|small|medium|large"}}   (any subset)
 - {"op":"set_settings","settings":{"siteName","description","businessType":"Organization|LocalBusiness|ProfessionalService|Store","locality","email","phone","features":["shop","bookings","menu","hours","gallery","reviews","signup","faq"]}}   (any subset; "features" is the FULL list of what the website does — anything left out is switched off and hidden, so ask before dropping one)
 - {"op":"set_footer","text":"..."}
-Section props: hero {layout:"centered|split|banner", eyebrow, headline (max ${SITE_LIMITS.headline} chars), subheadline, primaryCta:{label,href}, secondaryCta:{label,href}}; features and steps {heading, intro, items:[{title, body}]}; text {heading, body, image:{assetId,alt}|null, imageSide:"left|right"}; faq {heading, items:[{q, a}]}; testimonials {heading, items:[{quote, name, detail}]}; cta {heading, body, button:{label, href}}; contact {heading, intro, askPhone (true|false), buttonLabel} — an enquiry form: messages go to the owner's email and the Enquiries list, NOT into their Audience; signup {heading, intro, formId, image:{assetId,alt}|null} — one of their sign-up forms listed above by id (use only those ids; if they have none, tell them to make one with their Email Marketing Assistant first); "image" is an optional cover beside the form. A FREE DOWNLOAD (lead magnet — "get our free guide"): the PDF belongs to the sign-up FORM (Audience → Sign-up forms → Words → Free download) and is emailed to each person who signs up; the forms listed above say which ones send one. On the site it is a signup section with that form, a heading that names what they get, and its cover as the image; products {heading, intro, buyLabel, collectAddress (true|false — ask for a UK delivery address), productIds:[ids from their Business Information products listed above]} — things they sell. Names, prices and pictures come ONLY from Business Information ▸ Products & Services: you cannot set or change a price, and a product not in that list cannot be added here — tell them to add it (or change its price) there, and every page and checkout follows. Only a product with a fixed price can be bought online, and only once they connect Stripe on the Orders tab (they keep all the money; Be More Swan takes no fee; payments are in pounds sterling). menu {heading, intro, groups:[{title, productIds:[ids from their Business Information products listed above]}], showDescriptions (true|false), showDurations (true|false — how long each service takes), note} — a menu or price list ("Starters / Mains", "Cuts / Colour"): each product once; names, prices and descriptions come ONLY from Business Information exactly as for products, so you cannot add an item or change a price here — tell them to do it there; nothing on a menu is bought (use a products section for that); note is for things like allergy information or "prices include VAT", in their words only. reviews {heading, intro, reviewIds:[reviewIds listed above, in the order to show; [] = their newest], limit (1–12, how many newest when reviewIds is empty), showSummary (true|false — their average rating, which always counts every review)} — quotes ONLY reviews from Audience ▸ Reviews; prefer it to a testimonials section whenever they have reviews there. gallery {heading, intro, layout:"square|natural", images:[{assetId, alt, caption}]} — up to 24 of THEIR pictures (by assetId, as under THEIR PICTURES); every picture needs alt; caption optional, in their words; never a picture they have not given you. hours {heading, intro, showHours, showAddress, showContact (each true|false, default true)} — opening hours with an "Open now" badge, the address, and Call / WhatsApp / Email / Get directions buttons; it holds NO facts of its own: hours and address come from Business Information, phone and email from the site's business details (set_settings). social_feed {heading, intro, platforms:["instagram","facebook","linkedin","x","threads","youtube" — any of them; [] = all], count (1–12, how many of the newest posts), enabled (true|false — false keeps the section but leaves it off the live site)} — their latest social posts, ONLY ones published through Be More Swan (listed above), drawn fresh on every visit with a link to each post; it can never show posts they made directly on a platform, so say so if they ask. Before adding one, confirm which platforms and which page it goes on; to switch it off or on, update_section with enabled; to put it on another page, move_section with toPageId. Links: "/" or "/<page address>", "#<sectionId>", mailto:, tel:, or https only.
+Section props: hero {layout:"centered|split|banner", eyebrow, headline (max ${SITE_LIMITS.headline} chars), subheadline, primaryCta:{label,href}, secondaryCta:{label,href}}; features and steps {heading, intro, items:[{title, body}]}; text {heading, body, image:{assetId,alt}|null, imageSide:"left|right"}; faq {heading, items:[{q, a}]}; testimonials {heading, items:[{quote, name, detail}]}; cta {heading, body, button:{label, href}}; contact {heading, intro, askPhone (true|false), buttonLabel} — an enquiry form: messages go to the owner's email and the Enquiries list, NOT into their Audience; signup {heading, intro, formId, image:{assetId,alt}|null} — one of their sign-up forms listed above by id (use only those ids; if they have none, tell them to make one in Audience ▸ Sign-up forms — or with their Email Marketing Assistant ONLY if <team_activity> lists one that is active); "image" is an optional cover beside the form. A FREE DOWNLOAD (lead magnet — "get our free guide"): the PDF belongs to the sign-up FORM (Audience → Sign-up forms → Words → Free download) and is emailed to each person who signs up; the forms listed above say which ones send one. On the site it is a signup section with that form, a heading that names what they get, and its cover as the image; products {heading, intro, buyLabel, collectAddress (true|false — ask for a UK delivery address), productIds:[ids from their Business Information products listed above]} — things they sell. Names, prices and pictures come ONLY from Business Information ▸ Products & Services: you cannot set or change a price, and a product not in that list cannot be added here — tell them to add it (or change its price) there, and every page and checkout follows. Only a product with a fixed price can be bought online, and only once they connect Stripe on the Orders tab (they keep all the money; Be More Swan takes no fee; payments are in pounds sterling). menu {heading, intro, groups:[{title, productIds:[ids from their Business Information products listed above]}], showDescriptions (true|false), showDurations (true|false — how long each service takes), note} — a menu or price list ("Starters / Mains", "Cuts / Colour"): each product once; names, prices and descriptions come ONLY from Business Information exactly as for products, so you cannot add an item or change a price here — tell them to do it there; nothing on a menu is bought (use a products section for that); note is for things like allergy information or "prices include VAT", in their words only. reviews {heading, intro, reviewIds:[reviewIds listed above, in the order to show; [] = their newest], limit (1–12, how many newest when reviewIds is empty), showSummary (true|false — their average rating, which always counts every review)} — quotes ONLY reviews from Audience ▸ Reviews; prefer it to a testimonials section whenever they have reviews there. gallery {heading, intro, layout:"square|natural", images:[{assetId, alt, caption}]} — up to 24 of THEIR pictures (by assetId, as under THEIR PICTURES); every picture needs alt; caption optional, in their words; never a picture they have not given you. hours {heading, intro, showHours, showAddress, showContact (each true|false, default true)} — opening hours with an "Open now" badge, the address, and Call / WhatsApp / Email / Get directions buttons; it holds NO facts of its own: hours and address come from Business Information, phone and email from the site's business details (set_settings). social_feed {heading, intro, platforms:["instagram","facebook","linkedin","x","threads","youtube" — any of them; [] = all], count (1–12, how many of the newest posts), enabled (true|false — false keeps the section but leaves it off the live site)} — their latest social posts, ONLY ones published through Be More Swan (listed above), drawn fresh on every visit with a link to each post; it can never show posts they made directly on a platform, so say so if they ask. Before adding one, confirm which platforms and which page it goes on; to switch it off or on, update_section with enabled; to put it on another page, move_section with toPageId. Links: "/" or "/<page address>", "#<sectionId>", mailto:, tel:, or https only.
 
 ${rc.attachmentsBlock ?? 'They have not attached any files in this conversation. They can attach pictures and documents with the paperclip, or by dragging them into the chat.'}
 
@@ -3015,15 +3017,21 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 shadowRow?.onboardingContext ?? null,
             );
 
-            const shadowResponse = await anthropic.messages.create({
-                model: targetRoute.model,
-                max_tokens: targetRoute.maxTokens,
-                system: sanitizeForModel(shadowSystem),
-                messages: [{
-                    role: 'user' as const,
-                    content: `Background handoff (automated — the user approved this handoff; they are not addressing you directly). "${assistantRow.name}" needs your output to finish its own task. Work the payload below and respond in your usual format; keep the reply brief.\n\nHandoff payload:\n${handoff.payloadJson}`,
-                }],
-            });
+            // The TARGET role's model (Admin ▸ Assistants ▸ Model & rules), held at low thinking —
+            // this is inside the same 26s request as the reply below.
+            const { response: shadowResponse, model: shadowModel } = await withRoleModel(
+                await loadRoleModel(db, handoff.targetRoleKey), targetRoute.model,
+                async (model, thinking) => ({ model, response: await anthropic.messages.create(adaptForModel({
+                    model,
+                    max_tokens: targetRoute.maxTokens,
+                    system: sanitizeForModel(shadowSystem),
+                    messages: [{
+                        role: 'user' as const,
+                        content: `Background handoff (automated — the user approved this handoff; they are not addressing you directly). "${assistantRow.name}" needs your output to finish its own task. Work the payload below and respond in your usual format; keep the reply brief.\n\nHandoff payload:\n${handoff.payloadJson}`,
+                    }],
+                }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming) }),
+                { requestPath: true, label: 'chat handoff' },
+            );
 
             // Shadow calls burn real tokens — same telemetry as a foreground turn, with a
             // :handoff session suffix so COGS reporting can split background work out.
@@ -3031,14 +3039,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 workspaceId: orgId,
                 userId,
                 assistantId: shadowRow?.id ?? assistantRow.id,
-                model: targetRoute.model,
+                model: shadowModel,
                 inputTokens: shadowResponse.usage.input_tokens,
                 outputTokens: shadowResponse.usage.output_tokens,
                 sessionId: `chat:${session.id}:handoff`,
                 dataCategories: ['business_context'],
             });
 
-            const shadowRaw = shadowResponse.content[0]?.type === 'text' ? shadowResponse.content[0].text : '';
+            const shadowRaw = replyText(shadowResponse.content);
             const shadow = targetRoute.parseResponse(shadowRaw);
             handoffAudit = { roleKey: handoff.targetRoleKey, targetName, content: shadow.content, uiElement: shadow.uiElement };
 
@@ -3060,26 +3068,32 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             });
         }
 
-        const response = await anthropic.messages.create({
-            model: route.model,
-            max_tokens: route.maxTokens,
-            // Half-emoji anywhere in the assembled prompt make the request invalid JSON (text-safe.ts).
-            system: sanitizeForModel(system),
-            messages: sanitizeForModel(llmMessages),
-        });
+        // The role's model from Admin ▸ Assistants ▸ Model & rules (src/utils/assistant-model.ts);
+        // none chosen = route.model, exactly as before. Held at low thinking: a 26s request.
+        const { response, model: chatModel } = await withRoleModel(
+            await loadRoleModel(db, assistantRow.roleKey), route.model,
+            async (model, thinking) => ({ model, response: await anthropic.messages.create(adaptForModel({
+                model,
+                max_tokens: route.maxTokens,
+                // Half-emoji anywhere in the assembled prompt make the request invalid JSON (text-safe.ts).
+                system: sanitizeForModel(system),
+                messages: sanitizeForModel(llmMessages),
+            }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming) }),
+            { requestPath: true, label: 'chat' },
+        );
 
         void logAiUsage({
             workspaceId: orgId,
             userId,
             assistantId: assistantRow.id,
-            model: route.model,
+            model: chatModel,
             inputTokens: response.usage.input_tokens,
             outputTokens: response.usage.output_tokens,
             sessionId: `chat:${session.id}`,
             dataCategories: ['business_context'],
         });
 
-        const raw = response.content[0]?.type === 'text' ? response.content[0].text : '';
+        const raw = replyText(response.content);
         // `content` is not final: the reconciliation guard below replaces it when the model
         // claims a post was saved and no row was actually written.
         const parsed = route.parseResponse(raw);

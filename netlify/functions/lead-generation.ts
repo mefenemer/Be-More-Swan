@@ -34,6 +34,8 @@
 import { Handler } from '@netlify/functions';
 import { createHash, randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
+import { adaptForModel, replyText } from '../../src/config/model-options';
+import { loadRoleModel, withRoleModel } from '../../src/utils/assistant-model';
 import { and, asc, count, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { adminAuditLog, aiAssistants, assistantRecords, discoveredLeads, leadRejectFeedback, masterAssistants, organisations, revenueEvents, userOrganisations } from '../../db/schema';
@@ -255,12 +257,19 @@ export default withLambda(async (event) => {
     }
 
     /** Log token usage the same way the chat route does, so COGS reporting stays complete. */
-    function logUsage(resp: Anthropic.Message, suffix: string) {
+    // The Lead Generator role's model (Admin ▸ Assistants ▸ Model & rules); none chosen = MODEL, as
+    // before. Every call here is inside a request, so thinking is held at low.
+    const leadModel = await loadRoleModel(db, 'lead_qualifier');
+    const leadCall = (params: Omit<Anthropic.MessageCreateParamsNonStreaming, 'model'>) => withRoleModel(leadModel, MODEL,
+        async (model, thinking) => ({ model, resp: await anthropic.messages.create(adaptForModel({ ...params, model }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming) }),
+        { requestPath: true, label: 'lead generation' });
+
+    function logUsage(resp: Anthropic.Message, suffix: string, model: string = MODEL) {
         void logAiUsage({
             workspaceId: orgId,
             userId,
             assistantId: assistant.id,
-            model: MODEL,
+            model,
             inputTokens: resp.usage.input_tokens,
             outputTokens: resp.usage.output_tokens,
             sessionId: `lead-generation:${assistant.id}:${suffix}`,
@@ -343,14 +352,13 @@ ${OUTREACH_SUBJECT_RULES}
 
 ${outreachFirstEmailBlock(leadSender.outreachOffer)}`;
 
-            const resp = await anthropic.messages.create({
-                model: MODEL,
+            const { resp, model: usedModel } = await leadCall({
                 max_tokens: 1024,
                 system,
                 messages: [{ role: 'user', content: `Score this lead:\n${JSON.stringify(lead)}` }],
             });
-            logUsage(resp, 'score_lead');
-            const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
+            logUsage(resp, 'score_lead', usedModel);
+            const raw = replyText(resp.content);
             // Widened on purpose: the card is stored as the record's `data` blob and this path
             // stamps extra fields onto it below.
             const card: LeadScoringCard & Record<string, unknown> = { ...normaliseLeadCard(parseModelJson(raw), title) };
@@ -1346,12 +1354,12 @@ anyway and do NOT put your reasoning in the subject or body. Return exactly:
 { "decline": "<one short line saying why>" }
 
 Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email body>" }`;
-                const resp = await anthropic.messages.create({
-                    model: MODEL, max_tokens: 512, system,
+                const { resp, model: usedModel } = await leadCall({
+                    max_tokens: 512, system,
                     messages: [{ role: 'user', content: `Lead: ${JSON.stringify({ title: rec.title, ...data })}` }],
                 });
-                logUsage(resp, 'send_outreach_gen');
-                const gen = parseModelJson<{ subject?: string; body?: string; decline?: string }>(resp.content[0]?.type === 'text' ? resp.content[0].text : '') || {};
+                logUsage(resp, 'send_outreach_gen', usedModel);
+                const gen = parseModelJson<{ subject?: string; body?: string; decline?: string }>(replyText(resp.content)) || {};
 
                 // An explicit refusal — e.g. the scoring pass wrote "do not contact" or "internal test
                 // account" into this record and the only honest email would contradict it. Without this
@@ -1814,14 +1822,13 @@ Return STRICT JSON only (no markdown), an array of exactly 3 objects:
   { "title": "<short punchy label>", "demographic": "<who>", "industrySector": "<sector>", "companySizeBand": "<e.g. 11-200 staff>", "rationale": "<one sentence>" }
 ]`;
 
-            const resp = await anthropic.messages.create({
-                model: MODEL,
+            const { resp, model: usedModel } = await leadCall({
                 max_tokens: 1024,
                 system,
                 messages: [{ role: 'user', content: 'Propose 3 lead-generation ideas.' }],
             });
-            logUsage(resp, 'generate_ideas');
-            const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
+            logUsage(resp, 'generate_ideas', usedModel);
+            const raw = replyText(resp.content);
             const parsed = parseModelJsonArray(raw);
             const list = Array.isArray(parsed) ? parsed : [];
             const saved: { id: number; title: string; status: string; data: unknown }[] = [];

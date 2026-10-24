@@ -149,14 +149,27 @@ const fmtWhen = (d: Date, tz?: string | null) => {
 const clean = (s: string, max: number) => safeSlice(s.replace(/\s+/g, ' ').trim(), max);
 
 /**
- * Render the block. Pure — tested without a database. Returns null when there is no team beyond
- * this assistant and nothing booked: a lone assistant gains nothing from a header saying so.
+ * The one rule about teammates, in every block (owner, 2026-10-24): assistants can only connect with
+ * each other if the user has them ACTIVE. The list is the roster — anything not on it, or marked
+ * [paused], is not someone to hand work to or send the user to.
+ */
+export const ACTIVE_TEAMMATES_RULE = 'Only the teammates listed here are active for this business. Never suggest, hand work to, or tell the user to ask an assistant that is not listed below, or one marked [paused] — if a task belongs to an assistant they do not have active, say what they can do themselves, or that hiring (or resuming) that assistant would cover it.';
+
+/** What an assistant with no active teammates is told, so it never invents one. */
+export const NO_TEAMMATES_BLOCK = `<team_activity>
+You are the only assistant this business has active. Never suggest, hand work to, or tell the user to ask another assistant (an Email Marketing, Social Media, Blog, Website or any other assistant) — they do not have one active. If a task belongs to another role, say what they can do themselves, or that hiring that assistant would cover it.
+</team_activity>`;
+
+/**
+ * Render the block. Pure — tested without a database. A lone assistant with nothing booked gets
+ * NO_TEAMMATES_BLOCK: before 2026-10-24 it got nothing, and with no roster in front of it a chat
+ * would happily send the user to an Email Marketing Assistant they had never hired.
  */
 export function renderTeamActivityBlock(input: TeamActivityInput): string | null {
     const { selfId, team, work, booked, now, timezone } = input;
     const self = team.find((m) => m.id === selfId);
     const others = team.filter((m) => m.id !== selfId);
-    if (!others.length && !booked.length) return null;
+    if (!others.length && !booked.length) return NO_TEAMMATES_BLOCK;
 
     const nameOf = (id: number | null) => {
         if (id == null) return null;
@@ -195,6 +208,7 @@ export function renderTeamActivityBlock(input: TeamActivityInput): string | null
         `- Only claim work listed under YOU as your own. Work listed under a teammate was done by that teammate.`,
         `- This is a summary, not everything: if the user asks about something not listed here, say you can only see recent highlights and point them to that assistant or its Activity tab. Never guess at what a teammate did.`,
         `- You cannot instruct a teammate or change their work from here unless your own instructions say you can.`,
+        `- ${ACTIVE_TEAMMATES_RULE}`,
         '',
         parts.join('\n\n'),
         cut ? `\n(${cut} more teammate${cut === 1 ? '' : 's'} not shown.)` : '',

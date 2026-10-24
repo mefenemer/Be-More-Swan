@@ -174,7 +174,8 @@ async function main() {
         const checkOnly = fn.indexOf('if (body.checkOnly === true)');
         assert.ok(checkOnly > fn.indexOf("reason: 'task_limit'"), 'check-only must come after every gate');
         assert.ok(checkOnly < fn.indexOf('openLeadThread('), 'check-only must return before anything is minted or sent');
-        assert.ok(checkOnly < fn.indexOf('anthropic.messages.create'), 'check-only must return before a draft is generated');
+        // The draft is generated through leadCall() (the role's model, src/utils/assistant-model.ts).
+        assert.ok(fn.indexOf('leadCall(') > 0 && checkOnly < fn.indexOf('leadCall('), 'check-only must return before a draft is generated');
     });
 
     console.log('\nWiring');

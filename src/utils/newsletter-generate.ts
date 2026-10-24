@@ -20,6 +20,9 @@
 import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import { loadProductsBlock } from './org-products';
 import { emailOpeningBlock } from '../config/hook-styles';
+import { emailCraftBlock } from '../constants/email-craft';
+import { adaptForModel, replyText } from '../config/model-options';
+import { loadRoleModel, withRoleModel } from './assistant-model';
 import { CTA_BINDING_RULE, ctaBriefLine } from '../config/call-to-action';
 import { loadCtaForAssistant } from './call-to-action';
 
@@ -389,8 +392,11 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
     } catch { /* the id still varies */ }
 
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const response = await anthropic.messages.create({
-        model: NEWSLETTER_MODEL,
+    // The Email Marketing role's model (Admin ▸ Assistants ▸ Model & rules); none = NEWSLETTER_MODEL.
+    // Held at low thinking: newsletter-issues and newsletter-sequences call this inside a request.
+    const { response, model: usedModel } = await withRoleModel(await loadRoleModel(db, 'newsletter_editor'), NEWSLETTER_MODEL,
+        async (model, thinking) => ({ model, response: await anthropic.messages.create(adaptForModel({
+        model,
         // Raised from 2000 with the layout: the same 200–400 words now arrive wrapped in JSON
         // nodes. A truncated reply loses the whole object rather than its tail, so the headroom is
         // the difference between a draft and a retry.
@@ -430,7 +436,9 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
                 : '') +
             'Do NOT invent statistics, customer numbers, testimonials, prices or dates. If the brief ' +
             'does not supply a fact, write around it.\n' +
-            `${CTA_BINDING_RULE}` +
+            `${CTA_BINDING_RULE}\n\n` +
+            // How an expert email marketer writes one (src/constants/email-craft.ts) — prompt audit.
+            `${emailCraftBlock(org?.name)}` +
             // ⚠️ AFTER the general rules and BEFORE the guardrails: a purpose narrows the job (a
             // terms notice is not written in newsletter voice), and the blueprint guardrails are
             // the tenant's own constraints, which outrank both.
@@ -439,13 +447,13 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
             (guardrailsBlock ? `\n\n${guardrailsBlock}` : '') +
             (inspoBlock ? `\n\n${inspoBlock}` : ''),
         messages: [{ role: 'user', content: brief }],
-    });
+    }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming) }), { requestPath: true, label: 'email' });
 
-    const raw = (response.content[0] as { text?: string })?.text?.trim() ?? '';
+    const raw = replyText(response.content).trim();
     if (!raw) throw new Error('Empty draft.');
 
     void logAiUsage({
-        userId, workspaceId: organisationId, model: NEWSLETTER_MODEL,
+        userId, workspaceId: organisationId, model: usedModel,
         inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
     });
 
@@ -698,8 +706,11 @@ export async function refineEmailCopy(db: Db, args: {
     const customKeys = customFields.map((f) => f.key);
 
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const response = await anthropic.messages.create({
-        model: NEWSLETTER_MODEL,
+    // The Email Marketing role's model (Admin ▸ Assistants ▸ Model & rules); none = NEWSLETTER_MODEL.
+    // Held at low thinking: newsletter-issues and newsletter-sequences call this inside a request.
+    const { response, model: usedModel } = await withRoleModel(await loadRoleModel(db, 'newsletter_editor'), NEWSLETTER_MODEL,
+        async (model, thinking) => ({ model, response: await anthropic.messages.create(adaptForModel({
+        model,
         max_tokens: 2500,
         system:
             `You are revising an email newsletter that has already been written and read by the `
@@ -739,13 +750,13 @@ export async function refineEmailCopy(db: Db, args: {
                 issue.bodyMarkdown,
             ].join('\n'),
         }],
-    });
+    }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming) }), { requestPath: true, label: 'email' });
 
-    const raw = (response.content[0] as { text?: string })?.text?.trim() ?? '';
+    const raw = replyText(response.content).trim();
     if (!raw) throw new Error('The assistant returned nothing. Try again in a moment.');
 
     void logAiUsage({
-        userId, workspaceId: organisationId, model: NEWSLETTER_MODEL,
+        userId, workspaceId: organisationId, model: usedModel,
         inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
     });
 
@@ -841,8 +852,11 @@ export async function draftSequenceEmail(db: Db, opts: SequenceDraftOptions): Pr
     const wantsLayout = opts.allowLayout !== false;
 
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const response = await anthropic.messages.create({
-        model: NEWSLETTER_MODEL,
+    // The Email Marketing role's model (Admin ▸ Assistants ▸ Model & rules); none = NEWSLETTER_MODEL.
+    // Held at low thinking: newsletter-issues and newsletter-sequences call this inside a request.
+    const { response, model: usedModel } = await withRoleModel(await loadRoleModel(db, 'newsletter_editor'), NEWSLETTER_MODEL,
+        async (model, thinking) => ({ model, response: await anthropic.messages.create(adaptForModel({
+        model,
         // Structure costs tokens; asking for it inside a 1600 ceiling is how a reply gets truncated
         // into an unparseable object. Only raised for the run that actually wants a layout.
         max_tokens: wantsLayout ? 2400 : 1600,
@@ -867,6 +881,7 @@ export async function draftSequenceEmail(db: Db, opts: SequenceDraftOptions): Pr
             + 'in a year, do not write it.\n'
             + 'Do NOT invent statistics, customer numbers, testimonials or prices. Do NOT write an '
             + 'unsubscribe line, a footer or a postal address — those are added automatically.\n'
+            + `${emailCraftBlock(org?.name)}\n`
             + `You may personalise using these tags, written exactly as shown: ${varList}. Always `
             + `give a name tag a fallback, like ${GREETING_EXAMPLE}.\n\n`
             + (wantsLayout
@@ -882,13 +897,13 @@ export async function draftSequenceEmail(db: Db, opts: SequenceDraftOptions): Pr
                   + '"bodyMarkdown" (Markdown: a greeting, one or two short sections with ## subheadings, '
                   + 'a closing line — roughly 120–250 words, no H1).'),
         messages: [{ role: 'user', content: seqBrief }],
-    });
+    }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming) }), { requestPath: true, label: 'email' });
 
-    const raw = (response.content[0] as { text?: string })?.text?.trim() ?? '';
+    const raw = replyText(response.content).trim();
     if (!raw) throw new Error('Empty draft.');
 
     void logAiUsage({
-        userId, workspaceId: organisationId, model: NEWSLETTER_MODEL,
+        userId, workspaceId: organisationId, model: usedModel,
         inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
     });
 
