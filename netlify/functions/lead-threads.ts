@@ -60,6 +60,8 @@ import {
 import { requireTenant } from '../../src/utils/tenant';
 import { haltReasonLabel } from '../../src/config/outreach-sequences';
 import { haltEnrolment } from '../../src/utils/outreach-sequences';
+import { loadOutreachOffer, offerLinkForThread } from '../../src/utils/outreach-offer';
+import { resolveBaseUrl } from '../../src/utils/base-url';
 import { drainSequenceSends } from './process-sequence-sends';
 // The `reply` action's send path. Every one of these is the same helper the two existing send sites
 // use — a second copy of the footer, the alias or the suppression check is how the three drift apart.
@@ -582,7 +584,17 @@ export default withLambda(async (event) => {
                 ))
                 .limit(1);
 
+            // The outreach offer's link for THIS conversation (src/utils/outreach-offer.ts), so the
+            // reply composer can put it in when they answer "yes, send it". A gift form's link is
+            // signed with this thread, so a sign-up through it is credited here. Never throws.
+            const offer = await loadOutreachOffer(db, orgId, assistantId);
+            const offerUrl = await offerLinkForThread(db, offer, thread.id, resolveBaseUrl((event.headers || {}) as Record<string, string | undefined>));
+            const offerLink = offerUrl && offer.kind !== 'reply'
+                ? { url: offerUrl, label: offer.kind === 'gift' ? `Insert the "${offer.giftLabel}" link` : 'Insert your offer link', tracked: offer.kind === 'gift' }
+                : null;
+
             return json(200, {
+                offerLink,
                 thread: {
                     id: thread.id,
                     state: thread.state,

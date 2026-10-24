@@ -52,6 +52,10 @@ export const EVENT_TYPES = [
     // is the health metric that says targeting or copy is wrong, and it has to be answerable
     // without parsing message bodies after the fact.
     'opt_out_received',
+    // The prospect signed up on the outreach offer's form, through the tracked link a follow-up
+    // carried (src/utils/outreach-offer.ts). The conversion the offer exists for — its own event so
+    // "how many leads took the free gift?" is a GROUP BY, not a join through audience_contacts.
+    'offer_signed_up',
     // ── Sequencing (Phase 2b) — lifecycle, not sends ─────────────────────────
     // These answer "did the cadence run, and why did it stop?". `sequence_halted` carries the
     // closed haltReason vocabulary in its payload, so the Strategy Agent can GROUP BY it to see

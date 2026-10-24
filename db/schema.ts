@@ -3934,7 +3934,7 @@ export const sequenceEnrolments = pgTable("sequence_enrolments", {
   index("sequence_enrolments_due_idx").on(t.state, t.nextSendAt),
   index("sequence_enrolments_org_idx").on(t.organisationId, t.createdAt),
   check("sequence_enrolments_state_check", sql`${t.state} IN ('active','completed','halted','cancelled')`),
-  check("sequence_enrolments_halt_reason_check", sql`${t.haltReason} IS NULL OR ${t.haltReason} IN ('replied','suppressed','no_recipient','not_connected','send_failed','max_steps','record_closed','do_not_contact','manual')`),
+  check("sequence_enrolments_halt_reason_check", sql`${t.haltReason} IS NULL OR ${t.haltReason} IN ('replied','suppressed','no_recipient','not_connected','send_failed','max_steps','record_closed','do_not_contact','manual','signed_up')`),
 ]);
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -5515,6 +5515,14 @@ export const orgReviews = pgTable("org_reviews", {
 export const orgOfferProfile = pgTable("org_offer_profile", {
   organisationId: integer("organisation_id").primaryKey().references(() => organisations.id, { onDelete: "cascade" }),
   offers: text().array().notNull().default(sql`'{}'::text[]`),
+  updatedBy: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// "Do you offer a free trial or an introductory offer?" (db/z-org-intro-offer.sql, src/utils/intro-offer.ts)
+export const orgIntroOffer = pgTable("org_intro_offer", {
+  organisationId: integer("organisation_id").primaryKey().references(() => organisations.id, { onDelete: "cascade" }),
+  offer: jsonb().notNull(),
   updatedBy: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

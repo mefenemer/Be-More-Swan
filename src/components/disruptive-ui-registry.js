@@ -2153,6 +2153,157 @@
   }
   register('offer_profile', renderOfferProfileCard);
 
+  // { type: 'intro_offer', summary, offer } — the workspace's free trial / introductory offer
+  // (src/utils/intro-offer.ts), checked by the server before it gets here. Any assistant's chat.
+  // After the owner's click: org-products.ts PATCH { introOffer }, the same call as the tab's form.
+  // Same wording as src/utils/intro-offer.ts INTRO_OFFER_LABELS.
+  const INTRO_OFFER_LABELS = {
+    free_trial: 'A free trial',
+    freemium: 'A free plan',
+    free_consultation: 'A free consultation or discovery call',
+    first_visit: 'A first-visit or first-booking offer',
+    intro_discount: 'An introductory discount',
+    free_sample: 'A free sample or taster',
+    money_back: 'A money-back guarantee',
+    other: 'Something else',
+  };
+  function renderIntroOfferCard(ui, esc) {
+    const o = ui.offer && typeof ui.offer === 'object' ? ui.offer : { has: false };
+    const rows = [];
+    if (!o.has) rows.push('No free trial or introductory offer — your assistants won\'t mention one.');
+    else {
+      rows.push(INTRO_OFFER_LABELS[o.kind] || 'An introductory offer');
+      if (o.days) rows.push(`${o.days} days`);
+      if (o.cardUpFront === false) rows.push('No card needed up front');
+      if (o.cardUpFront === true) rows.push('Card taken at sign-up');
+      if (o.afterwards === 'stops') rows.push('When it ends, it just stops');
+      if (o.afterwards === 'auto_charge') rows.push('When it ends, the paid plan starts');
+      if (o.terms) rows.push(`Offer: ${o.terms}`);
+      if (o.whoFor) rows.push(`Who can have it: ${o.whoFor}`);
+      if (o.appliesTo) rows.push(`Applies to: ${o.appliesTo}`);
+      if (o.url) rows.push(`Where to start: ${o.url}`);
+    }
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Free trial or introductory offer · Approval needed</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <ul class="mt-2 space-y-0.5">${rows.map((r) => `<li class="text-xs text-gray-700 break-words">${esc(r)}</li>`).join('')}</ul>
+      <p class="text-xs text-gray-600 mt-2">Every assistant then uses this, on exactly these terms. Change it any time under Business Information ▸ Products &amp; Services.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-io-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save this</button>
+        <button type="button" data-io-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-io-status></p>`;
+    const status = el.querySelector('[data-io-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-io-cancel]')) { setBusy(true); say('Not changed.'); return; }
+      if (!e.target.closest('[data-io-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('intro:offer', {
+        bubbles: true,
+        detail: {
+          offer: o,
+          respond({ ok, error }) {
+            if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved — nothing was changed.', 'error'); return; }
+            say('Saved — every assistant now uses this.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('intro_offer', renderIntroOfferCard);
+
+  // { type: 'outreach_offer', summary, offer, offerLabel, formId, formName, giftLabel } — what a Lead
+  // Generator's first emails offer (src/config/outreach-offer.ts), rebuilt by the server against the
+  // workspace's real gift forms (src/utils/chat-outreach-offer.ts). The click → lead-generation.ts
+  // set_outreach_offer, the same action as the Outreach tab's offer strip.
+  function renderOutreachOfferCard(ui, esc) {
+    const what = ui.offer === 'gift' && ui.giftLabel
+      ? `A free "${ui.giftLabel}" from your "${ui.formName || 'sign-up'}" form`
+      : (ui.offerLabel || 'No offer — just ask a question');
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Outreach offer · Approval needed</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <p class="text-xs text-gray-700 mt-2 break-words">First emails will offer: <span class="font-semibold">${esc(what)}</span></p>
+      <p class="text-xs text-gray-600 mt-2">Emails already drafted keep their words. Change it any time on the Outreach tab.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-oo-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save this</button>
+        <button type="button" data-oo-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-oo-status></p>`;
+    const status = el.querySelector('[data-oo-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-oo-cancel]')) { setBusy(true); say('Not changed.'); return; }
+      if (!e.target.closest('[data-oo-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('lead:outreachOffer', {
+        bubbles: true,
+        detail: {
+          offer: ui.offer, formId: ui.formId ?? null,
+          respond({ ok, error }) {
+            if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved — nothing was changed.', 'error'); return; }
+            say('Saved — your next first emails use this offer.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('outreach_offer', renderOutreachOfferCard);
+
+  // { type: 'call_to_action', summary, kind, kindLabel, formId, formName, giftLabel } — what a Social,
+  // Blog or Email assistant's work invites people to do (src/config/call-to-action.ts), rebuilt by the
+  // server against the real gift forms. The click → org-products.ts PATCH { callToAction }, the same
+  // save as Business Information ▸ Products & Services ▸ Calls to action.
+  function renderCallToActionCard(ui, esc) {
+    const what = ui.kind === 'gift' && ui.giftLabel
+      ? `The free "${ui.giftLabel}" from your "${ui.formName || 'sign-up'}" form`
+      : (ui.kindLabel || 'Its own call to action');
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Call to action · Approval needed</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <p class="text-xs text-gray-700 mt-2 break-words">My work will invite people to: <span class="font-semibold">${esc(what)}</span></p>
+      <p class="text-xs text-gray-600 mt-2">Drafts already written keep their words. Change it any time on Business Information ▸ Products &amp; Services.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-cta-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save this</button>
+        <button type="button" data-cta-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-cta-status></p>`;
+    const status = el.querySelector('[data-cta-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-cta-cancel]')) { setBusy(true); say('Not changed.'); return; }
+      if (!e.target.closest('[data-cta-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('cta:change', {
+        bubbles: true,
+        detail: {
+          kind: ui.kind, formId: ui.formId ?? null,
+          respond({ ok, error }) {
+            if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved — nothing was changed.', 'error'); return; }
+            say('Saved — my next drafts use this.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('call_to_action', renderCallToActionCard);
+
   // ── Request a call back (src/utils/callback-request.ts) ───────────────────────────────────────
   // Shown when the customer asks the chat for a call or a person. It only OPENS the Help & Support
   // form — the chat never books a call. No time is promised (owner, 2026-10-19).

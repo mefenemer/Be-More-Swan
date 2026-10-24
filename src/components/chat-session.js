@@ -1382,6 +1382,54 @@
       }).catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // "Save this" on an intro_offer card (any assistant) → org-products.ts PATCH { introOffer }, the
+    // same call as the form on Business Information ▸ Products & Services (src/utils/intro-offer.ts).
+    function onIntroOffer(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/org-products', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ introOffer: d.offer || null }),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+        respond({ ok: true });
+        document.dispatchEvent(new CustomEvent('bizinfo:introOffer', { detail: data.introOffer }));
+      }).catch((err) => respond({ ok: false, error: err.message }));
+    }
+
+    // "Save this" on an outreach_offer card (Lead Generator) → lead-generation.ts set_outreach_offer, the
+    // same action as the Outreach tab's offer strip (src/config/outreach-offer.ts).
+    function onOutreachOffer(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/lead-generation', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ action: 'set_outreach_offer', assistantId, offer: d.offer, formId: d.formId ?? null }),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+        respond({ ok: true });
+        document.dispatchEvent(new CustomEvent('lead:outreachOfferSaved', { detail: { choice: data.choice, resolved: data.resolved } }));
+      }).catch((err) => respond({ ok: false, error: err.message }));
+    }
+
+    // "Save this" on a call_to_action card (Social, Blog or Email) → org-products.ts PATCH
+    // { callToAction }, the same save as Products & Services ▸ Calls to action.
+    function onCallToAction(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/org-products', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ callToAction: { assistantId, kind: d.kind, formId: d.formId ?? null } }),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+        respond({ ok: true });
+        document.dispatchEvent(new CustomEvent('bizinfo:callToAction', { detail: data.assistant }));
+      }).catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     // "Add" on a class_sessions card — sites.ts `session_add`, the same checks as the Website tab's Timetable.
     function onClassSessions(e) {
       const d = e.detail || {};
@@ -1762,6 +1810,9 @@
     container.addEventListener('site:reviewsAdd', onReviewsAdd);
     container.addEventListener('site:classSessions', onClassSessions);
     container.addEventListener('site:offerProfile', onOfferProfile);
+    container.addEventListener('intro:offer', onIntroOffer);
+    container.addEventListener('lead:outreachOffer', onOutreachOffer);
+    container.addEventListener('cta:change', onCallToAction);
     container.addEventListener('site:reviewDecisions', onReviewDecisions);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
@@ -1833,6 +1884,9 @@
         container.removeEventListener('site:classSessions', onClassSessions);
         container.removeEventListener('site:reviewDecisions', onReviewDecisions);
         container.removeEventListener('site:offerProfile', onOfferProfile);
+        container.removeEventListener('intro:offer', onIntroOffer);
+        container.removeEventListener('lead:outreachOffer', onOutreachOffer);
+        container.removeEventListener('cta:change', onCallToAction);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
         container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);

@@ -528,6 +528,22 @@
             ],
           },
           {
+            // Read by every outreach prompt through loadSenderIdentity (src/config/outreach-offer.ts,
+            // src/utils/outreach-offer.ts). Optional: blank = "reply", how every email was written
+            // before offers existed. WHICH gift form is chosen on the Outreach tab's offer strip (or in
+            // chat) — this form can't list them — and defaults to the newest form with a free download.
+            key: 'outreachOffer',
+            label: 'What should your first emails offer?',
+            type: 'radio',
+            required: false,
+            helpText: 'First emails stay under 75 words, open with their problem, carry no link and never ask for a call — they ask permission instead. The link goes in the first follow-up, or in your reply when they say yes. Change it any time on the Outreach tab.',
+            options: [
+              { value: 'gift', label: 'A free gift', description: 'Offers the free download from one of your sign-up forms ("Mind if I send it over?"). A sign-up through the link is credited to the lead.' },
+              { value: 'intro_offer', label: 'Our free trial or introductory offer', description: 'Uses the offer saved in Business Information ▸ Products & Services, exactly as written.' },
+              { value: 'reply', label: 'No offer — just ask a question', description: 'Asks one simple question that invites a reply.' },
+            ],
+          },
+          {
             // Read by enrolInSequence (src/utils/outreach-sequences.ts) on the send path.
             //
             // ⚠️ THIS QUESTION EXISTS BECAUSE APPROVING ONE EMAIL USED TO AUTHORISE FOUR. Every

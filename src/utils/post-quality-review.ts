@@ -39,6 +39,7 @@
 // caller that forgets to pass withSuggestions gets the terminating behaviour.
 
 import { loadOrgProducts, renderProductFacts } from './org-products';
+import { introOfferFact, loadIntroOffer } from './intro-offer';
 import { and, desc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, aiBlueprints, scheduledPosts } from '../../db/schema';
@@ -235,6 +236,8 @@ export const FACT_LOCATION_VALUES: readonly string[] = Object.values(FACT_LOCATI
 export function composeDeclaredFacts(
     sections: Record<string, { content: Record<string, unknown> }> | null | undefined,
     productFacts: string,
+    /** introOfferFact() — the workspace's free trial / introductory offer; '' when not answered. */
+    offerFact = '',
 ): string {
     const answers = (sections?.['6-onboarding']?.content?.answers ?? {}) as Record<string, unknown>;
     const org = (sections?.['5-org-context']?.content ?? {}) as Record<string, unknown>;
@@ -250,6 +253,7 @@ export function composeDeclaredFacts(
     // is read only while the catalogue is empty, as notes waiting to be moved across.
     if (hasCatalogue) parts.push(`[Edited in: ${FACT_LOCATIONS.catalogue}] ${productFacts}`);
     else add(FACT_LOCATIONS.briefSales, 'Older notes on products, services and prices (not yet moved into Products & Services)', answers.service_offerings);
+    if (offerFact) parts.push(`[Edited in: ${FACT_LOCATIONS.catalogue}] ${offerFact}`);
     add(FACT_LOCATIONS.briefMessage, 'Standard offer / incentive', answers.incentive);
     add(FACT_LOCATIONS.briefSales, 'Approved answers to objections (including price)', answers.sales_objections);
     add(FACT_LOCATIONS.briefMessage, 'Core message', answers.core_message);
@@ -273,7 +277,8 @@ export async function loadDeclaredFacts(db: Db, assistantId: number | null | und
         const [owner] = await db.select({ orgId: aiAssistants.organisationId }).from(aiAssistants)
             .where(eq(aiAssistants.id, assistantId)).limit(1);
         const productFacts = owner ? renderProductFacts(await loadOrgProducts(db, owner.orgId)) : '';
-        return composeDeclaredFacts(bp?.sections as Record<string, { content: Record<string, unknown> }> | undefined, productFacts);
+        const offerFact = owner ? introOfferFact(await loadIntroOffer(db, owner.orgId)) : '';
+        return composeDeclaredFacts(bp?.sections as Record<string, { content: Record<string, unknown> }> | undefined, productFacts, offerFact);
     } catch {
         return '';
     }
@@ -349,13 +354,17 @@ export async function runQualityReview(
         // The workspace catalogue (Business Information ▸ Products & Services) — a listed price is
         // the business's own, so the reviewer stops flagging it; a price NOT listed still gets
         // flagged, which is how an invented one is caught. Never throws.
+        // And the free trial / introductory offer, so a declared one isn't flagged and one the
+        // business said it doesn't have is (intro-offer.ts).
         let productFacts = '';
+        let offerFact = '';
         try {
             const [owner] = await db.select({ orgId: aiAssistants.organisationId }).from(aiAssistants)
                 .where(eq(aiAssistants.id, post.assistantId)).limit(1);
             productFacts = owner ? renderProductFacts(await loadOrgProducts(db, owner.orgId)) : '';
+            offerFact = owner ? introOfferFact(await loadIntroOffer(db, owner.orgId)) : '';
         } catch { /* no products is no change */ }
-        knownFacts = composeDeclaredFacts(blueprintSections, productFacts);
+        knownFacts = composeDeclaredFacts(blueprintSections, productFacts, offerFact);
     }
 
     const caption = post.caption || '';
@@ -386,9 +395,11 @@ being asked again on every post:
 - a product, service or price → "If it's real, add it under Business Information ▸ Products &
   Services, or mark this warning as sourced."
 - a free trial, discount, guarantee, "no card required" or other standing offer → "If it's real,
-  add it as the Incentive under ${FACT_LOCATIONS.briefMessage}, or mark this warning as sourced."
-  (Products & Services holds only names and prices — an offer has nowhere to go there.)
-A "Standard offer / incentive" fact below that covers the offer means it IS declared — do not warn.
+  add it under ${FACT_LOCATIONS.catalogue} ▸ Free trial or introductory offer, or mark this warning
+  as sourced."
+A "Free trial / introductory offer" or "Standard offer / incentive" fact below that covers the
+offer means it IS declared — do not warn. If the introductory-offer fact says NONE and no
+incentive names one, an offer in the caption is untrue — warn.
 
 Each declared fact below is tagged [Edited in: …] — the screen where the business changes it. When
 a warning is about the business's OWN records (a stated price, link or offer that is wrong, out of

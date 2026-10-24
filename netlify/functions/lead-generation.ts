@@ -76,6 +76,8 @@ import { replyAddress } from '../../src/utils/reply-address';
 import { checkSuppression } from '../../src/utils/suppression';
 import { enrolInSequence, haltEnrolmentsForRecord } from '../../src/utils/outreach-sequences';
 import { OUTREACH_SUBJECT_RULES } from '../../src/constants/outreach-subject';
+import { cleanOutreachOfferKind, outreachFirstEmailBlock } from '../../src/config/outreach-offer';
+import { listGiftForms, offerChoiceFromContext, resolveOutreachOffer } from '../../src/utils/outreach-offer';
 import { evaluateDoNotContact } from '../../src/config/do-not-contact';
 import { outreachDraftFingerprint } from '../../src/utils/chat-lead-action';
 // One normaliser for the lead_scoring_card wire shape, shared with discovery scoring — the
@@ -184,6 +186,9 @@ export default withLambda(async (event) => {
         email?: string; confirmErase?: boolean; eraseScope?: string;
         // set_outcome on a win: the owner ticked "Add to my Audience" (soft opt-in — see won-customer-audience.ts).
         addToAudience?: boolean;
+        /** set_outreach_offer: gift | intro_offer | reply, and the gift form. */
+        offer?: unknown;
+        formId?: unknown;
     };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
@@ -334,7 +339,9 @@ own staff or domain, a competitor, an existing customer, or anyone who has asked
 This is stronger than a low score: a cold lead is a poor prospect we may still contact, whereas
 doNotContact means sending would be wrong. When it is true, set outreachDraft to null.
 
-${OUTREACH_SUBJECT_RULES}`;
+${OUTREACH_SUBJECT_RULES}
+
+${outreachFirstEmailBlock(leadSender.outreachOffer)}`;
 
             const resp = await anthropic.messages.create({
                 model: MODEL,
@@ -1320,7 +1327,7 @@ ${OUTREACH_SUBJECT_RULES}`;
             if (!bodyText) {
                 const sendSender = await sender();
                 const system =
-`You write a short, personalised cold outreach email to the lead below. Under 150 words, no placeholders or brackets.
+`You write a short, personalised cold outreach email to the lead below. No placeholders or brackets.
 
 ${voiceDirective(onboarding.salesTone, { surface: 'outreach', fallback: 'professional' })}
 
@@ -1330,6 +1337,8 @@ ${senderIdentityBlock(sendSender)}
 ${SENDER_IDENTITY_RULE}
 
 ${OUTREACH_SUBJECT_RULES}
+
+${outreachFirstEmailBlock(sendSender.outreachOffer)}
 
 If this email should NOT be written at all — the lead details below say this is not a genuine prospect,
 that it must not be contacted, or the only honest email would break the rules above — do NOT write one
@@ -1541,6 +1550,14 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
                 // The signature added under every email, so the review card can show it beneath the
                 // draft — and the reviewer can see a sign-off in an older draft would print twice.
                 signature: signatureFromContext(assistant.onboardingContext) || null,
+                // What the emails offer (src/utils/outreach-offer.ts): the owner's choice, what it
+                // resolves to (a gift that can't be used falls back to a question, and says why), and
+                // the gift forms to choose from — for the Outreach tab's offer strip.
+                offer: {
+                    choice: offerChoiceFromContext(assistant.onboardingContext),
+                    resolved: await resolveOutreachOffer(db, orgId, assistant.onboardingContext),
+                    giftForms: await listGiftForms(db, orgId),
+                },
             });
         }
 
@@ -1737,6 +1754,36 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
                 .set({ onboardingContext: { ...onboarding, outreachEmailProvider: wanted }, updatedAt: new Date() })
                 .where(and(eq(aiAssistants.id, assistant.id), eq(aiAssistants.organisationId, orgId)));
             return json(200, { provider: wanted });
+        }
+
+        // ── What the outreach offers ─────────────────────────────────────────────
+        // src/config/outreach-offer.ts. The ONE writer of outreachOffer / outreachOfferFormId: the
+        // Outreach tab's offer strip and the chat's outreach_offer card both call this. Merges two keys,
+        // like set_outreach_provider — never update-assistant-context, which REPLACES the context.
+        // A gift must name one of this workspace's forms that sends a free download.
+        if (action === 'set_outreach_offer') {
+            const kind = cleanOutreachOfferKind(body.offer);
+            if (!kind) return json(400, { error: 'offer must be gift, intro_offer or reply.' });
+            let formId: number | null = null;
+            if (kind === 'gift') {
+                const forms = await listGiftForms(db, orgId);
+                const wanted = Number(body.formId);
+                const form = forms.find((f) => f.id === wanted) ?? (body.formId == null ? forms[0] : undefined);
+                if (!form) {
+                    return json(400, { error: forms.length
+                        ? 'Choose one of your sign-up forms that sends a free download.'
+                        : 'None of your sign-up forms sends a free download yet. Add one in Audience ▸ Sign-up forms ▸ Free download first.' });
+                }
+                formId = form.id;
+            }
+            const next = { ...onboarding, outreachOffer: kind, outreachOfferFormId: formId };
+            await db.update(aiAssistants)
+                .set({ onboardingContext: next, updatedAt: new Date() })
+                .where(and(eq(aiAssistants.id, assistant.id), eq(aiAssistants.organisationId, orgId)));
+            return json(200, {
+                choice: { kind, formId },
+                resolved: await resolveOutreachOffer(db, orgId, next),
+            });
         }
 
         // ── List this assistant's lead ideas ─────────────────────────────────────

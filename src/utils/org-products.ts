@@ -18,6 +18,7 @@
 
 import { ALLERGENS_MAX, dietaryWords } from './product-dietary';
 import { describeOfferProfile, loadAnsweredOffer } from './offer-profile';
+import { describeIntroOffer, introOfferShortLine, loadIntroOffer } from './intro-offer';
 import { and, asc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { orgProducts } from '../../db/schema';
@@ -88,7 +89,7 @@ export function renderProductsBlock(products: OrgProduct[] | null | undefined, b
         `<products_and_services>`,
         `What ${who} sells, exactly as the business recorded it (Business Information ▸ Products & Services). These are FACTS — use them as written:`,
         `- Name products and services exactly as listed. Never invent one that is not listed, and never describe a feature, result or guarantee the entry does not state.`,
-        `- Quote a price ONLY when it is listed below, and quote it exactly — never round it, convert it or add a discount, offer or deadline. If a price is not listed, do not state one.`,
+        `- Quote a price ONLY when it is listed below, and quote it exactly — never round it, convert it or add a discount, offer or deadline (the only standing offer is the INTRODUCTORY OFFER line, exactly as written). If a price is not listed, do not state one.`,
         `- Bring a product in only where it genuinely fits the task. Not every piece of work is a sales pitch; most should not mention a product at all.`,
         `- When linking to a product, use its listed link and no other.`,
         '',
@@ -139,12 +140,16 @@ The business has not listed any products or services yet. They are kept in ONE p
 export async function loadProductsBlock(db: Db, organisationId: number, businessName?: string | null): Promise<string | null> {
     // Plus what the business offers — only once the OWNER has said (a guess must not steer every
     // assistant), so none of them asks a software company about its menu (offer-profile.ts).
-    const [products, offer] = await Promise.all([loadOrgProducts(db, organisationId), loadAnsweredOffer(db, organisationId)]);
+    // And the free trial / introductory offer — ALWAYS a line, because "not answered" and "no" both
+    // tell the model something: don't promise one (intro-offer.ts, owner 2026-10-24).
+    const [products, offer, intro] = await Promise.all([
+        loadOrgProducts(db, organisationId), loadAnsweredOffer(db, organisationId), loadIntroOffer(db, organisationId),
+    ]);
     // An empty catalogue still gets a block: every assistant must know where products live, or it
     // sends the owner to the old free-text boxes that no longer hold them (owner, 2026-10-21).
     const block = renderProductsBlock(products, businessName) ?? NO_PRODUCTS_BLOCK;
     const line = offer ? describeOfferProfile(offer) : '';
-    return [block, line].filter(Boolean).join('\n') || null;
+    return [block, line, describeIntroOffer(intro)].filter(Boolean).join('\n') || null;
 }
 
 // ── Short form, for prompts that only need to NAME what is on offer ─────────────────────────────
@@ -178,7 +183,13 @@ export function offeringsText(products: OrgProduct[] | null | undefined, legacyN
     return legacy ? `${legacy} (older notes — not yet in Business Information ▸ Products & Services)` : '';
 }
 
-/** offeringsText from the database. Never throws: no catalogue and no notes is ''. */
+/**
+ * offeringsText from the database, plus the introductory offer when the owner has answered (and
+ * there is something on offer to attach it to). Never throws: no catalogue and no notes is ''.
+ */
 export async function loadOfferingsText(db: Db, organisationId: number, legacyNotes?: unknown): Promise<string> {
-    return offeringsText(await loadOrgProducts(db, organisationId), legacyNotes);
+    const [products, intro] = await Promise.all([loadOrgProducts(db, organisationId), loadIntroOffer(db, organisationId)]);
+    const text = offeringsText(products, legacyNotes);
+    const introLine = introOfferShortLine(intro);
+    return text && introLine ? `${text}. ${introLine}` : text;
 }

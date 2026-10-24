@@ -245,6 +245,56 @@
       </div>
       <p id="op-offer-note" class="text-xs mt-1.5"></p>
     </div>
+    <!-- "Do you offer a free trial or an introductory offer?" (src/utils/intro-offer.ts) — every
+         assistant uses the answer (org-products.ts loadProductsBlock). The question and the order of
+         kinds follow the ticks above. "No" saves at once; "Yes" opens the terms and a Save button.
+         Also settable from any assistant's chat (intro_offer card), through the same PATCH. -->
+    <div id="op-intro" class="hidden mb-5 border border-gray-200 bg-gray-50 rounded-xl px-4 py-3">
+      <p id="op-intro-q" class="text-sm font-bold text-gray-900">Do you offer new customers a free trial or an introductory offer?</p>
+      <p class="text-xs text-gray-500 mt-0.5">Every assistant uses your answer. Outreach, emails, posts and your website mention only this offer, on exactly these terms, and none at all if you say no.</p>
+      <div class="flex flex-wrap gap-x-6 gap-y-1.5 mt-2">
+        <label class="inline-flex items-center gap-2 text-sm cursor-pointer"><input type="radio" name="op-intro-has" value="yes"> Yes</label>
+        <label class="inline-flex items-center gap-2 text-sm cursor-pointer"><input type="radio" name="op-intro-has" value="no"> No, we don't</label>
+      </div>
+      <div id="op-intro-form" class="hidden mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+        <label class="block text-xs font-semibold text-gray-700">What is it?
+          <select id="op-intro-kind" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm bg-white font-normal"></select></label>
+        <label id="op-intro-days-row" class="block text-xs font-semibold text-gray-700">How many days?
+          <input id="op-intro-days" type="number" min="1" max="365" step="1" placeholder="e.g. 14" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-normal"></label>
+        <fieldset id="op-intro-card-row" class="text-xs">
+          <legend class="font-semibold text-gray-700">Card details to start?</legend>
+          <div class="flex flex-wrap gap-x-6 gap-y-1.5 mt-1 text-sm">
+            <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="op-intro-card" value="no"> No card needed</label>
+            <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="op-intro-card" value="yes"> Card taken at sign-up</label>
+          </div>
+        </fieldset>
+        <fieldset id="op-intro-after-row" class="text-xs">
+          <legend class="font-semibold text-gray-700">When the trial ends</legend>
+          <div class="flex flex-wrap gap-x-6 gap-y-1.5 mt-1 text-sm">
+            <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="op-intro-after" value="stops"> It just stops</label>
+            <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="op-intro-after" value="auto_charge"> The paid plan starts</label>
+          </div>
+        </fieldset>
+        <label id="op-intro-terms-row" class="block text-xs font-semibold text-gray-700 sm:col-span-2">The offer in a few words <span id="op-intro-terms-opt" class="font-normal text-gray-400">(optional)</span>
+          <input id="op-intro-terms" type="text" maxlength="300" placeholder="e.g. 20% off your first visit" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-normal"></label>
+        <label class="block text-xs font-semibold text-gray-700">Who can have it <span class="font-normal text-gray-400">(optional)</span>
+          <input id="op-intro-who" type="text" maxlength="200" placeholder="e.g. new customers only" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-normal"></label>
+        <label class="block text-xs font-semibold text-gray-700">Which products or plans <span class="font-normal text-gray-400">(optional)</span>
+          <input id="op-intro-applies" type="text" maxlength="200" placeholder="e.g. every plan" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-normal"></label>
+        <label class="block text-xs font-semibold text-gray-700 sm:col-span-2">Where people start it <span class="font-normal text-gray-400">(optional link)</span>
+          <input id="op-intro-url" type="url" maxlength="500" placeholder="https://" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-normal"></label>
+        <div class="sm:col-span-2"><button type="button" id="op-intro-save" class="btn-primary text-sm font-bold px-3 py-1.5 rounded-md transition-colors">Save offer</button></div>
+      </div>
+      <p id="op-intro-note" class="text-xs mt-1.5"></p>
+    </div>
+    <!-- Calls to action (src/config/call-to-action.ts) — what each Social, Blog and Email assistant's
+         work invites people to do: its own words, the offer above, or a sign-up form's free download.
+         Saved per assistant on change; also settable from that assistant's chat (call_to_action card). -->
+    <div id="op-cta" class="hidden mb-5 border border-gray-200 bg-gray-50 rounded-xl px-4 py-3">
+      <p class="text-sm font-bold text-gray-900">Calls to action</p>
+      <p class="text-xs text-gray-500 mt-0.5">What each assistant’s posts, articles and emails invite people to do. Social posts only ask now and then; most of them simply give.</p>
+      <div id="op-cta-list" class="mt-2 space-y-2"></div>
+    </div>
     <div id="op-error" class="hidden mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3"></div>
     <div id="op-editor-slot"></div>
     <div id="op-list" class="space-y-3">
@@ -294,7 +344,169 @@
       note.className = `text-xs mt-1.5 ${offer.answered ? 'text-gray-500' : 'text-amber-700'}`;
       note.textContent = offer.answered ? '' : 'We guessed this from your business details. Tick what\'s true and it\'s saved.';
       window.BizOffer.set(offer);
+      refreshIntroChoices();
     }
+
+    // ── Free trial / introductory offer (src/utils/intro-offer.ts) ────────────────────────────
+    // undefined until loaded; null = not answered; { has: false } = no; { has: true, kind, … }.
+    let introOffer;
+    // Same wording and order as intro-offer.ts INTRO_OFFER_LABELS, suggestedIntroKinds and introOfferQuestion.
+    const INTRO_LABELS = {
+      free_trial: 'A free trial',
+      freemium: 'A free plan',
+      free_consultation: 'A free consultation or discovery call',
+      first_visit: 'A first-visit or first-booking offer',
+      intro_discount: 'An introductory discount',
+      free_sample: 'A free sample or taster',
+      money_back: 'A money-back guarantee',
+      other: 'Something else',
+    };
+    const INTRO_DAYS = ['free_trial', 'money_back'];
+    const INTRO_TERMS = ['freemium', 'first_visit', 'intro_discount', 'other'];
+    const byId = (id) => document.getElementById(id);
+    const radioVal = (name) => (document.querySelector(`input[name="${name}"]:checked`) || {}).value || '';
+    const setRadio = (name, v) => document.querySelectorAll(`input[name="${name}"]`).forEach((r) => { r.checked = r.value === v; });
+    function introKinds() {
+      const first = [];
+      if (offers('subscriptions')) first.push('free_trial', 'freemium', 'money_back');
+      if (offers('services')) first.push('free_consultation', 'intro_discount');
+      if (offers('bookings') || offers('visits')) first.push('first_visit', 'intro_discount');
+      if (offers('products') || offers('menu')) first.push('free_sample', 'intro_discount', 'money_back');
+      return [...new Set([...first, ...Object.keys(INTRO_LABELS)])];
+    }
+    function introQuestion() {
+      if (offers('subscriptions')) return 'Do you offer a free trial?';
+      if (offers('services') || offers('bookings')) return 'Do you offer a free consultation or an introductory offer?';
+      return 'Do you offer new customers a free trial or an introductory offer?';
+    }
+    // The question and the order of kinds follow the ticks above; a kind already chosen is kept.
+    function refreshIntroChoices() {
+      const sel = byId('op-intro-kind');
+      if (!sel || introOffer === undefined) return;
+      byId('op-intro-q').textContent = introQuestion();
+      const keep = sel.value;
+      sel.innerHTML = introKinds().map((k) => `<option value="${k}">${esc(INTRO_LABELS[k])}</option>`).join('');
+      if (keep) sel.value = keep;
+    }
+    function introFields() {
+      const k = byId('op-intro-kind').value;
+      byId('op-intro-days-row').classList.toggle('hidden', !INTRO_DAYS.includes(k));
+      byId('op-intro-card-row').classList.toggle('hidden', k !== 'free_trial');
+      byId('op-intro-after-row').classList.toggle('hidden', k !== 'free_trial');
+      byId('op-intro-terms-opt').classList.toggle('hidden', INTRO_TERMS.includes(k));
+    }
+    function introNote(text, tone) {
+      const n = byId('op-intro-note');
+      n.className = `text-xs mt-1.5 ${tone === 'error' ? 'text-red-600' : tone === 'warn' ? 'text-amber-700' : 'text-gray-500'}`;
+      n.textContent = text || '';
+    }
+    function renderIntro() {
+      const box = byId('op-intro');
+      if (!box || introOffer === undefined) return;
+      box.classList.remove('hidden');
+      refreshIntroChoices();
+      const o = introOffer;
+      const yes = !!(o && o.has);
+      setRadio('op-intro-has', o ? (yes ? 'yes' : 'no') : '');
+      byId('op-intro-form').classList.toggle('hidden', !yes);
+      byId('op-intro-kind').value = yes ? o.kind : introKinds()[0];
+      byId('op-intro-days').value = yes && o.days ? o.days : '';
+      setRadio('op-intro-card', yes && o.cardUpFront != null ? (o.cardUpFront ? 'yes' : 'no') : '');
+      setRadio('op-intro-after', yes && o.afterwards ? o.afterwards : '');
+      byId('op-intro-terms').value = yes ? o.terms || '' : '';
+      byId('op-intro-who').value = yes ? o.whoFor || '' : '';
+      byId('op-intro-applies').value = yes ? o.appliesTo || '' : '';
+      byId('op-intro-url').value = yes ? o.url || '' : '';
+      introFields();
+      if (!o) introNote('Not answered yet. Until you answer, your assistants won\'t mention any free trial or offer.', 'warn');
+      else introNote(yes ? 'Saved. Every assistant uses this offer, on exactly these terms.' : 'Saved. Your assistants won\'t offer a free trial or discount.');
+    }
+    async function saveIntro(payload) {
+      introNote('Saving…');
+      try {
+        introOffer = (await call('PATCH', { introOffer: payload })).introOffer;
+        renderIntro();
+        refreshCtas();
+      } catch (err) {
+        introNote(err.message, 'error');
+      }
+    }
+    function introFromForm() {
+      const card = radioVal('op-intro-card');
+      const days = byId('op-intro-days').value;
+      return {
+        has: true, kind: byId('op-intro-kind').value,
+        days: days ? Number(days) : null,
+        cardUpFront: card ? card === 'yes' : null,
+        afterwards: radioVal('op-intro-after') || null,
+        terms: byId('op-intro-terms').value, whoFor: byId('op-intro-who').value,
+        appliesTo: byId('op-intro-applies').value, url: byId('op-intro-url').value,
+      };
+    }
+    // The chat's intro_offer card saves through the same PATCH, then tells this tab (chat-session.js).
+    document.addEventListener('bizinfo:introOffer', (e) => { introOffer = e.detail ?? null; renderIntro(); refreshCtas(); });
+
+    // ── Calls to action (src/config/call-to-action.ts) ────────────────────────────────────────
+    // { assistants: [{ id, name, roleKey, choice, resolved }], giftForms } — null until loaded.
+    let ctas = null;
+    const ctaNotes = {};
+    // Same wording as src/config/call-to-action.ts CTA_LABELS.
+    const CTA_LABELS = {
+      own: 'Its own call to action',
+      intro_offer: 'Your free trial or introductory offer',
+      gift: 'A free download from a sign-up form',
+    };
+    const CTA_ROLE_NAMES = { social_media_manager: 'Social posts', blog_writer: 'Blog articles', newsletter_editor: 'Emails' };
+    function ctaDescribe(r) {
+      if (r.kind === 'intro_offer') return `Invites people to your offer${r.url ? '' : ' (no link — add one to your offer above)'}.`;
+      if (r.kind === 'gift') return `Invites people to get the free “${r.giftLabel}”${r.url ? '' : ' (that form has no page of its own yet, so there’s no link)'}.`;
+      return r.unusable ? `${r.unusable} Until then it uses its own.` : 'Uses the call to action in its own brief.';
+    }
+    function renderCtas() {
+      const box = byId('op-cta');
+      if (!box || !ctas) return;
+      const list = ctas.assistants || [];
+      box.classList.toggle('hidden', !list.length);
+      const forms = ctas.giftForms || [];
+      byId('op-cta-list').innerHTML = list.map((a) => {
+        const kind = a.choice.kind;
+        const formId = a.resolved.kind === 'gift' ? a.resolved.formId : a.choice.formId;
+        const note = ctaNotes[a.id];
+        return `<div class="bg-white border border-gray-200 rounded-lg px-3 py-2" data-cta-row="${a.id}">
+          <div class="flex flex-col sm:flex-row sm:items-center gap-2">
+            <p class="text-sm font-semibold text-gray-800 sm:w-64 min-w-0 truncate">${esc(a.name)} <span class="text-xs font-normal text-gray-500">· ${esc(CTA_ROLE_NAMES[a.roleKey] || '')}</span></p>
+            <select data-cta-kind class="w-full sm:w-64 px-2 py-1.5 rounded-lg border border-gray-300 text-sm bg-white">
+              ${Object.keys(CTA_LABELS).map((k) => `<option value="${k}" ${k === kind ? 'selected' : ''}>${esc(CTA_LABELS[k])}</option>`).join('')}
+            </select>
+            <select data-cta-form class="w-full sm:w-64 px-2 py-1.5 rounded-lg border border-gray-300 text-sm bg-white ${kind === 'gift' ? '' : 'hidden'}">
+              ${forms.length ? forms.map((f) => `<option value="${f.id}" ${f.id === formId ? 'selected' : ''}>${esc(f.name)} — ${esc(f.giftLabel)}</option>`).join('') : '<option value="">No form sends a free download yet</option>'}
+            </select>
+          </div>
+          <p class="text-xs mt-1 ${note && note.error ? 'text-red-600' : 'text-gray-500'}">${esc(note ? note.text : ctaDescribe(a.resolved))}</p>
+        </div>`;
+      }).join('');
+    }
+    async function saveCtaRow(row) {
+      const id = Number(row.dataset.ctaRow);
+      const kind = row.querySelector('[data-cta-kind]').value;
+      const formId = kind === 'gift' ? Number(row.querySelector('[data-cta-form]').value) || null : null;
+      ctaNotes[id] = { text: 'Saving…' };
+      renderCtas();
+      try {
+        const { assistant } = await call('PATCH', { callToAction: { assistantId: id, kind, formId } });
+        ctas.assistants = ctas.assistants.map((a) => (a.id === id ? assistant : a));
+        ctaNotes[id] = { text: `Saved. ${ctaDescribe(assistant.resolved)}` };
+      } catch (err) {
+        ctaNotes[id] = { text: err.message, error: true };
+      }
+      renderCtas();
+    }
+    // After the offer above changes, what each call to action resolves to may change too.
+    async function refreshCtas() {
+      try { const d = await call('GET'); ctas = d.callsToAction || null; renderCtas(); } catch { /* keep what is shown */ }
+    }
+    // The chat's call_to_action card saved (chat-session.js).
+    document.addEventListener('bizinfo:callToAction', () => refreshCtas());
 
     /**
      * Which optional groups of fields this product shows. A group the business doesn't use stays in
@@ -370,9 +582,13 @@
         const data = await call('GET');
         products = data.products || [];
         offer = data.offer || null;
+        introOffer = data.introOffer ?? null;
+        ctas = data.callsToAction || null;
         showError('');
         render();
         renderOffer();
+        renderIntro();
+        renderCtas();
       } catch (e) {
         listEl.innerHTML = '';
         showError('Your products could not be loaded right now. Please refresh and try again.');
@@ -557,6 +773,21 @@
     // Show the price boxes that fit the choice; services also ask how long they take.
     section.addEventListener('change', async (e) => {
       if (e.target.matches('[data-op-offer]')) return saveOffer();
+      // "No" is the whole answer, so it saves at once; "Yes" opens the terms and waits for Save.
+      if (e.target.name === 'op-intro-has') {
+        if (e.target.value === 'no') return saveIntro({ has: false });
+        byId('op-intro-form').classList.remove('hidden');
+        introFields();
+        return introNote('Fill in the terms, then Save offer.');
+      }
+      if (e.target.id === 'op-intro-kind') return introFields();
+      // A call to action saves on change; choosing "free download" shows the form picker first
+      // and saves with the form it shows.
+      const ctaRow = e.target.closest('[data-cta-row]');
+      if (ctaRow) {
+        if (e.target.matches('[data-cta-kind]')) ctaRow.querySelector('[data-cta-form]').classList.toggle('hidden', e.target.value !== 'gift');
+        return saveCtaRow(ctaRow);
+      }
       const f = document.getElementById('op-editor');
       if (!f) return;
       if (e.target.id === 'op-price-type') {
@@ -577,6 +808,7 @@
       if (!t) return;
       const id = Number(t.closest('.op-card')?.dataset.id);
       if (t.id === 'op-add') return openEditor(null);
+      if (t.id === 'op-intro-save') return saveIntro(introFromForm());
       if (t.id === 'op-cancel') return closeEditor();
       if (t.id === 'op-save') return save();
       if (t.id === 'op-pick' && window.MediaPicker) {

@@ -14,6 +14,8 @@ import { aiAssistants, organisations } from '../../db/schema';
 import { signatureFromContext } from './outreach-signature';
 import type { SenderIdentity } from '../config/sender-identity';
 import { loadProductsBlock } from './org-products';
+import { resolveOutreachOffer } from './outreach-offer';
+import type { ResolvedOutreachOffer } from '../config/outreach-offer';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -39,10 +41,14 @@ export async function loadSenderIdentity(db: Db, organisationId: number, assista
             .where(eq(organisations.id, organisationId))
             .limit(1);
         let signature: string | null = null;
+        // And what its emails offer (src/utils/outreach-offer.ts) — every outreach prompt loads the
+        // sender, so carrying the offer here means no seam can draft without it. Never throws.
+        let outreachOffer: ResolvedOutreachOffer | null = null;
         if (assistantId) {
             const [a] = await db.select({ ctx: aiAssistants.onboardingContext }).from(aiAssistants)
                 .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, organisationId))).limit(1);
             signature = signatureFromContext(a?.ctx) || null;
+            outreachOffer = await resolveOutreachOffer(db, organisationId, a?.ctx);
         }
         return {
             businessName: org?.name ?? '',
@@ -52,6 +58,7 @@ export async function loadSenderIdentity(db: Db, organisationId: number, assista
             // Never throws — no products (or no table yet) is simply no block.
             productsBlock: await loadProductsBlock(db, organisationId, org?.name ?? null),
             signature,
+            outreachOffer,
         };
     } catch (err) {
         console.error('[sender-identity] could not read the org row:', err);
