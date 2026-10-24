@@ -16,7 +16,7 @@ export const OUTREACH_OFFER_CARD_TYPE = 'outreach_offer';
 export function renderOutreachOfferChatBlock(current: string, forms: GiftForm[], unusable?: string | null): string {
     const formLines = forms.length
         ? forms.map((f) => `  • formId ${f.id}: "${f.name}" — free download "${f.giftLabel}"${f.linkable ? '' : ' (no page of its own yet, so follow-ups cannot link to it)'}`).join('\n')
-        : '  (none — a gift needs a sign-up form with a free download, made with the Email Marketing Assistant or in Audience ▸ Sign-up forms)';
+        : '  (none — a gift needs a sign-up form with a free download, made in Audience ▸ Sign-up forms, or by their Email Marketing Assistant only if <team_activity> lists one that is active)';
     return `YOUR OUTREACH OFFER — what your first emails offer: ${current}.${unusable ? ` (${unusable})` : ''}
 Every first email is under 75 words, opens with the prospect's problem, carries no link, never asks for a call and ends by asking permission. The first follow-up carries the link; for a gift it is tracked, so a sign-up through it is credited to the lead and stops the follow-ups. The owner sees and changes this on the Outreach tab.
 Gift forms in this workspace:

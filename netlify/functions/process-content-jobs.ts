@@ -45,6 +45,7 @@ import { operationalSetupLines } from '../../src/utils/operational-setup';
 import { renderBlueprintPrompt } from '../../src/utils/blueprint-prompt';
 import { loadOfferingsText, loadProductsBlock } from '../../src/utils/org-products';
 import { socialHookFor } from '../../src/config/hook-styles';
+import { platformCraftBlock } from '../../src/constants/platform-craft';
 import { ctaBriefLine } from '../../src/config/call-to-action';
 import { resolveCta } from '../../src/utils/call-to-action';
 import { campaignDirectiveForJob } from '../../src/utils/campaign-job-directive';
@@ -432,7 +433,9 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // setup answers: its own "Call to action" words, or the workspace's intro offer / a gift form,
         // with the real link. 'own' leaves the line exactly as it always was.
         const ctaOfferLine    = ctaBriefLine(await resolveCta(db, job.organisation_id, brandCtx), 'social');
-        const ctaLine         = ctaOfferLine || (answers['cta'] ? `Call to action: ${answers['cta']}` : '');
+        // "Not every post": the own-words CTA used to read as an instruction for EVERY post, so the
+        // prompt audit (2026-10-24) found it bolted onto 3 posts in 4, against the standards' rule.
+        const ctaLine         = ctaOfferLine || (answers['cta'] ? `Call to action, for the posts that ask for something (not every post — most should simply give): ${answers['cta']}` : '');
         const incentiveLine   = answers['incentive']    ? `Incentive/offer: ${answers['incentive']}` : '';
         const coreMessageLine = answers['core_message'] ? `Core message: ${answers['core_message']}` : '';
         const extraLines      = [ctaLine, incentiveLine, coreMessageLine].filter(Boolean).join('\n');
@@ -649,6 +652,9 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             formatBlock,
             shapeLine,
             strategyBlock,
+            // How an expert writes for these platforms (src/constants/platform-craft.ts) — before the
+            // owner's own strategy line, which wins where they overlap.
+            platformCraftBlock(targetPlatforms),
             platformStrategyLine,
             hookLine,
             recentBlock,

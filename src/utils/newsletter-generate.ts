@@ -20,6 +20,7 @@
 import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import { loadProductsBlock } from './org-products';
 import { emailOpeningBlock } from '../config/hook-styles';
+import { emailCraftBlock } from '../constants/email-craft';
 import { CTA_BINDING_RULE, ctaBriefLine } from '../config/call-to-action';
 import { loadCtaForAssistant } from './call-to-action';
 
@@ -430,7 +431,9 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
                 : '') +
             'Do NOT invent statistics, customer numbers, testimonials, prices or dates. If the brief ' +
             'does not supply a fact, write around it.\n' +
-            `${CTA_BINDING_RULE}` +
+            `${CTA_BINDING_RULE}\n\n` +
+            // How an expert email marketer writes one (src/constants/email-craft.ts) — prompt audit.
+            `${emailCraftBlock(org?.name)}` +
             // ⚠️ AFTER the general rules and BEFORE the guardrails: a purpose narrows the job (a
             // terms notice is not written in newsletter voice), and the blueprint guardrails are
             // the tenant's own constraints, which outrank both.
@@ -867,6 +870,7 @@ export async function draftSequenceEmail(db: Db, opts: SequenceDraftOptions): Pr
             + 'in a year, do not write it.\n'
             + 'Do NOT invent statistics, customer numbers, testimonials or prices. Do NOT write an '
             + 'unsubscribe line, a footer or a postal address — those are added automatically.\n'
+            + `${emailCraftBlock(org?.name)}\n`
             + `You may personalise using these tags, written exactly as shown: ${varList}. Always `
             + `give a name tag a fallback, like ${GREETING_EXAMPLE}.\n\n`
             + (wantsLayout

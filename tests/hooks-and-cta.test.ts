@@ -58,7 +58,7 @@ check('a blank setting is "own" — every assistant behaves exactly as before', 
         assert.strictEqual(ctaBriefLine(null, s), '');
     }
     // Social falls back to its own "Call to action" answer when the setting is 'own'.
-    assert.ok(read('netlify/functions/process-content-jobs.ts').includes("const ctaLine         = ctaOfferLine || (answers['cta'] ? `Call to action: ${answers['cta']}` : '');"));
+    assert.ok(read('netlify/functions/process-content-jobs.ts').includes("const ctaLine         = ctaOfferLine || (answers['cta'] ? `Call to action, for the posts that ask for something"));
 });
 
 check('the offer is stated exactly, with its real link, and social only asks now and then', () => {

@@ -378,7 +378,11 @@ export async function runQualityReview(
 
 Only raise a complianceWarning for something a human must verify or correct before publishing —
 an unsubstantiated claim, a pricing or performance statement that may mislead, a missing
-disclosure, or a breach of the content rules below. Do NOT raise one for matters of style, tone,
+disclosure, or a breach of the content rules below. A specific customer, client or patient moment
+told as fact ("someone just picked up a bouquet…", "a bride called on Tuesday…", "one client saved
+£2,000") that the declared facts don't give IS one: if it's made up it reads as a fake review, so
+warn and ask them to confirm it happened or reword it as hypothetical. A plainly hypothetical scene
+("Picture…") is not. Do NOT raise one for matters of style, tone,
 length or hashtag choice.${withSuggestions ? ' Those belong in the suggestion.' : ''}
 
 Raise a warning ONLY where there is a specific, nameable problem a person can act on. A caption

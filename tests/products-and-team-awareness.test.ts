@@ -212,8 +212,9 @@ check('a teammate with nothing recent says so instead of vanishing', () => {
     const b = renderTeamActivityBlock({ selfId: 1, team, work: new Map([[1, []]]), booked: [], now: NOW })!;
     assert.ok(/TEAMMATE — Nina[^\n]*\n {2}- Nothing finished in the last 14 days\./.test(b));
 });
-check('a lone assistant with nothing booked gets no block', () => {
-    assert.strictEqual(renderTeamActivityBlock({ selfId: 1, team: [team[0]], work, booked: [], now: NOW }), null);
+check('a lone assistant is told it has no active teammates (owner, 2026-10-24)', () => {
+    const lone = renderTeamActivityBlock({ selfId: 1, team: [team[0]], work, booked: [], now: NOW });
+    assert.ok(lone && lone.includes('the only assistant this business has active') && lone.includes('Never suggest, hand work to'));
 });
 check('the block is bounded however big the team', () => {
     const big: TeamMember[] = Array.from({ length: 60 }, (_, i) => ({ id: i + 1, name: `A${i}`, roleKey: 'blog_writer', roleLabel: 'Blog Writer', lifecycleStatus: 'working' }));
