@@ -1957,8 +1957,97 @@ function _rqOutreachReadinessHtml(statusKey) {
             </p>
           </div>`);
     }
+    parts.push(_rqOutreachOfferHtml());
     return parts.join('');
 }
+
+// ── What the outreach offers (src/config/outreach-offer.ts) ───────────────────
+// One strip under the readiness banner on Review and Approved: what this assistant's first emails
+// offer, and a Change control (offer + which gift form). Saves through lead-generation.ts
+// `set_outreach_offer` — the same action as the chat's outreach_offer card. Handlers are bound once on
+// `document` below, never from this render path (the column repaints on every approve).
+// Same wording as src/config/outreach-offer.ts OUTREACH_OFFER_LABELS.
+const _RQ_OFFER_LABELS = {
+    gift: 'A free gift (a sign-up form with a free download)',
+    intro_offer: 'Your free trial or introductory offer',
+    reply: 'No offer — just ask a question',
+};
+let _rqOfferEditing = false;
+let _rqOfferError = '';
+function _rqOfferDescribe(r) {
+    if (!r) return '';
+    if (r.kind === 'gift') return `a free "${r.giftLabel}" (from your "${r.formName}" sign-up form)`;
+    if (r.kind === 'intro_offer') return String(r.summary || '').replace(/\.$/, '');
+    return 'no offer — a question that invites a reply';
+}
+function _rqOutreachOfferHtml() {
+    const o = _rqReadiness && _rqReadiness.offer;
+    if (!o) return '';
+    const esc = _escapeHtml;
+    const r = o.resolved || { kind: 'reply' };
+    const forms = Array.isArray(o.giftForms) ? o.giftForms : [];
+    const choice = (o.choice && o.choice.kind) || 'reply';
+    const giftNote = r.kind === 'gift' && !r.linkable
+        ? `<p class="text-xs text-amber-800 mt-1">That form has no page of its own yet, so follow-ups can't link to it. Turn on "Its own page" for it in Audience ▸ Sign-up forms.</p>` : '';
+    const unusable = r.unusable ? `<p class="text-xs text-amber-800 mt-1">${esc(r.unusable)} Until then, emails just ask a question.</p>` : '';
+    const editor = !_rqOfferEditing ? '' : `
+        <div class="mt-2 flex flex-col sm:flex-row sm:items-end gap-2">
+          <label class="text-xs font-semibold text-gray-700 sm:w-72">Offer
+            <select data-rq-offer-kind class="mt-1 w-full px-2 py-1.5 rounded-lg border border-gray-300 text-sm bg-white font-normal">
+              ${Object.keys(_RQ_OFFER_LABELS).map((k) => `<option value="${k}" ${k === choice ? 'selected' : ''}>${esc(_RQ_OFFER_LABELS[k])}</option>`).join('')}
+            </select></label>
+          <label data-rq-offer-form-row class="text-xs font-semibold text-gray-700 sm:w-72 ${choice === 'gift' ? '' : 'hidden'}">Gift form
+            <select data-rq-offer-form class="mt-1 w-full px-2 py-1.5 rounded-lg border border-gray-300 text-sm bg-white font-normal">
+              ${forms.length ? forms.map((f) => `<option value="${f.id}" ${r.kind === 'gift' && r.formId === f.id ? 'selected' : ''}>${esc(f.name)} — ${esc(f.giftLabel)}</option>`).join('') : '<option value="">No form sends a free download yet</option>'}
+            </select></label>
+          <div class="flex gap-2">
+            <button type="button" data-rq-offer-save class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg">Save</button>
+            <button type="button" data-rq-offer-cancel class="btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border">Cancel</button>
+          </div>
+        </div>
+        ${_rqOfferError ? `<p class="text-xs text-red-700 mt-1">${esc(_rqOfferError)}</p>` : ''}`;
+    return `<div data-rq-offer class="rounded-xl border border-gray-200 bg-white px-3 py-2.5 my-3">
+        <div class="flex items-start justify-between gap-2">
+          <p class="text-xs text-gray-700 min-w-0"><span class="text-sm leading-none">🎁</span>
+            <span class="font-bold">First emails offer:</span> ${esc(_rqOfferDescribe(r))}.
+            <span class="text-gray-500">Under 75 words, no link, no call request — the link goes in the first follow-up${r.kind === 'gift' && r.linkable ? ', and a sign-up through it is credited to the lead' : ''}.</span></p>
+          ${_rqOfferEditing ? '' : '<button type="button" data-rq-offer-edit class="text-xs font-bold underline hover:no-underline shrink-0">Change</button>'}
+        </div>
+        ${giftNote}${unusable}${editor}
+      </div>`;
+}
+function _rqRepaintOffer() {
+    if (_rqRecordsPageKey) _detailRqPaintRecords(_rqRecordsPageKey, _rqLastPaintOpts);
+}
+document.addEventListener('click', (e) => {
+    if (e.target.closest('[data-rq-offer-edit]')) { _rqOfferEditing = true; _rqOfferError = ''; _rqRepaintOffer(); return; }
+    if (e.target.closest('[data-rq-offer-cancel]')) { _rqOfferEditing = false; _rqOfferError = ''; _rqRepaintOffer(); return; }
+    const save = e.target.closest('[data-rq-offer-save]');
+    if (!save) return;
+    const box = save.closest('[data-rq-offer]');
+    const offer = box.querySelector('[data-rq-offer-kind]').value;
+    const formId = offer === 'gift' ? Number(box.querySelector('[data-rq-offer-form]').value) || null : null;
+    save.disabled = true;
+    fetch('/.netlify/functions/lead-generation', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set_outreach_offer', assistantId: window._currentAssistantId, offer, formId }),
+    }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'That could not be saved. Please try again.');
+        _rqReadiness.offer = { ..._rqReadiness.offer, choice: data.choice, resolved: data.resolved };
+        _rqOfferEditing = false; _rqOfferError = '';
+    }).catch((err) => { _rqOfferError = err.message; })
+        .finally(() => _rqRepaintOffer());
+});
+document.addEventListener('change', (e) => {
+    if (!e.target.matches('[data-rq-offer-kind]')) return;
+    const row = e.target.closest('[data-rq-offer]').querySelector('[data-rq-offer-form-row]');
+    if (row) row.classList.toggle('hidden', e.target.value !== 'gift');
+});
+// The chat's outreach_offer card saved (chat-session.js): show the new offer on next paint.
+document.addEventListener('lead:outreachOfferSaved', (e) => {
+    if (_rqReadiness && e.detail) { _rqReadiness.offer = { ..._rqReadiness.offer, ...e.detail }; _rqRepaintOffer(); }
+});
 
 // ── Paging + collapse state for the records queue ────────────────────────────
 // Both exist for the same reason: a lead search files fifteen to sixty records at a time, and this

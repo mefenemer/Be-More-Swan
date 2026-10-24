@@ -1398,6 +1398,22 @@
       }).catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // "Save this" on an outreach_offer card (Lead Generator) → lead-generation.ts set_outreach_offer, the
+    // same action as the Outreach tab's offer strip (src/config/outreach-offer.ts).
+    function onOutreachOffer(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/lead-generation', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ action: 'set_outreach_offer', assistantId, offer: d.offer, formId: d.formId ?? null }),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+        respond({ ok: true });
+        document.dispatchEvent(new CustomEvent('lead:outreachOfferSaved', { detail: { choice: data.choice, resolved: data.resolved } }));
+      }).catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     // "Add" on a class_sessions card — sites.ts `session_add`, the same checks as the Website tab's Timetable.
     function onClassSessions(e) {
       const d = e.detail || {};
@@ -1779,6 +1795,7 @@
     container.addEventListener('site:classSessions', onClassSessions);
     container.addEventListener('site:offerProfile', onOfferProfile);
     container.addEventListener('intro:offer', onIntroOffer);
+    container.addEventListener('lead:outreachOffer', onOutreachOffer);
     container.addEventListener('site:reviewDecisions', onReviewDecisions);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
@@ -1851,6 +1868,7 @@
         container.removeEventListener('site:reviewDecisions', onReviewDecisions);
         container.removeEventListener('site:offerProfile', onOfferProfile);
         container.removeEventListener('intro:offer', onIntroOffer);
+        container.removeEventListener('lead:outreachOffer', onOutreachOffer);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
         container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);

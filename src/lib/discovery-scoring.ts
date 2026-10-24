@@ -6,6 +6,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { OUTREACH_SUBJECT_RULES } from '../constants/outreach-subject';
+import { outreachFirstEmailBlock } from '../config/outreach-offer';
 import { parseModelJson, parseModelJsonArray } from '../utils/model-json';
 import {
     DISQUALIFIED_MAX_SCORE,
@@ -524,7 +525,9 @@ our own staff or domain, a competitor, an existing customer, or anyone who has a
 contacted. This is stronger than a low score: a cold lead is a poor prospect we may still contact,
 whereas doNotContact means sending would be wrong. When it is true, set outreachDraft to null.
 
-${OUTREACH_SUBJECT_RULES}`;
+${OUTREACH_SUBJECT_RULES}
+
+${outreachFirstEmailBlock(sender.outreachOffer)}`;
 
     const compact = candidates.map((c, i) => ({
         index: i,
@@ -739,7 +742,9 @@ ${senderIdentityBlock(sender)}
 
 ${SENDER_IDENTITY_RULE}
 
-${OUTREACH_SUBJECT_RULES}`;
+${OUTREACH_SUBJECT_RULES}
+
+${outreachFirstEmailBlock(sender.outreachOffer)}`;
 
     const payload = {
         companyName: current.leadName,

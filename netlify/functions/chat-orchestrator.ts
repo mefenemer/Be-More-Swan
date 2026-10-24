@@ -77,6 +77,8 @@ import { buildRulesListBlock, resolveRuleProposal, ruleProposalFromUiElement, ru
 import { buildPlanSnapshot } from '../../src/utils/chat-plan-snapshot';
 import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGoalProposal, type GoalCard } from '../../src/utils/chat-goals';
 import { introOfferCardFromUiElement, introOfferPromptBlock, type IntroOfferCard } from '../../src/utils/intro-offer';
+import { buildOutreachOfferChatBlock, OUTREACH_OFFER_CARD_TYPE, outreachOfferCardFrom, type OutreachOfferCard } from '../../src/utils/chat-outreach-offer';
+import { listGiftForms } from '../../src/utils/outreach-offer';
 import { resolveScheduleProposal, scheduleProposalFromUiElement, schedulePromptBlock, type ScheduleCard } from '../../src/utils/chat-schedule';
 import { buildPlatformsBlock, platformsProposalFromUiElement, resolvePlatformsProposal, type PlatformsCard } from '../../src/utils/chat-platforms';
 import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal, type LibraryCard } from '../../src/utils/chat-library';
@@ -178,6 +180,9 @@ interface RouteContext {
      *  usesLeadSnapshot. null/undefined injects nothing, and the prompt says so rather than
      *  guessing. See buildLeadsSnapshot(). */
     leadsSnapshot?: string | null;
+    /** What this Lead Generator's outreach offers and the card that changes it — same routes as
+     *  leadsSnapshot. src/utils/chat-outreach-offer.ts. */
+    outreachOfferBlock?: string | null;
     /** This Campaign Assistant's own campaigns and the org's saved searches, read per turn — only
      *  populated for routes with usesCampaignSnapshot. Without it the chat can only ever CREATE:
      *  "add two articles to the spring campaign" has no campaign id to point at. See
@@ -1749,7 +1754,7 @@ ${rc.leadsSnapshot
     ?? 'YOUR LEADS RIGHT NOW — unavailable for this turn: the lead counts could not be read. If the user asks how many leads they have, say you cannot see the count right now and point them at the Found leads tab. Do NOT estimate, and do NOT answer from anything else in this conversation.'}
 
 ${leadActionsPrompt()}
-
+${rc.outreachOfferBlock ? `\n${rc.outreachOfferBlock}\n` : ''}
 Score every lead against the ideal customer profile below — a lead that matches it well scores high; one that misses it scores low, and your reasons must say which criteria it met or missed.
 
 Ideal customer profile (from setup):
@@ -2758,6 +2763,11 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const leadsSnapshot = route.usesLeadSnapshot
         ? await buildLeadsSnapshot(db, orgId, session.aiAssistantId)
         : null;
+    // What its outreach offers (src/utils/chat-outreach-offer.ts) — per turn, so a change on the
+    // Outreach tab a moment ago is in the next answer. Null on failure.
+    const outreachOfferBlock = route.usesLeadSnapshot
+        ? await buildOutreachOfferChatBlock(db, orgId, session.aiAssistantId)
+        : null;
 
     // Per turn, for the same reason as the leads snapshot: a plan approved on the Campaigns tab a
     // moment ago must be visible to the next message, not the one that opened the conversation.
@@ -2814,6 +2824,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         mediaSources: assistantRow.mediaSources,
         inspoBlock,
         leadsSnapshot,
+        outreachOfferBlock,
         campaignsSnapshot,
         briefsSnapshot,
         siteAuditSnapshot,
@@ -3151,8 +3162,16 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             introOfferCard = introReq;
             uiElement = introOfferCard;
         }
+        // The Lead Generator's outreach offer (src/utils/chat-outreach-offer.ts), rebuilt against the
+        // workspace's real gift forms; the click calls lead-generation.ts set_outreach_offer.
+        let outreachOfferCard: OutreachOfferCard | null = null;
+        if (route === ROUTES.lead_qualifier && !introReq && (uiElement as { type?: unknown } | null)?.type === OUTREACH_OFFER_CARD_TYPE) {
+            const r = outreachOfferCardFrom(uiElement, await listGiftForms(db, orgId));
+            if (r && 'error' in r) { uiElement = null; content = `${r.error} I haven’t changed anything — you can also change the offer on the Outreach tab.`; }
+            else if (r) { outreachOfferCard = r; uiElement = r; }
+        }
         // One card for the "keep it" checks below: a change to the assistant's own profile.
-        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard;
+        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | OutreachOfferCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard ?? outreachOfferCard;
         // The Blog Writer's twin (src/utils/chat-blog-action.ts): same checks, built from blog_posts
         // rows; a time in the user's words is worked out here so the card shows the exact instant.
         let blogAction: BlogActionCard | null = null;

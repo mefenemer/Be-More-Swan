@@ -50,6 +50,8 @@ import { replyAddress } from '../../src/utils/reply-address';
 import { checkSuppression } from '../../src/utils/suppression';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { OUTREACH_SUBJECT_RULES } from '../../src/constants/outreach-subject';
+import { followUpLinkTarget, outreachFollowUpBlock, withOfferLink } from '../../src/config/outreach-offer';
+import { offerLinkForThread } from '../../src/utils/outreach-offer';
 import { evaluateDoNotContact } from '../../src/config/do-not-contact';
 import {
     advanceEnrolment, haltEnrolment, loadSteps, recordSendFailure, sequenceSendsToday,
@@ -182,6 +184,8 @@ async function draftFollowUp(
     sender: SenderIdentity,
     step: SequenceStepRow,
     originalSubject: string | null,
+    /** The code adds the offer's link after the body (src/config/outreach-offer.ts) — the prompt introduces it. */
+    withOfferLinkLine = false,
 ): Promise<{ subject: string; body: string } | null> {
     const history = await threadHistory(db, enrolment.lead_thread_id, 6);
 
@@ -210,11 +214,13 @@ ${step.bodyPrompt}
 Hard rules:
 - The prospect has not answered. Do not thank them for their reply, do not reference a conversation that did not happen, and do not invent facts about their business that are not in the transcript below.
 - No placeholders, no square brackets, no "Dear [Name]".
-- Plain text only. No markdown, no links unless one already appears in the transcript.
+- Plain text only. No markdown, and never write a link or web address yourself (the offer's link, when this email has one, is added for you).
 - Keep the subject line as a reply to the original thread where that reads naturally. This thread genuinely exists — we sent the earlier message — so a "Re:" prefix is honest here.
 - BUT do not inherit a bad subject. If the original subject breaks any rule below (it invents an account or relationship, manufactures urgency, or reads as phishing), do NOT prefix it with "Re:" and carry it forward. Write a fresh, honest subject for this follow-up instead — one bad opener must not contaminate the rest of the sequence.
 
 ${OUTREACH_SUBJECT_RULES}
+
+${outreachFollowUpBlock(sender.outreachOffer, withOfferLinkLine)}
 
 If this email should NOT be written at all — the transcript or lead details say this contact is not a
 genuine prospect, must not be contacted, or the only honest email would break the rules above — do NOT
@@ -421,13 +427,23 @@ async function processEnrolment(
         return 'skipped';
     }
 
+    // The outreach offer's link, on the first chaser only (src/config/outreach-offer.ts): a gift form's
+    // page with this conversation's signed ref, so a sign-up through it credits the lead and stops the
+    // chasers; or the intro offer's own address. Null = this step carries no link.
+    const offerLink = followUpLinkTarget(sender.outreachOffer, step.stepNumber) && sender.outreachOffer
+        ? await offerLinkForThread(db, sender.outreachOffer, row.lead_thread_id)
+        : null;
+
     let draft: { subject: string; body: string } | null;
     try {
-        draft = await draftFollowUp(db, row, assistant, sender, step, opener?.subject ?? null);
+        draft = await draftFollowUp(db, row, assistant, sender, step, opener?.subject ?? null, !!offerLink);
     } catch (err) {
         return await handleSendFailure(db, ref, row, err, 'draft failed');
     }
     if (!draft) return await handleSendFailure(db, ref, row, null, 'model returned no usable draft');
+    // The link goes on the line after the sentence that introduces it — in the stored message too, so
+    // the transcript shows what they actually received.
+    draft = { ...draft, body: withOfferLink(draft.body, offerLink) };
 
     // Last check before the irreversible step. The draft above took an LLM round trip — seconds in
     // which a reply could have landed. Re-reading here costs one indexed query and is the

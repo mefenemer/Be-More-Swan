@@ -24,6 +24,7 @@
 // utils reads the DB.
 
 import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
+import type { ResolvedOutreachOffer } from './outreach-offer';
 
 /**
  * The sender's own business, as the prospect should perceive it. Every field except `businessName`
@@ -47,6 +48,13 @@ export interface SenderIdentity {
      * appended in code after the last sentence and a model sign-off would print twice.
      */
     signature?: string | null;
+    /**
+     * What this assistant's outreach offers (src/config/outreach-offer.ts), resolved against the
+     * workspace's real forms and intro offer. Rendered by outreachFirstEmailBlock /
+     * outreachFollowUpBlock, NOT here — the first email and a follow-up are told different things.
+     * Absent = no assistant known = reply-only.
+     */
+    outreachOffer?: ResolvedOutreachOffer | null;
 }
 
 /**

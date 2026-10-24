@@ -2218,6 +2218,49 @@
   }
   register('intro_offer', renderIntroOfferCard);
 
+  // { type: 'outreach_offer', summary, offer, offerLabel, formId, formName, giftLabel } — what a Lead
+  // Generator's first emails offer (src/config/outreach-offer.ts), rebuilt by the server against the
+  // workspace's real gift forms (src/utils/chat-outreach-offer.ts). The click → lead-generation.ts
+  // set_outreach_offer, the same action as the Outreach tab's offer strip.
+  function renderOutreachOfferCard(ui, esc) {
+    const what = ui.offer === 'gift' && ui.giftLabel
+      ? `A free "${ui.giftLabel}" from your "${ui.formName || 'sign-up'}" form`
+      : (ui.offerLabel || 'No offer — just ask a question');
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Outreach offer · Approval needed</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <p class="text-xs text-gray-700 mt-2 break-words">First emails will offer: <span class="font-semibold">${esc(what)}</span></p>
+      <p class="text-xs text-gray-600 mt-2">Emails already drafted keep their words. Change it any time on the Outreach tab.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-oo-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save this</button>
+        <button type="button" data-oo-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-oo-status></p>`;
+    const status = el.querySelector('[data-oo-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-oo-cancel]')) { setBusy(true); say('Not changed.'); return; }
+      if (!e.target.closest('[data-oo-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('lead:outreachOffer', {
+        bubbles: true,
+        detail: {
+          offer: ui.offer, formId: ui.formId ?? null,
+          respond({ ok, error }) {
+            if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved — nothing was changed.', 'error'); return; }
+            say('Saved — your next first emails use this offer.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('outreach_offer', renderOutreachOfferCard);
+
   // ── Request a call back (src/utils/callback-request.ts) ───────────────────────────────────────
   // Shown when the customer asks the chat for a call or a person. It only OPENS the Help & Support
   // form — the chat never books a call. No time is promised (owner, 2026-10-19).

@@ -765,6 +765,9 @@
 
     const notice = state.replyNotice && state.replyNotice[t.id];
     const err = state.replyError && state.replyError[t.id];
+    // The outreach offer's link for this conversation (lead-threads.ts `get` → offerLink), for when they
+    // answer "yes, send it over". Inserted into the reply, never sent on its own.
+    const offer = loaded.offerLink && loaded.offerLink.url ? loaded.offerLink : null;
 
     return `<div class="p-4 border-t border-gray-100 bg-gray-50">
       <div class="flex items-baseline justify-between gap-3 flex-wrap">
@@ -778,8 +781,11 @@
         <button type="button" data-lt-send-reply="${t.id}" ${sending || !draft.trim() ? 'disabled' : ''}
           class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
           ${sending ? 'Sending&hellip;' : 'Send reply'}</button>
+        ${offer && !sending ? `<button type="button" data-lt-offer-link="${t.id}"
+          class="btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border transition">${esc(offer.label)}</button>` : ''}
         <span class="text-[11px] text-gray-400">Your opt-out footer and postal address are added automatically.</span>
       </div>
+      ${offer && offer.tracked ? '<p class="mt-1.5 text-[11px] text-gray-500">If they sign up through that link, it\'s credited to this lead and any remaining follow-ups stop.</p>' : ''}
       ${err ? `<p class="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">${esc(err)}</p>` : ''}
       ${notice ? `<p class="mt-2 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">${esc(notice)}</p>` : ''}
     </div>`;
@@ -1097,7 +1103,7 @@
       td.innerHTML = detailHtml(t);
       try {
         const data = await call('get', { threadId: t.id });
-        state.open[t.id] = { thread: data.thread, messages: data.messages || [], enrolment: data.enrolment || null };
+        state.open[t.id] = { thread: data.thread, messages: data.messages || [], enrolment: data.enrolment || null, offerLink: data.offerLink || null };
         // The list row is the summary; the fetched thread is authoritative. Copy the two fields the
         // row renders from the record so the collapsed row cannot disagree with what is open above it.
         if (data.thread) {
@@ -1152,7 +1158,7 @@
       repaintDetail(t);
       try {
         const data = await call('get', { threadId: t.id });
-        state.open[t.id] = { thread: data.thread, messages: data.messages || [], enrolment: data.enrolment || null };
+        state.open[t.id] = { thread: data.thread, messages: data.messages || [], enrolment: data.enrolment || null, offerLink: data.offerLink || null };
       } catch (err) {
         state.rowError[t.id] = err.message || 'Could not open that conversation.';
       } finally {
@@ -1214,6 +1220,18 @@
       });
     }
     td.querySelector('[data-lt-send-reply]')?.addEventListener('click', () => sendReply(t));
+    // Puts the offer's link on its own line at the end of the reply. Into the box, not sent: the owner
+    // still writes the sentence around it and presses Send.
+    td.querySelector('[data-lt-offer-link]')?.addEventListener('click', () => {
+      const url = state.open[t.id] && state.open[t.id].offerLink && state.open[t.id].offerLink.url;
+      const box = td.querySelector('[data-lt-reply]');
+      if (!url || !box) return;
+      if (!box.value.includes(url)) box.value = box.value.replace(/\s+$/, '') + (box.value.trim() ? '\n' : '') + url;
+      state.replyDraft[t.id] = box.value;
+      const send = td.querySelector('[data-lt-send-reply]');
+      if (send) send.disabled = !box.value.trim() || !!state.replySending[t.id];
+      box.focus();
+    });
 
     td.querySelector('[data-lt-direct]')?.addEventListener('click', () => recordDirectReply(t));
 
@@ -1249,7 +1267,7 @@
         // The new message is only in the database — refetch this one conversation so it appears.
         try {
           const fresh = await call('get', { threadId: t.id });
-          state.open[t.id] = { thread: fresh.thread, messages: fresh.messages || [], enrolment: fresh.enrolment || null };
+          state.open[t.id] = { thread: fresh.thread, messages: fresh.messages || [], enrolment: fresh.enrolment || null, offerLink: fresh.offerLink || null };
         } catch { /* the notice above is still true; the message shows on the next open */ }
       } else {
         // Written, not sent. The row is due, so the hourly run will pick it up — say that rather
@@ -1295,7 +1313,7 @@
         // in the transcript above the box the user just typed into.
         try {
           const fresh = await call('get', { threadId: t.id });
-          state.open[t.id] = { thread: fresh.thread, messages: fresh.messages || [], enrolment: fresh.enrolment || null };
+          state.open[t.id] = { thread: fresh.thread, messages: fresh.messages || [], enrolment: fresh.enrolment || null, offerLink: fresh.offerLink || null };
         } catch { /* the notice is still true; the message appears on the next open */ }
       } else {
         // Non-send with a reason. Keep the draft — the user's words are the expensive part.
@@ -1340,7 +1358,7 @@
       // added — three things the open panel is showing stale.
       try {
         const fresh = await call('get', { threadId: t.id });
-        state.open[t.id] = { thread: fresh.thread, messages: fresh.messages || [], enrolment: fresh.enrolment || null };
+        state.open[t.id] = { thread: fresh.thread, messages: fresh.messages || [], enrolment: fresh.enrolment || null, offerLink: fresh.offerLink || null };
         t.sequence = fresh.enrolment || t.sequence;
         if (fresh.thread) t.state = fresh.thread.state;
       } catch { /* the notice is still true; the panel catches up on the next open */ }
@@ -1443,7 +1461,7 @@
       // after telling the user it was erased is the one thing this screen must not do.
       try {
         const fresh = await call('get', { threadId: t.id });
-        state.open[t.id] = { thread: fresh.thread, messages: fresh.messages || [], enrolment: fresh.enrolment || null };
+        state.open[t.id] = { thread: fresh.thread, messages: fresh.messages || [], enrolment: fresh.enrolment || null, offerLink: fresh.offerLink || null };
         t.contactEmail = (fresh.thread && fresh.thread.contactEmail) || null;
         t.lastExcerpt = '';
         t.erasedAt = (fresh.thread && fresh.thread.erasedAt) || null;

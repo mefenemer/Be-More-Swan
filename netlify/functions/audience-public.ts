@@ -29,6 +29,7 @@ import {
 import { looksLikeEmail, normaliseEmail, cleanName } from '../../src/utils/audience-contacts';
 import { addToSegment, applyTagsByName, recordConsentEvent, setContactStatus, upsertContact } from '../../src/utils/audience-store';
 import { bindConversion } from '../../src/utils/campaign-attribution-store';
+import { creditOfferSignup } from '../../src/utils/outreach-offer';
 import { enrolAfterSignup, enrolInWelcomeSequence } from '../../src/utils/newsletter-sequence';
 import { deliverFormReward } from '../../src/utils/form-reward';
 import {
@@ -642,6 +643,10 @@ export default withLambda(async (event: HandlerEvent) => {
             pageUrl,
             cookieHeader: event.headers?.cookie || null,
         });
+        // And which Lead Generator conversation, when they came through an outreach offer's tracked
+        // link (?lt=, src/utils/outreach-offer.ts): credits the lead and stops its chasers. Same
+        // contract as the binding above — awaited, never throws, and the sign-up never depends on it.
+        await creditOfferSignup(db, { organisationId: orgId, formId: form.id, contactId, pageUrl });
 
         if (!form.doubleOptIn) {
             // Single opt-in: no email to wait for, so the segment is applied now.
