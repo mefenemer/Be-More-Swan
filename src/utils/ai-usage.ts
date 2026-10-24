@@ -35,6 +35,9 @@ export const LIST_PRICE_PER_1K: Record<string, { input: number; output: number }
     'claude-opus-5-5':           { input: 0.004, output: 0.02 },
     'claude-opus-4-8':           { input: 0.005, output: 0.025 },
     'claude-sonnet-4-6':         { input: 0.003, output: 0.015 },
+    // Choosable per assistant role (src/config/model-options.ts) — keep the two lists in step.
+    'claude-sonnet-5-5':         { input: 0.002, output: 0.01 },
+    'claude-haiku-5-5':          { input: 0.0001, output: 0.0005 },
     'claude-haiku-4-5-20251001': { input: 0.001, output: 0.005 },
     'claude-haiku-4-5':          { input: 0.001, output: 0.005 },
     // Voyage embeddings (src/utils/kb-embeddings.ts): $0.02 per million tokens, no free tier for

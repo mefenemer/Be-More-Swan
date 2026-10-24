@@ -14,6 +14,8 @@ import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
+import { adaptForModel, replyText } from '../config/model-options';
+import { loadRoleModel, withRoleModel } from './assistant-model';
 import { aiAssistants, aiBlueprints, blogPostAssets, blogPosts, organisations } from '../../db/schema';
 import { logAiUsage } from './ai-usage';
 import { buildInspoBlock } from './inspo-profile';
@@ -300,8 +302,11 @@ export async function generateBlogBody(
         : null;
 
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const response = await anthropic.messages.create({
-        model: BLOG_MODEL,
+    // The Blog role's model (Admin ▸ Assistants ▸ Model & rules); none = BLOG_MODEL. Background
+    // work (blog drafting is async), so the role's full thinking setting applies.
+    const { response, model: usedModel } = await withRoleModel(await loadRoleModel(db, 'blog_writer'), BLOG_MODEL,
+        async (model, thinking) => ({ model, response: await anthropic.messages.create(adaptForModel({
+        model,
         // ⚠️ Raised from 2500 with the layout. A long-form post is the one place structured output
         // is genuinely risky: the same 1,200 words now arrive wrapped in JSON nodes, and a reply
         // that runs out of tokens loses the WHOLE object rather than its tail. The headroom is what
@@ -346,13 +351,13 @@ export async function generateBlogBody(
             (guardrailsBlock ? `\n\n${guardrailsBlock}` : '') +
             (inspoBlock ? `\n\n${inspoBlock}` : ''),
         messages: [{ role: 'user', content: brief }],
-    });
+    }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming) }), { label: 'blog' });
 
-    const raw = (response.content[0] as { text?: string })?.text?.trim() ?? '';
+    const raw = replyText(response.content).trim();
     if (!raw) throw new Error('Empty draft.');
 
     void logAiUsage({
-        userId, workspaceId: organisationId, model: BLOG_MODEL,
+        userId, workspaceId: organisationId, model: usedModel,
         inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
     });
 

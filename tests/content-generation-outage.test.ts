@@ -166,8 +166,12 @@ check('it records the model KEY WE INVOKED, not the dated id the API returns', (
     // The API resolves 'claude-sonnet-4-6' into a dated id, ai_model_pricing is keyed on the undated
     // constant, and every other caller logs its own MODEL constant — so recording response.model
     // would match no pricing row and write every drafting call in at $0.00. Which is the hole.
-    assert.ok(gateway.includes('usedFallback ? FALLBACK_MODEL : PRIMARY_MODEL);'),
+    // calledModel is the key we sent — PRIMARY_MODEL, or a role's chosen model (assistant-model.ts),
+    // which is always one of MODEL_OPTIONS' undated ids — never response.model.
+    assert.ok(gateway.includes('usedFallback ? FALLBACK_MODEL : calledModel);'),
         'the plain path records a model key that will not price');
+    assert.ok(gateway.includes('let calledModel = req.model && modelOption(req.model) ? req.model : PRIMARY_MODEL;'),
+        'calledModel must be an offered model key or PRIMARY_MODEL');
     assert.ok(gateway.includes('model:        modelKey,'), 'recordUsage ignores the key it was given');
     assert.ok(!/model:\s+response\.model,\n\s+inputTokens/.test(gateway),
         'the dated model id is back, and prices at zero');

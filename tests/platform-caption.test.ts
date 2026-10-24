@@ -9,7 +9,7 @@
 // logic — no DB required.
 
 import assert from 'node:assert';
-import { fitForPlatform, isShortForm, normalizeHashtags, platformTextLimit, stripDisclosureEchoes } from '../src/utils/platform-caption';
+import { cleanGeneratedBody, fitForPlatform, isShortForm, normalizeHashtags, platformTextLimit, stripDisclosureEchoes, stripTrailingHashtags } from '../src/utils/platform-caption';
 import { resolveWorkspaceFooterDefault } from '../src/utils/disclosure-footer';
 
 let passed = 0;
@@ -207,6 +207,14 @@ check('the workspace default footer says "our", not "my"', () => {
     assert.ok(resolved.includes('our Be More Swan AI Digital Assistant'), `wrong possessive: ${resolved}`);
     assert.ok(!/\bmy Be More Swan\b/.test(resolved), `still says "my": ${resolved}`);
     assert.ok(resolved.startsWith('Composed with Marvin,'), 'assistant name not substituted');
+});
+
+check('a leaked hashtag block with a tag split by a space is still stripped (prod, 2026-10-23)', () => {
+    const prod = "It's still there, waiting. 🌿\n\n#lovecatstudio #creativewellbeing #crafttherapy #selfcarethrough creativity #slowliving #creativityasself care\n\nComposed with athena, our Be More Swan AI Digital Assistant.";
+    assert.strictEqual(cleanGeneratedBody(prod), "It's still there, waiting. 🌿");
+    // Prose with a tag or two, and a line that is mostly words, are left alone.
+    assert.strictEqual(stripTrailingHashtags('Loved this week at #YorkMarket with the team.'), 'Loved this week at #YorkMarket with the team.');
+    assert.strictEqual(stripTrailingHashtags('Body.\n#one two three four five'), 'Body.\n#one two three four five');
 });
 
 console.log(`\n${passed} checks passed`);

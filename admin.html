@@ -387,7 +387,10 @@
 
       <!-- ── AI Model Config ────────────────────────────────────────── -->
       <section id="view-model-config" class="admin-view hidden">
-        <p class="text-sm text-gray-500 mb-5">Update the active AI model routing without deploying code. Changes take effect immediately on the next request.</p>
+        <!-- ⚠️ 2026-10-24: nothing in the code reads ai_model_config — this page used to say changes "take
+             effect immediately", and they never did. The model an assistant runs on is set on Assistants ▸
+             (role) ▸ Model & rules (src/utils/assistant-model.ts). -->
+        <p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-5"><strong>These slots are not used.</strong> No assistant or service reads them, so changing them does nothing. To choose the model an assistant runs on, open <a href="?view=catalog" class="underline font-semibold">Assistants</a>, pick the role, and use its <strong>Model &amp; rules</strong> tab.</p>
         <div id="model-config-list" class="space-y-4">Loading…</div>
         <!-- Add new config slot (US13) -->
         <div class="bg-white rounded-2xl border border-dashed border-gray-300 p-6 mt-4">
@@ -2413,12 +2416,13 @@
         <button type="button" onclick="aaClose()" class="text-gray-400 hover:text-gray-700 text-xl font-bold" aria-label="Close">✕</button>
       </div>
       <div id="aa-status-bar" class="mt-3"></div>
-      <div class="flex gap-1 mt-3 -mb-3" id="aa-tabs">
-        <button type="button" class="aa-tab px-3 py-2 text-sm font-semibold border-b-2" data-tab="checks" onclick="aaTab('checks')">Go-live checks</button>
-        <button type="button" class="aa-tab px-3 py-2 text-sm font-semibold border-b-2" data-tab="details" onclick="aaTab('details')">Details</button>
-        <button type="button" class="aa-tab px-3 py-2 text-sm font-semibold border-b-2" data-tab="website" onclick="aaTab('website')">Website page</button>
-        <button type="button" class="aa-tab px-3 py-2 text-sm font-semibold border-b-2" data-tab="prompt" onclick="aaTab('prompt')">Prompt &amp; versions</button>
-        <button type="button" class="aa-tab px-3 py-2 text-sm font-semibold border-b-2" data-tab="capabilities" onclick="aaTab('capabilities')">Capabilities</button>
+      <div class="flex gap-1 mt-3 -mb-3 overflow-x-auto" id="aa-tabs">
+        <button type="button" class="aa-tab shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold border-b-2" data-tab="checks" onclick="aaTab('checks')">Go-live checks</button>
+        <button type="button" class="aa-tab shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold border-b-2" data-tab="details" onclick="aaTab('details')">Details</button>
+        <button type="button" class="aa-tab shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold border-b-2" data-tab="website" onclick="aaTab('website')">Website page</button>
+        <button type="button" class="aa-tab shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold border-b-2" data-tab="prompt" onclick="aaTab('prompt')">Prompt &amp; versions</button>
+        <button type="button" class="aa-tab shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold border-b-2" data-tab="model" onclick="aaTab('model')">Model &amp; rules</button>
+        <button type="button" class="aa-tab shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold border-b-2" data-tab="capabilities" onclick="aaTab('capabilities')">Capabilities</button>
       </div>
     </div>
     <div id="aa-body" class="p-6 flex-1"></div>
@@ -7481,7 +7485,7 @@ function aaRender() {
   host.innerHTML = `<table class="w-full text-sm">
     <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase"><tr>
       <th class="px-5 py-3 text-left">Assistant</th><th class="px-5 py-3 text-left">Category</th><th class="px-5 py-3 text-left">Status</th>
-      <th class="px-5 py-3 text-left">Ready to go live</th>${_aa.capsAll ? '<th class="px-5 py-3 text-left">Capabilities</th>' : ''}<th class="px-5 py-3 text-right">Waitlist</th><th class="px-5 py-3 text-right">Hired</th>
+      <th class="px-5 py-3 text-left">Ready to go live</th>${_aa.capsAll ? '<th class="px-5 py-3 text-left">Capabilities</th>' : ''}<th class="px-5 py-3 text-left">Model</th><th class="px-5 py-3 text-right" title="Claude spend on this role's assistants, last 30 days">AI cost · 30d</th><th class="px-5 py-3 text-right">Waitlist</th><th class="px-5 py-3 text-right">Hired</th>
     </tr></thead>
     <tbody>${rows.map((r) => `<tr class="border-t border-gray-100 hover:bg-gray-50 cursor-pointer" onclick="aaOpen(${r.id})">
       <td class="px-5 py-3"><div class="font-semibold text-gray-900">${_aaEsc(r.name)}</div><div class="text-[11px] text-gray-400 font-mono">${_aaEsc(r.roleKey)}</div></td>
@@ -7489,9 +7493,11 @@ function aaRender() {
       <td class="px-5 py-3">${_aaBadge(r.status)}</td>
       <td class="px-5 py-3">${ready(r)}</td>
       ${_aa.capsAll ? `<td class="px-5 py-3">${aaCapChips(r.id)}</td>` : ''}
+      <td class="px-5 py-3 text-xs ${r.model ? 'font-semibold text-gray-800' : 'text-gray-400'}">${_aaEsc(r.model || 'Code default')}</td>
+      <td class="px-5 py-3 text-right text-xs">${r.cost30dUsd ? '$' + r.cost30dUsd.toFixed(2) : '—'}</td>
       <td class="px-5 py-3 text-right text-xs">${r.waitlistCount}</td>
       <td class="px-5 py-3 text-right text-xs">${r.hiredCount}</td>
-    </tr>`).join('') || `<tr><td colspan="${_aa.capsAll ? 7 : 6}" class="px-5 py-8 text-center text-gray-400">No assistants match.</td></tr>`}</tbody></table>`;
+    </tr>`).join('') || `<tr><td colspan="${_aa.capsAll ? 9 : 8}" class="px-5 py-8 text-center text-gray-400">No assistants match.</td></tr>`}</tbody></table>`;
 }
 
 // The capabilities granted to one role, as chips. A grant whose capability is switched off
@@ -7587,11 +7593,14 @@ function aaTab(tab) {
     const on = b.dataset.tab === tab;
     b.classList.toggle('border-indigo-600', on); b.classList.toggle('text-indigo-600', on);
     b.classList.toggle('border-transparent', !on); b.classList.toggle('text-gray-500', !on);
+    // On a phone the tab row scrolls sideways; keep the chosen one in view.
+    if (on) b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   });
   if (tab === 'checks') aaRenderChecks();
   else if (tab === 'details') aaRenderDetails();
   else if (tab === 'website') aaRenderWebsite();
   else if (tab === 'prompt') aaRenderPrompt();
+  else if (tab === 'model') aaRenderModel();
   else if (tab === 'capabilities') aaRenderCapabilities();
 }
 
@@ -7906,6 +7915,115 @@ function aaOpenCreate() {
   document.getElementById('aa-status-bar').innerHTML = _aaBadge('hidden') + ' <span class="text-xs text-gray-500 ml-1">New assistants start Hidden.</span>';
   document.getElementById('aa-tabs').classList.add('hidden');
   aaRenderDetails();
+}
+
+// ── Model & rules ─────────────────────────────────────────────────────────────────────────────
+// Which Claude model the role runs on (src/config/model-options.ts, saved per role by
+// admin-assistants.ts ?action=model), what it really cost over 30 days (ai_usage_log) and what the
+// other models would have cost for the same calls, and the rule blocks its prompts are built from
+// (src/config/assistant-prompt-layers.ts — rendered from the code that runs, never copied).
+const AA_KIND = { craft: ['Craft', 'bg-indigo-50 text-indigo-700'], rule: ['Rule', 'bg-red-50 text-red-700'], rotation: ['Rotation', 'bg-amber-50 text-amber-800'], workspace: ['Per workspace', 'bg-gray-100 text-gray-600'] };
+const AA_THINK = { off: 'Off', low: 'Low', medium: 'Medium', high: 'High' };
+const _aaUsd = (n) => n == null ? '—' : `$${Number(n) < 1 && Number(n) > 0 ? Number(n).toFixed(3) : Number(n).toFixed(2)}`;
+
+async function aaRenderModel() {
+  const a = _aa.current.assistant;
+  const body = document.getElementById('aa-body');
+  body.innerHTML = '<p class="text-sm text-gray-500">Loading…</p>';
+  let d;
+  try { d = await api(`${AA_API}?id=${a.id}&config=1`); } catch (e) { body.innerHTML = `<p class="text-sm text-red-600">${_aaEsc(e.message)}</p>`; return; }
+  _aa.model = d;
+  const opt = (id) => d.options.find((o) => o.id === id);
+  const chosen = d.choice?.model || '';
+  const runsOn = (def) => opt(chosen || def)?.label || chosen || def;
+  const sel = 'px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none';
+  const actual = d.usage.reduce((s, u) => s + u.usd, 0);
+  const calls = d.usage.reduce((s, u) => s + u.calls, 0);
+  const group = (gen, title) => `<optgroup label="${title}">${d.options.filter((o) => o.generation === gen).map((o) =>
+    `<option value="${_aaEsc(o.id)}" ${o.id === chosen ? 'selected' : ''}>${_aaEsc(o.label)} — $${o.inPerM} in / $${o.outPerM} out per million tokens</option>`).join('')}</optgroup>`;
+
+  body.innerHTML = `
+    <section class="mb-6">
+      <h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">Model</h3>
+      ${d.needsSetup ? '<p class="text-sm text-amber-700 mb-3">The model setting is not set up on this database yet — apply db/assistant-model-settings.sql. Until then every role runs on the models written in the code.</p>' : ''}
+      <table class="w-full text-sm mb-3"><thead class="text-xs text-gray-500 text-left"><tr><th class="py-1">What uses it</th><th class="py-1">Code default</th><th class="py-1">Runs on now</th></tr></thead>
+        <tbody>${d.paths.map((p) => `<tr class="border-t border-gray-100"><td class="py-1.5">${_aaEsc(p.label)}</td>
+          <td class="py-1.5 text-gray-500">${_aaEsc(opt(p.defaultModel)?.label || p.defaultModel)}</td>
+          <td class="py-1.5 font-semibold">${_aaEsc(runsOn(p.defaultModel))}</td></tr>`).join('')}</tbody></table>
+      <div class="flex flex-wrap items-end gap-3">
+        <label class="text-sm font-semibold text-gray-700 max-w-full min-w-0">Model for this role
+          <select id="aa-model" class="${sel} mt-1 block max-w-full" onchange="aaModelChanged()" ${d.needsSetup ? 'disabled' : ''}>
+            <option value="" ${chosen ? '' : 'selected'}>Use the code defaults (above)</option>
+            ${group('current', 'Current generation')}${group('previous', 'Previous generation')}
+          </select></label>
+        <label class="text-sm font-semibold text-gray-700">Thinking
+          <select id="aa-thinking" class="${sel} mt-1 block" ${d.needsSetup ? 'disabled' : ''}></select></label>
+        <button type="button" onclick="aaSaveModel()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg" ${d.needsSetup ? 'disabled' : ''}>Save</button>
+      </div>
+      <p id="aa-model-note" class="text-xs text-gray-500 mt-2"></p>
+      <p class="text-xs text-gray-400 mt-1">Applies to every workspace's ${_aaEsc(a.name)} within a minute. Chat, email and Lead Generator calls run inside a 26-second request, so they use Low thinking at most. If a model ever refuses a request, that call is retried on the code default and logged, so a customer's assistant keeps working. Reviews, scoring and other helpers keep their own models.</p>
+    </section>
+
+    <section class="mb-6">
+      <h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">AI cost — last 30 days</h3>
+      ${calls ? `<table class="w-full text-sm mb-3"><thead class="text-xs text-gray-500 text-left"><tr><th class="py-1">Model</th><th class="py-1 text-right">Calls</th><th class="py-1 text-right">Avg tokens in / out</th><th class="py-1 text-right">Cost</th></tr></thead>
+        <tbody>${d.usage.map((u) => `<tr class="border-t border-gray-100"><td class="py-1.5">${_aaEsc(u.label)}</td><td class="py-1.5 text-right">${u.calls}</td>
+          <td class="py-1.5 text-right text-gray-500">${u.avgIn.toLocaleString()} / ${u.avgOut.toLocaleString()}</td><td class="py-1.5 text-right font-semibold">${_aaUsd(u.usd)}</td></tr>`).join('')}
+          <tr class="border-t border-gray-300"><td class="py-1.5 font-semibold">Total</td><td class="py-1.5 text-right">${calls}</td><td></td><td class="py-1.5 text-right font-bold">${_aaUsd(actual)}</td></tr></tbody></table>
+      <p class="text-sm font-semibold text-gray-700 mb-1">The same ${calls} calls on each model (estimate)</p>
+      <table class="w-full text-sm"><tbody>${d.estimates.map((e) => {
+        const o = opt(e.model); const x = actual > 0 ? e.usd30d / actual : null;
+        return `<tr class="border-t border-gray-100"><td class="py-2 pr-3"><div class="font-semibold text-gray-900">${_aaEsc(o.label)}</div><div class="text-xs text-gray-500">${_aaEsc(o.summary)}</div></td>
+          <td class="py-2 text-right font-semibold whitespace-nowrap align-top">${_aaUsd(e.usd30d)}</td>
+          <td class="py-2 pl-3 text-right text-xs whitespace-nowrap align-top ${x == null ? 'text-gray-400' : x > 1.05 ? 'text-red-600' : x < 0.95 ? 'text-emerald-700' : 'text-gray-500'}">${x == null ? '' : x > 1.05 ? `${x.toFixed(1)}× more` : x < 0.95 ? `${(1 / x).toFixed(1)}× less` : 'about the same'}</td></tr>`; }).join('')}</tbody></table>
+      <p class="text-xs text-gray-400 mt-2">Real token counts from the usage ledger, re-priced at list prices. The newer models count about 38% more tokens for the same prompt and add thinking (measured 2026-10-24), and both are allowed for. Assistant-level calls only: platform helpers aren't included.</p>`
+      : '<p class="text-sm text-gray-500">No model calls recorded for this role in the last 30 days.</p>'}
+    </section>
+
+    <section>
+      <h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">What its prompts are built from</h3>
+      <p class="text-xs text-gray-500 mb-3">Shown from the code that runs, so it is always current. The versioned base prompt is on the Prompt &amp; versions tab.</p>
+      <div class="space-y-2">${d.layers.map((l) => `<details class="border border-gray-200 rounded-xl">
+        <summary class="px-4 py-2.5 cursor-pointer flex flex-wrap items-center gap-2">
+          <span class="text-[11px] font-bold px-1.5 py-0.5 rounded ${AA_KIND[l.kind][1]}">${AA_KIND[l.kind][0]}</span>
+          <span class="text-sm font-semibold text-gray-900">${_aaEsc(l.title)}</span>
+          <span class="text-xs text-gray-400">· ${_aaEsc(l.usedBy)}</span></summary>
+        <div class="px-4 pb-3"><p class="text-[11px] text-gray-400 font-mono mb-1.5">${_aaEsc(l.source)}</p>
+          <pre class="text-xs text-gray-700 whitespace-pre-wrap break-words bg-gray-50 rounded-lg p-3 max-h-[400px] overflow-y-auto">${_aaEsc(l.text)}</pre></div>
+      </details>`).join('')}</div>
+    </section>`;
+  aaModelChanged(d.choice?.thinking);
+}
+
+// Fill the Thinking list for the chosen model: previous-generation models don't think; Opus can't be Off.
+function aaModelChanged(keep) {
+  const d = _aa.model;
+  const id = document.getElementById('aa-model').value;
+  const o = d.options.find((x) => x.id === id);
+  const box = document.getElementById('aa-thinking');
+  const levels = !o || o.thinking === 'none' ? ['off'] : d.thinkingLevels.filter((l) => !(o.thinking === 'always' && l === 'off'));
+  const want = keep && levels.includes(keep) ? keep : levels.includes('low') ? 'low' : levels[0];
+  box.innerHTML = levels.map((l) => `<option value="${l}" ${l === want ? 'selected' : ''}>${AA_THINK[l]}</option>`).join('');
+  box.disabled = levels.length === 1 || d.needsSetup;
+  document.getElementById('aa-model-note').textContent = !o ? 'Each job runs on the model written in the code.'
+    : o.thinking === 'none' ? `${o.label} doesn't think before answering. ${o.summary}`
+    : `${o.summary} Thinking makes replies slower and adds cost; Low is usually enough.`;
+}
+
+async function aaSaveModel() {
+  const a = _aa.current.assistant;
+  const model = document.getElementById('aa-model').value || null;
+  const thinking = document.getElementById('aa-thinking').value;
+  const label = model ? _aa.model.options.find((o) => o.id === model).label : 'the code defaults';
+  const ok = await window.confirmModal(`Every workspace's ${_aaEsc(a.name)} will run on <strong>${_aaEsc(label)}</strong>${model ? ` with ${AA_THINK[thinking]} thinking` : ''} within a minute.`, {
+    title: 'Change the model?', confirmLabel: 'Change it', cancelLabel: 'Cancel' });
+  if (!ok) return;
+  try {
+    await api(`${AA_API}?id=${a.id}&action=model`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, thinking }) });
+    window.showToast?.(`${a.name} now runs on ${label}.`, { icon: '✅' });
+    await aaRenderModel();
+    loadAssistantsAdmin();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 function aaRenderPrompt() {
