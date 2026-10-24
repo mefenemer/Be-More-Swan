@@ -19,6 +19,12 @@
 
 import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import { loadProductsBlock } from './org-products';
+import { emailOpeningBlock } from '../config/hook-styles';
+import { CTA_BINDING_RULE, ctaBriefLine } from '../config/call-to-action';
+import { loadCtaForAssistant } from './call-to-action';
+
+/** Email purposes a call to action belongs in — never an incident or a policy notice. */
+const CTA_EMAIL_PURPOSES: ReadonlySet<string> = new Set(['newsletter', 'announcement', 'offer', 'product_update']);
 import Anthropic from '@anthropic-ai/sdk';
 import { and, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
@@ -36,7 +42,7 @@ import {
     NEWSLETTER_MERGE_VARS, applyDefaultFallbacks, customMergeKeys,
 } from '../config/newsletter-merge-vars';
 import { loadCustomFieldDefs } from './audience-custom-fields';
-import { purposePromptBlock } from '../config/newsletter-purposes';
+import { purposeOrDefault, purposePromptBlock } from '../config/newsletter-purposes';
 import {
     designToMarkdown, normaliseDesign,
     type DesignBlock, type DesignTheme, type NewsletterDesign,
@@ -330,6 +336,12 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
         notes ? `Source material / author notes:\n${notes}` : '',
         // What the business sells (Business Information ▸ Products & Services). Never throws.
         await loadProductsBlock(db, organisationId, org?.name ?? null),
+        // Its call-to-action setting (src/config/call-to-action.ts) — in the BRIEF, so the button's
+        // link is one groundLinks keeps. Never on an incident or policy notice: those are not
+        // marketing, and an offer in one reads as exactly that. '' when it keeps its own.
+        CTA_EMAIL_PURPOSES.has(purposeOrDefault(opts.purpose ?? issue.purpose))
+            ? ctaBriefLine(await loadCtaForAssistant(db, organisationId, issue.assistantId), 'email')
+            : '',
         SPECIAL_CATEGORY_RULE,
     ].filter(Boolean).join('\n');
 
@@ -360,6 +372,22 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
 
     const purposeBlock = purposePromptBlock(opts.purpose ?? issue.purpose);
 
+    // How it opens — subject line and first line — rotated by how many issues this assistant (or,
+    // with none, this organisation) wrote before this one, so consecutive emails never start the same
+    // way (src/config/hook-styles.ts). A count, like the blog's article type: nothing stored.
+    let sequence = issue.id;
+    try {
+        const [row] = await db
+            .select({ n: sql<number>`count(*)::int` })
+            .from(newsletterIssues)
+            .where(and(
+                eq(newsletterIssues.organisationId, organisationId),
+                issue.assistantId ? eq(newsletterIssues.assistantId, issue.assistantId) : sql`true`,
+                sql`${newsletterIssues.id} < ${issue.id}`,
+            ));
+        sequence = Number(row?.n ?? issue.id);
+    } catch { /* the id still varies */ }
+
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const response = await anthropic.messages.create({
         model: NEWSLETTER_MODEL,
@@ -387,6 +415,7 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
             // layouts existed. Never remove it to "force" the structured path.
             '  "bodyMarkdown" — ONLY if you cannot produce a layout: the same email as plain ' +
             'Markdown. Send one or the other, never both.\n\n' +
+            `${emailOpeningBlock(sequence)}\n\n` +
             `You may personalise using these tags, written exactly as shown: ${varList}. ` +
             `Always give a name tag a fallback, like ${GREETING_EXAMPLE}, so a subscriber whose name ` +
             'we do not hold still reads a natural sentence. Use no other tags.\n' +
@@ -400,7 +429,8 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
                   'paragraph, because someone who reads both should not read the same thing twice.\n'
                 : '') +
             'Do NOT invent statistics, customer numbers, testimonials, prices or dates. If the brief ' +
-            'does not supply a fact, write around it.' +
+            'does not supply a fact, write around it.\n' +
+            `${CTA_BINDING_RULE}` +
             // ⚠️ AFTER the general rules and BEFORE the guardrails: a purpose narrows the job (a
             // terms notice is not written in newsletter voice), and the blueprint guardrails are
             // the tenant's own constraints, which outrank both.

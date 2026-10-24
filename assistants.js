@@ -1992,11 +1992,11 @@ function _rqOutreachOfferHtml() {
     const unusable = r.unusable ? `<p class="text-xs text-amber-800 mt-1">${esc(r.unusable)} Until then, emails just ask a question.</p>` : '';
     const editor = !_rqOfferEditing ? '' : `
         <div class="mt-2 flex flex-col sm:flex-row sm:items-end gap-2">
-          <label class="text-xs font-semibold text-gray-700 sm:w-72">Offer
+          <label class="text-xs font-semibold text-gray-700 sm:w-64">Offer
             <select data-rq-offer-kind class="mt-1 w-full px-2 py-1.5 rounded-lg border border-gray-300 text-sm bg-white font-normal">
               ${Object.keys(_RQ_OFFER_LABELS).map((k) => `<option value="${k}" ${k === choice ? 'selected' : ''}>${esc(_RQ_OFFER_LABELS[k])}</option>`).join('')}
             </select></label>
-          <label data-rq-offer-form-row class="text-xs font-semibold text-gray-700 sm:w-72 ${choice === 'gift' ? '' : 'hidden'}">Gift form
+          <label data-rq-offer-form-row class="text-xs font-semibold text-gray-700 sm:w-64 ${choice === 'gift' ? '' : 'hidden'}">Gift form
             <select data-rq-offer-form class="mt-1 w-full px-2 py-1.5 rounded-lg border border-gray-300 text-sm bg-white font-normal">
               ${forms.length ? forms.map((f) => `<option value="${f.id}" ${r.kind === 'gift' && r.formId === f.id ? 'selected' : ''}>${esc(f.name)} — ${esc(f.giftLabel)}</option>`).join('') : '<option value="">No form sends a free download yet</option>'}
             </select></label>

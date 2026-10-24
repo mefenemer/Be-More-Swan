@@ -287,6 +287,14 @@
       </div>
       <p id="op-intro-note" class="text-xs mt-1.5"></p>
     </div>
+    <!-- Calls to action (src/config/call-to-action.ts) — what each Social, Blog and Email assistant's
+         work invites people to do: its own words, the offer above, or a sign-up form's free download.
+         Saved per assistant on change; also settable from that assistant's chat (call_to_action card). -->
+    <div id="op-cta" class="hidden mb-5 border border-gray-200 bg-gray-50 rounded-xl px-4 py-3">
+      <p class="text-sm font-bold text-gray-900">Calls to action</p>
+      <p class="text-xs text-gray-500 mt-0.5">What each assistant’s posts, articles and emails invite people to do. Social posts only ask now and then; most of them simply give.</p>
+      <div id="op-cta-list" class="mt-2 space-y-2"></div>
+    </div>
     <div id="op-error" class="hidden mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3"></div>
     <div id="op-editor-slot"></div>
     <div id="op-list" class="space-y-3">
@@ -418,6 +426,7 @@
       try {
         introOffer = (await call('PATCH', { introOffer: payload })).introOffer;
         renderIntro();
+        refreshCtas();
       } catch (err) {
         introNote(err.message, 'error');
       }
@@ -435,7 +444,69 @@
       };
     }
     // The chat's intro_offer card saves through the same PATCH, then tells this tab (chat-session.js).
-    document.addEventListener('bizinfo:introOffer', (e) => { introOffer = e.detail ?? null; renderIntro(); });
+    document.addEventListener('bizinfo:introOffer', (e) => { introOffer = e.detail ?? null; renderIntro(); refreshCtas(); });
+
+    // ── Calls to action (src/config/call-to-action.ts) ────────────────────────────────────────
+    // { assistants: [{ id, name, roleKey, choice, resolved }], giftForms } — null until loaded.
+    let ctas = null;
+    const ctaNotes = {};
+    // Same wording as src/config/call-to-action.ts CTA_LABELS.
+    const CTA_LABELS = {
+      own: 'Its own call to action',
+      intro_offer: 'Your free trial or introductory offer',
+      gift: 'A free download from a sign-up form',
+    };
+    const CTA_ROLE_NAMES = { social_media_manager: 'Social posts', blog_writer: 'Blog articles', newsletter_editor: 'Emails' };
+    function ctaDescribe(r) {
+      if (r.kind === 'intro_offer') return `Invites people to your offer${r.url ? '' : ' (no link — add one to your offer above)'}.`;
+      if (r.kind === 'gift') return `Invites people to get the free “${r.giftLabel}”${r.url ? '' : ' (that form has no page of its own yet, so there’s no link)'}.`;
+      return r.unusable ? `${r.unusable} Until then it uses its own.` : 'Uses the call to action in its own brief.';
+    }
+    function renderCtas() {
+      const box = byId('op-cta');
+      if (!box || !ctas) return;
+      const list = ctas.assistants || [];
+      box.classList.toggle('hidden', !list.length);
+      const forms = ctas.giftForms || [];
+      byId('op-cta-list').innerHTML = list.map((a) => {
+        const kind = a.choice.kind;
+        const formId = a.resolved.kind === 'gift' ? a.resolved.formId : a.choice.formId;
+        const note = ctaNotes[a.id];
+        return `<div class="bg-white border border-gray-200 rounded-lg px-3 py-2" data-cta-row="${a.id}">
+          <div class="flex flex-col sm:flex-row sm:items-center gap-2">
+            <p class="text-sm font-semibold text-gray-800 sm:w-64 min-w-0 truncate">${esc(a.name)} <span class="text-xs font-normal text-gray-500">· ${esc(CTA_ROLE_NAMES[a.roleKey] || '')}</span></p>
+            <select data-cta-kind class="w-full sm:w-64 px-2 py-1.5 rounded-lg border border-gray-300 text-sm bg-white">
+              ${Object.keys(CTA_LABELS).map((k) => `<option value="${k}" ${k === kind ? 'selected' : ''}>${esc(CTA_LABELS[k])}</option>`).join('')}
+            </select>
+            <select data-cta-form class="w-full sm:w-64 px-2 py-1.5 rounded-lg border border-gray-300 text-sm bg-white ${kind === 'gift' ? '' : 'hidden'}">
+              ${forms.length ? forms.map((f) => `<option value="${f.id}" ${f.id === formId ? 'selected' : ''}>${esc(f.name)} — ${esc(f.giftLabel)}</option>`).join('') : '<option value="">No form sends a free download yet</option>'}
+            </select>
+          </div>
+          <p class="text-xs mt-1 ${note && note.error ? 'text-red-600' : 'text-gray-500'}">${esc(note ? note.text : ctaDescribe(a.resolved))}</p>
+        </div>`;
+      }).join('');
+    }
+    async function saveCtaRow(row) {
+      const id = Number(row.dataset.ctaRow);
+      const kind = row.querySelector('[data-cta-kind]').value;
+      const formId = kind === 'gift' ? Number(row.querySelector('[data-cta-form]').value) || null : null;
+      ctaNotes[id] = { text: 'Saving…' };
+      renderCtas();
+      try {
+        const { assistant } = await call('PATCH', { callToAction: { assistantId: id, kind, formId } });
+        ctas.assistants = ctas.assistants.map((a) => (a.id === id ? assistant : a));
+        ctaNotes[id] = { text: `Saved. ${ctaDescribe(assistant.resolved)}` };
+      } catch (err) {
+        ctaNotes[id] = { text: err.message, error: true };
+      }
+      renderCtas();
+    }
+    // After the offer above changes, what each call to action resolves to may change too.
+    async function refreshCtas() {
+      try { const d = await call('GET'); ctas = d.callsToAction || null; renderCtas(); } catch { /* keep what is shown */ }
+    }
+    // The chat's call_to_action card saved (chat-session.js).
+    document.addEventListener('bizinfo:callToAction', () => refreshCtas());
 
     /**
      * Which optional groups of fields this product shows. A group the business doesn't use stays in
@@ -512,10 +583,12 @@
         products = data.products || [];
         offer = data.offer || null;
         introOffer = data.introOffer ?? null;
+        ctas = data.callsToAction || null;
         showError('');
         render();
         renderOffer();
         renderIntro();
+        renderCtas();
       } catch (e) {
         listEl.innerHTML = '';
         showError('Your products could not be loaded right now. Please refresh and try again.');
@@ -708,6 +781,13 @@
         return introNote('Fill in the terms, then Save offer.');
       }
       if (e.target.id === 'op-intro-kind') return introFields();
+      // A call to action saves on change; choosing "free download" shows the form picker first
+      // and saves with the form it shows.
+      const ctaRow = e.target.closest('[data-cta-row]');
+      if (ctaRow) {
+        if (e.target.matches('[data-cta-kind]')) ctaRow.querySelector('[data-cta-form]').classList.toggle('hidden', e.target.value !== 'gift');
+        return saveCtaRow(ctaRow);
+      }
       const f = document.getElementById('op-editor');
       if (!f) return;
       if (e.target.id === 'op-price-type') {

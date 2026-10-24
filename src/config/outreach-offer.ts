@@ -24,6 +24,8 @@
 // model never writes the address: it writes a sentence that introduces it, and the code puts the
 // link on the next line — a model copying a long URL is how a typo reaches a stranger's inbox.
 
+import { OUTREACH_OPENING_RULE } from './hook-styles';
+
 export const OUTREACH_OFFER_KINDS = ['gift', 'intro_offer', 'reply'] as const;
 export type OutreachOfferKind = typeof OUTREACH_OFFER_KINDS[number];
 
@@ -75,7 +77,7 @@ function askFor(o: ResolvedOutreachOffer): string {
 
 /** The block every first-email seam appends (discovery scoring, re-scoring, manual scoring, send-time). Pure. */
 export function outreachFirstEmailBlock(o: ResolvedOutreachOffer | null | undefined): string {
-    return `${OUTREACH_FIRST_EMAIL_RULES}\n${askFor(o ?? { kind: 'reply' })}`;
+    return `${OUTREACH_FIRST_EMAIL_RULES}\n${OUTREACH_OPENING_RULE}\n${askFor(o ?? { kind: 'reply' })}`;
 }
 
 /** Follow-up step that carries the offer's link (the first chaser). Later chasers may mention it, not link it. */

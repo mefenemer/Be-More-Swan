@@ -2261,6 +2261,49 @@
   }
   register('outreach_offer', renderOutreachOfferCard);
 
+  // { type: 'call_to_action', summary, kind, kindLabel, formId, formName, giftLabel } — what a Social,
+  // Blog or Email assistant's work invites people to do (src/config/call-to-action.ts), rebuilt by the
+  // server against the real gift forms. The click → org-products.ts PATCH { callToAction }, the same
+  // save as Business Information ▸ Products & Services ▸ Calls to action.
+  function renderCallToActionCard(ui, esc) {
+    const what = ui.kind === 'gift' && ui.giftLabel
+      ? `The free "${ui.giftLabel}" from your "${ui.formName || 'sign-up'}" form`
+      : (ui.kindLabel || 'Its own call to action');
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Call to action · Approval needed</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <p class="text-xs text-gray-700 mt-2 break-words">My work will invite people to: <span class="font-semibold">${esc(what)}</span></p>
+      <p class="text-xs text-gray-600 mt-2">Drafts already written keep their words. Change it any time on Business Information ▸ Products &amp; Services.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-cta-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save this</button>
+        <button type="button" data-cta-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-cta-status></p>`;
+    const status = el.querySelector('[data-cta-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-cta-cancel]')) { setBusy(true); say('Not changed.'); return; }
+      if (!e.target.closest('[data-cta-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('cta:change', {
+        bubbles: true,
+        detail: {
+          kind: ui.kind, formId: ui.formId ?? null,
+          respond({ ok, error }) {
+            if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved — nothing was changed.', 'error'); return; }
+            say('Saved — my next drafts use this.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('call_to_action', renderCallToActionCard);
+
   // ── Request a call back (src/utils/callback-request.ts) ───────────────────────────────────────
   // Shown when the customer asks the chat for a call or a person. It only OPENS the Help & Support
   // form — the chat never books a call. No time is promised (owner, 2026-10-19).

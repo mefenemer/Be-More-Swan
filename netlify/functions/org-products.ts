@@ -12,6 +12,9 @@
 // PATCH  { introOffer: {...} } → { introOffer }        "Do you offer a free trial or introductory offer?"
 //                                                      (src/utils/intro-offer.ts; GET returns it too, null =
 //                                                      not answered). The tab's form and the chat card.
+// PATCH  { callToAction: { assistantId, kind, formId } } → { assistant }   one Social, Blog or Email
+//                                                      assistant's call to action (src/utils/call-to-action.ts);
+//                                                      GET returns callsToAction { assistants, giftForms }
 //
 // Prices are STRUCTURED (db/z-product-pricing.sql, src/utils/product-price.ts): priceType + priceAmount
 // (pence) + priceUnit, or the owner's own words (priceType 'text' + price). `price` is then written by
@@ -36,6 +39,8 @@ import { cleanAllergens, cleanDietary } from '../../src/utils/product-dietary';
 import { siteAssetUrl } from '../../src/utils/site-hosting';
 import { cleanOffers, loadOfferProfile, saveOfferProfile } from '../../src/utils/offer-profile';
 import { cleanIntroOffer, loadIntroOffer, saveIntroOffer } from '../../src/utils/intro-offer';
+import { listCtaAssistants, saveCta } from '../../src/utils/call-to-action';
+import { listGiftForms } from '../../src/utils/outreach-offer';
 import { splitOfferingNotes } from '../../src/utils/offerings-import';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { contentAssets } from '../../db/schema';
@@ -163,8 +168,14 @@ export default withLambda(async (event) => {
                 .orderBy(desc(sql`${orgProducts.status} = 'active'`), asc(orgProducts.sortOrder), asc(orgProducts.id));
             // The picture's link, for the editor's thumbnail (the same signed link sites and emails use).
             const base = resolveBaseUrl(event.headers as Record<string, string | undefined>) || 'https://bemoreswan.com';
-            const [offer, introOffer] = await Promise.all([loadOfferProfile(db, orgId), loadIntroOffer(db, orgId)]);
-            return json(200, { products: products.map((p) => ({ ...p, imageUrl: p.imageAssetId ? siteAssetUrl(base, p.imageAssetId) : null })), offer, introOffer });
+            const [offer, introOffer, ctaAssistants, giftForms] = await Promise.all([
+                loadOfferProfile(db, orgId), loadIntroOffer(db, orgId), listCtaAssistants(db, orgId), listGiftForms(db, orgId),
+            ]);
+            return json(200, {
+                products: products.map((p) => ({ ...p, imageUrl: p.imageAssetId ? siteAssetUrl(base, p.imageAssetId) : null })),
+                offer, introOffer,
+                callsToAction: { assistants: ctaAssistants, giftForms },
+            });
         }
 
         let body: Record<string, unknown> = {};
@@ -201,6 +212,12 @@ export default withLambda(async (event) => {
                 console.error('[org-products] offer save failed — is db/z-org-offer-profile.sql applied?', err);
                 return json(503, { error: 'That choice could not be saved just yet. Please try again later.' });
             }
+        }
+
+        if (method === 'PATCH' && body.callToAction && typeof body.callToAction === 'object') {
+            const r = await saveCta(db, orgId, body.callToAction as { assistantId: unknown; kind: unknown; formId?: unknown });
+            if ('error' in r) return json(r.status, { error: r.error });
+            return json(200, r);
         }
 
         if (method === 'PATCH' && Object.prototype.hasOwnProperty.call(body, 'introOffer')) {

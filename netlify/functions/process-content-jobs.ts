@@ -44,6 +44,9 @@ import { fireOrchestrations } from '../../src/utils/orchestration';
 import { operationalSetupLines } from '../../src/utils/operational-setup';
 import { renderBlueprintPrompt } from '../../src/utils/blueprint-prompt';
 import { loadOfferingsText, loadProductsBlock } from '../../src/utils/org-products';
+import { socialHookFor } from '../../src/config/hook-styles';
+import { ctaBriefLine } from '../../src/config/call-to-action';
+import { resolveCta } from '../../src/utils/call-to-action';
 import { campaignDirectiveForJob } from '../../src/utils/campaign-job-directive';
 import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
 import { resolvePostingSchedule } from '../../src/config/posting-cadence';
@@ -425,7 +428,11 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // caption too, so those platforms don't inherit the LinkedIn-length essay verbatim.
         const needsShort = targetPlatforms.some(isShortForm);
 
-        const ctaLine         = answers['cta']          ? `Call to action: ${answers['cta']}` : '';
+        // The assistant's call-to-action setting (src/config/call-to-action.ts), read live from its
+        // setup answers: its own "Call to action" words, or the workspace's intro offer / a gift form,
+        // with the real link. 'own' leaves the line exactly as it always was.
+        const ctaOfferLine    = ctaBriefLine(await resolveCta(db, job.organisation_id, brandCtx), 'social');
+        const ctaLine         = ctaOfferLine || (answers['cta'] ? `Call to action: ${answers['cta']}` : '');
         const incentiveLine   = answers['incentive']    ? `Incentive/offer: ${answers['incentive']}` : '';
         const coreMessageLine = answers['core_message'] ? `Core message: ${answers['core_message']}` : '';
         const extraLines      = [ctaLine, incentiveLine, coreMessageLine].filter(Boolean).join('\n');
@@ -500,20 +507,9 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // with the same formula. Derived deterministically from the slot's hour (no coordination or
         // storage needed); a prime-length (7) list coprime with the 24h day-step keeps daily slots
         // cycling through ALL styles instead of aliasing onto one. On-demand jobs (no slot) stay free.
-        const HOOK_STYLES = [
-            'a provocative question aimed straight at the target reader',
-            // Was "a surprising statistic or a concrete number" — which the NO INVENTED STATISTICS
-            // standard then forbade, so one slot in seven was told to do the thing it may not do.
-            'one concrete, specific real-life detail (a time, a place, a small moment)',
-            'a short, vivid "this is you right now" scenario (one or two lines)',
-            'a widely-believed myth stated plainly, then busted',
-            'a bold, mildly contrarian claim',
-            'a sharp pain-point callout',
-            'a before/after contrast (the messy now vs. the calmer after)',
-        ];
-        const hookStyle = job.target_publish_date
-            ? HOOK_STYLES[Math.floor(new Date(job.target_publish_date).getTime() / 3_600_000) % HOOK_STYLES.length]
-            : null;
+        // The seven hooks live in src/config/hook-styles.ts now (shared with articles, emails and
+        // outreach) — same list, same order, same hour-based choice as before.
+        const hookStyle = socialHookFor(job.target_publish_date);
         const hookLine = hookStyle
             ? `OPENING HOOK for THIS post — open with ${hookStyle}. (The standing hook rules — vary the opening, never reuse a formula, the banned "you didn't start a business to become…" line — are in the Content Quality Standards below.)`
             : '';

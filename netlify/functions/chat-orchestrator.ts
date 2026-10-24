@@ -79,6 +79,7 @@ import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGo
 import { introOfferCardFromUiElement, introOfferPromptBlock, type IntroOfferCard } from '../../src/utils/intro-offer';
 import { buildOutreachOfferChatBlock, OUTREACH_OFFER_CARD_TYPE, outreachOfferCardFrom, type OutreachOfferCard } from '../../src/utils/chat-outreach-offer';
 import { listGiftForms } from '../../src/utils/outreach-offer';
+import { buildCtaChatBlock, CTA_CARD_TYPE, ctaCardFrom, roleHasCta, type CtaCard } from '../../src/utils/chat-call-to-action';
 import { resolveScheduleProposal, scheduleProposalFromUiElement, schedulePromptBlock, type ScheduleCard } from '../../src/utils/chat-schedule';
 import { buildPlatformsBlock, platformsProposalFromUiElement, resolvePlatformsProposal, type PlatformsCard } from '../../src/utils/chat-platforms';
 import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal, type LibraryCard } from '../../src/utils/chat-library';
@@ -2882,6 +2883,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // The free trial / introductory offer card (src/utils/intro-offer.ts) — the offer itself is in
     // productsBlock for every route; structured routes can also propose a change to it.
     const introOfferCardBlock = route !== defaultRoute ? introOfferPromptBlock() : null;
+    // And, for a Social, Blog or Email assistant, its own call to action and the card that changes it
+    // (src/utils/chat-call-to-action.ts). Null for every other role.
+    const ctaCardBlock = route !== defaultRoute ? await buildCtaChatBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey) : null;
     const scheduleBlock = route !== defaultRoute ? schedulePromptBlock(assistantRow.roleKey, assistantRow.onboardingContext) : null;
     // The "Use for this assistant" switches, for the roles whose Connections card shows them
     // (src/utils/chat-platforms.ts). Null for every other role; never throws.
@@ -2894,7 +2898,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // The signed-in user's own My Account settings, read-only (src/utils/chat-my-account.ts). Every
     // route, every role; null when the read fails.
     const myAccountBlock = await buildMyAccountBlock(db, userId, session.aiAssistantId, assistantRow.roleKey);
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, scheduleBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock].filter(Boolean).join('\n\n');
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock].filter(Boolean).join('\n\n');
 
     const system = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -3170,8 +3174,16 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             if (r && 'error' in r) { uiElement = null; content = `${r.error} I haven’t changed anything — you can also change the offer on the Outreach tab.`; }
             else if (r) { outreachOfferCard = r; uiElement = r; }
         }
+        // A content assistant's call to action (src/utils/chat-call-to-action.ts), rebuilt against the
+        // real gift forms; the click calls org-products.ts PATCH { callToAction }.
+        let ctaCard: CtaCard | null = null;
+        if (route !== defaultRoute && roleHasCta(assistantRow.roleKey) && !introReq && (uiElement as { type?: unknown } | null)?.type === CTA_CARD_TYPE) {
+            const r = ctaCardFrom(uiElement, await listGiftForms(db, orgId));
+            if (r && 'error' in r) { uiElement = null; content = `${r.error} I haven’t changed anything — you can also change it on Business Information ▸ Products & Services.`; }
+            else if (r) { ctaCard = r; uiElement = r; }
+        }
         // One card for the "keep it" checks below: a change to the assistant's own profile.
-        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | OutreachOfferCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard ?? outreachOfferCard;
+        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | OutreachOfferCard | CtaCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard ?? outreachOfferCard ?? ctaCard;
         // The Blog Writer's twin (src/utils/chat-blog-action.ts): same checks, built from blog_posts
         // rows; a time in the user's words is worked out here so the card shows the exact instant.
         let blogAction: BlogActionCard | null = null;

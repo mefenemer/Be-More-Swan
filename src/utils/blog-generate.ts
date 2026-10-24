@@ -20,6 +20,9 @@ import { buildInspoBlock } from './inspo-profile';
 import { currentDatePromptBlock } from './current-date-prompt';
 import { voiceDirective } from './voice-profile';
 import { articleTypeByKey, blogArticleTypeBlock, blogArticleTypeFor } from './content-shapes';
+import { blogOpeningBlock } from '../config/hook-styles';
+import { CTA_BINDING_RULE, ctaBriefLine } from '../config/call-to-action';
+import { loadCtaForAssistant } from './call-to-action';
 import { resolvePostingSchedule } from '../config/posting-cadence';
 import { assembleBlueprint } from './blueprint';
 import { businessKnowledgePromptBlock } from './business-knowledge';
@@ -266,6 +269,9 @@ export async function generateBlogBody(
         notes ? `Author notes / source material:\n${notes}` : '',
         // What the business sells (Business Information ▸ Products & Services). Never throws.
         await loadProductsBlock(db, organisationId, org?.name ?? null),
+        // Its call-to-action setting (src/config/call-to-action.ts) — in the BRIEF, so its link
+        // survives groundLinks below. '' when it keeps its own. Never throws.
+        ctaBriefLine(await loadCtaForAssistant(db, organisationId, post.assistantId), 'blog'),
         SPECIAL_CATEGORY_RULE,
     ].filter(Boolean).join('\n');
 
@@ -313,6 +319,10 @@ export async function generateBlogBody(
             'Produce a complete, publish-ready blog post with a single level-1 heading as the title. ' +
             'Weave the target keywords in naturally — never keyword-stuff.\n' +
             `${blogArticleTypeBlock(articleType)}\n` +
+            // And how it opens — rotated by the same count, so consecutive articles never start the
+            // same way (src/config/hook-styles.ts).
+            `${blogOpeningBlock(sequence)}\n` +
+            `${CTA_BINDING_RULE}\n` +
             // ⚠️ THE LENGTH TARGET IS LOAD-BEARING, and it was measured rather than guessed. Asking
             // for a layout instead of a wall of Markdown made drafts ~30% SHORTER on the same brief
             // (mean 773 words against 1,101 over two runs each): the model keeps the same number of
