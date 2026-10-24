@@ -76,6 +76,7 @@ import {
 import { buildRulesListBlock, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock, type RuleCard } from '../../src/utils/chat-rules';
 import { buildPlanSnapshot } from '../../src/utils/chat-plan-snapshot';
 import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGoalProposal, type GoalCard } from '../../src/utils/chat-goals';
+import { introOfferCardFromUiElement, introOfferPromptBlock, type IntroOfferCard } from '../../src/utils/intro-offer';
 import { resolveScheduleProposal, scheduleProposalFromUiElement, schedulePromptBlock, type ScheduleCard } from '../../src/utils/chat-schedule';
 import { buildPlatformsBlock, platformsProposalFromUiElement, resolvePlatformsProposal, type PlatformsCard } from '../../src/utils/chat-platforms';
 import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal, type LibraryCard } from '../../src/utils/chat-library';
@@ -2867,6 +2868,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // schedule and its card (src/utils/chat-schedule.ts). Neither throws.
     const goalsBlock = await buildGoalsBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey);
     const goalsCardBlock = route !== defaultRoute ? goalsPromptBlock() : null;
+    // The free trial / introductory offer card (src/utils/intro-offer.ts) — the offer itself is in
+    // productsBlock for every route; structured routes can also propose a change to it.
+    const introOfferCardBlock = route !== defaultRoute ? introOfferPromptBlock() : null;
     const scheduleBlock = route !== defaultRoute ? schedulePromptBlock(assistantRow.roleKey, assistantRow.onboardingContext) : null;
     // The "Use for this assistant" switches, for the roles whose Connections card shows them
     // (src/utils/chat-platforms.ts). Null for every other role; never throws.
@@ -2879,7 +2883,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // The signed-in user's own My Account settings, read-only (src/utils/chat-my-account.ts). Every
     // route, every role; null when the read fails.
     const myAccountBlock = await buildMyAccountBlock(db, userId, session.aiAssistantId, assistantRow.roleKey);
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, scheduleBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock].filter(Boolean).join('\n\n');
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, scheduleBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock].filter(Boolean).join('\n\n');
 
     const system = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -3136,8 +3140,19 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             uiElement = libraryCard;
             if (!libraryCard) content = `I couldn’t check your ${libraryReq.which === 'kb' ? 'Knowledge Base' : 'Inspo'} just now, so I haven’t added anything. Please try again in a moment, or use the ${libraryReq.which === 'kb' ? 'Knowledge Base' : 'Inspo'} tab.`;
         }
+        // The workspace's free trial / introductory offer (src/utils/intro-offer.ts) — any structured
+        // route. Checked through the tab's own gate; the click PATCHes org-products.ts as the tab does.
+        let introOfferCard: IntroOfferCard | null = null;
+        const introReq = route !== defaultRoute && !settingsReq && !ruleReq && !goalReq && !scheduleReq && !platformsReq && !libraryReq ? introOfferCardFromUiElement(uiElement) : null;
+        if (introReq && 'error' in introReq) {
+            uiElement = null;
+            content = `I haven’t set that offer up — ${introReq.error.charAt(0).toLowerCase()}${introReq.error.slice(1)} You can also fill it in under Business Information ▸ Products & Services.`;
+        } else if (introReq) {
+            introOfferCard = introReq;
+            uiElement = introOfferCard;
+        }
         // One card for the "keep it" checks below: a change to the assistant's own profile.
-        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard;
+        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard;
         // The Blog Writer's twin (src/utils/chat-blog-action.ts): same checks, built from blog_posts
         // rows; a time in the user's words is worked out here so the card shows the exact instant.
         let blogAction: BlogActionCard | null = null;

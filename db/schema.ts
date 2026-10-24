@@ -5519,6 +5519,14 @@ export const orgOfferProfile = pgTable("org_offer_profile", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// "Do you offer a free trial or an introductory offer?" (db/z-org-intro-offer.sql, src/utils/intro-offer.ts)
+export const orgIntroOffer = pgTable("org_intro_offer", {
+  organisationId: integer("organisation_id").primaryKey().references(() => organisations.id, { onDelete: "cascade" }),
+  offer: jsonb().notNull(),
+  updatedBy: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // ── Asking customers for reviews (db/z-review-requests.sql) ──────────────────────────────────────
 export const reviewSettings = pgTable("review_settings", {
   id: serial().primaryKey(),

@@ -9,6 +9,9 @@
 //                                                      free-text notes as rows (offerings-import.ts) —
 //                                                      nothing is saved; each accepted row is a normal POST
 // PATCH  { offer: [kinds] }    → { offer }             the owner's answer to "What does your business offer?"
+// PATCH  { introOffer: {...} } → { introOffer }        "Do you offer a free trial or introductory offer?"
+//                                                      (src/utils/intro-offer.ts; GET returns it too, null =
+//                                                      not answered). The tab's form and the chat card.
 //
 // Prices are STRUCTURED (db/z-product-pricing.sql, src/utils/product-price.ts): priceType + priceAmount
 // (pence) + priceUnit, or the owner's own words (priceType 'text' + price). `price` is then written by
@@ -32,6 +35,7 @@ import { cleanDeposit, cleanPrice, priceFromText } from '../../src/utils/product
 import { cleanAllergens, cleanDietary } from '../../src/utils/product-dietary';
 import { siteAssetUrl } from '../../src/utils/site-hosting';
 import { cleanOffers, loadOfferProfile, saveOfferProfile } from '../../src/utils/offer-profile';
+import { cleanIntroOffer, loadIntroOffer, saveIntroOffer } from '../../src/utils/intro-offer';
 import { splitOfferingNotes } from '../../src/utils/offerings-import';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { contentAssets } from '../../db/schema';
@@ -159,8 +163,8 @@ export default withLambda(async (event) => {
                 .orderBy(desc(sql`${orgProducts.status} = 'active'`), asc(orgProducts.sortOrder), asc(orgProducts.id));
             // The picture's link, for the editor's thumbnail (the same signed link sites and emails use).
             const base = resolveBaseUrl(event.headers as Record<string, string | undefined>) || 'https://bemoreswan.com';
-            const offer = await loadOfferProfile(db, orgId);
-            return json(200, { products: products.map((p) => ({ ...p, imageUrl: p.imageAssetId ? siteAssetUrl(base, p.imageAssetId) : null })), offer });
+            const [offer, introOffer] = await Promise.all([loadOfferProfile(db, orgId), loadIntroOffer(db, orgId)]);
+            return json(200, { products: products.map((p) => ({ ...p, imageUrl: p.imageAssetId ? siteAssetUrl(base, p.imageAssetId) : null })), offer, introOffer });
         }
 
         let body: Record<string, unknown> = {};
@@ -196,6 +200,17 @@ export default withLambda(async (event) => {
             } catch (err) {
                 console.error('[org-products] offer save failed — is db/z-org-offer-profile.sql applied?', err);
                 return json(503, { error: 'That choice could not be saved just yet. Please try again later.' });
+            }
+        }
+
+        if (method === 'PATCH' && Object.prototype.hasOwnProperty.call(body, 'introOffer')) {
+            const parsed = cleanIntroOffer(body.introOffer);
+            if ('error' in parsed) return json(400, parsed);
+            try {
+                return json(200, { introOffer: await saveIntroOffer(db, orgId, parsed.offer, ctx.userId ?? null) });
+            } catch (err) {
+                console.error('[org-products] intro offer save failed — is db/z-org-intro-offer.sql applied?', err);
+                return json(503, { error: 'Your offer could not be saved just yet. Please try again later.' });
             }
         }
 
