@@ -11,6 +11,7 @@
 import { sanitizeForModel } from '../utils/text-safe';
 import Anthropic from '@anthropic-ai/sdk';
 import { logAiUsage, type DataCategory } from '../utils/ai-usage';
+import { adaptForModel, modelOption, replyText, type ThinkingLevel } from '../config/model-options';
 
 export interface GatewayRequest {
     system: string;
@@ -51,6 +52,14 @@ export interface GatewayRequest {
      *
      * ⚠️ So a caller must never ALSO call logAiUsage for a gateway call — that double-counts.
      */
+    /**
+     * The assistant ROLE's chosen model (src/utils/assistant-model.ts), when the caller has one.
+     * Omitted = PRIMARY_MODEL, exactly as before. A chosen model is sent through adaptForModel()
+     * (thinking room, no temperature), and if the API refuses the request for it the call is made
+     * once more on PRIMARY_MODEL — a role setting must never be what stops a draft.
+     */
+    model?: string;
+    thinking?: ThinkingLevel;
     usage?: {
         workspaceId?: number | null;
         userId?: number | null;
@@ -126,21 +135,40 @@ function isFailoverError(err: unknown): boolean {
 }
 
 async function callModel(model: string, req: GatewayRequest): Promise<Anthropic.Message> {
-    return client.messages.create({
+    const params = {
         model,
         max_tokens: req.maxTokens ?? 1024,
         // Half-emoji in any part of the prompt make the whole request invalid JSON (text-safe.ts).
         system: sanitizeForModel(req.system),
         messages: sanitizeForModel(req.messages),
-    });
+    };
+    // Only a role's chosen model is adapted; PRIMARY/FALLBACK calls go out exactly as before.
+    if (model !== req.model) return client.messages.create(params);
+    // A thinking model in background work (no deadline) gets longer than the client's 24s: the
+    // head-to-head measured Opus 5.5 at up to 22.6s on short prompts, and drafts carry ~8k tokens.
+    const thinks = modelOption(model)?.thinking !== 'none';
+    return client.messages.create(adaptForModel(params, model, req.thinking) as Anthropic.MessageCreateParamsNonStreaming,
+        thinks && !req.deadlineMs ? { timeout: 120_000 } : undefined);
+}
+
+function isRequestRefusal(err: unknown): boolean {
+    return err instanceof Anthropic.BadRequestError && !/credit balance|billing|quota/i.test(String(err.message));
 }
 
 export async function gatewayGenerate(req: GatewayRequest): Promise<GatewayResponse> {
     let response: Anthropic.Message;
     let usedFallback = false;
 
+    let calledModel = req.model && modelOption(req.model) ? req.model : PRIMARY_MODEL;
     try {
-        response = await callModel(PRIMARY_MODEL, req);
+        try {
+            response = await callModel(calledModel, req);
+        } catch (roleErr) {
+            if (calledModel === PRIMARY_MODEL || !isRequestRefusal(roleErr)) throw roleErr;
+            console.error(`[ai-gateway] ${calledModel} refused the request; retrying on ${PRIMARY_MODEL}`, roleErr instanceof Error ? roleErr.message : roleErr);
+            calledModel = PRIMARY_MODEL;
+            response = await callModel(calledModel, req);
+        }
     } catch (primaryErr) {
         if (!isFailoverError(primaryErr)) {
             // 400 Bad Request and other non-retriable errors are NOT falled over (AC4)
@@ -152,8 +180,8 @@ export async function gatewayGenerate(req: GatewayRequest): Promise<GatewayRespo
         usedFallback = true;
     }
 
-    const text = response.content.find(b => b.type === 'text')?.text ?? '';
-    recordUsage(req, response.usage?.input_tokens ?? 0, response.usage?.output_tokens ?? 0, usedFallback ? FALLBACK_MODEL : PRIMARY_MODEL);
+    const text = replyText(response.content);
+    recordUsage(req, response.usage?.input_tokens ?? 0, response.usage?.output_tokens ?? 0, usedFallback ? FALLBACK_MODEL : calledModel);
     return {
         text,
         stopReason: response.stop_reason ?? null,

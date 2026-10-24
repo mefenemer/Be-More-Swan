@@ -46,6 +46,7 @@ import { renderBlueprintPrompt } from '../../src/utils/blueprint-prompt';
 import { loadOfferingsText, loadProductsBlock } from '../../src/utils/org-products';
 import { socialHookFor } from '../../src/config/hook-styles';
 import { platformCraftBlock } from '../../src/constants/platform-craft';
+import { loadRoleModel, roleKeyOfAssistant } from '../../src/utils/assistant-model';
 import { ctaBriefLine } from '../../src/config/call-to-action';
 import { resolveCta } from '../../src/utils/call-to-action';
 import { campaignDirectiveForJob } from '../../src/utils/campaign-job-directive';
@@ -757,13 +758,16 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // the product and was recorded NOWHERE — neither here nor in the gateway — so token and cost
         // attribution for it did not exist, and a backlog's spend could not be read from our own
         // database at all. Opt-in because a dozen other callers log for themselves; this one does not.
+        // The role's model from Admin ▸ Assistants ▸ Model & rules (src/utils/assistant-model.ts);
+        // {} = the gateway's own model, as before. The same choice for the draft and both re-asks.
+        const roleModel = (await loadRoleModel(db, await roleKeyOfAssistant(db, job.assistant_id))) ?? {};
         const jobUsage = {
             workspaceId: job.organisation_id,
             userId: job.user_id,
             assistantId: job.assistant_id,
             dataCategories: ['business_context' as const],
         };
-        const gwResponse = await gatewayGenerate({ system: systemPrompt, messages, maxTokens: 4096, usage: jobUsage });
+        const gwResponse = await gatewayGenerate({ system: systemPrompt, messages, maxTokens: 4096, usage: jobUsage, ...roleModel });
         const { text: rawText, tokensInput, tokensOutput } = gwResponse;
         let generated: {
             caption?: string; captionShort?: string; hashtags?: string;
@@ -820,6 +824,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                     // separately rather than folded into the first, because "one post cost two
                     // calls" is the fact worth being able to see.
                     usage: jobUsage,
+                    ...roleModel,
                 });
                 dupTokensIn = retry.tokensInput ?? 0;
                 dupTokensOut = retry.tokensOutput ?? 0;
@@ -856,6 +861,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                     ],
                     maxTokens: 4096,
                     usage: jobUsage,
+                    ...roleModel,
                 });
                 const reparsed = parseModelJson<typeof generated>(retry.text);
                 if (reparsed?.caption && String(reparsed.caption).trim()

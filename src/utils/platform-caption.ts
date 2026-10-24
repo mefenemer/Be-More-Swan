@@ -46,8 +46,21 @@ const ACRONYM_CASE: Record<string, string> = {
 // (and surrounding whitespace) from the body before the footer is appended. Only a TRAILING block is
 // removed, so a hashtag used mid-sentence is left untouched.
 const TRAILING_HASHTAGS_RE = /(?:\s*#[\p{L}\p{N}_]+)+\s*$/u;
+
+// ⚠️ The model also SPLITS a tag with a space ("#selfcarethrough creativity #slowliving
+// #creativityasself care"), seen on prod 2026-10-23. The block then ends in "care", the run above
+// never matches, and the whole block shipped in the caption above the disclosure. So a trailing LINE
+// that starts with a hashtag and is mostly hashtags (3+, two thirds of its words) goes too. Prose
+// that mentions one tag never qualifies.
+function isHashtagLine(line: string): boolean {
+    const words = line.trim().split(/\s+/).filter(Boolean);
+    const tags = words.filter((w) => w.startsWith('#')).length;
+    return words[0]?.startsWith('#') === true && tags >= 3 && tags * 3 >= words.length * 2;
+}
 export function stripTrailingHashtags(caption: string | null | undefined): string {
-    return String(caption ?? '').replace(TRAILING_HASHTAGS_RE, '').replace(/\s+$/, '');
+    const lines = String(caption ?? '').replace(TRAILING_HASHTAGS_RE, '').replace(/\s+$/, '').split('\n');
+    while (lines.length && isHashtagLine(lines[lines.length - 1])) lines.pop();
+    return lines.join('\n').replace(/\s+$/, '');
 }
 
 /** The trailing hashtag block the model leaked into a caption (or '' if none). Used only as a

@@ -35,12 +35,43 @@ import { parseModelJson } from '../../src/utils/model-json';import { randomUUID 
 import { sql } from 'drizzle-orm';
 import { normaliseShowcase, SHOWCASE_MEDIA_PREFIX, showcaseMediaUrl } from '../../src/utils/assistant-showcase';
 import { putR2Object } from '../../src/lib/media-persist';
+import { MODEL_OPTIONS, THINKING_LEVELS, effectiveThinking, estimateCallUsd, modelOption, type ThinkingLevel } from '../../src/config/model-options';
+import { CHAT_DEFAULT_MODEL, ROLE_MODEL_PATHS, promptLayersFor } from '../../src/config/assistant-prompt-layers';
+import { clearRoleModelCache } from '../../src/utils/assistant-model';
 
 
 const pgCode = (err: unknown) => (err as { code?: string; cause?: { code?: string } })?.code
     ?? (err as { cause?: { code?: string } })?.cause?.code;
 
 const strList = (v: unknown) => (Array.isArray(v) ? v.map((x) => String(x ?? '').trim()).filter(Boolean) : []);
+
+// ── Model & rules (src/config/model-options.ts, src/utils/assistant-model.ts) ───────────────────
+type Db = ReturnType<typeof getDb>;
+type ModelRow = { role_key: string; model: string; thinking: string; updated_at: string };
+
+/** Every role's saved model choice. needsSetup when db/assistant-model-settings.sql isn't applied. */
+async function loadModelChoices(db: Db): Promise<{ rows: ModelRow[]; needsSetup: boolean }> {
+    try {
+        return { rows: [...await db.execute<ModelRow>(sql`SELECT role_key, model, thinking, updated_at::text FROM assistant_model_settings`)], needsSetup: false };
+    } catch (err) {
+        if (pgCode(err) === '42P01') return { rows: [], needsSetup: true };
+        throw err;
+    }
+}
+
+/** Claude spend over the last 30 days, by role and model, from the usage ledger (ai_usage_log). */
+async function usageByRole(db: Db, roleKey?: string) {
+    return [...await db.execute<{ role_key: string; model: string; calls: number; avg_in: number; avg_out: number; usd: string }>(sql`
+        SELECT m.role_key, l.model, count(*)::int AS calls,
+               round(avg(l.input_tokens))::int AS avg_in, round(avg(l.output_tokens))::int AS avg_out,
+               coalesce(sum(l.cost_usd::numeric), 0)::text AS usd
+        FROM ai_usage_log l
+        JOIN ai_assistants a ON a.id = l.assistant_id
+        JOIN master_assistants m ON m.id = a.master_assistant_id
+        WHERE l.created_at > now() - interval '30 days' AND l.model LIKE 'claude%'
+          ${roleKey ? sql`AND m.role_key = ${roleKey}` : sql``}
+        GROUP BY 1, 2 ORDER BY 1, 6 DESC`)];
+}
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body: JSON.stringify(body),
@@ -81,6 +112,10 @@ export default withLambda(async (event) => {
                     .where(ne(aiAssistants.lifecycleStatus, 'archived')).groupBy(aiAssistants.masterAssistantId),
                 db.select({ id: assistantFeatures.masterAssistantId, n: count() }).from(assistantFeatures).groupBy(assistantFeatures.masterAssistantId),
             ]);
+            const [{ rows: choices }, usage] = await Promise.all([loadModelChoices(db), usageByRole(db)]);
+            const choiceBy = new Map(choices.map((c) => [c.role_key, c]));
+            const costBy = new Map<string, number>();
+            for (const u of usage) costBy.set(u.role_key, (costBy.get(u.role_key) ?? 0) + Number(u.usd));
             const by = (list: { id: number | null; n: number }[]) => new Map(list.map((r) => [r.id, Number(r.n)]));
             const wlBy = by(wl), hiredBy = by(hired), capsBy = by(caps);
             const assistants = rows.map((r) => {
@@ -91,6 +126,9 @@ export default withLambda(async (event) => {
                     liveBlockers: blockersFor('live', checks).length,
                     warnings: checks.filter((c) => !c.ok && c.severity === 'warning').length,
                     built: checks.filter((c) => c.group === 'built').every((c) => c.ok),
+                    // null = the models written in the code (Model & rules tab lists them).
+                    model: choiceBy.has(r.roleKey) ? modelOption(choiceBy.get(r.roleKey)!.model)?.label ?? null : null,
+                    cost30dUsd: Math.round((costBy.get(r.roleKey) ?? 0) * 100) / 100,
                 };
             });
             return json(200, { assistants, statuses: ASSISTANT_STATUSES.map((s) => ({ key: s, label: STATUS_LABELS[s] })) });
@@ -154,6 +192,59 @@ export default withLambda(async (event) => {
             const key = `${SHOWCASE_MEDIA_PREFIX}${row.roleKey}/${Date.now().toString(36)}-${randomUUID().slice(0, 8)}.${ext}`;
             await putR2Object({ key, bytes, contentType: String(body.contentType) });
             return json(200, { url: showcaseMediaUrl(key) });
+        }
+
+        if (event.httpMethod === 'GET' && q.config === '1') {
+            const [{ rows, needsSetup }, usage] = await Promise.all([loadModelChoices(db), usageByRole(db, row.roleKey)]);
+            const saved = rows.find((r) => r.role_key === row.roleKey) ?? null;
+            const choice = saved && modelOption(saved.model)
+                ? { model: saved.model, thinking: effectiveThinking(saved.model, saved.thinking as ThinkingLevel), updatedAt: saved.updated_at } : null;
+            // What each option WOULD have cost for the same 30 days of calls: the real token counts,
+            // re-priced (estimateCallUsd allows for the newer tokenizer and for thinking).
+            const thinkingFor = (m: string) => effectiveThinking(m, choice?.thinking ?? 'low');
+            const estimates = MODEL_OPTIONS.map((o) => ({
+                model: o.id,
+                usd30d: Math.round(usage.reduce((sum, u) => sum + u.calls * (estimateCallUsd(u.model, o.id, u.avg_in, u.avg_out, thinkingFor(o.id)) ?? 0), 0) * 100) / 100,
+            }));
+            return json(200, {
+                roleKey: row.roleKey, needsSetup, choice,
+                options: MODEL_OPTIONS, thinkingLevels: THINKING_LEVELS,
+                paths: [...(ROLE_MODEL_PATHS[row.roleKey] ?? []), { label: 'Chat', defaultModel: CHAT_DEFAULT_MODEL }],
+                usage: usage.map((u) => ({ model: u.model, label: modelOption(u.model)?.label ?? u.model, calls: u.calls, avgIn: u.avg_in, avgOut: u.avg_out, usd: Math.round(Number(u.usd) * 100) / 100 })),
+                estimates,
+                layers: promptLayersFor(row.roleKey),
+            });
+        }
+
+        // The role's model. { model: null } goes back to the models written in the code.
+        if (event.httpMethod === 'POST' && q.action === 'model') {
+            let body: { model?: unknown; thinking?: unknown } = {};
+            try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON.' }); }
+            const model = body.model == null || body.model === '' ? null : String(body.model);
+            if (model && !modelOption(model)) return json(400, { error: 'Choose one of the models offered.' });
+            const thinking = model ? effectiveThinking(model, body.thinking as ThinkingLevel) : null;
+            const { rows, needsSetup } = await loadModelChoices(db);
+            if (needsSetup) return json(409, { error: 'The model setting is not set up here yet — apply db/assistant-model-settings.sql first.' });
+            const before = rows.find((r) => r.role_key === row.roleKey) ?? null;
+            if (model) {
+                await db.execute(sql`
+                    INSERT INTO assistant_model_settings (role_key, model, thinking, updated_by, updated_at)
+                    VALUES (${row.roleKey}, ${model}, ${thinking}, ${adminId}, now())
+                    ON CONFLICT (role_key) DO UPDATE SET model = EXCLUDED.model, thinking = EXCLUDED.thinking,
+                        updated_by = EXCLUDED.updated_by, updated_at = now()`);
+            } else {
+                await db.execute(sql`DELETE FROM assistant_model_settings WHERE role_key = ${row.roleKey}`);
+            }
+            clearRoleModelCache(row.roleKey);
+            await insertAdminAuditLog({
+                adminId, action: 'assistant_model_change', targetType: 'master_assistant', targetId: id,
+                previousState: before ? { model: before.model, thinking: before.thinking } : { model: 'code default' },
+                newState: model ? { model, thinking } : { model: 'code default' },
+                reason: model ? `model → ${model} (${thinking})` : 'model → code default',
+                ipAddress: getAdminIp(event.headers as Record<string, string | undefined>), userAgent: event.headers['user-agent'],
+                metadata: { assistantName: row.name, roleKey: row.roleKey },
+            });
+            return json(200, { choice: model ? { model, thinking } : null });
         }
 
         if (event.httpMethod === 'GET') {

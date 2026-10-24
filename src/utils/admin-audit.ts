@@ -36,6 +36,7 @@ export type AdminAction =
     | 'regulator_notification_submitted'
     | 'assistant_state_change'
     | 'assistant_showcase_update'
+    | 'assistant_model_change'
     | 'record_delete'
     | 'retry_failed_post'
     | 'sandbox_purge'

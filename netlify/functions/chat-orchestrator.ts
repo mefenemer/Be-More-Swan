@@ -19,6 +19,8 @@ import { SPECIAL_CATEGORY_RULE } from '../../src/constants/special-category-rule
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
+import { adaptForModel, replyText } from '../../src/config/model-options';
+import { loadRoleModel, withRoleModel } from '../../src/utils/assistant-model';
 import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts, scheduledPostAssets } from '../../db/schema';
@@ -3015,15 +3017,21 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 shadowRow?.onboardingContext ?? null,
             );
 
-            const shadowResponse = await anthropic.messages.create({
-                model: targetRoute.model,
-                max_tokens: targetRoute.maxTokens,
-                system: sanitizeForModel(shadowSystem),
-                messages: [{
-                    role: 'user' as const,
-                    content: `Background handoff (automated — the user approved this handoff; they are not addressing you directly). "${assistantRow.name}" needs your output to finish its own task. Work the payload below and respond in your usual format; keep the reply brief.\n\nHandoff payload:\n${handoff.payloadJson}`,
-                }],
-            });
+            // The TARGET role's model (Admin ▸ Assistants ▸ Model & rules), held at low thinking —
+            // this is inside the same 26s request as the reply below.
+            const { response: shadowResponse, model: shadowModel } = await withRoleModel(
+                await loadRoleModel(db, handoff.targetRoleKey), targetRoute.model,
+                async (model, thinking) => ({ model, response: await anthropic.messages.create(adaptForModel({
+                    model,
+                    max_tokens: targetRoute.maxTokens,
+                    system: sanitizeForModel(shadowSystem),
+                    messages: [{
+                        role: 'user' as const,
+                        content: `Background handoff (automated — the user approved this handoff; they are not addressing you directly). "${assistantRow.name}" needs your output to finish its own task. Work the payload below and respond in your usual format; keep the reply brief.\n\nHandoff payload:\n${handoff.payloadJson}`,
+                    }],
+                }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming) }),
+                { requestPath: true, label: 'chat handoff' },
+            );
 
             // Shadow calls burn real tokens — same telemetry as a foreground turn, with a
             // :handoff session suffix so COGS reporting can split background work out.
@@ -3031,14 +3039,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 workspaceId: orgId,
                 userId,
                 assistantId: shadowRow?.id ?? assistantRow.id,
-                model: targetRoute.model,
+                model: shadowModel,
                 inputTokens: shadowResponse.usage.input_tokens,
                 outputTokens: shadowResponse.usage.output_tokens,
                 sessionId: `chat:${session.id}:handoff`,
                 dataCategories: ['business_context'],
             });
 
-            const shadowRaw = shadowResponse.content[0]?.type === 'text' ? shadowResponse.content[0].text : '';
+            const shadowRaw = replyText(shadowResponse.content);
             const shadow = targetRoute.parseResponse(shadowRaw);
             handoffAudit = { roleKey: handoff.targetRoleKey, targetName, content: shadow.content, uiElement: shadow.uiElement };
 
@@ -3060,26 +3068,32 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             });
         }
 
-        const response = await anthropic.messages.create({
-            model: route.model,
-            max_tokens: route.maxTokens,
-            // Half-emoji anywhere in the assembled prompt make the request invalid JSON (text-safe.ts).
-            system: sanitizeForModel(system),
-            messages: sanitizeForModel(llmMessages),
-        });
+        // The role's model from Admin ▸ Assistants ▸ Model & rules (src/utils/assistant-model.ts);
+        // none chosen = route.model, exactly as before. Held at low thinking: a 26s request.
+        const { response, model: chatModel } = await withRoleModel(
+            await loadRoleModel(db, assistantRow.roleKey), route.model,
+            async (model, thinking) => ({ model, response: await anthropic.messages.create(adaptForModel({
+                model,
+                max_tokens: route.maxTokens,
+                // Half-emoji anywhere in the assembled prompt make the request invalid JSON (text-safe.ts).
+                system: sanitizeForModel(system),
+                messages: sanitizeForModel(llmMessages),
+            }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming) }),
+            { requestPath: true, label: 'chat' },
+        );
 
         void logAiUsage({
             workspaceId: orgId,
             userId,
             assistantId: assistantRow.id,
-            model: route.model,
+            model: chatModel,
             inputTokens: response.usage.input_tokens,
             outputTokens: response.usage.output_tokens,
             sessionId: `chat:${session.id}`,
             dataCategories: ['business_context'],
         });
 
-        const raw = response.content[0]?.type === 'text' ? response.content[0].text : '';
+        const raw = replyText(response.content);
         // `content` is not final: the reconciliation guard below replaces it when the model
         // claims a post was saved and no row was actually written.
         const parsed = route.parseResponse(raw);
