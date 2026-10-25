@@ -24,6 +24,7 @@ import { BETA_PLAN_TYPE } from './beta-testers';
 import { FREE_PLAN_TYPES } from '../config/beta-plan';
 import { endedTrialOrganisationIds, resumeAfterTrialConversion } from './trial';
 import { releaseHeldWork } from './held-work';
+import { takesASeat } from './assistant-capacity';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -104,7 +105,7 @@ export async function loadBetaWorkspaces(db: Db): Promise<BetaWorkspace[]> {
         db.select({ id: users.id, email: users.email, firstName: users.firstName }).from(users)
             .where(inArray(users.id, betaPlans.map((p) => p.userId).filter((x): x is number => x != null))),
         db.select({ orgId: aiAssistants.organisationId, n: sql<number>`count(*)::int` }).from(aiAssistants)
-            .where(and(inArray(aiAssistants.organisationId, orgIds), ne(aiAssistants.lifecycleStatus, 'archived')))
+            .where(and(inArray(aiAssistants.organisationId, orgIds), ne(aiAssistants.lifecycleStatus, 'archived'), takesASeat()))
             .groupBy(aiAssistants.organisationId),
         db.select({ orgId: usageCounters.organisationId, peak: sql<number>`max(${usageCounters.taskCount})::int` }).from(usageCounters)
             .where(inArray(usageCounters.organisationId, orgIds)).groupBy(usageCounters.organisationId),

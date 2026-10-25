@@ -18,6 +18,7 @@ import { qualifyPendingReferral } from '../../src/utils/referral-offer';
 import { invoiceNetPence, recordPartnerPayment, reinstateDisputedCommission, reversePartnerCommission, sessionNetPence, type PartnerPayment } from '../../src/utils/partner-ledger';
 import { finishPlanMove } from '../../src/utils/plan-moves';
 import { planStatusForCancelFlag } from '../../src/utils/subscription-cancel-state';
+import { takesASeat } from '../../src/utils/assistant-capacity';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
@@ -1149,8 +1150,8 @@ export default withLambda(async (event) => {
                     const activeAssistants = await db
                         .select({ id: aiAssistants.id, name: aiAssistants.name, createdAt: aiAssistants.createdAt })
                         .from(aiAssistants)
-                        .where(and(eq(aiAssistants.userId, userId), eq(aiAssistants.isActive, true), isNull(aiAssistants.archivedAt)))
-                        .orderBy(desc(aiAssistants.createdAt)); // newest first → pause oldest
+                        .where(and(eq(aiAssistants.userId, userId), eq(aiAssistants.isActive, true), isNull(aiAssistants.archivedAt), takesASeat()))
+                        .orderBy(desc(aiAssistants.createdAt)); // newest first → pause oldest (never the Business Mentor)
 
                     const excess = activeAssistants.length - assistantLimit;
                     if (excess > 0) {

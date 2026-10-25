@@ -700,6 +700,9 @@ trust page already disagree on whether Be More Swan is controller or processor; 
 
 Owner rule: every assistant is judged against what an expert in the role would produce.
 
+**The full rubric (12 lines), the 10 test workspaces and the run log are in
+`docs/business-mentor-rubric.md`.** The summary below is the original eight.
+
 **Rubric** (each reply graded pass / fail on what applies):
 
 1. Grounded: uses this workspace's real data; invents nothing about the business.

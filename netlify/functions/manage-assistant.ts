@@ -15,7 +15,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { transitionAssistantStatus } from '../../src/utils/assistant-lifecycle';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { releasePausedLimit } from '../../src/utils/release-paused-limit';
-import { checkResumeCapacity, checkRoleSwap } from '../../src/utils/assistant-capacity';
+import { checkResumeCapacity, checkRoleSwap, takesASeat } from '../../src/utils/assistant-capacity';
 
 // Issue #191: archiving starts a 14-day reinstate window before purge-archived-assistants.ts
 // (daily cron) permanently deletes the assistant and all of its associated data.
@@ -94,6 +94,7 @@ export default withLambda(async (event) => {
                             .where(and(
                                 eq(aiAssistants.organisationId, orgId),
                                 inArray(aiAssistants.lifecycleStatus, ['provisioning', 'ready_for_work', 'working']),
+                                takesASeat(),
                             ));
                         if (occupied >= assistantLimit) {
                             return { statusCode: 409, body: JSON.stringify({ error: "Your plan's assistant limit has been reached. Upgrade your plan or archive another assistant before reinstating this one.", code: 'CAPACITY' }) };

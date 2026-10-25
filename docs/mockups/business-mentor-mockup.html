@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Business Mentor — Phase 1a mockup</title>
+<style>
+  /* Standalone mockup for docs/business-mentor-plan.md Phase 1a. Tokens copied from input.css so it
+     reads as the real product, but NOT dependent on style.css. Green is spelled out as a literal:
+     emerald is remapped to neon pink in input.css. */
+  :root{
+    --accent:#ff007f; --accent-hover:#d6006b; --accent-wash:#fff0f5; --accent-border:#ffd6e8;
+    --g50:#f9fafb; --g100:#f3f4f6; --g200:#e5e7eb; --g300:#d1d5db; --g400:#9ca3af;
+    --g500:#6b7280; --g600:#4b5563; --g700:#374151; --g900:#111827;
+    --amber-wash:#fffbeb; --amber-border:#fde68a; --amber-text:#92400e;
+    --green-wash:#f0fdf4; --green-border:#bbf7d0; --green-text:#166534;
+    --blue-wash:#eff6ff; --blue-border:#bfdbfe; --blue-text:#1e40af;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none !important}
+  body{margin:0;background:var(--g50);color:var(--g900);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:85rem;margin:0 auto;padding:1.5rem 1rem 5rem}
+  .muted{color:var(--g500)} .small{font-size:12px} .tiny{font-size:11px}
+  h1{font-size:20px;margin:0} h2{font-size:15px;margin:0 0 .5rem} h3{font-size:13px;margin:0 0 .35rem}
+
+  .mockbar{background:var(--g900);color:#fff;padding:.6rem 1rem;font-size:12px;
+    display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+  .mockbar button{background:rgba(255,255,255,.12);color:#fff;border:0;border-radius:999px;padding:.25rem .7rem;font-size:12px;cursor:pointer}
+  .mockbar button[aria-pressed="true"]{background:var(--accent)}
+  .mockbar .sep{opacity:.4}
+
+  .card{background:#fff;border:1px solid var(--g200);border-radius:1rem;box-shadow:0 1px 2px rgba(0,0,0,.05);padding:1rem}
+  .head{display:flex;gap:.9rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem}
+  .avatar{width:44px;height:44px;border-radius:12px;background:var(--accent-wash);border:1px solid var(--accent-border);
+    display:grid;place-items:center;font-size:22px;flex-shrink:0}
+  .badge{display:inline-block;border-radius:999px;padding:.1rem .5rem;font-size:11px;font-weight:600}
+  .b-new{background:var(--accent-wash);color:var(--accent-hover);border:1px solid var(--accent-border)}
+  .b-incl{background:var(--g100);color:var(--g700)}
+  .b-amber{background:var(--amber-wash);color:var(--amber-text);border:1px solid var(--amber-border)}
+  .b-green{background:var(--green-wash);color:var(--green-text);border:1px solid var(--green-border)}
+
+  .tabs{display:flex;gap:.25rem;border-bottom:1px solid var(--g200);margin-bottom:1rem;overflow-x:auto}
+  .tabs button{background:none;border:0;padding:.6rem .9rem;font-weight:600;color:var(--g500);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+  .tabs button[aria-selected="true"]{color:var(--accent-hover);border-color:var(--accent)}
+
+  .grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:1rem}
+  @media (max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}}
+  .stack>*+*{margin-top:1rem}
+
+  .btn{border-radius:.6rem;padding:.45rem .8rem;font-weight:600;font-size:13px;cursor:pointer;border:1px solid transparent}
+  .btn-primary{background:var(--accent);color:#fff} .btn-primary:hover{background:var(--accent-hover)}
+  .btn-secondary{background:#fff;color:var(--g700);border-color:var(--g300)}
+  .btn-ghost{background:none;color:var(--g600)}
+  .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+
+  /* Chat */
+  .chat{display:flex;flex-direction:column;gap:.75rem;min-height:420px}
+  .msg{max-width:92%;border-radius:1rem;padding:.75rem .9rem}
+  .msg.mentor{background:var(--g100);align-self:flex-start;border-top-left-radius:.25rem}
+  .msg.user{background:var(--accent);color:#fff;align-self:flex-end;border-top-right-radius:.25rem}
+  .msg ol{margin:.4rem 0 .4rem 1.1rem;padding:0}
+  .composer{display:flex;gap:.5rem;margin-top:auto;border-top:1px solid var(--g200);padding-top:.75rem}
+  .composer input{flex:1;min-width:0;border:1px solid var(--g300);border-radius:.6rem;padding:.55rem .7rem;font:inherit}
+
+  /* Proposal card (§3.13) */
+  .proposal{border:1px solid var(--g200);border-radius:.9rem;background:#fff;padding:.8rem;align-self:stretch}
+  .proposal .target{font-size:11px;font-weight:600;color:var(--g500);text-transform:uppercase;letter-spacing:.03em}
+  .why{background:var(--blue-wash);border:1px solid var(--blue-border);color:var(--blue-text);border-radius:.6rem;padding:.45rem .6rem;font-size:12px;margin:.5rem 0}
+  .why a{color:inherit}
+  .preview{background:var(--g50);border:1px dashed var(--g300);border-radius:.6rem;padding:.5rem .6rem;font-size:13px;margin:.4rem 0}
+  .dismiss{display:none;gap:.35rem;flex-wrap:wrap;margin-top:.5rem}
+  .dismiss.open{display:flex}
+  .chip{border:1px solid var(--g300);background:#fff;border-radius:999px;padding:.2rem .6rem;font-size:12px;cursor:pointer}
+  .done{background:var(--green-wash);border:1px solid var(--green-border);color:var(--green-text);border-radius:.6rem;padding:.45rem .6rem;font-size:12px}
+
+  /* Side panels */
+  .check li{list-style:none;display:flex;gap:.5rem;align-items:flex-start;padding:.35rem 0;border-bottom:1px solid var(--g100)}
+  .check{margin:0;padding:0}
+  .tick{width:18px;height:18px;border-radius:5px;border:1.5px solid var(--g300);flex-shrink:0;margin-top:2px;display:grid;place-items:center;font-size:12px}
+  .tick.ok{background:#16a34a;border-color:#16a34a;color:#fff}
+  .see{width:100%;border-collapse:collapse;font-size:12px}
+  .see td{padding:.3rem .2rem;border-bottom:1px solid var(--g100);vertical-align:top}
+  .see td:first-child{font-weight:600;width:38%}
+  .switch{width:38px;height:22px;border-radius:999px;background:var(--g300);position:relative;cursor:pointer;flex-shrink:0;border:0}
+  .switch::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+  .switch[aria-checked="true"]{background:var(--accent)} .switch[aria-checked="true"]::after{left:19px}
+  details summary{cursor:pointer;font-weight:600}
+
+  /* Inbox + admin */
+  .inbox-item{display:flex;gap:.75rem;align-items:flex-start;padding:.75rem 0;border-bottom:1px solid var(--g100)}
+  .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem}
+  @media (max-width:700px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  .kpi{background:#fff;border:1px solid var(--g200);border-radius:.8rem;padding:.75rem}
+  .kpi .n{font-size:22px;font-weight:700}
+  table.list{width:100%;border-collapse:collapse;font-size:12px}
+  table.list th,table.list td{text-align:left;padding:.45rem .35rem;border-bottom:1px solid var(--g100)}
+  .note{background:var(--amber-wash);border:1px solid var(--amber-border);color:var(--amber-text);border-radius:.6rem;padding:.6rem .7rem;font-size:12px}
+  section.view{display:none} section.view.on{display:block}
+</style>
+</head>
+<body>
+
+<div class="mockbar">
+  <strong>Business Mentor · Phase 1a mockup</strong><span class="sep">|</span>
+  <span>Workspace:</span>
+  <button data-scenario="existing" aria-pressed="true">Existing subscriber</button>
+  <button data-scenario="noteam" aria-pressed="false">No other assistants</button>
+  <button data-scenario="noplan" aria-pressed="false">No paid plan</button>
+  <span class="sep">|</span><span>Screen:</span>
+  <button data-view="mentor" aria-pressed="true">Mentor page</button>
+  <button data-view="inbox" aria-pressed="false">Inbox · Needs you</button>
+  <button data-view="admin" aria-pressed="false">Admin · Mentor activity</button>
+</div>
+
+<div class="wrap">
+
+<!-- ═══════════════════════ MENTOR PAGE ═══════════════════════ -->
+<section class="view on" id="view-mentor">
+  <div class="head">
+    <div class="avatar">🦢</div>
+    <div style="flex:1;min-width:200px">
+      <div class="row"><h1 id="mentor-name">Willow</h1>
+        <button class="btn btn-ghost small" title="Rename (§14: GUI twin of naming in chat)">✎ Rename</button>
+        <span class="badge b-new">New</span><span class="badge b-incl">Included on every plan · takes no assistant slot</span></div>
+      <div class="muted small">Your Business Mentor · guide, coach and support</div>
+    </div>
+    <div class="row small"><span class="muted">Quiet mode</span>
+      <button class="switch" role="switch" aria-checked="false" aria-label="Quiet mode" onclick="this.setAttribute('aria-checked', this.getAttribute('aria-checked')!=='true')"></button></div>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button aria-selected="true">Chat</button>
+    <button aria-selected="false">Results</button>
+    <button aria-selected="false" title="Phase 2" disabled style="opacity:.45">Plan · coming</button>
+  </div>
+
+  <div class="grid">
+    <!-- Chat column -->
+    <div class="card chat" id="chat">
+      <!-- filled by scenario -->
+    </div>
+
+    <!-- Side column: GUI twins (§14) -->
+    <div class="stack">
+      <div class="card" id="panel-checklist">
+        <h2>Set-up checklist</h2>
+        <p class="muted small" style="margin:0 0 .4rem">The same gaps Willow raises in chat. Each opens its field.</p>
+        <ul class="check">
+          <li><span class="tick ok">✓</span><div>Business description <div class="tiny muted">Business Information</div></div></li>
+          <li><span class="tick ok">✓</span><div>Who your customers are</div></li>
+          <li><span class="tick"></span><div><a href="#">Products &amp; Services</a> <span class="badge b-amber">Empty</span>
+            <div class="tiny muted">None of your assistants can mention prices until this is filled in.</div></div></li>
+          <li><span class="tick"></span><div><a href="#">Intro offer</a> <div class="tiny muted">Optional · used in outreach and posts</div></div></li>
+          <li><span class="tick ok">✓</span><div>Tone of voice</div></li>
+        </ul>
+      </div>
+
+      <div class="card" id="panel-see">
+        <details>
+          <summary>What Willow can see</summary>
+          <p class="muted small">Generated from the same list the Mentor works from (plan §12). It never changes anything without your click.</p>
+          <table class="see">
+            <tr><td>Your business</td><td>Business Information, Products &amp; Services, offers, Brand Knowledge</td></tr>
+            <tr><td>Your team</td><td>Active assistants' settings, set-up answers, goals and recent work</td></tr>
+            <tr><td>Results</td><td>Goal progress, performance, what's waiting for your review</td></tr>
+            <tr><td>Sales &amp; customers</td><td>Lead and deal counts, reasons won or lost, reviews</td></tr>
+            <tr><td>Your plan</td><td>Plan, tasks used, daily chat allowance</td></tr>
+          </table>
+          <h3 style="margin-top:.75rem">Never sees</h3>
+          <p class="small" style="margin:0">Passwords and connection keys · other workspaces · your other assistants' chats · contacts' email addresses or phone numbers · card details</p>
+        </details>
+      </div>
+
+      <div class="card" id="panel-dismissed">
+        <details>
+          <summary>Dismissed suggestions (1)</summary>
+          <div class="row small" style="justify-content:space-between;margin-top:.5rem">
+            <span>Post on Sundays as well <span class="muted">· Not now · back on 8 Nov</span></span>
+            <button class="btn btn-secondary small">Bring back</button>
+          </div>
+        </details>
+      </div>
+
+      <div class="card small muted">
+        Need help with Be More Swan? Ask Willow in chat, or <a href="#">contact support</a> · <a href="#">report a problem</a>.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ INBOX ═══════════════════════ -->
+<section class="view" id="view-inbox">
+  <h1 style="margin-bottom:1rem">Inbox · Needs you</h1>
+  <div class="card">
+    <div class="inbox-item">
+      <div class="avatar" style="width:36px;height:36px;font-size:18px">🦢</div>
+      <div style="flex:1;min-width:0">
+        <div class="row"><strong>Willow suggests</strong><span class="badge b-incl">Business Mentor</span><span class="muted tiny">· 1 of 3 this week</span></div>
+        <div class="proposal" style="margin-top:.5rem">
+          <div class="target">Changes: Social Media Assistant · posting schedule</div>
+          <div><strong>Post 3 times a week instead of 5</strong></div>
+          <div class="why"><strong>Why?</strong> 14 drafts are waiting for your review, the oldest from 9 days ago (<a href="#">Review page</a>). At 5 a week, they arrive faster than you approve them.</div>
+          <div class="preview">Mon · Wed · Fri at 09:00 &nbsp;<span class="muted">(was Mon–Fri)</span></div>
+          <div class="row"><button class="btn btn-primary">Apply</button><button class="btn btn-secondary" onclick="this.closest('.proposal').querySelector('.dismiss').classList.toggle('open')">Dismiss…</button></div>
+          <div class="dismiss"><span class="small muted">Why?</span><button class="chip">Not relevant</button><button class="chip">Already done</button><button class="chip">Disagree</button><button class="chip">Not now</button></div>
+        </div>
+        <div class="tiny muted" style="margin-top:.35rem">Same card as in Willow's chat — apply it here and it shows as done there.</div>
+      </div>
+    </div>
+    <div class="inbox-item">
+      <div class="avatar" style="width:36px;height:36px;font-size:18px">📣</div>
+      <div><strong>3 posts waiting for review</strong><div class="muted small">Social Media Assistant</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ ADMIN ═══════════════════════ -->
+<section class="view" id="view-admin">
+  <h1 style="margin-bottom:.25rem">Admin · Assistants · Business Mentor · Activity</h1>
+  <p class="muted small" style="margin-top:0">Success measures (plan §8.2), from the Phase 1a launch. With 9 workspaces, read case by case — no targets yet.</p>
+  <div class="kpis">
+    <div class="kpi"><div class="muted small">Is the advice any good?</div><div class="n">62%</div><div class="tiny muted">18 of 29 suggestions accepted</div></div>
+    <div class="kpi"><div class="muted small">Getting people set up?</div><div class="n">11</div><div class="tiny muted">Business Information gaps closed</div></div>
+    <div class="kpi"><div class="muted small">Making a difference?</div><div class="n">—</div><div class="tiny muted">Track record arrives in Phase 3</div></div>
+    <div class="kpi"><div class="muted small">Keeping people?</div><div class="n">8 / 9</div><div class="tiny muted">active 30 days after meeting the Mentor</div></div>
+  </div>
+  <div class="card" style="margin-top:1rem;overflow-x:auto">
+    <h2>By workspace</h2>
+    <table class="list">
+      <tr><th>Workspace</th><th>Met Mentor</th><th>Shown</th><th>Accepted</th><th>Dismissed (top reason)</th><th>Gaps closed</th><th>Support raised</th></tr>
+      <tr><td>Love Cat Studio</td><td>26 Oct</td><td>6</td><td>4</td><td>1 (Not now)</td><td>3</td><td>0</td></tr>
+      <tr><td>Restorative Futures</td><td>27 Oct</td><td>5</td><td>2</td><td>2 (Disagree)</td><td>1</td><td>1</td></tr>
+      <tr><td class="muted" colspan="7">Illustrative figures.</td></tr>
+    </table>
+  </div>
+</section>
+
+</div>
+
+<script>
+// Chat content per scenario. Text is illustrative; the real wording comes from the prompt + snapshot.
+const CHAT = {
+  existing: `
+    <div class="msg mentor">Hello Sam — I'm your new Business Mentor, included with your plan. You can call me Willow, or give me another name.</div>
+    <div class="msg user">Willow's fine</div>
+    <div class="msg mentor">Lovely. I've looked over your workspace. Three things stand out:
+      <ol><li><strong>14 drafts are waiting</strong> for your review, the oldest from 9 days ago.</li>
+      <li><strong>Products &amp; Services is empty</strong>, so none of your assistants can mention prices.</li>
+      <li>Your Social assistant's goal of <strong>500 followers by December</strong> is behind: 120 so far.</li></ol>
+      Want to start with the drafts?</div>
+    <div class="proposal">
+      <div class="target">Changes: Social Media Assistant · posting schedule</div>
+      <div><strong>Post 3 times a week instead of 5</strong></div>
+      <div class="why"><strong>Why?</strong> 14 drafts waiting, oldest 9 days (<a href="#">Review page</a>). At 5 a week they arrive faster than you approve them.</div>
+      <div class="preview">Mon · Wed · Fri at 09:00 <span class="muted">(was Mon–Fri)</span></div>
+      <div class="row"><button class="btn btn-primary" onclick="applied(this)">Apply</button>
+        <button class="btn btn-secondary" onclick="this.closest('.proposal').querySelector('.dismiss').classList.toggle('open')">Dismiss…</button>
+        <span class="tiny muted">Or change it yourself on the Social assistant's page.</span></div>
+      <div class="dismiss"><span class="small muted">Why?</span><button class="chip">Not relevant</button><button class="chip">Already done</button><button class="chip">Disagree</button><button class="chip">Not now</button></div>
+    </div>
+    <div class="msg user">The app keeps logging me out</div>
+    <div class="msg mentor">Sorry about that. I can report it to the Be More Swan team for you:</div>
+    <div class="proposal">
+      <div class="target">Sends to: Be More Swan · <a href="#" class="tiny">switch to a support question</a></div>
+      <div><strong>Report a problem</strong></div>
+      <div class="preview"><strong>Keeps logging me out</strong><br>Reported from Willow's chat · page and assistant attached. No content from your workspace is sent.</div>
+      <div class="row"><button class="btn btn-primary" onclick="applied(this,'Reported · you\\'ll see replies in Report an Issue')">Send report</button><button class="btn btn-secondary">Edit first</button></div>
+    </div>
+    <div class="composer"><input placeholder="Ask Willow anything about your business or Be More Swan"><button class="btn btn-primary">Send</button></div>`,
+  noteam: `
+    <div class="msg mentor">Hello Sam — I'm your Business Mentor, included with your plan. It's just us for now: you haven't picked an assistant yet. On The Workflow Saver you have <strong>one assistant slot free</strong>.</div>
+    <div class="msg mentor">Before choosing, let's make sure whichever one you pick has what it needs. Two gaps:
+      <ol><li><strong>Products &amp; Services is empty.</strong></li><li><strong>No intro offer</strong> yet (optional).</li></ol>
+      Shall I draft your Products &amp; Services from your website and description? You check it before anything is saved.</div>
+    <div class="proposal">
+      <div class="target">Changes: Business Information · Products &amp; Services</div>
+      <div><strong>Add 3 products</strong></div>
+      <div class="why"><strong>Why?</strong> Drafted from your business description and <a href="#">website</a>. Prices are left blank — only you know them.</div>
+      <div class="preview">1:1 coaching session · £—<br>Monthly membership · £—<br>Group workshop · £—</div>
+      <div class="row"><button class="btn btn-primary" onclick="applied(this)">Add these</button><button class="btn btn-secondary">Edit first</button></div>
+    </div>
+    <div class="msg mentor small">No team cards here: I won't suggest changes to assistants you haven't got. When you hire one, I'll start reviewing its work too.</div>
+    <div class="composer"><input placeholder="Ask Willow anything"><button class="btn btn-primary">Send</button></div>`,
+  noplan: `
+    <div class="note">Your workspace has no active plan, so Willow can answer questions about Be More Swan and pass messages to our team — but can't suggest changes or run reviews. <a href="#">Choose a plan</a></div>
+    <div class="msg user">How do I export my data?</div>
+    <div class="msg mentor">Go to <strong>My Account ▸ Your data</strong> and choose <strong>Export</strong>. You'll get a download link by email. <a href="#">Read the article →</a></div>
+    <div class="msg user">Can someone call me about my bill?</div>
+    <div class="proposal">
+      <div class="target">Sends to: Be More Swan support</div>
+      <div><strong>Ask for a call back about billing</strong></div>
+      <div class="row"><button class="btn btn-primary" onclick="applied(this,'Sent · ticket #214')">Send</button></div>
+    </div>
+    <div class="composer"><input placeholder="Ask about Be More Swan"><button class="btn btn-primary">Send</button></div>`,
+};
+function applied(btn, text){
+  const p = btn.closest('.proposal');
+  p.querySelector('.row').outerHTML = '<div class="done">✓ ' + (text || 'Applied · changed on the Social assistant\'s page too') + '</div>';
+  const d = p.querySelector('.dismiss'); if (d) d.remove();
+}
+function scenario(name){
+  document.querySelectorAll('[data-scenario]').forEach(b => b.setAttribute('aria-pressed', b.dataset.scenario === name));
+  document.getElementById('chat').innerHTML = CHAT[name];
+  document.getElementById('panel-dismissed').hidden = name !== 'existing';
+  document.getElementById('panel-checklist').hidden = name === 'noplan';
+}
+function view(name){
+  document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-pressed', b.dataset.view === name));
+  document.querySelectorAll('section.view').forEach(s => s.classList.toggle('on', s.id === 'view-' + name));
+}
+document.querySelectorAll('[data-scenario]').forEach(b => b.onclick = () => scenario(b.dataset.scenario));
+document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => view(b.dataset.view));
+scenario('existing');
+</script>
+</body>
+</html>

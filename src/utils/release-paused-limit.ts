@@ -24,6 +24,7 @@ import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, masterPlans, organisations, plans } from '../../db/schema';
 import { effectiveLimit, type FeatureOverrides } from './plan-features';
+import { takesASeat } from './assistant-capacity';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -82,6 +83,7 @@ export async function releasePausedLimit(db: Db, userId: number, organisationId:
                 eq(aiAssistants.userId, userId),
                 eq(aiAssistants.isActive, true),
                 isNull(aiAssistants.archivedAt),
+                takesASeat(),
             ));
 
         const capacity = limit === null ? Number.MAX_SAFE_INTEGER : limit - active.length;

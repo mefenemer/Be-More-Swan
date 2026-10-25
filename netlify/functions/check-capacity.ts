@@ -37,7 +37,7 @@ import { readTaskUsage, tasksRemaining as remainingTasks } from '../../src/utils
 import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { getTrial } from '../../src/utils/trial';
 import { resolveImpersonation } from '../../src/utils/impersonation';
-import { checkRoleSwap } from '../../src/utils/assistant-capacity';
+import { checkRoleSwap, takesASeat } from '../../src/utils/assistant-capacity';
 
 const stripe = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
@@ -199,6 +199,7 @@ export default withLambda(async (event) => {
             .where(and(
                 orgId ? eq(aiAssistants.organisationId, orgId) : eq(aiAssistants.userId, userId),
                 inArray(aiAssistants.lifecycleStatus, ['provisioning', 'ready_for_work', 'working']),
+                takesASeat(),
             ));
 
         // ── 3. Task & token counts from usageCounters (authoritative) ──
