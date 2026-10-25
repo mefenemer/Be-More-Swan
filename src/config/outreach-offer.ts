@@ -59,18 +59,20 @@ export const OUTREACH_FIRST_EMAIL_RULES = `FIRST-EMAIL RULES (these override any
 - Under ${MAX_WORDS} words in the body, not counting any sign-off — aim for 50 to 70, and count before you answer. Decision-makers read this on a phone.
 - Open with THEIR situation or problem — something true of a business like theirs — never with us, our product or a compliment.
 - At most ONE short sentence about what we do. Claim no result, time saving, percentage or number that the business's own information above does not state.
+- Say nothing about us that the business's information above does not state: not who we already work with ("we work with local employers"), not how far away we are ("five minutes away"), not a special rate or deal for them, not an outcome ("cuts time off work", "stops small issues becoming big ones"), not past work ("how we've worked with running groups", "we've helped…"). And no claims about what other businesses find or do — no "most clubs…", "many gyms find…", "a lot of runners find…", "venues tell us…", "most venues we speak to…".
 - At most FOUR paragraphs of ONE sentence each, after the greeting: their problem; what we do (optional); the offer; the question. Nothing else.
+- Greeting: "Hi <first name>," only when the lead details give a person's first name; otherwise just "Hi,". Never a first initial ("Hi J,").
 - No links, no web addresses and no attachments in this email.
-- Never ask for a call, a meeting or "a few minutes of your time".
-- End with ONE question they can answer in a word or two.`;
+- Never ask for a call, a meeting or "a few minutes of your time" — and "a chat", "a quick conversation" or "how we could work together" are the same ask.
+- End with ONE question they can answer in a word or two, and ask no other question anywhere in the email.`;
 
 /** What the email asks for, by offer. Pure. */
 function askFor(o: ResolvedOutreachOffer): string {
     if (o.kind === 'gift') {
-        return `THE ASK: offer to send them our free "${o.giftLabel}" and ask permission — for example "Mind if I send it over?". Name it plainly and say in a few words who it helps; claim nothing about its contents beyond its title. Do not include it or link to it.`;
+        return `THE ASK: offer to send them our free "${o.giftLabel}" and ask permission — for example "Mind if I send it over?". Name it plainly and say in a few words who it helps; claim nothing about its contents beyond its title. That permission question IS the email's one question and its last line — add no other question. Do not include it or link to it.`;
     }
     if (o.kind === 'intro_offer') {
-        return `THE ASK: offer this in ONE short sentence — ${o.summary} — naming its length and the one term that matters most (for example "no card needed"), then ask whether they would like the link. Leave the other terms for later, and never change any of them. Do not include the link.`;
+        return `THE ASK: offer this in ONE short sentence — ${o.summary} — naming its length and the one term that matters most (for example "no card needed"), then ask whether they would like the link — that is the email's one question and its last line; add no other question after it. Offer THIS and nothing else: never swap in another product, service or free offer from the list above, even one that seems to fit them better. Leave the other terms for later, and never change any of them. Do not include the link.`;
     }
     return 'THE ASK: no offer. Ask one simple, genuine question about the problem you opened with — one that is easy and worthwhile to answer.';
 }

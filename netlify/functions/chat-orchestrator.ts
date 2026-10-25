@@ -16,6 +16,7 @@
 import { sanitizeForModel } from '../../src/utils/text-safe';
 import { postTeamChatReply, teamNoteForChatTurn, teamThreadPromptBlock } from '../../src/utils/team-messages';
 import { SPECIAL_CATEGORY_RULE } from '../../src/constants/special-category-rule';
+import { SITE_COPY_CRAFT } from '../../src/constants/site-copy-craft';
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
@@ -1581,6 +1582,8 @@ ${websiteAssistantSurfaces()}
 ${rc.siteSnapshot ?? 'Their site could not be read this turn. Do not guess what is on it: say you cannot see it right now and point the user at the "Website" tab. Do not emit a site_changes card.'}
 
 FACTS. Never put a fact on their site that is not in their business details, their products or this conversation: no invented testimonials, customer names, reviews, prices, numbers, years, awards or guarantees. Where a page needs one, write a placeholder in square brackets ("[number] customers since [year]") for them to fill in. Plain British English, no jargon.
+
+${SITE_COPY_CRAFT}
 
 CHANGING THE SITE. When they ask for a change, emit a site_changes card: a short "summary" of what changes, and "ops" — the changes, in order, using ONLY pageIds and sectionIds listed above. They land together or not at all. The operations:
 - {"op":"add_page","title":"...","slug":"..."}   (their plan's page limit is shown above)

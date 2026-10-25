@@ -336,7 +336,7 @@ Return STRICT JSON only (no markdown, no prose outside the JSON):
   "rating": "hot" | "warm" | "cold",
   "reasons": ["<short reason tied to a profile criterion>", ...],
   "suggestedNextStep": "<one concrete next action>",
-  "outreachDraft": { "to": "<email or null>", "subject": "<subject>", "body": "<personalised outreach email in the sales tone>" } | null,
+  "outreachDraft": { "to": "<email or null>", "subject": "<subject>", "body": "<UNDER 75 WORDS, following the FIRST-EMAIL RULES: personalised outreach email in the sales tone>" } | null,
   "excludedBy": "<the exclusion-list entry this matches, quoted from the profile>" | null,
   "doNotContact": <true|false>,
   "doNotContactReason": "<short reason, or null>"
@@ -1353,7 +1353,7 @@ that it must not be contacted, or the only honest email would break the rules ab
 anyway and do NOT put your reasoning in the subject or body. Return exactly:
 { "decline": "<one short line saying why>" }
 
-Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email body>" }`;
+Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email body, UNDER 75 WORDS>" }`;
                 const { resp, model: usedModel } = await leadCall({
                     max_tokens: 512, system,
                     messages: [{ role: 'user', content: `Lead: ${JSON.stringify({ title: rec.title, ...data })}` }],

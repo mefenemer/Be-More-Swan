@@ -124,7 +124,7 @@ export const BLOG_ARTICLE_TYPES: ArticleType[] = [
         key: 'story',
         label: 'True story',
         summary: 'A real situation, told as a narrative',
-        brief: 'A TRUE STORY told as a narrative: a real (or clearly anonymised) situation from the business or a customer — the setting, what went wrong or what was at stake, what was tried, what happened. Chronological, scene-led, written like a story, with few or no headings. The lesson emerges from the story; state it in a short closing section at most. Use ONLY facts from the brief or business context — never invent names, numbers or events. 700–1,100 words.',
+        brief: 'A TRUE STORY told as a narrative: a real (or clearly anonymised) situation from the business or a customer — the setting, what went wrong or what was at stake, what was tried, what happened. Chronological, scene-led, written like a story, with few or no headings. The lesson emerges from the story; state it in a short closing section at most. Use ONLY facts from the brief or business context — never invent names, numbers, quotes or events. If the brief and notes give no real events, tell it as how the business works and why it works that way, in the present tense, rather than inventing a history. 700–1,100 words.',
     },
     {
         key: 'list',
@@ -148,7 +148,7 @@ export const BLOG_ARTICLE_TYPES: ArticleType[] = [
         key: 'behind_scenes',
         label: 'Behind the scenes',
         summary: 'An honest look at how you work',
-        brief: 'BEHIND THE SCENES — an honest look at how the business does something: a decision, a process, a change, a mistake and what was learned. First person ("we"/"I"), candid, specific. A few level-2 headings to pace it, mostly prose. 700–1,000 words.',
+        brief: 'BEHIND THE SCENES — an honest look at how the business does something: a decision, a process, a change, a mistake and what was learned. First person ("we"/"I"), candid, specific — but only about how it really works as the brief describes it: never invent a step, a tool, a timeline or a client. A few level-2 headings to pace it, mostly prose. 700–1,000 words.',
     },
     {
         key: 'comparison',

@@ -9,6 +9,7 @@
 import { currentDatePromptBlock } from './current-date-prompt';
 import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../constants/safety-benchmark';
+import { SITE_COPY_CRAFT } from '../constants/site-copy-craft';
 import { applySiteOperation, type Section, type SiteDefinition } from './site-definition';
 import { draftFacts, type DraftBrief } from './site-draft';
 
@@ -80,12 +81,14 @@ export function buildFillPrompt(brief: DraftBrief, def: SiteDefinition): { syste
         brief.rulesBlock ? `${brief.rulesBlock}\nEvery word of the site must follow these rules.` : '',
         brief.request ? `<request>\n${brief.request}\n</request>` : '',
         `<template>\n${JSON.stringify(layout)}\n</template>`,
+        SITE_COPY_CRAFT,
         `<rules>
 - Rewrite every section's "words" for this business. Keep the same keys, and the same number of items in every list.
 - Keep the template's tone and roughly its length. Plain British English, short sentences, no hype.
 - Where the template has a [placeholder], replace it with the real fact ONLY if it is in the business details or products above; otherwise keep a clear [placeholder] for the owner to fill in.
 - NEVER invent facts: no prices, numbers, years, names, awards, guarantees or results that are not above.
 - A button's words should say what happens when it is pressed (e.g. "Book a table").
+- A template's own promises (reply times, free delivery, "no obligation", what is included) are the template's, not this business's: keep one only if the business details say so, otherwise replace it with a [placeholder] or a sentence that promises nothing.
 - Also write each page's seo title (max 60 characters) and description (max 155), and a one-sentence site description.
 - Reply with JSON only: {"sections":{"<section id>":{ …the same keys as its words… }},"seo":{"<page id>":{"title":"","description":""}},"description":""}
 </rules>`,

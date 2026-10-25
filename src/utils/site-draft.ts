@@ -7,11 +7,13 @@
 //
 // Honesty rules the prompt states and `placeholdersIn` lets later steps enforce:
 //   · no invented testimonials, reviews, prices, numbers, awards, years or guarantees — where a page
-//     needs one, the draft writes a [placeholder] the owner fills in;
+//     needs one, the draft writes a [placeholder] the owner fills in — and no invented promises or
+//     policies either (reply times, free quotes, delivery…: src/constants/site-copy-craft.ts);
 //   · step 3's publish refuses a page that still has a [placeholder] on it.
 
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../constants/safety-benchmark';
 import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
+import { SITE_COPY_CRAFT } from '../constants/site-copy-craft';
 import type { BrandKit } from './brand-kit';
 import { currentDatePromptBlock } from './current-date-prompt';
 import {
@@ -137,11 +139,12 @@ export function buildDraftPrompt(brief: DraftBrief): { system: string; user: str
 - Write a complete site of at most ${brief.maxPages} page${brief.maxPages === 1 ? '' : 's'}. The first page is the home page (slug ""). Give every other page a short lowercase slug.
 - The home page opens with a hero whose headline says what the business does and who it is for, in plain words — no slogans a competitor could use. Its main button leads to the action a visitor should take.
 - Plain British English. Short sentences. No jargon, no hype.
-- NEVER invent facts: no testimonials, reviews, customer names, prices, numbers, years, awards, guarantees or results that are not in the business details or products above. Where a page genuinely needs one, write a clear placeholder in square brackets — e.g. "[number] customers since [year]", or a testimonials section whose items are "[A customer's words]" with name "[Customer name]" — for the owner to fill in.
+- NEVER invent facts: no testimonials, reviews, customer names, prices, numbers, years, awards, guarantees or results that are not in the business details or products above. Where a page genuinely needs one, write a clear placeholder in square brackets — e.g. "[number] customers since [year]" — for the owner to fill in.
 - Answer the questions buyers ask (price, process, timescale, who it suits) in a "faq" section where you can do so from the facts above.
 - Every page gets an seo.title (max ${LIMITS.seoTitle} chars) and seo.description (max ${LIMITS.seoDescription} chars).
 - Reply with the JSON object only.
 </rules>`,
+        SITE_COPY_CRAFT,
         SECTION_SCHEMA,
         `<output>
 {"settings":{"siteName":"","description":"","businessType":"Organization | LocalBusiness | ProfessionalService | Store","locality":"<town or null>"},

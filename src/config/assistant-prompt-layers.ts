@@ -13,6 +13,8 @@ import { CONTENT_QUALITY_STANDARDS } from '../constants/content-quality';
 import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import { emailCraftBlock } from '../constants/email-craft';
 import { platformCraftBlock } from '../constants/platform-craft';
+import { BLOG_CRAFT } from '../constants/blog-craft';
+import { SITE_COPY_CRAFT } from '../constants/site-copy-craft';
 import { BLOG_ARTICLE_TYPES, SOCIAL_POST_SHAPES } from '../utils/content-shapes';
 import { EMAIL_SUBJECT_STYLES, LONG_FORM_OPENINGS, OUTREACH_OPENINGS, SOCIAL_HOOK_STYLES } from './hook-styles';
 import { CTA_BINDING_RULE } from './call-to-action';
@@ -65,6 +67,7 @@ const EMAIL: PromptLayer[] = [
 ];
 
 const BLOG: PromptLayer[] = [
+    { key: 'blog_craft', title: 'Blog craft and accuracy', kind: 'craft', usedBy: 'Drafting articles', source: 'src/constants/blog-craft.ts', text: BLOG_CRAFT },
     { key: 'article_types', title: `Article types (${BLOG_ARTICLE_TYPES.length}, in turn)`, kind: 'rotation', usedBy: 'Drafting articles', source: 'src/utils/content-shapes.ts',
       text: BLOG_ARTICLE_TYPES.map((t) => `${t.label} — ${t.brief}`).join('\n\n') },
     { key: 'blog_openings', title: `Openings (${LONG_FORM_OPENINGS.length}, in turn)`, kind: 'rotation', usedBy: 'Drafting articles', source: 'src/config/hook-styles.ts', text: list(LONG_FORM_OPENINGS) },
@@ -81,11 +84,19 @@ const LEADS: PromptLayer[] = [
       text: 'The sender identity, the outreach offer (gift, intro offer or a question), the lead\'s own details, and the ideal customer profile.' },
 ];
 
+const WEBSITE: PromptLayer[] = [
+    { key: 'site_copy', title: 'Website copy craft', kind: 'craft', usedBy: 'Writing the site (a new draft, a template\'s words, and chat edits)', source: 'src/constants/site-copy-craft.ts', text: SITE_COPY_CRAFT },
+    { key: 'special_site', title: 'Special category data', kind: 'rule', usedBy: 'Writing the site', source: 'src/constants/special-category-rule.ts', text: SPECIAL_CATEGORY_RULE },
+    { key: 'workspace_site', title: 'Filled in per workspace', kind: 'workspace', usedBy: 'Writing the site', source: 'src/utils/site-draft.ts',
+      text: 'The business details, Products & Services (the only prices it may state), the set-up answers (what visitors should do, the pages wanted, how it should feel), the assistant\'s Rules, and the request. Colours, lettering and logo come from the brand kit, never the draft.' },
+];
+
 const BY_ROLE: Record<string, PromptLayer[]> = {
     social_media_manager: SOCIAL,
     newsletter_editor: EMAIL,
     blog_writer: BLOG,
     lead_qualifier: LEADS,
+    website_assistant: WEBSITE,
 };
 
 /** Every layer that shapes this role's prompts: its own jobs first, then chat. Pure. */
@@ -98,7 +109,8 @@ export const ROLE_MODEL_PATHS: Record<string, { label: string; defaultModel: str
     social_media_manager: [{ label: 'Drafting posts', defaultModel: 'claude-sonnet-4-6' }],
     newsletter_editor: [{ label: 'Newsletters and welcome emails', defaultModel: 'claude-haiku-4-5-20251001' }],
     blog_writer: [{ label: 'Drafting articles', defaultModel: 'claude-haiku-4-5-20251001' }],
-    lead_qualifier: [{ label: 'Scoring leads, ideas and outreach emails', defaultModel: 'claude-haiku-4-5-20251001' }],
+    // Not bulk lead discovery (src/lib/discovery-scoring.ts): it keeps its own SCORING_MODEL.
+    lead_qualifier: [{ label: 'Lead scoring in chat, ideas and outreach emails (bulk lead discovery keeps Haiku 4.5)', defaultModel: 'claude-haiku-4-5-20251001' }],
 };
 /** Every role's chat. */
 export const CHAT_DEFAULT_MODEL = 'claude-haiku-4-5-20251001';

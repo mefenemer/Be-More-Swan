@@ -133,14 +133,14 @@ async function main() {
         const USES: Record<string, string> = {
             standards: 'CONTENT_QUALITY_STANDARDS', platform_craft: 'platformCraftBlock(', shapes: 'socialShapeLine(', hooks: 'socialHookFor(',
             email_craft: 'emailCraftBlock(', email_openings: 'emailOpeningBlock(', cta_email: 'CTA_BINDING_RULE',
-            article_types: 'blogArticleTypeBlock(', blog_openings: 'blogOpeningBlock(', cta_blog: 'CTA_BINDING_RULE',
+            article_types: 'blogArticleTypeBlock(', blog_openings: 'blogOpeningBlock(', cta_blog: 'CTA_BINDING_RULE', blog_craft: 'BLOG_CRAFT',
             special_social: 'SPECIAL_CATEGORY_RULE', special_email: 'SPECIAL_CATEGORY_RULE', special_blog: 'SPECIAL_CATEGORY_RULE', special: 'SPECIAL_CATEGORY_RULE',
         };
         const PATH: Record<string, string> = {
             standards: 'netlify/functions/process-content-jobs.ts', platform_craft: 'netlify/functions/process-content-jobs.ts',
             shapes: 'netlify/functions/process-content-jobs.ts', hooks: 'netlify/functions/process-content-jobs.ts', special_social: 'netlify/functions/process-content-jobs.ts',
             email_craft: 'src/utils/newsletter-generate.ts', email_openings: 'src/utils/newsletter-generate.ts', cta_email: 'src/utils/newsletter-generate.ts', special_email: 'src/utils/newsletter-generate.ts',
-            article_types: 'src/utils/blog-generate.ts', blog_openings: 'src/utils/blog-generate.ts', cta_blog: 'src/utils/blog-generate.ts', special_blog: 'src/utils/blog-generate.ts',
+            article_types: 'src/utils/blog-generate.ts', blog_openings: 'src/utils/blog-generate.ts', blog_craft: 'src/utils/blog-generate.ts', cta_blog: 'src/utils/blog-generate.ts', special_blog: 'src/utils/blog-generate.ts',
             special: 'netlify/functions/chat-orchestrator.ts',
         };
         for (const role of Object.keys(ROLE_MODEL_PATHS)) {
