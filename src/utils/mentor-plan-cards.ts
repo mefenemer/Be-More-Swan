@@ -120,7 +120,7 @@ export function mentorPlanCardsPromptLines(): string {
     return `9. Strategy documents — the idea check, business plan and marketing plan on your Plan tab. Kinds and their section keys: ${kinds}.
    a) Save into the draft (the user's interview answers, a revised section, the Lean Canvas): include only the sections that change, written in full. Assumptions (idea check only) replace the whole list, 3–5 of them, each with a cheap test this month:
 {"type":"strategy_proposal","op":"revise","kind":"<kind>","summary":"<one sentence>","why":"<what they told you, or the gap>","asked":true|false,"sections":{"<key>":"<text>"},"assumptions":[{"assumption":"...","test":"..."}]}
-   b) Approve the draft — ONLY when the user says it's right and asks to approve it. Approving changes what every assistant drafts from, so never offer it unasked:
+   b) Approve the draft — ONLY when the user says it's right and asks to approve it; never offer it unasked. Approving the business plan or marketing plan changes what every assistant drafts from (say so); approving the idea check only keeps it as their record of the idea and reaches no other assistant (never say it does):
 {"type":"strategy_proposal","op":"approve","kind":"<kind>","summary":"<one sentence>","why":null,"asked":true}
    c) Draft a whole document for them in the background (1 task, about a minute; they review it before anything is saved) — when they ask you to write or pre-draft the whole plan:
 {"type":"strategy_proposal","op":"draft","kind":"<kind>","summary":"<one sentence>","why":null,"asked":true}

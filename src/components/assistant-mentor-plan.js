@@ -128,7 +128,7 @@
         <button type="button" data-mplan-draft="${kind}" class="btn-secondary px-3 py-2 border text-xs font-bold rounded-lg transition disabled:opacity-50" ${busy || draftJob(kind, true) ? 'disabled' : ''}>${kind === 'idea_check' ? 'Draft my canvas' : 'Draft it for me'} · 1 task</button>
         ${d.draft ? `<button type="button" data-mplan-changes aria-expanded="${state.showChanges ? 'true' : 'false'}" class="btn-swan-link px-1 py-2 text-xs font-bold">Changes (${(d.diff || []).length})</button>` : ''}
       </div>
-      <p class="text-[11px] text-gray-500 mt-1">Approving makes this the plan every assistant writes from. Earlier versions are kept.</p>
+      <p class="text-[11px] text-gray-500 mt-1">${kind === 'idea_check' ? 'Approving keeps this as your record of the idea; it doesn’t change what your other assistants write.' : 'Approving makes this the plan every assistant writes from.'} Earlier versions are kept.</p>
       ${note(kind)}
       ${state.showChanges && d.draft ? `<div class="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3" data-mplan-panel="changes"><p class="text-xs font-bold uppercase tracking-wide text-gray-500">Changes since ${d.approved ? `approved v${Number(d.approved.version)}` : 'nothing approved yet'}</p>${diffHtml(d.diff)}</div>` : ''}`;
   }
@@ -414,13 +414,13 @@
     const d = docOf(kind);
     if (!d.draft) return;
     // /dialogs.js owns every dialog.
-    const ok = await window.confirmModal('Every assistant will write from it from their next draft. The version it replaces is kept under Earlier versions.',
+    const ok = await window.confirmModal(`${kind === 'idea_check' ? 'It’s kept as your record of the idea.' : 'Every assistant will write from it from their next draft.'} The version it replaces is kept under Earlier versions.`,
       { title: `Approve your ${esc(defOf(kind).label.toLowerCase())}?`, confirmLabel: 'Approve', tone: 'golive' });
     if (!ok) return;
     state.busy[kind] = true; state.notes[kind] = { text: 'Approving…' }; render();
     try {
       await call({ action: 'strategy_approve', kind, draftId: d.draft.id, updatedAt: d.draft.updatedAt });
-      state.notes[kind] = { text: 'Approved — your assistants write from it from their next draft.' };
+      state.notes[kind] = { text: kind === 'idea_check' ? 'Approved.' : 'Approved — your assistants write from it from their next draft.' };
       state.showChanges = false;
       await load();
     } catch (err) { state.notes[kind] = { text: err.message, error: true }; }

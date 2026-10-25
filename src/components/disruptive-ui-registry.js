@@ -2460,8 +2460,11 @@
         bodyHtml: `<p class="mt-2 text-xs text-gray-700">Draft v${Number(ui.version) || ''}${ui.approvedVersion ? ` replaces approved v${Number(ui.approvedVersion)}` : ' becomes your first approved version'}. What changes:</p>
           <ul class="mt-1 space-y-0.5">${changed.map((c) => `<li class="text-xs text-gray-700"><span class="font-semibold">${esc(String(c.label || ''))}</span> <span class="text-gray-500">(${esc(String(c.change || ''))})</span></li>`).join('')}</ul>`,
         goLabel: 'Approve', eventName: 'mentor:strategyApprove', detail: { kind: ui.kind, draftId: ui.draftId, updatedAt: ui.draftUpdatedAt },
-        doneText: 'Approved — every assistant writes from it from their next draft. The old version is kept on the Plan tab.',
-        note: 'Every assistant will write from it. See the full changes on your Mentor’s Plan tab first if you like.',
+        // Only the business and marketing plans reach other assistants (strategy-documents.ts feedsDrafts).
+        doneText: ui.kind === 'idea_check' ? 'Approved — it’s on your Mentor’s Plan tab. The old version is kept there.'
+          : 'Approved — every assistant writes from it from their next draft. The old version is kept on the Plan tab.',
+        note: ui.kind === 'idea_check' ? 'Your idea check is your Mentor’s record of the idea. It doesn’t change what your other assistants write.'
+          : 'Every assistant will write from it. See the full changes on your Mentor’s Plan tab first if you like.',
       });
     }
     if (ui.op === 'draft') {
