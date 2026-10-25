@@ -100,6 +100,7 @@ import { enforcePromptModeration } from '../../src/utils/moderation';
 import { BRIEF_PURPOSES, BRIEF_ASPECT_RATIOS, REJECT_REASONS, SOURCE_SPECS } from '../../src/config/visual-brief-vocab';
 import { FUNNEL_STAGES, FUNNEL_STAGE_DESCRIPTIONS, stageOutcomes } from '../../src/config/campaign-vocab';
 import { asksForACall, callbackOfferElement } from '../../src/utils/callback-request';
+import { buildMentorSnapshot } from '../../src/utils/mentor-snapshot';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -200,6 +201,8 @@ interface RouteContext {
     /** This Mystery Shopper's site, scores and suggested fixes by id — read per turn for routes with
      *  usesSiteAuditSnapshot (src/utils/site-audit-snapshot.ts). */
     siteAuditSnapshot?: string | null;
+    /** The Business Mentor's <workspace> block (src/utils/mentor-snapshot.ts). */
+    mentorSnapshot?: string | null;
     /** This Website Assistant's site — pages and sections by id — read per turn (usesSiteSnapshot). */
     siteSnapshot?: string | null;
     /** Files attached in this conversation (chat-attachments.ts) — routes with acceptsAttachments. */
@@ -235,6 +238,8 @@ interface AssistantRoute {
     usesBriefsSnapshot?: boolean;
     /** When true the handler reads this assistant's website checks for this turn (rc.siteAuditSnapshot). */
     usesSiteAuditSnapshot?: boolean;
+    /** When true the handler reads the whole workspace for the Business Mentor (rc.mentorSnapshot). */
+    usesMentorSnapshot?: boolean;
     /** When true the handler reads this assistant's site for this turn (rc.siteSnapshot). */
     usesSiteSnapshot?: boolean;
     /** The chat takes pictures and documents (paperclip / drag / paste — chat-session.js). Read per turn. */
@@ -1743,12 +1748,14 @@ or
     },
 
     // Business Mentor (docs/business-mentor-plan.md). Included on every plan; never takes a seat
-    // (assistant-capacity.ts WORKSPACE_ROLE_KEYS). Phase 1a, first step: conversational coaching with
-    // the honesty rules. Its proposal cards, workspace snapshot and Help Centre block follow (§3.2–3.7,
-    // §3.13); until then the prompt says plainly it can't change anything from chat.
+    // (assistant-capacity.ts WORKSPACE_ROLE_KEYS); provisioned per workspace behind the business_mentor
+    // flag (mentor-provision.ts). Reads the whole workspace every turn (mentor-snapshot.ts; what it may
+    // read: src/config/mentor-data-inventory.ts). Its proposal cards and Help Centre block follow
+    // (§3.3–3.7, §3.13); until then the prompt says plainly it can't change anything from chat.
     business_mentor: {
         model: DEFAULT_MODEL,
         maxTokens: 1600,
+        usesMentorSnapshot: true,
         buildRolePrompt: (rc) => {
             const stage = (rc.onboardingContext as { businessStage?: string } | null)?.businessStage;
             const stageLine = stage === 'new_idea'
@@ -1761,6 +1768,8 @@ or
                 `You are ${rc.assistantName}, this business's Business Mentor on Be More Swan: their guide to the platform and a business coach who knows their workspace. You are included with their plan.
 
 ${stageLine}
+
+${rc.mentorSnapshot ?? 'The workspace overview could not be read this turn. Do not guess gaps, figures, goals or which assistants they have: say you can\'t see the workspace right now and answer from the details above only.'}
 
 ${MENTOR_CRAFT}
 
@@ -2856,6 +2865,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         })
         : null;
 
+    // Per turn: a gap filled or an assistant paused a moment ago must be visible to the next message.
+    // Never throws.
+    const mentorSnapshot = route.usesMentorSnapshot
+        ? await buildMentorSnapshot(db, orgId).catch((err) => {
+            console.error('[chat-orchestrator] mentor snapshot failed:', err);
+            return null;
+        })
+        : null;
+
     // Per turn, like the leads snapshot: something approved on the Posts / Blogs / Emails tab a
     // moment ago must already be in "Scheduled" when the user asks what is coming up. Never throws.
     const snapshotTz = resolvePostingSchedule(
@@ -2884,6 +2902,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         siteSnapshot,
         contentSnapshot,
         audienceSnapshot,
+        mentorSnapshot,
         attachmentsBlock,
     });
     // The user's rules (their Assistant Rules, learned directives and workspace-wide rules) for the

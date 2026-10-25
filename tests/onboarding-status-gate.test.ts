@@ -113,7 +113,10 @@ check('only hire-assistant.ts and onboarding.ts insert ai_assistants rows in net
     };
     walk('netlify');
     walk('src');
-    assert.deepStrictEqual(hits.sort(), ['netlify/functions/hire-assistant.ts', 'netlify/functions/onboarding.ts'],
+    // src/utils/mentor-provision.ts is the one exception, and not a hire: every workspace gets the
+    // Business Mentor, gated by the business_mentor feature flag instead of hireDecision, while its
+    // catalogue row stays Hidden so nobody can hire it (docs/business-mentor-plan.md §2.3, §8.5).
+    assert.deepStrictEqual(hits.sort(), ['netlify/functions/hire-assistant.ts', 'netlify/functions/onboarding.ts', 'src/utils/mentor-provision.ts'],
         'a new path creates assistants — gate it with hireDecision and add it here');
 });
 
