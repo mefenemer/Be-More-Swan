@@ -103,7 +103,7 @@ import { asksForACall, callbackOfferElement } from '../../src/utils/callback-req
 import { buildMentorSnapshotParts, type MentorSnapshotData } from '../../src/utils/mentor-snapshot';
 import { recommendHires } from '../../src/utils/mentor-hire';
 import { assistantSetupFieldBlock, resolveSetupFieldProposal, setupFieldRequestFromUiElement, type SetupFieldCard } from '../../src/utils/chat-setup-field';
-import { mentorCardFromUiElement, mentorCardsPromptBlock, proposalKind, recordMentorProposal } from '../../src/utils/mentor-cards';
+import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, proposalKind, recordMentorProposal } from '../../src/utils/mentor-cards';
 import { gateMentorSuggestion, proposalFields } from '../../src/utils/mentor-proposals';
 import { mentorVisibilityPromptBlock } from '../../src/config/mentor-data-inventory';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -3236,6 +3236,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 setupFieldCard = card;
             }
         } else if (route === ROUTES.business_mentor) {
+            // Asked who to hire, or to review everything, and no card drawn: the server-filled card anyway.
+            if (!uiElement) uiElement = cardTheUserAskedFor(typed);
             const m = mentorCardFromUiElement(uiElement, session.aiAssistantId);
             if (m && 'error' in m) {
                 uiElement = null;

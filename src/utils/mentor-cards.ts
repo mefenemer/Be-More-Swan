@@ -177,3 +177,20 @@ Set "asked": true ONLY when the user's latest message asked for exactly this cha
 
 Cards 1, 2, 6 and 7 are suggestions when you volunteer them ("asked": false) and count towards the 3 a week. At most one card per reply, and at most one suggestion card unless they asked for more. Never say a card has been applied — the user decides.`;
 }
+
+/**
+ * The user asked who (or what) to hire, or to review their suggestions together. Live on staging
+ * (2026-10-25, Opus 5.5) the Mentor answered "who should I hire next?" in words three times and drew
+ * no card, even saying "on the card below". Both cards are filled by the server anyway, so when the
+ * model draws none the chat route asks for it on the user's behalf (asked: true).
+ */
+export function cardTheUserAskedFor(typed: string): MentorCard | null {
+    const t = typed.toLowerCase();
+    if (/\b(who|which|what)\b[^?.!\n]{0,40}\b(hire|recruit|take on)\b/.test(t) || /\bhire next\b/.test(t)) {
+        return { type: 'mentor_hire_recommendation', summary: 'Who I’d hire next', asked: true };
+    }
+    if (/\b(review|approve|see|show|go through)\b[^?.!\n]{0,30}\b(all|every|several|your)\b[^?.!\n]{0,30}\bsuggestions?\b/.test(t)) {
+        return { type: 'mentor_review_all', summary: 'Your suggestions that are still waiting' };
+    }
+    return null;
+}

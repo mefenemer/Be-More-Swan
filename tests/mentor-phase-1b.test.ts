@@ -25,7 +25,7 @@ import {
 import { applySetupPatch, assistantSetupFieldBlock, resolveSetupFieldProposal, setupFieldRequestFromUiElement } from '../src/utils/chat-setup-field';
 import { recommendHires, renderHireRecommendation } from '../src/utils/mentor-hire';
 import { renderMentorSnapshot, type MentorSnapshotData } from '../src/utils/mentor-snapshot';
-import { MENTOR_CARD_TYPES, mentorCardFromUiElement, mentorCardsPromptBlock, proposalKind } from '../src/utils/mentor-cards';
+import { MENTOR_CARD_TYPES, cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, proposalKind } from '../src/utils/mentor-cards';
 import { dedupeOpen, REVIEWABLE_KINDS } from '../src/utils/mentor-proposals';
 import { checkDraftText, feedbackContext, feedbackSystemPrompt } from '../src/utils/mentor-feedback';
 import { MENTOR_FEEDBACK_CRAFT } from '../src/constants/mentor-craft';
@@ -261,6 +261,16 @@ test('hire: the card, the "Recommended next" panel and the catalogue badge read 
     assert.match(read('src/components/assistant-mentor-overview.js'), /Recommended next/);
     assert.match(renderMentorSnapshot(base), /WHO TO HIRE NEXT \(the same list as "Recommended next" on your Overview tab\):\n1\. Website Assistant/);
     assert.strictEqual(proposalKind({ type: 'mentor_hire_recommendation', summary: '', asked: false }), 'hire_recommendation');
+});
+
+test('asked who to hire, or to review everything, and no card drawn: the server attaches it', () => {
+    for (const q of ['Who should I hire next?', 'Which assistant should I hire next? Show me the list.', 'what should I hire first', 'Who do I hire next']) {
+        assert.strictEqual(cardTheUserAskedFor(q)?.type, 'mentor_hire_recommendation', q);
+    }
+    assert.strictEqual(cardTheUserAskedFor('Can I review all your suggestions together?')?.type, 'mentor_review_all');
+    assert.strictEqual(cardTheUserAskedFor('Show me all the suggestions')?.type, 'mentor_review_all');
+    for (const q of ['How do I post to Instagram?', 'Help me write a sales email', 'I hired a designer last year']) assert.strictEqual(cardTheUserAskedFor(q), null, q);
+    assert.match(read('netlify/functions/chat-orchestrator.ts'), /if \(!uiElement\) uiElement = cardTheUserAskedFor\(typed\);\s*\n\s*const m = mentorCardFromUiElement/);
 });
 
 // ── 1. New-user opening ─────────────────────────────────────────────────────────────────────────
