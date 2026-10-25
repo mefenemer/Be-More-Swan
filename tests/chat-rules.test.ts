@@ -130,7 +130,7 @@ async function main() {
 
     await check('the orchestrator lists the rules and resolves the card on structured routes', () => {
         const o = read('netlify/functions/chat-orchestrator.ts');
-        assert.ok(o.includes('route !== defaultRoute ? await buildRulesListBlock(db, orgId, session.aiAssistantId) : null'));
+        assert.ok(o.includes('offersOwnCards ? await buildRulesListBlock(db, orgId, session.aiAssistantId) : null'));
         assert.ok(o.includes('route !== defaultRoute && !settingsReq ? ruleProposalFromUiElement(uiElement) : null'));
         assert.ok(o.includes('const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | OutreachOfferCard | CtaCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard ?? outreachOfferCard ?? ctaCard;'));
         assert.ok(read('src/utils/chat-card-refresh.ts').includes('refreshRuleCards(db, organisationId, aiAssistantId, roleKey, out)'));

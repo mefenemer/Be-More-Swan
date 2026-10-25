@@ -9,9 +9,11 @@
 //
 // Missing is not zero (§12.3): a paused or unhired assistant is described as such, never as idle.
 
-import { and, eq, ne, sql } from 'drizzle-orm';
-import { aiAssistants, goals, masterAssistants, orgIntroOffer, orgOfferProfile, orgProducts, organisations } from '../../db/schema';
+import { and, count, eq, inArray, ne, or, sql } from 'drizzle-orm';
+import { aiAssistants, goals, masterAssistants, orgIntroOffer, orgOfferProfile, orgProducts, organisations, plans } from '../../db/schema';
 import { MENTOR_ROLE_KEY } from './mentor-provision';
+import { SEAT_OCCUPYING_STATUSES, takesASeat } from './assistant-capacity';
+import { resolveAssistantLimit } from './release-paused-limit';
 
 type Db = any;
 
@@ -26,6 +28,8 @@ export interface MentorSnapshotData {
     introOfferAnswered: boolean;
     team: Array<{ id: number; name: string; role: string; state: TeamState }>;
     goals: Array<{ assistant: string; label: string; latest: number | null; target: number; targetDate: Date; status: string }>;
+    /** The live plan, to cross-check pause reasons: `status` null = no active or past-due plan; `freeSlots` null = unlimited. */
+    plan: { status: 'active' | 'past_due' | null; freeSlots: number | null };
 }
 
 export type TeamState = 'active' | 'paused_by_user' | 'paused_task_cap' | 'paused_payment' | 'paused_plan_limit' | 'setting_up' | 'archived';
@@ -45,16 +49,38 @@ const STATE_WORDS: Record<TeamState, string> = {
     active: 'active',
     paused_by_user: 'paused by the user — never hand work to it; you may explain what resuming would do',
     paused_task_cap: 'paused because the monthly task allowance ran out — it restarts on the 1st; propose no work for it',
-    paused_payment: 'paused because of a payment problem — point to billing; propose no work for it',
+    paused_payment: 'paused because of a payment problem — point to My Account ▸ Billing & Subscription; propose no work for it',
     paused_plan_limit: 'paused because the plan has fewer assistant slots than assistants — propose no work for it',
     setting_up: 'hired but not started yet — its set-up isn\'t finished',
     archived: 'archived — treat as not hired',
 };
 
-/** Pure: which opening applies (§13.4). Established = has a description AND (an active assistant OR products). */
+/**
+ * Pure: how to describe one assistant's state, cross-checked against the live plan. A pause marker can
+ * outlive its cause: on staging (2026-10-25) Felix still said "paused for plan slots" on an active plan
+ * with 10 free slots, and the Mentor advised upgrading. A marker the plan contradicts is described as
+ * out of date, and the Mentor sends the user to support rather than to a purchase.
+ */
+export function describeState(state: TeamState, plan: MentorSnapshotData['plan']): string {
+    const slotsFree = plan.status !== null && (plan.freeSlots === null || plan.freeSlots > 0);
+    if (state === 'paused_plan_limit' && slotsFree) {
+        return 'marked as paused for plan slots, but the plan has free slots now, so the marker looks out of date. Never advise upgrading for it; suggest asking Be More Swan via Help & Support';
+    }
+    if (state === 'paused_payment' && plan.status === 'active') {
+        return 'marked as paused for a payment problem, but the plan shows as active and paid, so the marker looks out of date. Never tell them to fix billing for it; suggest asking Be More Swan via Help & Support';
+    }
+    return STATE_WORDS[state];
+}
+
+/**
+ * Pure: which opening applies (§13.4). Established = has a description AND (any hired assistant, paused
+ * included, OR products). A paused team still means the business has been running here — the live test
+ * on 2026-10-25 asked an established film company "established or new?" because all three of its
+ * assistants were paused.
+ */
 export function startingPoint(d: MentorSnapshotData): 'established' | 'new' {
     const hasDescription = !!d.business.description?.trim();
-    const hasTeam = d.team.some((t) => t.state === 'active');
+    const hasTeam = d.team.some((t) => t.state !== 'archived');
     return hasDescription && (hasTeam || d.productCount > 0) ? 'established' : 'new';
 }
 
@@ -95,7 +121,7 @@ export function renderMentorSnapshot(d: MentorSnapshotData): string {
     if (!others.length) {
         lines.push('- None. You are the only assistant here. Never propose changes to, or hand work to, an assistant; give do-it-yourself steps and say once which assistant would help.');
     } else {
-        lines.push(...others.map((t) => `- ${t.name} (${t.role}): ${STATE_WORDS[t.state]}`));
+        lines.push(...others.map((t) => `- ${t.name} (${t.role}): ${describeState(t.state, d.plan)}`));
         if (!active.length) lines.push('- None of them is active right now: no team suggestions until one is.');
     }
 
@@ -111,7 +137,7 @@ export function renderMentorSnapshot(d: MentorSnapshotData): string {
 }
 
 /** Reads the workspace (org-scoped throughout) and renders the block. Throws on a DB error; the caller catches. */
-export async function buildMentorSnapshot(db: Db, orgId: number): Promise<string> {
+export async function buildMentorSnapshot(db: Db, orgId: number, userId: number): Promise<string> {
     const [org] = await db.select({
         description: organisations.businessDescription, industry: organisations.industry, website: organisations.websiteUrl,
     }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
@@ -152,7 +178,23 @@ export async function buildMentorSnapshot(db: Db, orgId: number): Promise<string
         .where(and(eq(goals.organisationId, orgId), eq(goals.isActive, true), ne(aiAssistants.lifecycleStatus, 'archived')))
         .limit(MAX_GOALS);
 
+    // The live plan, the same resolution the hire gate and the downgrade use (release-paused-limit.ts).
+    const [planRow] = await db.select({ status: plans.status }).from(plans)
+        .where(and(or(eq(plans.userId, userId), eq(plans.organisationId, orgId)), inArray(plans.status, ['active', 'past_due'])))
+        .orderBy(plans.status).limit(1);
+    let freeSlots: number | null = null;
+    if (planRow) {
+        const limit = await resolveAssistantLimit(db, userId, orgId);
+        if (limit !== null) {
+            const [{ value: used }] = await db.select({ value: count() }).from(aiAssistants).where(and(
+                eq(aiAssistants.organisationId, orgId), inArray(aiAssistants.lifecycleStatus, [...SEAT_OCCUPYING_STATUSES]), takesASeat(),
+            ));
+            freeSlots = Math.max(0, limit - Number(used));
+        }
+    }
+
     return renderMentorSnapshot({
+        plan: { status: (planRow?.status as 'active' | 'past_due' | undefined) ?? null, freeSlots },
         business: { description: org?.description ?? null, industry: org?.industry ?? null, website: org?.website ?? null },
         products: products.slice(0, MAX_PRODUCTS).map((p) => ({ name: p.name, hasPrice: !!p.price?.trim() })),
         productCount: products.length,

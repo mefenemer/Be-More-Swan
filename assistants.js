@@ -460,7 +460,7 @@ window.generateAssistantCardHTML = function(assistant) {
         ...(dReg.siteAuditTab ? [['🔍', dReg.siteAuditTab.label || 'Website', 'website']] : []),
         ...(dReg.siteEditorTab ? [['🌐', dReg.siteEditorTab.label || 'Website', 'sitebuilder']] : []),
         ...(dReg.hideReviewQueue ? [] : [['✅', dReg.reviewQueue?.label || 'Review', 'review-queue']]),
-        ['📅', 'Calendar', 'calendar'],
+        ...(dReg.hideCalendar ? [] : [['📅', 'Calendar', 'calendar']]),
     ] : [];
     const quickActionsHtml = quickActions.length ? `
         <div class="flex items-center gap-2 flex-wrap mb-4 pt-4 border-t border-gray-50">
@@ -6420,6 +6420,8 @@ function _applyDashboardRegistry(data) {
     // approval gate is the option grid on its Briefs tab, and the default here would be an empty
     // SOCIAL post queue for an assistant that makes no posts.
     toggle('maintab-btn-review-queue', !cfg.hideReviewQueue);
+    // A role with nothing dated to show (the Business Mentor) has no Calendar tab or card shortcut.
+    toggle('maintab-btn-calendar', !cfg.hideCalendar);
     // A role whose campaigns carry their own targets (the Campaign Assistant) has no separate goals:
     // two places to set "what success is" was the confusion. The Goal Progress card goes with it.
     // "How is it going" in one place (owner, 2026-10-21 — trialled on Social Media, then every role):

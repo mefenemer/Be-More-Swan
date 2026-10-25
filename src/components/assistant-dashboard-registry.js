@@ -630,6 +630,8 @@
       hideReviewQueue: true,
       hideDataHub: true,
       hideGoals: true,
+      // Nothing dated to show yet: no Calendar tab, and no Calendar shortcut on its card.
+      hideCalendar: true,
       modules: {
         hasPostingSchedule: false, hasSocialStrategy: false,
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,

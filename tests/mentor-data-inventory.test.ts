@@ -11,7 +11,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { MENTOR_DATA_INVENTORY } from '../src/config/mentor-data-inventory';
-import { businessGaps, renderMentorSnapshot, startingPoint, teamState, type MentorSnapshotData } from '../src/utils/mentor-snapshot';
+import { businessGaps, describeState, renderMentorSnapshot, startingPoint, teamState, type MentorSnapshotData } from '../src/utils/mentor-snapshot';
 
 let passed = 0, total = 0;
 function test(name: string, fn: () => void) {
@@ -49,6 +49,7 @@ const base: MentorSnapshotData = {
     offerKinds: ['services'], introOfferAnswered: true,
     team: [{ id: 2, name: 'Sam', role: 'Social Media Assistant', state: 'active' }],
     goals: [{ assistant: 'Sam', label: 'Followers', latest: null, target: 500, targetDate: new Date('2026-12-31'), status: 'at_risk' }],
+    plan: { status: 'active', freeSlots: 10 },
 };
 
 console.log('mentor data inventory');
@@ -105,11 +106,14 @@ test('team states say why an assistant is paused', () => {
     assert.strictEqual(teamState('archived', 'complete'), 'archived');
 });
 
-test('starting point: established needs a description and a team or products', () => {
+test('starting point: established needs a description and a hired team (paused counts) or products', () => {
     assert.strictEqual(startingPoint(base), 'established');
     assert.strictEqual(startingPoint({ ...base, business: { ...base.business, description: '' } }), 'new');
     assert.strictEqual(startingPoint({ ...base, team: [], productCount: 0, products: [] }), 'new');
     assert.strictEqual(startingPoint({ ...base, team: [], productCount: 1 }), 'established');
+    // A paused team still counts; an archived-only one doesn't.
+    assert.strictEqual(startingPoint({ ...base, productCount: 0, products: [], team: [{ id: 3, name: 'Felix', role: 'Social Media Assistant', state: 'paused_payment' }] }), 'established');
+    assert.strictEqual(startingPoint({ ...base, productCount: 0, products: [], team: [{ id: 3, name: 'Misty', role: 'Social Media Assistant', state: 'archived' }] }), 'new');
 });
 
 test('gaps come out in order, and a filled-in workspace has none', () => {
@@ -132,11 +136,20 @@ test('the block never turns an unmeasured goal into 0, and says when it is the o
     assert.match(paused, /None of them is active right now/);
 });
 
+test('a pause marker the live plan contradicts is called out of date, never a reason to buy', () => {
+    // Staging 2026-10-25: Felix "paused for plan slots" on an active plan with 10 free slots.
+    assert.match(describeState('paused_plan_limit', { status: 'active', freeSlots: 10 }), /looks out of date\. Never advise upgrading/);
+    assert.match(describeState('paused_plan_limit', { status: 'active', freeSlots: 0 }), /fewer assistant slots than assistants/);
+    assert.match(describeState('paused_plan_limit', { status: null, freeSlots: null }), /fewer assistant slots than assistants/);
+    assert.match(describeState('paused_payment', { status: 'active', freeSlots: 10 }), /looks out of date\. Never tell them to fix billing/);
+    assert.match(describeState('paused_payment', { status: 'past_due', freeSlots: 10 }), /My Account ▸ Billing & Subscription/);
+});
+
 test('the Mentor chat route reads the snapshot every turn', () => {
     const src = read('netlify/functions/chat-orchestrator.ts');
     const route = src.slice(src.indexOf('    business_mentor: {'), src.indexOf('    // Tier 1, Batch 1 — Lead Generator.'));
     assert.ok(route.length > 0 && route.includes('usesMentorSnapshot: true') && route.includes('rc.mentorSnapshot'));
-    assert.match(src, /route\.usesMentorSnapshot\s*\n?\s*\? await buildMentorSnapshot\(db, orgId\)/);
+    assert.match(src, /route\.usesMentorSnapshot\s*\n?\s*\? await buildMentorSnapshot\(db, orgId, userId\)/);
 });
 
 test('provisioning is flag-gated, one per workspace, and never runs under impersonation', () => {

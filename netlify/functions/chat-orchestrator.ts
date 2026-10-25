@@ -688,7 +688,7 @@ function businessMentorSurfaces(): string {
     return `WHERE THINGS LIVE — pages inside this platform, never outside tools:
 - "Business Information" — the business description, who the customers are, tone of voice, Brand Knowledge documents and links, and the "Products & Services" tab.
 - Each assistant's own page — its settings, set-up answers, goals ("Results" tab) and rules. Only mention assistants listed as active below.
-- "My Account" — the plan, tasks used, notifications and "Your data".
+- "My Account" — its "Billing & Subscription" tab (the plan, payments, resubscribing and changing plan), tasks used, notifications and "Your data". Always say "My Account ▸ Billing & Subscription", never "the Billing page".
 - "Help & Support" — Help Centre articles, contacting support, and "Report an Issue".
 Your own page has a "Chat" tab (this conversation) and a "Results" tab.`;
 }
@@ -2868,7 +2868,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // Per turn: a gap filled or an assistant paused a moment ago must be visible to the next message.
     // Never throws.
     const mentorSnapshot = route.usesMentorSnapshot
-        ? await buildMentorSnapshot(db, orgId).catch((err) => {
+        ? await buildMentorSnapshot(db, orgId, userId).catch((err) => {
             console.error('[chat-orchestrator] mentor snapshot failed:', err);
             return null;
         })
@@ -2937,35 +2937,40 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // Its own status, settings and goals (src/utils/chat-assistant-settings.ts), every role, per turn
     // — a pause or a horizon changed on the page a moment ago is in the next answer. Routes with a
     // JSON reply can also propose a change through a confirm card; the plain default route only reads.
+    // The card instructions below (own settings, rules, goals, schedule, offers, platforms, library,
+    // reviews) go to every structured route. Not the Business Mentor: it replies in plain text, so a card
+    // could never be drawn, and telling it otherwise made it claim on staging (2026-10-25) that it could
+    // change its own settings. Its own cards are added deliberately (docs/business-mentor-plan.md §3.3–3.7).
+    const offersOwnCards = route !== defaultRoute && route !== ROUTES.business_mentor;
     const settingsBlock = await buildAssistantSettingsSnapshot(db, orgId, session.aiAssistantId, assistantRow.roleKey);
-    const settingsCardBlock = route !== defaultRoute ? assistantSettingsPromptBlock(assistantRow.roleKey) : null;
+    const settingsCardBlock = offersOwnCards ? assistantSettingsPromptBlock(assistantRow.roleKey) : null;
     // Its Do's and don'ts by id, and the card that adds, rewords, switches or deletes one
     // (src/utils/chat-rules.ts) — the rules block above is what it FOLLOWS; this is what it can CHANGE.
     // Plus the workspace's plan and this month's task balance (src/utils/chat-plan-snapshot.ts), the
     // same figures as the usage bar. Both every turn, every role; both never throw.
-    const rulesListBlock = route !== defaultRoute ? await buildRulesListBlock(db, orgId, session.aiAssistantId) : null;
-    const rulesCardBlock = route !== defaultRoute ? rulesPromptBlock(assistantRow.roleKey) : null;
+    const rulesListBlock = offersOwnCards ? await buildRulesListBlock(db, orgId, session.aiAssistantId) : null;
+    const rulesCardBlock = offersOwnCards ? rulesPromptBlock(assistantRow.roleKey) : null;
     const planBlock = await buildPlanSnapshot(db, orgId);
     // Its goals by id with the metrics on offer (src/utils/chat-goals.ts) — every role reads them;
     // structured routes can propose a goal card. And, for the roles with a Posting Schedule card, the
     // schedule and its card (src/utils/chat-schedule.ts). Neither throws.
     const goalsBlock = await buildGoalsBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey);
-    const goalsCardBlock = route !== defaultRoute ? goalsPromptBlock() : null;
+    const goalsCardBlock = offersOwnCards ? goalsPromptBlock() : null;
     // The free trial / introductory offer card (src/utils/intro-offer.ts) — the offer itself is in
     // productsBlock for every route; structured routes can also propose a change to it.
-    const introOfferCardBlock = route !== defaultRoute ? introOfferPromptBlock() : null;
+    const introOfferCardBlock = offersOwnCards ? introOfferPromptBlock() : null;
     // And, for a Social, Blog or Email assistant, its own call to action and the card that changes it
     // (src/utils/chat-call-to-action.ts). Null for every other role.
-    const ctaCardBlock = route !== defaultRoute ? await buildCtaChatBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey) : null;
-    const scheduleBlock = route !== defaultRoute ? schedulePromptBlock(assistantRow.roleKey, assistantRow.onboardingContext) : null;
+    const ctaCardBlock = offersOwnCards ? await buildCtaChatBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey) : null;
+    const scheduleBlock = offersOwnCards ? schedulePromptBlock(assistantRow.roleKey, assistantRow.onboardingContext) : null;
     // The "Use for this assistant" switches, for the roles whose Connections card shows them
     // (src/utils/chat-platforms.ts). Null for every other role; never throws.
-    const platformsBlock = route !== defaultRoute ? await buildPlatformsBlock(db, orgId, userId, session.aiAssistantId) : null;
+    const platformsBlock = offersOwnCards ? await buildPlatformsBlock(db, orgId, userId, session.aiAssistantId) : null;
     // Its Knowledge Base or Inspo, for the roles with that tab (src/utils/chat-library.ts). Never throws.
-    const libraryBlock = route !== defaultRoute ? await buildLibraryBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey) : null;
+    const libraryBlock = offersOwnCards ? await buildLibraryBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey) : null;
     // Customer reviews for the Email Marketing chat (src/utils/chat-reviews.ts) — the Website Assistant's
     // prompt carries its own. Null for every other role; never throws.
-    const reviewsBlock = route !== defaultRoute ? await buildReviewsBlock(db, orgId, assistantRow.roleKey) : null;
+    const reviewsBlock = offersOwnCards ? await buildReviewsBlock(db, orgId, assistantRow.roleKey) : null;
     // The signed-in user's own My Account settings, read-only (src/utils/chat-my-account.ts). Every
     // route, every role; null when the read fails.
     const myAccountBlock = await buildMyAccountBlock(db, userId, session.aiAssistantId, assistantRow.roleKey);

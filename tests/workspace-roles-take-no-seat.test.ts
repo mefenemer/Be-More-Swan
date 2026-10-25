@@ -31,6 +31,7 @@ const SEAT_COUNTS: Array<{ file: string; why: string }> = [
     { file: 'src/utils/plan-moves.ts', why: 'how many a bulk plan move will pause' },
     { file: 'src/utils/release-paused-limit.ts', why: 'how many paused assistants can come back' },
     { file: 'src/utils/beta-ending.ts', why: 'whether a beta workspace fits a paid plan' },
+    { file: 'src/utils/mentor-snapshot.ts', why: 'free slots, to tell whether a "paused for plan slots" marker is out of date' },
 ];
 
 // Files that list assistants by lifecycle state for reasons other than the plan limit.

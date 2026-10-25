@@ -174,7 +174,9 @@ async function main() {
     await check('the orchestrator reads the snapshot every turn and resolves the card on structured routes', () => {
         const src = read('netlify/functions/chat-orchestrator.ts');
         assert.ok(src.includes('buildAssistantSettingsSnapshot(db, orgId, session.aiAssistantId, assistantRow.roleKey)'));
-        assert.ok(src.includes("route !== defaultRoute ? assistantSettingsPromptBlock(assistantRow.roleKey) : null"));
+        assert.ok(src.includes("offersOwnCards ? assistantSettingsPromptBlock(assistantRow.roleKey) : null"));
+        // Every structured route except the Business Mentor, whose replies are plain text (no cards yet).
+        assert.ok(src.includes("const offersOwnCards = route !== defaultRoute && route !== ROUTES.business_mentor;"));
         assert.ok(src.includes("route !== defaultRoute ? settingsProposalFromUiElement(uiElement) : null"));
         // The blog and newsletter routes rebuild uiElement after the action cards — a settings card must survive.
         assert.ok(src.includes('blogAction ?? profileCard'));
