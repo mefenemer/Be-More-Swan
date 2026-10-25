@@ -254,6 +254,9 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             'site_audit_competitor_change', 'site_audit_goal_met',
             // The Website Assistant finished an AI draft of the site (site-store.ts runSiteDraft).
             'site_draft_ready',
+            // The Business Mentor finished research or a strategy draft (mentor-jobs.ts). Reports —
+            // nothing waits on the user. metadata.assistantId is passed.
+            'mentor_research_ready', 'mentor_draft_ready',
             // Someone paid on the website (site-shop.ts). metadata.assistantId is passed.
             'site_order_received',
             // Stripe is connected and can take payments (site-shop.ts announcePaymentsReady).

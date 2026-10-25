@@ -14,6 +14,9 @@
  *                             on the server against the role's questions; active assistants only)
  *   mentor_support_request  → support-tickets.ts POST, or issue-reports.ts POST
  *   decide                  → mentor.ts { action: 'decide' } — accepted after a saved click, or dismissed
+ *   strategy_proposal       → mentor.ts strategy_save / strategy_approve / strategy_draft — the Plan tab's
+ *                             Save draft, Approve and "Draft it for me" (Phase 2, §4)
+ *   mentor_research         → mentor.ts research ("Look this up"); jobStatus polls it (?job=)
  *
  * Every function resolves to nothing or throws an Error whose message is for the user. After a write it
  * dispatches the `document` event the screen behind listens for. Nothing here is bound to the DOM.
@@ -76,15 +79,43 @@
     document.dispatchEvent(new CustomEvent('mentor:changed', { detail: { proposalId, decision } }));
   }
 
+  // Phase 2: the strategy documents and the Mentor's background jobs (mentor.ts). Each repaints an open Plan tab.
+  const planChanged = (detail) => document.dispatchEvent(new CustomEvent('mentor:planChanged', { detail }));
+  async function strategySave(kind, sections, assumptions) {
+    await post('/.netlify/functions/mentor', { action: 'strategy_save', kind, sections: sections || {}, ...(Array.isArray(assumptions) ? { assumptions } : {}) });
+    planChanged({ kind, op: 'save' });
+  }
+  async function strategyApprove(kind, draftId, updatedAt) {
+    await post('/.netlify/functions/mentor', { action: 'strategy_approve', kind, draftId, updatedAt });
+    planChanged({ kind, op: 'approve' });
+  }
+  async function strategyDraft(kind, chatSessionId) {
+    const { job } = await post('/.netlify/functions/mentor', { action: 'strategy_draft', kind, chatSessionId: chatSessionId || null });
+    planChanged({ kind, op: 'draft' });
+    return { jobId: job && job.id };
+  }
+  async function research(question, chatSessionId) {
+    const { job } = await post('/.netlify/functions/mentor', { action: 'research', question, chatSessionId: chatSessionId || null });
+    planChanged({ op: 'research' });
+    return { jobId: job && job.id };
+  }
+  async function jobStatus(jobId) {
+    const { job } = await json(`/.netlify/functions/mentor?job=${encodeURIComponent(jobId)}`);
+    if (job && (job.status === 'done' || job.status === 'failed')) planChanged({ op: 'job', jobId });
+    return job;
+  }
+
   /** Apply a stored card (a suggestion's payload, mentor.ts `open`). Throws for a type with nothing to apply. */
   async function applyCard(card) {
     switch (card && card.type) {
       case 'mentor_business_profile': return businessProfile(card.fields);
       case 'mentor_products': return products(card.products);
       case 'setup_field_proposal': return setupAnswer(card.assistantId, card.key, card.value);
-      default: throw new Error('This suggestion has nothing to apply here.');
+      case 'strategy_proposal': if (card.op === 'revise') return strategySave(card.kind, card.sections, card.assumptions); break;
+      default: break;
     }
+    throw new Error('This suggestion has nothing to apply here.');
   }
 
-  window.MentorApply = { businessProfile, products, setupAnswer, support, decide, applyCard };
+  window.MentorApply = { businessProfile, products, setupAnswer, support, decide, applyCard, strategySave, strategyApprove, strategyDraft, research, jobStatus };
 })();

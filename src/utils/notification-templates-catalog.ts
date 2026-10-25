@@ -211,6 +211,34 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // The Business Mentor finished a "Look this up" (src/utils/mentor-jobs.ts). The answer and its
+        // links are also posted into the chat it was asked from and listed on its Plan tab.
+        templateKey: 'mentor_research_ready',
+        name: 'Business Mentor research ready',
+        category: 'Assistants',
+        type: 'mentor_research_ready',
+        title: '{{assistant.name}} looked it up',
+        message: 'The answer to "{{research.question}}" is ready, with its sources, in your chat and on the Plan tab.',
+        variables: [
+            ASSISTANT_NAME,
+            v('research.question', 'The question asked', 'How many UK small businesses use social media?'),
+        ],
+    },
+    {
+        // The Business Mentor drafted a strategy document (src/utils/mentor-jobs.ts). Nothing is saved
+        // until the user chooses "Use this draft".
+        templateKey: 'mentor_draft_ready',
+        name: 'Business Mentor draft ready',
+        category: 'Assistants',
+        type: 'mentor_draft_ready',
+        title: 'Your {{document.name}} draft is ready',
+        message: '{{assistant.name}} has drafted it for you to check. Nothing is saved until you choose "Use this draft" on the Plan tab or in your chat.',
+        variables: [
+            ASSISTANT_NAME,
+            v('document.name', 'Document', 'business plan'),
+        ],
+    },
+    {
         // The Website Assistant finished an AI draft of the whole site (site-store.ts runSiteDraft).
         // Nothing is live: a draft is only ever published by the owner's click (step 3).
         templateKey: 'site_draft_ready',

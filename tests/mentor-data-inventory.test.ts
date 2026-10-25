@@ -41,6 +41,7 @@ const ALWAYS_READERS = [
     'src/utils/task-balance.ts',
     'src/utils/org-products.ts',
     'src/utils/mentor-proposals.ts',
+    'src/utils/strategy-documents.ts',
 ].filter((f) => { try { read(f); return true; } catch { return false; } }).map((f) => [f, read(f)] as const);
 
 const base: MentorSnapshotData = {

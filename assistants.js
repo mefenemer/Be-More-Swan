@@ -457,6 +457,7 @@ window.generateAssistantCardHTML = function(assistant) {
     const quickActions = dReg ? [
         ...(dReg.hideDataHub ? [] : [['🗂️', dReg.hubTab?.label || 'Data Hub', 'datahub']]),
         ...(dReg.mentorTab ? [['🧭', dReg.mentorTab.label || 'Overview', 'mentor']] : []),
+        ...(dReg.mentorPlanTab ? [['🗺️', dReg.mentorPlanTab.label || 'Plan', 'mentorplan']] : []),
         ...(dReg.briefsTab ? [['🎨', dReg.briefsTab.label || 'Briefs', 'briefs']] : []),
         ...(dReg.siteAuditTab ? [['🔍', dReg.siteAuditTab.label || 'Website', 'website']] : []),
         ...(dReg.siteEditorTab ? [['🌐', dReg.siteEditorTab.label || 'Website', 'sitebuilder']] : []),
@@ -1071,6 +1072,8 @@ window._activateMainTab = function(name) {
     if (name === 'briefs') window.AssistantBriefs?.activate();
     // Overview (Business Mentor) — init() already fetched; this only repaints.
     if (name === 'mentor') window.AssistantMentorOverview?.activate();
+    // Plan (Business Mentor, Phase 2) — init() already fetched; this repaints and resumes any poll.
+    if (name === 'mentorplan') window.AssistantMentorPlan?.activate();
     // Website (Mystery Shopper) likewise — init() already fetched for the badge.
     if (name === 'website') window.AssistantSiteAudit?.activate();
     // Website (Website Assistant) — the editor and preview; init() already fetched the site.
@@ -6752,6 +6755,13 @@ function _applyDashboardRegistry(data) {
     if (mentorTab) {
         setText('mentor-tab-label', mentorTab.label || 'Overview');
         window.AssistantMentorOverview?.init({ assistantId: data.id, assistantName: data.name });
+    }
+    // Plan tab — Business Mentor only (mentorPlanTab): plans, calculator, research, playbook (assistant-mentor-plan.js).
+    const mentorPlanTab = cfg.mentorPlanTab;
+    toggle('maintab-btn-mentorplan', !!mentorPlanTab);
+    if (mentorPlanTab) {
+        setText('mentorplan-tab-label', mentorPlanTab.label || 'Plan');
+        window.AssistantMentorPlan?.init({ assistantId: data.id, assistantName: data.name });
     }
 
     // Briefs tab — Brand Designer only (briefsTab: brand_designer). init() loads eagerly: the count

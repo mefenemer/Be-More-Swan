@@ -508,6 +508,17 @@ reaches the admin inbox and a test issue that appears in Admin → Issues; and A
 **Goal:** the Mentor drafts a small set of strategy documents with the user, the user approves them,
 and every assistant writes from them.
 
+**Build status (2026-10-25):** items §4.1–§4.5 built on staging; needs `db/z-business-mentor-phase-2.sql`
+(`strategy_documents`, `mentor_jobs`) on each database — the code runs without it and says "not switched
+on yet". Where things are: `src/utils/strategy-documents.ts` (kinds, sections, versions, diff, pre-fill,
+save/approve), `src/utils/break-even.ts`, `src/utils/mentor-jobs.ts` + `netlify/functions/mentor-job-background.ts`
+(research and "Draft it for me", 1 task each on delivery), `src/utils/mentor-plan-cards.ts` (chat cards),
+`src/components/assistant-mentor-plan.js` (the Plan tab), all through `netlify/functions/mentor.ts`.
+Approved business-plan customer/problem/offer and marketing-plan audience/messaging/channels reach drafts
+through `business-knowledge.ts` and blueprint §11. Playbooks (§4.6): drafts for `services` and `products`
+in `src/config/mentor-playbooks/`, **unreviewed** — the Mentor uses none until the owner sets `reviewed`.
+Pre-draft (§13.2) is code, not a model: filled only from saved Business Information, assistants and goals.
+
 ### 4.1 Idea check (the "new idea" path)
 
 A structured interview, the way an investor or experienced mentor would question a new idea:

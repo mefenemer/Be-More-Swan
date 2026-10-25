@@ -12,7 +12,7 @@
 // real steering weight but an assistant without them is fully configured, so none counts toward
 // completeness.
 
-import { BUSINESS_KNOWLEDGE_DIRECTIVE, loadBusinessKnowledge } from './business-knowledge';
+import { BUSINESS_KNOWLEDGE_DIRECTIVE, STRATEGY_DIRECTIVE, loadBusinessKnowledge } from './business-knowledge';
 import { eq, and, desc, isNull, inArray, sql } from 'drizzle-orm';
 import * as crypto from 'crypto';
 import { getDb } from '../../db/client';
@@ -498,17 +498,23 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
     // Loader + caps shared with the chat (src/utils/business-knowledge.ts), so a draft written in chat
     // sees exactly what the drafting workers see.
     const knowledge = await loadBusinessKnowledge(db, asst.organisationId);
-    const { documents, links } = knowledge;
+    const { documents, links, strategy } = knowledge;
     // Version the blueprint against each asset so adding/editing a doc forces a recompile.
     for (const a of knowledge.assets) hashParts.push({ id: `asset:${a.id}`, updatedAt: a.updatedAt });
+    // …and against each approved strategy document (the Business Mentor's Plan tab, §4.4), so approving
+    // a new version reaches the next draft.
+    for (const d of knowledge.strategyDocs) hashParts.push({ id: `strategy:${d.id}`, updatedAt: d.approvedAt });
 
-    const hasKnowledge = documents.length > 0 || links.length > 0;
+    const hasKnowledge = documents.length > 0 || links.length > 0 || !!strategy;
     // Only emit the authoritative directive when there's actually knowledge to honour — otherwise the
     // section serialises to just an empty header (no misleading "treat this as a strict rule" with no docs).
     const s11content: Record<string, unknown> = hasKnowledge ? {
         directive: BUSINESS_KNOWLEDGE_DIRECTIVE,
         documents,
         links,
+        // Rendered prose (renderApprovedStrategyForDrafts): the social pipeline's flattener prints it as
+        // `strategy: …`, and blog-generate renders it through businessKnowledgePromptBlock.
+        ...(strategy ? { strategy: `${STRATEGY_DIRECTIVE}\n${strategy}` } : {}),
     } : {};
     sections['11-business-knowledge'] = {
         status: hasKnowledge ? 'complete' : 'missing',

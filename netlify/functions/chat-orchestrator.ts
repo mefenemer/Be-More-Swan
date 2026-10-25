@@ -18,7 +18,7 @@ import { postTeamChatReply, teamNoteForChatTurn, teamThreadPromptBlock } from '.
 import { SPECIAL_CATEGORY_RULE } from '../../src/constants/special-category-rule';
 import { SITE_COPY_CRAFT } from '../../src/constants/site-copy-craft';
 import { CAMPAIGN_PLANNING_CRAFT } from '../../src/constants/campaign-craft';
-import { MENTOR_CRAFT, MENTOR_FEEDBACK_CRAFT, MENTOR_HONESTY_RULES } from '../../src/constants/mentor-craft';
+import { MENTOR_CRAFT, MENTOR_FEEDBACK_CRAFT, MENTOR_HONESTY_RULES, MENTOR_IDEA_CHECK_CRAFT } from '../../src/constants/mentor-craft';
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
@@ -106,6 +106,8 @@ import { assistantSetupFieldBlock, resolveSetupFieldProposal, setupFieldRequestF
 import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, proposalKind, recordMentorProposal } from '../../src/utils/mentor-cards';
 import { gateMentorSuggestion, proposalFields } from '../../src/utils/mentor-proposals';
 import { mentorVisibilityPromptBlock } from '../../src/config/mentor-data-inventory';
+import { buildBreakEvenCard, buildStrategyCard } from '../../src/utils/mentor-plan-cards';
+import { loadStrategyDocs } from '../../src/utils/strategy-documents';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -696,7 +698,12 @@ function businessMentorSurfaces(): string {
 - Each assistant's own page — its settings, set-up answers, goals ("Results" tab) and rules. Only mention assistants listed as active below.
 - "My Account" — its "Billing & Subscription" tab (the plan, payments, resubscribing and changing plan), tasks used, notifications and "Your data". Always say "My Account ▸ Billing & Subscription", never "the Billing page".
 - "Help & Support" — Help Centre articles, contacting support, and "Report an Issue".
-Your own page has an "Overview" tab, a "Results" tab and an "Activity" tab; the user chats with you from the "Chat" button at the top. The "Overview" tab holds:
+Your own page has an "Overview" tab, a "Plan" tab, a "Results" tab and an "Activity" tab; the user chats with you from the "Chat" button at the top. The "Plan" tab holds:
+  - "Your plans" — "Idea check", "Business plan" and "Marketing plan". The idea check is the same questions you ask, one at a time with "Back" and "Next", then the "Lean Canvas" (nine boxes they can edit) and "Riskiest assumptions". Each plan has "Save draft", "Approve" (owner or admin only), "Changes" since the approved version and "Earlier versions"; "Draft it for me" (or "Draft my canvas") drafts it for 1 task, and the result waits there with "Use this draft". An existing workspace's plans start pre-filled from Business Information, not saved until "Save draft".
+  - "Look this up" — a question box (1 task, about two minutes) and the "Research" list of past answers with their links. Each section of a plan has a "Look this up" link too.
+  - "Break-even calculator" — price of one sale, cost per sale, fixed costs, marketing spend and how many leads become a sale, each with "A guess"; "Work it out".
+  - "The playbook I'm using" — the reviewed playbook for their kind of business, or that there isn't one yet.
+The "Overview" tab holds:
   - "Set-up checklist" — the same Business Information gaps you see, ticked when done; each opens its field.
   - "What I can see" — what you can and can never see (the list under WHAT YOU CAN SEE).
   - "Dismissed suggestions" — suggestions they dismissed, with the reason, each with "Bring back".
@@ -1781,7 +1788,7 @@ or
                 ? 'QUIET MODE IS ON: the user asked you to stay in the background. Do not open with a health check and do not volunteer suggestions, gaps or next steps. Answer exactly what they ask (including how to use Be More Swan) and stop. If they ask what you would suggest, then suggest.'
                 : '';
             const stageLine = stage === 'new_idea'
-                ? 'They told you they are starting something new: begin from the idea itself (who buys, why, how to test it cheaply) before anything else.'
+                ? 'They told you they are starting something new: begin with THE IDEA CHECK below (who buys, why, how to test it cheaply) before anything else.'
                 : stage === 'existing'
                     ? 'They told you this is an established business: start from what is already set up here, and never re-ask anything shown above.'
                     // §3.1: a new workspace's introduction asks it with the question card, which saves the answer.
@@ -1797,6 +1804,8 @@ ${rc.mentorSnapshot ?? 'The workspace overview could not be read this turn. Do n
 ${MENTOR_CRAFT}
 
 ${MENTOR_FEEDBACK_CRAFT}
+
+${MENTOR_IDEA_CHECK_CRAFT}
 
 ${MENTOR_HONESTY_RULES}
 
@@ -3248,6 +3257,39 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             } else if (m && m.type === 'mentor_hire_recommendation' && !recommendHires(mentorParts!.data).picks.length) {
                 uiElement = null;
                 content = `${content}\n\n(There’s no assistant I’d recommend hiring right now, so there’s no list to show.)`;
+            } else if (m && m.type === 'strategy_proposal') {
+                // Phase 2 (src/utils/mentor-plan-cards.ts): rebuilt from the documents as they are now, so the
+                // card shows the real "now" text, and an approve card names the exact draft it approves.
+                const docs = await loadStrategyDocs(db, orgId).catch((err) => { console.error('[chat-orchestrator] strategy documents unreadable', err); return null; });
+                const card = docs === null ? { error: 'Your Plan tab isn’t switched on for this workspace yet.' } : buildStrategyCard(m, docs);
+                if ('error' in card) {
+                    uiElement = null;
+                    content = `${content}\n\n(I didn’t include a card for that — ${card.error.charAt(0).toLowerCase()}${card.error.slice(1)} You can use the Plan tab instead.)`;
+                } else {
+                    const kind = proposalKind(m);
+                    const fields = Object.keys(card.sections ?? {}).map((k) => `${m.kind}:${k}`);
+                    const gate = kind ? await gateMentorSuggestion(db, orgId, { kind, fields, asked: m.asked }) : { ok: true as const };
+                    if (!gate.ok) { uiElement = null; content = `${content}\n\n(${gate.note})`; }
+                    else if (kind) {
+                        const proposalId = await recordMentorProposal(db, { organisationId: orgId, aiAssistantId: session.aiAssistantId, kind, title: m.summary, why: m.why ?? '', payload: { ...card, fields: Object.fromEntries(fields.map((f) => [f, true])) }, chatSessionId: session.id });
+                        uiElement = { ...card, proposalId };
+                    } else {
+                        uiElement = card;
+                    }
+                }
+            } else if (m && m.type === 'mentor_break_even') {
+                // §4.3: the maths is code (break-even.ts). The sentence under the reply is written by code too,
+                // so a figure the model wrote can't stand alone.
+                const card = buildBreakEvenCard(m.summary, m.inputs);
+                if ('error' in card) {
+                    uiElement = null;
+                    content = `${content}\n\n(I couldn’t work that out: ${card.error} You can try the break-even calculator on my Plan tab.)`;
+                } else {
+                    uiElement = card;
+                    content = `${content}\n\n${card.sentence}`;
+                }
+            } else if (m && m.type === 'mentor_research') {
+                uiElement = m; // the click queues the job (mentor.ts research); nothing runs until then
             } else if (m) {
                 // The hire card's picks, reasons and plan room come from mentor-hire.ts — the same list as
                 // the Overview tab's "Recommended next" — never from the model.

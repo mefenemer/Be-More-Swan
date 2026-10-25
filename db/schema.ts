@@ -6251,3 +6251,49 @@ export const mentorProposals = pgTable("mentor_proposals", {
   index("mentor_proposals_org_shown_idx").on(t.organisationId, t.shownAt),
   index("mentor_proposals_org_kind_status_idx").on(t.organisationId, t.kind, t.status),
 ]);
+
+// Business Mentor Phase 2 (docs/business-mentor-plan.md §4.4) — the idea check, business plan and
+// marketing plan, versioned: one draft and one approved per kind; approving supersedes the old one.
+// Approved documents reach drafting through src/utils/business-knowledge.ts. Created by
+// db/z-business-mentor-phase-2.sql; readers tolerate the table being missing.
+export const strategyDocuments = pgTable("strategy_documents", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  // 'idea_check' | 'business_plan' | 'marketing_plan'
+  kind: text("kind").notNull(),
+  version: integer("version").notNull(),
+  // 'draft' | 'approved' | 'superseded'
+  status: text("status").notNull().default("draft"),
+  body: jsonb("body").notNull().default({}),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  updatedBy: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
+  approvedBy: integer("approved_by").references(() => users.id, { onDelete: "set null" }),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  unique("strategy_documents_version_key").on(t.organisationId, t.kind, t.version),
+]);
+
+// The Business Mentor's background work (§4.5): research with sources and drafting a strategy
+// document. Run by mentor-job-background.ts; 1 task each when delivered. Created by
+// db/z-business-mentor-phase-2.sql.
+export const mentorJobs = pgTable("mentor_jobs", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  // 'research' | 'strategy_draft'
+  kind: text("kind").notNull(),
+  // 'queued' | 'running' | 'done' | 'failed'
+  status: text("status").notNull().default("queued"),
+  input: jsonb("input").notNull().default({}),
+  result: jsonb("result"),
+  error: text("error"),
+  chatSessionId: integer("chat_session_id").references(() => chatSessions.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+}, (t) => [
+  index("mentor_jobs_org_created_idx").on(t.organisationId, t.kind, t.createdAt),
+]);

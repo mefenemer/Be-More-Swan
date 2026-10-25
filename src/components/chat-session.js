@@ -1417,7 +1417,7 @@
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
       if (!window.MentorApply) { respond({ ok: false, error: 'This page needs a refresh before that can be saved.' }); return; }
       Promise.resolve().then(() => work(window.MentorApply, d))
-        .then(() => respond({ ok: true }), (err) => respond({ ok: false, error: err.message }));
+        .then((out) => respond({ ok: true, ...(out && typeof out === 'object' ? out : {}) }), (err) => respond({ ok: false, error: err.message }));
     }
 
     // Business Information → organisation-profile.ts, read-merge-write of only the card's fields.
@@ -1461,6 +1461,28 @@
     async function onMentorDecide(e) {
       if (mentorAlreadyHandled(e)) return;
       mentorRun(e, (A, d) => A.decide(d.proposalId, d.decision, d.reason));
+    }
+
+    // Phase 2 plan cards (src/utils/mentor-plan-cards.ts) → mentor.ts, the same actions as the Plan tab.
+    // Save into a strategy document's draft (strategy_save).
+    async function onMentorStrategySave(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.strategySave(d.kind, d.sections, d.assumptions));
+    }
+    // Approve the draft the card names (strategy_approve; owner or admin; the server checks it is unchanged).
+    async function onMentorStrategyApprove(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.strategyApprove(d.kind, d.draftId, d.updatedAt));
+    }
+    // "Draft it for me" (strategy_draft, 1 task) — the draft is posted back into THIS chat when ready.
+    async function onMentorStrategyDraft(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.strategyDraft(d.kind, chatSessionId));
+    }
+    // "Look this up" (research, 1 task) — the answer is posted back into THIS chat; the card polls for it.
+    async function onMentorResearch(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.research(d.question, chatSessionId));
     }
 
     // "Save this" on an outreach_offer card (Lead Generator) → lead-generation.ts set_outreach_offer, the
@@ -1882,6 +1904,10 @@
     container.addEventListener('mentor:support', onMentorSupport);
     container.addEventListener('mentor:decide', onMentorDecide);
     container.addEventListener('mentor:businessStage', onMentorBusinessStage);
+    container.addEventListener('mentor:strategySave', onMentorStrategySave);
+    container.addEventListener('mentor:strategyApprove', onMentorStrategyApprove);
+    container.addEventListener('mentor:strategyDraft', onMentorStrategyDraft);
+    container.addEventListener('mentor:research', onMentorResearch);
     container.addEventListener('setupField:apply', onSetupFieldApply);
     container.addEventListener('lead:outreachOffer', onOutreachOffer);
     container.addEventListener('cta:change', onCallToAction);
@@ -1963,6 +1989,10 @@
         container.removeEventListener('mentor:support', onMentorSupport);
         container.removeEventListener('mentor:decide', onMentorDecide);
         container.removeEventListener('mentor:businessStage', onMentorBusinessStage);
+        container.removeEventListener('mentor:strategySave', onMentorStrategySave);
+        container.removeEventListener('mentor:strategyApprove', onMentorStrategyApprove);
+        container.removeEventListener('mentor:strategyDraft', onMentorStrategyDraft);
+        container.removeEventListener('mentor:research', onMentorResearch);
         container.removeEventListener('setupField:apply', onSetupFieldApply);
         container.removeEventListener('lead:outreachOffer', onOutreachOffer);
         container.removeEventListener('cta:change', onCallToAction);

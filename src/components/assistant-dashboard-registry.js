@@ -633,6 +633,11 @@
       mentorTab: {
         label: 'Overview',
       },
+      // Phase 2 (§4): the idea check, business and marketing plans, break-even calculator, research and
+      // the playbook in use (assistant-mentor-plan.js → mentor.ts ?plan=1). Same rename rule as above.
+      mentorPlanTab: {
+        label: 'Plan',
+      },
       defaultMainTab: 'mentor',
       hideReviewQueue: true,
       hideDataHub: true,

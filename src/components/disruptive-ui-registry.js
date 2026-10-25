@@ -2444,6 +2444,143 @@
     return el;
   });
 
+  // ── Business Mentor Phase 2 (src/utils/mentor-plan-cards.ts): its plans, research and break-even. ──
+  // strategy_proposal — the server rebuilt it from the documents, so "Now" is the real saved text.
+  //   revise  → mentor:strategySave    (mentor.ts strategy_save — the Plan tab's Save draft)
+  //   approve → mentor:strategyApprove (mentor.ts strategy_approve — the Plan tab's Approve)
+  //   draft   → mentor:strategyDraft   (mentor.ts strategy_draft — "Draft it for me", 1 task)
+  const clipText = (t, n) => { const v = String(t || ''); return v.length > n ? `${v.slice(0, n - 1)}…` : v; };
+  register('strategy_proposal', (ui, esc) => {
+    const label = String(ui.kindLabel || 'Plan');
+    const lower = label.toLowerCase();
+    if (ui.op === 'approve') {
+      const changed = Array.isArray(ui.changed) ? ui.changed : [];
+      return mentorCard(esc, {
+        eyebrow: `Approve your ${lower}`, summary: ui.summary, why: null,
+        bodyHtml: `<p class="mt-2 text-xs text-gray-700">Draft v${Number(ui.version) || ''}${ui.approvedVersion ? ` replaces approved v${Number(ui.approvedVersion)}` : ' becomes your first approved version'}. What changes:</p>
+          <ul class="mt-1 space-y-0.5">${changed.map((c) => `<li class="text-xs text-gray-700"><span class="font-semibold">${esc(String(c.label || ''))}</span> <span class="text-gray-500">(${esc(String(c.change || ''))})</span></li>`).join('')}</ul>`,
+        goLabel: 'Approve', eventName: 'mentor:strategyApprove', detail: { kind: ui.kind, draftId: ui.draftId, updatedAt: ui.draftUpdatedAt },
+        doneText: 'Approved — every assistant writes from it from their next draft. The old version is kept on the Plan tab.',
+        note: 'Every assistant will write from it. See the full changes on your Mentor’s Plan tab first if you like.',
+      });
+    }
+    if (ui.op === 'draft') {
+      return mentorCard(esc, {
+        eyebrow: `Draft your ${lower}`, summary: ui.summary, why: null,
+        bodyHtml: '<p class="mt-2 text-xs text-gray-700">Uses 1 task. Ready in about a minute — it’s posted into this chat and on the Plan tab, and you’ll get a notification. Nothing is saved until you choose “Use this draft”.</p>',
+        goLabel: 'Draft it · 1 task', eventName: 'mentor:strategyDraft', detail: { kind: ui.kind },
+        doneText: 'Drafting — I’ll post it here when it’s ready (about a minute). Reopen this chat or check the Plan tab.',
+      });
+    }
+    const changes = Array.isArray(ui.changes) ? ui.changes : [];
+    const rows = changes.map((c) => `<li class="py-1.5 border-b border-gray-100 last:border-0">
+        <p class="text-xs font-bold text-gray-900">${esc(String(c.label || c.key || ''))}</p>
+        ${c.now ? `<p class="text-[11px] text-gray-500 break-words"><span class="font-semibold">Now:</span> ${esc(clipText(c.now, 160))}</p>` : ''}
+        <p class="text-xs text-gray-800 whitespace-pre-line break-words">${esc(String(c.next || ''))}</p></li>`).join('');
+    const ass = Array.isArray(ui.assumptions) ? ui.assumptions : null;
+    const assHtml = ass ? `<p class="text-xs font-bold text-gray-900 mt-2">Riskiest assumptions</p><ul class="mt-1 space-y-1 list-disc pl-4">${ass.map((a) => `<li class="text-xs text-gray-800 break-words">${esc(String(a.assumption || ''))}${a.test ? ` <span class="text-gray-500">→ ${esc(String(a.test))}</span>` : ''}</li>`).join('')}</ul>` : '';
+    return mentorCard(esc, {
+      eyebrow: label, summary: ui.summary, why: ui.why, proposalId: ui.proposalId,
+      bodyHtml: `<ul class="mt-2">${rows}</ul>${assHtml}`,
+      goLabel: ui.jobId ? 'Use this draft' : ui.kind === 'idea_check' ? 'Save to my idea check' : 'Save to my draft',
+      eventName: 'mentor:strategySave', detail: { kind: ui.kind, sections: ui.sections || {}, assumptions: ass || undefined },
+      doneText: 'Saved to your draft on the Plan tab. Nothing changes for your assistants until you approve it.',
+      note: 'Saved as a draft, not approved. Edit or approve it on your Mentor’s Plan tab.',
+    });
+  });
+
+  // mentor_research — "Look this up" (mentor.ts research, 1 task). The answer is posted into this chat
+  // when ready (about two minutes); the card also polls (mentor.ts ?job=) and shows it here.
+  register('mentor_research', (ui, esc) => {
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-pink-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `<p class="text-xs font-bold text-pink-700 tracking-wider uppercase">Look this up</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <p class="mt-2 text-xs rounded-lg bg-gray-50 border border-dashed border-gray-300 px-3 py-2 text-gray-800 break-words">${esc(String(ui.question || ''))}</p>
+      <p class="text-xs text-gray-600 mt-2">Searches the web and answers with its sources: about two minutes, 1 task. If it can’t find a source, it says so rather than guess.</p>
+      <div class="flex flex-wrap gap-2 mt-3">
+        <button type="button" data-mr-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Look it up · 1 task</button>
+        <button type="button" data-mr-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-pink-700" data-mc-status role="status" aria-live="polite"></p>
+      <div data-mr-answer></div>`;
+    const status = el.querySelector('[data-mc-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-pink-700'}`; };
+    const buttons = () => el.querySelectorAll('[data-mr-go],[data-mr-cancel]');
+    const showAnswer = (job) => {
+      const r = job.result || {};
+      const src = Array.isArray(r.sources) ? r.sources : [];
+      el.querySelector('[data-mr-answer]').innerHTML = `<div class="mt-2 rounded-lg border border-pink-200 bg-pink-50 p-3">
+        <p class="text-xs text-gray-800 whitespace-pre-line break-words">${esc(String(r.answer || ''))}</p>
+        ${src.length ? `<ul class="mt-2 space-y-0.5">${src.map((x) => `<li class="text-[11px] break-words"><a href="${esc(String(x.url || ''))}" target="_blank" rel="noopener noreferrer" class="text-pink-700 underline">${esc(String(x.title || x.url || ''))}</a></li>`).join('')}</ul>` : ''}
+      </div>`;
+    };
+    let tries = 0;
+    const poll = (jobId) => {
+      if (!el.isConnected) return; // the chat closed: the answer is still posted into it
+      if (++tries > 45) { say('Still working — the answer will be posted in this chat and on the Plan tab.'); return; }
+      window.MentorApply?.jobStatus(jobId).then((job) => {
+        if (!job || job.status === 'queued' || job.status === 'running') { setTimeout(() => poll(jobId), 8000); return; }
+        if (job.status === 'failed') { say(job.error || 'It couldn’t be finished. Nothing was charged.', 'error'); return; }
+        say(job.result && job.result.outcome === 'answered' ? 'Here’s what I found — it’s also on the Plan tab.' : 'Done — nothing I could source.');
+        showAnswer(job);
+      }, () => setTimeout(() => poll(jobId), 8000));
+    };
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-mr-cancel]')) { buttons().forEach((b) => { b.disabled = true; }); say('Not looked up.'); return; }
+      if (!e.target.closest('[data-mr-go]')) return;
+      buttons().forEach((b) => { b.disabled = true; });
+      say('Starting…');
+      el.dispatchEvent(new CustomEvent('mentor:research', {
+        bubbles: true,
+        detail: { question: ui.question, respond({ ok, error, jobId }) {
+          if (!ok) { buttons().forEach((b) => { b.disabled = false; }); say(error || 'That couldn’t be started — nothing was charged.', 'error'); return; }
+          say('Looking it up — about two minutes. You can carry on chatting.');
+          if (jobId) setTimeout(() => poll(jobId), 8000);
+        } },
+      }));
+    });
+    return el;
+  });
+
+  // mentor_break_even — worked out in code on the server (break-even.ts); nothing is saved. "Open in the
+  // calculator" fills the Plan tab's calculator (assistant-mentor-plan.js listens for mentor:openCalculator).
+  register('mentor_break_even', (ui, esc) => {
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-pink-200 rounded-xl shadow-sm p-5 max-w-md';
+    const inputs = ui.inputs && typeof ui.inputs === 'object' ? ui.inputs : {};
+    const labels = ui.labels && typeof ui.labels === 'object' ? ui.labels : {};
+    const r = ui.result || {};
+    const n = (v) => Number(v).toLocaleString('en-GB');
+    const rows = Object.keys(labels).filter((k) => inputs[k]).map((k) => {
+      const i = inputs[k];
+      const src = i.source === 'assumption' ? '<span class="text-amber-700 font-semibold">assumption</span>' : i.source === 'plan' ? 'from your plan' : 'from you';
+      const val = k === 'conversionRate' ? `${n(i.value)}%` : `£${n(i.value)}`;
+      return `<li class="text-xs text-gray-700 break-words"><span class="font-semibold">${esc(String(labels[k]))}:</span> ${esc(val)} <span class="text-gray-500">(${src}${i.note ? ` — ${esc(String(i.note))}` : ''})</span></li>`;
+    }).join('');
+    el.innerHTML = `<p class="text-xs font-bold text-pink-700 tracking-wider uppercase">Break-even · worked out in code</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <ul class="mt-2 space-y-0.5">${rows}</ul>
+      <dl class="mt-3 grid grid-cols-2 gap-2 rounded-lg bg-pink-50 border border-pink-200 p-3">
+        <div><dt class="text-[11px] text-gray-600">Sales to break even</dt><dd class="text-sm font-bold text-gray-900">${esc(n(r.salesToBreakEven))}</dd></div>
+        ${r.leadsToBreakEven != null ? `<div><dt class="text-[11px] text-gray-600">Leads needed</dt><dd class="text-sm font-bold text-gray-900">${esc(n(r.leadsToBreakEven))}</dd></div>` : ''}
+        <div><dt class="text-[11px] text-gray-600">Each sale brings in</dt><dd class="text-sm font-bold text-gray-900">£${esc(n(r.marginPerSale))}</dd></div>
+      </dl>
+      ${(r.assumed || []).length ? `<p class="text-[11px] text-amber-800 mt-2">Assumed, not from you: ${esc(r.assumed.join(', '))}. Change them in the calculator.</p>` : ''}
+      <button type="button" data-mbe-open class="btn-secondary mt-3 px-4 py-2 border text-sm font-bold rounded-lg transition">Open in the calculator</button>
+      <p class="hidden mt-2 text-xs font-semibold text-pink-700" data-mc-status></p>`;
+    el.addEventListener('click', (e) => {
+      if (!e.target.closest('[data-mbe-open]')) return;
+      if (!window.AssistantMentorPlan) {
+        const st = el.querySelector('[data-mc-status]');
+        st.textContent = 'Open your Mentor’s Plan tab to use the calculator.'; st.className = 'mt-2 text-xs font-semibold text-pink-700';
+        return;
+      }
+      document.dispatchEvent(new CustomEvent('mentor:openCalculator', { detail: { inputs } }));
+    });
+    return el;
+  });
+
   // { type: 'outreach_offer', summary, offer, offerLabel, formId, formName, giftLabel } — what a Lead
   // Generator's first emails offer (src/config/outreach-offer.ts), rebuilt by the server against the
   // workspace's real gift forms (src/utils/chat-outreach-offer.ts). The click → lead-generation.ts

@@ -10,7 +10,7 @@
 // Missing is not zero (§12.3): a paused or unhired assistant is described as such, never as idle.
 
 import { and, count, eq, inArray, ne, or, sql } from 'drizzle-orm';
-import { aiAssistants, goals, masterAssistants, masterPlans, orgIntroOffer, orgOfferProfile, orgProducts, organisations, plans } from '../../db/schema';
+import { aiAssistants, goals, masterAssistants, masterPlans, mentorJobs, orgIntroOffer, orgOfferProfile, orgProducts, organisations, plans } from '../../db/schema';
 import { MENTOR_ROLE_KEY } from './mentor-provision';
 import { SEAT_OCCUPYING_STATUSES, takesASeat } from './assistant-capacity';
 import { resolveAssistantLimit } from './release-paused-limit';
@@ -19,11 +19,14 @@ import { recommendHires, renderHireRecommendation } from './mentor-hire';
 import { renderSetupFields } from './setup-field';
 import { statusOf, type AssistantStatus } from './assistant-go-live';
 import { loadNextPlan } from './next-plan';
+import { loadStrategyDocs, renderStrategyForMentor, type StrategyDoc } from './strategy-documents';
+import { playbookFor, renderPlaybookForMentor } from '../config/mentor-playbooks';
 
 type Db = any;
 
 const MAX_PRODUCTS = 8;
 const MAX_GOALS = 12;
+const MAX_RESEARCH = 5;
 
 export interface MentorSnapshotData {
     business: { description: string | null; industry: string | null; website: string | null };
@@ -38,6 +41,10 @@ export interface MentorSnapshotData {
     goals: Array<{ assistant: string; label: string; latest: number | null; target: number; targetDate: Date; status: string }>;
     /** The live plan, to cross-check pause reasons: `status` null = no active or past-due plan; `freeSlots` null = unlimited. */
     plan: { status: 'active' | 'past_due' | null; freeSlots: number | null; nextPlanName?: string | null };
+    /** Phase 2: its strategy documents (null = the table isn't there yet; undefined = not read). */
+    strategyDocs?: StrategyDoc[] | null;
+    /** Phase 2: its last research answers, with their links — the only sourced facts it may quote. */
+    research?: Array<{ question: string; answer: string; sources: string[] }>;
 }
 
 export type TeamState = 'active' | 'paused_by_user' | 'paused_task_cap' | 'paused_payment' | 'paused_plan_limit' | 'setting_up' | 'archived';
@@ -187,6 +194,13 @@ export function renderMentorSnapshot(d: MentorSnapshotData): string {
         return `- ${g.assistant}: ${g.label} — now ${latest}, target ${g.target} by ${g.targetDate.toISOString().slice(0, 10)} (${g.status.replace(/_/g, ' ')})`;
     }));
 
+    if (d.strategyDocs !== undefined) lines.push('', ...renderStrategyForMentor(d.strategyDocs));
+    lines.push('', ...renderPlaybookForMentor(playbookFor(d.offerKinds)));
+    if (d.research?.length) {
+        lines.push('', 'YOUR RESEARCH (looked up with web search; you may quote these, with their links):');
+        for (const r of d.research) lines.push(`- Q: ${r.question}\n  A: ${r.answer.replace(/\s*\n+\s*/g, ' ').slice(0, 500)}\n  Sources: ${r.sources.join(' ; ')}`);
+    }
+
     lines.push('</workspace>');
     return lines.join('\n');
 }
@@ -271,7 +285,24 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
         isActive: masterAssistants.isActive, comingSoon: masterAssistants.comingSoon, lifecycleState: masterAssistants.lifecycleState,
     }).from(masterAssistants).where(eq(masterAssistants.isActive, true));
 
+    // Phase 2 (db/z-business-mentor-phase-2.sql): its documents and its answered research. A missing
+    // table reads as "not available" — never as "no documents".
+    const strategyDocs = await loadStrategyDocs(db, orgId).catch((err: unknown) => {
+        console.error('[mentor-snapshot] strategy documents unreadable (non-fatal)', err instanceof Error ? err.message : err);
+        return null;
+    });
+    const researchRows: any[] = await optional(() => db.select({ input: mentorJobs.input, result: mentorJobs.result }).from(mentorJobs)
+        .where(and(eq(mentorJobs.organisationId, orgId), eq(mentorJobs.kind, 'research'), eq(mentorJobs.status, 'done')))
+        .orderBy(sql`${mentorJobs.createdAt} DESC`).limit(MAX_RESEARCH), []);
+    const research = researchRows.flatMap((r) => {
+        const res = r.result as { outcome?: string; answer?: string; sources?: Array<{ url?: string }> } | null;
+        if (res?.outcome !== 'answered' || !res.answer) return [];
+        return [{ question: String((r.input as { question?: unknown })?.question ?? ''), answer: res.answer, sources: (res.sources ?? []).map((x) => String(x.url ?? '')).filter(Boolean) }];
+    });
+
     return {
+        strategyDocs,
+        research,
         plan: { status: (planRow?.status as 'active' | 'past_due' | undefined) ?? null, freeSlots, nextPlanName: nextPlan?.name ?? null },
         catalogue: catalogue.filter((c: any) => c.roleKey).map((c: any) => ({
             roleKey: c.roleKey, name: c.name, description: c.description ?? null,

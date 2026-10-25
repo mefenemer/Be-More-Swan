@@ -18,6 +18,15 @@
 //     reason ∈ not_relevant | already_done | disagree | not_now (not_now snoozes 14 days)
 // POST { action: 'bring_back', proposalId }                               → { ok }  the Overview's "Bring back"
 //
+// Phase 2 — the Plan tab (assistant-mentor-plan.js) and the chat's plan cards (mentor-apply.js):
+// GET ?plan=1                                       → { ready, kinds, docs, canApprove, stage, playbook, research, drafting }
+// GET ?job=<id>                                     → { job }  a research or drafting job, for the card's and the page's poll
+// POST { action: 'strategy_save', kind, sections, assumptions? }   → { doc }  Save draft / form step / canvas / card
+// POST { action: 'strategy_approve', kind, draftId, updatedAt }    → { doc }  Approve (owner or admin); recompiles blueprints
+// POST { action: 'strategy_draft', kind, chatSessionId? }          → { job }  "Draft it for me" (1 task, background)
+// POST { action: 'research', question, chatSessionId? }            → { job }  "Look this up" (1 task, background)
+// POST { action: 'break_even', inputs }                            → { result }  the calculator (break-even.ts, in code)
+//
 // Tenant-scoped on every statement; read-only under impersonation (requireTenant).
 
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -28,6 +37,16 @@ import { recommendHires } from '../../src/utils/mentor-hire';
 import { findMentor } from '../../src/utils/mentor-provision';
 import { mentorDraftFeedback } from '../../src/utils/mentor-feedback';
 import { mentorVisibility } from '../../src/config/mentor-data-inventory';
+import { breakEven, BREAK_EVEN_INPUTS, BREAK_EVEN_KEYS } from '../../src/utils/break-even';
+import {
+    STRATEGY_KINDS, STRATEGY_KIND_KEYS, approveStrategyDraft, bodyIsEmpty, canApproveStrategy, diffStrategy, isStrategyKind,
+    loadPrefillSources, loadStrategyDocs, pickVersions, prefillStrategy, saveStrategyDraft, type StrategyDoc,
+} from '../../src/utils/strategy-documents';
+import { loadMentorJob, loadMentorJobs, queueMentorJob } from '../../src/utils/mentor-jobs';
+import { playbookFor } from '../../src/config/mentor-playbooks';
+import { recompileOrgBlueprints } from '../../src/utils/recompile-org-blueprints';
+import { aiAssistants } from '../../db/schema';
+import { and, eq, sql } from 'drizzle-orm';
 import {
     DISMISS_REASONS, WEEKLY_CAP, bringBackProposal, decideProposal, isDismissReason, loadOpenProposals, loadProposalState,
 } from '../../src/utils/mentor-proposals';
@@ -35,6 +54,50 @@ import {
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body: JSON.stringify(body),
 });
+
+const docView = (d: StrategyDoc | null) => d && ({
+    id: d.id, version: d.version, status: d.status, body: d.body,
+    approvedAt: d.approvedAt?.toISOString() ?? null, updatedAt: d.updatedAt?.toISOString() ?? null,
+});
+
+/** The Plan tab: every document (draft, approved, earlier versions, the diff), a pre-draft where none exists. */
+async function planView(db: any, orgId: number, role: string) {
+    const docs = await loadStrategyDocs(db, orgId);
+    const [prefillSources, research, drafting, mentorRow] = await Promise.all([
+        loadPrefillSources(db, orgId),
+        loadMentorJobs(db, orgId, 'research').catch(() => null),
+        loadMentorJobs(db, orgId, 'strategy_draft', 10).catch(() => null),
+        findMentor(db, orgId),
+    ]);
+    let stage: string | null = null;
+    if (mentorRow) {
+        const [r] = await db.select({ stage: sql<string | null>`${aiAssistants.onboardingContext} ->> 'businessStage'` }).from(aiAssistants)
+            .where(and(eq(aiAssistants.id, mentorRow.id), eq(aiAssistants.organisationId, orgId))).limit(1);
+        stage = r?.stage ?? null;
+    }
+    const byKind = Object.fromEntries(STRATEGY_KIND_KEYS.map((kind) => {
+        const { draft, approved, earlier } = pickVersions(docs ?? [], kind);
+        return [kind, {
+            draft: docView(draft), approved: docView(approved), earlier: earlier.map(docView),
+            diff: draft ? diffStrategy(kind, approved?.body ?? null, draft.body) : [],
+            // §13.2: an existing workspace's plans start pre-filled from what's already saved — shown, never saved until Save draft.
+            prefill: !draft && !approved ? prefillStrategy(kind, prefillSources) : null,
+        }];
+    }));
+    const choice = playbookFor(prefillSources.offerKinds);
+    return {
+        ready: docs !== null,
+        kinds: Object.fromEntries(STRATEGY_KIND_KEYS.map((k) => [k, { label: STRATEGY_KINDS[k].label, sections: STRATEGY_KINDS[k].sections, hasAssumptions: !!STRATEGY_KINDS[k].hasAssumptions }])),
+        docs: byKind,
+        canApprove: canApproveStrategy(role),
+        stage,
+        playbook: { inUse: choice.inUse, awaitingReview: choice.awaitingReview },
+        research: research ?? [],
+        researchReady: research !== null,
+        drafting: drafting ?? [],
+        breakEvenInputs: Object.fromEntries(BREAK_EVEN_KEYS.map((k) => [k, BREAK_EVEN_INPUTS[k]])),
+    };
+}
 
 export default withLambda(async (event) => {
     const db = getDb();
@@ -44,6 +107,12 @@ export default withLambda(async (event) => {
 
     try {
         if (event.httpMethod === 'GET') {
+            if (event.queryStringParameters?.plan) return json(200, await planView(db, orgId, ctx.role));
+            if (event.queryStringParameters?.job) {
+                const jobId = Number(event.queryStringParameters.job);
+                const job = Number.isInteger(jobId) && jobId > 0 ? await loadMentorJob(db, orgId, jobId) : null;
+                return job ? json(200, { job }) : json(404, { error: 'That isn’t one of your Mentor’s jobs.' });
+            }
             if (event.queryStringParameters?.only === 'open') return json(200, { open: (await loadOpenProposals(db, orgId)).map((o) => ({ id: o.id, kind: o.kind, title: o.title })) });
             if (event.queryStringParameters?.only === 'recommended') {
                 // Only a workspace that has a Mentor: the catalogue's badge says "Your Mentor".
@@ -72,6 +141,34 @@ export default withLambda(async (event) => {
                 const r = await mentorDraftFeedback(db, orgId, ctx.userId, body.text);
                 return r.ok ? json(200, { feedback: r.feedback }) : json(r.status, { error: r.error, ...(r.code ? { code: r.code } : {}) });
             }
+            // ── Phase 2: the Plan tab and the chat's plan cards ──
+            if (body.action === 'strategy_save' || body.action === 'strategy_approve' || body.action === 'strategy_draft') {
+                if (!isStrategyKind(body.kind)) return json(400, { error: 'Which document?' });
+                if (body.action === 'strategy_save') {
+                    const r = await saveStrategyDraft(db, orgId, ctx.userId, body.kind, { sections: body.sections, assumptions: body.assumptions });
+                    return r.ok ? json(200, { doc: docView(r.doc) }) : json(r.status, { error: r.error });
+                }
+                if (body.action === 'strategy_approve') {
+                    // §2.5: approving changes what every assistant drafts from — the roles that manage the workspace.
+                    if (!canApproveStrategy(ctx.role)) return json(403, { error: 'Only the workspace owner or an admin can approve a plan. You can still save the draft.' });
+                    const r = await approveStrategyDraft(db, orgId, ctx.userId, body.kind, { draftId: body.draftId, updatedAt: body.updatedAt });
+                    if (!r.ok) return json(r.status, { error: r.error });
+                    // §4.4: approved documents reach drafting through business-knowledge.ts; rebuild every blueprint now.
+                    await recompileOrgBlueprints(db, orgId, `strategy approved: ${body.kind} v${r.doc.version}`);
+                    return json(200, { doc: docView(r.doc) });
+                }
+                const r = await queueMentorJob(db, { orgId, userId: ctx.userId, kind: 'strategy_draft', strategyKind: body.kind, chatSessionId: body.chatSessionId });
+                return r.ok ? json(202, { job: r.job }) : json(r.status, { error: r.error, ...(r.code ? { code: r.code } : {}) });
+            }
+            if (body.action === 'research') {
+                const r = await queueMentorJob(db, { orgId, userId: ctx.userId, kind: 'research', question: body.question, chatSessionId: body.chatSessionId });
+                return r.ok ? json(202, { job: r.job }) : json(r.status, { error: r.error, ...(r.code ? { code: r.code } : {}) });
+            }
+            if (body.action === 'break_even') {
+                const r = breakEven(body.inputs && typeof body.inputs === 'object' ? body.inputs as Record<string, unknown> : {});
+                return r.ok ? json(200, { result: r }) : json(400, { error: r.error });
+            }
+
             const id = Number(body.proposalId);
             if (!Number.isInteger(id) || id <= 0) return json(400, { error: 'Which suggestion?' });
 

@@ -38,6 +38,8 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ], 'Your plan and the tasks used this month'),
 
     // ── on request ────────────────────────────────────────────────────────────────────────────
+    ...group('always', 'Its own strategy documents: the idea check, business plan and marketing plan (§4.4)', ['strategy_documents'], 'Your plans: the idea check, business plan and marketing plan'),
+    ...group('always', 'Its own research answers and drafting jobs, with their links (§4.5)', ['mentor_jobs'], 'What it has looked up for you, with the links'),
     ...group('always', 'Its own suggestions and what the user did with them: the weekly cap and what not to suggest again (§3.13)', ['mentor_proposals'], 'Its own suggestions and the ones you dismissed'),
     ...group('on_request', 'Task detail: what spent tasks this month and bonus tasks', ['task_ledger', 'task_bonus']),
     ...group('on_request', 'Drafting jobs in progress, and the compiled assistant brief', ['content_generation_jobs', 'ai_blueprints']),

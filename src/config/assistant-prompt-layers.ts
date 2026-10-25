@@ -23,7 +23,7 @@ import { EMAIL_SUBJECT_STYLES, LONG_FORM_OPENINGS, OUTREACH_OPENINGS, SOCIAL_HOO
 import { CTA_BINDING_RULE } from './call-to-action';
 import { OUTREACH_FIRST_EMAIL_RULES } from './outreach-offer';
 import { ACTIVE_TEAMMATES_RULE, NO_TEAMMATES_BLOCK } from '../utils/team-activity';
-import { MENTOR_CRAFT, MENTOR_HONESTY_RULES } from '../constants/mentor-craft';
+import { MENTOR_CRAFT, MENTOR_HONESTY_RULES, MENTOR_IDEA_CHECK_CRAFT, MENTOR_RESEARCH_CRAFT, MENTOR_STRATEGY_CRAFT } from '../constants/mentor-craft';
 
 export interface PromptLayer {
     key: string;
@@ -114,13 +114,18 @@ const CAMPAIGNS: PromptLayer[] = [
       text: 'Its campaigns and saved lead searches, the content library, lessons kept from past campaigns, and the orders this workspace can run — only those whose assistants are active; paused ones are named so it can say to resume them.' },
 ];
 
-// Business Mentor: chat only so far. Its background jobs (weekly review, strategy documents, research)
-// join ROLE_MODEL_PATHS when they exist — docs/business-mentor-plan.md §3.11.
+// Business Mentor: chat, plus its background jobs (src/utils/mentor-jobs.ts) — strategy drafts and
+// research, in ROLE_MODEL_PATHS. The weekly review joins in Phase 3 — docs/business-mentor-plan.md §3.11.
 const MENTOR: PromptLayer[] = [
     { key: 'mentor_craft', title: 'How it coaches', kind: 'craft', usedBy: 'Chat', source: 'src/constants/mentor-craft.ts', text: MENTOR_CRAFT },
+    { key: 'mentor_idea_check', title: 'The idea check', kind: 'craft', usedBy: 'Chat', source: 'src/constants/mentor-craft.ts', text: MENTOR_IDEA_CHECK_CRAFT },
     { key: 'mentor_honesty', title: 'Honesty rules', kind: 'rule', usedBy: 'Chat', source: 'src/constants/mentor-craft.ts', text: MENTOR_HONESTY_RULES },
+    { key: 'mentor_strategy', title: 'Drafting a plan', kind: 'craft', usedBy: 'Strategy documents', source: 'src/constants/mentor-craft.ts', text: MENTOR_STRATEGY_CRAFT },
+    { key: 'mentor_research', title: 'Research with sources', kind: 'rule', usedBy: 'Research with sources', source: 'src/constants/mentor-craft.ts', text: MENTOR_RESEARCH_CRAFT },
+    { key: 'workspace_mentor_jobs', title: 'Filled in per workspace (background jobs)', kind: 'workspace', usedBy: 'Strategy documents', source: 'src/utils/mentor-jobs.ts',
+      text: 'The workspace overview the chat reads, the document\'s sections with what is written now, their idea check, and the reviewed playbook for their kind of business (if any). Research gets only the question and a one-line description of the business; every link it gives is checked against the search tool\'s own results in code.' },
     { key: 'workspace_mentor', title: 'Filled in per workspace', kind: 'workspace', usedBy: 'Chat', source: 'netlify/functions/chat-orchestrator.ts',
-      text: 'Whether this is an established business or a new idea (its one set-up answer), plus everything every chat gets: the business identity, Products & Services, Brand Knowledge, its own settings and goals, and which teammates are active.' },
+      text: 'Whether this is an established business or a new idea (its one set-up answer), plus everything every chat gets: the business identity, Products & Services, Brand Knowledge, its own settings and goals, and which teammates are active. Also its strategy documents (draft and approved), its last research answers with their links, and the reviewed playbook for their kind of business, if there is one.' },
 ];
 
 const BY_ROLE: Record<string, PromptLayer[]> = {
@@ -158,6 +163,11 @@ export const ROLE_MODEL_PATHS: Record<string, { label: string; defaultModel: str
         { label: 'Rewriting the owner\'s own words (Low thinking at most)', defaultModel: 'claude-sonnet-4-6' },
     ],
     brand_designer: [{ label: 'Art direction for visual briefs', defaultModel: 'claude-sonnet-4-6' }],
+    // Background jobs (src/utils/mentor-jobs.ts MENTOR_JOB_DEFAULT_MODEL), not held to Low thinking (§2.4.1).
+    business_mentor: [
+        { label: 'Strategy documents', defaultModel: 'claude-opus-5-5' },
+        { label: 'Research with sources', defaultModel: 'claude-opus-5-5' },
+    ],
 };
 /** Every role's chat. */
 export const CHAT_DEFAULT_MODEL = 'claude-haiku-4-5-20251001';

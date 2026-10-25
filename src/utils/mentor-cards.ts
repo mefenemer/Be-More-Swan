@@ -15,15 +15,20 @@
 //   mentor_review_all       → the open suggestions together, each with its own tick (§3.13); the browser
 //                             loads them from mentor.ts and applies each through its own card's action
 //   setup_field_proposal    → src/utils/chat-setup-field.ts (any route; the Mentor may target any active assistant)
+//   strategy_proposal, mentor_research, mentor_break_even (Phase 2) → checked here, rebuilt from the
+//                             documents by src/utils/mentor-plan-cards.ts, applied through mentor.ts
 // The clicks are window.MentorApply (src/components/mentor-apply.js), shared by chat, the Overview tab and
 // Inbox "Needs you". Every gap card carries a "why" — the evidence it's based on (§3.13). A gap card
 // without one is dropped.
 
 import { mentorSetupFieldPromptLine } from './chat-setup-field';
+import { isStrategyKind, type StrategyKind } from './strategy-documents';
+import { cleanQuestion, mentorPlanCardsPromptLines } from './mentor-plan-cards';
 
 export const MENTOR_CARD_TYPES = [
     'mentor_business_profile', 'mentor_products', 'mentor_quiet_mode', 'mentor_support_request',
     'mentor_business_stage', 'mentor_hire_recommendation', 'mentor_review_all',
+    'strategy_proposal', 'mentor_research', 'mentor_break_even',
 ] as const;
 export type MentorCardType = typeof MENTOR_CARD_TYPES[number];
 
@@ -45,7 +50,10 @@ export type MentorCard =
     | { type: 'mentor_support_request'; summary: string; destination: 'issue' | 'support'; subject: string; description: string }
     | { type: 'mentor_business_stage'; summary: string; assistantId: number }
     | { type: 'mentor_hire_recommendation'; summary: string; asked: boolean }
-    | { type: 'mentor_review_all'; summary: string };
+    | { type: 'mentor_review_all'; summary: string }
+    | { type: 'strategy_proposal'; op: 'revise' | 'approve' | 'draft'; kind: StrategyKind; summary: string; why: string | null; asked: boolean; sections?: unknown; assumptions?: unknown }
+    | { type: 'mentor_research'; summary: string; question: string }
+    | { type: 'mentor_break_even'; summary: string; inputs: Record<string, unknown> };
 
 const text = (v: unknown, max: number): string | null => {
     if (typeof v !== 'string') return null;
@@ -107,6 +115,22 @@ export function mentorCardFromUiElement(ui: unknown, assistantId: number): Mento
             return { type: 'mentor_hire_recommendation', summary, asked };
         case 'mentor_review_all':
             return { type: 'mentor_review_all', summary };
+        case 'strategy_proposal': {
+            const op = u.op === 'approve' || u.op === 'draft' ? u.op : u.op === 'revise' ? 'revise' : null;
+            if (!op) return { error: 'A plan card needs to say what to do.' };
+            if (!isStrategyKind(u.kind)) return { error: 'Which document?' };
+            // The user's own interview answers are always theirs; a volunteered revision is a suggestion.
+            const isAsked = op !== 'revise' || u.kind === 'idea_check' ? true : asked;
+            if (op === 'revise' && !isAsked && !why) return { error: 'A suggestion needs to say why.' };
+            return { type: 'strategy_proposal', op, kind: u.kind, summary, why, asked: isAsked, sections: u.sections, assumptions: u.assumptions };
+        }
+        case 'mentor_research': {
+            const q = cleanQuestion(u.question);
+            if (!q.ok) return { error: q.error };
+            return { type: 'mentor_research', summary, question: q.text };
+        }
+        case 'mentor_break_even':
+            return { type: 'mentor_break_even', summary, inputs: (u.inputs && typeof u.inputs === 'object') ? u.inputs as Record<string, unknown> : {} };
     }
     return null;
 }
@@ -116,6 +140,7 @@ export function proposalKind(card: MentorCard): string | null {
     if (card.type === 'mentor_business_profile') return 'business_info_gap';
     if (card.type === 'mentor_products') return 'products_gap';
     if (card.type === 'mentor_hire_recommendation') return 'hire_recommendation';
+    if (card.type === 'strategy_proposal' && card.op === 'revise' && !card.asked) return 'strategy_revision';
     return null; // quiet mode, support, the opening question and Review all are not suggestions
 }
 
@@ -174,6 +199,8 @@ Set "asked": true ONLY when the user's latest message asked for exactly this cha
 
 8. Review all — when they want to see, review or approve several of your suggestions at once (ALWAYS draw it then). It lists every suggestion still waiting, each with its own tick (none ticked), and applies only the ones they tick:
 {"type":"mentor_review_all","summary":"<one sentence>"}
+
+${mentorPlanCardsPromptLines()}
 
 Cards 1, 2, 6 and 7 are suggestions when you volunteer them ("asked": false) and count towards the 3 a week. At most one card per reply, and at most one suggestion card unless they asked for more. Never say a card has been applied — the user decides.`;
 }

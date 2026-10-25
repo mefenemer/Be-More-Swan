@@ -73,7 +73,7 @@ test('the Mentor route is structured and its cards are checked before any other 
     const check = o.indexOf('const m = mentorCardFromUiElement(uiElement, session.aiAssistantId);');
     const firstOther = o.indexOf('settingsProposalFromUiElement(uiElement)');
     assert.ok(parsed > 0 && check > parsed && check < firstOther, 'Mentor check must run first');
-    assert.match(o.slice(check, check + 4000), /uiElement = null; \/\/ never another route's card shape/);
+    assert.match(o.slice(check, check + 9000), /uiElement = null; \/\/ never another route's card shape/);
 });
 
 test('every card has a renderer and a click handler that calls the screen\'s own endpoint (§14)', () => {
@@ -90,6 +90,10 @@ test('every card has a renderer and a click handler that calls the screen\'s own
         ['setupField:apply', 'onSetupFieldApply', 'A.setupAnswer(d.assistantId, d.key, d.value)', '/.netlify/functions/update-assistant-context'],
         ['mentor:support', 'onMentorSupport', 'A.support(d)', '/.netlify/functions/support-tickets'],
         ['mentor:support', 'onMentorSupport', 'A.support(d)', '/.netlify/functions/issue-reports'],
+        ['mentor:strategySave', 'onMentorStrategySave', 'A.strategySave(', "action: 'strategy_save'"],
+        ['mentor:strategyApprove', 'onMentorStrategyApprove', 'A.strategyApprove(', "action: 'strategy_approve'"],
+        ['mentor:strategyDraft', 'onMentorStrategyDraft', 'A.strategyDraft(', "action: 'strategy_draft'"],
+        ['mentor:research', 'onMentorResearch', 'A.research(', "action: 'research'"],
     ]) {
         assert.ok(reg.includes(`eventName: '${ev}'`) || reg.includes(`new CustomEvent('${ev}'`), `card raises ${ev}`);
         assert.ok(sess.includes(`addEventListener('${ev}', ${handler})`), `chat listens for ${ev}`);
@@ -102,7 +106,7 @@ test('every card has a renderer and a click handler that calls the screen\'s own
 
 test('one click saves once, even if the event reaches two listeners', () => {
     const sess = read('src/components/chat-session.js');
-    for (const fn of ['onMentorBusinessProfile', 'onMentorProducts', 'onMentorQuietMode', 'onMentorSupport', 'onMentorBusinessStage', 'onSetupFieldApply']) {
+    for (const fn of ['onMentorBusinessProfile', 'onMentorProducts', 'onMentorQuietMode', 'onMentorSupport', 'onMentorBusinessStage', 'onSetupFieldApply', 'onMentorStrategySave', 'onMentorStrategyApprove', 'onMentorStrategyDraft', 'onMentorResearch']) {
         assert.match(sess, new RegExp(`async function ${fn}\\(e\\) \\{\\s*\\n\\s*if \\(mentorAlreadyHandled\\(e\\)\\) return;`), fn);
     }
 });
@@ -118,7 +122,7 @@ test('the Mentor can\'t be paused or archived, on the server or the page', () =>
     const m = read('netlify/functions/manage-assistant.ts');
     assert.match(m, /action === 'pause' && isWorkspaceRole\(/);
     assert.match(m, /httpMethod === 'DELETE'[\s\S]{0,400}isWorkspaceRole\(/);
-    assert.match(read('src/components/assistant-dashboard-registry.js'), /business_mentor: \{[\s\S]{0,900}noPauseOrArchive: true/);
+    assert.match(read('src/components/assistant-dashboard-registry.js'), /business_mentor: \{[\s\S]{0,1400}noPauseOrArchive: true/);
     assert.match(read('assistants.js'), /const lockedIn = !!window\.AssistantDashboardRegistry\?\.get\(currentData\.roleKey\)\?\.noPauseOrArchive;/);
 });
 

@@ -699,6 +699,12 @@
       <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-mentor" id="maintab-btn-mentor" data-maintab="mentor" class="main-tab-btn hidden">
         <span id="mentor-tab-label">Overview</span>
       </button>
+      <!-- Plan — Business Mentor only (mentorPlanTab: business_mentor). Idea check, business and marketing
+           plans, break-even calculator, research and the playbook in use (docs/business-mentor-plan.md §4,
+           §14). assistant-mentor-plan.js → mentor.ts ?plan=1. Same rename rule as Overview. -->
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-mentorplan" id="maintab-btn-mentorplan" data-maintab="mentorplan" class="main-tab-btn hidden">
+        <span id="mentorplan-tab-label">Plan</span>
+      </button>
       <!-- Briefs — Brand Designer only (briefsTab: brand_designer). One card per brief, its options as
            a grid to approve or turn down. Sits first: it is the only thing this role does.
            assistant-briefs.js → brand-briefs.ts. Design: docs/brand-designer-plan.md §4 -->
@@ -1061,6 +1067,10 @@
   <!-- Overview — Business Mentor only. Rendered by assistant-mentor-overview.js. -->
   <div id="maintab-mentor" role="tabpanel" aria-labelledby="maintab-btn-mentor" class="main-tab-content hidden">
     <div id="mentor-overview-host"></div>
+  </div>
+  <!-- Plan — Business Mentor only. Rendered by assistant-mentor-plan.js. -->
+  <div id="maintab-mentorplan" role="tabpanel" aria-labelledby="maintab-btn-mentorplan" class="main-tab-content hidden">
+    <div id="mentor-plan-host"></div>
   </div>
   <div id="maintab-briefs" role="tabpanel" aria-labelledby="maintab-btn-briefs" class="main-tab-content hidden">
     <div id="briefs-host"></div>
