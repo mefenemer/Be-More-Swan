@@ -6224,3 +6224,30 @@ export const loginEvents = pgTable("login_events", {
   index("login_events_created_idx").on(t.createdAt),
   index("login_events_user_idx").on(t.userId, t.createdAt),
 ]);
+
+// Business Mentor (docs/business-mentor-plan.md §3.13, §8.2) — every suggestion the Mentor shows and
+// what the user did with it. Feeds the 3-a-week cap, dismiss reasons, the Dismissed list and
+// Admin ▸ Mentor activity. Created by db/z-business-mentor.sql.
+export const mentorProposals = pgTable("mentor_proposals", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  targetAssistantId: integer("target_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  kind: text("kind").notNull(),
+  title: text("title").notNull(),
+  evidence: jsonb("evidence").notNull().default([]),
+  payload: jsonb("payload").notNull().default({}),
+  // 'shown' | 'accepted' | 'dismissed' | 'failed' | 'expired'
+  status: text("status").notNull().default("shown"),
+  // 'not_relevant' | 'already_done' | 'disagree' | 'not_now'
+  dismissReason: text("dismiss_reason"),
+  snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
+  shownAt: timestamp("shown_at", { withTimezone: true }).defaultNow().notNull(),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  decidedBy: integer("decided_by").references(() => users.id, { onDelete: "set null" }),
+  chatSessionId: integer("chat_session_id"),
+  chatMessageId: integer("chat_message_id"),
+}, (t) => [
+  index("mentor_proposals_org_shown_idx").on(t.organisationId, t.shownAt),
+  index("mentor_proposals_org_kind_status_idx").on(t.organisationId, t.kind, t.status),
+]);

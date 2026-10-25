@@ -541,6 +541,21 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         realism: { maxDailyDelta: 50 },
     },
     {
+        // Business Mentor (docs/business-mentor-plan.md §8.2, "is the advice any good?"). Suggestions the
+        // user applied, counted from mentor_proposals by poll-goal-telemetry.ts. Unmeasured (not 0) until
+        // db/z-business-mentor.sql is applied.
+        key: 'mentor_suggestions_applied',
+        label: 'Suggestions Applied',
+        unit: 'suggestions',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'action',
+        roles: ['business_mentor'],
+        description: 'Suggestions from your Business Mentor that you applied.',
+        available: true,
+        realism: { maxDailyDelta: 10 },
+    },
+    {
         // Mystery Shopper (docs/mystery-shopper-plan.md §4.5). The website's latest overall score,
         // read from site_audits.current_score by poll-goal-telemetry.ts. A LEVEL, not a count: it can
         // fall as well as rise (a competitor's change moves the comparison). Null until a check has

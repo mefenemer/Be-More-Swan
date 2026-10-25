@@ -4,7 +4,7 @@
 //
 // The TEXT is never copied here: every layer is rendered from the export the drafting code itself
 // uses, so this page cannot drift from what runs. What this file owns is only the map — which role's
-// prompts include which block — and tests/assistant-config-view.test.ts checks each claim against
+// prompts include which block — and tests/assistant-model-picker.test.ts checks each claim against
 // the source of the path named. Per-workspace inputs (voice, business information, products, Brand
 // Knowledge, Inspo) are listed by name only: their content is the customer's, and differs per
 // workspace. Pure.
@@ -23,6 +23,7 @@ import { EMAIL_SUBJECT_STYLES, LONG_FORM_OPENINGS, OUTREACH_OPENINGS, SOCIAL_HOO
 import { CTA_BINDING_RULE } from './call-to-action';
 import { OUTREACH_FIRST_EMAIL_RULES } from './outreach-offer';
 import { ACTIVE_TEAMMATES_RULE, NO_TEAMMATES_BLOCK } from '../utils/team-activity';
+import { MENTOR_CRAFT, MENTOR_HONESTY_RULES } from '../constants/mentor-craft';
 
 export interface PromptLayer {
     key: string;
@@ -113,6 +114,15 @@ const CAMPAIGNS: PromptLayer[] = [
       text: 'Its campaigns and saved lead searches, the content library, lessons kept from past campaigns, and the orders this workspace can run — only those whose assistants are active; paused ones are named so it can say to resume them.' },
 ];
 
+// Business Mentor: chat only so far. Its background jobs (weekly review, strategy documents, research)
+// join ROLE_MODEL_PATHS when they exist — docs/business-mentor-plan.md §3.11.
+const MENTOR: PromptLayer[] = [
+    { key: 'mentor_craft', title: 'How it coaches', kind: 'craft', usedBy: 'Chat', source: 'src/constants/mentor-craft.ts', text: MENTOR_CRAFT },
+    { key: 'mentor_honesty', title: 'Honesty rules', kind: 'rule', usedBy: 'Chat', source: 'src/constants/mentor-craft.ts', text: MENTOR_HONESTY_RULES },
+    { key: 'workspace_mentor', title: 'Filled in per workspace', kind: 'workspace', usedBy: 'Chat', source: 'netlify/functions/chat-orchestrator.ts',
+      text: 'Whether this is an established business or a new idea (its one set-up answer), plus everything every chat gets: the business identity, Products & Services, Brand Knowledge, its own settings and goals, and which teammates are active.' },
+];
+
 const BY_ROLE: Record<string, PromptLayer[]> = {
     social_media_manager: SOCIAL,
     newsletter_editor: EMAIL,
@@ -122,6 +132,7 @@ const BY_ROLE: Record<string, PromptLayer[]> = {
     mystery_shopper: SHOPPER,
     brand_designer: DESIGNER,
     campaign_orchestrator: CAMPAIGNS,
+    business_mentor: MENTOR,
 };
 
 /** Every layer that shapes this role's prompts: its own jobs first, then chat. Pure. */

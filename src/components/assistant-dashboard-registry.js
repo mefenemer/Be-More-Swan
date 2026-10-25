@@ -623,6 +623,21 @@
     // and the fixes they suggest; it publishes nothing, files no records and has no post queue, so
     // every social module is off and the Review Queue / Data Hub are hidden — its review surface is
     // the fix list on the Website tab, and its history is the checks listed there.
+    business_mentor: {
+      // docs/business-mentor-plan.md. Phase 1a: Chat and Results. The set-up checklist, "What I can
+      // see" and Dismissed panels (§14) are added as they are built. It publishes nothing, so no
+      // review queue, data hub, posting schedule or content modules.
+      hideReviewQueue: true,
+      hideDataHub: true,
+      hideGoals: true,
+      modules: {
+        hasPostingSchedule: false, hasSocialStrategy: false,
+        hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
+        hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+        hasContentPublishing: false,
+      },
+    },
+
     mystery_shopper: {
       // Fed by site-audits.ts `performance` (routed by metricsSource in assistants.js).
       metricsSource: 'site_audit',

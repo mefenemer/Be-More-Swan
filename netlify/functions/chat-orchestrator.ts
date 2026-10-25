@@ -18,6 +18,7 @@ import { postTeamChatReply, teamNoteForChatTurn, teamThreadPromptBlock } from '.
 import { SPECIAL_CATEGORY_RULE } from '../../src/constants/special-category-rule';
 import { SITE_COPY_CRAFT } from '../../src/constants/site-copy-craft';
 import { CAMPAIGN_PLANNING_CRAFT } from '../../src/constants/campaign-craft';
+import { MENTOR_CRAFT, MENTOR_HONESTY_RULES } from '../../src/constants/mentor-craft';
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
@@ -674,6 +675,17 @@ function websiteAssistantSurfaces(): string {
 - The "Publish" sub-tab of the Website tab puts the site live at its address ("Publish"; once it is live, "Publish changes", "View live site" and "Take offline"). It refuses while any [square brackets] are left. Publishing is always a click the user makes there — never something you do; changes stay in the draft until they publish.
 - "Enquiries" tab — messages from the site's contact form. "Orders" and "Bookings" tabs appear when the site sells things or takes bookings.
 Everything you can change here, the user can also change there by hand.`;
+}
+
+// ⚠️ Name only screens that exist. As each Phase 1a panel ships (set-up checklist, "What I can see",
+// Dismissed), add it here — docs/business-mentor-plan.md §14.
+function businessMentorSurfaces(): string {
+    return `WHERE THINGS LIVE — pages inside this platform, never outside tools:
+- "Business Information" — the business description, who the customers are, tone of voice, Brand Knowledge documents and links, and the "Products & Services" tab.
+- Each assistant's own page — its settings, set-up answers, goals ("Results" tab) and rules. Only mention assistants listed as active below.
+- "My Account" — the plan, tasks used, notifications and "Your data".
+- "Help & Support" — Help Centre articles, contacting support, and "Report an Issue".
+Your own page has a "Chat" tab (this conversation) and a "Results" tab.`;
 }
 
 function mysteryShopperSurfaces(): string {
@@ -1728,6 +1740,38 @@ or
 }`,
         ].filter(Boolean).join('\n\n'),
         parseResponse: parseStructuredReply,
+    },
+
+    // Business Mentor (docs/business-mentor-plan.md). Included on every plan; never takes a seat
+    // (assistant-capacity.ts WORKSPACE_ROLE_KEYS). Phase 1a, first step: conversational coaching with
+    // the honesty rules. Its proposal cards, workspace snapshot and Help Centre block follow (§3.2–3.7,
+    // §3.13); until then the prompt says plainly it can't change anything from chat.
+    business_mentor: {
+        model: DEFAULT_MODEL,
+        maxTokens: 1600,
+        buildRolePrompt: (rc) => {
+            const stage = (rc.onboardingContext as { businessStage?: string } | null)?.businessStage;
+            const stageLine = stage === 'new_idea'
+                ? 'They told you they are starting something new: begin from the idea itself (who buys, why, how to test it cheaply) before anything else.'
+                : stage === 'existing'
+                    ? 'They told you this is an established business: start from what is already set up here, and never re-ask anything shown above.'
+                    : 'You don\'t yet know whether this is an established business or a new idea. If it isn\'t clear from the details above, ask once.';
+            return [
+                sharedContextBlock(rc),
+                `You are ${rc.assistantName}, this business's Business Mentor on Be More Swan: their guide to the platform and a business coach who knows their workspace. You are included with their plan.
+
+${stageLine}
+
+${MENTOR_CRAFT}
+
+${MENTOR_HONESTY_RULES}
+
+${businessMentorSurfaces()}
+
+Reply conversationally in plain text. Do not use markdown headings.`,
+            ].join('\n\n');
+        },
+        parseResponse: (raw) => ({ content: raw.trim(), uiElement: null }),
     },
 
     // Tier 1, Batch 1 — Lead Generator. Scores inbound leads against the ideal-customer

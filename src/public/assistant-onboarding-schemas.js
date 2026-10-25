@@ -638,6 +638,27 @@
 
     // Tier 1, Batch 2 — CRM Enricher. Captures which CRM to enrich and what to hunt for,
     // then how it runs: trigger, scope, and whether existing values may be overwritten.
+    // Business Mentor (docs/business-mentor-plan.md). Provisioned for every workspace, so this is
+    // rarely shown as a wizard; the Mentor asks the same question in chat on first visit (§3.1).
+    // Read by chat-orchestrator.ts ROUTES.business_mentor.
+    business_mentor: [
+      {
+        title: 'Where is your business today?',
+        description: 'Your Business Mentor starts from the right place: what you already have, or the idea you want to test.',
+        fields: [
+          {
+            key: 'businessStage',
+            label: 'Which describes you best?',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'existing', label: 'I run an established business', description: 'Start from what is already set up here.' },
+              { value: 'new_idea', label: "I'm starting something new", description: 'Start by testing the idea.' },
+            ],
+          },
+        ],
+      },
+    ],
     crm_enricher: [
       {
         title: 'Where does your customer data live?',

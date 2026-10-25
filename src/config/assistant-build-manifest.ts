@@ -34,4 +34,5 @@ export const ASSISTANT_BUILD: Readonly<Record<string, RoleBuild>> = {
     meeting_note_taker:        { setup: 'schema', chat: true, dashboard: true },
     mystery_shopper:           { setup: 'schema', chat: true, dashboard: true },
     website_assistant:         { setup: 'schema', chat: true, dashboard: true },
+    business_mentor:           { setup: 'schema', chat: true, dashboard: true },
 };

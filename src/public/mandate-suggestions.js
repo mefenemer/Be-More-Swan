@@ -76,6 +76,13 @@
 
     // About not knowing why visitors leave — not about writing or posting, which belong to the
     // other assistants.
+    business_mentor: [
+      { title: 'The Too-Many-Priorities Trap', text: 'There are a dozen things I could work on and I never know which one actually matters most this week.' },
+      { title: 'The Lonely Decision', text: 'I make every big decision on my own, with nobody to sense-check it before I commit.' },
+      { title: 'The Untested Idea', text: 'I have an idea I believe in but no idea how to check whether people would actually pay for it.' },
+      { title: 'The Half-Used Tools', text: 'I pay for tools and assistants but I am not sure they are set up to do what my business needs.' },
+    ],
+
     mystery_shopper: [
       { title: 'The Silent Bounce', text: 'People visit our website and leave without getting in touch, and nobody ever tells us why.' },
       { title: 'The Homepage Blind Spot', text: 'I have looked at our homepage so often I can no longer see it the way a stranger does.' },
