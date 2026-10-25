@@ -1399,6 +1399,15 @@
     }
 
     // ── Business Mentor cards (src/utils/mentor-cards.ts) → the screens' own endpoints. ──
+    // One click must save once. On staging (2026-10-25) a quiet-mode click reached two listeners
+    // (a chat re-mounted by "New chat" kept its old one) and saved twice; for the products card that
+    // would add every product twice. Every listener sees the same event object, so mark it.
+    function mentorAlreadyHandled(e) {
+      if (e.__mentorHandled) return true;
+      e.__mentorHandled = true;
+      return false;
+    }
+
     async function mentorJson(url, init) {
       const res = await fetch(url, { credentials: 'same-origin', ...init });
       const data = await res.json().catch(() => ({}));
@@ -1409,6 +1418,7 @@
     // Business Information: organisation-profile.ts POST rewrites every field it is sent, so read the
     // current profile NOW and change only the card's fields.
     async function onMentorBusinessProfile(e) {
+      if (mentorAlreadyHandled(e)) return;
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
       try {
@@ -1429,6 +1439,7 @@
 
     // Products & Services: org-products.ts POST, one per product, exactly as the tab's "Add" does.
     async function onMentorProducts(e) {
+      if (mentorAlreadyHandled(e)) return;
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
       const list = Array.isArray(d.products) ? d.products : [];
@@ -1450,6 +1461,7 @@
 
     // Quiet mode: its set-up answer, read-merge-write like the schedule card (the context is replaced wholesale).
     async function onMentorQuietMode(e) {
+      if (mentorAlreadyHandled(e)) return;
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
       const id = Number(d.assistantId);
@@ -1467,6 +1479,7 @@
 
     // Help: a support ticket (support-tickets.ts) or, for something broken, Report an Issue (issue-reports.ts).
     async function onMentorSupport(e) {
+      if (mentorAlreadyHandled(e)) return;
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
       try {

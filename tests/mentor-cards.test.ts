@@ -93,6 +93,13 @@ test('every card has a renderer and a click handler that calls the screen\'s own
     }
 });
 
+test('one click saves once, even if the event reaches two listeners', () => {
+    const sess = read('src/components/chat-session.js');
+    for (const fn of ['onMentorBusinessProfile', 'onMentorProducts', 'onMentorQuietMode', 'onMentorSupport']) {
+        assert.match(sess, new RegExp(`async function ${fn}\\(e\\) \\{\\s*\\n\\s*if \\(mentorAlreadyHandled\\(e\\)\\) return;`), fn);
+    }
+});
+
 test('the Business Information save never sends allowDomainJoin (it would skip the save)', () => {
     const sess = read('src/components/chat-session.js');
     const fn = sess.slice(sess.indexOf('async function onMentorBusinessProfile'), sess.indexOf('async function onMentorProducts'));
