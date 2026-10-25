@@ -16,6 +16,7 @@ import type { getDb } from '../../db/client';
 import { aiAssistants, masterPlans, plans, trials } from '../../db/schema';
 import { FREE_PLAN_TYPES, TRIAL_TIER_KEY } from '../config/beta-plan';
 import { releaseHeldWork } from './held-work';
+import { takesASeat } from './assistant-capacity';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -108,8 +109,9 @@ export async function endTrialFor(db: Db, organisationId: number, now = new Date
     await db.update(plans).set({ status: 'expired', updatedAt: now })
         .where(and(eq(plans.organisationId, organisationId), eq(plans.planType, TRIAL_PLAN_TYPE), eq(plans.status, 'active')));
     // Only RUNNING assistants are paused, and stamped so only they come back.
+    // Never the Business Mentor: it stays for Help Centre answers and support (docs/business-mentor-plan.md §2.7).
     await db.update(aiAssistants).set({ isActive: false, provisioningStatus: TRIAL_ENDED_PAUSE, updatedAt: now })
-        .where(and(eq(aiAssistants.organisationId, organisationId), eq(aiAssistants.isActive, true)));
+        .where(and(eq(aiAssistants.organisationId, organisationId), eq(aiAssistants.isActive, true), takesASeat()));
     await db.update(trials).set({ endedAt: now, updatedAt: now }).where(eq(trials.id, trial.id));
     return 'ended';
 }

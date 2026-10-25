@@ -179,8 +179,9 @@ export async function endBetaFor(db: Db, organisationId: number, now = new Date(
     await db.update(plans).set({ status: 'expired', expiresAt: now, updatedAt: now })
         .where(and(eq(plans.organisationId, organisationId), eq(plans.planType, BETA_PLAN_TYPE), eq(plans.status, 'active')));
     // Only assistants that are RUNNING are paused, and stamped so only they come back.
+    // Never the Business Mentor: it stays for Help Centre answers and support (docs/business-mentor-plan.md §2.7).
     await db.update(aiAssistants).set({ isActive: false, provisioningStatus: BETA_ENDED_PAUSE, updatedAt: now })
-        .where(and(eq(aiAssistants.organisationId, organisationId), eq(aiAssistants.isActive, true)));
+        .where(and(eq(aiAssistants.organisationId, organisationId), eq(aiAssistants.isActive, true), takesASeat()));
     await db.update(betaEndings).set({ endedAt: now, updatedAt: now }).where(eq(betaEndings.id, ending.id));
     return 'ended';
 }

@@ -1,6 +1,6 @@
 // verify.ts
 import { Handler, HandlerResponse } from '@netlify/functions';
-import { eq, and, gt, inArray, isNull } from 'drizzle-orm';
+import { eq, and, gt, inArray, isNull, desc, sql } from 'drizzle-orm';
 import * as crypto from 'crypto';
 import { getDb } from '../../db/client';
 import { createNotification } from '../../src/utils/notify';
@@ -214,12 +214,15 @@ export default withLambda(async (event) => {
                     body: JSON.stringify({ success: true, redirect: `${baseUrl}/admin.html` })
                 };
             }
-            // Check for any plan (active OR past_due — include grace-period plans)
+            // The plan that decides where they land: active first, then past_due (grace period), then
+            // the newest of anything else. Ordering by startedAt alone picked the OLDEST row, so a
+            // customer who cancelled and later re-subscribed read as "subscription ended" at every
+            // login (staging workspace 58, 2026-10-25: cancelled plan 12 hid active plan 19).
             const [existingPlan] = await db
                 .select({ id: plans.id, status: plans.status })
                 .from(plans)
                 .where(eq(plans.userId, user.id))
-                .orderBy(plans.startedAt)
+                .orderBy(sql`CASE ${plans.status} WHEN 'active' THEN 0 WHEN 'past_due' THEN 1 ELSE 2 END`, desc(plans.startedAt))
                 .limit(1);
 
             // P3: Always check for existing assistants — even without an active plan
