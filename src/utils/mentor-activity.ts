@@ -80,12 +80,17 @@ export async function loadMentorActivity(db: Db): Promise<MentorActivity> {
                    count(*)::int AS shown,
                    count(*) FILTER (WHERE status = 'accepted')::int AS accepted,
                    count(*) FILTER (WHERE status = 'dismissed')::int AS dismissed,
-                   count(*) FILTER (WHERE status = 'accepted' AND kind IN ('business_info_gap', 'products_gap'))::int AS gaps_closed,
-                   coalesce(jsonb_object_agg(dismiss_reason, n) FILTER (WHERE dismiss_reason IS NOT NULL), '{}'::jsonb) AS reasons
+                   count(*) FILTER (WHERE status = 'accepted' AND kind IN ('business_info_gap', 'products_gap'))::int AS gaps_closed
+            FROM mentor_proposals
+            GROUP BY organisation_id
+        ),
+        reasons AS (
+            SELECT organisation_id, jsonb_object_agg(dismiss_reason, n) AS reasons
             FROM (
-                SELECT p.*, count(*) OVER (PARTITION BY organisation_id, dismiss_reason) AS n
-                FROM mentor_proposals p
-            ) p
+                SELECT organisation_id, dismiss_reason, count(*)::int AS n
+                FROM mentor_proposals WHERE status = 'dismissed' AND dismiss_reason IS NOT NULL
+                GROUP BY organisation_id, dismiss_reason
+            ) r
             GROUP BY organisation_id
         ),
         support AS (
@@ -97,7 +102,7 @@ export async function loadMentorActivity(db: Db): Promise<MentorActivity> {
         )
         SELECT m.organisation_id, o.name AS workspace, met.met_at::text AS met_at,
                coalesce(p.shown, 0) AS shown, coalesce(p.accepted, 0) AS accepted, coalesce(p.dismissed, 0) AS dismissed,
-               coalesce(p.gaps_closed, 0) AS gaps_closed, coalesce(p.reasons, '{}'::jsonb) AS reasons,
+               coalesce(p.gaps_closed, 0) AS gaps_closed, coalesce(r.reasons, '{}'::jsonb) AS reasons,
                coalesce(s.n, 0) AS support_raised,
                CASE WHEN met.met_at IS NULL OR met.met_at > now() - interval '30 days' THEN NULL
                     ELSE EXISTS (
@@ -108,6 +113,7 @@ export async function loadMentorActivity(db: Db): Promise<MentorActivity> {
         JOIN organisations o ON o.id = m.organisation_id
         LEFT JOIN met ON met.organisation_id = m.organisation_id
         LEFT JOIN props p ON p.organisation_id = m.organisation_id
+        LEFT JOIN reasons r ON r.organisation_id = m.organisation_id
         LEFT JOIN support s ON s.organisation_id = m.organisation_id
         ORDER BY met.met_at NULLS LAST, o.name`);
     const rows = (Array.isArray(result) ? result : result?.rows ?? []) as any[];

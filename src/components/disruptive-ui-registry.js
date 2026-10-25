@@ -2259,6 +2259,8 @@
         const open = reasons.style.display === 'none';
         reasons.style.display = open ? 'flex' : 'none';
         e.target.closest('[data-mc-dismiss]').setAttribute('aria-expanded', open ? 'true' : 'false');
+        // The chips open under the buttons, often below the chat's fold (staging, 2026-10-25).
+        if (open) reasons.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         return;
       }
       const r = e.target.closest('[data-mc-reason]');
