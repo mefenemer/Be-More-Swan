@@ -18,6 +18,8 @@ import { eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { organisations } from '../../db/schema';
 import { logAiUsage } from './ai-usage';
+import { adaptForModel, replyText } from '../config/model-options';
+import { loadRoleModel, withRoleModel } from './assistant-model';
 import { currentDatePromptBlock } from './current-date-prompt';
 import { parseModelJson } from './model-json';
 import { loadAssistantVoice, NEWSLETTER_MODEL } from './newsletter-generate';
@@ -97,18 +99,23 @@ ${plan}`,
     ].filter(Boolean).join('\n\n');
 
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    // The Email Marketing role's model (Admin ▸ Assistants ▸ Model & rules); none = NEWSLETTER_MODEL.
+    // Read once for every email of the flow, and held at Low thinking: this runs inside a request.
+    const emailModel = await loadRoleModel(db, 'newsletter_editor');
     const written = await Promise.all(steps.map(async (s, i) => {
-        const res = await anthropic.messages.create({
-            model: NEWSLETTER_MODEL,
-            max_tokens: 1200,
-            system,
-            messages: [{ role: 'user', content: `Write Email ${i + 1} of ${steps.length} — Day ${s.day}: ${s.role}.` }],
-        });
+        const { response: res, model: usedModel } = await withRoleModel(emailModel, NEWSLETTER_MODEL,
+            async (model, thinking) => ({ model, response: await anthropic.messages.create(adaptForModel({
+                model,
+                max_tokens: 1200,
+                system,
+                messages: [{ role: 'user', content: `Write Email ${i + 1} of ${steps.length} — Day ${s.day}: ${s.role}.` }],
+            }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming) }),
+            { requestPath: true, label: 'campaign email' });
         void logAiUsage({
-            userId: input.userId, workspaceId: input.organisationId, model: NEWSLETTER_MODEL,
+            userId: input.userId, workspaceId: input.organisationId, model: usedModel,
             inputTokens: res.usage?.input_tokens ?? 0, outputTokens: res.usage?.output_tokens ?? 0,
         });
-        const raw = (res.content[0] as { text?: string })?.text ?? '';
+        const raw = replyText(res.content);
         const out = parseModelJson<{ subject?: unknown; preheader?: unknown; bodyMarkdown?: unknown; callToAction?: unknown }>(raw) ?? {};
         return {
             sequenceOrder: i + 1, sendDay: s.day, role: clip(s.role, 80),

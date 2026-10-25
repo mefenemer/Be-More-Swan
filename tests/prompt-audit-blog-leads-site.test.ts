@@ -20,6 +20,7 @@ import { buildBlogSystemPrompt } from '../src/utils/blog-generate';
 import { buildDraftPrompt } from '../src/utils/site-draft';
 import { buildFillPrompt } from '../src/utils/site-template-fill';
 import { promptLayersFor } from '../src/config/assistant-prompt-layers';
+import { OUTREACH_OPENINGS } from '../src/config/hook-styles';
 
 let passed = 0;
 function check(name: string, fn: () => void) { fn(); console.log(`  ✓ ${name}`); passed++; }
@@ -99,6 +100,29 @@ check('Admin ▸ Assistants ▸ Model & rules shows the new blocks', () => {
     assert.ok(promptLayersFor('blog_writer').some((l) => l.key === 'blog_craft' && l.text === BLOG_CRAFT));
     assert.ok(promptLayersFor('website_assistant').some((l) => l.key === 'site_copy' && l.text === SITE_COPY_CRAFT));
     assert.ok(promptLayersFor('lead_qualifier').some((l) => l.key === 'first_email' && l.text === OUTREACH_FIRST_EMAIL_RULES));
+});
+
+check('no cold-email opening asks a question, because the email has exactly one and it comes last', () => {
+    // Opus 5.5, 2026-10-25: the old "a genuine question about how they handle that problem" opening
+    // made 3 emails in 9 ask twice once the one-question rule landed.
+    for (const o of OUTREACH_OPENINGS) assert.ok(!/^a genuine question/.test(o), o);
+    assert.ok(OUTREACH_OPENINGS.some((o) => o.includes("the email's one question comes at the end")));
+});
+
+check('bulk scoring, the classifier and the deep re-score run on the Lead Generator\'s chosen model', () => {
+    const ds = read('src/lib/discovery-scoring.ts');
+    // Both prospect-facing calls go through the picker, held at low thinking (a short-limit worker
+    // and a 26-second request); every reply is read with replyText, never content[0].
+    assert.strictEqual(ds.match(/withRoleModel\(/g)?.length, 3, 'scoring, the classifier and the re-score');
+    assert.strictEqual(ds.match(/\{ requestPath: true, label: '(discovery-scoring|classifyProspects|rescoreWithIntel)' \}/g)?.length, 3);
+    assert.ok(!/anthropic\.messages\.create\(\{/.test(ds), 'no call skips adaptForModel');
+    assert.ok(!ds.includes('content[0]'));
+    assert.ok(ds.includes('searchContext, modelChoice, depth + 1)'), 'the blank-card retry keeps the model');
+    const worker = read('netlify/functions/process-discovery-jobs.ts');
+    assert.ok(worker.includes("await loadRoleModel(db, 'lead_qualifier'))") && worker.includes('model: scored.model,'));
+    const enrich = read('src/utils/lead-enrichment.ts');
+    assert.ok(enrich.includes("modelChoice: await loadRoleModel(db, 'lead_qualifier')") && enrich.includes('model: rescored.model,'));
+    assert.ok(read('scripts/rescore-lead-prospect-type.ts').includes("classifyProspects(candidates, icp, sender, await loadRoleModel(db, 'lead_qualifier'))"));
 });
 
 console.log(`\n${passed} passed`);

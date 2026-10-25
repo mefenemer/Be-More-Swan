@@ -22,6 +22,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { aiAssistants, campaigns, contentAssets, mediaGenerationJobs, organisations, scheduledPosts, visualBriefOptions, visualBriefs } from '../../db/schema';
 import type { getDb } from '../../db/client';
 import { gatewayGenerate } from '../lib/ai-gateway';
+import { gatewayRoleModel } from './assistant-model';
 import { logMediaCost } from './ai-usage';
 import {
     FalContentPolicyError, FalError, extractVideo, falConfigured, generateImages, result as falResult, status as falStatus,
@@ -243,6 +244,8 @@ export async function writeArtDirection(db: Db, brief: BriefRow, ctx: BriefConte
             maxTokens: 700,
             deadlineMs: 45_000,
             usage: { workspaceId: brief.organisationId, assistantId: brief.aiAssistantId },
+            // The Brand Designer role's model (Admin ▸ Assistants ▸ Model & rules). A background round.
+            ...(await gatewayRoleModel(db, 'brand_designer')),
         });
         return parseArtDirection(res.text, fallback, brief.headline);
     } catch (err) {

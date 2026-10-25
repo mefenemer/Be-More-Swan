@@ -8,6 +8,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import { OUTREACH_SUBJECT_RULES } from '../constants/outreach-subject';
 import { outreachFirstEmailBlock } from '../config/outreach-offer';
 import { parseModelJson, parseModelJsonArray } from '../utils/model-json';
+import { adaptForModel, replyText } from '../config/model-options';
+import { withRoleModel, type RoleModelChoice } from '../utils/assistant-model';
 import {
     DISQUALIFIED_MAX_SCORE,
     EXCLUDED_MAX_SCORE,
@@ -117,6 +119,8 @@ export interface ScoreResult {
     cards: LeadScoringCard[];   // aligned by index to the input candidates
     inputTokens: number;
     outputTokens: number;
+    /** The model that answered — the Lead Generator's chosen one, or SCORING_MODEL. For usage logging. */
+    model: string;
 }
 
 function str(v: unknown, max = 300): string | null {
@@ -382,6 +386,8 @@ export async function classifyProspects(
     candidates: ScoreCandidate[],
     icp: Record<string, unknown>,
     sender: SenderIdentity,
+    /** The Lead Generator role's model (loadRoleModel). Null = SCORING_MODEL. */
+    modelChoice: RoleModelChoice | null = null,
 ): Promise<ClassifyResult> {
     const empty = candidates.map(() => ({ prospectType: null, rationale: null }));
     if (candidates.length === 0) return { results: [], inputTokens: 0, outputTokens: 0 };
@@ -413,8 +419,9 @@ Return STRICT JSON only (no markdown): an array with ONE object per candidate, i
     let parsed: unknown[] = [];
 
     try {
-        const resp = await anthropic.messages.create({
-            model: SCORING_MODEL,
+        // temperature below is dropped by adaptForModel for a model that takes no sampling settings.
+        const { resp } = await withRoleModel(modelChoice, SCORING_MODEL, async (model, thinking) => ({ model, resp: await anthropic.messages.create(adaptForModel({
+            model,
             // Classification-only replies are short — one enum and a sentence per candidate — but
             // this is still a BATCH, and a truncation here silently returns null for every row in
             // it. Cheap headroom against the same failure scoreCandidates suffered.
@@ -430,10 +437,10 @@ Return STRICT JSON only (no markdown): an array with ONE object per candidate, i
             temperature: 0,
             system,
             messages: [{ role: 'user', content: `Classify these ${candidates.length} candidates:\n${JSON.stringify(compact)}` }],
-        });
+        }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming) }), { requestPath: true, label: 'classifyProspects' });
         inputTokens = resp.usage.input_tokens;
         outputTokens = resp.usage.output_tokens;
-        const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
+        const raw = replyText(resp.content);
         const p = parseModelJsonArray(raw);
         if (Array.isArray(p)) parsed = p;
         warnIfTruncated('classifyProspects', resp.stop_reason ?? null, candidates.length, parsed.length);
@@ -479,10 +486,15 @@ export async function scoreCandidates(
      * which is how every call behaved before 2026-10-18.
      */
     searchContext: ScoringSearchContext | null = null,
+    /**
+     * The Lead Generator role's model (Admin ▸ Assistants ▸ Model & rules — loadRoleModel), since
+     * this call writes most of its outreach emails. Null = SCORING_MODEL, exactly as before.
+     */
+    modelChoice: RoleModelChoice | null = null,
     /** Recursion depth for the blank-card retry below. Callers never pass this. */
     depth = 0,
 ): Promise<ScoreResult> {
-    if (candidates.length === 0) return { cards: [], inputTokens: 0, outputTokens: 0 };
+    if (candidates.length === 0) return { cards: [], inputTokens: 0, outputTokens: 0, model: SCORING_MODEL };
 
     const areaBlock = searchAreaBlock(searchContext);
     const system =
@@ -540,10 +552,13 @@ ${outreachFirstEmailBlock(sender.outreachOffer)}`;
     let inputTokens = 0;
     let outputTokens = 0;
     let parsed: unknown[] = [];
+    let usedModel = SCORING_MODEL;
 
     try {
-        const resp = await anthropic.messages.create({
-            model: SCORING_MODEL,
+        // requestPath: the discovery worker is a scheduled function with a short limit, so thinking
+        // is held at 'low' whatever the role's setting.
+        const { resp, model } = await withRoleModel(modelChoice, SCORING_MODEL, async (model, thinking) => ({ model, resp: await anthropic.messages.create(adaptForModel({
+            model,
             // ⚠️ THIS CEILING IS SIZED FOR THE OUTREACH DRAFTS, NOT THE VERDICTS. Every object in
             // the array carries a complete personalised email — body, subject, reasons, next step
             // — so a candidate costs 250-400 output tokens, and the old 2048 completed five or six
@@ -559,10 +574,11 @@ ${outreachFirstEmailBlock(sender.outreachOffer)}`;
                 ? `${system}\n\nRULES FOR THE OUTREACH EMAILS — the business's own rules for this assistant. Follow every one in each outreachDraft. They never change a score.\n${rulesBlock}`
                 : system,
             messages: [{ role: 'user', content: `Score these ${candidates.length} candidates:\n${JSON.stringify(compact)}` }],
-        });
+        }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming) }), { requestPath: true, label: 'discovery-scoring' });
+        usedModel = model;
         inputTokens = resp.usage.input_tokens;
         outputTokens = resp.usage.output_tokens;
-        const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
+        const raw = replyText(resp.content);
         const p = parseModelJsonArray(raw);
         if (Array.isArray(p)) parsed = p;
         warnIfTruncated('scoreCandidates', resp.stop_reason ?? null, candidates.length, parsed.length);
@@ -590,7 +606,7 @@ ${outreachFirstEmailBlock(sender.outreachOffer)}`;
         const half = Math.ceil(blanks.length / 2);
         for (const group of [blanks.slice(0, half), blanks.slice(half)]) {
             if (group.length === 0) continue;
-            const retry = await scoreCandidates(group.map(({ i }) => candidates[i]), icp, sender, rulesBlock, searchContext, depth + 1);
+            const retry = await scoreCandidates(group.map(({ i }) => candidates[i]), icp, sender, rulesBlock, searchContext, modelChoice, depth + 1);
             inputTokens += retry.inputTokens;
             outputTokens += retry.outputTokens;
             group.forEach(({ i }, k) => { cards[i] = retry.cards[k]; });
@@ -612,7 +628,7 @@ ${outreachFirstEmailBlock(sender.outreachOffer)}`;
         }
     }
 
-    return { cards, inputTokens, outputTokens };
+    return { cards, inputTokens, outputTokens, model: usedModel };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -671,10 +687,12 @@ export interface RescoreResult {
     hooks: string[];
     inputTokens: number;
     outputTokens: number;
+    /** The model that answered, for usage logging. */
+    model: string;
 }
 
 const EMPTY_RESCORE: RescoreResult = {
-    card: null, signals: [], people: [], hooks: [], inputTokens: 0, outputTokens: 0,
+    card: null, signals: [], people: [], hooks: [], inputTokens: 0, outputTokens: 0, model: SCORING_MODEL,
 };
 
 /**
@@ -694,7 +712,8 @@ export async function rescoreWithIntel(
     intel: IntelForScoring,
     icp: Record<string, unknown>,
     sender: SenderIdentity,
-    opts: { domain?: string | null } = {},
+    /** `modelChoice`: the Lead Generator role's model (it rewrites the outreach draft). Null = SCORING_MODEL. */
+    opts: { domain?: string | null; modelChoice?: RoleModelChoice | null } = {},
 ): Promise<RescoreResult> {
     const hasEvidence = intel.evidence.length > 0
         || intel.peopleSources.length > 0
@@ -762,17 +781,20 @@ ${outreachFirstEmailBlock(sender.outreachOffer)}`;
     let inputTokens = 0;
     let outputTokens = 0;
     let parsed: Record<string, unknown> | null = null;
+    let usedModel = SCORING_MODEL;
 
     try {
-        const resp = await anthropic.messages.create({
-            model: SCORING_MODEL,
+        // requestPath: the manual "research this lead" button runs it inside a 26-second request.
+        const { resp, model } = await withRoleModel(opts.modelChoice ?? null, SCORING_MODEL, async (model, thinking) => ({ model, resp: await anthropic.messages.create(adaptForModel({
+            model,
             max_tokens: 2048,
             system,
             messages: [{ role: 'user', content: `Re-read this lead:\n${JSON.stringify(payload)}` }],
-        });
+        }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming) }), { requestPath: true, label: 'rescoreWithIntel' });
+        usedModel = model;
         inputTokens = resp.usage.input_tokens;
         outputTokens = resp.usage.output_tokens;
-        const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
+        const raw = replyText(resp.content);
         parsed = parseModelJson<Record<string, unknown>>(raw);
         // One lead, one card — 2048 clears it comfortably, so this is a tripwire rather than a
         // known fault. It is here because the identical silence cost scoreCandidates 26% of a
@@ -781,9 +803,9 @@ ${outreachFirstEmailBlock(sender.outreachOffer)}`;
         warnIfTruncated('rescoreWithIntel', resp.stop_reason ?? null, 1, parsed ? 1 : 0);
     } catch (err) {
         console.error('[discovery-scoring] rescore failed:', err);
-        return { ...EMPTY_RESCORE, inputTokens, outputTokens };
+        return { ...EMPTY_RESCORE, inputTokens, outputTokens, model: usedModel };
     }
-    if (!parsed || typeof parsed !== 'object') return { ...EMPTY_RESCORE, inputTokens, outputTokens };
+    if (!parsed || typeof parsed !== 'object') return { ...EMPTY_RESCORE, inputTokens, outputTokens, model: usedModel };
 
     // Routed through normaliseLeadCard so a re-score cannot produce a card shape that the original
     // scoring pass could not — including the prospect-type clamp, which is carried forward from the
@@ -838,5 +860,5 @@ ${outreachFirstEmailBlock(sender.outreachOffer)}`;
         .map((h) => h.trim().slice(0, 300))
         .slice(0, 3);
 
-    return { card, signals, people, hooks, inputTokens, outputTokens };
+    return { card, signals, people, hooks, inputTokens, outputTokens, model: usedModel };
 }

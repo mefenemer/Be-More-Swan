@@ -35,6 +35,7 @@ import {
 } from '../../src/lib/discovery-enrich-provider';
 import { classifyCandidate, resolveCandidateDomain } from '../../src/lib/discovery-domain-filter';
 import { logAiUsage } from '../../src/utils/ai-usage';
+import { loadRoleModel } from '../../src/utils/assistant-model';
 import { enqueueScenarioTrigger } from '../../src/utils/scenario-engine';
 import { recordEvent } from '../../src/utils/revenue-ledger';
 import { getBlueprintVersion } from '../../src/utils/blueprint-version';
@@ -628,11 +629,14 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
             const rulesBlock = campaign.aiAssistantId
                 ? await loadAssistantRulesBlock(db, { assistantId: campaign.aiAssistantId, organisationId: job.organisation_id })
                 : null;
-            const scored = await scoreCandidates(toScore, icp, sender, rulesBlock, searchContext);
+            // The Lead Generator role's model (Admin ▸ Assistants ▸ Model & rules): this call writes the
+            // outreach emails. Cached for a minute; null = SCORING_MODEL. Measured 2026-10-25 on a
+            // ten-company page: Opus 5.5 at low thinking 22–23s, Haiku 4.5 24–25s.
+            const scored = await scoreCandidates(toScore, icp, sender, rulesBlock, searchContext, await loadRoleModel(db, 'lead_qualifier'));
             tokensUsed += scored.inputTokens + scored.outputTokens;
             void logAiUsage({
                 workspaceId: job.organisation_id, assistantId: campaign.aiAssistantId,
-                model: 'claude-haiku-4-5-20251001', inputTokens: scored.inputTokens, outputTokens: scored.outputTokens,
+                model: scored.model, inputTokens: scored.inputTokens, outputTokens: scored.outputTokens,
                 sessionId: `discovery:${job.job_id}:scoring`, dataCategories: ['business_context'],
             });
 

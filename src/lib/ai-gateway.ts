@@ -144,11 +144,12 @@ async function callModel(model: string, req: GatewayRequest): Promise<Anthropic.
     };
     // Only a role's chosen model is adapted; PRIMARY/FALLBACK calls go out exactly as before.
     if (model !== req.model) return client.messages.create(params);
-    // A thinking model in background work (no deadline) gets longer than the client's 24s: the
-    // head-to-head measured Opus 5.5 at up to 22.6s on short prompts, and drafts carry ~8k tokens.
+    // A thinking model gets the caller's deadline, or 2 minutes in background work (no deadline),
+    // rather than the client's 24s: the head-to-head measured Opus 5.5 at up to 22.6s on short
+    // prompts, and drafts carry ~8k tokens. Request paths pass a deadline (gatewayRoleModel).
     const thinks = modelOption(model)?.thinking !== 'none';
     return client.messages.create(adaptForModel(params, model, req.thinking) as Anthropic.MessageCreateParamsNonStreaming,
-        thinks && !req.deadlineMs ? { timeout: 120_000 } : undefined);
+        thinks ? { timeout: req.deadlineMs ?? 120_000 } : undefined);
 }
 
 function isRequestRefusal(err: unknown): boolean {

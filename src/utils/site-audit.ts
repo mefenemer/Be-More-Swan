@@ -24,6 +24,7 @@ import { resolveBaseUrl } from './base-url';
 import { sendTemplatedEmail } from './email';
 import { buildTasterResult, tasterToken, unreadableResult, type TasterResult } from './site-taster';
 import { gatewayGenerate } from '../lib/ai-gateway';
+import { gatewayRoleModel } from './assistant-model';
 import { CRAWLERS } from '../lib/robots';
 import { fetchSiteHtml } from './site-fetch';
 import { parseModelJson } from './model-json';
@@ -379,6 +380,7 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
         } catch { /* none */ }
 
         const kind = claimed.kind as AuditInput['kind'];
+        const auditModel = await gatewayRoleModel(db, 'mystery_shopper');
         const outcome = await runAuditCore({
             kind,
             brief: { url: audit.url, icp: audit.icp, conversionGoal: audit.conversionGoal, productsBlock, rulesBlock, rejectedBlock },
@@ -389,11 +391,15 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
             covered,
         }, {
             fetchPage: fetchSitePageLive,
+            // The Mystery Shopper role's model (Admin ▸ Assistants ▸ Model & rules); {} = the gateway's
+            // own, as before. A background function, so the role's full thinking setting applies.
+            // (The public taster below stays on the gateway's model: it is not a hired assistant's work.)
             callModel: async (req) => (await gatewayGenerate({
                 system: req.system,
                 messages: [{ role: 'user', content: req.user }],
                 maxTokens: req.maxTokens,
                 usage: { workspaceId: orgId, assistantId: audit.aiAssistantId, userId: claimed.requestedBy },
+                ...auditModel,
             })).text,
             hasCapacity: () => hasTaskCapacity(db, orgId),
         });
