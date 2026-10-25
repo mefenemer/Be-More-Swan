@@ -73,7 +73,7 @@ test('the Mentor route is structured and its cards are checked before any other 
     const check = o.indexOf('const m = mentorCardFromUiElement(uiElement, session.aiAssistantId);');
     const firstOther = o.indexOf('settingsProposalFromUiElement(uiElement)');
     assert.ok(parsed > 0 && check > parsed && check < firstOther, 'Mentor check must run first');
-    assert.match(o.slice(check, check + 900), /uiElement = null; \/\/ never another route's card shape/);
+    assert.match(o.slice(check, check + 1800), /uiElement = null; \/\/ never another route's card shape/);
 });
 
 test('every card has a renderer and a click handler that calls the screen\'s own endpoint (§14)', () => {

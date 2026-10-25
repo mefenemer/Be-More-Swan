@@ -624,9 +624,16 @@
     // every social module is off and the Review Queue / Data Hub are hidden — its review surface is
     // the fix list on the Website tab, and its history is the checks listed there.
     business_mentor: {
-      // docs/business-mentor-plan.md. Phase 1a: Chat and Results. The set-up checklist, "What I can
-      // see" and Dismissed panels (§14) are added as they are built. It publishes nothing, so no
-      // review queue, data hub, posting schedule or content modules.
+      // docs/business-mentor-plan.md. Phase 1a: Overview (set-up checklist, "What I can see",
+      // Dismissed suggestions — the §14 screen twins of its chat cards), Results and Activity; chat
+      // from the header button. It publishes nothing, so no review queue, data hub, posting schedule
+      // or content modules.
+      // ⚠️ Rename this tab and businessMentorSurfaces() in chat-orchestrator.ts must change too
+      // (tests/mentor-page.test.ts).
+      mentorTab: {
+        label: 'Overview',
+      },
+      defaultMainTab: 'mentor',
       hideReviewQueue: true,
       hideDataHub: true,
       hideGoals: true,

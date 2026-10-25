@@ -102,6 +102,8 @@ import { FUNNEL_STAGES, FUNNEL_STAGE_DESCRIPTIONS, stageOutcomes } from '../../s
 import { asksForACall, callbackOfferElement } from '../../src/utils/callback-request';
 import { buildMentorSnapshot } from '../../src/utils/mentor-snapshot';
 import { mentorCardFromUiElement, mentorCardsPromptBlock, proposalKind, recordMentorProposal } from '../../src/utils/mentor-cards';
+import { gateMentorSuggestion, proposalFields } from '../../src/utils/mentor-proposals';
+import { mentorVisibilityPromptBlock } from '../../src/config/mentor-data-inventory';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -683,15 +685,22 @@ function websiteAssistantSurfaces(): string {
 Everything you can change here, the user can also change there by hand.`;
 }
 
-// ⚠️ Name only screens that exist. As each Phase 1a panel ships (set-up checklist, "What I can see",
-// Dismissed), add it here — docs/business-mentor-plan.md §14.
+// ⚠️ Name only screens that exist (docs/business-mentor-plan.md §14). The Overview tab's three panels
+// are the screen twins of its gap cards, "what can you see?" and Dismiss: tests/mentor-page.test.ts
+// checks each name here against assistant-detail.html and assistants.js.
 function businessMentorSurfaces(): string {
     return `WHERE THINGS LIVE — pages inside this platform, never outside tools:
 - "Business Information" — the business description, who the customers are, tone of voice, Brand Knowledge documents and links, and the "Products & Services" tab.
 - Each assistant's own page — its settings, set-up answers, goals ("Results" tab) and rules. Only mention assistants listed as active below.
 - "My Account" — its "Billing & Subscription" tab (the plan, payments, resubscribing and changing plan), tasks used, notifications and "Your data". Always say "My Account ▸ Billing & Subscription", never "the Billing page".
 - "Help & Support" — Help Centre articles, contacting support, and "Report an Issue".
-Your own page has a "Chat" tab (this conversation) and a "Results" tab. "Quiet mode" is on your profile, under how you work. You can't be paused or archived — Quiet mode is how the user asks you to step back.`;
+Your own page has an "Overview" tab, a "Results" tab and an "Activity" tab; the user chats with you from the "Chat" button at the top. The "Overview" tab holds:
+  - "Set-up checklist" — the same Business Information gaps you see, ticked when done; each opens its field.
+  - "What I can see" — what you can and can never see (the list under WHAT YOU CAN SEE).
+  - "Dismissed suggestions" — suggestions they dismissed, with the reason, each with "Bring back".
+  - "Suggestions this week" — how many of your 3 a week you have used.
+Each suggestion card has "Dismiss…", which asks why: "Not relevant", "Already done", "Disagree" or "Not now" (not now = back in two weeks).
+"Quiet mode" is on your profile, under how you work. You can't be paused or archived — Quiet mode is how the user asks you to step back.`;
 }
 
 function mysteryShopperSurfaces(): string {
@@ -1782,6 +1791,8 @@ ${MENTOR_CRAFT}
 ${MENTOR_HONESTY_RULES}
 
 ${businessMentorSurfaces()}
+
+${mentorVisibilityPromptBlock()}
 
 ${mentorCardsPromptBlock()}
 
@@ -3197,7 +3208,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 uiElement = m;
                 const kind = proposalKind(m);
                 if (kind && 'why' in m) {
-                    await recordMentorProposal(db, { organisationId: orgId, aiAssistantId: session.aiAssistantId, kind, title: m.summary, why: m.why, payload: m, chatSessionId: session.id });
+                    // §3.13: 3 a week, and never one the user dismissed — unless they asked (mentor-proposals.ts).
+                    const gate = await gateMentorSuggestion(db, orgId, { kind, fields: proposalFields(m), asked: m.asked });
+                    if (!gate.ok) {
+                        uiElement = null;
+                        content = `${content}\n\n(${gate.note})`;
+                    } else {
+                        const proposalId = await recordMentorProposal(db, { organisationId: orgId, aiAssistantId: session.aiAssistantId, kind, title: m.summary, why: m.why, payload: m, chatSessionId: session.id });
+                        uiElement = { ...m, proposalId };
+                    }
                 }
             } else {
                 uiElement = null; // never another route's card shape

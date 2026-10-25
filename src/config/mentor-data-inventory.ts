@@ -15,29 +15,30 @@
 // and the help article are written from this file.
 
 export type MentorAccess = 'always' | 'on_request' | 'never';
-export interface MentorInventoryEntry { access: MentorAccess; reason: string }
+/** `shown` = how the Mentor page's "What I can see" panel and the Mentor's prompt say it to the customer. */
+export interface MentorInventoryEntry { access: MentorAccess; reason: string; shown?: string }
 
-function group(access: MentorAccess, reason: string, tables: string[]): Record<string, MentorInventoryEntry> {
-    return Object.fromEntries(tables.map((t) => [t, { access, reason }]));
+function group(access: MentorAccess, reason: string, tables: string[], shown?: string): Record<string, MentorInventoryEntry> {
+    return Object.fromEntries(tables.map((t) => [t, shown ? { access, reason, shown } : { access, reason }]));
 }
 
 export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry>> = {
     // ── always ────────────────────────────────────────────────────────────────────────────────
     ...group('always', 'The business: what it does and sells (Business Information gaps)', [
         'org_products', 'org_offer_profile', 'org_intro_offer',
-    ]),
-    ...group('always', 'The team: every assistant, its state and its set-up answers', ['ai_assistants']),
-    ...group('always', 'Goals and their progress across the team', ['goals']),
-    ...group('always', 'Brand Knowledge, as every chat reads it (business-knowledge.ts)', ['workspace_assets']),
+    ], 'Your business: Business Information, Products & Services and your offers'),
+    ...group('always', 'The team: every assistant, its state and its set-up answers', ['ai_assistants'], 'Your team: each assistant, whether it is active or paused, and its set-up answers'),
+    ...group('always', 'Goals and their progress across the team', ['goals'], 'Goals and how close each one is'),
+    ...group('always', 'Brand Knowledge, as every chat reads it (business-knowledge.ts)', ['workspace_assets'], 'Brand Knowledge documents and links'),
     ...group('always', 'What the team did and has booked, as every chat reads it (team-activity.ts)', [
         'scheduled_posts', 'blog_posts', 'newsletter_issues',
-    ]),
+    ], 'What your assistants did in the last two weeks and what is booked next'),
     ...group('always', 'Plan and task balance, as every chat reads it (chat-plan-snapshot.ts)', [
         'plans', 'usage_counters',
-    ]),
+    ], 'Your plan and the tasks used this month'),
 
     // ── on request ────────────────────────────────────────────────────────────────────────────
-    ...group('on_request', 'Its own suggestions and what the user did with them — read once the proposal cards ship (§3.13)', ['mentor_proposals']),
+    ...group('always', 'Its own suggestions and what the user did with them: the weekly cap and what not to suggest again (§3.13)', ['mentor_proposals'], 'Its own suggestions and the ones you dismissed'),
     ...group('on_request', 'Task detail: what spent tasks this month and bonus tasks', ['task_ledger', 'task_bonus']),
     ...group('on_request', 'Drafting jobs in progress, and the compiled assistant brief', ['content_generation_jobs', 'ai_blueprints']),
     ...group('on_request', 'Results: goal measurements and post performance', ['goal_telemetry', 'post_insights', 'manual_follower_counts']),
@@ -68,20 +69,20 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('never', 'Secrets and connection credentials', [
         'vault_secrets', 'api_keys', 'system_connections', 'workspace_integrations', 'stripe_connect_accounts',
         'newsletter_sending_domains', 'webhook_endpoints',
-    ]),
+    ], 'Passwords, connection keys and other secrets'),
     ...group('never', 'Contacts\' personal details and consent records (it coaches from counts and segments)', [
         'audience_contacts', 'audience_consent_events', 'audience_confirmations', 'audience_custom_fields',
         'audience_form_submissions', 'lead_opt_outs', 'review_opt_outs', 'suppression_list', 'site_enquiries',
-    ]),
+    ], 'Your contacts\' email addresses, phone numbers and consent records'),
     ...group('never', 'Message bodies and transcripts (size and privacy; the owning assistant reads them)', [
         'lead_messages', 'chat_attachments',
-    ]),
+    ], 'The emails and messages your leads send'),
     ...group('never', 'People\'s personal details: who belongs to the workspace, logins, IP addresses', [
         'user_organisations', 'login_events', 'team_reads',
-    ]),
+    ], 'Your team members\' email addresses and logins'),
     ...group('never', 'Billing and payment internals', [
         'payments', 'stripe_disputes', 'site_orders', 'reward_redemptions', 'reward_audits', 'ai_credit_ledger', 'ai_credit_balance', 'trials', 'plan_moves',
-    ]),
+    ], 'Card details and payments'),
     ...group('never', 'What Be More Swan records about the customer, and compliance records', [
         'dpa_acceptances', 'legal_holds', 'beta_endings', 'risk_assessments', 'security_audits', 'agent_anomalies',
         'agent_anomaly_thresholds', 'feature_requests',
@@ -103,3 +104,25 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
         'strategy_proposals', 'visual_brief_options',
     ]),
 };
+
+/**
+ * What the customer is told the Mentor sees and never sees: the "What I can see" panel on its Overview
+ * tab (netlify/functions/mentor.ts) and the same list in its prompt, so chat and page say the same.
+ * `sees` is only what it reads today (`always`); other workspaces and other assistants' chats are never
+ * tables of this workspace, so they are added in words.
+ */
+export function mentorVisibility(): { sees: string[]; never: string[] } {
+    const uniq = (access: MentorAccess) => [...new Set(Object.values(MENTOR_DATA_INVENTORY).filter((e) => e.access === access && e.shown).map((e) => e.shown!))];
+    return {
+        sees: uniq('always'),
+        never: [...uniq('never'), 'Any other workspace, even one you also belong to', 'Your chats with your other assistants'],
+    };
+}
+
+/** The same list for the Mentor's prompt, so "what can you see?" in chat matches the panel. */
+export function mentorVisibilityPromptBlock(): string {
+    const v = mentorVisibility();
+    return `WHAT YOU CAN SEE — if asked, answer from this list only (the same list is on your Overview tab, under "What I can see"):
+Sees: ${v.sees.join('; ')}.
+Never sees: ${v.never.join('; ')}.`;
+}

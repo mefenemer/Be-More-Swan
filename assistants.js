@@ -456,6 +456,7 @@ window.generateAssistantCardHTML = function(assistant) {
     const dReg = window.AssistantDashboardRegistry ? window.AssistantDashboardRegistry.get(assistant.roleKey) : null;
     const quickActions = dReg ? [
         ...(dReg.hideDataHub ? [] : [['🗂️', dReg.hubTab?.label || 'Data Hub', 'datahub']]),
+        ...(dReg.mentorTab ? [['🧭', dReg.mentorTab.label || 'Overview', 'mentor']] : []),
         ...(dReg.briefsTab ? [['🎨', dReg.briefsTab.label || 'Briefs', 'briefs']] : []),
         ...(dReg.siteAuditTab ? [['🔍', dReg.siteAuditTab.label || 'Website', 'website']] : []),
         ...(dReg.siteEditorTab ? [['🌐', dReg.siteEditorTab.label || 'Website', 'sitebuilder']] : []),
@@ -1068,6 +1069,8 @@ window._activateMainTab = function(name) {
     if (name === 'email-campaigns') window.AssistantEmailCampaigns?.activate();
     // Briefs (Brand Designer) renders lazily too — init() already fetched for the badge.
     if (name === 'briefs') window.AssistantBriefs?.activate();
+    // Overview (Business Mentor) — init() already fetched; this only repaints.
+    if (name === 'mentor') window.AssistantMentorOverview?.activate();
     // Website (Mystery Shopper) likewise — init() already fetched for the badge.
     if (name === 'website') window.AssistantSiteAudit?.activate();
     // Website (Website Assistant) — the editor and preview; init() already fetched the site.
@@ -6740,6 +6743,15 @@ function _applyDashboardRegistry(data) {
         // The strip lives outside the tab, so hiding the tab button is not enough to hide it. Every
         // other role must never see a capacity meter for a feature it does not have.
         document.getElementById('campaign-control-strip')?.classList.add('hidden');
+    }
+
+    // Overview tab — Business Mentor only (mentorTab: business_mentor): set-up checklist, "What I can
+    // see" and Dismissed suggestions (assistant-mentor-overview.js → mentor.ts).
+    const mentorTab = cfg.mentorTab;
+    toggle('maintab-btn-mentor', !!mentorTab);
+    if (mentorTab) {
+        setText('mentor-tab-label', mentorTab.label || 'Overview');
+        window.AssistantMentorOverview?.init({ assistantId: data.id, assistantName: data.name });
     }
 
     // Briefs tab — Brand Designer only (briefsTab: brand_designer). init() loads eagerly: the count

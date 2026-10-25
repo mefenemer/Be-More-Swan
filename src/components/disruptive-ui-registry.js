@@ -2221,7 +2221,12 @@
   // ── Business Mentor cards (src/utils/mentor-cards.ts), checked by the server before they get here.
   // Each click goes through chat-session.js to the endpoint the screen itself uses (§14 of
   // docs/business-mentor-plan.md). The "Why?" line is the evidence the suggestion is based on.
-  function mentorCard(esc, { eyebrow, summary, why, bodyHtml, goLabel, eventName, detail, doneText, note }) {
+  // A suggestion (proposalId set — the server recorded it, mentor-proposals.ts) is answered: the click
+  // records "accepted" once it has saved, and "Dismiss…" asks why (§3.13) before recording it. The
+  // user's own requests (quiet mode, support) carry no proposalId and keep a plain "Not now".
+  const MENTOR_DISMISS_REASONS = [['not_relevant', 'Not relevant'], ['already_done', 'Already done'], ['disagree', 'Disagree'], ['not_now', 'Not now']];
+  function mentorCard(esc, { eyebrow, summary, why, bodyHtml, goLabel, eventName, detail, doneText, note, proposalId }) {
+    const suggestion = Number.isInteger(proposalId) && proposalId > 0;
     const el = document.createElement('div');
     el.className = 'bg-white border-2 border-pink-200 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
@@ -2232,14 +2237,44 @@
       ${note ? `<p class="text-xs text-gray-600 mt-2">${note}</p>` : ''}
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-mc-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">${esc(goLabel)}</button>
-        <button type="button" data-mc-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+        ${suggestion
+          ? '<button type="button" data-mc-dismiss aria-expanded="false" class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Dismiss…</button>'
+          : '<button type="button" data-mc-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>'}
       </div>
+      ${suggestion ? `<div class="hidden flex-wrap items-center gap-2 mt-2" data-mc-reasons style="display:none">
+        <span class="text-xs text-gray-500">Why?</span>
+        ${MENTOR_DISMISS_REASONS.map(([k, label]) => `<button type="button" data-mc-reason="${k}" class="btn-secondary px-2.5 py-1 border text-xs font-semibold rounded-full transition disabled:opacity-50">${label}</button>`).join('')}
+      </div>` : ''}
       <p class="hidden mt-2 text-xs font-semibold text-pink-700" data-mc-status></p>`;
     const status = el.querySelector('[data-mc-status]');
+    const reasons = el.querySelector('[data-mc-reasons]');
     const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-pink-700'}`; };
     const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    const decide = (decision, reason, respond) => el.dispatchEvent(new CustomEvent('mentor:decide', {
+      bubbles: true, detail: { proposalId, decision, reason, respond: respond || (() => {}) },
+    }));
     el.addEventListener('click', (e) => {
       if (e.target.closest('[data-mc-cancel]')) { setBusy(true); say('Not changed.'); return; }
+      if (e.target.closest('[data-mc-dismiss]')) {
+        const open = reasons.style.display === 'none';
+        reasons.style.display = open ? 'flex' : 'none';
+        e.target.closest('[data-mc-dismiss]').setAttribute('aria-expanded', open ? 'true' : 'false');
+        return;
+      }
+      const r = e.target.closest('[data-mc-reason]');
+      if (r) {
+        const reason = r.getAttribute('data-mc-reason');
+        setBusy(true);
+        say('Saving…');
+        decide('dismissed', reason, ({ ok, error }) => {
+          if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved.', 'error'); return; }
+          reasons.style.display = 'none';
+          say(reason === 'not_now' ? 'Dismissed for now — your Mentor may raise it again in two weeks. It\'s listed under Dismissed suggestions on its Overview tab.'
+            : reason === 'already_done' ? 'Dismissed — thanks for letting your Mentor know.'
+              : 'Dismissed — your Mentor won\'t suggest this again. Bring it back from its Overview tab any time.');
+        });
+        return;
+      }
       if (!e.target.closest('[data-mc-go]')) return;
       setBusy(true);
       say('Saving…');
@@ -2249,7 +2284,9 @@
           ...detail,
           respond({ ok, error, message }) {
             if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved — nothing was changed.', 'error'); return; }
+            if (reasons) reasons.style.display = 'none';
             say(message || doneText);
+            if (suggestion) decide('accepted');
           },
         },
       }));
@@ -2265,7 +2302,7 @@
     return mentorCard(esc, {
       eyebrow: 'Business Information', summary: ui.summary, why: ui.why,
       bodyHtml: `<ul class="mt-2 space-y-1">${rows}</ul>`,
-      goLabel: 'Save this', eventName: 'mentor:businessProfile', detail: { fields },
+      goLabel: 'Save this', eventName: 'mentor:businessProfile', detail: { fields }, proposalId: ui.proposalId,
       doneText: 'Saved to Business Information — every assistant now uses it.',
       note: 'Only these fields change. You can edit them any time under Business Information.',
     });
@@ -2277,7 +2314,7 @@
     return mentorCard(esc, {
       eyebrow: 'Products & Services', summary: ui.summary, why: ui.why,
       bodyHtml: `<ul class="mt-2 space-y-1">${rows}</ul>`,
-      goLabel: products.length > 1 ? `Add these ${products.length}` : 'Add this', eventName: 'mentor:products', detail: { products },
+      goLabel: products.length > 1 ? `Add these ${products.length}` : 'Add this', eventName: 'mentor:products', detail: { products }, proposalId: ui.proposalId,
       doneText: 'Added — add prices under Business Information ▸ Products & Services.',
       note: 'Prices are left for you to add on the Products &amp; Services tab.',
     });

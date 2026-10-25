@@ -2423,6 +2423,8 @@
         <button type="button" class="aa-tab shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold border-b-2" data-tab="prompt" onclick="aaTab('prompt')">Prompt &amp; versions</button>
         <button type="button" class="aa-tab shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold border-b-2" data-tab="model" onclick="aaTab('model')">Model &amp; rules</button>
         <button type="button" class="aa-tab shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold border-b-2" data-tab="capabilities" onclick="aaTab('capabilities')">Capabilities</button>
+        <!-- Business Mentor only (shown by aaPaintHeader): the §8.2 success measures. -->
+        <button type="button" class="aa-tab hidden shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold border-b-2" data-tab="mentor-activity" onclick="aaTab('mentor-activity')">Activity</button>
       </div>
     </div>
     <div id="aa-body" class="p-6 flex-1"></div>
@@ -7563,6 +7565,10 @@ async function aaOpen(id, tab) {
   try {
     _aa.current = await api(`${AA_API}?id=${id}`);
     _aa.tab = tab || _aa.tab || 'checks';
+    // The Activity tab belongs to the Business Mentor only; another role opens on its checks.
+    const isMentor = _aa.current.assistant.roleKey === 'business_mentor';
+    document.querySelector('.aa-tab[data-tab="mentor-activity"]')?.classList.toggle('hidden', !isMentor);
+    if (_aa.tab === 'mentor-activity' && !isMentor) _aa.tab = 'checks';
     aaPaintHeader();
     aaTab(_aa.tab);
   } catch (e) {
@@ -7602,6 +7608,44 @@ function aaTab(tab) {
   else if (tab === 'prompt') aaRenderPrompt();
   else if (tab === 'model') aaRenderModel();
   else if (tab === 'capabilities') aaRenderCapabilities();
+  else if (tab === 'mentor-activity') aaRenderMentorActivity();
+}
+
+// ── Business Mentor ▸ Activity ────────────────────────────────────────────────────────────────
+// The four success measures (docs/business-mentor-plan.md §8.2), then each workspace. From
+// admin-assistants.ts ?mentorActivity=1 (src/utils/mentor-activity.ts). Read case by case: no targets.
+const AA_MENTOR_REASONS = { not_relevant: 'Not relevant', already_done: 'Already done', disagree: 'Disagree', not_now: 'Not now' };
+async function aaRenderMentorActivity() {
+  const body = document.getElementById('aa-body');
+  body.innerHTML = '<p class="text-sm text-gray-500">Loading…</p>';
+  let d;
+  try { d = await api(`${AA_API}?mentorActivity=1`); } catch (e) { body.innerHTML = `<p class="text-sm text-red-600">${_aaEsc(e.message)}</p>`; return; }
+  if (d.needsSetup) { body.innerHTML = '<p class="text-sm text-amber-700">Apply db/z-business-mentor.sql on this database first.</p>'; return; }
+  const m = d.measures;
+  const kpi = (q, n, sub) => `<div class="border border-gray-200 rounded-xl p-3 min-w-0"><p class="text-xs text-gray-500">${q}</p><p class="text-2xl font-extrabold text-gray-900 mt-1">${n}</p><p class="text-xs text-gray-500 mt-0.5">${sub}</p></div>`;
+  const date = (iso) => iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '<span class="text-gray-400">Not yet</span>';
+  const top = (r) => { const e = Object.entries(r || {}).sort((a, b) => b[1] - a[1])[0]; return e ? ` (${_aaEsc(AA_MENTOR_REASONS[e[0]] || e[0])})` : ''; };
+  const rows = d.workspaces.map((w) => `<tr class="border-t border-gray-100">
+      <td class="py-1.5 pr-3">${_aaEsc(w.workspace)} <span class="text-xs text-gray-400">#${w.organisationId}</span></td>
+      <td class="py-1.5 pr-3 whitespace-nowrap">${date(w.metAt)}</td>
+      <td class="py-1.5 pr-3 text-right">${w.shown}</td><td class="py-1.5 pr-3 text-right">${w.accepted}</td>
+      <td class="py-1.5 pr-3 whitespace-nowrap">${w.dismissed}${top(w.reasons)}</td>
+      <td class="py-1.5 pr-3 text-right">${w.gapsClosed}</td><td class="py-1.5 pr-3 text-right">${w.supportRaised}</td>
+      <td class="py-1.5 text-center">${w.retained30 === null ? '<span class="text-gray-400">—</span>' : w.retained30 ? '✅' : '❌'}</td></tr>`).join('');
+  body.innerHTML = `
+    <p class="text-xs text-gray-500 mb-3">Success measures (plan §8.2), counted from the Phase 1a launch. With a handful of workspaces, read them case by case — no targets yet.</p>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+      ${kpi('Is the advice any good?', m.acceptance.rate == null ? '—' : `${Math.round(m.acceptance.rate * 100)}%`, `${m.acceptance.accepted} of ${m.acceptance.shown} suggestions accepted`)}
+      ${kpi('Is it getting people set up?', m.gapsClosed, 'Business Information gaps closed through its cards')}
+      ${kpi('Does it make a difference?', '—', 'Goals moved after a suggestion: arrives with the track record (Phase 3)')}
+      ${kpi('Does it keep people?', m.retention.eligible ? `${m.retention.retained} / ${m.retention.eligible}` : '—', m.retention.eligible ? 'logged in 30+ days after meeting the Mentor' : 'nobody met it 30+ days ago yet')}
+    </div>
+    <h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">By workspace</h3>
+    ${d.workspaces.length ? `<div class="overflow-x-auto"><table class="w-full text-sm" style="min-width:640px"><thead class="text-xs text-gray-500 text-left"><tr>
+      <th class="py-1 pr-3">Workspace</th><th class="py-1 pr-3">Met the Mentor</th><th class="py-1 pr-3 text-right">Shown</th><th class="py-1 pr-3 text-right">Accepted</th>
+      <th class="py-1 pr-3">Dismissed (top reason)</th><th class="py-1 pr-3 text-right">Gaps closed</th><th class="py-1 pr-3 text-right">Support raised</th><th class="py-1 text-center">Still active at 30 days</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>` : '<p class="text-sm text-gray-500">No workspace has a Business Mentor yet. Whitelist workspaces on the business_mentor feature flag.</p>'}
+    <p class="text-xs text-gray-400 mt-3">"Met the Mentor" is its first chat. "Shown" counts every suggestion card, including ones the user asked for. "Support raised" counts tickets and issue reports sent from its chat.</p>`;
 }
 
 function aaRenderChecks() {

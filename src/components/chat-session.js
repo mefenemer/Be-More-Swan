@@ -1499,6 +1499,22 @@
       } catch (err) { respond({ ok: false, error: err.message }); }
     }
 
+    // A suggestion answered (§3.13): accepted after its click saved, or dismissed with a reason →
+    // mentor.ts, the same action the Overview tab's "Bring back" uses. Repaints an open Overview.
+    async function onMentorDecide(e) {
+      if (mentorAlreadyHandled(e)) return;
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      try {
+        await mentorJson('/.netlify/functions/mentor', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'decide', proposalId: d.proposalId, decision: d.decision, reason: d.reason }),
+        });
+        respond({ ok: true });
+        document.dispatchEvent(new CustomEvent('mentor:changed', { detail: { proposalId: d.proposalId, decision: d.decision } }));
+      } catch (err) { respond({ ok: false, error: err.message }); }
+    }
+
     // "Save this" on an outreach_offer card (Lead Generator) → lead-generation.ts set_outreach_offer, the
     // same action as the Outreach tab's offer strip (src/config/outreach-offer.ts).
     function onOutreachOffer(e) {
@@ -1916,6 +1932,7 @@
     container.addEventListener('mentor:products', onMentorProducts);
     container.addEventListener('mentor:quietMode', onMentorQuietMode);
     container.addEventListener('mentor:support', onMentorSupport);
+    container.addEventListener('mentor:decide', onMentorDecide);
     container.addEventListener('lead:outreachOffer', onOutreachOffer);
     container.addEventListener('cta:change', onCallToAction);
     container.addEventListener('site:reviewDecisions', onReviewDecisions);
@@ -1994,6 +2011,7 @@
         container.removeEventListener('mentor:products', onMentorProducts);
         container.removeEventListener('mentor:quietMode', onMentorQuietMode);
         container.removeEventListener('mentor:support', onMentorSupport);
+        container.removeEventListener('mentor:decide', onMentorDecide);
         container.removeEventListener('lead:outreachOffer', onOutreachOffer);
         container.removeEventListener('cta:change', onCallToAction);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);

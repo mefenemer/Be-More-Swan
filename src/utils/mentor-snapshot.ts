@@ -14,6 +14,7 @@ import { aiAssistants, goals, masterAssistants, orgIntroOffer, orgOfferProfile, 
 import { MENTOR_ROLE_KEY } from './mentor-provision';
 import { SEAT_OCCUPYING_STATUSES, takesASeat } from './assistant-capacity';
 import { resolveAssistantLimit } from './release-paused-limit';
+import { loadProposalState, renderProposalState } from './mentor-proposals';
 
 type Db = any;
 
@@ -84,17 +85,53 @@ export function startingPoint(d: MentorSnapshotData): 'established' | 'new' {
     return hasDescription && (hasTeam || d.productCount > 0) ? 'established' : 'new';
 }
 
+/** One line of the Mentor page's "Set-up checklist" (§14), and the gap the prompt names when it isn't done. */
+export interface ChecklistItem {
+    key: 'description' | 'products' | 'offer' | 'website' | 'industry' | 'intro_offer';
+    label: string;
+    done: boolean;
+    optional: boolean;
+    /** Why it matters, shown under an unticked item. */
+    why: string;
+    /** The Business Information tab that holds the field (window._bizinfoInitialTab). */
+    tab: 'profile' | 'products';
+    /** The prompt's wording for the gap (BUSINESS INFORMATION GAPS). */
+    gap: string;
+}
+
+/**
+ * Pure: the set-up checklist, most important first. The prompt's gaps and the page's checklist are
+ * both read from this, so the Mentor never raises a gap the page shows as done (or the reverse).
+ */
+export function setupChecklist(d: MentorSnapshotData): ChecklistItem[] {
+    const priced = d.products.some((p) => p.hasPrice);
+    return [
+        { key: 'description', label: 'Business description', done: !!d.business.description?.trim(), optional: false, tab: 'profile',
+            why: 'Every assistant writes from it.',
+            gap: 'Business description is empty (Business Information) — every assistant writes from it.' },
+        { key: 'products', label: 'Products & Services', done: d.productCount > 0 && priced, optional: false, tab: 'products',
+            why: d.productCount === 0 ? 'None of your assistants can mention what you sell or its price until this is filled in.' : 'Nothing has a price yet, so no assistant can quote one.',
+            gap: d.productCount === 0
+                ? 'Products & Services is empty (Business Information ▸ Products & Services) — no assistant can mention what they sell or its price.'
+                : 'No product or service has a price yet (Business Information ▸ Products & Services).' },
+        { key: 'offer', label: 'What your business offers', done: !!d.offerKinds?.length, optional: false, tab: 'products',
+            why: 'Decides which details your assistants ask for and use.',
+            gap: '"What does your business offer?" hasn\'t been answered (Business Information).' },
+        { key: 'website', label: 'Website', done: !!d.business.website?.trim(), optional: false, tab: 'profile',
+            why: 'Assistants link to it and read it for your details.',
+            gap: 'No website address (Business Information).' },
+        { key: 'industry', label: 'Industry', done: !!d.business.industry?.trim(), optional: false, tab: 'profile',
+            why: 'Helps your assistants write for your kind of business.',
+            gap: 'No industry set (Business Information).' },
+        { key: 'intro_offer', label: 'Free trial or intro offer', done: d.introOfferAnswered, optional: true, tab: 'products',
+            why: 'Optional. Used in outreach and posts when you have one.',
+            gap: 'The free trial / intro offer question hasn\'t been answered (optional).' },
+    ];
+}
+
 /** Pure: the Business Information gaps, most important first. */
 export function businessGaps(d: MentorSnapshotData): string[] {
-    const gaps: string[] = [];
-    if (!d.business.description?.trim()) gaps.push('Business description is empty (Business Information) — every assistant writes from it.');
-    if (d.productCount === 0) gaps.push('Products & Services is empty (Business Information ▸ Products & Services) — no assistant can mention what they sell or its price.');
-    else if (d.products.every((p) => !p.hasPrice)) gaps.push('No product or service has a price yet (Business Information ▸ Products & Services).');
-    if (!d.offerKinds?.length) gaps.push('"What does your business offer?" hasn\'t been answered (Business Information).');
-    if (!d.business.website?.trim()) gaps.push('No website address (Business Information).');
-    if (!d.business.industry?.trim()) gaps.push('No industry set (Business Information).');
-    if (!d.introOfferAnswered) gaps.push('The free trial / intro offer question hasn\'t been answered (optional).');
-    return gaps;
+    return setupChecklist(d).filter((i) => !i.done).map((i) => i.gap);
 }
 
 /** Pure: the <workspace> block. */
@@ -138,6 +175,12 @@ export function renderMentorSnapshot(d: MentorSnapshotData): string {
 
 /** Reads the workspace (org-scoped throughout) and renders the block. Throws on a DB error; the caller catches. */
 export async function buildMentorSnapshot(db: Db, orgId: number, userId: number): Promise<string> {
+    const [data, proposals] = await Promise.all([loadMentorSnapshotData(db, orgId, userId), loadProposalState(db, orgId)]);
+    return renderMentorSnapshot(data) + '\n' + renderProposalState(proposals);
+}
+
+/** The workspace as the Mentor sees it (org-scoped throughout). Also feeds the Mentor page's checklist (mentor.ts). */
+export async function loadMentorSnapshotData(db: Db, orgId: number, userId: number): Promise<MentorSnapshotData> {
     const [org] = await db.select({
         description: organisations.businessDescription, industry: organisations.industry, website: organisations.websiteUrl,
     }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
@@ -193,7 +236,7 @@ export async function buildMentorSnapshot(db: Db, orgId: number, userId: number)
         }
     }
 
-    return renderMentorSnapshot({
+    return {
         plan: { status: (planRow?.status as 'active' | 'past_due' | undefined) ?? null, freeSlots },
         business: { description: org?.description ?? null, industry: org?.industry ?? null, website: org?.website ?? null },
         products: products.slice(0, MAX_PRODUCTS).map((p) => ({ name: p.name, hasPrice: !!p.price?.trim() })),
@@ -209,5 +252,5 @@ export async function buildMentorSnapshot(db: Db, orgId: number, userId: number)
             latest: g.latest === null || g.latest === undefined ? null : Number(g.latest),
             target: Number(g.target), targetDate: new Date(g.targetDate), status: g.status || 'pending',
         })),
-    });
+    };
 }

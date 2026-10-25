@@ -691,6 +691,14 @@
              Without it an empty amber pill shows until the first count lands. -->
         <span id="campaigns-live-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
+      <!-- Overview — Business Mentor only (mentorTab: business_mentor). Set-up checklist, "What I can see",
+           Dismissed suggestions and this week's count: the screen twins of its chat cards
+           (docs/business-mentor-plan.md §14). assistant-mentor-overview.js → mentor.ts.
+           ⚠️ Rename a panel and businessMentorSurfaces() in chat-orchestrator.ts must change too
+           (tests/mentor-page.test.ts). -->
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-mentor" id="maintab-btn-mentor" data-maintab="mentor" class="main-tab-btn hidden">
+        <span id="mentor-tab-label">Overview</span>
+      </button>
       <!-- Briefs — Brand Designer only (briefsTab: brand_designer). One card per brief, its options as
            a grid to approve or turn down. Sits first: it is the only thing this role does.
            assistant-briefs.js → brand-briefs.ts. Design: docs/brand-designer-plan.md §4 -->
@@ -1050,6 +1058,10 @@
 
   <!-- Briefs — Brand Designer only. Rendered lazily by assistant-briefs.js on first activation;
        init() fetches eagerly because the count of briefs needing a decision drives the tab badge. -->
+  <!-- Overview — Business Mentor only. Rendered by assistant-mentor-overview.js. -->
+  <div id="maintab-mentor" role="tabpanel" aria-labelledby="maintab-btn-mentor" class="main-tab-content hidden">
+    <div id="mentor-overview-host"></div>
+  </div>
   <div id="maintab-briefs" role="tabpanel" aria-labelledby="maintab-btn-briefs" class="main-tab-content hidden">
     <div id="briefs-host"></div>
   </div><!-- /maintab-briefs -->

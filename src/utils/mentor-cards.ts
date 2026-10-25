@@ -26,8 +26,8 @@ type ProfileField = keyof typeof PROFILE_FIELDS;
 const PRODUCT_KINDS = ['product', 'service'] as const;
 
 export type MentorCard =
-    | { type: 'mentor_business_profile'; summary: string; why: string; fields: Partial<Record<ProfileField, string>> }
-    | { type: 'mentor_products'; summary: string; why: string; products: Array<{ name: string; kind: string; description: string | null }> }
+    | { type: 'mentor_business_profile'; summary: string; why: string; asked: boolean; fields: Partial<Record<ProfileField, string>> }
+    | { type: 'mentor_products'; summary: string; why: string; asked: boolean; products: Array<{ name: string; kind: string; description: string | null }> }
     | { type: 'mentor_quiet_mode'; summary: string; on: boolean; assistantId: number }
     | { type: 'mentor_support_request'; summary: string; destination: 'issue' | 'support'; subject: string; description: string };
 
@@ -47,6 +47,8 @@ export function mentorCardFromUiElement(ui: unknown, assistantId: number): Mento
     if (!(MENTOR_CARD_TYPES as readonly string[]).includes(String(u.type))) return null;
     const summary = text(u.summary, 300) ?? '';
     const why = text(u.why, 400);
+    // The user asked for this change directly: not counted towards the weekly cap, never held back (§3.13).
+    const asked = u.asked === true;
 
     switch (u.type) {
         case 'mentor_business_profile': {
@@ -59,7 +61,7 @@ export function mentorCardFromUiElement(ui: unknown, assistantId: number): Mento
             }
             if (!Object.keys(fields).length) return { error: 'There was nothing to fill in.' };
             if (fields.websiteUrl && !/^https?:\/\/[^\s]+\.[^\s]+$/i.test(fields.websiteUrl)) return { error: 'That website address doesn\'t look right.' };
-            return { type: 'mentor_business_profile', summary, why, fields };
+            return { type: 'mentor_business_profile', summary, why, asked, fields };
         }
         case 'mentor_products': {
             if (!why) return { error: 'A suggestion needs to say why.' };
@@ -72,7 +74,7 @@ export function mentorCardFromUiElement(ui: unknown, assistantId: number): Mento
                 return [{ name, kind, description: text(o.description, 600) }];
             });
             if (!products.length) return { error: 'There were no products or services to add.' };
-            return { type: 'mentor_products', summary, why, products };
+            return { type: 'mentor_products', summary, why, asked, products };
         }
         case 'mentor_quiet_mode':
             if (typeof u.on !== 'boolean') return { error: 'Quiet mode needs to be on or off.' };
@@ -94,14 +96,17 @@ export function proposalKind(card: MentorCard): string | null {
     return null; // quiet mode and support are the user's own requests, not suggestions
 }
 
-/** Remember a suggestion the Mentor showed (feeds the cap, dismiss reasons and Admin ▸ Mentor activity). Never throws. */
+/**
+ * Remember a suggestion the Mentor showed (feeds the cap, dismiss reasons and Admin ▸ Mentor activity).
+ * Returns its id, which the card carries so Dismiss and a saved click can record the answer. Never throws.
+ */
 export async function recordMentorProposal(
     db: any,
     row: { organisationId: number; aiAssistantId: number; kind: string; title: string; why: string; payload: unknown; chatSessionId: number | null },
-): Promise<void> {
+): Promise<number | null> {
     try {
         const { mentorProposals } = await import('../../db/schema');
-        await db.insert(mentorProposals).values({
+        const [saved] = await db.insert(mentorProposals).values({
             organisationId: row.organisationId,
             aiAssistantId: row.aiAssistantId,
             kind: row.kind,
@@ -109,9 +114,11 @@ export async function recordMentorProposal(
             evidence: [{ text: row.why }],
             payload: row.payload ?? {},
             chatSessionId: row.chatSessionId,
-        });
+        }).returning({ id: mentorProposals.id });
+        return saved?.id ?? null;
     } catch (err) {
         console.warn('[mentor-cards] could not record the proposal (non-blocking):', (err as Error)?.message);
+        return null;
     }
 }
 
@@ -120,16 +127,18 @@ export function mentorCardsPromptBlock(): string {
     return `CARDS — the only things you can change, and only by putting ONE card in "uiElement" for the user to approve (nothing changes until they click):
 
 1. Fill in Business Information. Only for a gap listed under BUSINESS INFORMATION GAPS, drafted from what the user told you or what is already in the workspace — never invented. Include only the fields that change:
-{"type":"mentor_business_profile","summary":"<one sentence>","why":"<the gap it fills and why it matters, from the figures above>","fields":{"businessDescription":"...","targetAudience":"...","industry":"...","websiteUrl":"https://..."}}
+{"type":"mentor_business_profile","summary":"<one sentence>","why":"<the gap it fills and why it matters, from the figures above>","asked":false,"fields":{"businessDescription":"...","targetAudience":"...","industry":"...","websiteUrl":"https://..."}}
 
 2. Add to Products & Services. Only products or services the user named or that already appear in the workspace. NEVER invent a price — leave prices for the user to add on the page:
-{"type":"mentor_products","summary":"<one sentence>","why":"<why, from the gaps above>","products":[{"name":"...","kind":"product"|"service","description":"<optional>"}]}
+{"type":"mentor_products","summary":"<one sentence>","why":"<why, from the gaps above>","asked":false,"products":[{"name":"...","kind":"product"|"service","description":"<optional>"}]}
 
 3. Quiet mode — when they ask you to stop making suggestions (on) or to start again (off):
 {"type":"mentor_quiet_mode","summary":"<one sentence>","on":true}
 
 4. Ask Be More Swan for help, or report something broken — only when the user asks for it or describes a problem with Be More Swan itself. "issue" = something isn't working; "support" = a question, billing, or help. Write it in their words; never include passwords, card details or other people's personal details:
 {"type":"mentor_support_request","summary":"<one sentence>","destination":"issue"|"support","subject":"<short>","description":"<what happened, what they expected, and where>"}
+
+Cards 1 and 2 are suggestions. Set "asked": true ONLY when the user's latest message asked for exactly this change ("add my website", "fill in my products"); a suggestion you volunteer is "asked": false. Volunteered suggestions are limited to 3 a week and the user can dismiss them (see SUGGESTIONS THIS WEEK): never volunteer one they dismissed, and when the week's 3 are used, mention the gap in words instead. If they want a dismissed one back, they can ask you for it or use "Bring back" on your Overview tab.
 
 At most one card per reply, and at most one suggestion card (1 or 2) unless they asked for more. Never say a card has been applied — the user decides.`;
 }
