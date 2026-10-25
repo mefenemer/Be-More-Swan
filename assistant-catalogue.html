@@ -183,6 +183,10 @@
   // roleKey → { id, name } for the roles already on this workspace's team (get-assistants). A role is
   // hired once per workspace: hire-assistant / onboarding hand back or refuse a second instance.
   let _catHired = {};
+  // roleKey → reason, from the Business Mentor's "who to hire next" (mentor.ts ?only=recommended →
+  // src/utils/mentor-hire.ts) — the same list as "Recommended next" on the Mentor's Overview tab and
+  // its chat card. Empty when the Mentor recommends nothing or isn't reachable.
+  let _catRecommended = {};
 
   function _esc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -267,13 +271,16 @@
     const detailAttrs = ` data-rolekey="${_esc(a.roleKey)}" role="button" tabindex="0" aria-haspopup="dialog" style="cursor:pointer"`;
     const detailHint = `<span class="text-sm font-semibold text-emerald-700">View Details</span>`;
 
+    const why = _catRecommended[a.roleKey];
     return `
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col hover:shadow-md transition-shadow"${detailAttrs}>
+      <div class="bg-white rounded-2xl border ${why ? 'border-pink-300' : 'border-gray-200'} shadow-sm overflow-hidden flex flex-col hover:shadow-md transition-shadow relative"${detailAttrs}${why ? ' data-recommended="1"' : ''}>
+        ${why ? '<div class="absolute top-4 right-4 bg-pink-50 text-pink-700 px-3 py-1 rounded-full text-xs font-bold border border-pink-200">Recommended</div>' : ''}
         <div class="p-6 flex-grow">
           <div class="w-12 h-12 rounded-xl ${iconCls} flex items-center justify-center mb-4">${icon}</div>
-          <h2 class="text-xl font-bold text-gray-900 mb-1">${_esc(a.name)}</h2>
+          <h2 class="text-xl font-bold text-gray-900 mb-1${why ? ' pr-28' : ''}">${_esc(a.name)}</h2>
           <p class="text-sm text-gray-500 font-medium mb-4">${_esc(a.category)}</p>
           <p class="text-sm text-gray-600 leading-relaxed">${_esc(a.description || '')}</p>
+          ${why ? `<p class="mt-3 text-xs text-pink-800 bg-pink-50 rounded-lg px-2.5 py-1.5"><span class="font-bold">Your Mentor:</span> ${_esc(why)}</p>` : ''}
         </div>
         <div class="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center gap-3">
           ${detailHint}
@@ -328,10 +335,11 @@
   // ── Load data ──────────────────────────────────────────────────────────────
   async function _loadCatalog() {
     try {
-      const [catRes, milestoneRes, teamRes] = await Promise.all([
+      const [catRes, milestoneRes, teamRes, recRes] = await Promise.all([
         fetch('/.netlify/functions/master-assistants'),
         fetch('/.netlify/functions/milestone-progress'),
         fetch('/.netlify/functions/get-assistants').catch(() => null),
+        fetch('/.netlify/functions/mentor?only=recommended', { credentials: 'same-origin' }).catch(() => null),
       ]);
       // Roles already on the team. Archived ones don't count (they can be restored instead), nor do
       // abandoned set-ups (pending rows hire-assistant / onboarding replace on the next hire).
@@ -342,6 +350,11 @@
           if (!t.roleKey || t.lifecycleStatus === 'archived' || ['pending', 'pending_payment'].includes(t.status)) return;
           if (!_catHired[t.roleKey]) _catHired[t.roleKey] = { id: t.id, name: t.name || 'your assistant' };
         });
+      }
+      _catRecommended = {};
+      if (recRes && recRes.ok) {
+        const { recommended } = await recRes.json().catch(() => ({}));
+        ((recommended && recommended.picks) || []).forEach(p => { if (p && p.roleKey) _catRecommended[p.roleKey] = p.reason || ''; });
       }
       if (!catRes.ok) throw new Error();
       const { assistants } = await catRes.json();

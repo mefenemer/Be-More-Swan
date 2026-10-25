@@ -79,7 +79,9 @@ check('check-capacity hands the client the FEATURE tier and offers beta no "upgr
     const CAP = read('netlify/functions/check-capacity.ts');
     assert.match(CAP, /tierKey: featureTierKey\(plan\?\.tierKey \?\? null\)/,
         'the setup wizards rank plans by this key — raw "beta" ranked below the entry plan and locked features');
-    assert.match(CAP, /plan\?\.tierKey !== BETA_TIER_KEY/, 'a £0 plan would otherwise be offered the entry plan as an upgrade');
+    // The next plan up is one query shared with the Business Mentor (src/utils/next-plan.ts).
+    assert.match(CAP, /loadNextPlan\(db, \{ monthlyPriceGbp: plan\.monthlyPriceGbp, tierKey: plan\.tierKey \}/);
+    assert.match(read('src/utils/next-plan.ts'), /current\.tierKey === BETA_TIER_KEY\) return null;/, 'a £0 plan would otherwise be offered the entry plan as an upgrade');
 });
 
 if (process.exitCode) console.error('\nbeta testers: FAILED');

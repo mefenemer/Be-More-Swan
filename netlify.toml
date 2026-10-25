@@ -1158,6 +1158,11 @@ node_bundler = "esbuild"
 [functions.chat-orchestrator]
   timeout = 26
 
+# The Business Mentor's page (mentor.ts): "Get feedback" is one model call on the Mentor's model
+# (Opus 5.5 by default), which can outrun the 10s default like a chat turn does.
+[functions.mentor]
+  timeout = 26
+
 # The Website Assistant's API. "Add your own words" makes one model call (a short placement plan —
 # the words themselves are never generated) and may read a PDF or Word file first: seconds, but
 # more than the 10s default allows on a slow reply.

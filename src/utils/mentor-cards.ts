@@ -9,9 +9,22 @@
 //   mentor_products         → org-products.ts POST, one per product (Business Information ▸ Products & Services)
 //   mentor_quiet_mode       → update-assistant-context.ts PUT, read-merge-write (its "Quiet mode" set-up answer)
 //   mentor_support_request  → support-tickets.ts POST, or issue-reports.ts POST for something broken
-// Every gap card carries a "why" — the evidence it's based on (§3.13). A gap card without one is dropped.
+//   mentor_business_stage   → update-assistant-context.ts PUT patchContext { businessStage } (its set-up answer, §3.1)
+//   mentor_hire_recommendation → nothing is written: 1–3 Live roles from mentor-hire.ts, each linking to
+//                             the catalogue (§3.5). The server fills the picks; the model only asks for it.
+//   mentor_review_all       → the open suggestions together, each with its own tick (§3.13); the browser
+//                             loads them from mentor.ts and applies each through its own card's action
+//   setup_field_proposal    → src/utils/chat-setup-field.ts (any route; the Mentor may target any active assistant)
+// The clicks are window.MentorApply (src/components/mentor-apply.js), shared by chat, the Overview tab and
+// Inbox "Needs you". Every gap card carries a "why" — the evidence it's based on (§3.13). A gap card
+// without one is dropped.
 
-export const MENTOR_CARD_TYPES = ['mentor_business_profile', 'mentor_products', 'mentor_quiet_mode', 'mentor_support_request'] as const;
+import { mentorSetupFieldPromptLine } from './chat-setup-field';
+
+export const MENTOR_CARD_TYPES = [
+    'mentor_business_profile', 'mentor_products', 'mentor_quiet_mode', 'mentor_support_request',
+    'mentor_business_stage', 'mentor_hire_recommendation', 'mentor_review_all',
+] as const;
 export type MentorCardType = typeof MENTOR_CARD_TYPES[number];
 
 const PROFILE_FIELDS = {
@@ -29,7 +42,10 @@ export type MentorCard =
     | { type: 'mentor_business_profile'; summary: string; why: string; asked: boolean; fields: Partial<Record<ProfileField, string>> }
     | { type: 'mentor_products'; summary: string; why: string; asked: boolean; products: Array<{ name: string; kind: string; description: string | null }> }
     | { type: 'mentor_quiet_mode'; summary: string; on: boolean; assistantId: number }
-    | { type: 'mentor_support_request'; summary: string; destination: 'issue' | 'support'; subject: string; description: string };
+    | { type: 'mentor_support_request'; summary: string; destination: 'issue' | 'support'; subject: string; description: string }
+    | { type: 'mentor_business_stage'; summary: string; assistantId: number }
+    | { type: 'mentor_hire_recommendation'; summary: string; asked: boolean }
+    | { type: 'mentor_review_all'; summary: string };
 
 const text = (v: unknown, max: number): string | null => {
     if (typeof v !== 'string') return null;
@@ -85,6 +101,12 @@ export function mentorCardFromUiElement(ui: unknown, assistantId: number): Mento
             if (!subject || !description) return { error: 'A message to Be More Swan needs a subject and a description.' };
             return { type: 'mentor_support_request', summary, destination: u.destination === 'issue' ? 'issue' : 'support', subject, description };
         }
+        case 'mentor_business_stage':
+            return { type: 'mentor_business_stage', summary, assistantId };
+        case 'mentor_hire_recommendation':
+            return { type: 'mentor_hire_recommendation', summary, asked };
+        case 'mentor_review_all':
+            return { type: 'mentor_review_all', summary };
     }
     return null;
 }
@@ -93,7 +115,8 @@ export function mentorCardFromUiElement(ui: unknown, assistantId: number): Mento
 export function proposalKind(card: MentorCard): string | null {
     if (card.type === 'mentor_business_profile') return 'business_info_gap';
     if (card.type === 'mentor_products') return 'products_gap';
-    return null; // quiet mode and support are the user's own requests, not suggestions
+    if (card.type === 'mentor_hire_recommendation') return 'hire_recommendation';
+    return null; // quiet mode, support, the opening question and Review all are not suggestions
 }
 
 /**
@@ -102,7 +125,7 @@ export function proposalKind(card: MentorCard): string | null {
  */
 export async function recordMentorProposal(
     db: any,
-    row: { organisationId: number; aiAssistantId: number; kind: string; title: string; why: string; payload: unknown; chatSessionId: number | null },
+    row: { organisationId: number; aiAssistantId: number; kind: string; title: string; why: string; payload: unknown; chatSessionId: number | null; targetAssistantId?: number | null },
 ): Promise<number | null> {
     try {
         const { mentorProposals } = await import('../../db/schema');
@@ -114,6 +137,7 @@ export async function recordMentorProposal(
             evidence: [{ text: row.why }],
             payload: row.payload ?? {},
             chatSessionId: row.chatSessionId,
+            targetAssistantId: row.targetAssistantId ?? null,
         }).returning({ id: mentorProposals.id });
         return saved?.id ?? null;
     } catch (err) {
@@ -138,7 +162,18 @@ export function mentorCardsPromptBlock(): string {
 4. Ask Be More Swan for help, or report something broken — only when the user asks for it or describes a problem with Be More Swan itself. "issue" = something isn't working; "support" = a question, billing, or help. Write it in their words; never include passwords, card details or other people's personal details:
 {"type":"mentor_support_request","summary":"<one sentence>","destination":"issue"|"support","subject":"<short>","description":"<what happened, what they expected, and where>"}
 
-Cards 1 and 2 are suggestions. Set "asked": true ONLY when the user's latest message asked for exactly this change ("add my website", "fill in my products"); a suggestion you volunteer is "asked": false. Volunteered suggestions are limited to 3 a week and the user can dismiss them (see SUGGESTIONS THIS WEEK): never volunteer one they dismissed, and when the week's 3 are used, mention the gap in words instead. If they want a dismissed one back, they can ask you for it or use "Bring back" on your Overview tab.
+Set "asked": true ONLY when the user's latest message asked for exactly this change ("add my website", "fill in my products"); a suggestion you volunteer is "asked": false. Volunteered suggestions are limited to 3 a week and the user can dismiss them (see SUGGESTIONS THIS WEEK): never volunteer one they dismissed, and when the week's 3 are used, mention the gap in words instead. If they want a dismissed one back, they can ask you for it or use "Bring back" on your Overview tab.
 
-At most one card per reply, and at most one suggestion card (1 or 2) unless they asked for more. Never say a card has been applied — the user decides.`;
+5. The opening question — established business or new idea? Only when you don't know yet (see above), as part of your introduction. It shows both answers as buttons; their click saves it to your set-up, and they can change it later on your profile:
+{"type":"mentor_business_stage","summary":"<one short sentence asking it>"}
+
+6. ${mentorSetupFieldPromptLine()}
+
+7. Who to hire next — when they ask what to hire, or (as a suggestion) when WHO TO HIRE NEXT shows a clear gap. The card lists the assistants under WHO TO HIRE NEXT with their reasons and whether the plan has room; you write only the summary. It hires nothing:
+{"type":"mentor_hire_recommendation","summary":"<one sentence>","asked":true|false}
+
+8. Review all — when they want to see or approve several of your suggestions at once. It lists every suggestion still waiting, each with its own tick (none ticked), and applies only the ones they tick:
+{"type":"mentor_review_all","summary":"<one sentence>"}
+
+Cards 1, 2, 6 and 7 are suggestions when you volunteer them ("asked": false) and count towards the 3 a week. At most one card per reply, and at most one suggestion card unless they asked for more. Never say a card has been applied — the user decides.`;
 }

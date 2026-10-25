@@ -81,11 +81,11 @@ test('every `always` table is really read by the snapshot or a block every chat 
     assert.deepStrictEqual(unread, [], 'Marked always but no reader found — mark on_request, or read it');
 });
 
-test('the snapshot reads only tables marked `always` (or the org and catalogue rows)', () => {
+test('the snapshot reads only tables marked `always` (or the org, assistant catalogue and plan catalogue rows)', () => {
     const src = read('src/utils/mentor-snapshot.ts');
     const imported = (src.match(/import \{([^}]+)\} from '..\/..\/db\/schema'/)?.[1] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
     const byVar = new Map([...schema.matchAll(/export const (\w+) = pgTable\(\s*"([a-z_0-9]+)"/g)].map((m) => [m[1], m[2]]));
-    const notAllowed = imported.map((v) => byVar.get(v)!).filter((t) => t && !['organisations', 'master_assistants'].includes(t) && MENTOR_DATA_INVENTORY[t]?.access !== 'always');
+    const notAllowed = imported.map((v) => byVar.get(v)!).filter((t) => t && !['organisations', 'master_assistants', 'master_plans'].includes(t) && MENTOR_DATA_INVENTORY[t]?.access !== 'always');
     assert.deepStrictEqual(notAllowed, []);
 });
 
@@ -149,7 +149,7 @@ test('the Mentor chat route reads the snapshot every turn', () => {
     const src = read('netlify/functions/chat-orchestrator.ts');
     const route = src.slice(src.indexOf('    business_mentor: {'), src.indexOf('    // Tier 1, Batch 1 — Lead Generator.'));
     assert.ok(route.length > 0 && route.includes('usesMentorSnapshot: true') && route.includes('rc.mentorSnapshot'));
-    assert.match(src, /route\.usesMentorSnapshot\s*\n?\s*\? await buildMentorSnapshot\(db, orgId, userId\)/);
+    assert.match(src, /route\.usesMentorSnapshot\s*\n?\s*\? await buildMentorSnapshotParts\(db, orgId, userId\)/);
 });
 
 test('provisioning is flag-gated, one per workspace, and never runs under impersonation', () => {

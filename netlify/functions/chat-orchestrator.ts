@@ -18,7 +18,7 @@ import { postTeamChatReply, teamNoteForChatTurn, teamThreadPromptBlock } from '.
 import { SPECIAL_CATEGORY_RULE } from '../../src/constants/special-category-rule';
 import { SITE_COPY_CRAFT } from '../../src/constants/site-copy-craft';
 import { CAMPAIGN_PLANNING_CRAFT } from '../../src/constants/campaign-craft';
-import { MENTOR_CRAFT, MENTOR_HONESTY_RULES } from '../../src/constants/mentor-craft';
+import { MENTOR_CRAFT, MENTOR_FEEDBACK_CRAFT, MENTOR_HONESTY_RULES } from '../../src/constants/mentor-craft';
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
@@ -100,7 +100,9 @@ import { enforcePromptModeration } from '../../src/utils/moderation';
 import { BRIEF_PURPOSES, BRIEF_ASPECT_RATIOS, REJECT_REASONS, SOURCE_SPECS } from '../../src/config/visual-brief-vocab';
 import { FUNNEL_STAGES, FUNNEL_STAGE_DESCRIPTIONS, stageOutcomes } from '../../src/config/campaign-vocab';
 import { asksForACall, callbackOfferElement } from '../../src/utils/callback-request';
-import { buildMentorSnapshot } from '../../src/utils/mentor-snapshot';
+import { buildMentorSnapshotParts, type MentorSnapshotData } from '../../src/utils/mentor-snapshot';
+import { recommendHires } from '../../src/utils/mentor-hire';
+import { assistantSetupFieldBlock, resolveSetupFieldProposal, setupFieldRequestFromUiElement, type SetupFieldCard } from '../../src/utils/chat-setup-field';
 import { mentorCardFromUiElement, mentorCardsPromptBlock, proposalKind, recordMentorProposal } from '../../src/utils/mentor-cards';
 import { gateMentorSuggestion, proposalFields } from '../../src/utils/mentor-proposals';
 import { mentorVisibilityPromptBlock } from '../../src/config/mentor-data-inventory';
@@ -699,8 +701,13 @@ Your own page has an "Overview" tab, a "Results" tab and an "Activity" tab; the 
   - "What I can see" — what you can and can never see (the list under WHAT YOU CAN SEE).
   - "Dismissed suggestions" — suggestions they dismissed, with the reason, each with "Bring back".
   - "Suggestions this week" — how many of your 3 a week you have used.
+  - "Suggestions waiting" — your suggestions they haven't answered yet, with "Review all" (shown only when there are some).
+  - "Recommended next" — who you'd hire next and why (the same list as WHO TO HIRE NEXT), each with "See this assistant".
+  - "Get feedback" — they paste a draft (or "Open a text file") and press "Get feedback" to get your critique on the page.
+"Review all" opens every waiting suggestion together, each with its own tick (none ticked); "Apply … ticked" applies only those. It is also at the top of "Notifications" ▸ "Needs you" when suggestions are waiting.
+The assistant catalogue ("Hire a New Assistant") marks the roles you recommend with a "Recommended" badge.
 Each suggestion card has "Dismiss…", which asks why: "Not relevant", "Already done", "Disagree" or "Not now" (not now = back in two weeks).
-"Quiet mode" is on your profile, under how you work. You can't be paused or archived — Quiet mode is how the user asks you to step back.`;
+"Quiet mode" is on your profile, under how you work, with "Which describes you best?" (established business or starting something new). You can't be paused or archived — Quiet mode is how the user asks you to step back.`;
 }
 
 function mysteryShopperSurfaces(): string {
@@ -1777,7 +1784,8 @@ or
                 ? 'They told you they are starting something new: begin from the idea itself (who buys, why, how to test it cheaply) before anything else.'
                 : stage === 'existing'
                     ? 'They told you this is an established business: start from what is already set up here, and never re-ask anything shown above.'
-                    : 'You don\'t yet know whether this is an established business or a new idea. If it isn\'t clear from the details above, ask once.';
+                    // §3.1: a new workspace's introduction asks it with the question card, which saves the answer.
+                    : 'You don\'t yet know whether this is an established business or a new idea. If it isn\'t clear from the details above, ask once: introduce yourself in a sentence or two and put the mentor_business_stage card (card 5) in "uiElement" so they can answer with one click. If their message already answers it, offer the same card so the answer is saved.';
             return [
                 sharedContextBlock(rc),
                 `You are ${rc.assistantName}, this business's Business Mentor on Be More Swan: their guide to the platform and a business coach who knows their workspace. You are included with their plan.
@@ -1787,6 +1795,8 @@ ${quietLine ? `\n${quietLine}\n` : ''}
 ${rc.mentorSnapshot ?? 'The workspace overview could not be read this turn. Do not guess gaps, figures, goals or which assistants they have: say you can\'t see the workspace right now and answer from the details above only.'}
 
 ${MENTOR_CRAFT}
+
+${MENTOR_FEEDBACK_CRAFT}
 
 ${MENTOR_HONESTY_RULES}
 
@@ -2890,12 +2900,13 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
     // Per turn: a gap filled or an assistant paused a moment ago must be visible to the next message.
     // Never throws.
-    const mentorSnapshot = route.usesMentorSnapshot
-        ? await buildMentorSnapshot(db, orgId, userId).catch((err) => {
+    const mentorParts: { text: string; data: MentorSnapshotData } | null = route.usesMentorSnapshot
+        ? await buildMentorSnapshotParts(db, orgId, userId).catch((err) => {
             console.error('[chat-orchestrator] mentor snapshot failed:', err);
             return null;
         })
         : null;
+    const mentorSnapshot = mentorParts?.text ?? null;
 
     // Per turn, like the leads snapshot: something approved on the Posts / Blogs / Emails tab a
     // moment ago must already be in "Scheduled" when the user asks what is coming up. Never throws.
@@ -2986,6 +2997,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // (src/utils/chat-call-to-action.ts). Null for every other role.
     const ctaCardBlock = offersOwnCards ? await buildCtaChatBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey) : null;
     const scheduleBlock = offersOwnCards ? schedulePromptBlock(assistantRow.roleKey, assistantRow.onboardingContext) : null;
+    // Its own set-up answers and the card that changes one (src/utils/chat-setup-field.ts, §3.4 of
+    // docs/business-mentor-plan.md). The Mentor gets every active assistant's in its <workspace> block.
+    const setupFieldBlock = offersOwnCards ? assistantSetupFieldBlock(assistantRow.roleKey, session.aiAssistantId, assistantRow.onboardingContext) : null;
     // The "Use for this assistant" switches, for the roles whose Connections card shows them
     // (src/utils/chat-platforms.ts). Null for every other role; never throws.
     const platformsBlock = offersOwnCards ? await buildPlatformsBlock(db, orgId, userId, session.aiAssistantId) : null;
@@ -2997,7 +3011,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // The signed-in user's own My Account settings, read-only (src/utils/chat-my-account.ts). Every
     // route, every role; null when the read fails.
     const myAccountBlock = await buildMyAccountBlock(db, userId, session.aiAssistantId, assistantRow.roleKey);
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock].filter(Boolean).join('\n\n');
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock].filter(Boolean).join('\n\n');
 
     const system = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -3199,23 +3213,55 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         let content = parsed.content;
         // The Business Mentor's own cards (src/utils/mentor-cards.ts): checked first, drawn by
         // disruptive-ui-registry.js, applied by the user's click through the screens' own endpoints.
-        if (route === ROUTES.business_mentor) {
+        // A change to one set-up answer (src/utils/chat-setup-field.ts): the Mentor may target any
+        // ACTIVE assistant in the workspace; every other structured route only itself. Rebuilt from the row.
+        const setupReq = route !== defaultRoute ? setupFieldRequestFromUiElement(uiElement) : null;
+        let setupFieldCard: SetupFieldCard | null = null;
+        if (setupReq) {
+            const isMentor = route === ROUTES.business_mentor;
+            const card = await resolveSetupFieldProposal(db, orgId, session.aiAssistantId, setupReq, { allowOthers: isMentor });
+            if ('error' in card) {
+                uiElement = null;
+                content = `${content}\n\n(I didn’t include a card for that — ${card.error.charAt(0).toLowerCase()}${card.error.slice(1)} You can change it on the assistant’s own page instead.)`;
+            } else if (isMentor) {
+                // §3.13: a volunteered one is a suggestion — 3 a week, never one they dismissed.
+                const gate = await gateMentorSuggestion(db, orgId, { kind: 'setup_field', fields: [`${card.assistantId}:${card.key}`], asked: card.asked });
+                if (!gate.ok) { uiElement = null; content = `${content}\n\n(${gate.note})`; }
+                else {
+                    const proposalId = await recordMentorProposal(db, { organisationId: orgId, aiAssistantId: session.aiAssistantId, kind: 'setup_field', title: card.summary, why: card.why, payload: { ...card, fields: { [`${card.assistantId}:${card.key}`]: card.value } }, chatSessionId: session.id, targetAssistantId: card.assistantId });
+                    uiElement = { ...card, proposalId };
+                }
+            } else {
+                uiElement = card;
+                setupFieldCard = card;
+            }
+        } else if (route === ROUTES.business_mentor) {
             const m = mentorCardFromUiElement(uiElement, session.aiAssistantId);
             if (m && 'error' in m) {
                 uiElement = null;
                 content = `${content}\n\n(I didn’t include a card for that — ${m.error.charAt(0).toLowerCase()}${m.error.slice(1)} You can make the change on the page instead.)`;
+            } else if (m && m.type === 'mentor_hire_recommendation' && !mentorParts) {
+                uiElement = null;
+                content = `${content}\n\n(I couldn’t read your workspace just now, so I’ve left out the hiring list — ask me again in a moment.)`;
+            } else if (m && m.type === 'mentor_hire_recommendation' && !recommendHires(mentorParts!.data).picks.length) {
+                uiElement = null;
+                content = `${content}\n\n(There’s no assistant I’d recommend hiring right now, so there’s no list to show.)`;
             } else if (m) {
-                uiElement = m;
+                // The hire card's picks, reasons and plan room come from mentor-hire.ts — the same list as
+                // the Overview tab's "Recommended next" — never from the model.
+                const rec = m.type === 'mentor_hire_recommendation' ? recommendHires(mentorParts!.data) : null;
+                const filled = rec ? { ...m, why: rec.why, picks: rec.picks, capacity: rec.capacity } : m;
+                uiElement = filled;
                 const kind = proposalKind(m);
-                if (kind && 'why' in m) {
+                if (kind && 'why' in filled) {
                     // §3.13: 3 a week, and never one the user dismissed — unless they asked (mentor-proposals.ts).
-                    const gate = await gateMentorSuggestion(db, orgId, { kind, fields: proposalFields(m), asked: m.asked });
+                    const gate = await gateMentorSuggestion(db, orgId, { kind, fields: proposalFields(m), asked: 'asked' in m ? m.asked : false });
                     if (!gate.ok) {
                         uiElement = null;
                         content = `${content}\n\n(${gate.note})`;
                     } else {
-                        const proposalId = await recordMentorProposal(db, { organisationId: orgId, aiAssistantId: session.aiAssistantId, kind, title: m.summary, why: m.why, payload: m, chatSessionId: session.id });
-                        uiElement = { ...m, proposalId };
+                        const proposalId = await recordMentorProposal(db, { organisationId: orgId, aiAssistantId: session.aiAssistantId, kind, title: m.summary, why: filled.why, payload: filled, chatSessionId: session.id });
+                        uiElement = { ...filled, proposalId };
                     }
                 }
             } else {
@@ -3336,7 +3382,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             else if (r) { ctaCard = r; uiElement = r; }
         }
         // One card for the "keep it" checks below: a change to the assistant's own profile.
-        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | OutreachOfferCard | CtaCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard ?? outreachOfferCard ?? ctaCard;
+        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | OutreachOfferCard | CtaCard | SetupFieldCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard ?? outreachOfferCard ?? ctaCard ?? setupFieldCard;
         // The Blog Writer's twin (src/utils/chat-blog-action.ts): same checks, built from blog_posts
         // rows; a time in the user's words is worked out here so the card shows the exact instant.
         let blogAction: BlogActionCard | null = null;

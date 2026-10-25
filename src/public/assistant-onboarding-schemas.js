@@ -21,10 +21,16 @@
  *   const schema = window.AssistantOnboardingSchemas['lead_qualifier'];
  *   if (schema) AssistantOnboardingShell.mount({ container, assistantId, configurationSchema: schema });
  */
-(function () {
+(function (root, factory) {
+  // Also read on the server (src/utils/setup-field.ts validates a set-up answer card against it), the
+  // same UMD shape as brand-contrast.js: module.exports there, window.AssistantOnboardingSchemas here.
+  var schemas = factory();
+  if (typeof module === 'object' && module.exports) module.exports = schemas;
+  else root.AssistantOnboardingSchemas = schemas;
+}(typeof window !== 'undefined' ? window : this, function () {
   'use strict';
 
-  window.AssistantOnboardingSchemas = {
+  return {
     // Content Engine — Blog Writer. Topics + brand voice, then the publishing cadence that drives
     // assistant-scheduled "Approve & Schedule" (posting_frequency is read from onboarding_context by
     // src/config/posting-cadence.ts via schedule-blog's approve path; draft_horizon_days is promoted
@@ -850,4 +856,4 @@
       },
     ],
   };
-})();
+}));

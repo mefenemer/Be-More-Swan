@@ -10,11 +10,15 @@
 // Missing is not zero (§12.3): a paused or unhired assistant is described as such, never as idle.
 
 import { and, count, eq, inArray, ne, or, sql } from 'drizzle-orm';
-import { aiAssistants, goals, masterAssistants, orgIntroOffer, orgOfferProfile, orgProducts, organisations, plans } from '../../db/schema';
+import { aiAssistants, goals, masterAssistants, masterPlans, orgIntroOffer, orgOfferProfile, orgProducts, organisations, plans } from '../../db/schema';
 import { MENTOR_ROLE_KEY } from './mentor-provision';
 import { SEAT_OCCUPYING_STATUSES, takesASeat } from './assistant-capacity';
 import { resolveAssistantLimit } from './release-paused-limit';
 import { loadProposalState, renderProposalState } from './mentor-proposals';
+import { recommendHires, renderHireRecommendation } from './mentor-hire';
+import { renderSetupFields } from './setup-field';
+import { statusOf, type AssistantStatus } from './assistant-go-live';
+import { loadNextPlan } from './next-plan';
 
 type Db = any;
 
@@ -27,10 +31,13 @@ export interface MentorSnapshotData {
     productCount: number;
     offerKinds: string[] | null;          // null = the question hasn't been answered
     introOfferAnswered: boolean;
-    team: Array<{ id: number; name: string; role: string; state: TeamState }>;
+    /** roleKey and setup (its set-up answers) are read for set-up cards and hiring advice. */
+    team: Array<{ id: number; name: string; role: string; state: TeamState; roleKey?: string | null; setup?: Record<string, unknown> | null }>;
+    /** The assistant catalogue with each role's status (only `live` ones are recommended, mentor-hire.ts). */
+    catalogue?: Array<{ roleKey: string; name: string; description: string | null; status: AssistantStatus }>;
     goals: Array<{ assistant: string; label: string; latest: number | null; target: number; targetDate: Date; status: string }>;
     /** The live plan, to cross-check pause reasons: `status` null = no active or past-due plan; `freeSlots` null = unlimited. */
-    plan: { status: 'active' | 'past_due' | null; freeSlots: number | null };
+    plan: { status: 'active' | 'past_due' | null; freeSlots: number | null; nextPlanName?: string | null };
 }
 
 export type TeamState = 'active' | 'paused_by_user' | 'paused_task_cap' | 'paused_payment' | 'paused_plan_limit' | 'setting_up' | 'archived';
@@ -162,6 +169,17 @@ export function renderMentorSnapshot(d: MentorSnapshotData): string {
         if (!active.length) lines.push('- None of them is active right now: no team suggestions until one is.');
     }
 
+    if (active.length) {
+        lines.push('', 'SET-UP ANSWERS OF ACTIVE ASSISTANTS (what each was told at set-up; you may propose changing one with a card):');
+        for (const t of active) {
+            const fields = t.roleKey ? renderSetupFields(t.roleKey, t.setup ?? null) : [];
+            lines.push(`- ${t.name} (${t.role}, assistantId ${t.id})${fields.length ? ':' : ': no set-up answers you can change from chat.'}`);
+            lines.push(...fields);
+        }
+    }
+
+    lines.push('', ...renderHireRecommendation(recommendHires(d)));
+
     lines.push('', 'GOALS:');
     if (!d.goals.length) lines.push('- No goals are set yet.');
     else lines.push(...d.goals.map((g) => {
@@ -175,8 +193,13 @@ export function renderMentorSnapshot(d: MentorSnapshotData): string {
 
 /** Reads the workspace (org-scoped throughout) and renders the block. Throws on a DB error; the caller catches. */
 export async function buildMentorSnapshot(db: Db, orgId: number, userId: number): Promise<string> {
+    return (await buildMentorSnapshotParts(db, orgId, userId)).text;
+}
+
+/** The block and the data it was rendered from (the chat route fills the hire card from the same data). */
+export async function buildMentorSnapshotParts(db: Db, orgId: number, userId: number): Promise<{ text: string; data: MentorSnapshotData }> {
     const [data, proposals] = await Promise.all([loadMentorSnapshotData(db, orgId, userId), loadProposalState(db, orgId)]);
-    return renderMentorSnapshot(data) + '\n' + renderProposalState(proposals);
+    return { text: renderMentorSnapshot(data) + '\n' + renderProposalState(proposals), data };
 }
 
 /** The workspace as the Mentor sees it (org-scoped throughout). Also feeds the Mentor page's checklist (mentor.ts). */
@@ -203,7 +226,8 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
         .where(eq(orgIntroOffer.organisationId, orgId)).limit(1), [] as Array<{ one: number }>);
 
     const team = await db.select({
-        id: aiAssistants.id, name: aiAssistants.name, role: masterAssistants.name,
+        id: aiAssistants.id, name: aiAssistants.name, role: masterAssistants.name, roleKey: masterAssistants.roleKey,
+        setup: aiAssistants.onboardingContext,
         lifecycleStatus: aiAssistants.lifecycleStatus, provisioningStatus: aiAssistants.provisioningStatus,
     }).from(aiAssistants)
         .leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
@@ -222,7 +246,8 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
         .limit(MAX_GOALS);
 
     // The live plan, the same resolution the hire gate and the downgrade use (release-paused-limit.ts).
-    const [planRow] = await db.select({ status: plans.status }).from(plans)
+    const [planRow] = await db.select({ status: plans.status, tierKey: masterPlans.tierKey, monthlyPriceGbp: masterPlans.monthlyPriceGbp }).from(plans)
+        .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
         .where(and(or(eq(plans.userId, userId), eq(plans.organisationId, orgId)), inArray(plans.status, ['active', 'past_due'])))
         .orderBy(plans.status).limit(1);
     let freeSlots: number | null = null;
@@ -235,9 +260,23 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
             freeSlots = Math.max(0, limit - Number(used));
         }
     }
+    // Full plan: the next one up names the upgrade (the same query as check-capacity.ts).
+    const nextPlan = planRow && freeSlots === 0
+        ? await loadNextPlan(db, { monthlyPriceGbp: planRow.monthlyPriceGbp, tierKey: planRow.tierKey }).catch(() => null)
+        : null;
+
+    // The catalogue, for "who to hire next" (only Live roles are recommended — mentor-hire.ts).
+    const catalogue = await db.select({
+        roleKey: masterAssistants.roleKey, name: masterAssistants.name, description: masterAssistants.description,
+        isActive: masterAssistants.isActive, comingSoon: masterAssistants.comingSoon, lifecycleState: masterAssistants.lifecycleState,
+    }).from(masterAssistants).where(eq(masterAssistants.isActive, true));
 
     return {
-        plan: { status: (planRow?.status as 'active' | 'past_due' | undefined) ?? null, freeSlots },
+        plan: { status: (planRow?.status as 'active' | 'past_due' | undefined) ?? null, freeSlots, nextPlanName: nextPlan?.name ?? null },
+        catalogue: catalogue.filter((c: any) => c.roleKey).map((c: any) => ({
+            roleKey: c.roleKey, name: c.name, description: c.description ?? null,
+            status: statusOf({ isActive: !!c.isActive, comingSoon: !!c.comingSoon, lifecycleState: c.lifecycleState ?? '' }),
+        })),
         business: { description: org?.description ?? null, industry: org?.industry ?? null, website: org?.website ?? null },
         products: products.slice(0, MAX_PRODUCTS).map((p) => ({ name: p.name, hasPrice: !!p.price?.trim() })),
         productCount: products.length,
@@ -246,6 +285,7 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
         team: team.map((t: any) => ({
             id: t.id, name: t.name || t.role || 'Assistant', role: t.role || 'Assistant',
             state: teamState(t.lifecycleStatus, t.provisioningStatus),
+            roleKey: t.roleKey ?? null, setup: (t.setup as Record<string, unknown> | null) ?? null,
         })),
         goals: goalRows.map((g: any) => ({
             assistant: g.assistant || 'An assistant', label: g.title || g.metricKey,

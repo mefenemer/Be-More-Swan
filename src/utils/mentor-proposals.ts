@@ -175,3 +175,45 @@ export async function bringBackProposal(db: Db, orgId: number, id: number): Prom
         .returning({ id: mentorProposals.id });
     return rows.length > 0;
 }
+
+/** The kinds "Review all" can apply: each has a card with a click that writes (mentor-apply.js applyCard). */
+export const REVIEWABLE_KINDS = ['business_info_gap', 'products_gap', 'setup_field'] as const;
+/** A suggestion older than this is left out of "Review all": the workspace has likely moved on. */
+export const OPEN_MAX_AGE_DAYS = 30;
+
+export interface OpenProposal { id: number; kind: string; title: string; why: string | null; card: unknown; shownAt: Date | null }
+
+/** Pure: the newest of each kind + fields — the same gap suggested in two chats is one row to review. */
+export function dedupeOpen(rows: OpenProposal[]): OpenProposal[] {
+    const seen = new Set<string>();
+    return rows.filter((r) => {
+        const sig = `${r.kind}|${proposalFields(r.card).join(',')}|${r.kind === 'products_gap' ? JSON.stringify((r.card as any)?.products?.map((p: any) => p?.name) ?? []) : ''}`;
+        if (seen.has(sig)) return false;
+        seen.add(sig);
+        return true;
+    });
+}
+
+/** Suggestions still waiting for an answer ("Review all", §3.13), newest first. Never throws. */
+export async function loadOpenProposals(db: Db, orgId: number): Promise<OpenProposal[]> {
+    try {
+        const rows = await db.select({
+            id: mentorProposals.id, kind: mentorProposals.kind, title: mentorProposals.title, evidence: mentorProposals.evidence,
+            payload: mentorProposals.payload, shownAt: mentorProposals.shownAt,
+        }).from(mentorProposals)
+            .where(and(
+                eq(mentorProposals.organisationId, orgId), eq(mentorProposals.status, 'shown'),
+                inArray(mentorProposals.kind, [...REVIEWABLE_KINDS]),
+                sql`${mentorProposals.shownAt} >= now() - make_interval(days => ${OPEN_MAX_AGE_DAYS})`,
+            ))
+            .orderBy(desc(mentorProposals.shownAt)).limit(40);
+        return dedupeOpen(rows.map((r: any) => ({
+            id: r.id, kind: r.kind, title: r.title,
+            why: Array.isArray(r.evidence) && r.evidence[0]?.text ? String(r.evidence[0].text) : null,
+            card: r.payload ?? null, shownAt: r.shownAt ? new Date(r.shownAt) : null,
+        }))).slice(0, 20);
+    } catch (err) {
+        if (!missingTable(err)) console.warn('[mentor-proposals] could not read open suggestions (non-blocking):', (err as Error)?.message);
+        return [];
+    }
+}

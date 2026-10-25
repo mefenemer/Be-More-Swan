@@ -1409,110 +1409,58 @@
       return false;
     }
 
-    async function mentorJson(url, init) {
-      const res = await fetch(url, { credentials: 'same-origin', ...init });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `That didn’t work (HTTP ${res.status}).`);
-      return data;
+    // The writes themselves are window.MentorApply (src/components/mentor-apply.js), shared with
+    // "Review all" on the Mentor's Overview tab and in Inbox "Needs you", so each card calls its
+    // screen's own endpoint the same way wherever it is applied.
+    function mentorRun(e, work) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      if (!window.MentorApply) { respond({ ok: false, error: 'This page needs a refresh before that can be saved.' }); return; }
+      Promise.resolve().then(() => work(window.MentorApply, d))
+        .then(() => respond({ ok: true }), (err) => respond({ ok: false, error: err.message }));
     }
 
-    // Business Information: organisation-profile.ts POST rewrites every field it is sent, so read the
-    // current profile NOW and change only the card's fields.
+    // Business Information → organisation-profile.ts, read-merge-write of only the card's fields.
     async function onMentorBusinessProfile(e) {
       if (mentorAlreadyHandled(e)) return;
-      const d = e.detail || {};
-      const respond = typeof d.respond === 'function' ? d.respond : () => {};
-      try {
-        const current = await mentorJson('/.netlify/functions/organisation-profile');
-        const profile = current.profile || {};
-        // Only the profile's own fields: a body carrying allowDomainJoin is treated as the domain-join
-        // toggle and returns before the profile is saved.
-        const KEEP = ['businessName', 'industry', 'businessDescription', 'websiteUrl', 'outreachPostalAddress', 'socialLinks', 'socialHandles', 'targetAudience'];
-        const body = Object.fromEntries(KEEP.map((k) => [k, profile[k] ?? null]));
-        Object.assign(body, d.fields || {});
-        await mentorJson('/.netlify/functions/organisation-profile', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-        });
-        respond({ ok: true });
-        document.dispatchEvent(new CustomEvent('bizinfo:profileChanged', { detail: d.fields || {} }));
-      } catch (err) { respond({ ok: false, error: err.message }); }
+      mentorRun(e, (A, d) => A.businessProfile(d.fields || {}));
     }
 
-    // Products & Services: org-products.ts POST, one per product, exactly as the tab's "Add" does.
+    // Products & Services → org-products.ts POST, one per product.
     async function onMentorProducts(e) {
       if (mentorAlreadyHandled(e)) return;
-      const d = e.detail || {};
-      const respond = typeof d.respond === 'function' ? d.respond : () => {};
-      const list = Array.isArray(d.products) ? d.products : [];
-      let added = 0;
-      try {
-        for (const p of list) {
-          await mentorJson('/.netlify/functions/org-products', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ kind: p.kind === 'service' ? 'service' : 'product', name: p.name, description: p.description || null }),
-          });
-          added++;
-        }
-        respond({ ok: true });
-        document.dispatchEvent(new CustomEvent('bizinfo:productsChanged'));
-      } catch (err) {
-        respond({ ok: false, error: added ? `${added} added, then: ${err.message}` : err.message });
-      }
+      mentorRun(e, (A, d) => A.products(d.products));
     }
 
-    // Quiet mode: its set-up answer, read-merge-write like the schedule card (the context is replaced wholesale).
+    // Quiet mode → update-assistant-context.ts, only that set-up answer (patchContext).
     async function onMentorQuietMode(e) {
       if (mentorAlreadyHandled(e)) return;
-      const d = e.detail || {};
-      const respond = typeof d.respond === 'function' ? d.respond : () => {};
-      const id = Number(d.assistantId);
-      try {
-        const got = await mentorJson(`/.netlify/functions/get-assistant-context?id=${id}`);
-        if (!got || typeof got.context !== 'object') throw new Error('Your Mentor’s settings couldn’t be read just now — please try again.');
-        await mentorJson('/.netlify/functions/update-assistant-context', {
-          method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ assistantId: id, newContext: { ...(got.context || {}), quietMode: d.on ? 'on' : 'off' } }),
-        });
-        respond({ ok: true });
-        document.dispatchEvent(new CustomEvent('assistant:settingsChanged', { detail: { assistantId: id, setting: 'quietMode', value: d.on ? 'on' : 'off' } }));
-      } catch (err) { respond({ ok: false, error: err.message }); }
+      mentorRun(e, (A, d) => A.setupAnswer(d.assistantId, 'quietMode', d.on ? 'on' : 'off'));
+    }
+
+    // "Established business or new idea?" → its businessStage set-up answer (patchContext).
+    async function onMentorBusinessStage(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.setupAnswer(d.assistantId, 'businessStage', d.stage === 'new_idea' ? 'new_idea' : 'existing'));
+    }
+
+    // One set-up answer on an active assistant (setup_field_proposal, any route) → patchContext.
+    async function onSetupFieldApply(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.setupAnswer(d.assistantId, d.key, d.value));
     }
 
     // Help: a support ticket (support-tickets.ts) or, for something broken, Report an Issue (issue-reports.ts).
     async function onMentorSupport(e) {
       if (mentorAlreadyHandled(e)) return;
-      const d = e.detail || {};
-      const respond = typeof d.respond === 'function' ? d.respond : () => {};
-      try {
-        if (d.destination === 'issue') {
-          await mentorJson('/.netlify/functions/issue-reports', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ description: `${d.subject}\n\n${d.description}`, sourceLocation: 'Business Mentor chat', sourceUrl: window.location.href }),
-          });
-        } else {
-          await mentorJson('/.netlify/functions/support-tickets', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ subject: d.subject, category: 'Business Mentor', description: d.description }),
-          });
-        }
-        respond({ ok: true });
-      } catch (err) { respond({ ok: false, error: err.message }); }
+      mentorRun(e, (A, d) => A.support(d));
     }
 
     // A suggestion answered (§3.13): accepted after its click saved, or dismissed with a reason →
     // mentor.ts, the same action the Overview tab's "Bring back" uses. Repaints an open Overview.
     async function onMentorDecide(e) {
       if (mentorAlreadyHandled(e)) return;
-      const d = e.detail || {};
-      const respond = typeof d.respond === 'function' ? d.respond : () => {};
-      try {
-        await mentorJson('/.netlify/functions/mentor', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'decide', proposalId: d.proposalId, decision: d.decision, reason: d.reason }),
-        });
-        respond({ ok: true });
-        document.dispatchEvent(new CustomEvent('mentor:changed', { detail: { proposalId: d.proposalId, decision: d.decision } }));
-      } catch (err) { respond({ ok: false, error: err.message }); }
+      mentorRun(e, (A, d) => A.decide(d.proposalId, d.decision, d.reason));
     }
 
     // "Save this" on an outreach_offer card (Lead Generator) → lead-generation.ts set_outreach_offer, the
@@ -1933,6 +1881,8 @@
     container.addEventListener('mentor:quietMode', onMentorQuietMode);
     container.addEventListener('mentor:support', onMentorSupport);
     container.addEventListener('mentor:decide', onMentorDecide);
+    container.addEventListener('mentor:businessStage', onMentorBusinessStage);
+    container.addEventListener('setupField:apply', onSetupFieldApply);
     container.addEventListener('lead:outreachOffer', onOutreachOffer);
     container.addEventListener('cta:change', onCallToAction);
     container.addEventListener('site:reviewDecisions', onReviewDecisions);
@@ -2012,6 +1962,8 @@
         container.removeEventListener('mentor:quietMode', onMentorQuietMode);
         container.removeEventListener('mentor:support', onMentorSupport);
         container.removeEventListener('mentor:decide', onMentorDecide);
+        container.removeEventListener('mentor:businessStage', onMentorBusinessStage);
+        container.removeEventListener('setupField:apply', onSetupFieldApply);
         container.removeEventListener('lead:outreachOffer', onOutreachOffer);
         container.removeEventListener('cta:change', onCallToAction);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);

@@ -73,36 +73,43 @@ test('the Mentor route is structured and its cards are checked before any other 
     const check = o.indexOf('const m = mentorCardFromUiElement(uiElement, session.aiAssistantId);');
     const firstOther = o.indexOf('settingsProposalFromUiElement(uiElement)');
     assert.ok(parsed > 0 && check > parsed && check < firstOther, 'Mentor check must run first');
-    assert.match(o.slice(check, check + 1800), /uiElement = null; \/\/ never another route's card shape/);
+    assert.match(o.slice(check, check + 4000), /uiElement = null; \/\/ never another route's card shape/);
 });
 
 test('every card has a renderer and a click handler that calls the screen\'s own endpoint (§14)', () => {
     const reg = read('src/components/disruptive-ui-registry.js');
     const sess = read('src/components/chat-session.js');
+    // The writes live in mentor-apply.js, shared by chat, the Overview tab's and Inbox's "Review all".
+    const apply = read('src/components/mentor-apply.js');
     for (const t of MENTOR_CARD_TYPES) assert.ok(reg.includes(`register('${t}'`), `renderer for ${t}`);
-    for (const [ev, endpoint] of [
-        ['mentor:businessProfile', '/.netlify/functions/organisation-profile'],
-        ['mentor:products', '/.netlify/functions/org-products'],
-        ['mentor:quietMode', '/.netlify/functions/update-assistant-context'],
-        ['mentor:support', '/.netlify/functions/support-tickets'],
-        ['mentor:support', '/.netlify/functions/issue-reports'],
+    for (const [ev, handler, call, endpoint] of [
+        ['mentor:businessProfile', 'onMentorBusinessProfile', 'A.businessProfile(', '/.netlify/functions/organisation-profile'],
+        ['mentor:products', 'onMentorProducts', 'A.products(', '/.netlify/functions/org-products'],
+        ['mentor:quietMode', 'onMentorQuietMode', "A.setupAnswer(d.assistantId, 'quietMode'", '/.netlify/functions/update-assistant-context'],
+        ['mentor:businessStage', 'onMentorBusinessStage', "A.setupAnswer(d.assistantId, 'businessStage'", '/.netlify/functions/update-assistant-context'],
+        ['setupField:apply', 'onSetupFieldApply', 'A.setupAnswer(d.assistantId, d.key, d.value)', '/.netlify/functions/update-assistant-context'],
+        ['mentor:support', 'onMentorSupport', 'A.support(d)', '/.netlify/functions/support-tickets'],
+        ['mentor:support', 'onMentorSupport', 'A.support(d)', '/.netlify/functions/issue-reports'],
     ]) {
-        assert.ok(reg.includes(`eventName: '${ev}'`), `card raises ${ev}`);
-        assert.ok(sess.includes(`addEventListener('${ev}'`), `chat listens for ${ev}`);
-        assert.ok(sess.includes(endpoint), `${ev} → ${endpoint}`);
+        assert.ok(reg.includes(`eventName: '${ev}'`) || reg.includes(`new CustomEvent('${ev}'`), `card raises ${ev}`);
+        assert.ok(sess.includes(`addEventListener('${ev}', ${handler})`), `chat listens for ${ev}`);
+        const fn = sess.slice(sess.indexOf(`async function ${handler}(e)`), sess.indexOf(`async function ${handler}(e)`) + 300);
+        assert.ok(fn.includes(call), `${handler} → MentorApply ${call}`);
+        assert.ok(apply.includes(endpoint), `${ev} → ${endpoint}`);
     }
+    assert.match(apply, /patchContext: \{ \[key\]: value \}/, 'set-up answers send only the changed key');
 });
 
 test('one click saves once, even if the event reaches two listeners', () => {
     const sess = read('src/components/chat-session.js');
-    for (const fn of ['onMentorBusinessProfile', 'onMentorProducts', 'onMentorQuietMode', 'onMentorSupport']) {
+    for (const fn of ['onMentorBusinessProfile', 'onMentorProducts', 'onMentorQuietMode', 'onMentorSupport', 'onMentorBusinessStage', 'onSetupFieldApply']) {
         assert.match(sess, new RegExp(`async function ${fn}\\(e\\) \\{\\s*\\n\\s*if \\(mentorAlreadyHandled\\(e\\)\\) return;`), fn);
     }
 });
 
 test('the Business Information save never sends allowDomainJoin (it would skip the save)', () => {
-    const sess = read('src/components/chat-session.js');
-    const fn = sess.slice(sess.indexOf('async function onMentorBusinessProfile'), sess.indexOf('async function onMentorProducts'));
+    const apply = read('src/components/mentor-apply.js');
+    const fn = apply.slice(apply.indexOf('async function businessProfile'), apply.indexOf('async function products'));
     assert.match(fn, /const KEEP = \[/);
     assert.ok(!/KEEP = \[[^\]]*allowDomainJoin/.test(fn));
 });

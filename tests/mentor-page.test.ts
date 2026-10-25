@@ -93,11 +93,11 @@ test('cards carry "asked", and the prompt says when to set it', () => {
 
 test('the chat route gates a suggestion before recording it, and the card carries its id', () => {
     const o = read('netlify/functions/chat-orchestrator.ts');
-    const gate = o.indexOf('const gate = await gateMentorSuggestion(db, orgId, { kind, fields: proposalFields(m), asked: m.asked });');
-    const record = o.indexOf('const proposalId = await recordMentorProposal(');
+    const gate = o.indexOf("const gate = await gateMentorSuggestion(db, orgId, { kind, fields: proposalFields(m), asked: 'asked' in m ? m.asked : false });");
+    const record = o.indexOf('const proposalId = await recordMentorProposal(', gate);
     assert.ok(gate > 0 && record > gate, 'gate first');
     assert.match(o.slice(gate, record), /if \(!gate\.ok\) \{\s*\n\s*uiElement = null;/);
-    assert.match(o.slice(record, record + 300), /uiElement = \{ \.\.\.m, proposalId \};/);
+    assert.match(o.slice(record, record + 300), /uiElement = \{ \.\.\.filled, proposalId \};/);
     assert.match(read('src/utils/mentor-snapshot.ts'), /renderMentorSnapshot\(data\) \+ '\\n' \+ renderProposalState\(proposals\)/);
 });
 
@@ -143,11 +143,12 @@ test('one server action: the card and the Overview tab both call mentor.ts (§14
     assert.match(reg, /if \(suggestion\) decide\('accepted'\);/, 'accepted only after the click saved');
     const sess = read('src/components/chat-session.js');
     assert.match(sess, /async function onMentorDecide\(e\) \{\s*\n\s*if \(mentorAlreadyHandled\(e\)\) return;/);
-    assert.match(sess.slice(sess.indexOf('async function onMentorDecide')), /'\/\.netlify\/functions\/mentor'[\s\S]{0,200}action: 'decide'/);
+    assert.match(sess.slice(sess.indexOf('async function onMentorDecide'), sess.indexOf('async function onMentorDecide') + 300), /A\.decide\(d\.proposalId, d\.decision, d\.reason\)/);
+    assert.match(read('src/components/mentor-apply.js'), /post\('\/\.netlify\/functions\/mentor', \{ action: 'decide', proposalId, decision, reason \}\)/);
     const tab = read('src/components/assistant-mentor-overview.js');
     assert.match(tab, /const API = '\/\.netlify\/functions\/mentor';/);
     assert.match(tab, /action: 'bring_back'/);
-    assert.match(tab, /\['mentor:changed', 'bizinfo:profileChanged', 'bizinfo:productsChanged'\]/);
+    assert.match(tab, /\['mentor:changed', 'bizinfo:profileChanged', 'bizinfo:productsChanged', 'assistant:settingsChanged'\]/);
 });
 
 test('the decision is org-scoped and can\'t reopen an answered suggestion', () => {

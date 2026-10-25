@@ -15,6 +15,7 @@ import { MIN_HORIZON_DAYS, MAX_HORIZON_DAYS } from '../../src/config/posting-cad
 import { normaliseAssistantColor } from '../../src/config/assistant-colors';
 import { INSPO_TOPIC_CONFIG_KEY } from '../../src/utils/inspo-topics';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { applySetupPatch } from '../../src/utils/chat-setup-field';
 
 /** Everything the post-save gap-fill needs, captured from inside the write transaction. */
 interface GapFillTarget {
@@ -39,9 +40,14 @@ export default withLambda(async (event) => {
     const { userId: currentUserId, organisationId: orgId } = ctx;
 
     // 2. Payload Extraction
-    const { assistantId, newContext, newConfiguration, newName, appliedDefaults, disclosureText, avatarColor, avatarLetter } = JSON.parse(event.body || '{}');
+    // `patchContext` ({ key: value }) is the set-up answer card's write (docs/business-mentor-plan.md
+    // §3.4): only those keys, validated against the role's set-up questions (src/utils/setup-field.ts)
+    // and merged onto the row read INSIDE this save, so a card drawn earlier can't overwrite other
+    // answers. Active assistants only. Every other caller sends the whole `newContext`, as before.
+    const { assistantId, newContext: sentContext, patchContext, newConfiguration, newName, appliedDefaults, disclosureText, avatarColor, avatarLetter } = JSON.parse(event.body || '{}');
+    const isPatch = !sentContext && !!patchContext && typeof patchContext === 'object' && !Array.isArray(patchContext);
 
-    if (!assistantId || !newContext) return { statusCode: 400, body: JSON.stringify({ error: 'Missing parameters.' }) };
+    if (!assistantId || (!sentContext && !isPatch)) return { statusCode: 400, body: JSON.stringify({ error: 'Missing parameters.' }) };
 
     // Captured inside the transaction so the post-commit gap-fill below works from the values that
     // were actually written, not a re-read that could race another save.
@@ -57,6 +63,18 @@ export default withLambda(async (event) => {
                 .limit(1);
 
             if (!existingAssistant) throw new Error("Assistant not found.");
+
+            let newContext = sentContext;
+            if (isPatch) {
+                const [m] = await tx.select({ roleKey: masterAssistants.roleKey }).from(masterAssistants)
+                    .where(eq(masterAssistants.id, existingAssistant.masterAssistantId!)).limit(1);
+                const patched = applySetupPatch({
+                    roleKey: m?.roleKey ?? '', lifecycleStatus: existingAssistant.lifecycleStatus, provisioningStatus: existingAssistant.provisioningStatus,
+                    context: existingAssistant.onboardingContext as Record<string, unknown> | null,
+                }, patchContext);
+                if (!patched.ok) throw Object.assign(new Error(`SETUP_PATCH: ${patched.error}`), { userMessage: patched.error });
+                newContext = patched.context;
+            }
 
             // US-GOV-3.1.1: Reject save if trying to clear disclosure on an active assistant
             if (disclosureText !== undefined && !disclosureText?.trim() && existingAssistant.isActive) {
@@ -314,6 +332,9 @@ export default withLambda(async (event) => {
         // ending onboarding on a screen that promises work with no evidence any was scheduled.
         return { statusCode: 200, body: JSON.stringify({ success: true, draftsQueued, ...(siteCheck ? { siteCheck } : {}) }) };
     } catch (error: any) {
+        if (error?.message?.startsWith('SETUP_PATCH')) {
+            return { statusCode: 422, body: JSON.stringify({ error: error.userMessage, code: 'SETUP_FIELD_INVALID' }) };
+        }
         if (error?.message?.startsWith('DISCLOSURE_REQUIRED')) {
             return { statusCode: 422, body: JSON.stringify({ error: 'AI disclosure text is required before this assistant can be activated (EU AI Act Art. 52).', code: 'DISCLOSURE_MISSING' }) };
         }
