@@ -17,6 +17,7 @@ import { sanitizeForModel } from '../../src/utils/text-safe';
 import { postTeamChatReply, teamNoteForChatTurn, teamThreadPromptBlock } from '../../src/utils/team-messages';
 import { SPECIAL_CATEGORY_RULE } from '../../src/constants/special-category-rule';
 import { SITE_COPY_CRAFT } from '../../src/constants/site-copy-craft';
+import { CAMPAIGN_PLANNING_CRAFT } from '../../src/constants/campaign-craft';
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
@@ -51,7 +52,7 @@ import { parseModelJson, stripCodeFences } from '../../src/utils/model-json';
 import { liveRoleLabel } from '../../src/utils/live-role-label';
 import { voiceDirective } from '../../src/utils/voice-profile';
 import { RULE_READING_ROLES, loadAssistantRulesBlock } from '../../src/utils/assistant-rules-prompt';
-import { buildCampaignsSnapshot } from '../../src/utils/campaign-plan';
+import { activeAndPausedRoleKeys, buildCampaignsSnapshot, withoutInactiveOrders } from '../../src/utils/campaign-plan';
 import { buildBriefsSnapshot } from '../../src/utils/visual-briefs';
 import { buildSiteAuditSnapshot } from '../../src/utils/site-audit-snapshot';
 import { buildSiteSnapshot } from '../../src/utils/site-store';
@@ -1294,7 +1295,8 @@ async function retrieveKnowledgeBase(
     }
 }
 
-const ROUTES: Record<string, AssistantRoute> = {
+/** Exported for the prompt audit (tests/prompt-audit-shopper-designer-campaign.test.ts), which rebuilds role prompts. */
+export const ROUTES: Record<string, AssistantRoute> = {
     // Campaign Assistant. Turns one objective into briefs for the Social Media, Blog Writing and
     // Lead Generation assistants. Wire shape: reply + campaign_strategy_proposal uiElement, matching
     // the CampaignStrategyProposalCard renderer in disruptive-ui-registry.js.
@@ -1333,7 +1335,7 @@ ${angle ? `The argument they want made (from setup): ${String(angle)}` : ''}
 ${outcome ? `By default they measure a campaign by: ${String(outcome)}.` : ''}
 ${POSTURE_LINE[String(posture)] ?? ''}
 
-HOW TO PLAN. Start from the objective the user states, in their words — quote it back rather than rewriting it into marketing language. Then decide which assistants have work to do and what each should produce. Only these can be given orders, and only for what they actually do:
+HOW TO PLAN. Start from the objective the user states, in their words — quote it back rather than rewriting it into marketing language. Then decide which assistants have work to do and what each should produce. These are ALL the kinds of assistant there are — but you may brief ONLY the ones listed under ORDERS THIS WORKSPACE CAN RUN below (the ones this business has active), and only for what they actually do. A paused assistant or one they have not hired gets NO order: say what it would add and that resuming or hiring it would cover that.
 - Social Media Assistant — drafting social posts, and re-cutting one idea into several.
 - Blog Writing Assistant — one long-form article per order, carrying the campaign's keywords and call to action.
 - Lead Generation Assistant — finding companies matching an audience description, or narrowing a search that is returning the wrong kind of company.
@@ -1356,6 +1358,7 @@ ADDING TO A CAMPAIGN THAT EXISTS. When the user wants more work on a campaign li
 
 FUNNEL STAGE. Decide what the campaign is FOR before what it counts — not every campaign is meant to convert, and judging an awareness campaign on signups makes it look like it is failing when it is doing its job. The stages, and the only outcomes each may be measured by (the first is the default):
 ${FUNNEL_STAGES.map((st) => `- "${st}" — ${FUNNEL_STAGE_DESCRIPTIONS[st].toLowerCase()}: ${stageOutcomes(st).map((m) => `"${m}"`).join(', ')}`).join('\n')}
+${CAMPAIGN_PLANNING_CRAFT}
 The stage also changes how your colleagues write: awareness work never asks for a sale, conversion work asks for one clear next step, retention work speaks to existing customers. A retention campaign is aimed AT customers, so it includes them in its lead searches unless the user says otherwise; every other stage leaves them out. Only a conversion campaign can be stopped automatically for finding poor-quality leads.
 
 WHO IT IS FOR. Every campaign needs an audience before you propose it: a short persona name and a sentence on who they are and what they care about. If the user has not said and setup did not capture one, ask before proposing. Drafting reads the campaign's audience; when one assistant should write for a DIFFERENT persona from the rest (the Blog Writer for IT directors while lead searches hunt founders), put that persona in that order's own "audience" and it wins for that order's work.
@@ -3103,6 +3106,22 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // Not final either: the blog route replaces it with a normalised draft (or nothing) below.
         let uiElement = parsed.uiElement;
         let content = parsed.content;
+
+        // A campaign plan briefs ONLY assistants this workspace has active (src/utils/campaign-plan.ts):
+        // the prompt says so, and this holds it when a model doesn't. Fails open on a read error —
+        // the orders are still refused at placement for an assistant that is not hired.
+        if (uiElement && typeof uiElement === 'object' && (uiElement as { type?: unknown }).type === 'campaign_strategy_proposal') {
+            try {
+                const { active } = await activeAndPausedRoleKeys(db, orgId);
+                const guarded = withoutInactiveOrders(uiElement as { orders?: unknown }, active);
+                if (guarded.dropped.length) {
+                    uiElement = guarded.card;
+                    content = `${content}\n\nI've left ${guarded.dropped.join(' and ')} out of this plan: ${guarded.dropped.length === 1 ? 'that assistant isn’t' : 'those assistants aren’t'} active for you right now. Resume or hire ${guarded.dropped.length === 1 ? 'it' : 'them'} and I can add that work.`;
+                }
+            } catch (err) {
+                console.error('[chat-orchestrator] campaign plan roster check failed (non-fatal)', err);
+            }
+        }
 
         // Golden Rule 2: structured output flows into the Data Hub automatically. Computed
         // up front (rather than inside persistHubRecords) so the same records list can also

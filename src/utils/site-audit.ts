@@ -32,7 +32,7 @@ import { createNotification } from './notify';
 import { loadProductsBlock } from './org-products';
 import { loadAlreadyCovered, type CoveredItem } from './site-audit-covered';
 import {
-    buildLensPrompt, buildSummaryPrompt, rejectedFixesBlock, sanitiseSummary, type AuditBrief, type Handoff, type Priority,
+    buildLensPrompt, buildSummaryPrompt, HANDOFF_TARGETS, rejectedFixesBlock, sanitiseSummary, type AuditBrief, type Handoff, type HandoffTarget, type Priority,
 } from './site-audit-prompts';
 import {
     describeChanges, diffSitePages, extractSitePage, pickSecondaryPages, siteContentHash, normaliseText, type SitePage,
@@ -43,6 +43,9 @@ import {
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
 
 type Db = ReturnType<typeof getDb>;
+
+/** Lifecycle states in which an assistant is not a teammate to hand work to (assistant-lifecycle.ts). */
+const INACTIVE_STATES = new Set(['paused', 'system_paused', 'archived']);
 
 export const MAX_COMPETITORS = 3;
 /** Pages read on each competitor's site beyond its homepage (plan §3.6). */
@@ -173,6 +176,21 @@ async function readCompetitor(url: string, deps: AuditDeps): Promise<FetchResult
     return { ok: true, page: mergeSecondary(home.page, extras.flatMap((e) => (e.ok && !e.page.thin ? [e.page] : []))) };
 }
 
+/**
+ * One suggestion per piece of page text. Two lenses often fix the same headline in different words
+ * (audit, 2026-10-25: three sites in three had it), which hands the owner two rewrites of one line to
+ * choose between. The first lens wins — clarity, the buyer's view. Pure.
+ */
+export function oneFixPerText(fixes: SuggestedFix[]): SuggestedFix[] {
+    const seen = new Set<string>();
+    return fixes.filter((f) => {
+        const key = f.currentText.replace(/\s+/g, ' ').trim().toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+
 export async function runAuditCore(input: AuditInput, deps: AuditDeps): Promise<AuditOutcome> {
     const competitorUrls = input.competitorUrls.slice(0, MAX_COMPETITORS);
     const [own, ...theirs] = await Promise.all([
@@ -244,7 +262,7 @@ export async function runAuditCore(input: AuditInput, deps: AuditDeps): Promise<
     const answers: Partial<Record<Lens, RubricAnswer[]>> = {};
     for (const r of answered) answers[r.lens] = r.answers;
     const score = scoreAudit(own.page, readable.map((r) => r.page), answers);
-    const fixes = answered.flatMap((r) => r.fixes);
+    const fixes = oneFixPerText(answered.flatMap((r) => r.fixes));
     const groundingDropped = answered.reduce((n, r) => n + r.dropped, 0);
 
     const summaryInput = { brief: input.brief, score, previousScore: input.previousScore, fixes, competitorChanges, covered: input.covered };
@@ -379,11 +397,20 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
                 .orderBy(desc(siteAuditFixes.updatedAt)).limit(15));
         } catch { /* none */ }
 
+        // Which assistants a hand-off may go to: the ones this workspace has active, never a paused,
+        // archived or unhired one. A failed read means none — no idea is better than a dead-end one.
+        let activeHandoffTargets: HandoffTarget[] = [];
+        try {
+            const team = await db.select({ roleKey: sql<string | null>`${aiAssistants.configuration} ->> 'type'`, status: aiAssistants.lifecycleStatus })
+                .from(aiAssistants).where(eq(aiAssistants.organisationId, orgId));
+            activeHandoffTargets = HANDOFF_TARGETS.filter((t) => team.some((m) => m.roleKey === t && !INACTIVE_STATES.has(String(m.status))));
+        } catch { /* none */ }
+
         const kind = claimed.kind as AuditInput['kind'];
         const auditModel = await gatewayRoleModel(db, 'mystery_shopper');
         const outcome = await runAuditCore({
             kind,
-            brief: { url: audit.url, icp: audit.icp, conversionGoal: audit.conversionGoal, productsBlock, rulesBlock, rejectedBlock },
+            brief: { url: audit.url, icp: audit.icp, conversionGoal: audit.conversionGoal, activeHandoffTargets, productsBlock, rulesBlock, rejectedBlock },
             competitorUrls: Array.isArray(audit.competitorUrls) ? (audit.competitorUrls as string[]) : [],
             lastHashes: (audit.lastHashes ?? {}) as Record<string, string>,
             previousPages: ((prev?.pages ?? {}) as Record<string, SitePage>),

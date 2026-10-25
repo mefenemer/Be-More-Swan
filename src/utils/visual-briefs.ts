@@ -23,6 +23,7 @@ import { aiAssistants, campaigns, contentAssets, mediaGenerationJobs, organisati
 import type { getDb } from '../../db/client';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { gatewayRoleModel } from './assistant-model';
+import { ART_DIRECTION_CRAFT } from '../constants/art-direction-craft';
 import { logMediaCost } from './ai-usage';
 import {
     FalContentPolicyError, FalError, extractVideo, falConfigured, generateImages, result as falResult, status as falStatus,
@@ -165,7 +166,7 @@ export function fallbackArtDirection(
         house.mustAvoid ? `Never show: ${clip(house.mustAvoid, 200)}.` : '',
         house.photoStyle ? `Style: ${clip(house.photoStyle, 300)}.` : '',
         house.mustInclude ? `Where it fits, include: ${clip(house.mustInclude, 200)}.` : '',
-        `Colour accents close to ${kit.primaryColor}.`,
+        `Colour accents in ${colourWords(kit.primaryColor)}.`,
         'Photographic, natural light, no text, no lettering, no logos.',
     ].filter(Boolean).join(' ');
     return {
@@ -175,6 +176,39 @@ export function fallbackArtDirection(
         cardHeadlines: [clip(brief.headline, 120) || clip(brief.message, 120) || clip(brief.title, 120)].filter(Boolean),
         by: 'fallback',
     };
+}
+
+/**
+ * A brand colour as words an image model can use ("deep green", "warm cream"). Hex codes in an image
+ * prompt can be painted into the picture as text (audit, 2026-10-25). Pure; '' for a bad value.
+ */
+export function colourWords(hex: string | null | undefined): string {
+    const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(String(hex ?? '').trim());
+    if (!m) return '';
+    const h6 = m[1].length === 3 ? m[1].split('').map((c) => c + c).join('') : m[1];
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(h6.slice(i, i + 2), 16) / 255);
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2, d = max - min;
+    const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+    if (l > 0.93) return s > 0.25 ? 'warm cream' : 'white';
+    if (l < 0.1) return 'near-black';
+    let hue = 0;
+    if (d) hue = max === r ? 60 * (((g - b) / d) % 6) : max === g ? 60 * ((b - r) / d + 2) : 60 * ((r - g) / d + 4);
+    if (hue < 0) hue += 360;
+    const shade = l < 0.3 ? 'deep ' : l > 0.75 ? 'pale ' : '';
+    if (s < 0.15) return l < 0.3 ? 'charcoal' : l > 0.75 ? 'light grey' : 'grey';
+    const name = hue < 15 || hue >= 345 ? (l < 0.45 ? 'wine red' : 'red') : hue < 40 ? (l < 0.45 ? 'brown' : 'orange') : hue < 65 ? 'yellow'
+        : hue < 160 ? 'green' : hue < 195 ? 'teal' : hue < 255 ? 'blue' : hue < 290 ? 'purple' : hue < 345 ? (l < 0.4 ? 'plum' : 'pink') : 'red';
+    return `${shade}${name}`;
+}
+
+/** An image or video prompt with every colour code taken out — the code guard behind the prompt rule. Pure. */
+export function withoutColourCodes(prompt: string): string {
+    return prompt
+        .replace(/\s*\(\s*#[0-9a-f]{3,8}\s*\)/gi, '')
+        .replace(/#[0-9a-f]{6}\b|#[0-9a-f]{3}\b/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/\s+([.,;])/g, '$1')
+        .trim();
 }
 
 export function artDirectionSystemPrompt(): string {
@@ -187,6 +221,8 @@ export function artDirectionSystemPrompt(): string {
 
 Respect every "must avoid" in the brief in all four. When earlier options were turned down, the reasons are listed: change what the reason names, keep what it does not.
 
+${ART_DIRECTION_CRAFT}
+
 Return STRICT JSON only: {"imagePrompt": "...", "stockKeywords": "...", "videoPrompt": "...", "cardHeadlines": ["..."]}`;
 }
 
@@ -195,7 +231,8 @@ export function artDirectionUserPrompt(brief: BriefRow, ctx: BriefContext, rejec
     return [
         `BUSINESS: ${clip(ctx.orgName, 120)}${ctx.industry ? ` (${clip(ctx.industry, 80)})` : ''}`,
         ctx.description ? `ABOUT THEM: ${clip(ctx.description, 400)}` : '',
-        `BRAND COLOURS: accent ${ctx.kit.primaryColor}, ink ${ctx.kit.textColor}, background ${ctx.kit.backgroundColor}.`,
+        // In words as well as codes: the codes are for the cards; an image prompt must use the words.
+        `BRAND COLOURS (describe them in words in the prompts, never as codes): accent ${colourWords(ctx.kit.primaryColor)} (${ctx.kit.primaryColor}), ink ${colourWords(ctx.kit.textColor)} (${ctx.kit.textColor}), background ${colourWords(ctx.kit.backgroundColor)} (${ctx.kit.backgroundColor}).`,
         ...guidelinesPromptLines(ctx.guidelines),
         `BRIEF: "${clip(brief.title, 120)}" — a ${purpose.toLowerCase()} in ${brief.aspectRatio}.`,
         brief.message ? `WHAT IT SHOULD SHOW OR SAY: ${clip(brief.message, 1000)}` : '',
@@ -216,9 +253,9 @@ export function parseArtDirection(raw: string, fallback: ArtDirection, exactHead
         const m = raw.match(/\{[\s\S]*\}/);
         j = m ? JSON.parse(m[0]) : {};
     } catch { return fallback; }
-    const imagePrompt = clip(typeof j.imagePrompt === 'string' ? j.imagePrompt : '', 1000);
+    const imagePrompt = clip(typeof j.imagePrompt === 'string' ? withoutColourCodes(j.imagePrompt) : '', 1000);
     const stockKeywords = clip(typeof j.stockKeywords === 'string' ? j.stockKeywords.replace(/[^\p{L}\p{N}\s-]/gu, ' ') : '', 80);
-    const videoPrompt = clip(typeof j.videoPrompt === 'string' ? j.videoPrompt : '', 1000);
+    const videoPrompt = clip(typeof j.videoPrompt === 'string' ? withoutColourCodes(j.videoPrompt) : '', 1000);
     let heads = Array.isArray(j.cardHeadlines) ? j.cardHeadlines.filter((h): h is string => typeof h === 'string').map((h) => clip(h, 120)).filter(Boolean) : [];
     // The user's exact words are never paraphrased away, whatever the model returned.
     if (exactHeadline) heads = [clip(exactHeadline, 120), ...heads.filter((h) => h !== clip(exactHeadline, 120))];

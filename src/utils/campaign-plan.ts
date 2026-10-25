@@ -26,7 +26,7 @@ import { CAMPAIGN_TYPES } from './newsletter-campaign-chat-draft';
 import { EMAIL_TRIGGERS } from './campaign-email-order';
 import { BRIEF_ASPECT_RATIOS, BRIEF_PURPOSES, BRIEF_SOURCES } from '../config/visual-brief-vocab';
 import { and, desc, eq, sql } from 'drizzle-orm';
-import { campaignAssets, campaignBudgets, campaignDecisions, campaignOrders, campaigns, contentAssets, discoveryCampaigns } from '../../db/schema';
+import { aiAssistants, campaignAssets, campaignBudgets, campaignDecisions, campaignOrders, campaigns, contentAssets, discoveryCampaigns } from '../../db/schema';
 import { hiredRoleKeys, persistProposal, type LiveCampaign, type ProposedDecision } from './campaign-proposer';
 import { settleDecisionMirror } from './campaign-mirror';
 import { campaignSpendTotals } from './campaign-ledger';
@@ -446,14 +446,73 @@ const SNAPSHOT_CAMPAIGNS = 15;
  */
 async function briefableLine(db: Db, organisationId: number): Promise<string> {
     try {
-        const hired = await hiredRoleKeys(db, organisationId);
-        const yes = Object.entries(ORDER_ACTION_SPECS)
-            .filter(([, spec]) => spec.roleKey === HUMAN_ROLE_KEY || hired.has(spec.roleKey))
-            .map(([action]) => `"${action}"`);
-        return `\n\nORDERS THIS WORKSPACE CAN RUN (its assistants are hired): ${yes.join(', ')}. Any other order would be refused — say which assistant they would need to hire instead.`;
+        const { active, paused } = await activeAndPausedRoleKeys(db, organisationId);
+        return briefableOrdersLine(active, paused);
     } catch {
         return '';
     }
+}
+
+/**
+ * The roles this workspace has ACTIVE, and those it has only paused. ⚠️ Active, not merely hired
+ * (owner, 2026-10-24: assistants only connect with teammates the user has active) — hiredRoleKeys
+ * counts paused and archived assistants too, so a plan could brief a paused Email Marketing
+ * Assistant and its work would sit there. Throws on a failed read.
+ */
+export async function activeAndPausedRoleKeys(db: Db, organisationId: number): Promise<{ active: Set<string>; paused: Set<string> }> {
+    const rows = await db
+        .select({ roleKey: sql<string>`(${aiAssistants.configuration} ->> 'type')`, status: aiAssistants.lifecycleStatus })
+        .from(aiAssistants)
+        .where(eq(aiAssistants.organisationId, organisationId));
+    const active = new Set<string>();
+    const paused = new Set<string>();
+    for (const r of rows) {
+        if (!r.roleKey || r.status === 'archived') continue;
+        (r.status === 'paused' || r.status === 'system_paused' ? paused : active).add(r.roleKey);
+    }
+    for (const k of active) paused.delete(k);
+    return { active, paused };
+}
+
+/**
+ * A chat plan card with every order for an assistant that is not ACTIVE taken out — the code guard
+ * behind the prompt rule, which Haiku 4.5 broke in 4 plans of 5 (audit, 2026-10-25). An order that
+ * waited ("after") on a removed one is removed too, and later "after"s are renumbered, the same rule
+ * normalisePlanOrders applies. `dropped` names the assistants left out, for the reply. Pure.
+ */
+export function withoutInactiveOrders<T extends { orders?: unknown }>(card: T, active: ReadonlySet<string>): { card: T; dropped: string[] } {
+    if (!Array.isArray(card.orders)) return { card, dropped: [] };
+    const out: unknown[] = [];
+    const kept = new Map<number, number>();
+    const dropped = new Set<string>();
+    card.orders.forEach((o, r) => {
+        const rec = (o && typeof o === 'object' ? o : {}) as Record<string, unknown>;
+        const role = isOrderAction(rec.action) ? ORDER_ACTION_SPECS[rec.action].roleKey : null;
+        if (role && role !== HUMAN_ROLE_KEY && !active.has(role)) { dropped.add(ORDER_ROLE_LABELS[role] ?? role); return; }
+        const rawAfter = Math.floor(Number(rec.after));
+        if (Number.isInteger(rawAfter) && rawAfter >= 1 && rawAfter <= r) {
+            const mapped = kept.get(rawAfter);
+            if (mapped === undefined) return;
+            out.push({ ...rec, after: mapped });
+        } else {
+            out.push(o);
+        }
+        kept.set(r + 1, out.length);
+    });
+    return { card: { ...card, orders: out }, dropped: [...dropped] };
+}
+
+/** The campaign chat's list of orders it may plan, from the roles that are active and paused. Pure. */
+export function briefableOrdersLine(active: ReadonlySet<string>, paused: ReadonlySet<string> = new Set()): string {
+    const yes = Object.entries(ORDER_ACTION_SPECS)
+        .filter(([, spec]) => spec.roleKey === HUMAN_ROLE_KEY || active.has(spec.roleKey))
+        .map(([action]) => `"${action}"`);
+    const resting = Object.entries(ORDER_ACTION_SPECS)
+        .filter(([, spec]) => spec.roleKey !== HUMAN_ROLE_KEY && !active.has(spec.roleKey) && paused.has(spec.roleKey))
+        .map(([action]) => `"${action}"`);
+    return `\n\nORDERS THIS WORKSPACE CAN RUN (their assistants are active): ${yes.join(', ')}. Plan ONLY with these.`
+        + (resting.length ? ` ${resting.join(', ')} need an assistant that is PAUSED: never put them in a plan — say the user can resume that assistant first.` : '')
+        + ' Any other order would be refused — say which assistant they would need to hire instead.';
 }
 
 export async function buildCampaignsSnapshot(

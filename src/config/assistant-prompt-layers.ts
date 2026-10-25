@@ -15,6 +15,9 @@ import { emailCraftBlock } from '../constants/email-craft';
 import { platformCraftBlock } from '../constants/platform-craft';
 import { BLOG_CRAFT } from '../constants/blog-craft';
 import { SITE_COPY_CRAFT } from '../constants/site-copy-craft';
+import { SITE_AUDIT_CRAFT } from '../constants/site-audit-craft';
+import { ART_DIRECTION_CRAFT } from '../constants/art-direction-craft';
+import { CAMPAIGN_PLANNING_CRAFT } from '../constants/campaign-craft';
 import { BLOG_ARTICLE_TYPES, SOCIAL_POST_SHAPES } from '../utils/content-shapes';
 import { EMAIL_SUBJECT_STYLES, LONG_FORM_OPENINGS, OUTREACH_OPENINGS, SOCIAL_HOOK_STYLES } from './hook-styles';
 import { CTA_BINDING_RULE } from './call-to-action';
@@ -91,12 +94,34 @@ const WEBSITE: PromptLayer[] = [
       text: 'The business details, Products & Services (the only prices it may state), the set-up answers (what visitors should do, the pages wanted, how it should feel), the assistant\'s Rules, and the request. Colours, lettering and logo come from the brand kit, never the draft.' },
 ];
 
+const SHOPPER: PromptLayer[] = [
+    { key: 'audit_craft', title: 'How a suggested fix is written', kind: 'craft', usedBy: 'Site audits', source: 'src/constants/site-audit-craft.ts', text: SITE_AUDIT_CRAFT },
+    { key: 'special_audit', title: 'Special category data', kind: 'rule', usedBy: 'Site audits', source: 'src/constants/special-category-rule.ts', text: SPECIAL_CATEGORY_RULE },
+    { key: 'workspace_audit', title: 'Filled in per workspace', kind: 'workspace', usedBy: 'Site audits', source: 'src/utils/site-audit.ts',
+      text: 'The website and up to three competitors as read that day, who the site is for and what a visitor should do, Products & Services, the assistant\'s Rules, fixes the owner turned down, ideas other assistants already have, and which assistants are active (the only ones a hand-off may go to). Every quote is checked against the page and every number in the summary against the score, in code.' },
+];
+
+const DESIGNER: PromptLayer[] = [
+    { key: 'art_direction', title: 'Art direction craft', kind: 'craft', usedBy: 'Art direction for visual briefs', source: 'src/constants/art-direction-craft.ts', text: ART_DIRECTION_CRAFT },
+    { key: 'workspace_designer', title: 'Filled in per workspace', kind: 'workspace', usedBy: 'Art direction for visual briefs', source: 'src/utils/visual-briefs.ts',
+      text: 'The brief (what it shows, exact card words, mood, must include / avoid, purpose and shape), the brand colours (in words for images), the workspace\'s picture guidelines, the assistant\'s Rules, and the reasons earlier options were turned down. Colour codes are removed from image prompts in code.' },
+];
+
+const CAMPAIGNS: PromptLayer[] = [
+    { key: 'campaign_craft', title: 'Campaign planning craft', kind: 'craft', usedBy: 'Chat (campaign plans)', source: 'src/constants/campaign-craft.ts', text: CAMPAIGN_PLANNING_CRAFT },
+    { key: 'workspace_campaigns', title: 'Filled in per workspace', kind: 'workspace', usedBy: 'Chat (campaign plans)', source: 'src/utils/campaign-plan.ts',
+      text: 'Its campaigns and saved lead searches, the content library, lessons kept from past campaigns, and the orders this workspace can run — only those whose assistants are active; paused ones are named so it can say to resume them.' },
+];
+
 const BY_ROLE: Record<string, PromptLayer[]> = {
     social_media_manager: SOCIAL,
     newsletter_editor: EMAIL,
     blog_writer: BLOG,
     lead_qualifier: LEADS,
     website_assistant: WEBSITE,
+    mystery_shopper: SHOPPER,
+    brand_designer: DESIGNER,
+    campaign_orchestrator: CAMPAIGNS,
 };
 
 /** Every layer that shapes this role's prompts: its own jobs first, then chat. Pure. */
