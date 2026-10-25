@@ -218,10 +218,11 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         category: 'Assistants',
         type: 'mentor_research_ready',
         title: '{{assistant.name}} looked it up',
-        message: 'The answer to "{{research.question}}" is ready, with its sources, in your chat and on the Plan tab.',
+        message: 'The answer to "{{research.question}}" is ready, with its sources, {{research.where}}.',
         variables: [
             ASSISTANT_NAME,
-            v('research.question', 'The question asked', 'How many UK small businesses use social media?'),
+            v('research.question', 'The question asked (shortened at a word)', 'How many UK small businesses use social media?'),
+            v('research.where', 'Where to find it', 'in your chat and on the Plan tab'),
         ],
     },
     {

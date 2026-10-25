@@ -22,7 +22,7 @@ import {
     renderApprovedStrategyForDrafts, renderStrategyForMentor, type StrategyDoc,
 } from '../src/utils/strategy-documents';
 import { businessKnowledgePromptBlock } from '../src/utils/business-knowledge';
-import { parseResearchReply } from '../src/utils/mentor-jobs';
+import { parseResearchReply, shortQuestion } from '../src/utils/mentor-jobs';
 import { buildBreakEvenCard, buildStrategyCard, cleanQuestion } from '../src/utils/mentor-plan-cards';
 import { cardTheUserAskedFor, mentorCardFromUiElement, proposalKind } from '../src/utils/mentor-cards';
 import { PLAYBOOKS, isUsablePlaybook, playbookFor, renderPlaybookForMentor, type Playbook } from '../src/config/mentor-playbooks';
@@ -168,6 +168,8 @@ test('research keeps only links the search returned; no search or no source mean
     assert.ok(none.outcome === 'nothing_found' && !/42%/.test(none.answer) && !none.sources.length);
     const noSearch = parseResearchReply(JSON.stringify({ answer: 'x', sources: [{ url: searched[0] }] }), searched, 0);
     assert.ok(noSearch.outcome === 'no_search' && /Nothing was charged/.test(noSearch.answer));
+    const sq = shortQuestion('What do UK viewers typically pay to rent a new independent or documentary-style feature film online (transactional video on demand)?');
+    assert.ok(sq.endsWith('online…') && sq.length <= 111, sq);
     assert.ok(cleanQuestion('hi').ok === false && cleanQuestion('What do groomers in Leeds charge?').ok);
 });
 

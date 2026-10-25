@@ -338,6 +338,14 @@ async function postToChat(db: Db, job: any, content: string, uiElement: unknown)
     }
 }
 
+/** Pure: a question short enough for a notification, cut at a word. */
+export function shortQuestion(q: string, max = 110): string {
+    const t = q.replace(/\s+/g, ' ').trim();
+    if (t.length <= max) return t;
+    const cut = t.slice(0, max);
+    return `${cut.slice(0, Math.max(cut.lastIndexOf(' '), max - 20)).replace(/[\s,;:(–-]+$/, '')}…`;
+}
+
 /** Pure: the chat message for a research result — the answer, then its links. */
 export function researchMessage(question: string, r: ResearchResult): string {
     const head = `You asked me to look up: “${question}”`;
@@ -369,7 +377,7 @@ export async function runMentorJob(db: Db, jobId: number): Promise<void> {
             if (job.userId) {
                 await createNotification(db, 'mentor_research_ready', {
                     userId: job.userId, assistantId: job.aiAssistantId, category: 'state_change',
-                    context: { assistant: { name }, research: { question: String(job.input?.question ?? '').slice(0, 120) } },
+                    context: { assistant: { name }, research: { question: shortQuestion(String(job.input?.question ?? '')), where: job.chatSessionId ? 'in your chat and on the Plan tab' : 'on the Plan tab' } },
                     metadata: { assistantId: job.aiAssistantId, mentorJobId: job.id },
                 });
             }
