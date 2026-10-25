@@ -117,7 +117,7 @@ check('bulk scoring, the classifier and the deep re-score run on the Lead Genera
     assert.strictEqual(ds.match(/\{ requestPath: true, label: '(discovery-scoring|classifyProspects|rescoreWithIntel)' \}/g)?.length, 3);
     assert.ok(!/anthropic\.messages\.create\(\{/.test(ds), 'no call skips adaptForModel');
     assert.ok(!ds.includes('content[0]'));
-    assert.ok(ds.includes('searchContext, modelChoice, depth + 1)'), 'the blank-card retry keeps the model');
+    assert.ok(ds.includes('searchContext, modelChoice, depth + 1, true, endsAt)'), 'the blank-card retry keeps the model');
     const worker = read('netlify/functions/process-discovery-jobs.ts');
     assert.ok(worker.includes("await loadRoleModel(db, 'lead_qualifier'))") && worker.includes('model: scored.model,'));
     const enrich = read('src/utils/lead-enrichment.ts');
