@@ -63,6 +63,9 @@ export function readInput(key: BreakEvenKey, raw: unknown): BreakEvenInput | nul
 export function breakEven(raw: Record<string, unknown> | null | undefined): BreakEvenOutcome {
     const r = raw && typeof raw === 'object' ? raw : {};
     const inputs = Object.fromEntries(BREAK_EVEN_KEYS.map((k) => [k, readInput(k, r[k])])) as Record<BreakEvenKey, BreakEvenInput | null>;
+    // A guessed £0 of fixed costs or spend changes nothing, so it isn't reported as an assumption
+    // (live on staging the model filled "fixed costs: £0, assumption" and the card said it had assumed them).
+    for (const k of ['fixedCosts', 'spend'] as const) if (inputs[k]?.value === 0 && inputs[k]?.source === 'assumption') inputs[k] = null;
     if (!inputs.price) return { ok: false, error: 'Enter the price of one sale.' };
     const cost = inputs.costPerSale?.value ?? 0;
     const margin = Math.round((inputs.price.value - cost) * 100) / 100;

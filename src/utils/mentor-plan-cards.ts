@@ -125,7 +125,7 @@ export function mentorPlanCardsPromptLines(): string {
    c) Draft a whole document for them in the background (1 task, about a minute; they review it before anything is saved) — when they ask you to write or pre-draft the whole plan:
 {"type":"strategy_proposal","op":"draft","kind":"<kind>","summary":"<one sentence>","why":null,"asked":true}
 
-10. Look something up with sources — whenever you would otherwise state a statistic, benchmark, market size, regulation or competitor fact you can't source from the details above. Ask "Want me to look that up?" and offer this card. It runs in the background (1 task, about two minutes) and the answer comes back into this chat with its links:
+10. Look something up with sources — whenever you would otherwise state a statistic, benchmark, market size, regulation or competitor fact you can't source from the details above. Whenever you offer to look something up, put THIS card in "uiElement" in the SAME reply (never offer it in words only) — the click is their yes. It runs in the background (1 task, about two minutes) and the answer comes back into this chat with its links:
 {"type":"mentor_research","summary":"<one sentence>","question":"<the precise question to research>"}
 
 11. Break-even — when they ask how many sales, leads or customers they need to cover a cost ("if I spend £500 on ads…"). Fill only the inputs they gave or that are in their business plan; anything else is an assumption and must be marked "source":"assumption" with a note. Never state the result yourself: it is worked out in code and shown on the card, with a sentence added under your reply:

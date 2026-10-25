@@ -216,6 +216,16 @@ export function cardTheUserAskedFor(typed: string): MentorCard | null {
     if (/\b(who|which|what)\b[^?.!\n]{0,40}\b(hire|recruit|take on)\b/.test(t) || /\bhire next\b/.test(t)) {
         return { type: 'mentor_hire_recommendation', summary: 'Who I’d hire next', asked: true };
     }
+    // Phase 2, same lesson (staging, 2026-10-25): asked to "approve my idea check", Opus 5.5 said "the
+    // approval card is below" and drew none. The card is rebuilt from the documents anyway.
+    const plan = /\b(idea check|business plan|marketing plan)\b/.exec(t);
+    const kind = plan ? ({ 'idea check': 'idea_check', 'business plan': 'business_plan', 'marketing plan': 'marketing_plan' } as const)[plan[1] as 'idea check'] : null;
+    if (kind && /\bapprove\b/.test(t) && !/\b(don['’]?t|do not|not yet|before)\b[^?.!\n]{0,15}\bapprove\b/.test(t) && !/\bapprove\b[^?.!\n]{0,40}\byet\b/.test(t)) {
+        return { type: 'strategy_proposal', op: 'approve', kind, summary: 'Approve your plan', why: null, asked: true };
+    }
+    if (kind && kind !== 'idea_check' && /\b(draft|write|pre-?draft)\b[^?.!\n]{0,25}\b(business plan|marketing plan)\b/.test(t)) {
+        return { type: 'strategy_proposal', op: 'draft', kind, summary: 'I’ll draft it for you to check', why: null, asked: true };
+    }
     if (/\b(review|approve|see|show|go through)\b[^?.!\n]{0,30}\b(all|every|several|your)\b[^?.!\n]{0,30}\bsuggestions?\b/.test(t)) {
         return { type: 'mentor_review_all', summary: 'Your suggestions that are still waiting' };
     }

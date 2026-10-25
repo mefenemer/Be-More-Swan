@@ -16,6 +16,7 @@
 // "not ready", writes refuse with a plain message.
 
 import { and, desc, eq, sql } from 'drizzle-orm';
+import { getGoalMetric } from '../config/goal-metrics';
 import { aiAssistants, goals, masterAssistants, organisations, orgOfferProfile, orgProducts, strategyDocuments } from '../../db/schema';
 
 type Db = any;
@@ -280,7 +281,8 @@ export async function loadPrefillSources(db: Db, orgId: number): Promise<Prefill
         offerKinds: offer ? (offer.offers ?? []).filter((k: string) => !k.startsWith('asked:')) : null,
         // Only the role assistants: the Mentor itself is not a channel.
         activeTeam: team.filter((t: any) => t.type !== 'business_mentor').map((t: any) => ({ name: t.name || t.role || 'Assistant', role: t.role || 'Assistant' })),
-        goals: goalRows.map((g: any) => ({ assistant: g.assistant || 'An assistant', label: g.title || g.metricKey, target: Number(g.target), targetDate: new Date(g.targetDate) })),
+        // A goal with no title is named by its metric's label, never its internal key (staging, 2026-10-25).
+        goals: goalRows.map((g: any) => ({ assistant: g.assistant || 'An assistant', label: g.title || getGoalMetric(g.metricKey)?.label || 'A goal', target: Number(g.target), targetDate: new Date(g.targetDate) })),
     };
 }
 

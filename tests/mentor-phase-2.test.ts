@@ -24,7 +24,7 @@ import {
 import { businessKnowledgePromptBlock } from '../src/utils/business-knowledge';
 import { parseResearchReply } from '../src/utils/mentor-jobs';
 import { buildBreakEvenCard, buildStrategyCard, cleanQuestion } from '../src/utils/mentor-plan-cards';
-import { mentorCardFromUiElement, proposalKind } from '../src/utils/mentor-cards';
+import { cardTheUserAskedFor, mentorCardFromUiElement, proposalKind } from '../src/utils/mentor-cards';
 import { PLAYBOOKS, isUsablePlaybook, playbookFor, renderPlaybookForMentor, type Playbook } from '../src/config/mentor-playbooks';
 import { ROLE_MODEL_PATHS, promptLayersFor } from '../src/config/assistant-prompt-layers';
 import { TASK_WEIGHTS } from '../src/config/task-weights';
@@ -66,6 +66,8 @@ test('break-even refuses inputs that cannot break even, instead of guessing', ()
     const neg = breakEven({ price: 10, costPerSale: 12, spend: 100 });
     assert.ok(!neg.ok && /no number of sales/.test(neg.error));
     assert.ok(!breakEven({ price: 10 }).ok, 'nothing to cover');
+    const zeroGuess = breakEven({ price: 12, costPerSale: 2, spend: 500, fixedCosts: { value: 0, source: 'assumption' } });
+    assert.ok(zeroGuess.ok && !zeroGuess.assumed.length && !/Assumed/.test(zeroGuess.sentence), 'a £0 guess is not reported as an assumption');
     const badRate = breakEven({ price: 10, spend: 100, conversionRate: 140 });
     assert.ok(badRate.ok && badRate.leadsToBreakEven === null, 'an impossible rate is dropped, not used');
     const card = buildBreakEvenCard('x', { price: 40, costPerSale: 15, spend: 500 });
@@ -218,6 +220,12 @@ test('chat cards: rebuilt from the real documents; approve needs a draft; volunt
     assert.ok(idea && !('error' in idea) && proposalKind(idea) === null, 'the user’s own interview answers are never a suggestion');
     assert.ok('error' in (mentorCardFromUiElement({ type: 'strategy_proposal', op: 'revise', kind: 'marketing_plan', asked: false, sections: {} }, 50) as object));
     assert.ok('error' in (mentorCardFromUiElement({ type: 'mentor_research', question: 'x' }, 50) as object));
+    // Opus 5.5 said "the approval card is below" and drew none (staging, 2026-10-25): the user's ask draws it.
+    const askApprove = cardTheUserAskedFor('My buyer answer is right. Please approve my idea check.');
+    assert.ok(askApprove && askApprove.type === 'strategy_proposal' && askApprove.op === 'approve' && askApprove.kind === 'idea_check');
+    assert.strictEqual(cardTheUserAskedFor('Don’t approve my business plan yet'), null);
+    const askDraft = cardTheUserAskedFor('Can you draft my marketing plan?');
+    assert.ok(askDraft && askDraft.type === 'strategy_proposal' && askDraft.op === 'draft' && askDraft.kind === 'marketing_plan');
     const o = read('netlify/functions/chat-orchestrator.ts');
     assert.match(o, /m\.type === 'mentor_break_even'[\s\S]{0,700}content = `\$\{content\}\\n\\n\$\{card\.sentence\}`/, 'the figure is written by code under the reply');
 });
