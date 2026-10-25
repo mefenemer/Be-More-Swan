@@ -1,0 +1,104 @@
+// tests/prompt-audit-blog-leads-site.test.ts
+// Prompt audit, 2026-10-25 — Blog, Lead Generator outreach and Website (owner: "assistants need to
+// be experts in their role"). Graded live drafts for three businesses (a physio, a bookkeeper, a
+// florist), before and after. Before: a "true story" blog invented a client's quote with a "he",
+// "ninety percent of our clients" and a three-year history; a Making Tax Digital article gave wrong
+// thresholds and deadlines; a physio guide promised "stronger than before"; half the cold emails ran
+// past 75 words, asked twice, swapped the chosen offer for another product, asked for "a chat" and
+// claimed things about the sender nobody had said; every drafted website invented reply times,
+// free quotes, online booking and delivery, and carried a testimonials section of [placeholders].
+// These pin the rules that fixed them.
+// Run:  npx tsx tests/prompt-audit-blog-leads-site.test.ts
+
+import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
+import { BLOG_CRAFT } from '../src/constants/blog-craft';
+import { SITE_COPY_CRAFT } from '../src/constants/site-copy-craft';
+import { OUTREACH_FIRST_EMAIL_RULES, outreachFirstEmailBlock } from '../src/config/outreach-offer';
+import { articleTypeByKey } from '../src/utils/content-shapes';
+import { buildBlogSystemPrompt } from '../src/utils/blog-generate';
+import { buildDraftPrompt } from '../src/utils/site-draft';
+import { buildFillPrompt } from '../src/utils/site-template-fill';
+import { promptLayersFor } from '../src/config/assistant-prompt-layers';
+
+let passed = 0;
+function check(name: string, fn: () => void) { fn(); console.log(`  ✓ ${name}`); passed++; }
+const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+
+check('blog craft: no invented stories, history or figures, and no tax or health figures from memory', () => {
+    for (const s of ['NO INVENTED STORIES, PEOPLE OR QUOTES', 'NO INVENTED HISTORY OR FIGURES', '"three years ago"',
+        'TAX, LEGAL, BENEFITS AND HEALTH RULES', 'GOV.UK', 'Never promise an outcome', 'a "he" or "she"',
+        'in the present tense', 'never an "In conclusion…" recap', 'under about 65 characters'])
+        assert.ok(BLOG_CRAFT.includes(s), s);
+});
+
+check('the blog system prompt carries the craft, after the type and opening and before the layout', () => {
+    const p = buildBlogSystemPrompt({
+        dateBlock: 'DATE', businessName: 'Ledger & Lane', tone: 'warm', voiceSettings: undefined, assistantPrompt: '',
+        articleType: articleTypeByKey('story')!, sequence: 0, guardrailsBlock: null, inspoBlock: null,
+    });
+    const type = p.indexOf('ARTICLE TYPE for THIS post'), craft = p.indexOf('BLOG CRAFT —'), layout = p.indexOf('LAYOUT\n');
+    assert.ok(p.startsWith('DATE') && type > 0 && craft > type && layout > craft, 'order: date → type → craft → layout');
+    assert.ok(p.includes('for Ledger & Lane'));
+    // The drafter really uses the builder.
+    assert.ok(read('src/utils/blog-generate.ts').includes('system: buildBlogSystemPrompt({'));
+});
+
+check('story and behind-the-scenes articles cannot be met by inventing a history', () => {
+    assert.ok(articleTypeByKey('story')!.brief.includes('rather than inventing a history'));
+    assert.ok(articleTypeByKey('behind_scenes')!.brief.includes('never invent a step, a tool, a timeline or a client'));
+});
+
+check('cold email: one question, no invented claims about us, no "a chat", no first initials', () => {
+    for (const s of ['ONE question', 'ask no other question anywhere', 'Say nothing about us that the business',
+        '"a chat"', 'Never a first initial', 'not past work', 'venues tell us…'])
+        assert.ok(OUTREACH_FIRST_EMAIL_RULES.includes(s), s);
+});
+
+check('a gift or intro offer: the permission question is the last line, and the offer is never swapped', () => {
+    const gift = outreachFirstEmailBlock({ kind: 'gift', formId: 1, formName: 'F', giftLabel: 'MTD checklist', linkable: true });
+    assert.ok(gift.includes("IS the email's one question and its last line"));
+    const intro = outreachFirstEmailBlock({ kind: 'intro_offer', summary: 'A free first week, no card needed.', url: null });
+    assert.ok(intro.includes('Offer THIS and nothing else') && intro.includes('add no other question after it'));
+});
+
+check('every outreach JSON shape repeats the word limit where the model writes the body', () => {
+    assert.strictEqual(read('src/lib/discovery-scoring.ts').match(/"body": "<UNDER 75 WORDS, following the FIRST-EMAIL RULES/g)?.length, 2, 'scoring and re-scoring');
+    const lg = read('netlify/functions/lead-generation.ts');
+    assert.ok(lg.includes('"body": "<UNDER 75 WORDS, following the FIRST-EMAIL RULES') && lg.includes('"body": "<email body, UNDER 75 WORDS>"'));
+});
+
+check('website copy: promises and policies are facts, no slogans, no placeholder testimonials', () => {
+    for (const s of ['PROMISES AND POLICIES ARE FACTS TOO', '"within one working day"', '"no obligation"', 'whether a referral is needed',
+        'is a slogan, not a headline', "Don't add a testimonials section", 'never a question written only to hold one', '"back to full health"'])
+        assert.ok(SITE_COPY_CRAFT.includes(s), s);
+});
+
+const BRIEF = {
+    business: { name: 'Hollin Physio', industry: null, description: null, audience: null, websiteUrl: null, email: null },
+    productsBlock: null, rulesBlock: null, goal: null, pagesWanted: null, style: null, request: null, maxPages: 3,
+};
+
+check('the whole-site draft and the template fill both carry the website craft', () => {
+    const d = buildDraftPrompt(BRIEF).user;
+    assert.ok(d.includes('WEBSITE COPY —'));
+    // It no longer suggests a testimonials section of placeholders.
+    assert.ok(!d.includes("[A customer's words]"));
+    const f = buildFillPrompt(BRIEF, { theme: {}, settings: {}, nav: [], pages: [], footer: {} } as never).user;
+    assert.ok(f.includes('WEBSITE COPY —') && f.includes("A template's own promises"));
+});
+
+check('the Website Assistant chat edits the site under the same craft', () => {
+    const orch = read('netlify/functions/chat-orchestrator.ts');
+    const site = orch.indexOf('website_assistant: {');
+    const craft = orch.indexOf('${SITE_COPY_CRAFT}', site);
+    assert.ok(site > 0 && craft > site && craft < orch.indexOf('CHANGING THE SITE.', site), 'in the FACTS part of the website prompt');
+});
+
+check('Admin ▸ Assistants ▸ Model & rules shows the new blocks', () => {
+    assert.ok(promptLayersFor('blog_writer').some((l) => l.key === 'blog_craft' && l.text === BLOG_CRAFT));
+    assert.ok(promptLayersFor('website_assistant').some((l) => l.key === 'site_copy' && l.text === SITE_COPY_CRAFT));
+    assert.ok(promptLayersFor('lead_qualifier').some((l) => l.key === 'first_email' && l.text === OUTREACH_FIRST_EMAIL_RULES));
+});
+
+console.log(`\n${passed} passed`);

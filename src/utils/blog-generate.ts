@@ -11,6 +11,7 @@
 // established, and every query here is scoped by it.
 
 import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
+import { BLOG_CRAFT } from '../constants/blog-craft';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
@@ -21,7 +22,7 @@ import { logAiUsage } from './ai-usage';
 import { buildInspoBlock } from './inspo-profile';
 import { currentDatePromptBlock } from './current-date-prompt';
 import { voiceDirective } from './voice-profile';
-import { articleTypeByKey, blogArticleTypeBlock, blogArticleTypeFor } from './content-shapes';
+import { articleTypeByKey, blogArticleTypeBlock, blogArticleTypeFor, type ArticleType } from './content-shapes';
 import { blogOpeningBlock } from '../config/hook-styles';
 import { CTA_BINDING_RULE, ctaBriefLine } from '../config/call-to-action';
 import { loadCtaForAssistant } from './call-to-action';
@@ -130,6 +131,68 @@ export async function buildBlueprintGuardrailsBlock(
         console.error(`buildBlueprintGuardrailsBlock: assistant ${opts.assistantId} failed`, err);
         return null;
     }
+}
+
+/** What the blog drafter's system prompt is built from. */
+export interface BlogSystemPromptInput {
+    /** currentDatePromptBlock() for the post's own publish date — it leads the prompt. */
+    dateBlock: string;
+    businessName: string | null | undefined;
+    tone: string;
+    voiceSettings: unknown;
+    assistantPrompt: string;
+    articleType: ArticleType;
+    sequence: number;
+    guardrailsBlock: string | null;
+    inspoBlock: string | null;
+}
+
+/**
+ * The blog drafter's system prompt. Pure — exported so the prompt audit can rebuild exactly what
+ * runs (tests/prompt-audit-blog-leads-site.test.ts).
+ */
+export function buildBlogSystemPrompt({
+    dateBlock, businessName, tone, voiceSettings, assistantPrompt, articleType, sequence, guardrailsBlock, inspoBlock,
+}: BlogSystemPromptInput): string {
+    return (
+        // Blog is the most year-exposed surface there is — "the 2025 guide to…" is a title
+        // format a blog writer reaches for unprompted, and an H1 with a stale year is visible
+        // on the customer's own domain. Leads the prompt, as on the social path.
+        `${dateBlock}\n\n` +
+        `You are a blog writer${businessName ? ` for ${businessName}` : ''}.\n` +
+        `${voiceDirective(tone, { surface: 'blog', fallback: DEFAULT_TONE, voice: voiceSettings })}\n` +
+        (assistantPrompt ? `Further voice guidance: ${assistantPrompt}\n` : '') +
+        'Produce a complete, publish-ready blog post with a single level-1 heading as the title. ' +
+        'Weave the target keywords in naturally — never keyword-stuff.\n' +
+        `${blogArticleTypeBlock(articleType)}\n` +
+        // And how it opens — rotated by the same count, so consecutive articles never start the
+        // same way (src/config/hook-styles.ts).
+        `${blogOpeningBlock(sequence)}\n` +
+        `${CTA_BINDING_RULE}\n` +
+        // How a professional blogger writes, and what it may never invent (prompt audit 2026-10-25).
+        `${BLOG_CRAFT}\n` +
+        // ⚠️ THE LENGTH TARGET IS LOAD-BEARING, and it was measured rather than guessed. Asking
+        // for a layout instead of a wall of Markdown made drafts ~30% SHORTER on the same brief
+        // (mean 773 words against 1,101 over two runs each): the model keeps the same number of
+        // sections and thins every one of them, spending its budget on structure. Without this
+        // line, adding layouts would have quietly downgraded every blog post the product writes.
+        // The range now comes from the ARTICLE TYPE (each states one — an opinion piece is
+        // shorter than a guide), but it is still always stated, for the reason above.
+        'Write the word count the ARTICLE TYPE gives. Each section needs real substance — full ' +
+        'paragraphs, examples, specifics — not a sentence under a heading.\n' +
+        'Return ONLY a JSON object with one key, "layout", SET OUT as described under LAYOUT ' +
+        'below.\n' +
+        // ⚠️ The escape hatch, and on this surface it is doing more work than on the newsletter:
+        // a blog post is long enough that a model can run out of room mid-object. A reply that
+        // is plain Markdown is used as the draft exactly as it was before layouts existed.
+        'If you cannot produce a layout, return the post as plain Markdown instead, with no ' +
+        'JSON and no preamble.' +
+        // Order matters: the workspace's binding rules and authoritative business facts are
+        // established FIRST, so the Inspo styling that follows can shape the voice but never
+        // override them. Mirrors the social path, where inspo sits after the blueprint.
+        `\n\n${layoutIrPromptBlock({ images: 'encouraged' })}` +
+        (guardrailsBlock ? `\n\n${guardrailsBlock}` : '') +
+        (inspoBlock ? `\n\n${inspoBlock}` : ''));
 }
 
 export const BLOG_MODEL = 'claude-haiku-4-5-20251001';
@@ -313,43 +376,10 @@ export async function generateBlogBody(
         // keeps the structured path from being a worse deal than the wall of Markdown it replaced —
         // and the raw-Markdown fallback below is what catches it when it happens anyway.
         max_tokens: 6000,
-        system:
-            // Blog is the most year-exposed surface there is — "the 2025 guide to…" is a title
-            // format a blog writer reaches for unprompted, and an H1 with a stale year is visible
-            // on the customer's own domain. Leads the prompt, as on the social path.
-            `${currentDatePromptBlock({ publishDate: post.publishDate, timezone })}\n\n` +
-            `You are a blog writer${org?.name ? ` for ${org.name}` : ''}.\n` +
-            `${voiceDirective(tone, { surface: 'blog', fallback: DEFAULT_TONE, voice: voiceSettings })}\n` +
-            (assistantPrompt ? `Further voice guidance: ${assistantPrompt}\n` : '') +
-            'Produce a complete, publish-ready blog post with a single level-1 heading as the title. ' +
-            'Weave the target keywords in naturally — never keyword-stuff.\n' +
-            `${blogArticleTypeBlock(articleType)}\n` +
-            // And how it opens — rotated by the same count, so consecutive articles never start the
-            // same way (src/config/hook-styles.ts).
-            `${blogOpeningBlock(sequence)}\n` +
-            `${CTA_BINDING_RULE}\n` +
-            // ⚠️ THE LENGTH TARGET IS LOAD-BEARING, and it was measured rather than guessed. Asking
-            // for a layout instead of a wall of Markdown made drafts ~30% SHORTER on the same brief
-            // (mean 773 words against 1,101 over two runs each): the model keeps the same number of
-            // sections and thins every one of them, spending its budget on structure. Without this
-            // line, adding layouts would have quietly downgraded every blog post the product writes.
-            // The range now comes from the ARTICLE TYPE (each states one — an opinion piece is
-            // shorter than a guide), but it is still always stated, for the reason above.
-            'Write the word count the ARTICLE TYPE gives. Each section needs real substance — full ' +
-            'paragraphs, examples, specifics — not a sentence under a heading.\n' +
-            'Return ONLY a JSON object with one key, "layout", SET OUT as described under LAYOUT ' +
-            'below.\n' +
-            // ⚠️ The escape hatch, and on this surface it is doing more work than on the newsletter:
-            // a blog post is long enough that a model can run out of room mid-object. A reply that
-            // is plain Markdown is used as the draft exactly as it was before layouts existed.
-            'If you cannot produce a layout, return the post as plain Markdown instead, with no ' +
-            'JSON and no preamble.' +
-            // Order matters: the workspace's binding rules and authoritative business facts are
-            // established FIRST, so the Inspo styling that follows can shape the voice but never
-            // override them. Mirrors the social path, where inspo sits after the blueprint.
-            `\n\n${layoutIrPromptBlock({ images: 'encouraged' })}` +
-            (guardrailsBlock ? `\n\n${guardrailsBlock}` : '') +
-            (inspoBlock ? `\n\n${inspoBlock}` : ''),
+        system: buildBlogSystemPrompt({
+            dateBlock: currentDatePromptBlock({ publishDate: post.publishDate, timezone }),
+            businessName: org?.name, tone, voiceSettings, assistantPrompt, articleType, sequence, guardrailsBlock, inspoBlock,
+        }),
         messages: [{ role: 'user', content: brief }],
     }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming) }), { label: 'blog' });
 

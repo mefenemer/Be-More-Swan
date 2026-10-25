@@ -511,7 +511,7 @@ Return STRICT JSON only (no markdown): an array with ONE object per candidate, i
     "rating": "hot" | "warm" | "cold",
     "reasons": ["<reason tied to a profile criterion>", ...],
     "suggestedNextStep": "<one concrete next action>",
-    "outreachDraft": { "to": null, "subject": "<subject>", "body": "<personalised outreach in the sales tone>" } | null,
+    "outreachDraft": { "to": null, "subject": "<subject>", "body": "<UNDER 75 WORDS, following the FIRST-EMAIL RULES: personalised outreach in the sales tone>" } | null,
     "excludedBy": "<the exclusion-list entry this matches, quoted from the profile>" | null,${areaBlock ? `
     "outsideArea": "<where it is, when outside the search's area>" | null,` : ''}
     "doNotContact": <true|false>,
@@ -732,7 +732,7 @@ Return STRICT JSON only (no markdown):
   "hooks": ["<a concrete opening line the outreach could use, tied to something in the evidence>", ...],
   "suggestedNextStep": "<one concrete next action>",
   "excludedBy": "<the exclusion-list entry this matches, quoted from the profile>" | null,
-  "outreachDraft": { "to": null, "subject": "<subject>", "body": "<personalised outreach in the sales tone, referencing the strongest hook>" } | null
+  "outreachDraft": { "to": null, "subject": "<subject>", "body": "<UNDER 75 WORDS, following the FIRST-EMAIL RULES: personalised outreach in the sales tone, referencing the strongest hook>" } | null
 }
 
 Every "url" in "signals" must be one of the evidence urls given to you. Write an outreachDraft for hot/warm leads only; use null for cold. Keep "hooks" to at most three, and only include one if the evidence genuinely supports it.
