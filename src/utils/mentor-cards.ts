@@ -169,10 +169,10 @@ Set "asked": true ONLY when the user's latest message asked for exactly this cha
 
 6. ${mentorSetupFieldPromptLine()}
 
-7. Who to hire next — when they ask what to hire, or (as a suggestion) when WHO TO HIRE NEXT shows a clear gap. The card lists the assistants under WHO TO HIRE NEXT with their reasons and whether the plan has room; you write only the summary. It hires nothing:
+7. Who to hire next — whenever they ask who or what to hire (ALWAYS draw it then, "asked": true, even if you also advise fixing the team first — say that in the reply), or as a suggestion when WHO TO HIRE NEXT shows a clear gap. Never when WHO TO HIRE NEXT says there is no clear gap. The card lists the assistants under WHO TO HIRE NEXT with their reasons and whether the plan has room; you write only the summary. It hires nothing:
 {"type":"mentor_hire_recommendation","summary":"<one sentence>","asked":true|false}
 
-8. Review all — when they want to see or approve several of your suggestions at once. It lists every suggestion still waiting, each with its own tick (none ticked), and applies only the ones they tick:
+8. Review all — when they want to see, review or approve several of your suggestions at once (ALWAYS draw it then). It lists every suggestion still waiting, each with its own tick (none ticked), and applies only the ones they tick:
 {"type":"mentor_review_all","summary":"<one sentence>"}
 
 Cards 1, 2, 6 and 7 are suggestions when you volunteer them ("asked": false) and count towards the 3 a week. At most one card per reply, and at most one suggestion card unless they asked for more. Never say a card has been applied — the user decides.`;
