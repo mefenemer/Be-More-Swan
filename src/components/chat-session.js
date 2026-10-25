@@ -1399,9 +1399,10 @@
     }
 
     // ── Business Mentor cards (src/utils/mentor-cards.ts) → the screens' own endpoints. ──
-    // One click must save once. On staging (2026-10-25) a quiet-mode click reached two listeners
-    // (a chat re-mounted by "New chat" kept its old one) and saved twice; for the products card that
-    // would add every product twice. Every listener sees the same event object, so mark it.
+    // One click must save once. On staging (2026-10-25) a quiet-mode click saved twice: destroy() never
+    // removed these four listeners, so "New chat" left the old chat's handlers listening. destroy()
+    // now removes them (tests/chat-session-listeners.test.ts pins every add to a remove); this guard
+    // stays as a second line of defence, since a duplicate products save would add every product twice.
     function mentorAlreadyHandled(e) {
       if (e.__mentorHandled) return true;
       e.__mentorHandled = true;
@@ -1989,6 +1990,10 @@
         container.removeEventListener('site:reviewDecisions', onReviewDecisions);
         container.removeEventListener('site:offerProfile', onOfferProfile);
         container.removeEventListener('intro:offer', onIntroOffer);
+        container.removeEventListener('mentor:businessProfile', onMentorBusinessProfile);
+        container.removeEventListener('mentor:products', onMentorProducts);
+        container.removeEventListener('mentor:quietMode', onMentorQuietMode);
+        container.removeEventListener('mentor:support', onMentorSupport);
         container.removeEventListener('lead:outreachOffer', onOutreachOffer);
         container.removeEventListener('cta:change', onCallToAction);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
