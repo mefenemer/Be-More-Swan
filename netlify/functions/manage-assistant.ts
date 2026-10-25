@@ -15,7 +15,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { transitionAssistantStatus } from '../../src/utils/assistant-lifecycle';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { releasePausedLimit } from '../../src/utils/release-paused-limit';
-import { checkResumeCapacity, checkRoleSwap, takesASeat } from '../../src/utils/assistant-capacity';
+import { checkResumeCapacity, checkRoleSwap, isWorkspaceRole, takesASeat } from '../../src/utils/assistant-capacity';
 
 // Issue #191: archiving starts a 14-day reinstate window before purge-archived-assistants.ts
 // (daily cron) permanently deletes the assistant and all of its associated data.
@@ -55,6 +55,12 @@ export default withLambda(async (event) => {
 
                 const existing = await findAssistant();
                 if (!existing) return { statusCode: 404, body: JSON.stringify({ error: 'Assistant not found.' }) };
+
+                // The Business Mentor can be quietened (Quiet mode), never paused: it is the workspace's
+                // guide and its route to support (docs/business-mentor-plan.md §2.3).
+                if (action === 'pause' && isWorkspaceRole((existing.configuration as { type?: string } | null)?.type)) {
+                    return { statusCode: 409, body: JSON.stringify({ error: 'Your Business Mentor can’t be paused. Turn on Quiet mode instead: it stops suggestions until you ask.', code: 'WORKSPACE_ROLE' }) };
+                }
 
                 // Issue #191 — Reinstate: undo an archive within its 14-day grace window,
                 // subject to the same plan assistant-limit gate as hiring a new one.
@@ -182,6 +188,10 @@ export default withLambda(async (event) => {
             if (event.httpMethod === 'DELETE') {
                 const existing = await findAssistant();
                 if (!existing) return { statusCode: 404, body: JSON.stringify({ error: 'Assistant not found.' }) };
+                // Included on every plan and takes no slot, so there is nothing to free by archiving it.
+                if (isWorkspaceRole((existing.configuration as { type?: string } | null)?.type)) {
+                    return { statusCode: 409, body: JSON.stringify({ error: 'Your Business Mentor is included with every plan and can’t be archived. Turn on Quiet mode if you’d rather it stayed in the background.', code: 'WORKSPACE_ROLE' }) };
+                }
 
                 // Issue #191: archiving now opens a 14-day reinstate window (rather than being
                 // immediately terminal) — archivedAt/scheduledDeletionAt drive both the reinstate

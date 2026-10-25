@@ -632,6 +632,8 @@
       hideGoals: true,
       // Nothing dated to show yet: no Calendar tab, and no Calendar shortcut on its card.
       hideCalendar: true,
+      // Included on every plan: Quiet mode instead of pause, and never archived (manage-assistant.ts).
+      noPauseOrArchive: true,
       modules: {
         hasPostingSchedule: false, hasSocialStrategy: false,
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,

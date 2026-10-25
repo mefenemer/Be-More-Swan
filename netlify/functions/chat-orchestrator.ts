@@ -101,6 +101,7 @@ import { BRIEF_PURPOSES, BRIEF_ASPECT_RATIOS, REJECT_REASONS, SOURCE_SPECS } fro
 import { FUNNEL_STAGES, FUNNEL_STAGE_DESCRIPTIONS, stageOutcomes } from '../../src/config/campaign-vocab';
 import { asksForACall, callbackOfferElement } from '../../src/utils/callback-request';
 import { buildMentorSnapshot } from '../../src/utils/mentor-snapshot';
+import { mentorCardFromUiElement, mentorCardsPromptBlock, proposalKind, recordMentorProposal } from '../../src/utils/mentor-cards';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -690,7 +691,7 @@ function businessMentorSurfaces(): string {
 - Each assistant's own page — its settings, set-up answers, goals ("Results" tab) and rules. Only mention assistants listed as active below.
 - "My Account" — its "Billing & Subscription" tab (the plan, payments, resubscribing and changing plan), tasks used, notifications and "Your data". Always say "My Account ▸ Billing & Subscription", never "the Billing page".
 - "Help & Support" — Help Centre articles, contacting support, and "Report an Issue".
-Your own page has a "Chat" tab (this conversation) and a "Results" tab.`;
+Your own page has a "Chat" tab (this conversation) and a "Results" tab. "Quiet mode" is on your profile, under how you work. You can't be paused or archived — Quiet mode is how the user asks you to step back.`;
 }
 
 function mysteryShopperSurfaces(): string {
@@ -1757,7 +1758,12 @@ or
         maxTokens: 1600,
         usesMentorSnapshot: true,
         buildRolePrompt: (rc) => {
-            const stage = (rc.onboardingContext as { businessStage?: string } | null)?.businessStage;
+            const ctx = rc.onboardingContext as { businessStage?: string; quietMode?: string } | null;
+            const stage = ctx?.businessStage;
+            // Quiet mode (its set-up answer): the Mentor can't be paused, so this is how it steps back.
+            const quietLine = ctx?.quietMode === 'on'
+                ? 'QUIET MODE IS ON: the user asked you to stay in the background. Do not open with a health check and do not volunteer suggestions, gaps or next steps. Answer exactly what they ask (including how to use Be More Swan) and stop. If they ask what you would suggest, then suggest.'
+                : '';
             const stageLine = stage === 'new_idea'
                 ? 'They told you they are starting something new: begin from the idea itself (who buys, why, how to test it cheaply) before anything else.'
                 : stage === 'existing'
@@ -1768,7 +1774,7 @@ or
                 `You are ${rc.assistantName}, this business's Business Mentor on Be More Swan: their guide to the platform and a business coach who knows their workspace. You are included with their plan.
 
 ${stageLine}
-
+${quietLine ? `\n${quietLine}\n` : ''}
 ${rc.mentorSnapshot ?? 'The workspace overview could not be read this turn. Do not guess gaps, figures, goals or which assistants they have: say you can\'t see the workspace right now and answer from the details above only.'}
 
 ${MENTOR_CRAFT}
@@ -1777,10 +1783,16 @@ ${MENTOR_HONESTY_RULES}
 
 ${businessMentorSurfaces()}
 
-Reply conversationally in plain text. Do not use markdown headings.`,
+${mentorCardsPromptBlock()}
+
+Return STRICT JSON (no markdown, no prose outside the JSON):
+{
+  "reply": "your conversational message to the user, in plain text without markdown headings",
+  "uiElement": <one card from CARDS above, or null>
+}`,
             ].join('\n\n');
         },
-        parseResponse: (raw) => ({ content: raw.trim(), uiElement: null }),
+        parseResponse: parseStructuredReply,
     },
 
     // Tier 1, Batch 1 — Lead Generator. Scores inbound leads against the ideal-customer
@@ -3174,6 +3186,24 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // Not final either: the blog route replaces it with a normalised draft (or nothing) below.
         let uiElement = parsed.uiElement;
         let content = parsed.content;
+        // The Business Mentor's own cards (src/utils/mentor-cards.ts): checked first, drawn by
+        // disruptive-ui-registry.js, applied by the user's click through the screens' own endpoints.
+        if (route === ROUTES.business_mentor) {
+            const m = mentorCardFromUiElement(uiElement, session.aiAssistantId);
+            if (m && 'error' in m) {
+                uiElement = null;
+                content = `${content}\n\n(I didn’t include a card for that — ${m.error.charAt(0).toLowerCase()}${m.error.slice(1)} You can make the change on the page instead.)`;
+            } else if (m) {
+                uiElement = m;
+                const kind = proposalKind(m);
+                if (kind && 'why' in m) {
+                    await recordMentorProposal(db, { organisationId: orgId, aiAssistantId: session.aiAssistantId, kind, title: m.summary, why: m.why, payload: m, chatSessionId: session.id });
+                }
+            } else {
+                uiElement = null; // never another route's card shape
+            }
+        }
+
 
         // A campaign plan briefs ONLY assistants this workspace has active (src/utils/campaign-plan.ts):
         // the prompt says so, and this holds it when a model doesn't. Fails open on a read error —

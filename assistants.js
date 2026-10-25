@@ -8181,10 +8181,13 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         // both "More actions" entries and show a reinstate banner with the countdown instead
         // (below). The banner's own button is the one live path back from archived.
         const isArchived = currentData.lifecycleStatus === 'archived';
-        if (archiveBtn) archiveBtn.classList.toggle('hidden', isArchived);
-        document.getElementById('btn-toggle-status')?.classList.toggle('hidden', isArchived);
+        // The Business Mentor can be quietened but never paused or archived (registry
+        // noPauseOrArchive; manage-assistant.ts refuses both): no entries, so no "…" menu either.
+        const lockedIn = !!window.AssistantDashboardRegistry?.get(currentData.roleKey)?.noPauseOrArchive;
+        if (archiveBtn) archiveBtn.classList.toggle('hidden', isArchived || lockedIn);
+        document.getElementById('btn-toggle-status')?.classList.toggle('hidden', isArchived || lockedIn);
         // Both entries are hidden when archived, so the "…" trigger has nothing left to open.
-        document.getElementById('btn-more-actions')?.classList.toggle('hidden', isArchived);
+        document.getElementById('btn-more-actions')?.classList.toggle('hidden', isArchived || lockedIn);
 
         // Issue #191 — Safe Archiving reinstate window: archived assistants are reachable only
         // via the archive notification's deep link (they're filtered out of the "My Assistants"

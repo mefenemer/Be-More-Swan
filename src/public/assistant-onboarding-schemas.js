@@ -658,6 +658,24 @@
           },
         ],
       },
+      {
+        title: 'How should your Mentor work?',
+        description: 'Your Business Mentor is included with your plan and can’t be paused or archived. Quiet mode keeps it in the background instead.',
+        operational: true,
+        fields: [
+          {
+            // Read by chat-orchestrator.ts ROUTES.business_mentor (and, from Phase 3, the weekly review).
+            key: 'quietMode',
+            label: 'Quiet mode',
+            type: 'radio',
+            required: false,
+            options: [
+              { value: 'off', label: 'Suggest things', description: 'Your Mentor points out what to fix and suggests next steps.' },
+              { value: 'on', label: 'Only when I ask', description: 'No health checks or suggestions — it answers your questions and helps with Be More Swan.' },
+            ],
+          },
+        ],
+      },
     ],
     crm_enricher: [
       {

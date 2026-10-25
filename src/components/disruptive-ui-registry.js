@@ -2218,6 +2218,91 @@
   }
   register('intro_offer', renderIntroOfferCard);
 
+  // ── Business Mentor cards (src/utils/mentor-cards.ts), checked by the server before they get here.
+  // Each click goes through chat-session.js to the endpoint the screen itself uses (§14 of
+  // docs/business-mentor-plan.md). The "Why?" line is the evidence the suggestion is based on.
+  function mentorCard(esc, { eyebrow, summary, why, bodyHtml, goLabel, eventName, detail, doneText, note }) {
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-pink-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-pink-700 tracking-wider uppercase">${esc(eyebrow)} · Approval needed</p>
+      ${summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(summary).slice(0, 300))}</p>` : ''}
+      ${why ? `<p class="mt-2 text-xs rounded-lg border border-blue-200 bg-blue-50 text-blue-800 px-2.5 py-1.5"><span class="font-bold">Why?</span> ${esc(String(why).slice(0, 400))}</p>` : ''}
+      ${bodyHtml}
+      ${note ? `<p class="text-xs text-gray-600 mt-2">${note}</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-mc-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">${esc(goLabel)}</button>
+        <button type="button" data-mc-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-pink-700" data-mc-status></p>`;
+    const status = el.querySelector('[data-mc-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-pink-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-mc-cancel]')) { setBusy(true); say('Not changed.'); return; }
+      if (!e.target.closest('[data-mc-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent(eventName, {
+        bubbles: true,
+        detail: {
+          ...detail,
+          respond({ ok, error, message }) {
+            if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved — nothing was changed.', 'error'); return; }
+            say(message || doneText);
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  const MENTOR_PROFILE_LABELS = { businessDescription: 'Business description', targetAudience: 'Who your customers are', industry: 'Industry', websiteUrl: 'Website' };
+  register('mentor_business_profile', (ui, esc) => {
+    const fields = ui.fields && typeof ui.fields === 'object' ? ui.fields : {};
+    const rows = Object.keys(MENTOR_PROFILE_LABELS).filter((k) => fields[k]).map((k) =>
+      `<li class="text-xs text-gray-700 break-words"><span class="font-semibold">${esc(MENTOR_PROFILE_LABELS[k])}:</span> ${esc(String(fields[k]))}</li>`).join('');
+    return mentorCard(esc, {
+      eyebrow: 'Business Information', summary: ui.summary, why: ui.why,
+      bodyHtml: `<ul class="mt-2 space-y-1">${rows}</ul>`,
+      goLabel: 'Save this', eventName: 'mentor:businessProfile', detail: { fields },
+      doneText: 'Saved to Business Information — every assistant now uses it.',
+      note: 'Only these fields change. You can edit them any time under Business Information.',
+    });
+  });
+
+  register('mentor_products', (ui, esc) => {
+    const products = Array.isArray(ui.products) ? ui.products : [];
+    const rows = products.map((p) => `<li class="text-xs text-gray-700 break-words"><span class="font-semibold">${esc(String(p.name || ''))}</span> <span class="text-gray-500">(${esc(p.kind === 'service' ? 'service' : 'product')})</span>${p.description ? ` — ${esc(String(p.description))}` : ''}</li>`).join('');
+    return mentorCard(esc, {
+      eyebrow: 'Products & Services', summary: ui.summary, why: ui.why,
+      bodyHtml: `<ul class="mt-2 space-y-1">${rows}</ul>`,
+      goLabel: products.length > 1 ? `Add these ${products.length}` : 'Add this', eventName: 'mentor:products', detail: { products },
+      doneText: 'Added — add prices under Business Information ▸ Products & Services.',
+      note: 'Prices are left for you to add on the Products &amp; Services tab.',
+    });
+  });
+
+  register('mentor_quiet_mode', (ui, esc) => mentorCard(esc, {
+    eyebrow: 'Quiet mode', summary: ui.summary, why: null,
+    bodyHtml: `<p class="mt-2 text-xs text-gray-700">${ui.on ? 'Your Mentor will answer your questions but stop making suggestions until you ask.' : 'Your Mentor will point out what to fix and suggest next steps again.'}</p>`,
+    goLabel: ui.on ? 'Turn on Quiet mode' : 'Turn off Quiet mode', eventName: 'mentor:quietMode', detail: { on: !!ui.on, assistantId: ui.assistantId },
+    doneText: ui.on ? 'Quiet mode is on.' : 'Quiet mode is off.',
+    note: 'Also on your Mentor’s profile, under how it works.',
+  }));
+
+  register('mentor_support_request', (ui, esc) => {
+    const issue = ui.destination === 'issue';
+    return mentorCard(esc, {
+      eyebrow: issue ? 'Report a problem to Be More Swan' : 'Message Be More Swan support', summary: ui.summary, why: null,
+      bodyHtml: `<div class="mt-2 rounded-lg bg-gray-50 border border-dashed border-gray-300 px-3 py-2"><p class="text-xs font-bold text-gray-900">${esc(String(ui.subject || ''))}</p><p class="text-xs text-gray-700 mt-1 whitespace-pre-line break-words">${esc(String(ui.description || ''))}</p></div>`,
+      goLabel: issue ? 'Send report' : 'Send', eventName: 'mentor:support',
+      detail: { destination: issue ? 'issue' : 'support', subject: ui.subject, description: ui.description },
+      doneText: issue ? 'Sent — follow it under Help & Support ▸ Report an Issue.' : 'Sent — the team will reply by email and in Help & Support.',
+      note: 'Only what’s written here is sent, with the page you were on. Nothing else from your workspace.',
+    });
+  });
+
   // { type: 'outreach_offer', summary, offer, offerLabel, formId, formName, giftLabel } — what a Lead
   // Generator's first emails offer (src/config/outreach-offer.ts), rebuilt by the server against the
   // workspace's real gift forms (src/utils/chat-outreach-offer.ts). The click → lead-generation.ts
