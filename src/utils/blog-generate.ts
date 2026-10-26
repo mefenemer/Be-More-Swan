@@ -256,6 +256,28 @@ export class BlogPostNotFoundError extends Error {
  * when the model returns nothing. Callers translate these into their own failure shape — an HTTP
  * status for the handler, a job retry for the worker.
  */
+/** What the author sees when the drafter answered with something other than an article. */
+export const NOT_AN_ARTICLE_MESSAGE = 'Your assistant didn’t write this one — it asked for more to go on instead. '
+    + 'Give the article a clearer title, or add notes on what it should cover, then try again. Nothing was charged.';
+
+/**
+ * Pure: why a plain-text reply is NOT an article, or null when it reads as one. Two shapes, both seen
+ * from the drafter: a refusal ("I can't write this…", "I'm sorry, but…") and a reply that only asks
+ * questions back. A real article from this drafter has `##` section headings, so neither rule fires on
+ * a post that has them — an article may well open "I can't tell you how often…".
+ */
+export function notAnArticle(raw: string): 'refusal' | 'questions' | null {
+    const text = String(raw ?? '').trim();
+    if (!text) return null;
+    if (/^#{2,3}\s+\S/m.test(text)) return null;
+    const opening = text.split('\n').find((l) => l.trim())!.trim();
+    if (/^(I\s+(can['’]?t|cannot|can not|won['’]?t|am (unable|not able|sorry))|I['’]m (unable|not able|sorry)|Sorry[,.!]|Unfortunately,?\s+I\b|As an AI\b)/i.test(opening)) return 'refusal';
+    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+    const asksForMore = /\b(give me|could you|can you|let me know|tell me|please (share|provide|send)|what would help|before I (write|start|draft))\b/i.test(text);
+    if (text.length < 2500 && lines[lines.length - 1].endsWith('?') && asksForMore) return 'questions';
+    return null;
+}
+
 export async function generateBlogBody(
     db: Db,
     opts: GenerateBlogBodyOptions,
@@ -466,6 +488,15 @@ export async function generateBlogBody(
         // this path had before layouts existed — except for the grounding, which this path needs
         // MOST: an unstructured draft is where invented links have always been able to reach a
         // customer's own domain, and it is the path a model falls back to when it is struggling.
+        // ⚠️ Not every plain-text reply is a post. On staging (2026-10-26) a draft titled "… delete me"
+        // came back as "I can't write this post as briefed…" plus a list of questions, and it was saved
+        // as the article body and the job charged as a finished article. A refusal or a reply that only
+        // asks questions fails the run instead: the post is left as it was and nothing is charged.
+        const notArticle = notAnArticle(raw);
+        if (notArticle) {
+            console.warn('[blog-generate] the reply was not an article', { blogPostId, why: notArticle, opening: raw.slice(0, 160) });
+            throw new Error(NOT_AN_ARTICLE_MESSAGE);
+        }
         const ground = groundMarkdownLinks(raw, brief);
         bodyMarkdown = ground.markdown;
         ungroundedLinks = ground.removed;
