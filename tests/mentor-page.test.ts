@@ -182,6 +182,11 @@ test('the Overview tab exists on the page, and the prompt names it and its panel
         assert.ok(tab.includes(name), `page shows ${name}`);
     }
     assert.ok(surfaces.includes('"Dismissed suggestions"') && tab.includes('Dismissed suggestions ('));
+    // The Set-up checklist collapses; the choice is saved on the summary click, never on `toggle`
+    // (an open render fires toggle too, saving a choice nobody made).
+    assert.ok(tab.includes('<details data-mentor-checklist'), 'checklist is collapsible');
+    assert.ok(tab.includes("closest('[data-mentor-checklist] > summary')"), 'choice saved on summary click');
+    assert.ok(!tab.includes("addEventListener('toggle'"), 'not on toggle');
     for (const r of ['Not relevant', 'Already done', 'Disagree', 'Not now']) assert.ok(surfaces.includes(`"${r}"`), r);
     assert.ok(surfaces.includes('"Dismiss…"') && read('src/components/disruptive-ui-registry.js').includes('>Dismiss…</button>'));
 });

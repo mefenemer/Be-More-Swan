@@ -258,6 +258,19 @@ test('hire: respects the plan\'s assistant limit, naming the next plan', () => {
     assert.match(top.capacity.note, /swapping one you have/);
     assert.match(recommendHires(base).capacity.note, /1 free assistant slot, included in what you pay/);
     assert.match(recommendHires({ ...base, plan: { status: null, freeSlots: null } }).capacity.note, /need a plan/);
+    // Free slots that cover every assistant not yet hired: the plan includes them all, not "3 free slots".
+    const covers = recommendHires({ ...base, plan: { status: 'active', freeSlots: 5 } });
+    assert.strictEqual(covers.capacity.remaining, 5);
+    assert.match(covers.capacity.note, /Your plan includes every assistant/);
+    assert.ok(!/free assistant slot/.test(covers.capacity.note));
+    assert.match(recommendHires({ ...base, plan: { status: 'active', freeSlots: null } }).capacity.note, /includes every assistant/);
+    // Everyone hired: nothing left to offer, and a full plan is not an upgrade prompt.
+    const all = recommendHires({ ...base, plan: { status: 'active', freeSlots: 0, nextPlanName: 'Business' },
+        team: ['social_media_manager', 'website_assistant', 'newsletter_editor', 'blog_writer', 'crm_enricher'].map((roleKey, i) => ({ id: i, name: roleKey, role: roleKey, state: 'active' as const, roleKey })) });
+    assert.strictEqual(all.capacity.remaining, 0);
+    assert.ok(!all.capacity.needsUpgrade);
+    assert.match(all.capacity.note, /already has every assistant on offer/);
+    assert.match(renderHireRecommendation(all).join('\n'), /nobody left to hire/);
     assert.match(recommendHires(base).why, /^Based on your workspace: no assistants hired yet, no website address/);
     assert.match(read('netlify/functions/check-capacity.ts'), /await loadNextPlan\(db, \{ monthlyPriceGbp: plan\.monthlyPriceGbp, tierKey: plan\.tierKey \}, userCurrency\)/);
     assert.match(read('src/utils/mentor-snapshot.ts'), /await loadNextPlan\(db, \{ monthlyPriceGbp: planRow\.monthlyPriceGbp, tierKey: planRow\.tierKey \}\)/);
