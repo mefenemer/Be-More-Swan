@@ -59,7 +59,7 @@ check('meterInteraction keeps the old charge while the flag is off', () => {
 check('meterInteraction still requires a paid plan, and fails closed on a fault', () => {
     const src = read('src/utils/task-credit.ts');
     const fn = src.slice(src.indexOf('export async function meterInteraction'));
-    assert.match(fn, /if \(!hasPlan\) return \{ allowed: false, limitMessage: NO_PLAN_MESSAGE \}/);
+    assert.match(fn, /if \(!hasPlan\) return \{ allowed: false, noPlan: true, limitMessage: NO_PLAN_MESSAGE \}/);
     assert.match(fn, /failed: true/);
 });
 

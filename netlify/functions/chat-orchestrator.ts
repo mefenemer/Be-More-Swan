@@ -32,6 +32,9 @@ import { appendFooter } from '../../src/utils/disclosure-footer';
 import { resolvePostFooter } from '../../src/utils/post-disclosure';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { meterInteraction } from '../../src/utils/task-credit';
+import { checkFairUse } from '../../src/utils/fair-use';
+import { isMentorTurn } from '../../src/utils/mentor-provision';
+import { loadHelpKnowledge } from '../../src/utils/help-knowledge';
 import { embedTexts } from '../../src/utils/kb-embeddings';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
@@ -90,7 +93,7 @@ import { buildPlatformsBlock, platformsProposalFromUiElement, resolvePlatformsPr
 import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal, type LibraryCard } from '../../src/utils/chat-library';
 import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
-import { confirmCardReply } from '../../src/utils/confirm-card-reply';
+import { confirmCardReply, missingCardReply } from '../../src/utils/confirm-card-reply';
 import { isInOutreachReview } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
 import { LOSS_REASONS } from '../../src/config/revenue-events';
@@ -281,7 +284,7 @@ function sharedContextBlock(rc: RouteContext): string {
         // became a monospace code box with every paragraph on one unwrapped line.
         'When you show the user copy in your reply (a post, a revised draft, an email), write it as ordinary paragraphs, or as a > blockquote to set it apart. Never put it in a code block — no ``` fences and no lines indented with spaces.',
         // Owner, 2026-10-19: customers felt there were no humans. There are; say so, never stonewall.
-        'If the user asks to speak to a person, a human or the Be More Swan team, or asks for a phone call, tell them warmly that a person from the Be More Swan team can call them back: they can request it with the "Request a call back" button shown with your reply, or under Help & Support → Contact us. Never promise a time, never say you have booked or made a call, and never claim to be a human.',
+        'If the user asks to speak to a person, a human or the Be More Swan team, or asks for a phone call, tell them warmly that a person from the Be More Swan team can call them back: they can request it with the "Request a call back" button shown with your reply, or under Help & Support → Contact us. Mention that button ONLY when they asked for a person or a call and your reply carries no other card: it is shown then and never otherwise. When you volunteer it unasked, point to Help & Support → Contact us instead. Never promise a time, never say you have booked or made a call, and never claim to be a human.',
     ].filter(Boolean).join('\n\n');
 }
 
@@ -373,6 +376,9 @@ const defaultRoute: AssistantRoute = {
 // stamped. So: try a direct parse, then a best-effort parse of the outermost {...} span, and
 // only when the output was never a structured attempt at all do we pass it through as plain
 // text. A JSON-shaped-but-broken reply degrades to a friendly retry line, not the payload.
+/** Ends the Business Mentor's system prompt (see `system` below): its reply format, where it can't be lost. */
+const MENTOR_REPLY_FORMAT_REMINDER = 'REPLY FORMAT (always, every turn, however long the answer): one STRICT JSON object and nothing else: {"reply": "<your message>", "uiElement": <one card from CARDS, or null>}. Never answer in plain prose. If your reply mentions a card or a button below, that card MUST be the uiElement; if you are not including one, do not mention it.';
+
 const STRUCTURED_REPLY_FALLBACK =
     "Sorry — something went wrong formatting that on my end. Could you send that to me again? I'll redraft it cleanly.";
 
@@ -2690,7 +2696,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // the 403 paywall payload, not a generic error; the client renders it inline and logs the
     // conversion event.
     const capacity = await meterInteraction(db, orgId, 'chat');
-    if (!capacity.allowed) {
+    // §2.7 (owner, 2026-10-25): with no paid plan the Business Mentor still answers, in help-only mode:
+    // the Help Centre and a support ticket or issue report, nothing else (mentorNoPlanBlock below, and
+    // its cards are dropped). Still held to the daily fair-use limit, so a lapsed workspace can't run up
+    // unmetered model turns. Every other assistant, and a Team note, keeps the paywall.
+    let mentorNoPlan = false;
+    if (!capacity.allowed && capacity.noPlan && body.teamMessageId === undefined && await isMentorTurn(db, orgId, body)) {
+        const fair = await checkFairUse(db, orgId, 'chat');
+        if (!fair.allowed) return json(429, { code: 'FAIR_USE_LIMIT', error: fair.message });
+        mentorNoPlan = true;
+    }
+    if (!capacity.allowed && !mentorNoPlan) {
         // Fair use is "come back tomorrow", never an upgrade prompt.
         if (capacity.fairUse) return json(429, { code: 'FAIR_USE_LIMIT', error: capacity.limitMessage });
         // A cap that could not be EVALUATED is a server fault, and answering it with the upgrade
@@ -3031,14 +3047,26 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // The signed-in user's own My Account settings, read-only (src/utils/chat-my-account.ts). Every
     // route, every role; null when the read fails.
     const myAccountBlock = await buildMyAccountBlock(db, userId, session.aiAssistantId, assistantRow.roleKey);
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock].filter(Boolean).join('\n\n');
+    // §2.7: no paid plan → the Mentor only helps with Be More Swan itself, from the published Help Centre.
+    const mentorNoPlanBlock = mentorNoPlan ? await (async () => {
+        const help = await loadHelpKnowledge(db).catch(() => ({ text: '', titles: [] as string[] }));
+        return [
+            'HELP-ONLY MODE: this workspace has no active plan, so you only help with Be More Swan itself (this overrides every coaching instruction above). Answer from the HELP CENTRE articles below and name the article you used. If something is broken, or they want the team, offer the mentor_support_request card. Offer no other card: no health check, suggestions, set-up gaps, commitments, weekly review, research, plans or hiring. If they ask for any of that, say plainly it comes with a plan, which they can choose under My Account ▸ Billing & Subscription, and stop.',
+            help.text ? `<help_centre>\n${help.text}\n</help_centre>` : 'The Help Centre could not be read just now: say so, and offer the mentor_support_request card.',
+        ].join('\n\n');
+    })() : '';
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock, mentorNoPlanBlock].filter(Boolean).join('\n\n');
 
-    const system = buildSystemPrompt(
+    const builtSystem = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
         // which is exactly what must NOT happen when the user is editing a post already.
         draftTarget ? `${promptWithRules}\n\n${draftTargetPromptBlock(draftTarget.platform)}` : promptWithRules,
         assistantRow.onboardingContext,
     );
+    // The Mentor's reply format, restated LAST. Twenty blocks follow its role prompt, and on long turns the
+    // model answered in plain prose that promised "the card below": with no JSON there is no card to draw
+    // (rubric W5/W6, staging 2026-10-26 — three in four such turns).
+    const system = route === ROUTES.business_mentor ? `${builtSystem}\n\n${MENTOR_REPLY_FORMAT_REMINDER}` : builtSystem;
 
     // ── Data Hub context injection — load the referenced records (tenant- and
     // assistant-scoped) and prepend them to this turn as an "[Imported records]" block.
@@ -3231,6 +3259,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // Not final either: the blog route replaces it with a normalised draft (or nothing) below.
         let uiElement = parsed.uiElement;
         let content = parsed.content;
+        // §2.7 help-only mode: the support card is the only one drawn, so nothing else is recorded or offered.
+        if (mentorNoPlan && (uiElement as { type?: unknown } | null)?.type !== 'mentor_support_request') uiElement = null;
         // The Business Mentor's own cards (src/utils/mentor-cards.ts): checked first, drawn by
         // disruptive-ui-registry.js, applied by the user's click through the screens' own endpoints.
         // A change to one set-up answer (src/utils/chat-setup-field.ts): the Mentor may target any
@@ -3257,7 +3287,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             }
         } else if (route === ROUTES.business_mentor) {
             // Asked who to hire, or to review everything, and no card drawn: the server-filled card anyway.
-            if (!uiElement) uiElement = cardTheUserAskedFor(typed);
+            if (!uiElement && !mentorNoPlan) uiElement = cardTheUserAskedFor(typed);
             // Phase 3: a post asked of an ACTIVE Social Media assistant (mentor-draft-request.ts), rebuilt from its row.
             const draftReq = await resolveDraftRequest(db, orgId, uiElement);
             const m = draftReq ? null : mentorCardFromUiElement(uiElement, session.aiAssistantId);
@@ -3686,6 +3716,16 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // card that opens the Help & Support form. The chat never books a call itself. A reply that
         // already carries a card keeps it — the prompt line below has the model mention the option.
         if (!uiElement && asksForACall(typed)) uiElement = callbackOfferElement();
+        // The Mentor's reply never points at a card that isn't there (confirm-card-reply.ts, rubric W6).
+        if (route === ROUTES.business_mentor) {
+            const fixed = missingCardReply(content, !!uiElement);
+            if (fixed !== content) {
+                // Which way the card was lost: the model sent none, sent a shape the server refused, or wrote prose, not JSON.
+                const sent = (parsed.uiElement as { type?: unknown } | null)?.type;
+                console.warn('[chat-orchestrator] mentor reply points at a card that was not drawn', { sentType: typeof sent === 'string' ? sent : null, replyWasJson: raw.trimStart().startsWith('{'), length: raw.length, end: raw.slice(-200) });
+            }
+            content = fixed;
+        }
 
         // One transaction: the shadow call's audit row (role 'system' — hidden from the
         // transcript and excluded from the LLM window, kept so the handoff's work is

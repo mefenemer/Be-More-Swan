@@ -29,3 +29,22 @@ export function confirmCardReply(content: string, card: { blocked?: unknown; set
     }
     return replyClaimsChange(content) ? 'Here it is — nothing changes until you confirm on the card below.' : content;
 }
+
+/**
+ * A reply that points at a card when none came with it (Business Mentor rubric W6, staging
+ * 2026-10-26: "I've added a card that looks up the up-to-date rules" over no card at all). The prompt
+ * can't hold this either, so the server says so plainly beside the reply.
+ */
+const POINTS_AT_CARD = /\b(?:I(?:'|’)?ve|I have)\s+(?:added|included|attached|drafted|put)\b[^.\n]{0,40}\bcard\b|\bcard\s+(?:below|above|here)\b|\b(?:the|a|this)\s+card\s+(?:that|which)\b|\bbelow is a card\b|\btap (?:the|an?) (?:button|answer) below\b/i;
+
+export const NO_CARD_NOTE = '(No card came with this reply. Ask me again and I’ll add it.)';
+
+export function replyPointsAtCard(content: string): boolean {
+    return POINTS_AT_CARD.test(content);
+}
+
+/** The reply, with NO_CARD_NOTE added when it points at a card that isn't there. */
+export function missingCardReply(content: string, hasCard: boolean): string {
+    if (hasCard || !replyPointsAtCard(content) || content.includes(NO_CARD_NOTE)) return content;
+    return `${content}\n\n${NO_CARD_NOTE}`;
+}

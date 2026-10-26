@@ -65,4 +65,5 @@ chat turn in seconds (§2.4.1: Opus must stay under the 26-second limit), and co
 
 | Date | Model | W1 | W2 | W3 | W4 | W5 | W6 | W7 | W8 | W9 | W10 | Slowest turn | Cost / turn | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| — | — | | | | | | | | | | | | | Not yet run |
+| 2026-10-26 (1st) | Opus 5.5, low | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ | ✅ | 26.5 s ❌ | ~$0.06 | W5 a whole launch plan in chat, over the 26 s limit (R8). W6 "I've added a card" with no card (R7). W8 chat paywalled, 403: §2.7 never built. W9 named a "Request a call back" button that wasn't shown (R7, R12). |
+| 2026-10-26 (2nd, after fixes) | Opus 5.5, low | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 22.1 s | ~$0.05–0.12 | Fixed: help-only mode with no plan, replies under ~250 words with whole plans sent to the Plan tab, reply format restated last (the lost cards were plain-prose replies), a server note when a reply points at a missing card, honest call-back rule. W5/W6 re-run 3×, cards drawn. Cost is all model spend in the workspace during the turn, logged late, so a guide only. Not checked: W1 as specified (workspace 58 isn't 14 drafts / follower goal), W2 says "every Monday I send a weekly review" on a trial. |

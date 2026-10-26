@@ -12,7 +12,7 @@
 // Never throws: a failure here must not stop the workspace's assistants from loading.
 
 import { and, eq, sql } from 'drizzle-orm';
-import { aiAssistants, masterAssistants } from '../../db/schema';
+import { aiAssistants, chatSessions, masterAssistants } from '../../db/schema';
 import { isFeatureEnabled } from './feature-flags';
 
 export const MENTOR_ROLE_KEY = 'business_mentor';
@@ -38,6 +38,29 @@ export async function findMentor(db: Db, orgId: number): Promise<{ id: number } 
         ))
         .limit(1);
     return row ?? null;
+}
+
+/**
+ * Is this chat turn addressed to the workspace's Mentor? Read before the turn's session exists, from
+ * what the browser sent (an existing conversation, or the assistant to start one with). The chat route
+ * asks only when the workspace has no plan: the Mentor still answers then, in help-only mode (§2.7).
+ */
+export async function isMentorTurn(db: Db, orgId: number, body: { chatSessionId?: unknown; aiAssistantId?: unknown }): Promise<boolean> {
+    try {
+        const mentor = await findMentor(db, orgId);
+        if (!mentor) return false;
+        if (body.chatSessionId !== undefined) {
+            const [session] = await db
+                .select({ aiAssistantId: chatSessions.aiAssistantId })
+                .from(chatSessions)
+                .where(and(eq(chatSessions.id, Number(body.chatSessionId)), eq(chatSessions.organisationId, orgId)))
+                .limit(1);
+            return session?.aiAssistantId === mentor.id;
+        }
+        return Number(body.aiAssistantId) === mentor.id;
+    } catch {
+        return false; // unsure → the paywall, as before
+    }
 }
 
 export async function ensureMentor(db: Db, orgId: number, userId: number): Promise<MentorProvisionResult> {

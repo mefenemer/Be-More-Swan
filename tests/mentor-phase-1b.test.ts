@@ -270,7 +270,7 @@ test('asked who to hire, or to review everything, and no card drawn: the server 
     assert.strictEqual(cardTheUserAskedFor('Can I review all your suggestions together?')?.type, 'mentor_review_all');
     assert.strictEqual(cardTheUserAskedFor('Show me all the suggestions')?.type, 'mentor_review_all');
     for (const q of ['How do I post to Instagram?', 'Help me write a sales email', 'I hired a designer last year']) assert.strictEqual(cardTheUserAskedFor(q), null, q);
-    assert.match(read('netlify/functions/chat-orchestrator.ts'), /if \(!uiElement\) uiElement = cardTheUserAskedFor\(typed\);[\s\S]{0,300}const m = draftReq \? null : mentorCardFromUiElement/);
+    assert.match(read('netlify/functions/chat-orchestrator.ts'), /if \(!uiElement && !mentorNoPlan\) uiElement = cardTheUserAskedFor\(typed\);[\s\S]{0,300}const m = draftReq \? null : mentorCardFromUiElement/);
 });
 
 // ── 1. New-user opening ─────────────────────────────────────────────────────────────────────────
