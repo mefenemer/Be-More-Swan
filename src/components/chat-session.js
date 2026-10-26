@@ -1432,6 +1432,12 @@
       mentorRun(e, (A, d) => A.products(d.products));
     }
 
+    // Products & Services → org-products.ts DELETE, one per product (only drawn when the user asked).
+    async function onMentorProductsRemove(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.removeProducts(d.ids));
+    }
+
     // Quiet mode → update-assistant-context.ts, only that set-up answer (patchContext).
     async function onMentorQuietMode(e) {
       if (mentorAlreadyHandled(e)) return;
@@ -1915,6 +1921,7 @@
     container.addEventListener('intro:offer', onIntroOffer);
     container.addEventListener('mentor:businessProfile', onMentorBusinessProfile);
     container.addEventListener('mentor:products', onMentorProducts);
+    container.addEventListener('mentor:productsRemove', onMentorProductsRemove);
     container.addEventListener('mentor:quietMode', onMentorQuietMode);
     container.addEventListener('mentor:support', onMentorSupport);
     container.addEventListener('mentor:decide', onMentorDecide);
@@ -2003,6 +2010,7 @@
         container.removeEventListener('intro:offer', onIntroOffer);
         container.removeEventListener('mentor:businessProfile', onMentorBusinessProfile);
         container.removeEventListener('mentor:products', onMentorProducts);
+        container.removeEventListener('mentor:productsRemove', onMentorProductsRemove);
         container.removeEventListener('mentor:quietMode', onMentorQuietMode);
         container.removeEventListener('mentor:support', onMentorSupport);
         container.removeEventListener('mentor:decide', onMentorDecide);

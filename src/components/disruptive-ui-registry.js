@@ -2334,6 +2334,19 @@
     });
   });
 
+  register('mentor_products_remove', (ui, esc) => {
+    const products = Array.isArray(ui.products) ? ui.products : [];
+    const ids = products.map((p) => Number(p.id)).filter((n) => Number.isInteger(n) && n > 0);
+    const rows = products.map((p) => `<li class="text-xs text-gray-700 break-words"><span class="font-semibold">${esc(String(p.name || ''))}</span></li>`).join('');
+    return mentorCard(esc, {
+      eyebrow: 'Products & Services', summary: ui.summary, why: null,
+      bodyHtml: `<ul class="mt-2 space-y-1">${rows}</ul>`,
+      goLabel: ids.length > 1 ? `Remove these ${ids.length}` : 'Remove this', eventName: 'mentor:productsRemove', detail: { ids },
+      doneText: 'Removed from Business Information ▸ Products & Services.',
+      note: 'They’re deleted for good — your assistants stop mentioning them straight away.',
+    });
+  });
+
   register('mentor_quiet_mode', (ui, esc) => mentorCard(esc, {
     eyebrow: 'Quiet mode', summary: ui.summary, why: null,
     bodyHtml: `<p class="mt-2 text-xs text-gray-700">${ui.on ? 'Your Mentor will answer your questions but stop making suggestions until you ask.' : 'Your Mentor will point out what to fix and suggest next steps again.'}</p>`,

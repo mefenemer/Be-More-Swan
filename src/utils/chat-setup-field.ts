@@ -90,7 +90,7 @@ export async function resolveSetupFieldProposal(
     const checked = validateSetupValue(def, req.value);
     if (!checked.ok) return { error: checked.error };
     const ctx = (row.context as Record<string, unknown> | null) ?? {};
-    if (sameSetupValue(ctx[def.key], checked.value)) return { error: `"${def.label}" is already ${displaySetupValue(def, checked.value)}.` };
+    if (sameSetupValue(ctx[def.key], checked.value, def)) return { error: `"${def.label}" is already ${displaySetupValue(def, ctx[def.key])}, so nothing would change.` };
     return {
         type: SETUP_FIELD_CARD_TYPE,
         summary: req.summary || `Change "${def.label}" for ${row.name}`,

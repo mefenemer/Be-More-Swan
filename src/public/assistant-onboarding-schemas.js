@@ -314,6 +314,8 @@
             options: [
               { value: 'Book a call or consultation', label: 'Book a call or consultation' },
               { value: 'Buy online', label: 'Buy online' },
+              // Same choices as the Mystery Shopper's own question below, so the two can agree.
+              { value: 'Start a free trial or sign up', label: 'Start a free trial or sign up' },
               { value: 'Ask for a quote', label: 'Ask for a quote' },
               { value: 'Phone us', label: 'Phone us' },
               { value: 'Visit us in person', label: 'Visit us in person' },
@@ -566,6 +568,10 @@
             label: 'Chase leads who do not reply?',
             type: 'radio',
             required: true,
+            // What a blank answer DOES (outreach-sequences.ts reads anything but 'none' as chase).
+            // The Business Mentor sees this, so it can't call a blank answer "one email only"
+            // (prod 2026-10-26: it did, and proposed "fixing" it).
+            blankMeans: 'automatic',
             helpText: 'Chasers are written in the context of each conversation and sent from the same mailbox. They stop the moment someone replies, and the last one always says it is the last.',
             options: [
               { value: 'automatic', label: 'Yes — chase automatically', description: 'Up to three follow-ups: 3 days after the first email, then a week later, then a polite sign-off. Nothing after that.' },

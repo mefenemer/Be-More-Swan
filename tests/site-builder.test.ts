@@ -21,6 +21,8 @@ import { esc, jsonLd, renderRobots, renderSitemap, renderSitePage, type RenderCo
 import { extractSitePage } from '../src/utils/site-extract';
 import { runDeterministicChecks } from '../src/utils/site-score';
 import { contrastRatio } from '../src/utils/brand-kit';
+import schemas from '../src/public/assistant-onboarding-schemas.js';
+import { CONVERSION_GOALS } from '../src/utils/site-audit-setup';
 
 let passed = 0;
 let total = 0;
@@ -325,6 +327,12 @@ check('a site we render passes the Mystery Shopper\'s code checks on the basics'
         'title_ok', 'description_ok', 'schema_present', 'schema_entity', 'faq_present', 'indexable', 'https', 'mobile_viewport', 'images_alt', 'lang_set']) {
         assert.strictEqual(results[id], 'pass', `${id}: ${results[id]}`);
     }
+});
+
+check('"What should a visitor do?" offers the Mystery Shopper\'s choices, free trial included (prod 2026-10-26)', () => {
+    // A workspace with a free trial couldn't point its site at it while the Mystery Shopper checked for it.
+    const field = (schemas as any).website_assistant.flatMap((st: any) => st.fields).find((f: any) => f.key === 'siteGoal');
+    assert.deepStrictEqual(field.options.map((o: any) => o.label), CONVERSION_GOALS.map((g) => g.label));
 });
 
 console.log(`\n${passed}/${total} passed`);
