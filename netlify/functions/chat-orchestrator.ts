@@ -110,6 +110,7 @@ import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, o
 import { gateMentorSuggestion, proposalFields } from '../../src/utils/mentor-proposals';
 import { resolveDraftRequest } from '../../src/utils/mentor-draft-request';
 import { closeCommitmentCard } from '../../src/utils/mentor-commitments';
+import { cardOutcomeLine } from '../../src/utils/mentor-card-outcome';
 import { renderReviewSettingsForMentor } from '../../src/utils/mentor-review';
 import { mentorVisibilityPromptBlock } from '../../src/config/mentor-data-inventory';
 import { buildBreakEvenCard, buildStrategyCard } from '../../src/utils/mentor-plan-cards';
@@ -3105,7 +3106,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const llmMessages = [
         ...history.map((m, i) => ({
             role: m.role as 'user' | 'assistant',
-            content: i === latestCardIdx ? `${m.content}\n\n${onScreenCardBlock(m.uiElementJson)}` : m.content,
+            content: i === latestCardIdx ? `${m.content}\n\n${onScreenCardBlock(m.uiElementJson)}`
+                // The Mentor's earlier cards: what the user did with each (mentor-card-outcome.ts), so an
+                // applied change isn't read as the Mentor's own mistake.
+                : route === ROUTES.business_mentor && m.role === 'assistant' && cardOutcomeLine(m.uiElementJson)
+                    ? `${m.content}\n\n${cardOutcomeLine(m.uiElementJson)}`
+                    : m.content,
         })),
         { role: 'user' as const, content: [
             recordContext,

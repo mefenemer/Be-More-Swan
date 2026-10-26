@@ -2259,6 +2259,9 @@
       return el;
     }
     const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    // What the user did with the card, saved on its chat message (chat-session.js → mentor.ts card_outcome)
+    // so the Mentor's next turn knows (mentor-card-outcome.ts).
+    const outcome = (status, note) => el.dispatchEvent(new CustomEvent('mentor:cardOutcome', { bubbles: true, detail: { outcome: status, note: note || null } }));
     const decide = (decision, reason, respond) => el.dispatchEvent(new CustomEvent('mentor:decide', {
       bubbles: true, detail: { proposalId, decision, reason, respond: respond || (() => {}) },
     }));
@@ -2266,7 +2269,7 @@
     let accepted = false;
     el._mcAccept = () => { if (suggestion && !accepted) { accepted = true; decide('accepted'); } };
     el.addEventListener('click', (e) => {
-      if (e.target.closest('[data-mc-cancel]')) { setBusy(true); say('Not changed.'); return; }
+      if (e.target.closest('[data-mc-cancel]')) { setBusy(true); say('Not changed.'); outcome('not_now'); return; }
       if (e.target.closest('[data-mc-dismiss]')) {
         const open = reasons.style.display === 'none';
         reasons.style.display = open ? 'flex' : 'none';
@@ -2283,6 +2286,7 @@
         decide('dismissed', reason, ({ ok, error }) => {
           if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved.', 'error'); return; }
           reasons.style.display = 'none';
+          outcome('dismissed', reason);
           say(reason === 'not_now' ? 'Dismissed for now — your Mentor may raise it again in two weeks. It\'s listed under Dismissed suggestions on its Overview tab.'
             : reason === 'already_done' ? 'Dismissed — thanks for letting your Mentor know.'
               : 'Dismissed — your Mentor won\'t suggest this again. Bring it back from its Overview tab any time.');
@@ -2297,9 +2301,10 @@
         detail: {
           ...detail,
           respond({ ok, error, message }) {
-            if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved — nothing was changed.', 'error'); return; }
+            if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved — nothing was changed.', 'error'); outcome('failed', error); return; }
             if (reasons) reasons.style.display = 'none';
             say(message || doneText);
+            outcome('applied', message || doneText);
             if (suggestion) decide('accepted');
           },
         },

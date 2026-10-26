@@ -289,7 +289,12 @@
       const uiElement = message.uiElement ?? message.uiElementJson ?? null;
       if (uiElement && window.DisruptiveUIRegistry) {
         const card = window.DisruptiveUIRegistry.render(uiElement);
-        if (card) row.appendChild(card);
+        if (card) {
+          // The message a Mentor card's outcome is saved on (onMentorCardOutcome), and a saved one shown on reload.
+          if (Number.isInteger(message.id)) row.dataset.chatMessageId = String(message.id);
+          showSavedCardOutcome(card, uiElement.outcome);
+          row.appendChild(card);
+        }
       }
 
       // Issue #180: when a turn produced a Data Hub record (chat-orchestrator.ts
@@ -301,6 +306,17 @@
 
       scrollEl.appendChild(row);
       scrollToBottom();
+    }
+
+    // A Mentor card answered before this chat was opened: its buttons go, its result stays.
+    const SAVED_OUTCOME_TEXT = { applied: 'Done.', failed: 'This didn’t save last time — nothing was changed.', not_now: 'Not changed.', dismissed: 'Dismissed.' };
+    function showSavedCardOutcome(card, outcome) {
+      const status = card.querySelector && card.querySelector('[data-mc-status]');
+      if (!status || !outcome || !SAVED_OUTCOME_TEXT[outcome.status]) return;
+      if (outcome.status === 'failed') return; // they can try again
+      card.querySelectorAll('[data-mc-go], [data-mc-cancel], [data-mc-dismiss], [data-mc-reasons]').forEach((b) => b.remove());
+      status.textContent = outcome.status === 'applied' && outcome.note ? outcome.note : SAVED_OUTCOME_TEXT[outcome.status];
+      status.className = 'mt-2 text-xs font-semibold text-pink-700';
     }
 
     /** "View in Review Queue" style jump-off link — see appendMessage's hubLink handling. */
@@ -1432,6 +1448,19 @@
       mentorRun(e, (A, d) => A.products(d.products));
     }
 
+    // What the user did with a Mentor card → mentor.ts card_outcome, on the card's message, so the next
+    // turn knows (src/utils/mentor-card-outcome.ts). Fire-and-forget: the card has already said the result.
+    function onMentorCardOutcome(e) {
+      const row = e.target && e.target.closest && e.target.closest('[data-chat-message-id]');
+      const messageId = row ? Number(row.dataset.chatMessageId) : NaN;
+      const d = e.detail || {};
+      if (!Number.isInteger(messageId) || !d.outcome) return;
+      fetch('/.netlify/functions/mentor', {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'card_outcome', messageId, outcome: d.outcome, note: d.note || undefined }),
+      }).catch(() => {});
+    }
+
     // Products & Services → org-products.ts DELETE, one per product (only drawn when the user asked).
     async function onMentorProductsRemove(e) {
       if (mentorAlreadyHandled(e)) return;
@@ -1922,6 +1951,7 @@
     container.addEventListener('mentor:businessProfile', onMentorBusinessProfile);
     container.addEventListener('mentor:products', onMentorProducts);
     container.addEventListener('mentor:productsRemove', onMentorProductsRemove);
+    container.addEventListener('mentor:cardOutcome', onMentorCardOutcome);
     container.addEventListener('mentor:quietMode', onMentorQuietMode);
     container.addEventListener('mentor:support', onMentorSupport);
     container.addEventListener('mentor:decide', onMentorDecide);
@@ -2011,6 +2041,7 @@
         container.removeEventListener('mentor:businessProfile', onMentorBusinessProfile);
         container.removeEventListener('mentor:products', onMentorProducts);
         container.removeEventListener('mentor:productsRemove', onMentorProductsRemove);
+        container.removeEventListener('mentor:cardOutcome', onMentorCardOutcome);
         container.removeEventListener('mentor:quietMode', onMentorQuietMode);
         container.removeEventListener('mentor:support', onMentorSupport);
         container.removeEventListener('mentor:decide', onMentorDecide);
