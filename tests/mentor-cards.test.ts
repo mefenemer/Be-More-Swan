@@ -87,7 +87,8 @@ test('the Mentor route is structured and its cards are checked before any other 
     const check = o.indexOf('const m = draftReq ? null : mentorCardFromUiElement(uiElement, session.aiAssistantId);');
     const firstOther = o.indexOf('settingsProposalFromUiElement(uiElement)');
     assert.ok(parsed > 0 && check > parsed && check < firstOther, 'Mentor check must run first');
-    assert.match(o.slice(check, check + 9000), /uiElement = null; \/\/ never another route's card shape/);
+    // Any other route's card shape is dropped — except a goal card, which the goal block checks (chat-goals.ts).
+    assert.match(o.slice(check, check + 9000), /\} else if \(!goalProposalFromUiElement\(uiElement\)\) \{\n\s+\/\/ Never another route's card shape[^]*?uiElement = null;/);
 });
 
 test('every card has a renderer and a click handler that calls the screen\'s own endpoint (§14)', () => {

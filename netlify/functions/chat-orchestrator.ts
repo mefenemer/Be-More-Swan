@@ -3402,8 +3402,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                         uiElement = { ...filled, proposalId };
                     }
                 }
-            } else {
-                uiElement = null; // never another route's card shape
+            } else if (!goalProposalFromUiElement(uiElement)) {
+                // Never another route's card shape — except a goal card, which the goal block below checks
+                // (resolveTeamGoalProposal). Dropping it here is why "here it is" came with no card.
+                uiElement = null;
             }
         }
 
