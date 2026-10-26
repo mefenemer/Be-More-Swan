@@ -72,6 +72,9 @@
     website_assistant: {
       working: 'Open the Website tab and press “Write my site” (or “Import my current site” if you already have one) — or just tell me in chat what your site should say',
     },
+    business_mentor: {
+      working: 'I’ve looked over your workspace — open my Chat tab and I’ll tell you what I’d sort out first',
+    },
     mystery_shopper: {
       working: 'I’m reading your website the way a buyer would — your first score and what to fix will be on the Website tab shortly',
       // When set-up saved but the first check could not start (an address it could not read, say).

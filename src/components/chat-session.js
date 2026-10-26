@@ -1398,6 +1398,108 @@
       }).catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // ── Business Mentor cards (src/utils/mentor-cards.ts) → the screens' own endpoints. ──
+    // One click must save once. On staging (2026-10-25) a quiet-mode click saved twice: destroy() never
+    // removed these four listeners, so "New chat" left the old chat's handlers listening. destroy()
+    // now removes them (tests/chat-session-listeners.test.ts pins every add to a remove); this guard
+    // stays as a second line of defence, since a duplicate products save would add every product twice.
+    function mentorAlreadyHandled(e) {
+      if (e.__mentorHandled) return true;
+      e.__mentorHandled = true;
+      return false;
+    }
+
+    // The writes themselves are window.MentorApply (src/components/mentor-apply.js), shared with
+    // "Review all" on the Mentor's Overview tab and in Inbox "Needs you", so each card calls its
+    // screen's own endpoint the same way wherever it is applied.
+    function mentorRun(e, work) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      if (!window.MentorApply) { respond({ ok: false, error: 'This page needs a refresh before that can be saved.' }); return; }
+      Promise.resolve().then(() => work(window.MentorApply, d))
+        .then((out) => respond({ ok: true, ...(out && typeof out === 'object' ? out : {}) }), (err) => respond({ ok: false, error: err.message }));
+    }
+
+    // Business Information → organisation-profile.ts, read-merge-write of only the card's fields.
+    async function onMentorBusinessProfile(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.businessProfile(d.fields || {}));
+    }
+
+    // Products & Services → org-products.ts POST, one per product.
+    async function onMentorProducts(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.products(d.products));
+    }
+
+    // Quiet mode → update-assistant-context.ts, only that set-up answer (patchContext).
+    async function onMentorQuietMode(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.setupAnswer(d.assistantId, 'quietMode', d.on ? 'on' : 'off'));
+    }
+
+    // "Established business or new idea?" → its businessStage set-up answer (patchContext).
+    async function onMentorBusinessStage(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.setupAnswer(d.assistantId, 'businessStage', d.stage === 'new_idea' ? 'new_idea' : 'existing'));
+    }
+
+    // One set-up answer on an active assistant (setup_field_proposal, any route) → patchContext.
+    async function onSetupFieldApply(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.setupAnswer(d.assistantId, d.key, d.value));
+    }
+
+    // Help: a support ticket (support-tickets.ts) or, for something broken, Report an Issue (issue-reports.ts).
+    async function onMentorSupport(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.support(d));
+    }
+
+    // A suggestion answered (§3.13): accepted after its click saved, or dismissed with a reason →
+    // mentor.ts, the same action the Overview tab's "Bring back" uses. Repaints an open Overview.
+    async function onMentorDecide(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.decide(d.proposalId, d.decision, d.reason));
+    }
+
+    // Phase 2 plan cards (src/utils/mentor-plan-cards.ts) → mentor.ts, the same actions as the Plan tab.
+    // Save into a strategy document's draft (strategy_save).
+    async function onMentorStrategySave(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.strategySave(d.kind, d.sections, d.assumptions));
+    }
+    // Approve the draft the card names (strategy_approve; owner or admin; the server checks it is unchanged).
+    async function onMentorStrategyApprove(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.strategyApprove(d.kind, d.draftId, d.updatedAt));
+    }
+    // "Draft it for me" (strategy_draft, 1 task) — the draft is posted back into THIS chat when ready.
+    async function onMentorStrategyDraft(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.strategyDraft(d.kind, chatSessionId));
+    }
+    // "Look this up" (research, 1 task) — the answer is posted back into THIS chat; the card polls for it.
+    async function onMentorResearch(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.research(d.question, chatSessionId));
+    }
+
+    // Phase 3 (§5.1, §5.3): commitments → mentor.ts, the Results tab's own actions; a post request →
+    // generate-post.ts as "Create a Post" does, with the suggestion's id for its "Requested by" pill.
+    async function onMentorCommitmentsAdd(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.commitmentsAdd(d.texts).then(() => undefined));
+    }
+    async function onMentorCommitmentClose(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.commitmentClose(d.id, d.status, d.missReason, d.note).then(() => undefined));
+    }
+    async function onMentorDraftRequest(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.draftRequest(d.assistantId, d.brief, d.proposalId));
+    }
+
     // "Save this" on an outreach_offer card (Lead Generator) → lead-generation.ts set_outreach_offer, the
     // same action as the Outreach tab's offer strip (src/config/outreach-offer.ts).
     function onOutreachOffer(e) {
@@ -1811,6 +1913,20 @@
     container.addEventListener('site:classSessions', onClassSessions);
     container.addEventListener('site:offerProfile', onOfferProfile);
     container.addEventListener('intro:offer', onIntroOffer);
+    container.addEventListener('mentor:businessProfile', onMentorBusinessProfile);
+    container.addEventListener('mentor:products', onMentorProducts);
+    container.addEventListener('mentor:quietMode', onMentorQuietMode);
+    container.addEventListener('mentor:support', onMentorSupport);
+    container.addEventListener('mentor:decide', onMentorDecide);
+    container.addEventListener('mentor:businessStage', onMentorBusinessStage);
+    container.addEventListener('mentor:strategySave', onMentorStrategySave);
+    container.addEventListener('mentor:strategyApprove', onMentorStrategyApprove);
+    container.addEventListener('mentor:strategyDraft', onMentorStrategyDraft);
+    container.addEventListener('mentor:research', onMentorResearch);
+    container.addEventListener('mentor:commitmentsAdd', onMentorCommitmentsAdd);
+    container.addEventListener('mentor:commitmentClose', onMentorCommitmentClose);
+    container.addEventListener('mentor:draftRequest', onMentorDraftRequest);
+    container.addEventListener('setupField:apply', onSetupFieldApply);
     container.addEventListener('lead:outreachOffer', onOutreachOffer);
     container.addEventListener('cta:change', onCallToAction);
     container.addEventListener('site:reviewDecisions', onReviewDecisions);
@@ -1885,6 +2001,20 @@
         container.removeEventListener('site:reviewDecisions', onReviewDecisions);
         container.removeEventListener('site:offerProfile', onOfferProfile);
         container.removeEventListener('intro:offer', onIntroOffer);
+        container.removeEventListener('mentor:businessProfile', onMentorBusinessProfile);
+        container.removeEventListener('mentor:products', onMentorProducts);
+        container.removeEventListener('mentor:quietMode', onMentorQuietMode);
+        container.removeEventListener('mentor:support', onMentorSupport);
+        container.removeEventListener('mentor:decide', onMentorDecide);
+        container.removeEventListener('mentor:businessStage', onMentorBusinessStage);
+        container.removeEventListener('mentor:strategySave', onMentorStrategySave);
+        container.removeEventListener('mentor:strategyApprove', onMentorStrategyApprove);
+        container.removeEventListener('mentor:strategyDraft', onMentorStrategyDraft);
+        container.removeEventListener('mentor:research', onMentorResearch);
+        container.removeEventListener('mentor:commitmentsAdd', onMentorCommitmentsAdd);
+        container.removeEventListener('mentor:commitmentClose', onMentorCommitmentClose);
+        container.removeEventListener('mentor:draftRequest', onMentorDraftRequest);
+        container.removeEventListener('setupField:apply', onSetupFieldApply);
         container.removeEventListener('lead:outreachOffer', onOutreachOffer);
         container.removeEventListener('cta:change', onCallToAction);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);

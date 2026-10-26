@@ -2,9 +2,13 @@
 // Which Claude model an assistant ROLE runs on — the admin's choice from Admin ▸ Assistants ▸ Model &
 // rules (db/assistant-model-settings.sql), or the model written in the code when there is none.
 //
-// The four paths that read it: social drafting (process-content-jobs → ai-gateway), every chat
-// (chat-orchestrator), email (newsletter-generate), blog (blog-generate) and Lead Generator outreach
-// (lead-generation). Everything else — reviews, scoring, hooks, helpers — stays on its own model.
+// What reads it — the list on the admin page is ROLE_MODEL_PATHS (src/config/assistant-prompt-layers.ts):
+// every chat (chat-orchestrator); social drafting (process-content-jobs → ai-gateway); email
+// (newsletter-generate, and Email Studio flows in newsletter-campaign-generate); blog (blog-generate);
+// Lead Generator (lead-generation, and discovery-scoring: the classifier, bulk scoring and the deep
+// re-score); Mystery Shopper audits (site-audit); Website drafting, import and own-words rewrites
+// (site-store, site-import-store); Brand Designer art direction (visual-briefs). Everything else —
+// reviews, hooks, helpers, the public site-audit taster — stays on its own model.
 //
 // ⚠️ It must never be the reason a customer's assistant stops working. So: a missing table, a read
 // error or an unknown model is "no choice" (the code default); and a chosen model the API refuses
@@ -55,6 +59,21 @@ export async function roleKeyOfAssistant(db: Db, assistantId: number | null | un
         const [row] = await db.execute<{ role_key: string }>(sql`SELECT m.role_key FROM ai_assistants a JOIN master_assistants m ON m.id = a.master_assistant_id WHERE a.id = ${assistantId} LIMIT 1`);
         return row?.role_key ?? null;
     } catch { return null; }
+}
+
+/**
+ * The role's choice as fields to spread into a gatewayGenerate() request ({} = the gateway's own
+ * model). The gateway adapts the request and falls back on a refusal itself. On a request path the
+ * thinking is held at Low and a deadline is set, which keeps the client's 24s timeout instead of the
+ * 2 minutes a thinking model gets in background work.
+ */
+export async function gatewayRoleModel(
+    db: Db, roleKey: string | null | undefined, opts: { requestPath?: boolean } = {},
+): Promise<{ model?: string; thinking?: ThinkingLevel; deadlineMs?: number }> {
+    const c = await loadRoleModel(db, roleKey);
+    if (!c) return {};
+    if (!opts.requestPath) return { model: c.model, thinking: c.thinking };
+    return { model: c.model, thinking: c.thinking === 'medium' || c.thinking === 'high' ? 'low' : c.thinking, deadlineMs: 22_000 };
 }
 
 /** A refusal of the REQUEST (wrong params for this model), not a billing or rate problem. */

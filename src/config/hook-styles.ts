@@ -75,7 +75,9 @@ export const OUTREACH_OPENINGS = [
     'one concrete, specific detail about THEIR business (a branch, a post, a job advert, a review) — only one the lead details actually give',
     'a short "this is probably you right now" line about a business like theirs',
     'the sharp, specific problem businesses like theirs have',
-    'a genuine question about how they handle that problem today',
+    // Was 'a genuine question about how they handle that problem today' — which, with the first-email
+    // rule of ONE question (the closing one), had Opus 5.5 ask twice in 3 emails of 9 (2026-10-25).
+    'a short line about what their week probably involves, drawn from the lead details (a statement, not a question — the email\'s one question comes at the end)',
 ] as const;
 
 /** The opening rule every first-email seam gets (src/config/outreach-offer.ts). Pure. */

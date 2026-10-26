@@ -29,6 +29,10 @@ export const TASK_WEIGHTS = {
     // A track the user marks as shareable keeps today's 3:5 discount against a private one.
     ai_music_shared: 12,
     x_link_post: 10,
+    // The Business Mentor's background work (docs/business-mentor-plan.md §2.1, decided: 1 task each).
+    mentor_research: 1,
+    mentor_strategy: 1,
+    mentor_review: 1,
 } as const;
 
 /** What one charge bought — logged on every task_ledger row so a disputed count can be explained. */
@@ -57,4 +61,7 @@ export const WORK_KIND_LABELS: Record<WorkKind, string> = {
     ai_music: 'AI music',
     ai_music_shared: 'AI music (shared)',
     x_link_post: 'X posts with a link',
+    mentor_research: 'Business Mentor research',
+    mentor_strategy: 'Business Mentor plan drafts',
+    mentor_review: 'Business Mentor weekly reviews',
 };

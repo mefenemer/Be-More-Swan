@@ -16,6 +16,7 @@
 import { coveredBlock, sameIdea, type CoveredItem } from './site-audit-covered';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../constants/safety-benchmark';
 import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
+import { SITE_AUDIT_CRAFT } from '../constants/site-audit-craft';
 import { currentDatePromptBlock } from './current-date-prompt';
 import type { SitePage } from './site-extract';
 import { LENS_LABEL, rubricFor, type AuditScore, type Lens, type SuggestedFix } from './site-score';
@@ -39,6 +40,12 @@ export interface AuditBrief {
      * suggest the same change, or one that does the same thing, again.
      */
     rejectedBlock?: string | null;
+    /**
+     * The hand-off targets this workspace has ACTIVE (owner, 2026-10-24: assistants only connect with
+     * teammates the user has active). Absent = not known (the public taster, which writes none).
+     * The audit of 2026-10-25 found ideas briefed to a Blog Writer the workspace had never hired.
+     */
+    activeHandoffTargets?: readonly HandoffTarget[];
 }
 
 /** Max suggested fixes per lens — the summary picks three across all lenses. */
@@ -135,7 +142,7 @@ export function buildLensPrompt(
             parts.push(`<competitor n="${i + 1}">\n${JSON.stringify(pageForPrompt(c.page, 1200))}${changed}\n</competitor>`);
         });
     }
-    parts.push(rubricBlock(lens), EVIDENCE_RULES, LENS_OUTPUT);
+    parts.push(rubricBlock(lens), EVIDENCE_RULES, SITE_AUDIT_CRAFT, LENS_OUTPUT);
     return { system: systemPrompt(LENS_ROLE[lens]), user: parts.join('\n\n') };
 }
 
@@ -158,6 +165,18 @@ export interface SummaryInput {
     covered?: CoveredItem[];
 }
 
+/** The hand-off targets the summary may name: the active ones when known, else every target. */
+export function allowedHandoffTargets(active: readonly HandoffTarget[] | undefined): HandoffTarget[] {
+    return active ? HANDOFF_TARGETS.filter((t) => active.includes(t)) : [...HANDOFF_TARGETS];
+}
+
+/** The summary's sentence on who a hand-off may go to. Pure. */
+export function handoffTargetsLine(active: readonly HandoffTarget[] | undefined): string {
+    const allowed = allowedHandoffTargets(active);
+    if (!allowed.length) return 'This business has none of those assistants active, so return "handoffs": [] — never brief an assistant they do not have.';
+    return `"target" is one of ${allowed.map((t) => `"${t}"`).join(', ')} — the ONLY assistants this business has active; never brief any other. Use only facts from the page and the products list, and promise no results.`;
+}
+
 export function buildSummaryPrompt(input: SummaryInput): LensPrompt {
     const { score } = input;
     const lensLines = (Object.keys(score.lenses) as Lens[])
@@ -177,11 +196,11 @@ export function buildSummaryPrompt(input: SummaryInput): LensPrompt {
         coveredBlock(input.covered ?? []),
         `<rules>
 - "summary": 2–3 short sentences to the business owner: where the site stands, what moved since last time, and the single most important thing to change. Calm and direct, no hype. Use ONLY the numbers given above — do not invent percentages, conversion rates or forecasts.
-- "priorities": up to 3 of the suggested fixes, by their [index], most valuable first, each with one sentence on why it matters commercially and an impact of "high", "medium" or "low". You may not write new fixes.
-- "handoffs": up to 2 briefs for other assistants who could help while the website is being changed. "target" is one of ${HANDOFF_TARGETS.map((t) => `"${t}"`).join(', ')}. "title" is a short button label; "brief" is 2–4 sentences the assistant can act on. Only include a hand-off if it genuinely helps AND says something new: never one that repeats or overlaps anything in <already_covered>. When everything useful is already covered, return "handoffs": [] — an empty list is the right answer then, not a reworded repeat.
+- "priorities": up to 3 of the suggested fixes, by their [index], most valuable first, each with one sentence on why it matters commercially and an impact of "high", "medium" or "low". You may not write new fixes, and never pick two fixes that change the same text.
+- "handoffs": up to 2 briefs for other assistants who could help while the website is being changed. ${handoffTargetsLine(input.brief.activeHandoffTargets)} "title" is a short button label; "brief" is 2–4 sentences the assistant can act on. Only include a hand-off if it genuinely helps AND says something new: never one that repeats or overlaps anything in <already_covered>. When everything useful is already covered, return "handoffs": [] — an empty list is the right answer then, not a reworded repeat.
 - Reply with the JSON object only.
 </rules>`,
-        `<output>\n{"summary":"","priorities":[{"fix":0,"whyItMatters":"","impact":"high"}],"handoffs":[{"target":"blog_writer","title":"","brief":""}]}\n</output>`,
+        `<output>\n{"summary":"","priorities":[{"fix":0,"whyItMatters":"","impact":"high"}],"handoffs":[{"target":"<one of the assistants named above>","title":"","brief":""}]}\n</output>`,
     ].filter(Boolean).join('\n\n');
 
     return {
@@ -236,9 +255,11 @@ export function sanitiseSummary(raw: unknown, input: SummaryInput): SummaryOutpu
     }
 
     const handoffs: Handoff[] = [];
+    const allowedTargets = allowedHandoffTargets(input.brief.activeHandoffTargets);
     for (const h of Array.isArray(r.handoffs) ? r.handoffs : []) {
         const o = (h && typeof h === 'object' ? h : {}) as Record<string, unknown>;
-        if (!HANDOFF_TARGETS.includes(o.target as HandoffTarget)) continue;
+        // Only an assistant this workspace has active — the prompt says so, and this enforces it.
+        if (!allowedTargets.includes(o.target as HandoffTarget)) continue;
         const title = typeof o.title === 'string' ? o.title.trim().slice(0, 80) : '';
         const brief = typeof o.brief === 'string' ? o.brief.trim().slice(0, 800) : '';
         if (!title || !brief) continue;

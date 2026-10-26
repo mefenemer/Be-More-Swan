@@ -8,6 +8,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import { OUTREACH_SUBJECT_RULES } from '../constants/outreach-subject';
 import { outreachFirstEmailBlock } from '../config/outreach-offer';
 import { parseModelJson, parseModelJsonArray } from '../utils/model-json';
+import { adaptForModel, replyText } from '../config/model-options';
+import { withRoleModel, type RoleModelChoice } from '../utils/assistant-model';
 import {
     DISQUALIFIED_MAX_SCORE,
     EXCLUDED_MAX_SCORE,
@@ -52,6 +54,21 @@ export const SCORING_MODEL = 'claude-haiku-4-5-20251001';
  * paying to be told the same thing.
  */
 const MAX_RESCORE_DEPTH = 3;
+
+/**
+ * Candidates per scoring call. A page is split into groups this size, scored side by side
+ * (scoreCandidates). Three keeps one call — three verdicts and three outreach emails — near a third
+ * of the 22–25s a ten-candidate call took on 2026-10-25.
+ */
+export const SCORE_GROUP_SIZE = 3;
+/**
+ * The most a page's scoring may take, all groups and retries included. The discovery worker is a
+ * scheduled function that also searches and reads home pages in the same tick; past this, cards are
+ * left unscored rather than the platform cutting the tick off with nothing saved.
+ */
+export const SCORE_BUDGET_MS = 15_000;
+/** The shortest timeout worth giving a call, and the least budget left for a retry to start. */
+const MIN_SCORE_CALL_MS = 4_000;
 
 export interface ScoreCandidate {
     companyName: string;
@@ -117,6 +134,8 @@ export interface ScoreResult {
     cards: LeadScoringCard[];   // aligned by index to the input candidates
     inputTokens: number;
     outputTokens: number;
+    /** The model that answered — the Lead Generator's chosen one, or SCORING_MODEL. For usage logging. */
+    model: string;
 }
 
 function str(v: unknown, max = 300): string | null {
@@ -382,6 +401,8 @@ export async function classifyProspects(
     candidates: ScoreCandidate[],
     icp: Record<string, unknown>,
     sender: SenderIdentity,
+    /** The Lead Generator role's model (loadRoleModel). Null = SCORING_MODEL. */
+    modelChoice: RoleModelChoice | null = null,
 ): Promise<ClassifyResult> {
     const empty = candidates.map(() => ({ prospectType: null, rationale: null }));
     if (candidates.length === 0) return { results: [], inputTokens: 0, outputTokens: 0 };
@@ -413,8 +434,9 @@ Return STRICT JSON only (no markdown): an array with ONE object per candidate, i
     let parsed: unknown[] = [];
 
     try {
-        const resp = await anthropic.messages.create({
-            model: SCORING_MODEL,
+        // temperature below is dropped by adaptForModel for a model that takes no sampling settings.
+        const { resp } = await withRoleModel(modelChoice, SCORING_MODEL, async (model, thinking) => ({ model, resp: await anthropic.messages.create(adaptForModel({
+            model,
             // Classification-only replies are short — one enum and a sentence per candidate — but
             // this is still a BATCH, and a truncation here silently returns null for every row in
             // it. Cheap headroom against the same failure scoreCandidates suffered.
@@ -430,10 +452,10 @@ Return STRICT JSON only (no markdown): an array with ONE object per candidate, i
             temperature: 0,
             system,
             messages: [{ role: 'user', content: `Classify these ${candidates.length} candidates:\n${JSON.stringify(compact)}` }],
-        });
+        }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming) }), { requestPath: true, label: 'classifyProspects' });
         inputTokens = resp.usage.input_tokens;
         outputTokens = resp.usage.output_tokens;
-        const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
+        const raw = replyText(resp.content);
         const p = parseModelJsonArray(raw);
         if (Array.isArray(p)) parsed = p;
         warnIfTruncated('classifyProspects', resp.stop_reason ?? null, candidates.length, parsed.length);
@@ -479,10 +501,41 @@ export async function scoreCandidates(
      * which is how every call behaved before 2026-10-18.
      */
     searchContext: ScoringSearchContext | null = null,
+    /**
+     * The Lead Generator role's model (Admin ▸ Assistants ▸ Model & rules — loadRoleModel), since
+     * this call writes most of its outreach emails. Null = SCORING_MODEL, exactly as before.
+     */
+    modelChoice: RoleModelChoice | null = null,
     /** Recursion depth for the blank-card retry below. Callers never pass this. */
     depth = 0,
+    /** True for one group of a split page (below). Callers never pass this. */
+    grouped = false,
+    /** When the whole page's scoring must be done by (ms since epoch); 0 = starts now. Callers never pass this. */
+    endsAt = 0,
 ): Promise<ScoreResult> {
-    if (candidates.length === 0) return { cards: [], inputTokens: 0, outputTokens: 0 };
+    if (candidates.length === 0) return { cards: [], inputTokens: 0, outputTokens: 0, model: SCORING_MODEL };
+    if (!endsAt) endsAt = Date.now() + SCORE_BUDGET_MS;
+
+    // ── A PAGE IS SCORED IN SMALL GROUPS, ALL AT ONCE ───────────────────────────────────────────
+    //
+    // ⚠️ One call for a whole page (up to ten candidates, each with a full outreach email) took
+    // 22–25s on Haiku 4.5 and Opus 5.5 alike (measured 2026-10-25), inside a scheduled worker that
+    // also searches and reads home pages in the same tick. Groups of SCORE_GROUP_SIZE run side by
+    // side, so the tick waits for one small call instead of one long one. Each candidate is judged
+    // on its own against the profile, so splitting changes no verdict; it does repeat the system
+    // prompt per group, which costs some input tokens.
+    if (depth === 0 && !grouped && candidates.length > SCORE_GROUP_SIZE) {
+        const groups: ScoreCandidate[][] = [];
+        for (let i = 0; i < candidates.length; i += SCORE_GROUP_SIZE) groups.push(candidates.slice(i, i + SCORE_GROUP_SIZE));
+        const parts = await Promise.all(groups.map((g) => scoreCandidates(g, icp, sender, rulesBlock, searchContext, modelChoice, 0, true, endsAt)));
+        return {
+            cards: parts.flatMap((p) => p.cards),
+            inputTokens: parts.reduce((n, p) => n + p.inputTokens, 0),
+            outputTokens: parts.reduce((n, p) => n + p.outputTokens, 0),
+            // The chosen model unless every group fell back to the default.
+            model: parts.find((p) => p.model !== SCORING_MODEL)?.model ?? SCORING_MODEL,
+        };
+    }
 
     const areaBlock = searchAreaBlock(searchContext);
     const system =
@@ -540,10 +593,13 @@ ${outreachFirstEmailBlock(sender.outreachOffer)}`;
     let inputTokens = 0;
     let outputTokens = 0;
     let parsed: unknown[] = [];
+    let usedModel = SCORING_MODEL;
 
     try {
-        const resp = await anthropic.messages.create({
-            model: SCORING_MODEL,
+        // requestPath: the discovery worker is a scheduled function with a short limit, so thinking
+        // is held at 'low' whatever the role's setting.
+        const { resp, model } = await withRoleModel(modelChoice, SCORING_MODEL, async (model, thinking) => ({ model, resp: await anthropic.messages.create(adaptForModel({
+            model,
             // ⚠️ THIS CEILING IS SIZED FOR THE OUTREACH DRAFTS, NOT THE VERDICTS. Every object in
             // the array carries a complete personalised email — body, subject, reasons, next step
             // — so a candidate costs 250-400 output tokens, and the old 2048 completed five or six
@@ -559,10 +615,13 @@ ${outreachFirstEmailBlock(sender.outreachOffer)}`;
                 ? `${system}\n\nRULES FOR THE OUTREACH EMAILS — the business's own rules for this assistant. Follow every one in each outreachDraft. They never change a score.\n${rulesBlock}`
                 : system,
             messages: [{ role: 'user', content: `Score these ${candidates.length} candidates:\n${JSON.stringify(compact)}` }],
-        });
+            // Whatever is left of the page's budget, and no SDK retries: a call that runs over ends
+            // here as unscored cards (handled below) instead of the platform killing the whole tick.
+        }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming, { timeout: Math.max(MIN_SCORE_CALL_MS, endsAt - Date.now()), maxRetries: 0 }) }), { requestPath: true, label: 'discovery-scoring' });
+        usedModel = model;
         inputTokens = resp.usage.input_tokens;
         outputTokens = resp.usage.output_tokens;
-        const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
+        const raw = replyText(resp.content);
         const p = parseModelJsonArray(raw);
         if (Array.isArray(p)) parsed = p;
         warnIfTruncated('scoreCandidates', resp.stop_reason ?? null, candidates.length, parsed.length);
@@ -585,12 +644,13 @@ ${outreachFirstEmailBlock(sender.outreachOffer)}`;
     // smallest request this prompt can make; if THAT still comes back blank the cause is not the
     // ceiling and no further splitting will help.
     const blanks = cards.map((c, i) => ({ c, i })).filter(({ c }) => isBlankCard(c));
-    if (blanks.length > 0 && candidates.length > 1 && depth < MAX_RESCORE_DEPTH) {
+    // Only while the page's budget leaves room for another call — past it, they stay unscored.
+    if (blanks.length > 0 && candidates.length > 1 && depth < MAX_RESCORE_DEPTH && endsAt - Date.now() > MIN_SCORE_CALL_MS) {
         console.warn(`[discovery-scoring] ${blanks.length}/${candidates.length} came back blank — re-scoring in smaller batches (depth ${depth + 1}/${MAX_RESCORE_DEPTH})`);
         const half = Math.ceil(blanks.length / 2);
         for (const group of [blanks.slice(0, half), blanks.slice(half)]) {
             if (group.length === 0) continue;
-            const retry = await scoreCandidates(group.map(({ i }) => candidates[i]), icp, sender, rulesBlock, searchContext, depth + 1);
+            const retry = await scoreCandidates(group.map(({ i }) => candidates[i]), icp, sender, rulesBlock, searchContext, modelChoice, depth + 1, true, endsAt);
             inputTokens += retry.inputTokens;
             outputTokens += retry.outputTokens;
             group.forEach(({ i }, k) => { cards[i] = retry.cards[k]; });
@@ -612,7 +672,7 @@ ${outreachFirstEmailBlock(sender.outreachOffer)}`;
         }
     }
 
-    return { cards, inputTokens, outputTokens };
+    return { cards, inputTokens, outputTokens, model: usedModel };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -671,10 +731,12 @@ export interface RescoreResult {
     hooks: string[];
     inputTokens: number;
     outputTokens: number;
+    /** The model that answered, for usage logging. */
+    model: string;
 }
 
 const EMPTY_RESCORE: RescoreResult = {
-    card: null, signals: [], people: [], hooks: [], inputTokens: 0, outputTokens: 0,
+    card: null, signals: [], people: [], hooks: [], inputTokens: 0, outputTokens: 0, model: SCORING_MODEL,
 };
 
 /**
@@ -694,7 +756,8 @@ export async function rescoreWithIntel(
     intel: IntelForScoring,
     icp: Record<string, unknown>,
     sender: SenderIdentity,
-    opts: { domain?: string | null } = {},
+    /** `modelChoice`: the Lead Generator role's model (it rewrites the outreach draft). Null = SCORING_MODEL. */
+    opts: { domain?: string | null; modelChoice?: RoleModelChoice | null } = {},
 ): Promise<RescoreResult> {
     const hasEvidence = intel.evidence.length > 0
         || intel.peopleSources.length > 0
@@ -762,17 +825,20 @@ ${outreachFirstEmailBlock(sender.outreachOffer)}`;
     let inputTokens = 0;
     let outputTokens = 0;
     let parsed: Record<string, unknown> | null = null;
+    let usedModel = SCORING_MODEL;
 
     try {
-        const resp = await anthropic.messages.create({
-            model: SCORING_MODEL,
+        // requestPath: the manual "research this lead" button runs it inside a 26-second request.
+        const { resp, model } = await withRoleModel(opts.modelChoice ?? null, SCORING_MODEL, async (model, thinking) => ({ model, resp: await anthropic.messages.create(adaptForModel({
+            model,
             max_tokens: 2048,
             system,
             messages: [{ role: 'user', content: `Re-read this lead:\n${JSON.stringify(payload)}` }],
-        });
+        }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming) }), { requestPath: true, label: 'rescoreWithIntel' });
+        usedModel = model;
         inputTokens = resp.usage.input_tokens;
         outputTokens = resp.usage.output_tokens;
-        const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
+        const raw = replyText(resp.content);
         parsed = parseModelJson<Record<string, unknown>>(raw);
         // One lead, one card — 2048 clears it comfortably, so this is a tripwire rather than a
         // known fault. It is here because the identical silence cost scoreCandidates 26% of a
@@ -781,9 +847,9 @@ ${outreachFirstEmailBlock(sender.outreachOffer)}`;
         warnIfTruncated('rescoreWithIntel', resp.stop_reason ?? null, 1, parsed ? 1 : 0);
     } catch (err) {
         console.error('[discovery-scoring] rescore failed:', err);
-        return { ...EMPTY_RESCORE, inputTokens, outputTokens };
+        return { ...EMPTY_RESCORE, inputTokens, outputTokens, model: usedModel };
     }
-    if (!parsed || typeof parsed !== 'object') return { ...EMPTY_RESCORE, inputTokens, outputTokens };
+    if (!parsed || typeof parsed !== 'object') return { ...EMPTY_RESCORE, inputTokens, outputTokens, model: usedModel };
 
     // Routed through normaliseLeadCard so a re-score cannot produce a card shape that the original
     // scoring pass could not — including the prospect-type clamp, which is carried forward from the
@@ -838,5 +904,5 @@ ${outreachFirstEmailBlock(sender.outreachOffer)}`;
         .map((h) => h.trim().slice(0, 300))
         .slice(0, 3);
 
-    return { card, signals, people, hooks, inputTokens, outputTokens };
+    return { card, signals, people, hooks, inputTokens, outputTokens, model: usedModel };
 }

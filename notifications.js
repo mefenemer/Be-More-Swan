@@ -293,6 +293,15 @@ window.NotifKit = (function () {
         // generic action fallback at the bottom drops the user on the dashboard to go and find it,
         // which for a card that expires in as little as two days is most of the way to not
         // notifying them at all.
+        // The Business Mentor's weekly review (src/utils/mentor-review.ts): the review is in THIS
+        // person's chat with the Mentor — open that conversation, not a fresh one (the Chat button starts
+        // a new conversation, so without this the review was only reachable through History).
+        if (notif.type === 'mentor_weekly_review' && meta.assistantId) {
+            return { label: 'Open my review', run: () => {
+                if (meta.chatSessionId && window.openAssistantChat) window.openAssistantChat({ assistantId: meta.assistantId, sessionId: meta.chatSessionId });
+                else { window._assistantDetailInitialTab = 'mentor'; window.routeToAssistantDetail?.(meta.assistantId); }
+            } };
+        }
         if (notif.type === 'campaign_decision_pending' && meta.assistantId) {
             return { label: 'Review decision', run: () => {
                 window._assistantDetailInitialTab = 'review-queue';
@@ -944,6 +953,41 @@ window.initNotifications = async function(param) {
         }
     };
 
+    // The Business Mentor's suggestions waiting for an answer (§3.13 of docs/business-mentor-plan.md):
+    // a strip at the top of Needs you, opening "Review all". A failed read is no strip, never a failed page.
+    const mentorStrip = document.getElementById('mentor-needs-strip');
+    let mentorOpen = 0;
+    const paintMentorStrip = () => {
+        if (!mentorStrip) return;
+        const show = activeTab === 'needs' && mentorOpen > 0;
+        mentorStrip.classList.toggle('hidden', !show);
+        mentorStrip.style.display = show ? '' : 'none';
+        if (!show) return;
+        mentorStrip.innerHTML = `<div class="bg-white rounded-xl border border-pink-200 shadow-sm p-4 flex flex-wrap items-center justify-between gap-3">
+            <div class="min-w-0">
+                <p class="text-sm font-bold text-gray-900">Your Business Mentor has ${mentorOpen} ${mentorOpen === 1 ? 'suggestion' : 'suggestions'} waiting</p>
+                <p class="text-xs text-gray-500 mt-0.5">Review them together and tick the ones you want. Nothing changes until you do.</p>
+            </div>
+            <button type="button" data-mentor-strip-review class="btn-primary shrink-0 px-4 py-2 text-sm font-bold rounded-lg transition">Review all</button>
+        </div>`;
+    };
+    const loadMentorOpen = async () => {
+        if (!mentorStrip) return;
+        try {
+            const res = await fetch('/.netlify/functions/mentor?only=open', { credentials: 'same-origin' });
+            const body = res.ok ? await res.json().catch(() => ({})) : {};
+            mentorOpen = Array.isArray(body.open) ? body.open.length : 0;
+        } catch { mentorOpen = 0; }
+        paintMentorStrip();
+    };
+    mentorStrip?.addEventListener('click', (e) => {
+        if (e.target.closest('[data-mentor-strip-review]')) window.MentorReviewAll?.openDialog();
+    });
+    // A suggestion answered anywhere (chat, Overview, Review all): re-read. Swapped, not stacked.
+    if (window._notifMentorListener) document.removeEventListener('mentor:changed', window._notifMentorListener);
+    window._notifMentorListener = () => { if (mentorStrip && document.body.contains(mentorStrip)) loadMentorOpen(); };
+    document.addEventListener('mentor:changed', window._notifMentorListener);
+
     const showTab = (tab) => {
         if (!TABS.includes(tab)) return;
         // A thread asked for while Messages is already open: remount on it.
@@ -983,6 +1027,7 @@ window.initNotifications = async function(param) {
         setCount('updates', unreadUpdates);
         setTabStyles();
         syncMessagesPanel();
+        paintMentorStrip();
 
         // Mark-all-read is an Updates control: an action is cleared by doing it and a question by
         // answering it, so "read" was never what clearing them meant.
@@ -1273,6 +1318,7 @@ window.initNotifications = async function(param) {
     if (activeTab === 'messages') renderList();
     restoreGroupBy();
     loadData();
+    loadMentorOpen();
 };
 
 // Global click handler for routing to the Support area

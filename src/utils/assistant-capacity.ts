@@ -13,7 +13,7 @@
 // A limit enforced only by the page that usually precedes the write is not enforced. This is the
 // server-side twin of check-capacity, and it belongs next to the insert.
 
-import { and, asc, count, eq, gte, inArray, ne, or } from 'drizzle-orm';
+import { and, asc, count, eq, gte, inArray, ne, or, sql } from 'drizzle-orm';
 import { aiAssistants, auditLogs, masterAssistants, masterPlans, organisations, plans } from '../../db/schema';
 import { effectiveLimit, type FeatureOverrides } from './plan-features';
 import { getPeriodStart } from './atomic-cap-check';
@@ -27,6 +27,25 @@ import { getPeriodStart } from './atomic-cap-check';
  * archiving a workable way to free one.
  */
 export const SEAT_OCCUPYING_STATUSES = ['provisioning', 'ready_for_work', 'working'] as const;
+
+/**
+ * Roles every workspace gets on every plan, which never take a plan seat (docs/business-mentor-plan.md
+ * §2.3). They are never counted against the assistant limit, never paused when a downgrade leaves the
+ * org over it, and never count as a role switch.
+ *
+ * ⚠️ Every query that counts or picks assistants against the plan limit must use `takesASeat()`;
+ * tests/workspace-roles-take-no-seat.test.ts lists those places and fails when one doesn't.
+ */
+export const WORKSPACE_ROLE_KEYS = ['business_mentor'] as const;
+
+export function isWorkspaceRole(roleKey: string | null | undefined): boolean {
+    return !!roleKey && (WORKSPACE_ROLE_KEYS as readonly string[]).includes(roleKey);
+}
+
+/** SQL condition: the assistant row takes a plan seat (it is not a workspace role). Role key = configuration.type, as hire-assistant writes it. */
+export function takesASeat() {
+    return sql`coalesce(${aiAssistants.configuration} ->> 'type', '') NOT IN (${sql.join(WORKSPACE_ROLE_KEYS.map((k) => sql`${k}`), sql`, `)})`;
+}
 
 export type CapacityRefusal = {
     status: 402 | 409;
@@ -92,6 +111,7 @@ export async function checkAssistantCapacity(
         .where(and(
             eq(aiAssistants.organisationId, orgId),
             inArray(aiAssistants.lifecycleStatus, [...SEAT_OCCUPYING_STATUSES]),
+            takesASeat(),
         ));
 
     if (occupied >= assistantLimit) {
@@ -139,6 +159,7 @@ export async function checkResumeCapacity(
         .where(and(
             eq(aiAssistants.organisationId, orgId),
             inArray(aiAssistants.lifecycleStatus, [...SEAT_OCCUPYING_STATUSES]),
+            takesASeat(),
             ne(aiAssistants.id, assistantId),
         ));
 
@@ -253,6 +274,8 @@ export async function checkRoleSwap(
     incoming: string | { assistantId: number },
     periodStart: Date = getPeriodStart(),
 ): Promise<RoleSwapRefusal | null> {
+    // A workspace role (the Business Mentor) is never a switch: it takes no seat.
+    if (typeof incoming === 'string' && isWorkspaceRole(incoming)) return null;
     const limit = await resolveSeatLimit(db, userId, orgId);
     if (limit === 'NO_PLAN' || limit === null) return null;
 
@@ -287,7 +310,9 @@ export async function checkRoleSwap(
             createdAt: new Date(r.createdAt),
             archivedAt: r.archivedAt ? new Date(r.archivedAt) : null,
             lifecycleStatus: r.lifecycleStatus,
-        }));
+        }))
+        // …nor is a workspace role held: it never occupied a seat.
+        .filter((r) => !isWorkspaceRole(r.roleKey));
 
     let events: RoleSwapEvent[] = [];
     if (rows.length) {

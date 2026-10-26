@@ -185,6 +185,10 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     site_audit_competitor_change: 'state_change', site_audit_goal_met: 'state_change',
     // A Website Assistant draft is ready to look at. Nothing is published by it.
     site_draft_ready: 'state_change',
+    // The Business Mentor's research or strategy draft is ready (mentor-jobs.ts). Nothing is applied by it.
+    mentor_research_ready: 'state_change', mentor_draft_ready: 'state_change',
+    // The Mentor's weekly review is written (mentor-review.ts). Its suggestions wait in Needs you on their own.
+    mentor_weekly_review: 'state_change',
     // Someone paid for something on the website (site-shop.ts, from the Connect webhook). The money
     // is already in their Stripe account; the card is the news, not a task.
     site_order_received: 'state_change',

@@ -11,6 +11,7 @@ import { parseRoiPeriod, roiPeriodStart } from '../../src/utils/roi-period';
 import { summariseGoals, pickHeadlineGoal, type GoalSummary } from '../../src/utils/goal-summary';
 import { getGoalMetric } from '../../src/config/goal-metrics';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { ensureMentor } from '../../src/utils/mentor-provision';
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -20,6 +21,11 @@ export default withLambda(async (event) => {
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
     const { organisationId: orgId, userId } = ctx;
+
+    // The Business Mentor arrives on the first load once the business_mentor flag includes this
+    // workspace (src/utils/mentor-provision.ts). Never while an admin is impersonating: that view is
+    // read-only. Never throws.
+    if (!ctx.impersonation) await ensureMentor(db, orgId, userId);
 
     try {
         // RLS-enforced: tenant-data queries run under withTenant (app_user + app.current_org).

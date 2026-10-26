@@ -42,6 +42,12 @@
       'Make the home page headline say exactly who we help.',
       'Add a questions section to the home page answering what customers ask most.',
     ],
+    // The Mentor opens from the workspace snapshot, so these steer it to the useful first questions.
+    business_mentor: [
+      'What should I sort out first in my workspace?',
+      'Are my assistants set up to do what my business needs?',
+      'I have a new idea — help me check whether people would pay for it.',
+    ],
     mystery_shopper: [
       'What is the one change to my homepage that would matter most?',
       'Why did my website get that score?',

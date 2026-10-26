@@ -18,6 +18,7 @@ import { refreshGoalCards } from './chat-goals';
 import { refreshScheduleCards } from './chat-schedule';
 import { refreshPlatformsCards } from './chat-platforms';
 import { refreshLibraryCards } from './chat-library';
+import { refreshMentorCards } from './mentor-proposal-cards';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -34,5 +35,7 @@ export async function refreshStoredCards<M extends { uiElement: unknown }>(
     out = await refreshGoalCards(db, organisationId, aiAssistantId, out);
     out = await refreshScheduleCards(db, organisationId, aiAssistantId, out);
     out = await refreshPlatformsCards(db, organisationId, aiAssistantId, out);
-    return refreshLibraryCards(db, organisationId, aiAssistantId, out);
+    out = await refreshLibraryCards(db, organisationId, aiAssistantId, out);
+    // The Business Mentor's suggestions and end-of-week checks (answered in another chat, Inbox or Review all).
+    return refreshMentorCards(db, organisationId, out);
 }

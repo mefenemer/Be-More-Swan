@@ -64,11 +64,11 @@ check('scoreCandidates puts the block and the field in the prompt only when ther
 check('the halving retry keeps the search context', () => {
     // A retried batch scored without the context would lose the location gate on exactly the
     // candidates the first attempt could not finish.
-    assert.ok(SCORING.includes('icp, sender, rulesBlock, searchContext, depth + 1)'));
+    assert.ok(SCORING.includes('icp, sender, rulesBlock, searchContext, modelChoice, depth + 1, true, endsAt)'));
 });
 
 check('the worker passes the search context to the scorer', () => {
-    assert.ok(WORKER.includes('await scoreCandidates(toScore, icp, sender, rulesBlock, searchContext)'));
+    assert.ok(WORKER.includes("await scoreCandidates(toScore, icp, sender, rulesBlock, searchContext, await loadRoleModel(db, 'lead_qualifier'))"));
 });
 
 console.log('\n──── code enforces the answer ────');

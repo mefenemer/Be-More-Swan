@@ -12,6 +12,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, contentAssets, siteImports, sites } from '../../db/schema';
 import { gatewayGenerate } from '../lib/ai-gateway';
+import { gatewayRoleModel } from './assistant-model';
 import { persistBufferToR2, r2IsConfigured } from '../lib/media-persist';
 import { CRAWLERS } from '../lib/robots';
 import { parseModelJson } from './model-json';
@@ -101,6 +102,8 @@ function liveDeps(db: Db, site: SiteRow, userId: number): ImportDeps {
             const res = await gatewayGenerate({
                 system: prompt.system, messages: [{ role: 'user', content: prompt.user }], maxTokens: 6000,
                 usage: { workspaceId: site.organisationId, assistantId: site.aiAssistantId },
+                // The Website role's model (Admin ▸ Assistants ▸ Model & rules). Background: full thinking.
+                ...(await gatewayRoleModel(db, 'website_assistant')),
             });
             return parseModelJson(res.text);
         },

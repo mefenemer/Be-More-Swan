@@ -17,6 +17,7 @@ import { createNotification } from '../../src/utils/notify';
 import { effectiveLimit, type FeatureOverrides } from '../../src/utils/plan-features';
 import { getPeriodStart } from '../../src/utils/atomic-cap-check';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { takesASeat } from '../../src/utils/assistant-capacity';
 
 export default withLambda(async (event) => {
     // Accept both scheduled invocations and a GET call for manual testing
@@ -126,6 +127,9 @@ export default withLambda(async (event) => {
                             eq(aiAssistants.organisationId, plan.organisationId),
                             eq(aiAssistants.provisioningStatus, 'complete'),
                             eq(aiAssistants.isActive, true),
+                            // Never the Business Mentor: its chat is free under fair use, and it stays for
+                            // Help Centre answers and support (docs/business-mentor-plan.md §2.7).
+                            takesASeat(),
                         ))
                         .catch(err => console.warn('[task-volume-check] Pause assistants failed:', err.message));
 

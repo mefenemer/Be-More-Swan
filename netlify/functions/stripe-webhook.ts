@@ -13,11 +13,13 @@ import { grantXCredits } from '../../src/utils/ai-credits';
 import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { releasePausedLimit, resolveAssistantLimit } from '../../src/utils/release-paused-limit';
+import { restoreAfterNewPlan } from '../../src/utils/restore-after-new-plan';
 import { backfillLivePlanForOrg } from '../../src/utils/plan-stripe-refs';
 import { qualifyPendingReferral } from '../../src/utils/referral-offer';
 import { invoiceNetPence, recordPartnerPayment, reinstateDisputedCommission, reversePartnerCommission, sessionNetPence, type PartnerPayment } from '../../src/utils/partner-ledger';
 import { finishPlanMove } from '../../src/utils/plan-moves';
 import { planStatusForCancelFlag } from '../../src/utils/subscription-cancel-state';
+import { takesASeat } from '../../src/utils/assistant-capacity';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
@@ -235,6 +237,8 @@ export default withLambda(async (event) => {
             }).returning();
             newPlan = inserted;
             if (orgIdInt) await afterPaidPlanStarted(db, orgIdInt);
+            // Assistants the old plan's end or a failed payment paused come back (restore-after-new-plan.ts).
+            if (orgIdInt && userIdInt) await restoreAfterNewPlan(db, userIdInt, orgIdInt);
         } catch (planErr: any) {
             if (planErr?.code === '23505' || planErr?.message?.includes('plans_one_active_per_org_unique')) {
                 // confirm-payment.ts won the race. Do not just walk away: fill in any reference it
@@ -424,6 +428,8 @@ export default withLambda(async (event) => {
             }).returning();
             newPlan = inserted;
             if (orgIdInt) await afterPaidPlanStarted(db, orgIdInt);
+            // Assistants the old plan's end or a failed payment paused come back (restore-after-new-plan.ts).
+            if (orgIdInt && userIdInt) await restoreAfterNewPlan(db, userIdInt, orgIdInt);
         } catch (planErr: any) {
             if (planErr?.code === '23505' || planErr?.message?.includes('plans_one_active_per_org_unique')) {
                 // Same reasoning as the checkout.session.completed handler above: the row that won
@@ -854,10 +860,12 @@ export default withLambda(async (event) => {
             }
 
             // On final attempt (≥ 3): immediately pause all assistants
+            // Never the Business Mentor: with no paid plan it still answers from the Help Centre and
+            // raises support tickets (docs/business-mentor-plan.md §2.7).
             if (attemptCount >= 3) {
                 await db.update(aiAssistants)
                     .set({ isActive: false, provisioningStatus: 'paused_payment', updatedAt: now })
-                    .where(and(eq(aiAssistants.userId, userId), eq(aiAssistants.isActive, true)));
+                    .where(and(eq(aiAssistants.userId, userId), eq(aiAssistants.isActive, true), takesASeat()));
             }
 
             const urgency = attemptCount >= 3
@@ -1149,8 +1157,8 @@ export default withLambda(async (event) => {
                     const activeAssistants = await db
                         .select({ id: aiAssistants.id, name: aiAssistants.name, createdAt: aiAssistants.createdAt })
                         .from(aiAssistants)
-                        .where(and(eq(aiAssistants.userId, userId), eq(aiAssistants.isActive, true), isNull(aiAssistants.archivedAt)))
-                        .orderBy(desc(aiAssistants.createdAt)); // newest first → pause oldest
+                        .where(and(eq(aiAssistants.userId, userId), eq(aiAssistants.isActive, true), isNull(aiAssistants.archivedAt), takesASeat()))
+                        .orderBy(desc(aiAssistants.createdAt)); // newest first → pause oldest (never the Business Mentor)
 
                     const excess = activeAssistants.length - assistantLimit;
                     if (excess > 0) {
@@ -1233,10 +1241,11 @@ export default withLambda(async (event) => {
                     inArray(plans.status, ['active', 'cancelling', 'past_due']),
                 ));
 
-            // Pause ALL active assistants — no active subscription
+            // Pause every active assistant — no active subscription — except the Business Mentor, which
+            // stays for Help Centre answers and support (docs/business-mentor-plan.md §2.7).
             await db.update(aiAssistants)
                 .set(withUpdatedAt({ isActive: false, provisioningStatus: 'paused_payment' as const }))
-                .where(and(eq(aiAssistants.userId, userId), eq(aiAssistants.isActive, true)));
+                .where(and(eq(aiAssistants.userId, userId), eq(aiAssistants.isActive, true), takesASeat()));
 
             await createNotification(db, 'billing_cancelled', {
                 userId,

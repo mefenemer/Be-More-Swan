@@ -14,6 +14,7 @@ import { assembleBlueprint } from '../../src/utils/blueprint';
 import { triggerContentDrain } from '../../src/utils/trigger-drain';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { SOCIAL_PLATFORMS } from '../../src/config/platform-formats';
+import { linkOutcomeJob } from '../../src/utils/mentor-outcomes';
 
 
 export default withLambda(async (event) => {
@@ -58,6 +59,8 @@ export default withLambda(async (event) => {
         platform?: string;
         platforms?: string[];
         triggerType?: string;
+        /** A Business Mentor post request (mentor-draft-request.ts): the suggestion this draft answers. */
+        mentorProposalId?: number;
     };
     try { body = JSON.parse(event.body || '{}'); } catch { body = {}; }
 
@@ -171,6 +174,10 @@ export default withLambda(async (event) => {
         // manual, chat) collapsed correctly. This was the only job creator that omitted it.
         crosspostGroupId: platforms.length > 1 ? randomUUID() : null,
     });
+
+    // The Business Mentor asked for this post: link it to the suggestion, so the draft carries
+    // "Requested by <Mentor>" (src/utils/requested-by.ts) and joins its track record. Never blocks the draft.
+    if (body.mentorProposalId !== undefined) await linkOutcomeJob(db, organisationId, body.mentorProposalId, jobId);
 
     await createNotification(db, triggerType === 'on_demand' ? 'post_generation_queued_on_demand' : 'post_generation_queued', {
         userId,

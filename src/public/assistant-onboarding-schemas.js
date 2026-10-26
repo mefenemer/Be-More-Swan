@@ -21,10 +21,16 @@
  *   const schema = window.AssistantOnboardingSchemas['lead_qualifier'];
  *   if (schema) AssistantOnboardingShell.mount({ container, assistantId, configurationSchema: schema });
  */
-(function () {
+(function (root, factory) {
+  // Also read on the server (src/utils/setup-field.ts validates a set-up answer card against it), the
+  // same UMD shape as brand-contrast.js: module.exports there, window.AssistantOnboardingSchemas here.
+  var schemas = factory();
+  if (typeof module === 'object' && module.exports) module.exports = schemas;
+  else root.AssistantOnboardingSchemas = schemas;
+}(typeof window !== 'undefined' ? window : this, function () {
   'use strict';
 
-  window.AssistantOnboardingSchemas = {
+  return {
     // Content Engine — Blog Writer. Topics + brand voice, then the publishing cadence that drives
     // assistant-scheduled "Approve & Schedule" (posting_frequency is read from onboarding_context by
     // src/config/posting-cadence.ts via schedule-blog's approve path; draft_horizon_days is promoted
@@ -638,6 +644,72 @@
 
     // Tier 1, Batch 2 — CRM Enricher. Captures which CRM to enrich and what to hunt for,
     // then how it runs: trigger, scope, and whether existing values may be overwritten.
+    // Business Mentor (docs/business-mentor-plan.md). Provisioned for every workspace, so this is
+    // rarely shown as a wizard; the Mentor asks the same question in chat on first visit (§3.1).
+    // Read by chat-orchestrator.ts ROUTES.business_mentor.
+    business_mentor: [
+      {
+        title: 'Where is your business today?',
+        description: 'Your Business Mentor starts from the right place: what you already have, or the idea you want to test.',
+        fields: [
+          {
+            key: 'businessStage',
+            label: 'Which describes you best?',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'existing', label: 'I run an established business', description: 'Start from what is already set up here.' },
+              { value: 'new_idea', label: "I'm starting something new", description: 'Start by testing the idea.' },
+            ],
+          },
+        ],
+      },
+      {
+        title: 'How should your Mentor work?',
+        description: 'Your Business Mentor is included with your plan and can’t be paused or archived. Quiet mode keeps it in the background instead.',
+        operational: true,
+        fields: [
+          {
+            // Read by chat-orchestrator.ts ROUTES.business_mentor (and, from Phase 3, the weekly review).
+            key: 'quietMode',
+            label: 'Quiet mode',
+            type: 'radio',
+            required: false,
+            options: [
+              { value: 'off', label: 'Suggest things', description: 'Your Mentor points out what to fix and suggests next steps.' },
+              { value: 'on', label: 'Only when I ask', description: 'No health checks, suggestions or weekly review — it answers your questions and helps with Be More Swan.' },
+            ],
+          },
+          {
+            // The weekly review (docs/business-mentor-plan.md §5; src/utils/mentor-review.ts reviewSettings).
+            // Quiet mode also stops it. Owners and admins are told by their own notification settings.
+            key: 'weeklyReview',
+            label: 'Weekly review',
+            type: 'radio',
+            required: false,
+            options: [
+              { value: 'on', label: 'Review my week', description: 'Once a week your Mentor compares what happened with your plan and suggests up to 3 changes. 1 task each week.' },
+              { value: 'off', label: 'No weekly review', description: 'You can still ask for one any time.' },
+            ],
+          },
+          {
+            key: 'reviewDay',
+            label: 'Review day',
+            type: 'dropdown',
+            required: false,
+            options: [
+              { value: 'Monday', label: 'Monday' },
+              { value: 'Tuesday', label: 'Tuesday' },
+              { value: 'Wednesday', label: 'Wednesday' },
+              { value: 'Thursday', label: 'Thursday' },
+              { value: 'Friday', label: 'Friday' },
+              { value: 'Saturday', label: 'Saturday' },
+              { value: 'Sunday', label: 'Sunday' },
+            ],
+          },
+        ],
+      },
+    ],
     crm_enricher: [
       {
         title: 'Where does your customer data live?',
@@ -811,4 +883,4 @@
       },
     ],
   };
-})();
+}));

@@ -254,6 +254,9 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             'site_audit_competitor_change', 'site_audit_goal_met',
             // The Website Assistant finished an AI draft of the site (site-store.ts runSiteDraft).
             'site_draft_ready',
+            // The Business Mentor finished research or a strategy draft (mentor-jobs.ts). Reports —
+            // nothing waits on the user. metadata.assistantId is passed.
+            'mentor_research_ready', 'mentor_draft_ready',
             // Someone paid on the website (site-shop.ts). metadata.assistantId is passed.
             'site_order_received',
             // Stripe is connected and can take payments (site-shop.ts announcePaymentsReady).
@@ -297,6 +300,19 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             // No sending domain / mailbox connected, so automated emails are queued, not sent.
             'newsletter_sequence_blocked',
         ],
+    },
+    {
+        // The Business Mentor's weekly review (src/utils/mentor-review.ts; docs/business-mentor-plan.md §2.4).
+        // Its own row so each owner or admin chooses how they hear about it: the review itself always
+        // lands in their chat with the Mentor, whatever is switched off here. scope:'account' — it is
+        // about the workspace, not one hired assistant, and the Mentor has no notifications drawer.
+        key: 'mentor_weekly_review',
+        label: 'Business Mentor weekly review',
+        description: 'When your Business Mentor has written its weekly review and suggestions.',
+        scope: 'account',
+        push: PUSH_OFF,  // a weekly summary, never worth a buzz
+        inApp: ON, email: ON,
+        types: ['mentor_weekly_review'],
     },
     {
         key: 'onboarding_reminders',

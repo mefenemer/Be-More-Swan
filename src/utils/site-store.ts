@@ -20,6 +20,7 @@ import { connectAccountFor } from './site-shop';
 import { loadBookingSetup } from './bookings';
 import { describeHours } from './booking-settings';
 import { gatewayGenerate } from '../lib/ai-gateway';
+import { gatewayRoleModel } from './assistant-model';
 import { loadAssistantRulesBlock } from './assistant-rules-prompt';
 import { normalizeBrandKit } from './brand-kit';
 import { parseModelJson } from './model-json';
@@ -185,6 +186,8 @@ export async function runSiteDraft(db: Db, siteId: number, request: string | nul
         const res = await gatewayGenerate({
             system: prompt.system, messages: [{ role: 'user', content: prompt.user }], maxTokens: 8000,
             usage: { workspaceId: site.organisationId, assistantId: site.aiAssistantId },
+            // The Website role's model (Admin ▸ Assistants ▸ Model & rules). Background: full thinking.
+            ...(await gatewayRoleModel(db, 'website_assistant')),
         });
         let drafted: { definition: SiteDefinition } | null;
         if (fromTemplate) {
@@ -358,6 +361,8 @@ export async function proposeOwnWords(db: Db, site: SiteRow, opts: { pageId: str
         const res = await gatewayGenerate({
             system: prompt.system, messages: [{ role: 'user', content: prompt.user }], maxTokens: 1500,
             usage: { workspaceId: site.organisationId, assistantId: site.aiAssistantId },
+            // The Website role's model, held at Low: the owner is waiting on this request.
+            ...(await gatewayRoleModel(db, 'website_assistant', { requestPath: true })),
         });
         plan = readPlan(parseModelJson(res.text));
     } catch (err) {

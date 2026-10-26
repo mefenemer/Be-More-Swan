@@ -17,6 +17,8 @@ import { sanitizeForModel } from '../../src/utils/text-safe';
 import { postTeamChatReply, teamNoteForChatTurn, teamThreadPromptBlock } from '../../src/utils/team-messages';
 import { SPECIAL_CATEGORY_RULE } from '../../src/constants/special-category-rule';
 import { SITE_COPY_CRAFT } from '../../src/constants/site-copy-craft';
+import { CAMPAIGN_PLANNING_CRAFT } from '../../src/constants/campaign-craft';
+import { MENTOR_CRAFT, MENTOR_FEEDBACK_CRAFT, MENTOR_HONESTY_RULES, MENTOR_IDEA_CHECK_CRAFT } from '../../src/constants/mentor-craft';
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
@@ -30,6 +32,9 @@ import { appendFooter } from '../../src/utils/disclosure-footer';
 import { resolvePostFooter } from '../../src/utils/post-disclosure';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { meterInteraction } from '../../src/utils/task-credit';
+import { checkFairUse } from '../../src/utils/fair-use';
+import { isMentorTurn } from '../../src/utils/mentor-provision';
+import { loadHelpKnowledge } from '../../src/utils/help-knowledge';
 import { embedTexts } from '../../src/utils/kb-embeddings';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
@@ -51,7 +56,7 @@ import { parseModelJson, stripCodeFences } from '../../src/utils/model-json';
 import { liveRoleLabel } from '../../src/utils/live-role-label';
 import { voiceDirective } from '../../src/utils/voice-profile';
 import { RULE_READING_ROLES, loadAssistantRulesBlock } from '../../src/utils/assistant-rules-prompt';
-import { buildCampaignsSnapshot } from '../../src/utils/campaign-plan';
+import { activeAndPausedRoleKeys, buildCampaignsSnapshot, withoutInactiveOrders } from '../../src/utils/campaign-plan';
 import { buildBriefsSnapshot } from '../../src/utils/visual-briefs';
 import { buildSiteAuditSnapshot } from '../../src/utils/site-audit-snapshot';
 import { buildSiteSnapshot } from '../../src/utils/site-store';
@@ -88,7 +93,7 @@ import { buildPlatformsBlock, platformsProposalFromUiElement, resolvePlatformsPr
 import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal, type LibraryCard } from '../../src/utils/chat-library';
 import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
-import { confirmCardReply } from '../../src/utils/confirm-card-reply';
+import { confirmCardReply, missingCardReply } from '../../src/utils/confirm-card-reply';
 import { isInOutreachReview } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
 import { LOSS_REASONS } from '../../src/config/revenue-events';
@@ -98,6 +103,18 @@ import { enforcePromptModeration } from '../../src/utils/moderation';
 import { BRIEF_PURPOSES, BRIEF_ASPECT_RATIOS, REJECT_REASONS, SOURCE_SPECS } from '../../src/config/visual-brief-vocab';
 import { FUNNEL_STAGES, FUNNEL_STAGE_DESCRIPTIONS, stageOutcomes } from '../../src/config/campaign-vocab';
 import { asksForACall, callbackOfferElement } from '../../src/utils/callback-request';
+import { asksAboutCustomers, buildMentorSnapshotParts, type MentorSnapshotData } from '../../src/utils/mentor-snapshot';
+import { recommendHires } from '../../src/utils/mentor-hire';
+import { assistantSetupFieldBlock, resolveSetupFieldProposal, setupFieldRequestFromUiElement, type SetupFieldCard } from '../../src/utils/chat-setup-field';
+import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, onlyGapFields, proposalKind, recordMentorProposal } from '../../src/utils/mentor-cards';
+import { gateMentorSuggestion, proposalFields } from '../../src/utils/mentor-proposals';
+import { resolveDraftRequest } from '../../src/utils/mentor-draft-request';
+import { closeCommitmentCard } from '../../src/utils/mentor-commitments';
+import { renderReviewSettingsForMentor } from '../../src/utils/mentor-review';
+import { mentorVisibilityPromptBlock } from '../../src/config/mentor-data-inventory';
+import { buildBreakEvenCard, buildStrategyCard } from '../../src/utils/mentor-plan-cards';
+import { loadStrategyDocs } from '../../src/utils/strategy-documents';
+import { recordPlatformIncident } from '../../src/utils/platform-incident';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -198,6 +215,8 @@ interface RouteContext {
     /** This Mystery Shopper's site, scores and suggested fixes by id — read per turn for routes with
      *  usesSiteAuditSnapshot (src/utils/site-audit-snapshot.ts). */
     siteAuditSnapshot?: string | null;
+    /** The Business Mentor's <workspace> block (src/utils/mentor-snapshot.ts). */
+    mentorSnapshot?: string | null;
     /** This Website Assistant's site — pages and sections by id — read per turn (usesSiteSnapshot). */
     siteSnapshot?: string | null;
     /** Files attached in this conversation (chat-attachments.ts) — routes with acceptsAttachments. */
@@ -233,6 +252,8 @@ interface AssistantRoute {
     usesBriefsSnapshot?: boolean;
     /** When true the handler reads this assistant's website checks for this turn (rc.siteAuditSnapshot). */
     usesSiteAuditSnapshot?: boolean;
+    /** When true the handler reads the whole workspace for the Business Mentor (rc.mentorSnapshot). */
+    usesMentorSnapshot?: boolean;
     /** When true the handler reads this assistant's site for this turn (rc.siteSnapshot). */
     usesSiteSnapshot?: boolean;
     /** The chat takes pictures and documents (paperclip / drag / paste — chat-session.js). Read per turn. */
@@ -263,7 +284,7 @@ function sharedContextBlock(rc: RouteContext): string {
         // became a monospace code box with every paragraph on one unwrapped line.
         'When you show the user copy in your reply (a post, a revised draft, an email), write it as ordinary paragraphs, or as a > blockquote to set it apart. Never put it in a code block — no ``` fences and no lines indented with spaces.',
         // Owner, 2026-10-19: customers felt there were no humans. There are; say so, never stonewall.
-        'If the user asks to speak to a person, a human or the Be More Swan team, or asks for a phone call, tell them warmly that a person from the Be More Swan team can call them back: they can request it with the "Request a call back" button shown with your reply, or under Help & Support → Contact us. Never promise a time, never say you have booked or made a call, and never claim to be a human.',
+        'If the user asks to speak to a person, a human or the Be More Swan team, or asks for a phone call, tell them warmly that a person from the Be More Swan team can call them back: they can request it with the "Request a call back" button shown with your reply, or under Help & Support → Contact us. Mention that button ONLY when they asked for a person or a call and your reply carries no other card: it is shown then and never otherwise. When you volunteer it unasked, point to Help & Support → Contact us instead. Never promise a time, never say you have booked or made a call, and never claim to be a human.',
     ].filter(Boolean).join('\n\n');
 }
 
@@ -355,6 +376,9 @@ const defaultRoute: AssistantRoute = {
 // stamped. So: try a direct parse, then a best-effort parse of the outermost {...} span, and
 // only when the output was never a structured attempt at all do we pass it through as plain
 // text. A JSON-shaped-but-broken reply degrades to a friendly retry line, not the payload.
+/** Ends the Business Mentor's system prompt (see `system` below): its reply format, where it can't be lost. */
+const MENTOR_REPLY_FORMAT_REMINDER = 'REPLY FORMAT (always, every turn, however long the answer): one STRICT JSON object and nothing else: {"reply": "<your message>", "uiElement": <one card from CARDS, or null>}. Never answer in plain prose. If your reply mentions a card or a button below, that card MUST be the uiElement; if you are not including one, do not mention it.';
+
 const STRUCTURED_REPLY_FALLBACK =
     "Sorry — something went wrong formatting that on my end. Could you send that to me again? I'll redraft it cleanly.";
 
@@ -673,6 +697,38 @@ function websiteAssistantSurfaces(): string {
 - The "Publish" sub-tab of the Website tab puts the site live at its address ("Publish"; once it is live, "Publish changes", "View live site" and "Take offline"). It refuses while any [square brackets] are left. Publishing is always a click the user makes there — never something you do; changes stay in the draft until they publish.
 - "Enquiries" tab — messages from the site's contact form. "Orders" and "Bookings" tabs appear when the site sells things or takes bookings.
 Everything you can change here, the user can also change there by hand.`;
+}
+
+// ⚠️ Name only screens that exist (docs/business-mentor-plan.md §14). The Overview tab's three panels
+// are the screen twins of its gap cards, "what can you see?" and Dismiss: tests/mentor-page.test.ts
+// checks each name here against assistant-detail.html and assistants.js.
+function businessMentorSurfaces(): string {
+    return `WHERE THINGS LIVE — pages inside this platform, never outside tools:
+- "Business Information" — the business description, who the customers are, tone of voice, Brand Knowledge documents and links, and the "Products & Services" tab.
+- Each assistant's own page — its settings, set-up answers, goals ("Results" tab) and rules. Only mention assistants listed as active below.
+- "My Account" — its "Billing & Subscription" tab (the plan, payments, resubscribing and changing plan), tasks used, notifications and "Your data". Always say "My Account ▸ Billing & Subscription", never "the Billing page".
+- "Help & Support" — Help Centre articles, contacting support, and "Report an Issue".
+Your own page has an "Overview" tab, a "Plan" tab, a "Results" tab and an "Activity" tab; the user chats with you from the "Chat" button at the top. The "Plan" tab holds:
+  - "Your plans" — "Idea check", "Business plan" and "Marketing plan". The idea check is the same questions you ask, one at a time with "Back" and "Next", then the "Lean Canvas" (nine boxes they can edit) and "Riskiest assumptions". Each plan has "Save draft", "Approve" (owner or admin only), "Changes" since the approved version and "Earlier versions"; "Draft it for me" (or "Draft my canvas") drafts it for 1 task, and the result waits there with "Use this draft". An existing workspace's plans start pre-filled from Business Information, not saved until "Save draft".
+  - "Look this up" — a question box (1 task, about two minutes) and the "Research" list of past answers with their links. Each section of a plan has a "Look this up" link too.
+  - "Break-even calculator" — price of one sale, cost per sale, fixed costs, marketing spend and how many leads become a sale, each with "A guess"; "Work it out".
+  - "The playbook I'm using" — the reviewed playbook for their kind of business, or that there isn't one yet.
+The "Overview" tab holds:
+  - "Set-up checklist" — the same Business Information gaps you see, ticked when done; each opens its field.
+  - "What I can see" — what you can and can never see (the list under WHAT YOU CAN SEE).
+  - "Dismissed suggestions" — suggestions they dismissed, with the reason, each with "Bring back".
+  - "Suggestions this week" — how many of your 3 a week you have used.
+  - "Suggestions waiting" — your suggestions they haven't answered yet, with "Review all" (shown only when there are some).
+  - "Recommended next" — who you'd hire next and why (the same list as WHO TO HIRE NEXT), each with "See this assistant".
+  - "Get feedback" — they paste a draft (or "Open a text file") and press "Get feedback" to get your critique on the page.
+  - "Reviews" — every weekly review you wrote, with its suggestions and whether each was accepted, and "Open in chat"; "Review my week now" (owners and admins, 1 task).
+  - "Customers" — won customers not heard from lately, deals won and lost and why, reviews and support tickets — only from their active assistants, names and dates only — and "What I can't see".
+  - "Track record" — suggestions they accepted and what changed since.
+The "Results" tab holds "Commitments" — this week's 1–3 things for each person (theirs first), each with "Done", "Missed…" (pick why) and "Drop", "Add one for this week", and "Earlier weeks".
+"Review all" opens every waiting suggestion together, each with its own tick (none ticked); "Apply … ticked" applies only those. It is also at the top of "Notifications" ▸ "Needs you" when suggestions are waiting.
+The assistant catalogue ("Hire a New Assistant") marks the roles you recommend with a "Recommended" badge.
+Each suggestion card has "Dismiss…", which asks why: "Not relevant", "Already done", "Disagree" or "Not now" (not now = back in two weeks).
+"Quiet mode" is on your profile, under how you work, with "Which describes you best?" (established business or starting something new). You can't be paused or archived — Quiet mode is how the user asks you to step back.`;
 }
 
 function mysteryShopperSurfaces(): string {
@@ -1294,7 +1350,8 @@ async function retrieveKnowledgeBase(
     }
 }
 
-const ROUTES: Record<string, AssistantRoute> = {
+/** Exported for the prompt audit (tests/prompt-audit-shopper-designer-campaign.test.ts), which rebuilds role prompts. */
+export const ROUTES: Record<string, AssistantRoute> = {
     // Campaign Assistant. Turns one objective into briefs for the Social Media, Blog Writing and
     // Lead Generation assistants. Wire shape: reply + campaign_strategy_proposal uiElement, matching
     // the CampaignStrategyProposalCard renderer in disruptive-ui-registry.js.
@@ -1333,7 +1390,7 @@ ${angle ? `The argument they want made (from setup): ${String(angle)}` : ''}
 ${outcome ? `By default they measure a campaign by: ${String(outcome)}.` : ''}
 ${POSTURE_LINE[String(posture)] ?? ''}
 
-HOW TO PLAN. Start from the objective the user states, in their words — quote it back rather than rewriting it into marketing language. Then decide which assistants have work to do and what each should produce. Only these can be given orders, and only for what they actually do:
+HOW TO PLAN. Start from the objective the user states, in their words — quote it back rather than rewriting it into marketing language. Then decide which assistants have work to do and what each should produce. These are ALL the kinds of assistant there are — but you may brief ONLY the ones listed under ORDERS THIS WORKSPACE CAN RUN below (the ones this business has active), and only for what they actually do. A paused assistant or one they have not hired gets NO order: say what it would add and that resuming or hiring it would cover that.
 - Social Media Assistant — drafting social posts, and re-cutting one idea into several.
 - Blog Writing Assistant — one long-form article per order, carrying the campaign's keywords and call to action.
 - Lead Generation Assistant — finding companies matching an audience description, or narrowing a search that is returning the wrong kind of company.
@@ -1356,6 +1413,7 @@ ADDING TO A CAMPAIGN THAT EXISTS. When the user wants more work on a campaign li
 
 FUNNEL STAGE. Decide what the campaign is FOR before what it counts — not every campaign is meant to convert, and judging an awareness campaign on signups makes it look like it is failing when it is doing its job. The stages, and the only outcomes each may be measured by (the first is the default):
 ${FUNNEL_STAGES.map((st) => `- "${st}" — ${FUNNEL_STAGE_DESCRIPTIONS[st].toLowerCase()}: ${stageOutcomes(st).map((m) => `"${m}"`).join(', ')}`).join('\n')}
+${CAMPAIGN_PLANNING_CRAFT}
 The stage also changes how your colleagues write: awareness work never asks for a sale, conversion work asks for one clear next step, retention work speaks to existing customers. A retention campaign is aimed AT customers, so it includes them in its lead searches unless the user says otherwise; every other stage leaves them out. Only a conversion campaign can be stopped automatically for finding poor-quality leads.
 
 WHO IT IS FOR. Every campaign needs an audience before you propose it: a short persona name and a sentence on who they are and what they care about. If the user has not said and setup did not capture one, ask before proposing. Drafting reads the campaign's audience; when one assistant should write for a DIFFERENT persona from the rest (the Blog Writer for IT directors while lead searches hunt founders), put that persona in that order's own "audience" and it wins for that order's work.
@@ -1724,6 +1782,60 @@ or
   "uiElement": { "type": "site_audit_fix_update", "decisions": [ { "fixId": <number from the list above>, "status": "accepted" | "dismissed" | "open" | "done" } ] }
 }`,
         ].filter(Boolean).join('\n\n'),
+        parseResponse: parseStructuredReply,
+    },
+
+    // Business Mentor (docs/business-mentor-plan.md). Included on every plan; never takes a seat
+    // (assistant-capacity.ts WORKSPACE_ROLE_KEYS); provisioned per workspace behind the business_mentor
+    // flag (mentor-provision.ts). Reads the whole workspace every turn (mentor-snapshot.ts; what it may
+    // read: src/config/mentor-data-inventory.ts). Its proposal cards and Help Centre block follow
+    // (§3.3–3.7, §3.13); until then the prompt says plainly it can't change anything from chat.
+    business_mentor: {
+        model: DEFAULT_MODEL,
+        maxTokens: 1600,
+        usesMentorSnapshot: true,
+        buildRolePrompt: (rc) => {
+            const ctx = rc.onboardingContext as { businessStage?: string; quietMode?: string } | null;
+            const stage = ctx?.businessStage;
+            // Quiet mode (its set-up answer): the Mentor can't be paused, so this is how it steps back.
+            const quietLine = ctx?.quietMode === 'on'
+                ? 'QUIET MODE IS ON: the user asked you to stay in the background. Do not open with a health check and do not volunteer suggestions, gaps or next steps. Answer exactly what they ask (including how to use Be More Swan) and stop. If they ask what you would suggest, then suggest.'
+                : '';
+            const stageLine = stage === 'new_idea'
+                ? 'They told you they are starting something new: begin with THE IDEA CHECK below (who buys, why, how to test it cheaply) before anything else.'
+                : stage === 'existing'
+                    ? 'They told you this is an established business: start from what is already set up here, and never re-ask anything shown above.'
+                    // §3.1: a new workspace's introduction asks it with the question card, which saves the answer.
+                    : 'You don\'t yet know whether this is an established business or a new idea. If it isn\'t clear from the details above, ask once: introduce yourself in a sentence or two and put the mentor_business_stage card (card 5) in "uiElement" so they can answer with one click. If their message already answers it, offer the same card so the answer is saved.';
+            return [
+                sharedContextBlock(rc),
+                `You are ${rc.assistantName}, this business's Business Mentor on Be More Swan: their guide to the platform and a business coach who knows their workspace. You are included with their plan.
+
+${stageLine}
+${quietLine ? `\n${quietLine}\n` : ''}
+${rc.mentorSnapshot ?? 'The workspace overview could not be read this turn. Do not guess gaps, figures, goals or which assistants they have: say you can\'t see the workspace right now and answer from the details above only.'}
+
+${MENTOR_CRAFT}
+
+${MENTOR_FEEDBACK_CRAFT}
+
+${MENTOR_IDEA_CHECK_CRAFT}
+
+${MENTOR_HONESTY_RULES}
+
+${businessMentorSurfaces()}
+
+${mentorVisibilityPromptBlock()}
+
+${mentorCardsPromptBlock()}
+
+Return STRICT JSON (no markdown, no prose outside the JSON):
+{
+  "reply": "your conversational message to the user, in plain text without markdown headings",
+  "uiElement": <one card from CARDS above, or null>
+}`,
+            ].join('\n\n');
+        },
         parseResponse: parseStructuredReply,
     },
 
@@ -2481,6 +2593,8 @@ export default withLambda(async (event) => {
         return await handleChatTurn(event);
     } catch (err) {
         console.error('[chat-orchestrator] unhandled error before the LLM boundary:', err);
+        // §6.2: no tenant is known here for certain, so the incident carries none.
+        await recordPlatformIncident(getDb(), { kind: 'chat_request', error: err, view: 'chat-orchestrator' });
         // Name the fault in the reply, not just the log.
         //
         // "Please try again — the details are in our logs" is only useful to someone who can read
@@ -2582,7 +2696,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // the 403 paywall payload, not a generic error; the client renders it inline and logs the
     // conversion event.
     const capacity = await meterInteraction(db, orgId, 'chat');
-    if (!capacity.allowed) {
+    // §2.7 (owner, 2026-10-25): with no paid plan the Business Mentor still answers, in help-only mode:
+    // the Help Centre and a support ticket or issue report, nothing else (mentorNoPlanBlock below, and
+    // its cards are dropped). Still held to the daily fair-use limit, so a lapsed workspace can't run up
+    // unmetered model turns. Every other assistant, and a Team note, keeps the paywall.
+    let mentorNoPlan = false;
+    if (!capacity.allowed && capacity.noPlan && body.teamMessageId === undefined && await isMentorTurn(db, orgId, body)) {
+        const fair = await checkFairUse(db, orgId, 'chat');
+        if (!fair.allowed) return json(429, { code: 'FAIR_USE_LIMIT', error: fair.message });
+        mentorNoPlan = true;
+    }
+    if (!capacity.allowed && !mentorNoPlan) {
         // Fair use is "come back tomorrow", never an upgrade prompt.
         if (capacity.fairUse) return json(429, { code: 'FAIR_USE_LIMIT', error: capacity.limitMessage });
         // A cap that could not be EVALUATED is a server fault, and answering it with the upgrade
@@ -2809,6 +2933,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         })
         : null;
 
+    // Per turn: a gap filled or an assistant paused a moment ago must be visible to the next message.
+    // Never throws.
+    const mentorParts: { text: string; data: MentorSnapshotData } | null = route.usesMentorSnapshot
+        ? await buildMentorSnapshotParts(db, orgId, userId, { withCustomers: asksAboutCustomers(typed) }).catch((err) => {
+            console.error('[chat-orchestrator] mentor snapshot failed:', err);
+            return null;
+        })
+        : null;
+    // Phase 3: its own weekly-review settings ride with the snapshot (mentor-review.ts).
+    const mentorSnapshot = mentorParts ? `${mentorParts.text}\n${renderReviewSettingsForMentor(session.aiAssistantId, assistantRow.onboardingContext)}` : null;
+
     // Per turn, like the leads snapshot: something approved on the Posts / Blogs / Emails tab a
     // moment ago must already be in "Scheduled" when the user asks what is coming up. Never throws.
     const snapshotTz = resolvePostingSchedule(
@@ -2837,6 +2972,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         siteSnapshot,
         contentSnapshot,
         audienceSnapshot,
+        mentorSnapshot,
         attachmentsBlock,
     });
     // The user's rules (their Assistant Rules, learned directives and workspace-wide rules) for the
@@ -2871,46 +3007,66 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // Its own status, settings and goals (src/utils/chat-assistant-settings.ts), every role, per turn
     // — a pause or a horizon changed on the page a moment ago is in the next answer. Routes with a
     // JSON reply can also propose a change through a confirm card; the plain default route only reads.
+    // The card instructions below (own settings, rules, goals, schedule, offers, platforms, library,
+    // reviews) go to every structured route. Not the Business Mentor: it replies in plain text, so a card
+    // could never be drawn, and telling it otherwise made it claim on staging (2026-10-25) that it could
+    // change its own settings. Its own cards are added deliberately (docs/business-mentor-plan.md §3.3–3.7).
+    const offersOwnCards = route !== defaultRoute && route !== ROUTES.business_mentor;
     const settingsBlock = await buildAssistantSettingsSnapshot(db, orgId, session.aiAssistantId, assistantRow.roleKey);
-    const settingsCardBlock = route !== defaultRoute ? assistantSettingsPromptBlock(assistantRow.roleKey) : null;
+    const settingsCardBlock = offersOwnCards ? assistantSettingsPromptBlock(assistantRow.roleKey) : null;
     // Its Do's and don'ts by id, and the card that adds, rewords, switches or deletes one
     // (src/utils/chat-rules.ts) — the rules block above is what it FOLLOWS; this is what it can CHANGE.
     // Plus the workspace's plan and this month's task balance (src/utils/chat-plan-snapshot.ts), the
     // same figures as the usage bar. Both every turn, every role; both never throw.
-    const rulesListBlock = route !== defaultRoute ? await buildRulesListBlock(db, orgId, session.aiAssistantId) : null;
-    const rulesCardBlock = route !== defaultRoute ? rulesPromptBlock(assistantRow.roleKey) : null;
+    const rulesListBlock = offersOwnCards ? await buildRulesListBlock(db, orgId, session.aiAssistantId) : null;
+    const rulesCardBlock = offersOwnCards ? rulesPromptBlock(assistantRow.roleKey) : null;
     const planBlock = await buildPlanSnapshot(db, orgId);
     // Its goals by id with the metrics on offer (src/utils/chat-goals.ts) — every role reads them;
     // structured routes can propose a goal card. And, for the roles with a Posting Schedule card, the
     // schedule and its card (src/utils/chat-schedule.ts). Neither throws.
     const goalsBlock = await buildGoalsBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey);
-    const goalsCardBlock = route !== defaultRoute ? goalsPromptBlock() : null;
+    const goalsCardBlock = offersOwnCards ? goalsPromptBlock() : null;
     // The free trial / introductory offer card (src/utils/intro-offer.ts) — the offer itself is in
     // productsBlock for every route; structured routes can also propose a change to it.
-    const introOfferCardBlock = route !== defaultRoute ? introOfferPromptBlock() : null;
+    const introOfferCardBlock = offersOwnCards ? introOfferPromptBlock() : null;
     // And, for a Social, Blog or Email assistant, its own call to action and the card that changes it
     // (src/utils/chat-call-to-action.ts). Null for every other role.
-    const ctaCardBlock = route !== defaultRoute ? await buildCtaChatBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey) : null;
-    const scheduleBlock = route !== defaultRoute ? schedulePromptBlock(assistantRow.roleKey, assistantRow.onboardingContext) : null;
+    const ctaCardBlock = offersOwnCards ? await buildCtaChatBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey) : null;
+    const scheduleBlock = offersOwnCards ? schedulePromptBlock(assistantRow.roleKey, assistantRow.onboardingContext) : null;
+    // Its own set-up answers and the card that changes one (src/utils/chat-setup-field.ts, §3.4 of
+    // docs/business-mentor-plan.md). The Mentor gets every active assistant's in its <workspace> block.
+    const setupFieldBlock = offersOwnCards ? assistantSetupFieldBlock(assistantRow.roleKey, session.aiAssistantId, assistantRow.onboardingContext) : null;
     // The "Use for this assistant" switches, for the roles whose Connections card shows them
     // (src/utils/chat-platforms.ts). Null for every other role; never throws.
-    const platformsBlock = route !== defaultRoute ? await buildPlatformsBlock(db, orgId, userId, session.aiAssistantId) : null;
+    const platformsBlock = offersOwnCards ? await buildPlatformsBlock(db, orgId, userId, session.aiAssistantId) : null;
     // Its Knowledge Base or Inspo, for the roles with that tab (src/utils/chat-library.ts). Never throws.
-    const libraryBlock = route !== defaultRoute ? await buildLibraryBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey) : null;
+    const libraryBlock = offersOwnCards ? await buildLibraryBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey) : null;
     // Customer reviews for the Email Marketing chat (src/utils/chat-reviews.ts) — the Website Assistant's
     // prompt carries its own. Null for every other role; never throws.
-    const reviewsBlock = route !== defaultRoute ? await buildReviewsBlock(db, orgId, assistantRow.roleKey) : null;
+    const reviewsBlock = offersOwnCards ? await buildReviewsBlock(db, orgId, assistantRow.roleKey) : null;
     // The signed-in user's own My Account settings, read-only (src/utils/chat-my-account.ts). Every
     // route, every role; null when the read fails.
     const myAccountBlock = await buildMyAccountBlock(db, userId, session.aiAssistantId, assistantRow.roleKey);
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock].filter(Boolean).join('\n\n');
+    // §2.7: no paid plan → the Mentor only helps with Be More Swan itself, from the published Help Centre.
+    const mentorNoPlanBlock = mentorNoPlan ? await (async () => {
+        const help = await loadHelpKnowledge(db).catch(() => ({ text: '', titles: [] as string[] }));
+        return [
+            'HELP-ONLY MODE: this workspace has no active plan, so you only help with Be More Swan itself (this overrides every coaching instruction above). Answer from the HELP CENTRE articles below and name the article you used. If something is broken, or they want the team, offer the mentor_support_request card. Offer no other card: no health check, suggestions, set-up gaps, commitments, weekly review, research, plans or hiring. If they ask for any of that, say plainly it comes with a plan, which they can choose under My Account ▸ Billing & Subscription, and stop.',
+            help.text ? `<help_centre>\n${help.text}\n</help_centre>` : 'The Help Centre could not be read just now: say so, and offer the mentor_support_request card.',
+        ].join('\n\n');
+    })() : '';
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock, mentorNoPlanBlock].filter(Boolean).join('\n\n');
 
-    const system = buildSystemPrompt(
+    const builtSystem = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
         // which is exactly what must NOT happen when the user is editing a post already.
         draftTarget ? `${promptWithRules}\n\n${draftTargetPromptBlock(draftTarget.platform)}` : promptWithRules,
         assistantRow.onboardingContext,
     );
+    // The Mentor's reply format, restated LAST. Twenty blocks follow its role prompt, and on long turns the
+    // model answered in plain prose that promised "the card below": with no JSON there is no card to draw
+    // (rubric W5/W6, staging 2026-10-26 — three in four such turns).
+    const system = route === ROUTES.business_mentor ? `${builtSystem}\n\n${MENTOR_REPLY_FORMAT_REMINDER}` : builtSystem;
 
     // ── Data Hub context injection — load the referenced records (tenant- and
     // assistant-scoped) and prepend them to this turn as an "[Imported records]" block.
@@ -3103,6 +3259,143 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // Not final either: the blog route replaces it with a normalised draft (or nothing) below.
         let uiElement = parsed.uiElement;
         let content = parsed.content;
+        // §2.7 help-only mode: the support card is the only one drawn, so nothing else is recorded or offered.
+        if (mentorNoPlan && (uiElement as { type?: unknown } | null)?.type !== 'mentor_support_request') uiElement = null;
+        // The Business Mentor's own cards (src/utils/mentor-cards.ts): checked first, drawn by
+        // disruptive-ui-registry.js, applied by the user's click through the screens' own endpoints.
+        // A change to one set-up answer (src/utils/chat-setup-field.ts): the Mentor may target any
+        // ACTIVE assistant in the workspace; every other structured route only itself. Rebuilt from the row.
+        const setupReq = route !== defaultRoute ? setupFieldRequestFromUiElement(uiElement) : null;
+        let setupFieldCard: SetupFieldCard | null = null;
+        if (setupReq) {
+            const isMentor = route === ROUTES.business_mentor;
+            const card = await resolveSetupFieldProposal(db, orgId, session.aiAssistantId, setupReq, { allowOthers: isMentor });
+            if ('error' in card) {
+                uiElement = null;
+                content = `${content}\n\n(I didn’t include a card for that — ${card.error.charAt(0).toLowerCase()}${card.error.slice(1)} You can change it on the assistant’s own page instead.)`;
+            } else if (isMentor) {
+                // §3.13: a volunteered one is a suggestion — 3 a week, never one they dismissed.
+                const gate = await gateMentorSuggestion(db, orgId, { kind: 'setup_field', fields: [`${card.assistantId}:${card.key}`], asked: card.asked });
+                if (!gate.ok) { uiElement = null; content = `${content}\n\n(${gate.note})`; }
+                else {
+                    const proposalId = await recordMentorProposal(db, { organisationId: orgId, aiAssistantId: session.aiAssistantId, kind: 'setup_field', title: card.summary, why: card.why, payload: { ...card, fields: { [`${card.assistantId}:${card.key}`]: card.value } }, chatSessionId: session.id, targetAssistantId: card.assistantId });
+                    uiElement = { ...card, proposalId };
+                }
+            } else {
+                uiElement = card;
+                setupFieldCard = card;
+            }
+        } else if (route === ROUTES.business_mentor) {
+            // Asked who to hire, or to review everything, and no card drawn: the server-filled card anyway.
+            if (!uiElement && !mentorNoPlan) uiElement = cardTheUserAskedFor(typed);
+            // Phase 3: a post asked of an ACTIVE Social Media assistant (mentor-draft-request.ts), rebuilt from its row.
+            const draftReq = await resolveDraftRequest(db, orgId, uiElement);
+            const m = draftReq ? null : mentorCardFromUiElement(uiElement, session.aiAssistantId);
+            if (draftReq && 'error' in draftReq) {
+                uiElement = null;
+                content = `${content}\n\n(I didn’t include a card for that — ${draftReq.error.charAt(0).toLowerCase()}${draftReq.error.slice(1)})`;
+            } else if (draftReq) {
+                const gate = await gateMentorSuggestion(db, orgId, { kind: 'draft_request', fields: [`${draftReq.assistantId}:post`], asked: draftReq.asked });
+                if (!gate.ok) { uiElement = null; content = `${content}\n\n(${gate.note})`; }
+                else {
+                    const proposalId = await recordMentorProposal(db, { organisationId: orgId, aiAssistantId: session.aiAssistantId, kind: 'draft_request', title: draftReq.summary, why: draftReq.why, payload: draftReq, chatSessionId: session.id, targetAssistantId: draftReq.assistantId });
+                    uiElement = { ...draftReq, proposalId };
+                }
+            } else if (m && 'error' in m) {
+                uiElement = null;
+                content = `${content}\n\n(I didn’t include a card for that — ${m.error.charAt(0).toLowerCase()}${m.error.slice(1)} You can make the change on the page instead.)`;
+            } else if (m && m.type === 'mentor_hire_recommendation' && !mentorParts) {
+                uiElement = null;
+                content = `${content}\n\n(I couldn’t read your workspace just now, so I’ve left out the hiring list — ask me again in a moment.)`;
+            } else if (m && m.type === 'mentor_hire_recommendation' && !recommendHires(mentorParts!.data).picks.length) {
+                uiElement = null;
+                content = `${content}\n\n(There’s no assistant I’d recommend hiring right now, so there’s no list to show.)`;
+            } else if (m && m.type === 'strategy_proposal') {
+                // Phase 2 (src/utils/mentor-plan-cards.ts): rebuilt from the documents as they are now, so the
+                // card shows the real "now" text, and an approve card names the exact draft it approves.
+                const docs = await loadStrategyDocs(db, orgId).catch((err) => { console.error('[chat-orchestrator] strategy documents unreadable', err); return null; });
+                const card = docs === null ? { error: 'Your Plan tab isn’t switched on for this workspace yet.' } : buildStrategyCard(m, docs);
+                if ('error' in card) {
+                    uiElement = null;
+                    content = `${content}\n\n(I didn’t include a card for that — ${card.error.charAt(0).toLowerCase()}${card.error.slice(1)} You can use the Plan tab instead.)`;
+                } else {
+                    const kind = proposalKind(m);
+                    const fields = Object.keys(card.sections ?? {}).map((k) => `${m.kind}:${k}`);
+                    const gate = kind ? await gateMentorSuggestion(db, orgId, { kind, fields, asked: m.asked }) : { ok: true as const };
+                    if (!gate.ok) { uiElement = null; content = `${content}\n\n(${gate.note})`; }
+                    else if (kind) {
+                        const proposalId = await recordMentorProposal(db, { organisationId: orgId, aiAssistantId: session.aiAssistantId, kind, title: m.summary, why: m.why ?? '', payload: { ...card, fields: Object.fromEntries(fields.map((f) => [f, true])) }, chatSessionId: session.id });
+                        uiElement = { ...card, proposalId };
+                    } else {
+                        uiElement = card;
+                    }
+                }
+            } else if (m && m.type === 'mentor_break_even') {
+                // §4.3: the maths is code (break-even.ts). The sentence under the reply is written by code too,
+                // so a figure the model wrote can't stand alone.
+                const card = buildBreakEvenCard(m.summary, m.inputs);
+                if ('error' in card) {
+                    uiElement = null;
+                    content = `${content}\n\n(I couldn’t work that out: ${card.error} You can try the break-even calculator on my Plan tab.)`;
+                } else {
+                    uiElement = card;
+                    content = `${content}\n\n${card.sentence}`;
+                }
+            } else if (m && m.type === 'mentor_research') {
+                uiElement = m; // the click queues the job (mentor.ts research); nothing runs until then
+            } else if (m && m.type === 'mentor_commitments') {
+                // §5.1: the user's own commitments — never a suggestion. A "close" card is rebuilt from the row.
+                const card = m.op === 'close' ? await closeCommitmentCard(db, orgId, userId, m.commitmentId, m.summary) : m;
+                if ('error' in card) {
+                    uiElement = null;
+                    content = `${content}\n\n(I didn’t include a card for that — ${card.error.charAt(0).toLowerCase()}${card.error.slice(1)} You can use the Commitments list on my Results tab.)`;
+                } else {
+                    uiElement = card;
+                }
+            } else if (m && m.type === 'mentor_business_profile' && !m.asked && mentorParts && !onlyGapFields(m.fields, mentorParts.data.business)) {
+                // A volunteered Business Information card fills gaps only (mentor-cards.ts onlyGapFields).
+                uiElement = null;
+                content = `${content}\n\n(I’ve left out a card: those details are already filled in, and I only suggest filling gaps. Ask me if you want to change them.)`;
+            } else if (m) {
+                // The hire card's picks, reasons and plan room come from mentor-hire.ts — the same list as
+                // the Overview tab's "Recommended next" — never from the model.
+                const rec = m.type === 'mentor_hire_recommendation' ? recommendHires(mentorParts!.data) : null;
+                const gaps = m.type === 'mentor_business_profile' && !m.asked && mentorParts ? onlyGapFields(m.fields, mentorParts.data.business) : null;
+                const filled = rec ? { ...m, why: rec.why, picks: rec.picks, capacity: rec.capacity } : gaps && m.type === 'mentor_business_profile' ? { ...m, fields: gaps } : m;
+                uiElement = filled;
+                const kind = proposalKind(m);
+                if (kind && 'why' in filled) {
+                    // §3.13: 3 a week, and never one the user dismissed — unless they asked (mentor-proposals.ts).
+                    const gate = await gateMentorSuggestion(db, orgId, { kind, fields: proposalFields(m), asked: 'asked' in m ? m.asked : false });
+                    if (!gate.ok) {
+                        uiElement = null;
+                        content = `${content}\n\n(${gate.note})`;
+                    } else {
+                        const proposalId = await recordMentorProposal(db, { organisationId: orgId, aiAssistantId: session.aiAssistantId, kind, title: m.summary, why: filled.why, payload: filled, chatSessionId: session.id });
+                        uiElement = { ...filled, proposalId };
+                    }
+                }
+            } else {
+                uiElement = null; // never another route's card shape
+            }
+        }
+
+
+        // A campaign plan briefs ONLY assistants this workspace has active (src/utils/campaign-plan.ts):
+        // the prompt says so, and this holds it when a model doesn't. Fails open on a read error —
+        // the orders are still refused at placement for an assistant that is not hired.
+        if (uiElement && typeof uiElement === 'object' && (uiElement as { type?: unknown }).type === 'campaign_strategy_proposal') {
+            try {
+                const { active } = await activeAndPausedRoleKeys(db, orgId);
+                const guarded = withoutInactiveOrders(uiElement as { orders?: unknown }, active);
+                if (guarded.dropped.length) {
+                    uiElement = guarded.card;
+                    content = `${content}\n\nI've left ${guarded.dropped.join(' and ')} out of this plan: ${guarded.dropped.length === 1 ? 'that assistant isn’t' : 'those assistants aren’t'} active for you right now. Resume or hire ${guarded.dropped.length === 1 ? 'it' : 'them'} and I can add that work.`;
+                }
+            } catch (err) {
+                console.error('[chat-orchestrator] campaign plan roster check failed (non-fatal)', err);
+            }
+        }
 
         // Golden Rule 2: structured output flows into the Data Hub automatically. Computed
         // up front (rather than inside persistHubRecords) so the same records list can also
@@ -3200,7 +3493,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             else if (r) { ctaCard = r; uiElement = r; }
         }
         // One card for the "keep it" checks below: a change to the assistant's own profile.
-        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | OutreachOfferCard | CtaCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard ?? outreachOfferCard ?? ctaCard;
+        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | OutreachOfferCard | CtaCard | SetupFieldCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard ?? outreachOfferCard ?? ctaCard ?? setupFieldCard;
         // The Blog Writer's twin (src/utils/chat-blog-action.ts): same checks, built from blog_posts
         // rows; a time in the user's words is worked out here so the card shows the exact instant.
         let blogAction: BlogActionCard | null = null;
@@ -3423,6 +3716,16 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // card that opens the Help & Support form. The chat never books a call itself. A reply that
         // already carries a card keeps it — the prompt line below has the model mention the option.
         if (!uiElement && asksForACall(typed)) uiElement = callbackOfferElement();
+        // The Mentor's reply never points at a card that isn't there (confirm-card-reply.ts, rubric W6).
+        if (route === ROUTES.business_mentor) {
+            const fixed = missingCardReply(content, !!uiElement);
+            if (fixed !== content) {
+                // Which way the card was lost: the model sent none, sent a shape the server refused, or wrote prose, not JSON.
+                const sent = (parsed.uiElement as { type?: unknown } | null)?.type;
+                console.warn('[chat-orchestrator] mentor reply points at a card that was not drawn', { sentType: typeof sent === 'string' ? sent : null, replyWasJson: raw.trimStart().startsWith('{'), length: raw.length, end: raw.slice(-200) });
+            }
+            content = fixed;
+        }
 
         // One transaction: the shadow call's audit row (role 'system' — hidden from the
         // transcript and excluded from the LLM window, kept so the handoff's work is
@@ -3480,6 +3783,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         });
     } catch (err) {
         console.error('[chat-orchestrator] LLM error:', err);
+        await recordPlatformIncident(db, { kind: 'chat_turn', error: err, organisationId: orgId, assistantId: session.aiAssistantId, ids: { chatSessionId: session.id }, view: 'chat-orchestrator' });
         // The user's turn is already persisted; the client can retry into the same session.
         return json(502, { chatSessionId: session.id, userMessageId: userMessage.id, error: "I'm having trouble right now — please try again in a moment." });
     }

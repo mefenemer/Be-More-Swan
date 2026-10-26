@@ -153,7 +153,8 @@ check('every assignee map names the Brand Designer', () => {
 check('the chat is told which orders can run here, and how to write a picture order', () => {
     const plan = code(read('src/utils/campaign-plan.ts'));
     assert.match(plan, /async function briefableLine/);
-    assert.match(plan, /spec\.roleKey === HUMAN_ROLE_KEY \|\| hired\.has\(spec\.roleKey\)/);
+    // Since 2026-10-25 only ACTIVE assistants' orders are offered (paused ones are named separately).
+    assert.match(plan, /spec\.roleKey === HUMAN_ROLE_KEY \|\| active\.has\(spec\.roleKey\)/);
     assert.match(plan, /\$\{await briefableLine\(db, organisationId\)\}/);
     const orch = read('netlify/functions/chat-orchestrator.ts');
     assert.match(orch, /- Brand Designer \("commission_visuals"\)/);

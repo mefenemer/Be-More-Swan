@@ -34,6 +34,10 @@
     </div>
 
     <div id="notif-list-panel" role="tabpanel">
+        <!-- Needs you only: the Business Mentor's suggestions still waiting, with "Review all"
+             (src/components/mentor-review-all.js — the same list as in chat and on the Mentor's Overview
+             tab). Painted by notifications.js from mentor.ts ?only=open; hidden when there are none. -->
+        <div id="mentor-needs-strip" class="hidden mb-4" style="display:none"></div>
         <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-6 flex flex-col gap-3">
             <div class="relative">
                 <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">

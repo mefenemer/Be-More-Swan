@@ -27,6 +27,7 @@
 
 import { Handler } from '@netlify/functions';
 import { and, eq, asc, lt } from 'drizzle-orm';
+import { loadIncidentFields } from '../../src/utils/platform-incident';
 import { getDb } from '../../db/client';
 import { issueReports, issueReportMessages, users } from '../../db/schema';
 import { ISSUE_STATUS_LABEL, maybeAdvanceToReadyToTest, triggerStagingDeployIfDrained, triggerProdDeploy, reclaimStaleMerges } from '../../src/utils/issue-reports';
@@ -104,7 +105,8 @@ export default withLambda(async (event) => {
         if (claimed.length === 0) return json(200, { issue: null }); // lost the race; runner will poll again
 
         const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, next.id)).limit(1);
-        const [reporter] = await db
+        // No reporter on an automatic incident (source 'system' | 'suspected').
+        const [reporter] = issue.userId == null ? [] : await db
             .select({ email: users.email, firstName: users.firstName, lastName: users.lastName })
             .from(users).where(eq(users.id, issue.userId)).limit(1);
 
@@ -133,8 +135,10 @@ export default withLambda(async (event) => {
                 hasImage: !!issue.imageMime,
                 status: issue.status,
                 createdAt: issue.createdAt,
-                reporterName: [reporter?.firstName, reporter?.lastName].filter(Boolean).join(' ') || reporter?.email || `User #${issue.userId}`,
+                reporterName: issue.userId == null ? 'Automatic (Be More Swan)' : [reporter?.firstName, reporter?.lastName].filter(Boolean).join(' ') || reporter?.email || `User #${issue.userId}`,
                 reporterEmail: reporter?.email || null,
+                // An automatic incident's error, role and ids, and how often it happened that day.
+                ...((await loadIncidentFields(db, [issue.id])).get(issue.id) ?? {}),
                 thread,
             },
         });

@@ -71,6 +71,7 @@ import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { reviewDraftGroup } from '../../src/utils/post-quality-review';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
 import type { MediaSource } from '../../src/utils/publish-policy';
+import { recordPlatformIncident } from '../../src/utils/platform-incident';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 // Fal image model for inline AI generation (matches the autonomous suggestions path).
@@ -1436,6 +1437,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 metadata: { jobId: job.job_id, assistantId: job.assistant_id },  // the raw error stays on the job + audit log, never in a customer's notification
             });
             await db.insert(auditLogs).values({ actionType: 'post_generation_failed', resourceType: 'content_generation_jobs', resourceId: job.job_id, userId: job.user_id, newState: { errorMessage, attempt, upstreamBlocked: true, ageHours } });
+            await recordPlatformIncident(db, { kind: 'social_post_job_upstream', error: err, organisationId: job.organisation_id, assistantId: job.assistant_id, ids: { jobId: job.job_id, attempt }, view: 'process-content-jobs' });
             return;
         }
 
@@ -1449,6 +1451,8 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 metadata: { jobId: job.job_id, assistantId: job.assistant_id },  // the raw error stays on the job + audit log, never in a customer's notification
             });
             await db.insert(auditLogs).values({ actionType: 'post_generation_failed', resourceType: 'content_generation_jobs', resourceId: job.job_id, userId: job.user_id, newState: { errorMessage, attempt } });
+            // §6.2: the last retry is gone — an automatic report for the admin queue, never shown to the user.
+            await recordPlatformIncident(db, { kind: 'social_post_job', error: err, organisationId: job.organisation_id, assistantId: job.assistant_id, ids: { jobId: job.job_id, attempt }, view: 'process-content-jobs' });
         } else {
             const backoffSecs = BACKOFF_SECS[attempt - 1] ?? 90;
             const nextRetryAt = new Date(Date.now() + backoffSecs * 1000).toISOString();

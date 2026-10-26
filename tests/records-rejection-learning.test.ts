@@ -89,7 +89,7 @@ check('chat reads the rules for those roles, appended to the role prompt', () =>
     const src = code('netlify/functions/chat-orchestrator.ts');
     assert.ok(src.includes('RULE_READING_ROLES.has(assistantRow.roleKey)'));
     assert.ok(src.includes('loadAssistantRulesBlock(db, { assistantId: session.aiAssistantId, organisationId: orgId })'));
-    assert.ok(src.indexOf('const promptWithRules') < src.indexOf('const system = buildSystemPrompt('));
+    assert.ok(src.indexOf('const promptWithRules') < src.indexOf('const builtSystem = buildSystemPrompt('));
 });
 check('the reject saves the feedback AFTER the record update commits, and only for feedback types', () => {
     const src = code('netlify/functions/assistant-records.ts');

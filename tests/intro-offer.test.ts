@@ -122,7 +122,7 @@ check('the chat card goes through the same gate, and only the click saves', () =
     assert.ok(block.includes('{ "type": "intro_offer"') && block.includes('never your own guess') && block.includes('only that click saves it'));
     const orch = read('netlify/functions/chat-orchestrator.ts');
     assert.ok(orch.includes('introOfferCardFromUiElement(uiElement)') && orch.includes('?? libraryCard ?? introOfferCard'));
-    assert.ok(orch.includes('const introOfferCardBlock = route !== defaultRoute ? introOfferPromptBlock() : null;') && orch.includes('goalsCardBlock, introOfferCardBlock,'));
+    assert.ok(orch.includes('const introOfferCardBlock = offersOwnCards ? introOfferPromptBlock() : null;') && orch.includes('goalsCardBlock, introOfferCardBlock,'));
 });
 
 check('GUI and chat save through ONE path', () => {

@@ -691,6 +691,20 @@
              Without it an empty amber pill shows until the first count lands. -->
         <span id="campaigns-live-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
+      <!-- Overview — Business Mentor only (mentorTab: business_mentor). Set-up checklist, "What I can see",
+           Dismissed suggestions and this week's count: the screen twins of its chat cards
+           (docs/business-mentor-plan.md §14). assistant-mentor-overview.js → mentor.ts.
+           ⚠️ Rename a panel and businessMentorSurfaces() in chat-orchestrator.ts must change too
+           (tests/mentor-page.test.ts). -->
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-mentor" id="maintab-btn-mentor" data-maintab="mentor" class="main-tab-btn hidden">
+        <span id="mentor-tab-label">Overview</span>
+      </button>
+      <!-- Plan — Business Mentor only (mentorPlanTab: business_mentor). Idea check, business and marketing
+           plans, break-even calculator, research and the playbook in use (docs/business-mentor-plan.md §4,
+           §14). assistant-mentor-plan.js → mentor.ts ?plan=1. Same rename rule as Overview. -->
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-mentorplan" id="maintab-btn-mentorplan" data-maintab="mentorplan" class="main-tab-btn hidden">
+        <span id="mentorplan-tab-label">Plan</span>
+      </button>
       <!-- Briefs — Brand Designer only (briefsTab: brand_designer). One card per brief, its options as
            a grid to approve or turn down. Sits first: it is the only thing this role does.
            assistant-briefs.js → brand-briefs.ts. Design: docs/brand-designer-plan.md §4 -->
@@ -1050,6 +1064,14 @@
 
   <!-- Briefs — Brand Designer only. Rendered lazily by assistant-briefs.js on first activation;
        init() fetches eagerly because the count of briefs needing a decision drives the tab badge. -->
+  <!-- Overview — Business Mentor only. Rendered by assistant-mentor-overview.js. -->
+  <div id="maintab-mentor" role="tabpanel" aria-labelledby="maintab-btn-mentor" class="main-tab-content hidden">
+    <div id="mentor-overview-host"></div>
+  </div>
+  <!-- Plan — Business Mentor only. Rendered by assistant-mentor-plan.js. -->
+  <div id="maintab-mentorplan" role="tabpanel" aria-labelledby="maintab-btn-mentorplan" class="main-tab-content hidden">
+    <div id="mentor-plan-host"></div>
+  </div>
   <div id="maintab-briefs" role="tabpanel" aria-labelledby="maintab-btn-briefs" class="main-tab-content hidden">
     <div id="briefs-host"></div>
   </div><!-- /maintab-briefs -->
@@ -2085,6 +2107,12 @@
 
   <!-- ── MAIN TAB: Goals & Automation ───────────────────────────────── -->
   <div id="maintab-goals" role="tabpanel" aria-labelledby="maintab-btn-goals" class="main-tab-content hidden">
+
+  <!-- Commitments — Business Mentor only (mentorCommitments: business_mentor). The 1–3 things each person
+       will do this week, ticked off with a reason when missed (docs/business-mentor-plan.md §5.1, §14).
+       Rendered by src/components/mentor-commitments.js → mentor.ts; the chat's mentor_commitments card
+       calls the same actions. -->
+  <div id="mentor-commitments-host" class="hidden mb-8"></div>
 
   <!-- ── Goals (SMART Goals — Feature 1) ───── -->
   <div id="tab-goals" class="space-y-6 mb-8">

@@ -12,7 +12,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import {
     MODEL_OPTIONS, adaptForModel, effectiveThinking, estimateCallUsd, modelOption, replyText,
 } from '../src/config/model-options';
-import { withRoleModel } from '../src/utils/assistant-model';
+import { gatewayRoleModel, withRoleModel } from '../src/utils/assistant-model';
 import { LIST_PRICE_PER_1K } from '../src/utils/ai-usage';
 import { CHAT_DEFAULT_MODEL, ROLE_MODEL_PATHS, promptLayersFor } from '../src/config/assistant-prompt-layers';
 
@@ -97,6 +97,14 @@ async function main() {
         assert.strictEqual(seen, 'high');
     });
     
+    await check('gatewayRoleModel: {} with no choice, full setting in background, Low + a deadline on a request', async () => {
+        const fakeDb = (row: unknown) => ({ execute: async () => (row ? [row] : []) }) as never;
+        assert.deepStrictEqual(await gatewayRoleModel(fakeDb(null), 'test_role_none'), {});
+        const opusHigh = fakeDb({ model: 'claude-opus-5-5', thinking: 'high' });
+        assert.deepStrictEqual(await gatewayRoleModel(opusHigh, 'test_role_bg'), { model: 'claude-opus-5-5', thinking: 'high' });
+        assert.deepStrictEqual(await gatewayRoleModel(opusHigh, 'test_role_req', { requestPath: true }), { model: 'claude-opus-5-5', thinking: 'low', deadlineMs: 22_000 });
+    });
+
     await check('each wired path reads its own role, adapts the request and no longer reads content[0]', () => {
         const paths: Array<[string, string]> = [
             ['src/utils/newsletter-generate.ts', "loadRoleModel(db, 'newsletter_editor')"],
@@ -113,9 +121,19 @@ async function main() {
                 assert.ok(!/\.content\[0\]/.test(src), `${file} still reads content[0]`);
             }
         }
+        // The gateway paths: each spreads its role's model in, held at Low on a request path.
+        const site = read('src/utils/site-store.ts');
+        assert.strictEqual(site.match(/gatewayRoleModel\(db, 'website_assistant'/g)?.length, 2, 'site draft and own-words rewrite');
+        assert.ok(site.includes("gatewayRoleModel(db, 'website_assistant', { requestPath: true })"), 'the own-words rewrite is a request');
+        assert.ok(read('src/utils/site-import-store.ts').includes("gatewayRoleModel(db, 'website_assistant')"));
+        assert.ok(read('src/utils/site-audit.ts').includes("const auditModel = await gatewayRoleModel(db, 'mystery_shopper');"));
+        assert.ok(read('src/utils/visual-briefs.ts').includes("gatewayRoleModel(db, 'brand_designer')"));
+        const flows = read('src/utils/newsletter-campaign-generate.ts');
+        assert.ok(flows.includes("loadRoleModel(db, 'newsletter_editor')") && flows.includes('adaptForModel(') && !/\.content\[0\]/.test(flows), 'Email Studio flows');
         // Social drafting goes through the gateway, which adapts a role's model and reads every text block.
         const gw = read('src/lib/ai-gateway.ts');
         assert.ok(gw.includes('adaptForModel(params, model, req.thinking)') && gw.includes('const text = replyText(response.content);'));
+        assert.ok(gw.includes('thinks ? { timeout: req.deadlineMs ?? 120_000 } : undefined'), 'a thinking model gets the caller\'s deadline or 2 minutes');
         assert.strictEqual(read('netlify/functions/process-content-jobs.ts').match(/\.\.\.roleModel/g)?.length, 3, 'the draft and both re-asks');
     });
     

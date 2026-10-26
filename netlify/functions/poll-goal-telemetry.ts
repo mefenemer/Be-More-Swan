@@ -21,7 +21,7 @@ import { getDb } from '../../db/client';
 import {
     goals, goalTelemetry, aiAssistants, systemConnections,
     scheduledPosts, plans, masterPlans, assistantRecords, blogPosts,
-    audienceContacts, newsletterIssues, siteAudits, sites, visualBriefOptions, visualBriefs, manualFollowerCounts } from '../../db/schema';
+    audienceContacts, newsletterIssues, siteAudits, sites, visualBriefOptions, visualBriefs, manualFollowerCounts, mentorProposals } from '../../db/schema';
 import { normaliseSiteDefinition } from '../../src/utils/site-definition';
 import { placeholdersIn } from '../../src/utils/site-draft';
 import { createNotification } from '../../src/utils/notify';
@@ -548,6 +548,24 @@ async function fetchMetric(
                     eq(siteAudits.organisationId, goal.organisationId),
                 )).limit(1);
                 return { value: row?.v ?? null, disconnected: false };
+            } catch (err) {
+                const code = (err as { code?: string; cause?: { code?: string } })?.code
+                    ?? (err as { cause?: { code?: string } })?.cause?.code;
+                if (code !== '42P01' && code !== '42703') throw err;
+                return { value: null, disconnected: false };
+            }
+        }
+
+        // Business Mentor — suggestions the workspace applied since the goal was set. The table may not
+        // exist yet (db/z-business-mentor.sql): that is "no figure yet", never 0.
+        case 'mentor_suggestions_applied': {
+            try {
+                const [row] = await db.select({ n: sql<number>`count(*)::int` }).from(mentorProposals).where(and(
+                    eq(mentorProposals.organisationId, goal.organisationId),
+                    eq(mentorProposals.status, 'accepted'),
+                    sql`${mentorProposals.decidedAt} >= ${goal.createdAt}`,
+                ));
+                return { value: row?.n ?? 0, disconnected: false };
             } catch (err) {
                 const code = (err as { code?: string; cause?: { code?: string } })?.code
                     ?? (err as { cause?: { code?: string } })?.cause?.code;

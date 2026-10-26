@@ -26,7 +26,8 @@ import { enrichLeadContact } from '../lib/discovery-enrich';
 import { isEnrichProviderConfigured, lookupProviderContact } from '../lib/discovery-enrich-provider';
 import { gatherLeadIntel, nameAppearsInSources, hasIntelWorthScoring, LEAD_INTEL_SEARCHES } from '../lib/lead-intel';
 import { logAiUsage } from './ai-usage';
-import { rescoreWithIntel, normaliseLeadCard, SCORING_MODEL, type LeadScoringCard, type DecisionMaker, type InterpretedSignal } from '../lib/discovery-scoring';
+import { loadRoleModel } from './assistant-model';
+import { rescoreWithIntel, normaliseLeadCard, type LeadScoringCard, type DecisionMaker, type InterpretedSignal } from '../lib/discovery-scoring';
 import type { SenderIdentity } from '../config/sender-identity';
 
 type Db = ReturnType<typeof getDb>;
@@ -400,12 +401,12 @@ export async function deepEnrichLead(
         evidence: intel.evidence,
         peopleSources: intel.peopleSources,
         fingerprint: { platforms: intel.fingerprint.platforms, hasCareersPage: intel.fingerprint.hasCareersPage },
-    }, opts.icp, opts.sender, { domain: opts.domain });
+    }, opts.icp, opts.sender, { domain: opts.domain, modelChoice: await loadRoleModel(db, 'lead_qualifier') });
     // rescoreWithIntel reports its tokens and logs nothing itself; nor did anything else.
     if (rescored.inputTokens || rescored.outputTokens) {
         void logAiUsage({
             workspaceId: rec.organisationId ?? null, assistantId: rec.aiAssistantId ?? null,
-            model: SCORING_MODEL, inputTokens: rescored.inputTokens, outputTokens: rescored.outputTokens,
+            model: rescored.model, inputTokens: rescored.inputTokens, outputTokens: rescored.outputTokens,
             sessionId: 'lead-deep-enrichment', dataCategories: ['business_context'],
         });
     }

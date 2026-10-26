@@ -61,6 +61,9 @@ export async function consumeTaskCredit(
 }
 
 export interface InteractionResult extends TaskCreditResult {
+    /** Refused because the workspace has no active plan. The Business Mentor still answers then, in
+     *  help-only mode (docs/business-mentor-plan.md §2.7, chat-orchestrator.ts). */
+    noPlan?: boolean;
     /** Refused by the daily fair-use limit — NOT a plan limit. Never answer this with a paywall. */
     fairUse?: boolean;
 }
@@ -91,7 +94,7 @@ export async function meterInteraction(
         console.error('[task-credit] plan lookup failed', { organisationId, message: err instanceof Error ? err.message : String(err) });
         return { allowed: false, failed: true, limitMessage: 'We could not check your plan just now. Please try again.' };
     }
-    if (!hasPlan) return { allowed: false, limitMessage: NO_PLAN_MESSAGE };
+    if (!hasPlan) return { allowed: false, noPlan: true, limitMessage: NO_PLAN_MESSAGE };
 
     const fair = await checkFairUse(db, organisationId, kind);
     if (!fair.allowed) return { allowed: false, fairUse: true, limitMessage: fair.message };

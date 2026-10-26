@@ -12,10 +12,17 @@
 //
 // ⚠️ Capped (8,000 characters across all documents, 4,000 per document) so a few large PDFs cannot
 // blow a prompt — and the chat pays this on every turn.
+//
+// Also carries the owner's APPROVED strategy (docs/business-mentor-plan.md §4.4): the business plan's
+// customer, problem and offer and the marketing plan's audience, messaging and channels, from
+// strategy_documents (src/utils/strategy-documents.ts, capped at STRATEGY_DRAFTS_CHAR_CAP). Only an
+// approved version ever reaches a draft; approving one recompiles every blueprint (mentor.ts). No
+// second loader.
 
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { workspaceAssets } from '../../db/schema';
+import { loadStrategyDocs, renderApprovedStrategyForDrafts } from './strategy-documents';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -31,6 +38,23 @@ export interface BusinessKnowledge {
     links: Array<{ name: string; url: string }>;
     /** Every applied asset, for the blueprint's version hash and sources. */
     assets: Array<{ id: number; updatedAt: Date | null }>;
+    /** The approved strategy, rendered for drafting; null when nothing is approved (or the table isn't there yet). */
+    strategy: string | null;
+    /** The approved strategy documents behind it, for the blueprint's version hash. */
+    strategyDocs: Array<{ id: number; approvedAt: Date | null }>;
+}
+
+export const STRATEGY_DIRECTIVE = 'The business owner approved this strategy. Write in line with it: who the customer is, what the business offers and the messages it wants across. Products & Services stays the source for products and prices.';
+
+/** The approved strategy documents. Never throws: a missing table or a failed read is "nothing approved". */
+async function loadApprovedStrategy(db: Db, organisationId: number): Promise<{ text: string | null; docs: Array<{ id: number; approvedAt: Date | null }> }> {
+    try {
+        const docs = (await loadStrategyDocs(db, organisationId) ?? []).filter((d) => d.status === 'approved');
+        return { text: renderApprovedStrategyForDrafts(docs), docs: docs.map((d) => ({ id: d.id, approvedAt: d.approvedAt })) };
+    } catch (err) {
+        console.error('[business-knowledge] could not load the approved strategy (non-fatal)', err instanceof Error ? err.message : err);
+        return { text: null, docs: [] };
+    }
 }
 
 /** The applied assets (active, ready or confirmed), highest priority first, within the caps. */
@@ -65,7 +89,8 @@ export async function loadBusinessKnowledge(db: Db, organisationId: number): Pro
         // URL assets are also surfaced as references even if extraction yielded nothing usable.
         if (a.assetType === 'url' && a.externalUrl) links.push({ name: a.name, url: a.externalUrl });
     }
-    return { documents, links, assets: rows.map((a) => ({ id: a.id, updatedAt: a.updatedAt })) };
+    const strategy = await loadApprovedStrategy(db, organisationId);
+    return { documents, links, assets: rows.map((a) => ({ id: a.id, updatedAt: a.updatedAt })), strategy: strategy.text, strategyDocs: strategy.docs };
 }
 
 /**
@@ -76,9 +101,13 @@ export function businessKnowledgePromptBlock(k: {
     directive?: unknown;
     documents?: Array<{ name?: string; text?: string }>;
     links?: Array<{ name?: string; url?: string }>;
+    strategy?: unknown;
 } | null | undefined): string | null {
     const documents = k?.documents ?? [];
     const links = k?.links ?? [];
+    const strategy = typeof k?.strategy === 'string' && k.strategy.trim() ? k.strategy.trim() : null;
+    // A blueprint §11 snapshot stores it with the directive already in front (for the social flattener).
+    const strategyBlock = strategy ? `APPROVED STRATEGY — ${strategy.startsWith(STRATEGY_DIRECTIVE) ? strategy : `${STRATEGY_DIRECTIVE}\n${strategy}`}` : null;
     const directive = typeof k?.directive === 'string' && k.directive ? k.directive : BUSINESS_KNOWLEDGE_DIRECTIVE;
     const docBlocks = documents
         .filter((d) => typeof d?.text === 'string' && d.text.trim())
@@ -86,9 +115,9 @@ export function businessKnowledgePromptBlock(k: {
     const linkLines = links
         .filter((l) => l?.url)
         .map((l) => `- ${l.name ?? l.url}: ${l.url}`);
-    if (!docBlocks.length && !linkLines.length) return null;
+    if (!docBlocks.length && !linkLines.length) return strategyBlock;
     return `BUSINESS KNOWLEDGE — ${directive}\n\n` +
-        [docBlocks.join('\n\n'), linkLines.length ? `Reference links:\n${linkLines.join('\n')}` : '']
+        [docBlocks.join('\n\n'), linkLines.length ? `Reference links:\n${linkLines.join('\n')}` : '', strategyBlock ?? '']
             .filter(Boolean).join('\n\n');
 }
 

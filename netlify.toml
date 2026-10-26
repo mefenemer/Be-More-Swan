@@ -935,6 +935,13 @@ node_bundler = "esbuild"
 [functions.dispatch-site-audits]
   schedule = "30 6 * * *"
 
+# The Business Mentor's weekly review (src/utils/mentor-review.ts dispatchDueReviews): queues every
+# workspace whose review day is today in UK time (Monday by default), or was earlier this week and missed.
+# 06:45 UTC — before the UK working day in GMT and BST, off the :00/:15/:20/:30/:40 batch. Daily, not
+# weekly: the review DAY is per workspace. Staging is poked via run-mentor-review-dispatch (staging-crons.yml).
+[functions.dispatch-mentor-reviews]
+  schedule = "45 6 * * *"
+
 # Is the paid sweep above still running? 09:20 UTC — a DIFFERENT schedule entry from
 # optimise-paid-campaigns on purpose, so one broken entry cannot silently take both.
 #
@@ -1156,6 +1163,11 @@ node_bundler = "esbuild"
 # construction: it opens a brand-new session and sends a "write me a post" prompt immediately,
 # so the whole cold path is inside one budget. Same remedy as generate-ai-image above.
 [functions.chat-orchestrator]
+  timeout = 26
+
+# The Business Mentor's page (mentor.ts): "Get feedback" is one model call on the Mentor's model
+# (Opus 5.5 by default), which can outrun the 10s default like a chat turn does.
+[functions.mentor]
   timeout = 26
 
 # The Website Assistant's API. "Add your own words" makes one model call (a short placement plan —

@@ -3,6 +3,7 @@
 //
 // GET                       → { assistants: [...] }  every role: status, counts, and how many checks fail
 // GET  ?id=N                → { assistant, status, checks, blockers: { coming_soon, beta, live } }
+// GET  ?mentorActivity=1    → { measures, workspaces }  Business Mentor ▸ Activity (src/utils/mentor-activity.ts)
 // POST ?id=N&action=status  → { status, reason? }    the ONLY way a role's status changes
 // POST ?id=N&action=suggest → { key }               a Fix or a drafted Suggestion for one failing check
 // POST ?id=N&action=apply   → { key, value }        write an approved fix (validated by go-live-fixes.ts)
@@ -38,6 +39,7 @@ import { putR2Object } from '../../src/lib/media-persist';
 import { MODEL_OPTIONS, THINKING_LEVELS, effectiveThinking, estimateCallUsd, modelOption, type ThinkingLevel } from '../../src/config/model-options';
 import { CHAT_DEFAULT_MODEL, ROLE_MODEL_PATHS, promptLayersFor } from '../../src/config/assistant-prompt-layers';
 import { clearRoleModelCache } from '../../src/utils/assistant-model';
+import { loadMentorActivity } from '../../src/utils/mentor-activity';
 
 
 const pgCode = (err: unknown) => (err as { code?: string; cause?: { code?: string } })?.code
@@ -103,6 +105,16 @@ export default withLambda(async (event) => {
     const id = q.id ? Number(q.id) : null;
 
     try {
+        // Business Mentor ▸ Activity: the four success measures (docs/business-mentor-plan.md §8.2).
+        if (event.httpMethod === 'GET' && q.mentorActivity === '1') {
+            try {
+                return json(200, await loadMentorActivity(db));
+            } catch (err) {
+                if (pgCode(err) === '42P01') return json(200, { needsSetup: true, measures: null, workspaces: [] });
+                throw err;
+            }
+        }
+
         if (event.httpMethod === 'GET' && !id) {
             const rows = await db.select().from(masterAssistants).orderBy(masterAssistants.name);
             const knownRoleKeys = rows.map((r) => r.roleKey);

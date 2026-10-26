@@ -144,11 +144,12 @@ async function callModel(model: string, req: GatewayRequest): Promise<Anthropic.
     };
     // Only a role's chosen model is adapted; PRIMARY/FALLBACK calls go out exactly as before.
     if (model !== req.model) return client.messages.create(params);
-    // A thinking model in background work (no deadline) gets longer than the client's 24s: the
-    // head-to-head measured Opus 5.5 at up to 22.6s on short prompts, and drafts carry ~8k tokens.
+    // A thinking model gets the caller's deadline, or 2 minutes in background work (no deadline),
+    // rather than the client's 24s: the head-to-head measured Opus 5.5 at up to 22.6s on short
+    // prompts, and drafts carry ~8k tokens. Request paths pass a deadline (gatewayRoleModel).
     const thinks = modelOption(model)?.thinking !== 'none';
     return client.messages.create(adaptForModel(params, model, req.thinking) as Anthropic.MessageCreateParamsNonStreaming,
-        thinks && !req.deadlineMs ? { timeout: 120_000 } : undefined);
+        thinks ? { timeout: req.deadlineMs ?? 120_000 } : undefined);
 }
 
 function isRequestRefusal(err: unknown): boolean {
@@ -278,7 +279,10 @@ function collectSearchedUrls(content: Anthropic.ContentBlock[]): { urls: string[
  * and treating that as a finished answer would silently truncate the verification mid-search.
  */
 export async function gatewayGenerateGrounded(req: GatewayRequest): Promise<GroundedResponse> {
-    let model = PRIMARY_MODEL;
+    // A role's chosen model (the Business Mentor's research, §4.5) is adapted like gatewayGenerate's;
+    // if the API refuses the request for it, the search is made once more on PRIMARY_MODEL.
+    const roleModel = req.model && modelOption(req.model) ? req.model : null;
+    let model = roleModel ?? PRIMARY_MODEL;
     let usedFallback = false;
 
     // ── Staying inside the caller's budget ──────────────────────────────────────────────────────
@@ -298,13 +302,19 @@ export async function gatewayGenerateGrounded(req: GatewayRequest): Promise<Grou
 
     const run = (m: string, messages: Anthropic.MessageParam[]) => {
         const left = remaining();
-        return client.messages.create({
+        const params = {
             model: m,
             max_tokens: req.maxTokens ?? 1024,
             system: sanitizeForModel(req.system),
             messages: sanitizeForModel(messages),
             tools: [webSearchTool(m)],
-        }, left === Infinity ? undefined : {
+        };
+        // A thinking model searching in background work (no deadline) gets 3 minutes a call, not the
+        // client's 24 s: thinking plus up to four searches runs well past it.
+        const adapted = m === roleModel;
+        const thinks = adapted && modelOption(m)?.thinking !== 'none';
+        return client.messages.create((adapted ? adaptForModel(params, m, req.thinking) : params) as Anthropic.MessageCreateParamsNonStreaming,
+            left === Infinity ? (thinks ? { timeout: 180_000 } : undefined) : {
             timeout: Math.max(MIN_CALL_MS, left),
             // A `timeout` is per ATTEMPT, not per call: the SDK retries a connection timeout
             // maxRetries times (default 2) before it ever throws, so a 20s budget silently became
@@ -317,7 +327,14 @@ export async function gatewayGenerateGrounded(req: GatewayRequest): Promise<Grou
     let messages = [...req.messages];
     let response: Anthropic.Message;
     try {
-        response = await run(model, messages);
+        try {
+            response = await run(model, messages);
+        } catch (roleErr) {
+            if (model !== roleModel || model === PRIMARY_MODEL || !isRequestRefusal(roleErr)) throw roleErr;
+            console.error(`[ai-gateway] grounded call: ${model} refused the request; retrying on ${PRIMARY_MODEL}`, roleErr instanceof Error ? roleErr.message : roleErr);
+            model = PRIMARY_MODEL;
+            response = await run(model, messages);
+        }
     } catch (primaryErr) {
         if (!isFailoverError(primaryErr)) throw primaryErr;
         // A failover is a second full call. With no room for one, the caller is better served by the

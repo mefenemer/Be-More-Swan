@@ -456,11 +456,13 @@ window.generateAssistantCardHTML = function(assistant) {
     const dReg = window.AssistantDashboardRegistry ? window.AssistantDashboardRegistry.get(assistant.roleKey) : null;
     const quickActions = dReg ? [
         ...(dReg.hideDataHub ? [] : [['🗂️', dReg.hubTab?.label || 'Data Hub', 'datahub']]),
+        ...(dReg.mentorTab ? [['🧭', dReg.mentorTab.label || 'Overview', 'mentor']] : []),
+        ...(dReg.mentorPlanTab ? [['🗺️', dReg.mentorPlanTab.label || 'Plan', 'mentorplan']] : []),
         ...(dReg.briefsTab ? [['🎨', dReg.briefsTab.label || 'Briefs', 'briefs']] : []),
         ...(dReg.siteAuditTab ? [['🔍', dReg.siteAuditTab.label || 'Website', 'website']] : []),
         ...(dReg.siteEditorTab ? [['🌐', dReg.siteEditorTab.label || 'Website', 'sitebuilder']] : []),
         ...(dReg.hideReviewQueue ? [] : [['✅', dReg.reviewQueue?.label || 'Review', 'review-queue']]),
-        ['📅', 'Calendar', 'calendar'],
+        ...(dReg.hideCalendar ? [] : [['📅', 'Calendar', 'calendar']]),
     ] : [];
     const quickActionsHtml = quickActions.length ? `
         <div class="flex items-center gap-2 flex-wrap mb-4 pt-4 border-t border-gray-50">
@@ -1068,6 +1070,10 @@ window._activateMainTab = function(name) {
     if (name === 'email-campaigns') window.AssistantEmailCampaigns?.activate();
     // Briefs (Brand Designer) renders lazily too — init() already fetched for the badge.
     if (name === 'briefs') window.AssistantBriefs?.activate();
+    // Overview (Business Mentor) — init() already fetched; this only repaints.
+    if (name === 'mentor') window.AssistantMentorOverview?.activate();
+    // Plan (Business Mentor, Phase 2) — init() already fetched; this repaints and resumes any poll.
+    if (name === 'mentorplan') window.AssistantMentorPlan?.activate();
     // Website (Mystery Shopper) likewise — init() already fetched for the badge.
     if (name === 'website') window.AssistantSiteAudit?.activate();
     // Website (Website Assistant) — the editor and preview; init() already fetched the site.
@@ -6420,6 +6426,8 @@ function _applyDashboardRegistry(data) {
     // approval gate is the option grid on its Briefs tab, and the default here would be an empty
     // SOCIAL post queue for an assistant that makes no posts.
     toggle('maintab-btn-review-queue', !cfg.hideReviewQueue);
+    // A role with nothing dated to show (the Business Mentor) has no Calendar tab or card shortcut.
+    toggle('maintab-btn-calendar', !cfg.hideCalendar);
     // A role whose campaigns carry their own targets (the Campaign Assistant) has no separate goals:
     // two places to set "what success is" was the confusion. The Goal Progress card goes with it.
     // "How is it going" in one place (owner, 2026-10-21 — trialled on Social Media, then every role):
@@ -6738,6 +6746,29 @@ function _applyDashboardRegistry(data) {
         // The strip lives outside the tab, so hiding the tab button is not enough to hide it. Every
         // other role must never see a capacity meter for a feature it does not have.
         document.getElementById('campaign-control-strip')?.classList.add('hidden');
+    }
+
+    // Overview tab — Business Mentor only (mentorTab: business_mentor): set-up checklist, "What I can
+    // see" and Dismissed suggestions (assistant-mentor-overview.js → mentor.ts).
+    const mentorTab = cfg.mentorTab;
+    toggle('maintab-btn-mentor', !!mentorTab);
+    if (mentorTab) {
+        setText('mentor-tab-label', mentorTab.label || 'Overview');
+        window.AssistantMentorOverview?.init({ assistantId: data.id, assistantName: data.name });
+    }
+    // Plan tab — Business Mentor only (mentorPlanTab): plans, calculator, research, playbook (assistant-mentor-plan.js).
+    const mentorPlanTab = cfg.mentorPlanTab;
+    toggle('maintab-btn-mentorplan', !!mentorPlanTab);
+    if (mentorPlanTab) {
+        setText('mentorplan-tab-label', mentorPlanTab.label || 'Plan');
+        window.AssistantMentorPlan?.init({ assistantId: data.id, assistantName: data.name });
+    }
+    // Commitments — Business Mentor only (mentorCommitments): top of its Results tab (mentor-commitments.js).
+    const commitHost = document.getElementById('mentor-commitments-host');
+    if (commitHost) {
+        commitHost.classList.toggle('hidden', !cfg.mentorCommitments);
+        commitHost.style.display = cfg.mentorCommitments ? '' : 'none';
+        if (cfg.mentorCommitments) window.MentorCommitments?.init({ assistantId: data.id, assistantName: data.name });
     }
 
     // Briefs tab — Brand Designer only (briefsTab: brand_designer). init() loads eagerly: the count
@@ -8179,10 +8210,13 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         // both "More actions" entries and show a reinstate banner with the countdown instead
         // (below). The banner's own button is the one live path back from archived.
         const isArchived = currentData.lifecycleStatus === 'archived';
-        if (archiveBtn) archiveBtn.classList.toggle('hidden', isArchived);
-        document.getElementById('btn-toggle-status')?.classList.toggle('hidden', isArchived);
+        // The Business Mentor can be quietened but never paused or archived (registry
+        // noPauseOrArchive; manage-assistant.ts refuses both): no entries, so no "…" menu either.
+        const lockedIn = !!window.AssistantDashboardRegistry?.get(currentData.roleKey)?.noPauseOrArchive;
+        if (archiveBtn) archiveBtn.classList.toggle('hidden', isArchived || lockedIn);
+        document.getElementById('btn-toggle-status')?.classList.toggle('hidden', isArchived || lockedIn);
         // Both entries are hidden when archived, so the "…" trigger has nothing left to open.
-        document.getElementById('btn-more-actions')?.classList.toggle('hidden', isArchived);
+        document.getElementById('btn-more-actions')?.classList.toggle('hidden', isArchived || lockedIn);
 
         // Issue #191 — Safe Archiving reinstate window: archived assistants are reachable only
         // via the archive notification's deep link (they're filtered out of the "My Assistants"

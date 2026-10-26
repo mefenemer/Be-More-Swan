@@ -623,6 +623,39 @@
     // and the fixes they suggest; it publishes nothing, files no records and has no post queue, so
     // every social module is off and the Review Queue / Data Hub are hidden — its review surface is
     // the fix list on the Website tab, and its history is the checks listed there.
+    business_mentor: {
+      // docs/business-mentor-plan.md. Phase 1a: Overview (set-up checklist, "What I can see",
+      // Dismissed suggestions — the §14 screen twins of its chat cards), Results and Activity; chat
+      // from the header button. It publishes nothing, so no review queue, data hub, posting schedule
+      // or content modules.
+      // ⚠️ Rename this tab and businessMentorSurfaces() in chat-orchestrator.ts must change too
+      // (tests/mentor-page.test.ts).
+      mentorTab: {
+        label: 'Overview',
+      },
+      // Phase 2 (§4): the idea check, business and marketing plans, break-even calculator, research and
+      // the playbook in use (assistant-mentor-plan.js → mentor.ts ?plan=1). Same rename rule as above.
+      mentorPlanTab: {
+        label: 'Plan',
+      },
+      // Phase 3 (§5.1): the Commitments list at the top of its Results tab (mentor-commitments.js).
+      mentorCommitments: true,
+      defaultMainTab: 'mentor',
+      hideReviewQueue: true,
+      hideDataHub: true,
+      hideGoals: true,
+      // Nothing dated to show yet: no Calendar tab, and no Calendar shortcut on its card.
+      hideCalendar: true,
+      // Included on every plan: Quiet mode instead of pause, and never archived (manage-assistant.ts).
+      noPauseOrArchive: true,
+      modules: {
+        hasPostingSchedule: false, hasSocialStrategy: false,
+        hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
+        hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+        hasContentPublishing: false,
+      },
+    },
+
     mystery_shopper: {
       // Fed by site-audits.ts `performance` (routed by metricsSource in assistants.js).
       metricsSource: 'site_audit',

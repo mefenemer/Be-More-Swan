@@ -23,6 +23,7 @@ import {
     type BillingInterval, type MoveDirection,
 } from './plan-change-schedule';
 import { sendTemplatedEmail } from './email';
+import { takesASeat } from './assistant-capacity';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -207,7 +208,7 @@ async function previewOne(db: Db, stripe: Stripe, c: Candidate, target: TargetPl
     // Assistants over the new plan's limit pause when it starts (stripe-webhook.ts, oldest first).
     if (!row.skipReason && target.assistantLimit != null && c.userId) {
         const active = await db.select({ id: aiAssistants.id }).from(aiAssistants)
-            .where(and(eq(aiAssistants.userId, c.userId), eq(aiAssistants.isActive, true), isNull(aiAssistants.archivedAt)));
+            .where(and(eq(aiAssistants.userId, c.userId), eq(aiAssistants.isActive, true), isNull(aiAssistants.archivedAt), takesASeat()));
         const [org] = await db.select({ bonus: organisations.bonusAssistants }).from(organisations).where(eq(organisations.id, c.organisationId)).limit(1);
         row.assistantsToPause = Math.max(0, active.length - (target.assistantLimit + (org?.bonus ?? 0)));
     }

@@ -372,6 +372,20 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             button('Open your dashboard', 'link.action_url') + signoff,
     },
     {
+        // The Business Mentor's weekly review (src/utils/mentor-review.ts), to owners and admins whose
+        // "Business Mentor weekly review" email preference is on. The review itself is in their chat.
+        triggerKey: 'mentor_weekly_review',
+        name: 'Business Mentor Weekly Review',
+        category: 'Engagement',
+        subject: 'Your weekly review from {{assistant.name | "your Business Mentor"}}',
+        preheader: '{{review.proposals | "Your week, compared with your plan"}}',
+        bodyHtml: greet +
+            p('{{assistant.name | "Your Business Mentor"}} has looked at your week in {{workspace.name | "your workspace"}} and compared it with your plan.') +
+            p('<strong>{{review.summary}}</strong>') +
+            p('There are {{review.proposals | "no suggestions"}}. Nothing changes until you choose — the full review is in your chat with {{assistant.name | "your Mentor"}}, and its suggestions are under Notifications ▸ Needs you.') +
+            button('Open my review', 'link.action_url') + signoff,
+    },
+    {
         triggerKey: 'post_due',
         name: 'Post Approval Due',
         category: 'Engagement',

@@ -24,9 +24,9 @@
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
-import { eq, and, gte, gt, count, sum, asc, or, inArray } from 'drizzle-orm';
+import { eq, and, gte, count, sum, or, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { plans, masterPlans, planPrices, aiAssistants, taskRuns, userOrganisations, users, systemConnections, organisations, partners } from '../../db/schema';
+import { plans, masterPlans, aiAssistants, taskRuns, userOrganisations, users, systemConnections, organisations, partners } from '../../db/schema';
 import { getPeriodStart } from '../../src/utils/atomic-cap-check';
 import { effectiveLimit, effectiveFeatures, type FeatureOverrides } from '../../src/utils/plan-features';
 import { SOCIAL_PLATFORMS } from '../../src/config/platform-formats';
@@ -37,7 +37,8 @@ import { readTaskUsage, tasksRemaining as remainingTasks } from '../../src/utils
 import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { getTrial } from '../../src/utils/trial';
 import { resolveImpersonation } from '../../src/utils/impersonation';
-import { checkRoleSwap } from '../../src/utils/assistant-capacity';
+import { checkRoleSwap, takesASeat } from '../../src/utils/assistant-capacity';
+import { loadNextPlan, type NextPlan } from '../../src/utils/next-plan';
 
 const stripe = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
@@ -199,6 +200,7 @@ export default withLambda(async (event) => {
             .where(and(
                 orgId ? eq(aiAssistants.organisationId, orgId) : eq(aiAssistants.userId, userId),
                 inArray(aiAssistants.lifecycleStatus, ['provisioning', 'ready_for_work', 'working']),
+                takesASeat(),
             ));
 
         // ── 3. Task & token counts from usageCounters (authoritative) ──
@@ -295,49 +297,10 @@ export default withLambda(async (event) => {
             : 0;
 
         // ── 5. Resolve next plan tier (for upgrade modal SC2 / SC5) ──────────
-        // Find the cheapest plan that costs more than the current plan — that's the next tier up.
-        // Returns null if the user is already on the highest-paid plan (enterprise contact path).
+        // The cheapest plan that costs more than the current one (src/utils/next-plan.ts, shared with
+        // the Business Mentor's hire recommendation). null if already on the highest-paid plan.
         const userCurrency = (plan as any)?.currency || 'GBP';
-        let nextPlan: { tierKey: string; name: string; monthlyPriceGbp: string; monthlyPrice: string; assistantLimit: number | null; monthlyTaskLimit: number | null } | null = null;
-        // A beta plan costs £0, so "the cheapest plan above it" would offer the ENTRY plan as an
-        // upgrade from top-tier limits. Beta testers get no upgrade suggestion at all.
-        if (plan?.monthlyPriceGbp != null && plan?.tierKey !== BETA_TIER_KEY) {
-            const [nextTierRow] = await db
-                .select({
-                    tierKey: masterPlans.tierKey,
-                    name: masterPlans.name,
-                    monthlyPriceGbp: masterPlans.monthlyPriceGbp,
-                    assistantLimit: masterPlans.assistantLimit,
-                    // The upgrade modal's "what you get" list names the next plan's task allowance —
-                    // read here so workspace.html never hardcodes it (it said "2,750" by hand).
-                    monthlyTaskLimit: masterPlans.monthlyTaskLimit,
-                    masterPlanId: masterPlans.id,
-                })
-                .from(masterPlans)
-                .where(and(
-                    eq(masterPlans.isActive, true),
-                    // Contact-sales Enterprise is never a self-serve upgrade: with the Digital Employee
-                    // retired (17 Oct 2026) it is the only priced plan above £79, and offering it here
-                    // sent buyers to a checkout with no Stripe price. null → the enterprise contact path.
-                    eq(masterPlans.isContactSales, false),
-                    gt(masterPlans.monthlyPriceGbp, plan.monthlyPriceGbp as any),
-                ))
-                .orderBy(asc(masterPlans.monthlyPriceGbp))
-                .limit(1);
-            if (nextTierRow) {
-                // US-I18N-2.1 SC5: look up price in user's billing currency
-                let monthlyPrice = String(nextTierRow.monthlyPriceGbp);
-                if (userCurrency !== 'GBP') {
-                    const [priceRow] = await db
-                        .select({ monthlyPriceMajorUnit: planPrices.monthlyPriceMajorUnit })
-                        .from(planPrices)
-                        .where(and(eq(planPrices.masterPlanId, nextTierRow.masterPlanId), eq(planPrices.currency, userCurrency), eq(planPrices.isActive, true)))
-                        .limit(1);
-                    if (priceRow) monthlyPrice = String(priceRow.monthlyPriceMajorUnit);
-                }
-                nextPlan = { tierKey: nextTierRow.tierKey, name: nextTierRow.name, monthlyPriceGbp: String(nextTierRow.monthlyPriceGbp), monthlyPrice, assistantLimit: nextTierRow.assistantLimit, monthlyTaskLimit: nextTierRow.monthlyTaskLimit };
-            }
-        }
+        const nextPlan: NextPlan | null = plan ? await loadNextPlan(db, { monthlyPriceGbp: plan.monthlyPriceGbp, tierKey: plan.tierKey }, userCurrency) : null;
 
         // ── 6. Grace period — expose expiry for UI warning banner ───
         const gracePeriodEndsAt = plan?.gracePeriodEndsAt

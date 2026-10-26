@@ -91,7 +91,8 @@ export async function getAdminRecipients(_db: Db): Promise<AdminRecipient[]> {
 export async function notifyIssueUser(
     db: Db,
     opts: {
-        userId: number;
+        /** NULL for an automatic incident (platform-incident.ts): there is nobody to tell. */
+        userId: number | null;
         issueId: number;
         status: IssueStatus;
         adminMessage?: string;
@@ -99,6 +100,7 @@ export async function notifyIssueUser(
     },
 ): Promise<void> {
     const { userId, issueId, status, adminMessage = '' } = opts;
+    if (userId == null) return;
     const label = ISSUE_STATUS_LABEL[status];
 
     // Status-specific call to action.

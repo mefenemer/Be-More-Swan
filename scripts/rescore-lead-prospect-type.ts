@@ -56,6 +56,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import * as path from 'path';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../db/client';
+import { loadRoleModel } from '../src/utils/assistant-model';
 import { aiAssistants, assistantRecords, discoveredLeads, discoveryCampaigns, organisations } from '../db/schema';
 import {
     applyProspectType,
@@ -285,7 +286,7 @@ async function main() {
                 snippet: (l.signals as Record<string, unknown> | null)?.snippet as string ?? null,
             }));
 
-            const { results, inputTokens: it, outputTokens: ot } = await classifyProspects(candidates, icp, sender);
+            const { results, inputTokens: it, outputTokens: ot } = await classifyProspects(candidates, icp, sender, await loadRoleModel(db, 'lead_qualifier'));
             inputTokens += it;
             outputTokens += ot;
 

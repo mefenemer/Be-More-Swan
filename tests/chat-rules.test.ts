@@ -130,9 +130,9 @@ async function main() {
 
     await check('the orchestrator lists the rules and resolves the card on structured routes', () => {
         const o = read('netlify/functions/chat-orchestrator.ts');
-        assert.ok(o.includes('route !== defaultRoute ? await buildRulesListBlock(db, orgId, session.aiAssistantId) : null'));
+        assert.ok(o.includes('offersOwnCards ? await buildRulesListBlock(db, orgId, session.aiAssistantId) : null'));
         assert.ok(o.includes('route !== defaultRoute && !settingsReq ? ruleProposalFromUiElement(uiElement) : null'));
-        assert.ok(o.includes('const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | OutreachOfferCard | CtaCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard ?? outreachOfferCard ?? ctaCard;'));
+        assert.ok(o.includes('const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | OutreachOfferCard | CtaCard | SetupFieldCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard ?? outreachOfferCard ?? ctaCard ?? setupFieldCard;'));
         assert.ok(read('src/utils/chat-card-refresh.ts').includes('refreshRuleCards(db, organisationId, aiAssistantId, roleKey, out)'));
     });
     await check('the click calls content-rules.ts with the page\'s methods, and the page repaints', () => {

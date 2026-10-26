@@ -1475,8 +1475,9 @@ export const issueReports = pgTable("issue_reports", {
   id: serial("id").primaryKey(),
   organisationId: integer("organisation_id")
       .references(() => organisations.id, { onDelete: "cascade" }),
+  // NULL for an automatic incident (source 'system' | 'suspected', db/z-platform-incidents.sql): no
+  // reporter, so it never reaches a user's own list or a status-change notification.
   userId: integer("user_id")
-      .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
 
   description: text("description").notNull(),
@@ -1530,6 +1531,10 @@ export const issueReports = pgTable("issue_reports", {
   devProdStatus: text("dev_prod_status"),
   devProdAt: timestamp("dev_prod_at"),
   devProdResult: text("dev_prod_result"),    // git/gh output or error from the promotion
+  // ⚠️ db/z-platform-incidents.sql adds source / fingerprint / fingerprint_day / occurrences /
+  // last_seen_at / incident_context. Deliberately NOT declared here: Drizzle names every declared
+  // column in an INSERT, so declaring them would break "Report an Issue" on any database the SQL
+  // hasn't reached. Read and written raw, behind incidentColumnsReady() (src/utils/platform-incident.ts).
 }, (t) => [
   index("issue_reports_user_idx").on(t.userId, t.createdAt),
   index("issue_reports_org_idx").on(t.organisationId),
@@ -6223,4 +6228,146 @@ export const loginEvents = pgTable("login_events", {
 }, (t) => [
   index("login_events_created_idx").on(t.createdAt),
   index("login_events_user_idx").on(t.userId, t.createdAt),
+]);
+
+// Business Mentor (docs/business-mentor-plan.md §3.13, §8.2) — every suggestion the Mentor shows and
+// what the user did with it. Feeds the 3-a-week cap, dismiss reasons, the Dismissed list and
+// Admin ▸ Mentor activity. Created by db/z-business-mentor.sql.
+export const mentorProposals = pgTable("mentor_proposals", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  targetAssistantId: integer("target_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  kind: text("kind").notNull(),
+  title: text("title").notNull(),
+  evidence: jsonb("evidence").notNull().default([]),
+  payload: jsonb("payload").notNull().default({}),
+  // 'shown' | 'accepted' | 'dismissed' | 'failed' | 'expired'
+  status: text("status").notNull().default("shown"),
+  // 'not_relevant' | 'already_done' | 'disagree' | 'not_now'
+  dismissReason: text("dismiss_reason"),
+  snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
+  shownAt: timestamp("shown_at", { withTimezone: true }).defaultNow().notNull(),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  decidedBy: integer("decided_by").references(() => users.id, { onDelete: "set null" }),
+  chatSessionId: integer("chat_session_id"),
+  chatMessageId: integer("chat_message_id"),
+}, (t) => [
+  index("mentor_proposals_org_shown_idx").on(t.organisationId, t.shownAt),
+  index("mentor_proposals_org_kind_status_idx").on(t.organisationId, t.kind, t.status),
+]);
+
+// Business Mentor Phase 2 (docs/business-mentor-plan.md §4.4) — the idea check, business plan and
+// marketing plan, versioned: one draft and one approved per kind; approving supersedes the old one.
+// Approved documents reach drafting through src/utils/business-knowledge.ts. Created by
+// db/z-business-mentor-phase-2.sql; readers tolerate the table being missing.
+export const strategyDocuments = pgTable("strategy_documents", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  // 'idea_check' | 'business_plan' | 'marketing_plan'
+  kind: text("kind").notNull(),
+  version: integer("version").notNull(),
+  // 'draft' | 'approved' | 'superseded'
+  status: text("status").notNull().default("draft"),
+  body: jsonb("body").notNull().default({}),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  updatedBy: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
+  approvedBy: integer("approved_by").references(() => users.id, { onDelete: "set null" }),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  unique("strategy_documents_version_key").on(t.organisationId, t.kind, t.version),
+]);
+
+// The Business Mentor's background work (§4.5): research with sources and drafting a strategy
+// document. Run by mentor-job-background.ts; 1 task each when delivered. Created by
+// db/z-business-mentor-phase-2.sql.
+export const mentorJobs = pgTable("mentor_jobs", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  // 'research' | 'strategy_draft'
+  kind: text("kind").notNull(),
+  // 'queued' | 'running' | 'done' | 'failed'
+  status: text("status").notNull().default("queued"),
+  input: jsonb("input").notNull().default({}),
+  result: jsonb("result"),
+  error: text("error"),
+  chatSessionId: integer("chat_session_id").references(() => chatSessions.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+}, (t) => [
+  index("mentor_jobs_org_created_idx").on(t.organisationId, t.kind, t.createdAt),
+]);
+
+// ── Business Mentor, Phase 3: the weekly review (db/z-business-mentor-phase-3.sql) ──────────────
+// docs/business-mentor-plan.md §5. Code tolerates all three missing (src/utils/mentor-review.ts).
+export const mentorReviews = pgTable("mentor_reviews", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  // Who pressed "Review my week now"; null for the schedule.
+  requestedBy: integer("requested_by").references(() => users.id, { onDelete: "set null" }),
+  // 'schedule' | 'on_demand'
+  trigger: text("trigger").notNull().default("schedule"),
+  // Monday of the review's week, UK time.
+  weekStart: date("week_start").notNull(),
+  // 'queued' | 'running' | 'done' | 'failed'
+  status: text("status").notNull().default("queued"),
+  // 'reviewed' | 'not_enough_data' (set when done)
+  outcome: text("outcome"),
+  summary: text("summary"),
+  // { sections: [{ title, text }], figures: [...], proposals: [{ id, type, title, target }] }
+  body: jsonb("body"),
+  proposalIds: integer("proposal_ids").array().notNull().default(sql`'{}'::integer[]`),
+  error: text("error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+}, (t) => [
+  index("mentor_reviews_org_created_idx").on(t.organisationId, t.createdAt),
+]);
+
+// §5.1: 1–3 things a person will do this week, and why a missed one was missed (a closed list).
+export const mentorCommitments = pgTable("mentor_commitments", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  ownerUserId: integer("owner_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  weekStart: date("week_start").notNull(),
+  text: text("text").notNull(),
+  // 'open' | 'done' | 'missed' | 'dropped'
+  status: text("status").notNull().default("open"),
+  // no_time | didnt_know_how | priorities_changed | waiting_on_someone | decided_against | other
+  missReason: text("miss_reason"),
+  note: text("note"),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  closedAt: timestamp("closed_at", { withTimezone: true }),
+  closedBy: integer("closed_by").references(() => users.id, { onDelete: "set null" }),
+}, (t) => [
+  index("mentor_commitments_org_week_idx").on(t.organisationId, t.weekStart),
+]);
+
+// §5.3: every accepted suggestion, the measure it was meant to move, and what happened SINCE.
+export const mentorOutcomes = pgTable("mentor_outcomes", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  proposalId: integer("proposal_id").notNull().references(() => mentorProposals.id, { onDelete: "cascade" }),
+  targetAssistantId: integer("target_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  kind: text("kind").notNull(),
+  change: text("change").notNull(),
+  measureKey: text("measure_key"),
+  measureLabel: text("measure_label"),
+  beforeValue: numeric("before_value"),
+  afterValue: numeric("after_value"),
+  // A draft the Mentor's suggestion asked for (content_generation_jobs.job_id) — its "Requested by" pill.
+  jobId: text("job_id"),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }).defaultNow().notNull(),
+  checkedAt: timestamp("checked_at", { withTimezone: true }),
+}, (t) => [
+  uniqueIndex("mentor_outcomes_proposal_uidx").on(t.proposalId),
+  index("mentor_outcomes_org_idx").on(t.organisationId, t.acceptedAt),
 ]);

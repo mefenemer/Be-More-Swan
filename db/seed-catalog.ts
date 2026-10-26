@@ -147,6 +147,19 @@ const CATALOG = [
         isActive: false,
     },
     {
+        // db/z-business-mentor.sql inserts this row on existing databases, HIDDEN — this entry is for
+        // a FRESH database. Included on every plan; never takes a seat (assistant-capacity.ts
+        // WORKSPACE_ROLE_KEYS). Plan: docs/business-mentor-plan.md.
+        roleKey: 'business_mentor',
+        name: 'Business Mentor',
+        description: 'Your guide to Be More Swan and a business coach who knows your workspace. It reads your business details and how your assistants are doing, points out what to fix first, and suggests changes you approve with one click. Included on every plan, and it never takes one of your assistant slots.',
+        category: 'Operations',
+        iconKey: 'chart',
+        iconColor: 'pink',
+        comingSoon: false,
+        isActive: false,
+    },
+    {
         roleKey: 'social_media_manager',
         name: 'Social Media Assistant',
         description: 'Plans, writes, and schedules branded content across all your social channels — consistent pipeline generation without the daily grind.',

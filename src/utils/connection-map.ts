@@ -64,6 +64,9 @@ export const ROLE_CONNECTIONS: Record<string, string[]> = {
     // The Website Assistant connects to nothing yet; step 3 adds Stripe Connect (payments) for
     // checkout. Empty, NOT omitted — an omitted role fails OPEN.
     website_assistant:         [],
+    // The Business Mentor reads the workspace through the database and connects to nothing itself.
+    // Empty, NOT omitted — an omitted role fails OPEN.
+    business_mentor:           [],
     social_media_manager:      ['social', 'design'],
     review_reputation_manager: ['reviews', 'social'],
     inbox_manager:             ['email'],
