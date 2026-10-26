@@ -17,7 +17,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
-    hasEnoughData, isReviewDue, notEnoughDataReview, renderFigures, renderReviewSettingsForMentor, reviewMessage, reviewSettings, ukWeekdayIndex,
+    hasEnoughData, isReviewDue, isStillWaiting, notEnoughDataReview, renderFigures, renderReviewSettingsForMentor, reviewMessage, reviewSettings, ukWeekdayIndex,
     type AssistantFigures,
 } from '../src/utils/mentor-review';
 import {
@@ -296,6 +296,13 @@ test('the review reaches the reader: "Open in chat" and the notification open it
     assert.match(src, /commitmentCard = \{ type: 'mentor_commitments', op: 'set'/);
     assert.match(read('notifications.js'), /notif\.type === 'mentor_weekly_review'[\s\S]{0,300}openAssistantChat\(\{ assistantId: meta\.assistantId, sessionId: meta\.chatSessionId \}\)/);
     assert.match(read('src/components/assistant-mentor-overview.js'), /data-mentor-open-review/);
+});
+
+test('a review never repeats a suggestion still waiting (staging, 26 Oct)', () => {
+    const waiting = [{ kind: 'draft_request', card: { fields: { '17:post': true } } }];
+    assert.strictEqual(isStillWaiting({ kind: 'draft_request', fields: ['17:post'] }, waiting), true);
+    assert.strictEqual(isStillWaiting({ kind: 'draft_request', fields: ['18:post'] }, waiting), false);
+    assert.strictEqual(isStillWaiting({ kind: 'setup_field', fields: ['17:post'] }, waiting), false);
 });
 
 test('the SQL is idempotent and drops nothing', () => {

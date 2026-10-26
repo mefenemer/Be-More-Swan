@@ -34,7 +34,7 @@ import { MENTOR_HONESTY_RULES, MENTOR_REVIEW_CRAFT } from '../constants/mentor-c
 import { loadRoleModel, withRoleModel } from './assistant-model';
 import { MENTOR_ROLE_KEY } from './mentor-provision';
 import { renderMentorSnapshot, loadMentorSnapshotData, type MentorSnapshotData } from './mentor-snapshot';
-import { gateSuggestion, loadProposalState, renderProposalState, WEEKLY_CAP, type ProposalState } from './mentor-proposals';
+import { gateSuggestion, loadOpenProposals, loadProposalState, proposalFields, renderProposalState, WEEKLY_CAP, type ProposalState } from './mentor-proposals';
 import { mentorCardFromUiElement, onlyGapFields, proposalKind, recordMentorProposal } from './mentor-cards';
 import { mentorSetupFieldPromptLine, resolveSetupFieldProposal, setupFieldRequestFromUiElement } from './chat-setup-field';
 import { draftRequestPromptLine, resolveDraftRequest } from './mentor-draft-request';
@@ -52,6 +52,7 @@ import { sendTemplatedEmail } from './email';
 import { logAiUsage } from './ai-usage';
 import { parseModelJson } from './model-json';
 import { sanitizeForModel } from './text-safe';
+import { shortQuestion } from './mentor-jobs';
 import { isGlobalAiDisabled } from './platform-config';
 import { resolveBaseUrl } from './base-url';
 
@@ -238,6 +239,12 @@ async function drawCard(db: Db, orgId: number, mentorId: number, data: MentorSna
         return { card: { ...card, fields: Object.fromEntries(fields.map((f) => [f, true])) }, kind: 'strategy_revision', title: m.summary, why: m.why, target: null, fields };
     }
     return null;
+}
+
+/** Pure: is the same suggestion (kind and what it changes) still waiting for an answer? */
+export function isStillWaiting(d: { kind: string; fields: string[] }, waiting: Array<{ kind: string; card: unknown }>): boolean {
+    const sig = [...d.fields].sort().join();
+    return waiting.some((w) => w.kind === d.kind && (proposalFields(w.card).join() === sig || (!d.fields.length && !proposalFields(w.card).length)));
 }
 
 // ── Recipients and delivery ───────────────────────────────────────────────────────────────────────
@@ -462,6 +469,10 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
             outcome = 'not_enough_data';
         } else {
             const left = inputs.proposals ? Math.max(0, WEEKLY_CAP - inputs.proposals.usedThisWeek) : 1;
+            const stillOpen = await loadOpenProposals(db, orgId);
+            const waitingLine = stillOpen.length
+                ? `STILL WAITING FOR THEIR ANSWER (never propose these again; you may remind them in words): ${stillOpen.slice(0, 8).map((o) => o.title).join(' | ')}`
+                : '';
             const system = [
                 `You are ${name}, the Business Mentor of ${org?.name || 'this business'} on Be More Swan.`,
                 MENTOR_REVIEW_CRAFT, MENTOR_HONESTY_RULES,
@@ -471,6 +482,7 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
                 renderTrackRecordForMentor(inputs.record).join('\n'),
                 renderCustomersForMentor(inputs.customers).join('\n'),
                 `SUGGESTIONS LEFT THIS WEEK: ${left}.`,
+                waitingLine,
                 reviewCardsPrompt(),
                 `Return STRICT JSON only: {"summary": "<two sentences: the headline of the week>", "sections": [{"title": "What went well", "text": "..."}, {"title": "What needs attention", "text": "..."}, {"title": "Since my last suggestions", "text": "..."}, {"title": "Commitments", "text": "..."}, {"title": "Your customers", "text": "..."}], "proposals": [<0 to ${left} cards>], "commitments": ["<1 to 3 small things for this week, the same ones you suggest under Commitments>"]}. Leave out a section with nothing true to say. "commitments" is saved only if they choose, from a card under the review.`,
             ].join('\n\n');
@@ -502,11 +514,14 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
 
             // Proposals: checked and rebuilt like chat cards; 3 a week and no dismissed kind (§3.13).
             const state: ProposalState = inputs.proposals ?? { usedThisWeek: 0, dismissed: [] };
+            // Never repeat a suggestion still waiting for an answer (staging, 26 Oct: a second identical post request).
+            const waiting = await loadOpenProposals(db, orgId);
             for (const ui of (Array.isArray(parsed.proposals) ? parsed.proposals : []).slice(0, WEEKLY_CAP)) {
                 const d = await drawCard(db, orgId, mentor.id, inputs.data, ui).catch(() => null);
                 if (!d || !d.why) continue;
                 if (d.target && !inputs.data.team.some((t) => t.id === d.target && t.state === 'active')) continue;
                 if (drawn.some((x) => x.kind === d.kind && x.fields.join() === d.fields.join())) continue;
+                if (isStillWaiting(d, waiting)) continue;
                 if (!gateSuggestion({ kind: d.kind, fields: d.fields, asked: false }, state, now).ok) continue;
                 drawn.push(d);
                 state.usedThisWeek++;
@@ -554,7 +569,7 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
         for (const p of people) {
             await createNotification(db, 'mentor_weekly_review', {
                 userId: p.userId, assistantId: mentor.id, category: 'state_change',
-                context: { assistant: { name }, review: { summary: summary.slice(0, 200), proposals: proposalsLine } },
+                context: { assistant: { name }, review: { summary: shortQuestion(summary, 200), proposals: proposalsLine } },
                 metadata: { assistantId: mentor.id, mentorReviewId: reviewId, chatSessionId: sessions.get(p.userId) ?? null },
             });
             if (isEmailEnabled(p.emailPrefs, 'mentor_weekly_review')) {
