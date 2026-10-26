@@ -293,6 +293,15 @@ window.NotifKit = (function () {
         // generic action fallback at the bottom drops the user on the dashboard to go and find it,
         // which for a card that expires in as little as two days is most of the way to not
         // notifying them at all.
+        // The Business Mentor's weekly review (src/utils/mentor-review.ts): the review is in THIS
+        // person's chat with the Mentor — open that conversation, not a fresh one (the Chat button starts
+        // a new conversation, so without this the review was only reachable through History).
+        if (notif.type === 'mentor_weekly_review' && meta.assistantId) {
+            return { label: 'Open my review', run: () => {
+                if (meta.chatSessionId && window.openAssistantChat) window.openAssistantChat({ assistantId: meta.assistantId, sessionId: meta.chatSessionId });
+                else { window._assistantDetailInitialTab = 'mentor'; window.routeToAssistantDetail?.(meta.assistantId); }
+            } };
+        }
         if (notif.type === 'campaign_decision_pending' && meta.assistantId) {
             return { label: 'Review decision', run: () => {
                 window._assistantDetailInitialTab = 'review-queue';

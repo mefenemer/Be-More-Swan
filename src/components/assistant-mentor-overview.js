@@ -62,6 +62,8 @@
   function schedulePoll() {
     clearTimeout(state.poll);
     const writing = (state.reviews?.reviews || []).some((r) => r.status === 'queued' || r.status === 'running');
+    // The "writing…" note goes once the review is there (its row says how it went).
+    if (!writing && state.reviewNote && !state.reviewNote.error && !state.reviewBusy) { state.reviewNote = null; render(); }
     if (writing && host()) state.poll = setTimeout(() => { if (host() && document.contains(host())) load(); }, 15000);
   }
 
@@ -104,17 +106,18 @@
             <span class="text-xs text-gray-500"> · ${v.trigger === 'on_demand' ? 'asked for' : 'weekly'}${v.outcome === 'not_enough_data' ? ' · not enough data yet' : ''}${(v.proposals || []).length ? ` · ${(v.proposals || []).length} suggestion${v.proposals.length === 1 ? '' : 's'}` : ''}</span>
             <p class="text-xs mt-0.5 break-words ${v.status === 'failed' ? 'text-red-600' : 'text-gray-600'}">${esc(label)}</p>
           </summary>
-          <div class="mt-1 pl-1">${sections}${props ? `<h4 class="text-xs font-bold text-gray-700 mt-2">Suggestions</h4><ul>${props}</ul>` : ''}</div>
+          <div class="mt-1 pl-1">${sections}${props ? `<h4 class="text-xs font-bold text-gray-700 mt-2">Suggestions</h4><ul>${props}</ul>` : ''}
+            ${v.chatSessionId ? `<button type="button" data-mentor-open-review="${Number(v.chatSessionId)}" class="btn-swan-link mt-2 px-0 py-1 text-xs font-bold">Open in chat</button>` : ''}</div>
         </details>
       </li>`;
     }).join('');
     return card(`
-      <div class="flex flex-wrap items-start justify-between gap-2">
-        <div class="min-w-0 flex-1">
+      <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+        <div class="min-w-0 sm:flex-1">
           <h2 class="text-base font-bold text-gray-900">Reviews</h2>
           <p class="text-xs text-gray-500 mt-0.5">${esc(when)} Change the day or switch it off on my profile, under “How should your Mentor work?”.</p>
         </div>
-        ${r.canRun ? `<button type="button" data-mentor-review-now class="btn-secondary shrink-0 px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50" ${state.reviewBusy ? 'disabled' : ''}>${state.reviewBusy ? 'Starting…' : 'Review my week now · 1 task'}</button>` : ''}
+        ${r.canRun ? `<button type="button" data-mentor-review-now class="btn-secondary self-start shrink-0 px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50" ${state.reviewBusy ? 'disabled' : ''}>${state.reviewBusy ? 'Starting…' : 'Review my week now · 1 task'}</button>` : ''}
       </div>
       ${state.reviewNote ? `<p class="mt-2 text-xs font-semibold ${state.reviewNote.error ? 'text-red-600' : 'text-pink-700'}" role="status">${esc(state.reviewNote.text)}</p>` : ''}
       ${items ? `<ul class="mt-2">${items}</ul>` : '<p class="text-sm text-gray-500 mt-2">No reviews yet. Your first arrives in your chat with me on your review day.</p>'}`, 'data-mentor-panel="reviews"');
@@ -354,6 +357,8 @@
     if (see) { window.MentorOpenCatalogue?.(see.getAttribute('data-mentor-see-role')); return; }
     if (t.closest('[data-mentor-feedback-go]')) { getFeedback(); return; }
     if (t.closest('[data-mentor-review-now]')) { reviewNow(); return; }
+    const openReview = t.closest('[data-mentor-open-review]');
+    if (openReview) { window.openAssistantChat?.({ assistantId: state.assistantId, sessionId: Number(openReview.getAttribute('data-mentor-open-review')) }); return; }
     if (t.closest('[data-mentor-help]') && window.loadView) window.loadView('help');
   });
   // The draft is kept as it is typed, so a repaint (a card saved in chat) never loses it.

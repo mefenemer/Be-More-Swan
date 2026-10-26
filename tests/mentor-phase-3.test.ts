@@ -26,7 +26,7 @@ import {
 import { sinceLine, verdictFor, MIN_SAMPLE } from '../src/utils/mentor-outcomes';
 import { excerpt, nothingToSee, renderCustomersForMentor, type CustomersView } from '../src/utils/mentor-customers';
 import { asksAboutCustomers, type MentorSnapshotData } from '../src/utils/mentor-snapshot';
-import { mentorCardFromUiElement, mentorCardsPromptBlock } from '../src/utils/mentor-cards';
+import { mentorCardFromUiElement, mentorCardsPromptBlock, onlyGapFields } from '../src/utils/mentor-cards';
 import { MENTOR_DATA_INVENTORY, mentorVisibility } from '../src/config/mentor-data-inventory';
 import { ROLE_MODEL_PATHS, promptLayersFor } from '../src/config/assistant-prompt-layers';
 import { TASK_WEIGHTS } from '../src/config/task-weights';
@@ -121,6 +121,14 @@ test('its own settings are in its prompt, changeable through the set-up card', (
     assert.match(t, /assistantId 50/);
     const keys = changeableSetupFields('business_mentor').map((f) => f.key);
     assert.ok(keys.includes('weeklyReview') && keys.includes('reviewDay'), 'the generic set-up card can change both');
+});
+
+test('a volunteered Business Information card fills gaps only — never overwrites (staging, 26 Oct)', () => {
+    const current = { description: 'We produce niche movies based on true stories', industry: 'Media', website: 'https://x.test', targetAudience: null };
+    assert.strictEqual(onlyGapFields({ businessDescription: 'A niche movie company.', industry: 'Film' }, current), null);
+    assert.deepStrictEqual(onlyGapFields({ businessDescription: 'x', targetAudience: 'Adults' }, current), { targetAudience: 'Adults' });
+    assert.match(read('src/utils/mentor-review.ts'), /onlyGapFields\(m\.fields, data\.business\)/);
+    assert.match(read('netlify/functions/chat-orchestrator.ts'), /!m\.asked && mentorParts && !onlyGapFields/);
 });
 
 console.log('mentor phase 3 — commitments');
@@ -280,6 +288,14 @@ test('delivery follows each user\'s settings: its own notification row, in-app a
 test('the review is scheduled on prod and poked on staging', () => {
     assert.match(read('netlify.toml'), /\[functions\.dispatch-mentor-reviews\]\n  schedule = "45 6 \* \* \*"/);
     assert.match(read('.github/workflows/staging-crons.yml'), /^\s+run-mentor-review-dispatch\s+21600\s+120$/m);
+});
+
+test('the review reaches the reader: "Open in chat" and the notification open its conversation; commitments come as a card', () => {
+    const src = read('src/utils/mentor-review.ts');
+    assert.match(src, /chatSessionId: sessions\.get\(p\.userId\) \?\? null/);
+    assert.match(src, /commitmentCard = \{ type: 'mentor_commitments', op: 'set'/);
+    assert.match(read('notifications.js'), /notif\.type === 'mentor_weekly_review'[\s\S]{0,300}openAssistantChat\(\{ assistantId: meta\.assistantId, sessionId: meta\.chatSessionId \}\)/);
+    assert.match(read('src/components/assistant-mentor-overview.js'), /data-mentor-open-review/);
 });
 
 test('the SQL is idempotent and drops nothing', () => {

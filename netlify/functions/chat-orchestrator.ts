@@ -103,7 +103,7 @@ import { asksForACall, callbackOfferElement } from '../../src/utils/callback-req
 import { asksAboutCustomers, buildMentorSnapshotParts, type MentorSnapshotData } from '../../src/utils/mentor-snapshot';
 import { recommendHires } from '../../src/utils/mentor-hire';
 import { assistantSetupFieldBlock, resolveSetupFieldProposal, setupFieldRequestFromUiElement, type SetupFieldCard } from '../../src/utils/chat-setup-field';
-import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, proposalKind, recordMentorProposal } from '../../src/utils/mentor-cards';
+import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, onlyGapFields, proposalKind, recordMentorProposal } from '../../src/utils/mentor-cards';
 import { gateMentorSuggestion, proposalFields } from '../../src/utils/mentor-proposals';
 import { resolveDraftRequest } from '../../src/utils/mentor-draft-request';
 import { closeCommitmentCard } from '../../src/utils/mentor-commitments';
@@ -714,7 +714,7 @@ The "Overview" tab holds:
   - "Suggestions waiting" — your suggestions they haven't answered yet, with "Review all" (shown only when there are some).
   - "Recommended next" — who you'd hire next and why (the same list as WHO TO HIRE NEXT), each with "See this assistant".
   - "Get feedback" — they paste a draft (or "Open a text file") and press "Get feedback" to get your critique on the page.
-  - "Reviews" — every weekly review you wrote, with its suggestions and whether each was accepted; "Review my week now" (owners and admins, 1 task).
+  - "Reviews" — every weekly review you wrote, with its suggestions and whether each was accepted, and "Open in chat"; "Review my week now" (owners and admins, 1 task).
   - "Customers" — won customers not heard from lately, deals won and lost and why, reviews and support tickets — only from their active assistants, names and dates only — and "What I can't see".
   - "Track record" — suggestions they accepted and what changed since.
 The "Results" tab holds "Commitments" — this week's 1–3 things for each person (theirs first), each with "Done", "Missed…" (pick why) and "Drop", "Add one for this week", and "Earlier weeks".
@@ -3319,11 +3319,16 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 } else {
                     uiElement = card;
                 }
+            } else if (m && m.type === 'mentor_business_profile' && !m.asked && mentorParts && !onlyGapFields(m.fields, mentorParts.data.business)) {
+                // A volunteered Business Information card fills gaps only (mentor-cards.ts onlyGapFields).
+                uiElement = null;
+                content = `${content}\n\n(I’ve left out a card: those details are already filled in, and I only suggest filling gaps. Ask me if you want to change them.)`;
             } else if (m) {
                 // The hire card's picks, reasons and plan room come from mentor-hire.ts — the same list as
                 // the Overview tab's "Recommended next" — never from the model.
                 const rec = m.type === 'mentor_hire_recommendation' ? recommendHires(mentorParts!.data) : null;
-                const filled = rec ? { ...m, why: rec.why, picks: rec.picks, capacity: rec.capacity } : m;
+                const gaps = m.type === 'mentor_business_profile' && !m.asked && mentorParts ? onlyGapFields(m.fields, mentorParts.data.business) : null;
+                const filled = rec ? { ...m, why: rec.why, picks: rec.picks, capacity: rec.capacity } : gaps && m.type === 'mentor_business_profile' ? { ...m, fields: gaps } : m;
                 uiElement = filled;
                 const kind = proposalKind(m);
                 if (kind && 'why' in filled) {

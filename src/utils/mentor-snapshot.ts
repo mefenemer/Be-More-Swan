@@ -32,7 +32,7 @@ const MAX_GOALS = 12;
 const MAX_RESEARCH = 5;
 
 export interface MentorSnapshotData {
-    business: { description: string | null; industry: string | null; website: string | null };
+    business: { description: string | null; industry: string | null; website: string | null; targetAudience?: string | null };
     products: Array<{ name: string; hasPrice: boolean }>;
     productCount: number;
     offerKinds: string[] | null;          // null = the question hasn't been answered
@@ -242,6 +242,7 @@ export async function buildMentorSnapshotParts(db: Db, orgId: number, userId: nu
 export async function loadMentorSnapshotData(db: Db, orgId: number, userId: number): Promise<MentorSnapshotData> {
     const [org] = await db.select({
         description: organisations.businessDescription, industry: organisations.industry, website: organisations.websiteUrl,
+        targetAudience: organisations.targetAudience,
     }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
 
     // Optional tables (applied by their own SQL files): a missing one reads as "not answered".
@@ -330,7 +331,7 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
             roleKey: c.roleKey, name: c.name, description: c.description ?? null,
             status: statusOf({ isActive: !!c.isActive, comingSoon: !!c.comingSoon, lifecycleState: c.lifecycleState ?? '' }),
         })),
-        business: { description: org?.description ?? null, industry: org?.industry ?? null, website: org?.website ?? null },
+        business: { description: org?.description ?? null, industry: org?.industry ?? null, website: org?.website ?? null, targetAudience: org?.targetAudience ?? null },
         products: products.slice(0, MAX_PRODUCTS).map((p) => ({ name: p.name, hasPrice: !!p.price?.trim() })),
         productCount: products.length,
         offerKinds: offer ? (offer.offers ?? []) : null,

@@ -154,6 +154,24 @@ export function mentorCardFromUiElement(ui: unknown, assistantId: number): Mento
     return null;
 }
 
+/**
+ * Pure: a VOLUNTEERED Business Information card fills gaps only — a field that already has a value is
+ * dropped, so a suggestion can never overwrite what the owner wrote (staging, 2026-10-26: the weekly
+ * review offered to replace a filled-in description and industry). Null when nothing is left to fill.
+ * A card the user asked for ("asked") may change a filled field: they asked.
+ */
+export function onlyGapFields(
+    fields: Partial<Record<ProfileField, string>>,
+    current: { description?: string | null; industry?: string | null; website?: string | null; targetAudience?: string | null },
+): Partial<Record<ProfileField, string>> | null {
+    const filled: Record<ProfileField, boolean> = {
+        businessDescription: !!current.description?.trim(), industry: !!current.industry?.trim(),
+        websiteUrl: !!current.website?.trim(), targetAudience: !!current.targetAudience?.trim(),
+    };
+    const out = Object.fromEntries(Object.entries(fields).filter(([k]) => !filled[k as ProfileField])) as Partial<Record<ProfileField, string>>;
+    return Object.keys(out).length ? out : null;
+}
+
 /** The kinds of mentor_proposals rows (§3.13): only suggestions count towards the weekly cap. */
 export function proposalKind(card: MentorCard): string | null {
     if (card.type === 'mentor_business_profile') return 'business_info_gap';

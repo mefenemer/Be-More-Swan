@@ -35,13 +35,13 @@ import { loadRoleModel, withRoleModel } from './assistant-model';
 import { MENTOR_ROLE_KEY } from './mentor-provision';
 import { renderMentorSnapshot, loadMentorSnapshotData, type MentorSnapshotData } from './mentor-snapshot';
 import { gateSuggestion, loadProposalState, renderProposalState, WEEKLY_CAP, type ProposalState } from './mentor-proposals';
-import { mentorCardFromUiElement, proposalKind, recordMentorProposal } from './mentor-cards';
+import { mentorCardFromUiElement, onlyGapFields, proposalKind, recordMentorProposal } from './mentor-cards';
 import { mentorSetupFieldPromptLine, resolveSetupFieldProposal, setupFieldRequestFromUiElement } from './chat-setup-field';
 import { draftRequestPromptLine, resolveDraftRequest } from './mentor-draft-request';
 import { buildStrategyCard } from './mentor-plan-cards';
 import { loadStrategyDocs } from './strategy-documents';
 import { recommendHires } from './mentor-hire';
-import { loadCommitments, renderCommitmentsForMentor, weekStartUk, weeksBefore, type Commitment } from './mentor-commitments';
+import { cleanCommitmentTexts, loadCommitments, renderCommitmentsForMentor, weekStartUk, weeksBefore, type Commitment } from './mentor-commitments';
 import { checkOutcomes, loadTrackRecord, renderTrackRecordForMentor, type TrackRecordItem } from './mentor-outcomes';
 import { loadCustomers, nothingToSee, renderCustomersForMentor, type CustomersView } from './mentor-customers';
 import { countRoiActivityByAssistant } from './roi-activity';
@@ -217,8 +217,11 @@ async function drawCard(db: Db, orgId: number, mentorId: number, data: MentorSna
     if (!m || 'error' in m) return null;
     if (m.type === 'mentor_business_profile' || m.type === 'mentor_products') {
         const kind = proposalKind(m)!;
-        const card = { ...m, asked: false };
-        const fields = m.type === 'mentor_business_profile' ? Object.keys(m.fields).sort() : [];
+        // A review's Business Information card fills gaps only — never overwrites what is written.
+        const gapFields = m.type === 'mentor_business_profile' ? onlyGapFields(m.fields, data.business) : null;
+        if (m.type === 'mentor_business_profile' && !gapFields) return null;
+        const card = m.type === 'mentor_business_profile' ? { ...m, asked: false, fields: gapFields! } : { ...m, asked: false };
+        const fields = m.type === 'mentor_business_profile' ? Object.keys(gapFields!).sort() : [];
         return { card, kind, title: m.summary, why: m.why, target: null, fields };
     }
     if (m.type === 'mentor_hire_recommendation') {
@@ -273,14 +276,18 @@ export interface ReviewView {
     id: number; trigger: string; weekStart: string; status: string; outcome: string | null; summary: string | null;
     sections: Array<{ title: string; text: string }>; proposals: Array<{ id: number; type: string; title: string; target: string | null; status?: string }>;
     error: string | null; createdAt: string | null; finishedAt: string | null;
+    /** The reader's own chat it was posted into ("Open in chat"), or null. */
+    chatSessionId: number | null;
 }
 
-export function toReviewView(r: any): ReviewView {
+export function toReviewView(r: any, userId?: number | null): ReviewView {
     const body = (r.body && typeof r.body === 'object') ? r.body : {};
+    const sid = userId != null && body.sessions && typeof body.sessions === 'object' ? Number(body.sessions[String(userId)]) : NaN;
     return {
         id: r.id, trigger: r.trigger, weekStart: String(r.weekStart).slice(0, 10), status: r.status, outcome: r.outcome ?? null, summary: r.summary ?? null,
         sections: Array.isArray(body.sections) ? body.sections : [], proposals: Array.isArray(body.proposals) ? body.proposals : [],
         error: r.error ?? null, createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null, finishedAt: r.finishedAt ? new Date(r.finishedAt).toISOString() : null,
+        chatSessionId: Number.isInteger(sid) && sid > 0 ? sid : null,
     };
 }
 
@@ -290,11 +297,11 @@ async function sweepStale(db: Db, orgId?: number): Promise<void> {
 }
 
 /** The Reviews list, newest first, with each suggestion's answer. Null when the table isn't there yet. */
-export async function loadReviews(db: Db, orgId: number, limit = 12): Promise<ReviewView[] | null> {
+export async function loadReviews(db: Db, orgId: number, userId: number | null = null, limit = 12): Promise<ReviewView[] | null> {
     try {
         await sweepStale(db, orgId);
         const rows = await db.select().from(mentorReviews).where(eq(mentorReviews.organisationId, orgId)).orderBy(desc(mentorReviews.createdAt)).limit(limit);
-        const views: ReviewView[] = rows.map(toReviewView);
+        const views: ReviewView[] = rows.map((r: any) => toReviewView(r, userId));
         const ids = [...new Set(views.flatMap((v) => v.proposals.map((p) => p.id)).filter((n) => Number.isInteger(n)))];
         if (ids.length) {
             const { mentorProposals } = await import('../../db/schema');
@@ -448,6 +455,7 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
         let outcome: 'reviewed' | 'not_enough_data';
         let drawn: Drawn[] = [];
         let charged = false;
+        let commitmentCard: Record<string, unknown> | null = null;
 
         if (!hasEnoughData(inputs, now)) {
             ({ summary, sections } = notEnoughDataReview(inputs, now));
@@ -464,7 +472,7 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
                 renderCustomersForMentor(inputs.customers).join('\n'),
                 `SUGGESTIONS LEFT THIS WEEK: ${left}.`,
                 reviewCardsPrompt(),
-                `Return STRICT JSON only: {"summary": "<two sentences: the headline of the week>", "sections": [{"title": "What went well", "text": "..."}, {"title": "What needs attention", "text": "..."}, {"title": "Since my last suggestions", "text": "..."}, {"title": "Commitments", "text": "..."}, {"title": "Your customers", "text": "..."}], "proposals": [<0 to ${left} cards>]}. Leave out a section with nothing true to say.`,
+                `Return STRICT JSON only: {"summary": "<two sentences: the headline of the week>", "sections": [{"title": "What went well", "text": "..."}, {"title": "What needs attention", "text": "..."}, {"title": "Since my last suggestions", "text": "..."}, {"title": "Commitments", "text": "..."}, {"title": "Your customers", "text": "..."}], "proposals": [<0 to ${left} cards>], "commitments": ["<1 to 3 small things for this week, the same ones you suggest under Commitments>"]}. Leave out a section with nothing true to say. "commitments" is saved only if they choose, from a card under the review.`,
             ].join('\n\n');
             const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
             const { response, model } = await withRoleModel(
@@ -480,7 +488,7 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
                 inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens,
                 sessionId: `mentor:review:${reviewId}`, dataCategories: ['business_context'],
             });
-            const parsed = parseModelJson<{ summary?: unknown; sections?: unknown; proposals?: unknown }>(replyText(response.content));
+            const parsed = parseModelJson<{ summary?: unknown; sections?: unknown; proposals?: unknown; commitments?: unknown }>(replyText(response.content));
             if (!parsed || typeof parsed.summary !== 'string' || !parsed.summary.trim()) throw new Error('The review came back empty.');
             summary = parsed.summary.trim().slice(0, 600);
             sections = (Array.isArray(parsed.sections) ? parsed.sections : []).flatMap((s: any) => (
@@ -488,6 +496,9 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
             )).slice(0, 6);
             outcome = 'reviewed';
             charged = true;
+            // §5.1: the commitments it suggests, as the chat's own card — the user's to save, never a suggestion.
+            const c = cleanCommitmentTexts(parsed.commitments);
+            if (c.ok) commitmentCard = { type: 'mentor_commitments', op: 'set', summary: 'Save these as this week’s commitments?', texts: c.texts };
 
             // Proposals: checked and rebuilt like chat cards; 3 a week and no dismissed kind (§3.13).
             const state: ProposalState = inputs.proposals ?? { usedThisWeek: 0, dismissed: [] };
@@ -520,13 +531,20 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
         const text = reviewMessage(summary, sections, recorded.length);
         for (const sid of sessions.values()) {
             await db.insert(chatMessages).values({ chatSessionId: sid, role: 'assistant', content: text, uiElementJson: null });
-            for (const r of recorded) await db.insert(chatMessages).values({ chatSessionId: sid, role: 'assistant', content: r.title, uiElementJson: r.card });
+            for (const [i, r] of recorded.entries()) {
+                await db.insert(chatMessages).values({ chatSessionId: sid, role: 'assistant', content: recorded.length > 1 ? `Suggestion ${i + 1} of ${recorded.length}` : 'My suggestion this week', uiElementJson: r.card });
+            }
+            if (commitmentCard) await db.insert(chatMessages).values({ chatSessionId: sid, role: 'assistant', content: 'Your commitments for this week', uiElementJson: commitmentCard });
             await db.update(chatSessions).set({ updatedAt: new Date() }).where(eq(chatSessions.id, sid));
         }
 
         await db.update(mentorReviews).set({
             status: 'done', outcome, summary, finishedAt: new Date(), proposalIds: recorded.map((r) => r.id),
-            body: { sections, figures: inputs.figures, proposals: recorded.map((r) => ({ id: r.id, type: r.type, title: r.title, target: r.target })) },
+            body: {
+                sections, figures: inputs.figures, proposals: recorded.map((r) => ({ id: r.id, type: r.type, title: r.title, target: r.target })),
+                // Each recipient's chat it was posted into — "Open in chat" on the Reviews list and the notification.
+                sessions: Object.fromEntries([...sessions.entries()].map(([u, sid]) => [String(u), sid])),
+            },
         }).where(eq(mentorReviews.id, reviewId));
         if (charged) await recordCompletedWork(db, orgId, 'mentor_review', { assistantId: mentor.id, ref: `mentor_review:${reviewId}` });
 
@@ -537,7 +555,7 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
             await createNotification(db, 'mentor_weekly_review', {
                 userId: p.userId, assistantId: mentor.id, category: 'state_change',
                 context: { assistant: { name }, review: { summary: summary.slice(0, 200), proposals: proposalsLine } },
-                metadata: { assistantId: mentor.id, mentorReviewId: reviewId },
+                metadata: { assistantId: mentor.id, mentorReviewId: reviewId, chatSessionId: sessions.get(p.userId) ?? null },
             });
             if (isEmailEnabled(p.emailPrefs, 'mentor_weekly_review')) {
                 await sendTemplatedEmail({

@@ -130,7 +130,7 @@ export default withLambda(async (event) => {
                         .where(and(eq(aiAssistants.id, mentorRow.id), eq(aiAssistants.organisationId, orgId))).limit(1);
                     ctxRow = r?.c ?? null;
                 }
-                const [reviews, trackRecord] = await Promise.all([loadReviews(db, orgId), loadTrackRecord(db, orgId)]);
+                const [reviews, trackRecord] = await Promise.all([loadReviews(db, orgId, ctx.userId), loadTrackRecord(db, orgId)]);
                 return json(200, {
                     ready: reviews !== null, reviews: reviews ?? [], settings: reviewSettings(ctxRow), canRun: REVIEW_ROLES.includes(String(ctx.role)),
                     trackRecord: trackRecord ?? [], trackReady: trackRecord !== null,
