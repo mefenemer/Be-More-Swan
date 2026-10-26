@@ -107,7 +107,7 @@ import { asksAboutCustomers, buildMentorSnapshotParts, type MentorSnapshotData }
 import { recommendHires } from '../../src/utils/mentor-hire';
 import { assistantSetupFieldBlock, resolveSetupFieldProposal, setupFieldRequestFromUiElement, type SetupFieldCard } from '../../src/utils/chat-setup-field';
 import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, onlyGapFields, proposalKind, recordMentorProposal, resolveProductRemoval } from '../../src/utils/mentor-cards';
-import { gateMentorSuggestion, proposalFields } from '../../src/utils/mentor-proposals';
+import { gateMentorSuggestion, proposalFields, supersedeSetupFieldProposals } from '../../src/utils/mentor-proposals';
 import { resolveDraftRequest } from '../../src/utils/mentor-draft-request';
 import { closeCommitmentCard } from '../../src/utils/mentor-commitments';
 import { cardOutcomeLine } from '../../src/utils/mentor-card-outcome';
@@ -3296,6 +3296,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 if (!gate.ok) { uiElement = null; content = `${content}\n\n(${gate.note})`; }
                 else {
                     const proposalId = await recordMentorProposal(db, { organisationId: orgId, aiAssistantId: session.aiAssistantId, kind: 'setup_field', title: card.summary, why: card.why, payload: { ...card, fields: { [`${card.assistantId}:${card.key}`]: card.value } }, chatSessionId: session.id, targetAssistantId: card.assistantId });
+                    if (proposalId) await supersedeSetupFieldProposals(db, orgId, { id: proposalId, assistantId: card.assistantId, key: card.key });
                     uiElement = { ...card, proposalId };
                 }
             } else {

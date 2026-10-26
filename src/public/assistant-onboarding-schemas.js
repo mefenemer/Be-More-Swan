@@ -590,7 +590,7 @@
             label: 'Email signature',
             type: 'textarea',
             required: false,
-            placeholder: 'Mark Fenemer\nFounder, Be More Swan\n07700 900123 · bemoreswan.com',
+            placeholder: 'Sam Taylor\nFounder, Taylor & Co\n07700 900123 · taylorandco.example',
             helpText: 'Added under every outreach email — first emails, follow-ups and replies. Plain text, exactly as you type it (your recipient\'s email app chooses the font). When this is set, your {role:lead_qualifier} stops signing off its drafts so the email is not signed twice. Leave blank for no signature.',
           },
         ],

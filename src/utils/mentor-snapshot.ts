@@ -9,7 +9,7 @@
 //
 // Missing is not zero (§12.3): a paused or unhired assistant is described as such, never as idle.
 
-import { and, count, eq, inArray, ne, or, sql } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import { aiAssistants, goals, masterAssistants, masterPlans, mentorJobs, orgIntroOffer, orgOfferProfile, orgProducts, organisations, plans } from '../../db/schema';
 import { MENTOR_ROLE_KEY } from './mentor-provision';
 import { SEAT_OCCUPYING_STATUSES, takesASeat } from './assistant-capacity';
@@ -255,9 +255,13 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
         }
     };
 
+    // ACTIVE rows only, in the business's order — the list every other assistant drafts from
+    // (org-products.ts loadOrgProducts). Unfiltered, an archived product showed up here with no
+    // details behind it, and the Mentor told the owner they sold it.
     const products: Array<{ id: number; name: string; price: string | null }> = await optional(() => db
         .select({ id: orgProducts.id, name: orgProducts.name, price: orgProducts.price }).from(orgProducts)
-        .where(eq(orgProducts.organisationId, orgId)), []);
+        .where(and(eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active')))
+        .orderBy(asc(orgProducts.sortOrder), asc(orgProducts.id)), []);
     const [offer] = await optional(() => db.select({ offers: orgOfferProfile.offers }).from(orgOfferProfile)
         .where(eq(orgOfferProfile.organisationId, orgId)).limit(1), [] as Array<{ offers: string[] }>);
     const [intro] = await optional(() => db.select({ one: sql<number>`1` }).from(orgIntroOffer)
