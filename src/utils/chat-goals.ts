@@ -23,9 +23,10 @@
 
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { goals } from '../../db/schema';
+import { aiAssistants, goals, masterAssistants } from '../../db/schema';
 import { GOAL_METRICS, assessGoalRealism, availableMetricsForRole, getGoalMetric, isManualMetric, type GoalMetric } from '../config/goal-metrics';
 import { connectedServices } from './goal-connections';
+import { teamState } from './mentor-snapshot';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -154,6 +155,8 @@ export interface GoalCard {
     isPrimary: boolean | undefined;
     blocked: string | null;
     settled?: boolean;
+    /** Set when the Business Mentor proposes it for another assistant: the card names whose goal it is. */
+    assistantName?: string;
 }
 
 interface GoalRow {
@@ -250,6 +253,49 @@ export async function resolveGoalProposal(
         return card;
     } catch (err) {
         console.error('[chat-goals] could not resolve the proposal (non-fatal)', err);
+        return null;
+    }
+}
+
+// ── The Business Mentor: another assistant's goal ────────────────────────────────────────────────
+// The Mentor sees every goal in the workspace (mentor-snapshot.ts GOALS, by "#" number) and kept
+// flagging expired ones ("Dex's newsletter goal expired on 30 September") with no way to act: asked to
+// "change it to 31 December 2026", it could only give directions. It may now propose an UPDATE to a
+// goal of an ACTIVE assistant — the same card, the same checks (resolveGoalProposal, run as the goal's
+// own assistant), the same click (manage-goals.ts PATCH). Setting or deleting a goal stays with that
+// assistant's own chat and Results tab.
+
+/** For the Mentor's prompt (mentor-cards.ts). */
+export function mentorGoalPromptLine(): string {
+    return `Change a goal of an ACTIVE assistant — ONLY when the user asks or agrees (otherwise suggest it in words). Name it by its "#" number under GOALS; give only what changes; a date must be in the future (turn "end of December" into a date):
+{ "type": "goal_proposal", "action": "update", "goalId": <# number>, "targetDate": "YYYY-MM-DD" or omit, "targetValue": <number, or omit> }
+Setting a new goal or deleting one is done in that assistant's own chat or on its Results tab — say so.`;
+}
+
+/**
+ * The Mentor's goal card: rebuilt from the goal and its assistant. { error } when it can't be offered;
+ * null when the read fails. Never throws.
+ */
+export async function resolveTeamGoalProposal(
+    db: Db, organisationId: number, req: GoalRequest, now: Date = new Date(),
+): Promise<GoalCard | { error: string } | null> {
+    if (req.action !== 'update') return { error: 'I can only change an existing goal\'s date or target. A new goal, or deleting one, is set in that assistant\'s own chat or on its Results tab.' };
+    try {
+        const row = await readGoal(db, organisationId, req.goalId!);
+        if (!row || !row.isActive) return { error: 'That goal no longer exists.' };
+        const [owner] = await db.select({
+            id: aiAssistants.id, name: aiAssistants.name, roleKey: masterAssistants.roleKey,
+            lifecycleStatus: aiAssistants.lifecycleStatus, provisioningStatus: aiAssistants.provisioningStatus,
+        }).from(aiAssistants)
+            .leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
+            .where(and(eq(aiAssistants.id, row.assistantId), eq(aiAssistants.organisationId, organisationId)))
+            .limit(1);
+        if (!owner) return { error: 'That goal no longer exists.' };
+        if (teamState(owner.lifecycleStatus, owner.provisioningStatus) !== 'active') return { error: `${owner.name || 'That assistant'} isn't active, so I can't change its goals.` };
+        const card = await resolveGoalProposal(db, organisationId, owner.id, owner.roleKey, req, now);
+        return card ? { ...card, assistantName: owner.name || 'Assistant' } : null;
+    } catch (err) {
+        console.error('[chat-goals] could not resolve the Mentor\'s goal card (non-fatal)', err);
         return null;
     }
 }

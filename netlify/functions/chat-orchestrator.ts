@@ -83,7 +83,7 @@ import {
 } from '../../src/utils/chat-assistant-settings';
 import { buildRulesListBlock, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock, type RuleCard } from '../../src/utils/chat-rules';
 import { buildPlanSnapshot } from '../../src/utils/chat-plan-snapshot';
-import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGoalProposal, type GoalCard } from '../../src/utils/chat-goals';
+import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGoalProposal, resolveTeamGoalProposal, type GoalCard } from '../../src/utils/chat-goals';
 import { introOfferCardFromUiElement, introOfferPromptBlock, type IntroOfferCard } from '../../src/utils/intro-offer';
 import { buildOutreachOfferChatBlock, OUTREACH_OFFER_CARD_TYPE, outreachOfferCardFrom, type OutreachOfferCard } from '../../src/utils/chat-outreach-offer';
 import { listGiftForms } from '../../src/utils/outreach-offer';
@@ -3460,7 +3460,19 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // rules, realism included; the click calls manage-goals.ts as the Results tab does.
         let goalCard: GoalCard | null = null;
         const goalReq = route !== defaultRoute && !settingsReq && !ruleReq ? goalProposalFromUiElement(uiElement) : null;
-        if (goalReq) {
+        if (goalReq && route === ROUTES.business_mentor) {
+            // The Mentor changes another ACTIVE assistant's goal (date / target) — the same card and checks,
+            // run as the goal's own assistant (chat-goals.ts resolveTeamGoalProposal).
+            const card = await resolveTeamGoalProposal(db, orgId, goalReq);
+            // goalCard too, so the reply beside it is checked like any profile card's (confirmCardReply).
+            if (card && !('error' in card)) { goalCard = card; uiElement = card; }
+            else {
+                uiElement = null;
+                content = card
+                    ? `${content}\n\n(I didn’t include a card for that — ${card.error.charAt(0).toLowerCase()}${card.error.slice(1)} You can change it on that assistant’s Results tab instead.)`
+                    : `${content}\n\n(I couldn’t read your goals just now, so there’s no card — try again in a moment, or use that assistant’s Results tab.)`;
+            }
+        } else if (goalReq) {
             goalCard = await resolveGoalProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, goalReq);
             uiElement = goalCard;
             if (!goalCard) content = 'I couldn’t read your goals just now, so I haven’t set anything up. Please try again in a moment, or use the Results tab.';

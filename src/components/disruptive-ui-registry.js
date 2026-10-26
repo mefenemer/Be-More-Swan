@@ -4095,15 +4095,17 @@
     const assistantId = Number(ui.assistantId);
     if (!copy || !Number.isInteger(assistantId)) return null;
     const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    // Set when the Business Mentor proposes it for another assistant (chat-goals.ts resolveTeamGoalProposal).
+    const who = typeof ui.assistantName === 'string' && ui.assistantName.trim() ? ui.assistantName.trim() : '';
     const el = document.createElement('div');
     el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
       <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
-      <p class="text-xs text-gray-500 mt-2">Results tab${ui.goalId ? ` · goal #${Number(ui.goalId)}` : ''}${ui.metricLabel ? ` · ${esc(ui.metricLabel)}` : ''}</p>
+      <p class="text-xs text-gray-500 mt-2">${who ? `${esc(who)}’s ` : ''}Results tab${ui.goalId ? ` · goal #${Number(ui.goalId)}` : ''}${ui.metricLabel ? ` · ${esc(ui.metricLabel)}` : ''}</p>
       ${ui.current ? `<p class="text-sm text-gray-700 mt-2 break-words"><span class="font-bold">${ui.action === 'delete' ? 'Goal:' : 'Now:'}</span> ${esc(ui.current)}</p>` : ''}
       ${ui.proposed && ui.action !== 'delete' ? `<p class="text-sm text-gray-900 mt-1 break-words"><span class="font-bold">${ui.action === 'create' ? 'Goal:' : 'After:'}</span> ${esc(ui.proposed)}</p>` : ''}
       ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
-      ${!blocked && ui.action !== 'delete' ? '<p class="text-xs text-gray-600 mt-3">Your assistant steers what it drafts toward this from now on.</p>' : ''}
+      ${!blocked && ui.action !== 'delete' ? `<p class="text-xs text-gray-600 mt-3">${who ? esc(who) : 'Your assistant'} steers what it drafts toward this from now on.</p>` : ''}
       ${!blocked && ui.action === 'delete' ? '<p class="text-xs text-gray-600 mt-3">This removes the goal and its progress for good.</p>' : ''}
       <div class="flex flex-wrap items-center gap-2 mt-3">
         ${blocked ? '' : `<button type="button" data-gp-go class="${copy.danger ? 'btn-destructive' : 'btn-primary'} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>
