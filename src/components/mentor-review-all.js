@@ -36,6 +36,9 @@
       const list = Array.isArray(card.products) ? card.products : [];
       return `<p class="text-xs text-gray-700 break-words"><span class="font-semibold">Add to Products &amp; Services:</span> ${esc(list.map((p) => p.name).join(', '))}</p>`;
     }
+    if (card.type === 'mentor_draft_request') {
+      return `<p class="text-xs text-gray-700 break-words"><span class="font-semibold">Ask ${esc(card.assistantName)} for a post:</span> ${esc(String(card.brief || '').slice(0, 240))}</p>`;
+    }
     if (card.type === 'setup_field_proposal') {
       return `<p class="text-xs text-gray-700 break-words"><span class="font-semibold">${esc(card.assistantName)} · ${esc(card.label)}:</span> ${esc(card.currentLabel || 'Not answered')} → <span class="font-semibold text-gray-900">${esc(card.valueLabel ?? card.value)}</span></p>`;
     }
@@ -103,7 +106,8 @@
       let ok = 0; let failed = 0;
       for (const it of chosen) {
         try {
-          await window.MentorApply.applyCard(it.card);
+          // The suggestion's id rides along: a post request links its draft to it ("Requested by").
+          await window.MentorApply.applyCard({ ...it.card, proposalId: it.id });
           st.results[it.id] = { ok: true };
           st.ticked.delete(it.id);
           ok++;

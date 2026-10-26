@@ -1485,6 +1485,21 @@
       mentorRun(e, (A, d) => A.research(d.question, chatSessionId));
     }
 
+    // Phase 3 (§5.1, §5.3): commitments → mentor.ts, the Results tab's own actions; a post request →
+    // generate-post.ts as "Create a Post" does, with the suggestion's id for its "Requested by" pill.
+    async function onMentorCommitmentsAdd(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.commitmentsAdd(d.texts).then(() => undefined));
+    }
+    async function onMentorCommitmentClose(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.commitmentClose(d.id, d.status, d.missReason, d.note).then(() => undefined));
+    }
+    async function onMentorDraftRequest(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.draftRequest(d.assistantId, d.brief, d.proposalId));
+    }
+
     // "Save this" on an outreach_offer card (Lead Generator) → lead-generation.ts set_outreach_offer, the
     // same action as the Outreach tab's offer strip (src/config/outreach-offer.ts).
     function onOutreachOffer(e) {
@@ -1908,6 +1923,9 @@
     container.addEventListener('mentor:strategyApprove', onMentorStrategyApprove);
     container.addEventListener('mentor:strategyDraft', onMentorStrategyDraft);
     container.addEventListener('mentor:research', onMentorResearch);
+    container.addEventListener('mentor:commitmentsAdd', onMentorCommitmentsAdd);
+    container.addEventListener('mentor:commitmentClose', onMentorCommitmentClose);
+    container.addEventListener('mentor:draftRequest', onMentorDraftRequest);
     container.addEventListener('setupField:apply', onSetupFieldApply);
     container.addEventListener('lead:outreachOffer', onOutreachOffer);
     container.addEventListener('cta:change', onCallToAction);
@@ -1993,6 +2011,9 @@
         container.removeEventListener('mentor:strategyApprove', onMentorStrategyApprove);
         container.removeEventListener('mentor:strategyDraft', onMentorStrategyDraft);
         container.removeEventListener('mentor:research', onMentorResearch);
+        container.removeEventListener('mentor:commitmentsAdd', onMentorCommitmentsAdd);
+        container.removeEventListener('mentor:commitmentClose', onMentorCommitmentClose);
+        container.removeEventListener('mentor:draftRequest', onMentorDraftRequest);
         container.removeEventListener('setupField:apply', onSetupFieldApply);
         container.removeEventListener('lead:outreachOffer', onOutreachOffer);
         container.removeEventListener('cta:change', onCallToAction);

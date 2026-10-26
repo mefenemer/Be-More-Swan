@@ -6763,6 +6763,13 @@ function _applyDashboardRegistry(data) {
         setText('mentorplan-tab-label', mentorPlanTab.label || 'Plan');
         window.AssistantMentorPlan?.init({ assistantId: data.id, assistantName: data.name });
     }
+    // Commitments — Business Mentor only (mentorCommitments): top of its Results tab (mentor-commitments.js).
+    const commitHost = document.getElementById('mentor-commitments-host');
+    if (commitHost) {
+        commitHost.classList.toggle('hidden', !cfg.mentorCommitments);
+        commitHost.style.display = cfg.mentorCommitments ? '' : 'none';
+        if (cfg.mentorCommitments) window.MentorCommitments?.init({ assistantId: data.id, assistantName: data.name });
+    }
 
     // Briefs tab — Brand Designer only (briefsTab: brand_designer). init() loads eagerly: the count
     // of briefs waiting for a decision is the tab badge, visible from every tab.

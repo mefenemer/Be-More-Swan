@@ -661,6 +661,28 @@ changes that didn't help and about results too small to judge (the minimum-sampl
   separate from everything else that happened.
 - Needs a small table (`mentor_outcomes`: proposal, target, measure, before, after, checked_at).
 
+### 5.4 As built (2026-10-26)
+
+- **Tables:** `db/z-business-mentor-phase-3.sql` — `mentor_reviews`, `mentor_commitments`, `mentor_outcomes`
+  (idempotent; code tolerates them missing).
+- **Review:** `src/utils/mentor-review.ts`. Daily dispatch at 06:45 UTC (`dispatch-mentor-reviews.ts`; staging:
+  `run-mentor-review-dispatch` in `staging-crons.yml`), one scheduled review per workspace per week on its
+  review day (set-up answers `weeklyReview`, `reviewDay`; Monday by default; a missed day is caught up that
+  week), worker `mentor-review-background.ts`. Below the minimum sample it writes "not enough data yet" in
+  code with no model call and **no charge**; otherwise 1 task (`mentor_review`). "Review my week now" on the
+  Overview tab (owners and admins). Reviews land in every owner's and admin's chat with the Mentor; each is
+  told by the new `mentor_weekly_review` notification row (in-app + email).
+- **Proposals** reuse the chat's cards and checks (set-up answer, Business Information, Products &
+  Services, who to hire, plan revision) plus one new card, `mentor_draft_request`: a post asked of an
+  ACTIVE Social Media assistant through "Create a Post" (`generate-post.ts`). That is where *Requested by:
+  Mentor* pills come from (`mentor_outcomes.job_id` → `requested-by.ts`); setting changes have no "work"
+  of their own to carry a pill.
+- **Customers:** `src/utils/mentor-customers.ts`. ⚠️ Correction to §5.2/§12.1: `invoices` is **Be More
+  Swan's own billing**, not the business's invoices, so it is `never`; overdue invoices come from the
+  Accounts Receivable assistant's `assistant_records` instead. A check-in for a quiet customer is a message
+  the Mentor drafts in chat for the user to send (no Email Marketing hand-off yet).
+- **Screens:** Overview tab — Reviews, Track record, Customers; Results tab — Commitments.
+
 **Done when:** a staging workspace with real activity gets a review whose proposals each apply
 correctly through the GUI endpoint; a workspace with no activity gets an honest "not enough yet"; a
 missed commitment records its reason; a workspace with won leads sees its quiet customers.

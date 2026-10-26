@@ -677,7 +677,34 @@
             required: false,
             options: [
               { value: 'off', label: 'Suggest things', description: 'Your Mentor points out what to fix and suggests next steps.' },
-              { value: 'on', label: 'Only when I ask', description: 'No health checks or suggestions — it answers your questions and helps with Be More Swan.' },
+              { value: 'on', label: 'Only when I ask', description: 'No health checks, suggestions or weekly review — it answers your questions and helps with Be More Swan.' },
+            ],
+          },
+          {
+            // The weekly review (docs/business-mentor-plan.md §5; src/utils/mentor-review.ts reviewSettings).
+            // Quiet mode also stops it. Owners and admins are told by their own notification settings.
+            key: 'weeklyReview',
+            label: 'Weekly review',
+            type: 'radio',
+            required: false,
+            options: [
+              { value: 'on', label: 'Review my week', description: 'Once a week your Mentor compares what happened with your plan and suggests up to 3 changes. 1 task each week.' },
+              { value: 'off', label: 'No weekly review', description: 'You can still ask for one any time.' },
+            ],
+          },
+          {
+            key: 'reviewDay',
+            label: 'Review day',
+            type: 'dropdown',
+            required: false,
+            options: [
+              { value: 'Monday', label: 'Monday' },
+              { value: 'Tuesday', label: 'Tuesday' },
+              { value: 'Wednesday', label: 'Wednesday' },
+              { value: 'Thursday', label: 'Thursday' },
+              { value: 'Friday', label: 'Friday' },
+              { value: 'Saturday', label: 'Saturday' },
+              { value: 'Sunday', label: 'Sunday' },
             ],
           },
         ],

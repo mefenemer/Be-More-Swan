@@ -100,11 +100,14 @@ import { enforcePromptModeration } from '../../src/utils/moderation';
 import { BRIEF_PURPOSES, BRIEF_ASPECT_RATIOS, REJECT_REASONS, SOURCE_SPECS } from '../../src/config/visual-brief-vocab';
 import { FUNNEL_STAGES, FUNNEL_STAGE_DESCRIPTIONS, stageOutcomes } from '../../src/config/campaign-vocab';
 import { asksForACall, callbackOfferElement } from '../../src/utils/callback-request';
-import { buildMentorSnapshotParts, type MentorSnapshotData } from '../../src/utils/mentor-snapshot';
+import { asksAboutCustomers, buildMentorSnapshotParts, type MentorSnapshotData } from '../../src/utils/mentor-snapshot';
 import { recommendHires } from '../../src/utils/mentor-hire';
 import { assistantSetupFieldBlock, resolveSetupFieldProposal, setupFieldRequestFromUiElement, type SetupFieldCard } from '../../src/utils/chat-setup-field';
 import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, proposalKind, recordMentorProposal } from '../../src/utils/mentor-cards';
 import { gateMentorSuggestion, proposalFields } from '../../src/utils/mentor-proposals';
+import { resolveDraftRequest } from '../../src/utils/mentor-draft-request';
+import { closeCommitmentCard } from '../../src/utils/mentor-commitments';
+import { renderReviewSettingsForMentor } from '../../src/utils/mentor-review';
 import { mentorVisibilityPromptBlock } from '../../src/config/mentor-data-inventory';
 import { buildBreakEvenCard, buildStrategyCard } from '../../src/utils/mentor-plan-cards';
 import { loadStrategyDocs } from '../../src/utils/strategy-documents';
@@ -711,6 +714,10 @@ The "Overview" tab holds:
   - "Suggestions waiting" — your suggestions they haven't answered yet, with "Review all" (shown only when there are some).
   - "Recommended next" — who you'd hire next and why (the same list as WHO TO HIRE NEXT), each with "See this assistant".
   - "Get feedback" — they paste a draft (or "Open a text file") and press "Get feedback" to get your critique on the page.
+  - "Reviews" — every weekly review you wrote, with its suggestions and whether each was accepted; "Review my week now" (owners and admins, 1 task).
+  - "Customers" — won customers not heard from lately, deals won and lost and why, reviews and support tickets — only from their active assistants, names and dates only — and "What I can't see".
+  - "Track record" — suggestions they accepted and what changed since.
+The "Results" tab holds "Commitments" — this week's 1–3 things for each person (theirs first), each with "Done", "Missed…" (pick why) and "Drop", "Add one for this week", and "Earlier weeks".
 "Review all" opens every waiting suggestion together, each with its own tick (none ticked); "Apply … ticked" applies only those. It is also at the top of "Notifications" ▸ "Needs you" when suggestions are waiting.
 The assistant catalogue ("Hire a New Assistant") marks the roles you recommend with a "Recommended" badge.
 Each suggestion card has "Dismiss…", which asks why: "Not relevant", "Already done", "Disagree" or "Not now" (not now = back in two weeks).
@@ -2910,12 +2917,13 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // Per turn: a gap filled or an assistant paused a moment ago must be visible to the next message.
     // Never throws.
     const mentorParts: { text: string; data: MentorSnapshotData } | null = route.usesMentorSnapshot
-        ? await buildMentorSnapshotParts(db, orgId, userId).catch((err) => {
+        ? await buildMentorSnapshotParts(db, orgId, userId, { withCustomers: asksAboutCustomers(typed) }).catch((err) => {
             console.error('[chat-orchestrator] mentor snapshot failed:', err);
             return null;
         })
         : null;
-    const mentorSnapshot = mentorParts?.text ?? null;
+    // Phase 3: its own weekly-review settings ride with the snapshot (mentor-review.ts).
+    const mentorSnapshot = mentorParts ? `${mentorParts.text}\n${renderReviewSettingsForMentor(session.aiAssistantId, assistantRow.onboardingContext)}` : null;
 
     // Per turn, like the leads snapshot: something approved on the Posts / Blogs / Emails tab a
     // moment ago must already be in "Scheduled" when the user asks what is coming up. Never throws.
@@ -3247,8 +3255,20 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         } else if (route === ROUTES.business_mentor) {
             // Asked who to hire, or to review everything, and no card drawn: the server-filled card anyway.
             if (!uiElement) uiElement = cardTheUserAskedFor(typed);
-            const m = mentorCardFromUiElement(uiElement, session.aiAssistantId);
-            if (m && 'error' in m) {
+            // Phase 3: a post asked of an ACTIVE Social Media assistant (mentor-draft-request.ts), rebuilt from its row.
+            const draftReq = await resolveDraftRequest(db, orgId, uiElement);
+            const m = draftReq ? null : mentorCardFromUiElement(uiElement, session.aiAssistantId);
+            if (draftReq && 'error' in draftReq) {
+                uiElement = null;
+                content = `${content}\n\n(I didn’t include a card for that — ${draftReq.error.charAt(0).toLowerCase()}${draftReq.error.slice(1)})`;
+            } else if (draftReq) {
+                const gate = await gateMentorSuggestion(db, orgId, { kind: 'draft_request', fields: [`${draftReq.assistantId}:post`], asked: draftReq.asked });
+                if (!gate.ok) { uiElement = null; content = `${content}\n\n(${gate.note})`; }
+                else {
+                    const proposalId = await recordMentorProposal(db, { organisationId: orgId, aiAssistantId: session.aiAssistantId, kind: 'draft_request', title: draftReq.summary, why: draftReq.why, payload: draftReq, chatSessionId: session.id, targetAssistantId: draftReq.assistantId });
+                    uiElement = { ...draftReq, proposalId };
+                }
+            } else if (m && 'error' in m) {
                 uiElement = null;
                 content = `${content}\n\n(I didn’t include a card for that — ${m.error.charAt(0).toLowerCase()}${m.error.slice(1)} You can make the change on the page instead.)`;
             } else if (m && m.type === 'mentor_hire_recommendation' && !mentorParts) {
@@ -3290,6 +3310,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 }
             } else if (m && m.type === 'mentor_research') {
                 uiElement = m; // the click queues the job (mentor.ts research); nothing runs until then
+            } else if (m && m.type === 'mentor_commitments') {
+                // §5.1: the user's own commitments — never a suggestion. A "close" card is rebuilt from the row.
+                const card = m.op === 'close' ? await closeCommitmentCard(db, orgId, userId, m.commitmentId, m.summary) : m;
+                if ('error' in card) {
+                    uiElement = null;
+                    content = `${content}\n\n(I didn’t include a card for that — ${card.error.charAt(0).toLowerCase()}${card.error.slice(1)} You can use the Commitments list on my Results tab.)`;
+                } else {
+                    uiElement = card;
+                }
             } else if (m) {
                 // The hire card's picks, reasons and plan room come from mentor-hire.ts — the same list as
                 // the Overview tab's "Recommended next" — never from the model.

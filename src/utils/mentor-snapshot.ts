@@ -21,6 +21,9 @@ import { statusOf, type AssistantStatus } from './assistant-go-live';
 import { loadNextPlan } from './next-plan';
 import { loadStrategyDocs, renderStrategyForMentor, type StrategyDoc } from './strategy-documents';
 import { playbookFor, renderPlaybookForMentor } from '../config/mentor-playbooks';
+import { loadCommitments, renderCommitmentsForMentor } from './mentor-commitments';
+import { loadTrackRecord, renderTrackRecordForMentor } from './mentor-outcomes';
+import { loadCustomers, renderCustomersForMentor } from './mentor-customers';
 
 type Db = any;
 
@@ -210,10 +213,29 @@ export async function buildMentorSnapshot(db: Db, orgId: number, userId: number)
     return (await buildMentorSnapshotParts(db, orgId, userId)).text;
 }
 
-/** The block and the data it was rendered from (the chat route fills the hire card from the same data). */
-export async function buildMentorSnapshotParts(db: Db, orgId: number, userId: number): Promise<{ text: string; data: MentorSnapshotData }> {
-    const [data, proposals] = await Promise.all([loadMentorSnapshotData(db, orgId, userId), loadProposalState(db, orgId)]);
-    return { text: renderMentorSnapshot(data) + '\n' + renderProposalState(proposals), data };
+/** Pure: does the user's message ask about their customers? Then the customers block is read (§12.1: on request). */
+export function asksAboutCustomers(typed: string | null | undefined): boolean {
+    return /\b(customers?|clients?|buyers?|reviews?|deals?|won|lost|churn|repeat business|gone quiet|check[- ]?in)\b/i.test(String(typed ?? ''));
+}
+
+/**
+ * The block and the data it was rendered from (the chat route fills the hire card from the same data).
+ * Phase 3: its own commitments and track record every turn; the customers block only when asked
+ * (`withCustomers`) — the weekly review always reads it.
+ */
+export async function buildMentorSnapshotParts(db: Db, orgId: number, userId: number, opts: { withCustomers?: boolean } = {}): Promise<{ text: string; data: MentorSnapshotData }> {
+    const [data, proposals, commitments, record, customers] = await Promise.all([
+        loadMentorSnapshotData(db, orgId, userId), loadProposalState(db, orgId),
+        loadCommitments(db, orgId, userId).catch((err: unknown) => { console.error('[mentor-snapshot] commitments unreadable (non-fatal)', err instanceof Error ? err.message : err); return null; }),
+        loadTrackRecord(db, orgId).catch(() => null),
+        opts.withCustomers ? loadCustomers(db, orgId).catch((err: unknown) => { console.error('[mentor-snapshot] customers unreadable (non-fatal)', err instanceof Error ? err.message : err); return null; }) : Promise.resolve(undefined),
+    ]);
+    const extra = [
+        ...renderCommitmentsForMentor(commitments, userId),
+        ...renderTrackRecordForMentor(record),
+        ...(customers === undefined ? [] : renderCustomersForMentor(customers)),
+    ];
+    return { text: [renderMentorSnapshot(data), renderProposalState(proposals), ...extra].join('\n'), data };
 }
 
 /** The workspace as the Mentor sees it (org-scoped throughout). Also feeds the Mentor page's checklist (mentor.ts). */

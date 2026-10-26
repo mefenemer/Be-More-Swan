@@ -42,6 +42,10 @@ const ALWAYS_READERS = [
     'src/utils/org-products.ts',
     'src/utils/mentor-proposals.ts',
     'src/utils/strategy-documents.ts',
+    // Phase 3: its own reviews, commitments and track record (the snapshot reads them through these).
+    'src/utils/mentor-review.ts',
+    'src/utils/mentor-commitments.ts',
+    'src/utils/mentor-outcomes.ts',
 ].filter((f) => { try { read(f); return true; } catch { return false; } }).map((f) => [f, read(f)] as const);
 
 const base: MentorSnapshotData = {
@@ -150,7 +154,7 @@ test('the Mentor chat route reads the snapshot every turn', () => {
     const src = read('netlify/functions/chat-orchestrator.ts');
     const route = src.slice(src.indexOf('    business_mentor: {'), src.indexOf('    // Tier 1, Batch 1 — Lead Generator.'));
     assert.ok(route.length > 0 && route.includes('usesMentorSnapshot: true') && route.includes('rc.mentorSnapshot'));
-    assert.match(src, /route\.usesMentorSnapshot\s*\n?\s*\? await buildMentorSnapshotParts\(db, orgId, userId\)/);
+    assert.match(src, /route\.usesMentorSnapshot\s*\n?\s*\? await buildMentorSnapshotParts\(db, orgId, userId, \{ withCustomers: asksAboutCustomers\(typed\) \}\)/);
 });
 
 test('provisioning is flag-gated, one per workspace, and never runs under impersonation', () => {

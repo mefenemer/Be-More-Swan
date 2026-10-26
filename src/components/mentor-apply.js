@@ -17,6 +17,10 @@
  *   strategy_proposal       → mentor.ts strategy_save / strategy_approve / strategy_draft — the Plan tab's
  *                             Save draft, Approve and "Draft it for me" (Phase 2, §4)
  *   mentor_research         → mentor.ts research ("Look this up"); jobStatus polls it (?job=)
+ *   mentor_commitments      → mentor.ts commitments_add / commitment_close — the Results tab's Commitments list (Phase 3)
+ *   mentor_draft_request    → generate-post.ts, exactly as "Create a Post" on that assistant's Posts tab, with the
+ *                             suggestion's id so the draft carries "Requested by" the Mentor (Phase 3)
+ *   reviewNow               → mentor.ts review_now — "Review my week now" on the Overview tab
  *
  * Every function resolves to nothing or throws an Error whose message is for the user. After a write it
  * dispatches the `document` event the screen behind listens for. Nothing here is bound to the DOM.
@@ -105,6 +109,29 @@
     return job;
   }
 
+  // Phase 3: commitments (the Results tab's list and the chat card), a post asked of a Social Media assistant,
+  // and "Review my week now". Each repaints whatever listens for mentor:commitmentsChanged / mentor:changed.
+  async function commitmentsAdd(texts) {
+    const r = await post('/.netlify/functions/mentor', { action: 'commitments_add', texts });
+    document.dispatchEvent(new CustomEvent('mentor:commitmentsChanged', { detail: { op: 'add' } }));
+    return r;
+  }
+  async function commitmentClose(id, status, missReason, note) {
+    const r = await post('/.netlify/functions/mentor', { action: 'commitment_close', id, status, missReason: missReason || undefined, note: note || undefined });
+    document.dispatchEvent(new CustomEvent('mentor:commitmentsChanged', { detail: { op: 'close', id, status } }));
+    return r;
+  }
+  async function draftRequest(assistantId, brief, proposalId) {
+    const r = await post('/.netlify/functions/generate-post', { assistantId: Number(assistantId), contextPrompt: String(brief || '').slice(0, 500), triggerType: 'on_demand', ...(proposalId ? { mentorProposalId: proposalId } : {}) });
+    document.dispatchEvent(new CustomEvent('assistant:postsChanged', { detail: { assistantId: Number(assistantId) } }));
+    return { jobId: r && r.jobId };
+  }
+  async function reviewNow() {
+    const r = await post('/.netlify/functions/mentor', { action: 'review_now' });
+    document.dispatchEvent(new CustomEvent('mentor:changed', { detail: { op: 'review_now' } }));
+    return r;
+  }
+
   /** Apply a stored card (a suggestion's payload, mentor.ts `open`). Throws for a type with nothing to apply. */
   async function applyCard(card) {
     switch (card && card.type) {
@@ -112,10 +139,11 @@
       case 'mentor_products': return products(card.products);
       case 'setup_field_proposal': return setupAnswer(card.assistantId, card.key, card.value);
       case 'strategy_proposal': if (card.op === 'revise') return strategySave(card.kind, card.sections, card.assumptions); break;
+      case 'mentor_draft_request': return draftRequest(card.assistantId, card.brief, card.proposalId);
       default: break;
     }
     throw new Error('This suggestion has nothing to apply here.');
   }
 
-  window.MentorApply = { businessProfile, products, setupAnswer, support, decide, applyCard, strategySave, strategyApprove, strategyDraft, research, jobStatus };
+  window.MentorApply = { businessProfile, products, setupAnswer, support, decide, applyCard, strategySave, strategyApprove, strategyDraft, research, jobStatus, commitmentsAdd, commitmentClose, draftRequest, reviewNow };
 })();

@@ -14,6 +14,11 @@
  *                            catalogue's "Recommended" badge); "See this assistant" opens the catalogue
  *   Get feedback           — paste a draft (or open a .txt/.md file) and get the Mentor's critique inline
  *                            (mentor.ts action 'feedback' → mentor-feedback.ts, the same craft as chat)
+ *   Reviews (Phase 3)      — every weekly review, its suggestions and what was answered; "Review my week now"
+ *                            (mentor.ts review_now, owners and admins); its day and on/off are on the profile
+ *   Track record           — accepted suggestions and what changed SINCE (mentor-outcomes.ts)
+ *   Customers (Phase 3b)   — quiet customers, deals, reviews and tickets, only from active assistants
+ *                            (mentor-customers.ts, the same summary the Mentor reads)
  *
  * Backed by netlify/functions/mentor.ts, the SAME action a card's Dismiss calls (chat-session.js →
  * mentor:decide). A save from a card dispatches `mentor:changed` / `bizinfo:*Changed`, which reload this
@@ -22,7 +27,8 @@
 (function () {
   const API = '/.netlify/functions/mentor';
   const state = { assistantId: null, assistantName: 'Your Mentor', data: null, error: null, loading: false, notes: {},
-    feedback: { text: '', busy: false, result: null, error: null } };
+    feedback: { text: '', busy: false, result: null, error: null },
+    reviews: null, customers: null, reviewBusy: false, reviewNote: null, poll: null };
   const FEEDBACK_MAX = 12000;
 
   function esc(v) {
@@ -32,19 +38,126 @@
   const host = () => document.getElementById('mentor-overview-host');
   const ukDate = (iso) => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Europe/London' });
 
+  async function getJson(url) {
+    const res = await fetch(url, { credentials: 'same-origin' });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `Couldn’t load (HTTP ${res.status}).`);
+    return body;
+  }
+
   async function load() {
     if (!host()) return;
     state.loading = true;
-    try {
-      const res = await fetch(API, { credentials: 'same-origin' });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || `Couldn’t load (HTTP ${res.status}).`);
-      state.data = body; state.error = null;
-    } catch (err) {
-      state.error = err.message || 'Couldn’t load your Mentor’s overview.';
-    }
+    const [main, reviews, customers] = await Promise.allSettled([getJson(API), getJson(`${API}?reviews=1`), getJson(`${API}?customers=1`)]);
+    if (main.status === 'fulfilled') { state.data = main.value; state.error = null; }
+    else state.error = main.reason?.message || 'Couldn’t load your Mentor’s overview.';
+    state.reviews = reviews.status === 'fulfilled' ? reviews.value : { error: reviews.reason?.message || 'Couldn’t load your reviews.' };
+    state.customers = customers.status === 'fulfilled' ? customers.value.customers : { error: customers.reason?.message || 'Couldn’t load your customers.' };
     state.loading = false;
     render();
+    schedulePoll();
+  }
+
+  // While a review is being written, look again every 15 s (it takes a minute or two).
+  function schedulePoll() {
+    clearTimeout(state.poll);
+    const writing = (state.reviews?.reviews || []).some((r) => r.status === 'queued' || r.status === 'running');
+    if (writing && host()) state.poll = setTimeout(() => { if (host() && document.contains(host())) load(); }, 15000);
+  }
+
+  async function reviewNow() {
+    if (state.reviewBusy) return;
+    state.reviewBusy = true; state.reviewNote = null; render();
+    try {
+      await window.MentorApply.reviewNow();
+      state.reviewNote = { text: 'Writing your review — it’ll be in your chat with me in a minute or two.' };
+      await load();
+    } catch (err) {
+      state.reviewNote = { text: err.message, error: true };
+    }
+    state.reviewBusy = false;
+    render();
+  }
+
+  const DAY_LABEL = { monday: 'Mondays', tuesday: 'Tuesdays', wednesday: 'Wednesdays', thursday: 'Thursdays', friday: 'Fridays', saturday: 'Saturdays', sunday: 'Sundays' };
+  const PROPOSAL_STATUS = { shown: ['Waiting', 'bg-amber-50 text-amber-800 border border-amber-200'], accepted: ['Accepted', 'bg-green-50 text-green-800 border border-green-200'], dismissed: ['Dismissed', 'bg-gray-100 text-gray-600'], expired: ['Expired', 'bg-gray-100 text-gray-600'], failed: ['Didn’t apply', 'bg-red-50 text-red-700'] };
+
+  function reviewsHtml() {
+    const r = state.reviews;
+    if (!r) return '';
+    if (r.error) return card(`<h2 class="text-base font-bold text-gray-900">Reviews</h2><p class="text-sm text-red-600 mt-1">${esc(r.error)}</p>`, 'data-mentor-panel="reviews"');
+    if (!r.ready) return card(`<h2 class="text-base font-bold text-gray-900">Reviews</h2><p class="text-sm text-gray-600 mt-1">Weekly reviews aren’t switched on for this workspace yet.</p>`, 'data-mentor-panel="reviews"');
+    const st = r.settings || {};
+    const when = st.quiet ? 'Off while Quiet mode is on.' : st.on === false ? 'Switched off.' : `Every week on ${DAY_LABEL[st.day] || 'Mondays'}, to the workspace’s owners and admins.`;
+    const items = (r.reviews || []).map((v) => {
+      const writing = v.status === 'queued' || v.status === 'running';
+      const label = writing ? 'Being written…' : v.status === 'failed' ? (v.error || 'Didn’t finish. Nothing was charged.') : (v.summary || '');
+      const props = (v.proposals || []).map((p) => {
+        const [txt, cls] = PROPOSAL_STATUS[p.status] || PROPOSAL_STATUS.shown;
+        return `<li class="flex flex-wrap items-start justify-between gap-2 py-1"><span class="text-xs text-gray-800 min-w-0 flex-1 break-words">${esc(p.title)}${p.target ? ` <span class="text-gray-500">· ${esc(p.target)}</span>` : ''}</span><span class="text-[11px] font-semibold rounded-full px-2 py-0.5 shrink-0 ${cls}">${txt}</span></li>`;
+      }).join('');
+      const sections = (v.sections || []).map((x) => `<h4 class="text-xs font-bold text-gray-700 mt-2">${esc(x.title)}</h4><p class="text-xs text-gray-700 whitespace-pre-line break-words">${esc(x.text)}</p>`).join('');
+      return `<li class="py-2 border-b border-gray-100 last:border-0">
+        <details>
+          <summary class="cursor-pointer">
+            <span class="text-sm font-semibold text-gray-900">Week of ${esc(ukDate(v.weekStart))}</span>
+            <span class="text-xs text-gray-500"> · ${v.trigger === 'on_demand' ? 'asked for' : 'weekly'}${v.outcome === 'not_enough_data' ? ' · not enough data yet' : ''}${(v.proposals || []).length ? ` · ${(v.proposals || []).length} suggestion${v.proposals.length === 1 ? '' : 's'}` : ''}</span>
+            <p class="text-xs mt-0.5 break-words ${v.status === 'failed' ? 'text-red-600' : 'text-gray-600'}">${esc(label)}</p>
+          </summary>
+          <div class="mt-1 pl-1">${sections}${props ? `<h4 class="text-xs font-bold text-gray-700 mt-2">Suggestions</h4><ul>${props}</ul>` : ''}</div>
+        </details>
+      </li>`;
+    }).join('');
+    return card(`
+      <div class="flex flex-wrap items-start justify-between gap-2">
+        <div class="min-w-0 flex-1">
+          <h2 class="text-base font-bold text-gray-900">Reviews</h2>
+          <p class="text-xs text-gray-500 mt-0.5">${esc(when)} Change the day or switch it off on my profile, under “How should your Mentor work?”.</p>
+        </div>
+        ${r.canRun ? `<button type="button" data-mentor-review-now class="btn-secondary shrink-0 px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50" ${state.reviewBusy ? 'disabled' : ''}>${state.reviewBusy ? 'Starting…' : 'Review my week now · 1 task'}</button>` : ''}
+      </div>
+      ${state.reviewNote ? `<p class="mt-2 text-xs font-semibold ${state.reviewNote.error ? 'text-red-600' : 'text-pink-700'}" role="status">${esc(state.reviewNote.text)}</p>` : ''}
+      ${items ? `<ul class="mt-2">${items}</ul>` : '<p class="text-sm text-gray-500 mt-2">No reviews yet. Your first arrives in your chat with me on your review day.</p>'}`, 'data-mentor-panel="reviews"');
+  }
+
+  const VERDICT = { up: 'text-green-700', down: 'text-red-700', same: 'text-gray-700', too_early: 'text-gray-500', too_small: 'text-gray-500', no_measure: 'text-gray-500', drafted: 'text-gray-500' };
+  function trackRecordHtml() {
+    const r = state.reviews;
+    if (!r || r.error || !r.trackReady) return '';
+    const items = (r.trackRecord || []).map((t) => `<li class="py-2 border-b border-gray-100 last:border-0"><p class="text-xs break-words ${VERDICT[t.verdict] || 'text-gray-700'}">${esc(t.line)}</p>${t.target ? `<p class="text-[11px] text-gray-500">${esc(t.target)}</p>` : ''}</li>`).join('');
+    return card(`
+      <h2 class="text-base font-bold text-gray-900">Track record</h2>
+      <p class="text-xs text-gray-500 mt-1">Suggestions you accepted and what changed since. “Since”, not “because” — other things change too.</p>
+      ${items ? `<ul class="mt-1">${items}</ul>` : '<p class="text-sm text-gray-500 mt-2">Nothing yet. When you accept a suggestion, I follow what happens next here.</p>'}`, 'data-mentor-panel="track-record"');
+  }
+
+  function customersHtml() {
+    const c = state.customers;
+    if (!c) return '';
+    if (c.error) return card(`<h2 class="text-base font-bold text-gray-900">Customers</h2><p class="text-sm text-red-600 mt-1">${esc(c.error)}</p>`, 'data-mentor-panel="customers"');
+    const parts = [];
+    if (c.deals) {
+      const d = c.deals;
+      parts.push(`<p class="text-sm text-gray-800">Last 90 days: <strong>${d.won}</strong> won, <strong>${d.lost}</strong> lost${d.disqualified ? `, ${d.disqualified} disqualified` : ''}.</p>
+        <p class="text-xs text-gray-600 mt-0.5">${d.enough ? (d.lossReasons.length ? `Lost mostly to: ${esc(d.lossReasons.map((x) => `${x.reason} (${x.count})`).join(', '))}.` : 'No loss reasons recorded.') : 'Too few closed deals yet to say why deals are lost.'}</p>`);
+    }
+    if (c.quiet) {
+      parts.push(c.quiet.length
+        ? `<h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-3">Not heard from lately</h3><ul class="mt-1">${c.quiet.map((q) => `<li class="text-sm text-gray-800 py-1 break-words">${esc(q.company)}${q.contact ? ` <span class="text-gray-500">· ${esc(q.contact)}</span>` : ''}<span class="block text-xs text-gray-500">${q.lastContactAt ? `Last contact ${esc(ukDate(q.lastContactAt))}` : 'No contact recorded'} · won ${esc(ukDate(q.wonAt))}</span></li>`).join('')}</ul><p class="text-xs text-gray-500 mt-1">Ask me in chat for a check-in message you can send them.</p>`
+        : '<p class="text-xs text-gray-600 mt-2">No won customer has gone quiet.</p>');
+    }
+    if (c.reviews) {
+      parts.push(`<h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-3">Reviews</h3><p class="text-sm text-gray-800 mt-1">${c.reviews.count} review${c.reviews.count === 1 ? '' : 's'}${c.reviews.average !== null ? `, average ${c.reviews.average}/5` : ''}.</p>
+        ${c.reviews.low.map((r) => `<p class="text-xs text-gray-600 mt-1 break-words">${r.rating}/5 — “${esc(r.excerpt)}”</p>`).join('')}`);
+    }
+    if (c.tickets) parts.push(`<h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-3">Support tickets</h3><p class="text-sm text-gray-800 mt-1">${c.tickets.last30} in 30 days, ${c.tickets.open} open.</p>${c.tickets.subjects.length ? `<p class="text-xs text-gray-600 mt-0.5 break-words">Recent: ${esc(c.tickets.subjects.join('; '))}</p>` : ''}`);
+    if (c.overdueInvoices !== null && c.overdueInvoices !== undefined) parts.push(`<h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-3">Overdue invoices</h3><p class="text-sm text-gray-800 mt-1">${c.overdueInvoices}</p>`);
+    const off = (c.sources || []).filter((x) => !x.available);
+    return card(`
+      <h2 class="text-base font-bold text-gray-900">Customers</h2>
+      <p class="text-xs text-gray-500 mt-1">Your own customers, from your active assistants only. Names and dates — never contact details.</p>
+      ${parts.length ? parts.join('') : '<p class="text-sm text-gray-600 mt-2">I can’t see any customer records yet. Tell me about your customers in chat — who buys, who comes back, who has gone quiet.</p>'}
+      ${off.length ? `<details class="mt-3"><summary class="cursor-pointer text-xs font-semibold text-gray-600">What I can’t see (${off.length})</summary><ul class="mt-1">${off.map((x) => `<li class="text-xs text-gray-600 py-0.5">${esc(x.label)}: ${esc(x.note)}</li>`).join('')}</ul></details>` : ''}`, 'data-mentor-panel="customers"');
   }
 
   function card(inner, attrs = '') {
@@ -198,8 +311,8 @@
     const d = state.data;
     el.innerHTML = `
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 items-start">
-        <div class="space-y-4 min-w-0 lg:col-span-2">${waitingHtml(d.open || [])}${checklistHtml(d.checklist || [])}${feedbackHtml()}${dismissedHtml(d.dismissed || [])}</div>
-        <div class="space-y-4 min-w-0">${recommendedHtml(d.recommended)}${weekHtml(d.week)}${visibilityHtml(d.visibility || { sees: [], never: [] })}
+        <div class="space-y-4 min-w-0 lg:col-span-2">${waitingHtml(d.open || [])}${reviewsHtml()}${checklistHtml(d.checklist || [])}${customersHtml()}${feedbackHtml()}${dismissedHtml(d.dismissed || [])}</div>
+        <div class="space-y-4 min-w-0">${recommendedHtml(d.recommended)}${weekHtml(d.week)}${trackRecordHtml()}${visibilityHtml(d.visibility || { sees: [], never: [] })}
           ${card(`<p class="text-xs text-gray-600">Need help with Be More Swan? Ask ${esc(state.assistantName)} in chat, or use <button type="button" data-mentor-help class="font-semibold text-pink-700 hover:underline">Help &amp; Support</button>.</p>`)}
         </div>
       </div>`;
@@ -240,6 +353,7 @@
     const see = t.closest('[data-mentor-see-role]');
     if (see) { window.MentorOpenCatalogue?.(see.getAttribute('data-mentor-see-role')); return; }
     if (t.closest('[data-mentor-feedback-go]')) { getFeedback(); return; }
+    if (t.closest('[data-mentor-review-now]')) { reviewNow(); return; }
     if (t.closest('[data-mentor-help]') && window.loadView) window.loadView('help');
   });
   // The draft is kept as it is typed, so a repaint (a card saved in chat) never loses it.
@@ -272,6 +386,7 @@
       state.assistantName = assistantName || 'Your Mentor';
       state.data = null; state.error = null; state.notes = {};
       state.feedback = { text: '', busy: false, result: null, error: null };
+      state.reviews = null; state.customers = null; state.reviewNote = null; clearTimeout(state.poll);
       render();
       load();
     },

@@ -70,7 +70,8 @@ test('the Mentor route is structured and its cards are checked before any other 
     const route = o.slice(o.indexOf('    business_mentor: {'), o.indexOf('    // Tier 1, Batch 1 — Lead Generator.'));
     assert.ok(route.includes('parseResponse: parseStructuredReply') && route.includes('${mentorCardsPromptBlock()}'));
     const parsed = o.indexOf('let content = parsed.content;');
-    const check = o.indexOf('const m = mentorCardFromUiElement(uiElement, session.aiAssistantId);');
+    // Phase 3: a post request (mentor-draft-request.ts) is resolved first, then the Mentor's own cards.
+    const check = o.indexOf('const m = draftReq ? null : mentorCardFromUiElement(uiElement, session.aiAssistantId);');
     const firstOther = o.indexOf('settingsProposalFromUiElement(uiElement)');
     assert.ok(parsed > 0 && check > parsed && check < firstOther, 'Mentor check must run first');
     assert.match(o.slice(check, check + 9000), /uiElement = null; \/\/ never another route's card shape/);

@@ -935,6 +935,13 @@ node_bundler = "esbuild"
 [functions.dispatch-site-audits]
   schedule = "30 6 * * *"
 
+# The Business Mentor's weekly review (src/utils/mentor-review.ts dispatchDueReviews): queues every
+# workspace whose review day is today in UK time (Monday by default), or was earlier this week and missed.
+# 06:45 UTC — before the UK working day in GMT and BST, off the :00/:15/:20/:30/:40 batch. Daily, not
+# weekly: the review DAY is per workspace. Staging is poked via run-mentor-review-dispatch (staging-crons.yml).
+[functions.dispatch-mentor-reviews]
+  schedule = "45 6 * * *"
+
 # Is the paid sweep above still running? 09:20 UTC — a DIFFERENT schedule entry from
 # optimise-paid-campaigns on purpose, so one broken entry cannot silently take both.
 #

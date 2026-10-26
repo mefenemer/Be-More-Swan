@@ -2108,6 +2108,12 @@
   <!-- ── MAIN TAB: Goals & Automation ───────────────────────────────── -->
   <div id="maintab-goals" role="tabpanel" aria-labelledby="maintab-btn-goals" class="main-tab-content hidden">
 
+  <!-- Commitments — Business Mentor only (mentorCommitments: business_mentor). The 1–3 things each person
+       will do this week, ticked off with a reason when missed (docs/business-mentor-plan.md §5.1, §14).
+       Rendered by src/components/mentor-commitments.js → mentor.ts; the chat's mentor_commitments card
+       calls the same actions. -->
+  <div id="mentor-commitments-host" class="hidden mb-8"></div>
+
   <!-- ── Goals (SMART Goals — Feature 1) ───── -->
   <div id="tab-goals" class="space-y-6 mb-8">
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">

@@ -13,14 +13,18 @@
 //      campaign_order_id column (newsletter_issues, visual_briefs).
 //   2. An Orchestrations HAND-OFF (orchestration_runs) — social drafts only, looked up by job id in
 //      get-social-drafts.ts, which already did this for its "Hand-off from" pill.
-// No schema change: these are lookups over columns that exist.
+//   3. A Business Mentor POST REQUEST (mentor_outcomes.job_id, db/z-business-mentor-phase-3.sql): the
+//      user accepted the Mentor's suggestion to ask a Social Media assistant for a post, and the job that
+//      drafted it is linked to that suggestion (generate-post.ts → mentor-outcomes.ts linkOutcomeJob). The
+//      pill names the Mentor. A missing table is a missing pill.
+// No schema change for the first two: these are lookups over columns that exist.
 //
 // The name is the assistant's CURRENT name (renames show through). A deleted Campaign Assistant
 // leaves no pill rather than a wrong one. Never throws — a failed lookup is a missing pill.
 
 import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, campaignOrders, campaigns, contentGenerationJobs, orchestrationRuns } from '../../db/schema';
+import { aiAssistants, campaignOrders, campaigns, contentGenerationJobs, mentorOutcomes, mentorProposals, orchestrationRuns } from '../../db/schema';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -73,6 +77,27 @@ export async function requesterNamesForJobIds(db: Db, organisationId: number, jo
         for (const h of handoffs) if (h.jobId && h.name && !out.has(h.jobId)) out.set(h.jobId, h.name);
     } catch (err) {
         console.warn('[requested-by] job lookup skipped:', err instanceof Error ? err.message : err);
+    }
+    for (const [jobId, name] of await mentorRequesterNames(db, organisationId, ids)) if (!out.has(jobId)) out.set(jobId, name);
+    return out;
+}
+
+/** content_generation_jobs.job_id → the Business Mentor's name, for posts it asked for (mentor_outcomes.job_id). */
+export async function mentorRequesterNames(db: Db, organisationId: number, jobIds: string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (!jobIds.length) return out;
+    try {
+        const rows = await db
+            .select({ jobId: mentorOutcomes.jobId, name: aiAssistants.name })
+            .from(mentorOutcomes)
+            .innerJoin(mentorProposals, eq(mentorProposals.id, mentorOutcomes.proposalId))
+            .innerJoin(aiAssistants, eq(aiAssistants.id, mentorProposals.aiAssistantId))
+            .where(and(eq(mentorOutcomes.organisationId, organisationId), inArray(mentorOutcomes.jobId, jobIds)));
+        for (const r of rows) if (r.jobId && r.name) out.set(r.jobId, r.name);
+    } catch (err) {
+        // The table is applied by hand (db/z-business-mentor-phase-3.sql); before that there's no pill.
+        const code = (err as any)?.code ?? (err as any)?.cause?.code;
+        if (code !== '42P01') console.warn('[requested-by] mentor lookup skipped:', err instanceof Error ? err.message : err);
     }
     return out;
 }

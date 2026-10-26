@@ -177,7 +177,7 @@ export async function bringBackProposal(db: Db, orgId: number, id: number): Prom
 }
 
 /** The kinds "Review all" can apply: each has a card with a click that writes (mentor-apply.js applyCard). */
-export const REVIEWABLE_KINDS = ['business_info_gap', 'products_gap', 'setup_field'] as const;
+export const REVIEWABLE_KINDS = ['business_info_gap', 'products_gap', 'setup_field', 'draft_request'] as const;
 /** A suggestion older than this is left out of "Review all": the workspace has likely moved on. */
 export const OPEN_MAX_AGE_DAYS = 30;
 
@@ -187,7 +187,7 @@ export interface OpenProposal { id: number; kind: string; title: string; why: st
 export function dedupeOpen(rows: OpenProposal[]): OpenProposal[] {
     const seen = new Set<string>();
     return rows.filter((r) => {
-        const sig = `${r.kind}|${proposalFields(r.card).join(',')}|${r.kind === 'products_gap' ? JSON.stringify((r.card as any)?.products?.map((p: any) => p?.name) ?? []) : ''}`;
+        const sig = `${r.kind}|${proposalFields(r.card).join(',')}|${r.kind === 'products_gap' ? JSON.stringify((r.card as any)?.products?.map((p: any) => p?.name) ?? []) : r.kind === 'draft_request' ? String((r.card as any)?.brief ?? '') : ''}`;
         if (seen.has(sig)) return false;
         seen.add(sig);
         return true;

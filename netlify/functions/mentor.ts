@@ -27,6 +27,16 @@
 // POST { action: 'research', question, chatSessionId? }            → { job }  "Look this up" (1 task, background)
 // POST { action: 'break_even', inputs }                            → { result }  the calculator (break-even.ts, in code)
 //
+// Phase 3 — the weekly review (§5): the Overview tab's Reviews, Track record and Customers panels, the
+// Results tab's Commitments list (mentor-commitments.js) and the chat's commitments card (mentor-apply.js):
+// GET ?reviews=1                                    → { ready, reviews, settings, canRun, trackRecord, trackReady }
+// GET ?customers=1                                  → { customers }  (mentor-customers.ts: active assistants only, names and dates only)
+// GET ?commitments=1                                → { ready, commitments, me, canManage, week, maxPerWeek, missReasons }
+// POST { action: 'review_now' }                                   → { review }  "Review my week now" (owner or admin; 1 task, background)
+// POST { action: 'commitments_add', texts: [...] }                → { commitments }  "Add" / the card's "Save these"
+// POST { action: 'commitment_close', id, status, missReason?, note? } → { commitments }  Done / Missed (why) / Drop
+// An accepted suggestion is also remembered for the track record (mentor-outcomes.ts recordOutcome).
+//
 // Tenant-scoped on every statement; read-only under impersonation (requireTenant).
 
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -50,6 +60,10 @@ import { and, eq, sql } from 'drizzle-orm';
 import {
     DISMISS_REASONS, WEEKLY_CAP, bringBackProposal, decideProposal, isDismissReason, loadOpenProposals, loadProposalState,
 } from '../../src/utils/mentor-proposals';
+import { loadReviews, queueReviewNow, REVIEW_ROLES, reviewSettings } from '../../src/utils/mentor-review';
+import { loadTrackRecord, recordOutcome } from '../../src/utils/mentor-outcomes';
+import { loadCustomers } from '../../src/utils/mentor-customers';
+import { addCommitments, closeCommitment, loadCommitments, MAX_PER_WEEK, MISS_REASONS, weekStartUk } from '../../src/utils/mentor-commitments';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body: JSON.stringify(body),
@@ -108,6 +122,28 @@ export default withLambda(async (event) => {
     try {
         if (event.httpMethod === 'GET') {
             if (event.queryStringParameters?.plan) return json(200, await planView(db, orgId, ctx.role));
+            if (event.queryStringParameters?.reviews) {
+                const mentorRow = await findMentor(db, orgId);
+                let ctxRow: unknown = null;
+                if (mentorRow) {
+                    const [r] = await db.select({ c: aiAssistants.onboardingContext }).from(aiAssistants)
+                        .where(and(eq(aiAssistants.id, mentorRow.id), eq(aiAssistants.organisationId, orgId))).limit(1);
+                    ctxRow = r?.c ?? null;
+                }
+                const [reviews, trackRecord] = await Promise.all([loadReviews(db, orgId), loadTrackRecord(db, orgId)]);
+                return json(200, {
+                    ready: reviews !== null, reviews: reviews ?? [], settings: reviewSettings(ctxRow), canRun: REVIEW_ROLES.includes(String(ctx.role)),
+                    trackRecord: trackRecord ?? [], trackReady: trackRecord !== null,
+                });
+            }
+            if (event.queryStringParameters?.customers) return json(200, { customers: await loadCustomers(db, orgId) });
+            if (event.queryStringParameters?.commitments) {
+                const list = await loadCommitments(db, orgId, ctx.userId);
+                return json(200, {
+                    ready: list !== null, commitments: list ?? [], me: ctx.userId, canManage: REVIEW_ROLES.includes(String(ctx.role)),
+                    week: weekStartUk(), maxPerWeek: MAX_PER_WEEK, missReasons: MISS_REASONS,
+                });
+            }
             if (event.queryStringParameters?.job) {
                 const jobId = Number(event.queryStringParameters.job);
                 const job = Number.isInteger(jobId) && jobId > 0 ? await loadMentorJob(db, orgId, jobId) : null;
@@ -164,6 +200,19 @@ export default withLambda(async (event) => {
                 const r = await queueMentorJob(db, { orgId, userId: ctx.userId, kind: 'research', question: body.question, chatSessionId: body.chatSessionId });
                 return r.ok ? json(202, { job: r.job }) : json(r.status, { error: r.error, ...(r.code ? { code: r.code } : {}) });
             }
+            // ── Phase 3: the weekly review and commitments ──
+            if (body.action === 'review_now') {
+                const r = await queueReviewNow(db, orgId, ctx.userId, ctx.role);
+                return r.ok ? json(202, { review: r.review }) : json(r.status, { error: r.error, ...(r.code ? { code: r.code } : {}) });
+            }
+            if (body.action === 'commitments_add') {
+                const r = await addCommitments(db, orgId, ctx.userId, body.texts);
+                return r.ok ? json(200, { commitments: r.commitments }) : json(r.status, { error: r.error });
+            }
+            if (body.action === 'commitment_close') {
+                const r = await closeCommitment(db, orgId, ctx.userId, ctx.role, { id: body.id, status: body.status, missReason: body.missReason, note: body.note });
+                return r.ok ? json(200, { commitments: r.commitments }) : json(r.status, { error: r.error });
+            }
             if (body.action === 'break_even') {
                 const r = breakEven(body.inputs && typeof body.inputs === 'object' ? body.inputs as Record<string, unknown> : {});
                 return r.ok ? json(200, { result: r }) : json(400, { error: r.error });
@@ -177,6 +226,8 @@ export default withLambda(async (event) => {
                 if (decision !== 'accepted' && decision !== 'dismissed') return json(400, { error: 'Accept or dismiss?' });
                 if (decision === 'dismissed' && !isDismissReason(body.reason)) return json(400, { error: 'Pick a reason: not relevant, already done, disagree or not now.' });
                 const ok = await decideProposal(db, orgId, ctx.userId, id, decision, isDismissReason(body.reason) ? body.reason : undefined);
+                // §5.3: remember what an accepted suggestion changed and the measure it was meant to move.
+                if (ok && decision === 'accepted') await recordOutcome(db, orgId, id);
                 return ok ? json(200, { ok: true }) : json(404, { error: 'That suggestion has already been answered.' });
             }
             if (body.action === 'bring_back') {

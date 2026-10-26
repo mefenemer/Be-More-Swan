@@ -638,6 +638,8 @@
       mentorPlanTab: {
         label: 'Plan',
       },
+      // Phase 3 (§5.1): the Commitments list at the top of its Results tab (mentor-commitments.js).
+      mentorCommitments: true,
       defaultMainTab: 'mentor',
       hideReviewQueue: true,
       hideDataHub: true,

@@ -2225,7 +2225,11 @@
   // records "accepted" once it has saved, and "Dismiss…" asks why (§3.13) before recording it. The
   // user's own requests (quiet mode, support) carry no proposalId and keep a plain "Not now".
   const MENTOR_DISMISS_REASONS = [['not_relevant', 'Not relevant'], ['already_done', 'Already done'], ['disagree', 'Disagree'], ['not_now', 'Not now']];
-  function mentorCard(esc, { eyebrow, summary, why, bodyHtml, goLabel, eventName, detail, doneText, note, proposalId, noGo }) {
+  // `answered` (chat-card-refresh.ts → mentor-proposal-cards.ts): the suggestion was answered somewhere else —
+  // this chat, another member's, Inbox "Needs you" or "Review all" — so the card says so instead of offering
+  // its buttons again.
+  const MENTOR_ANSWERED = { accepted: 'Done — this suggestion was accepted.', dismissed: 'Dismissed — listed under Dismissed suggestions on your Mentor’s Overview tab.', expired: 'This suggestion has expired.', failed: 'This suggestion couldn’t be applied.' };
+  function mentorCard(esc, { eyebrow, summary, why, bodyHtml, goLabel, eventName, detail, doneText, note, proposalId, noGo, answered }) {
     const suggestion = Number.isInteger(proposalId) && proposalId > 0;
     const el = document.createElement('div');
     el.className = 'bg-white border-2 border-pink-200 rounded-xl shadow-sm p-5 max-w-md';
@@ -2249,6 +2253,11 @@
     const status = el.querySelector('[data-mc-status]');
     const reasons = el.querySelector('[data-mc-reasons]');
     const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-pink-700'}`; };
+    if (suggestion && answered && MENTOR_ANSWERED[answered]) {
+      el.querySelectorAll('[data-mc-go], [data-mc-dismiss], [data-mc-cancel]').forEach((b) => b.remove());
+      say(MENTOR_ANSWERED[answered]);
+      return el;
+    }
     const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
     const decide = (decision, reason, respond) => el.dispatchEvent(new CustomEvent('mentor:decide', {
       bubbles: true, detail: { proposalId, decision, reason, respond: respond || (() => {}) },
@@ -2307,7 +2316,7 @@
     return mentorCard(esc, {
       eyebrow: 'Business Information', summary: ui.summary, why: ui.why,
       bodyHtml: `<ul class="mt-2 space-y-1">${rows}</ul>`,
-      goLabel: 'Save this', eventName: 'mentor:businessProfile', detail: { fields }, proposalId: ui.proposalId,
+      goLabel: 'Save this', eventName: 'mentor:businessProfile', detail: { fields }, proposalId: ui.proposalId, answered: ui.answered,
       doneText: 'Saved to Business Information — every assistant now uses it.',
       note: 'Only these fields change. You can edit them any time under Business Information.',
     });
@@ -2319,7 +2328,7 @@
     return mentorCard(esc, {
       eyebrow: 'Products & Services', summary: ui.summary, why: ui.why,
       bodyHtml: `<ul class="mt-2 space-y-1">${rows}</ul>`,
-      goLabel: products.length > 1 ? `Add these ${products.length}` : 'Add this', eventName: 'mentor:products', detail: { products }, proposalId: ui.proposalId,
+      goLabel: products.length > 1 ? `Add these ${products.length}` : 'Add this', eventName: 'mentor:products', detail: { products }, proposalId: ui.proposalId, answered: ui.answered,
       doneText: 'Added — add prices under Business Information ▸ Products & Services.',
       note: 'Prices are left for you to add on the Products &amp; Services tab.',
     });
@@ -2392,10 +2401,91 @@
         <div class="break-words"><dt class="inline text-gray-500">Change to:</dt> <dd class="inline font-semibold text-gray-900">${esc(String(ui.valueLabel ?? ui.value ?? ''))}</dd></div>
       </dl>`,
     goLabel: 'Save this', eventName: 'setupField:apply',
-    detail: { assistantId: ui.assistantId, key: ui.key, value: ui.value }, proposalId: ui.proposalId,
+    detail: { assistantId: ui.assistantId, key: ui.key, value: ui.value }, proposalId: ui.proposalId, answered: ui.answered,
     doneText: `Saved — ${String(ui.assistantName || 'the assistant')} uses it from now on.`,
     note: `Only this answer changes. It’s also on ${esc(String(ui.assistantName || 'the assistant'))}’s profile.`,
   }));
+
+  // A post asked of an ACTIVE Social Media assistant (src/utils/mentor-draft-request.ts, Phase 3). The click
+  // is "Create a Post" on that assistant's Posts tab (generate-post.ts), carrying the suggestion's id so the
+  // draft shows "Requested by" the Mentor.
+  register('mentor_draft_request', (ui, esc) => mentorCard(esc, {
+    eyebrow: `Post request · ${String(ui.assistantName || 'Social Media assistant')}`, summary: ui.summary, why: ui.why,
+    bodyHtml: `<p class="mt-2 text-xs text-gray-700 break-words"><span class="font-semibold">What the post should say:</span> ${esc(String(ui.brief || '').slice(0, 500))}</p>`,
+    goLabel: 'Ask for this post', eventName: 'mentor:draftRequest',
+    detail: { assistantId: ui.assistantId, brief: ui.brief, proposalId: ui.proposalId }, proposalId: ui.proposalId, answered: ui.answered,
+    doneText: `Asked — ${String(ui.assistantName || 'the assistant')} is drafting it. It’ll be in its Posts tab for you to review.`,
+    note: `Nothing is posted: the draft waits in ${esc(String(ui.assistantName || 'the assistant'))}’s Posts tab for your review.`,
+  }));
+
+  // Commitments (src/utils/mentor-commitments.ts, Phase 3 §5.1). "set" saves 1–3 things for this week; "close"
+  // is the end-of-week check on one: Done, Missed (pick why from the fixed list) or Drop it. Both call the same
+  // mentor.ts actions as the Commitments list on the Mentor's Results tab.
+  const MENTOR_MISS_REASONS = [['no_time', 'No time'], ['didnt_know_how', 'Didn’t know how'], ['priorities_changed', 'Priorities changed'], ['waiting_on_someone', 'Waiting on someone else'], ['decided_against', 'Decided against it'], ['other', 'Other']];
+  register('mentor_commitments', (ui, esc) => {
+    if (ui.op !== 'close') {
+      const texts = Array.isArray(ui.texts) ? ui.texts.slice(0, 3) : [];
+      return mentorCard(esc, {
+        eyebrow: 'Commitments this week', summary: ui.summary,
+        bodyHtml: `<ol class="mt-2 list-decimal pl-5 space-y-1">${texts.map((t) => `<li class="text-sm text-gray-800 break-words">${esc(String(t))}</li>`).join('')}</ol>`,
+        goLabel: texts.length > 1 ? 'Save these' : 'Save this', eventName: 'mentor:commitmentsAdd', detail: { texts },
+        doneText: 'Saved — they’re on the Commitments list on my Results tab. I’ll ask how they went at the end of the week.',
+      });
+    }
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-pink-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-pink-700 tracking-wider uppercase">End-of-week check</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <p class="mt-2 text-sm text-gray-800 break-words">“${esc(String(ui.text || ''))}”</p>
+      <p class="text-xs text-gray-500 mt-0.5">${ui.mine ? 'Yours' : esc(String(ui.ownerName || ''))} · week of ${esc(String(ui.weekStart || ''))}</p>
+      ${ui.closed ? `<p class="mt-2 text-xs font-semibold text-pink-700">Already marked ${esc(String(ui.closed))} — it’s on the Commitments list on your Mentor’s Results tab.</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3" ${ui.closed ? 'style="display:none"' : ''}>
+        <button type="button" data-mcc="done" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Done</button>
+        <button type="button" data-mcc="missed" aria-expanded="false" class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Missed…</button>
+        <button type="button" data-mcc="dropped" class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Drop it</button>
+      </div>
+      <div data-mcc-reasons class="flex-wrap items-center gap-2 mt-2" style="display:none">
+        <span class="text-xs text-gray-500">Why?</span>
+        ${MENTOR_MISS_REASONS.map(([k, label]) => `<button type="button" data-mcc-reason="${k}" class="btn-secondary px-2.5 py-1 border text-xs font-semibold rounded-full transition disabled:opacity-50">${label}</button>`).join('')}
+        <label class="sr-only" for="mcc-note-${Number(ui.commitmentId)}">A few words (needed for Other)</label>
+        <input id="mcc-note-${Number(ui.commitmentId)}" data-mcc-note type="text" maxlength="500" placeholder="A few words (needed for Other)" class="w-full mt-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs">
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-pink-700" data-mc-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-mc-status]');
+    const reasons = el.querySelector('[data-mcc-reasons]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-pink-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button, input').forEach((x) => { x.disabled = b; });
+    const send = (st, missReason) => {
+      setBusy(true); say('Saving…');
+      el.dispatchEvent(new CustomEvent('mentor:commitmentClose', {
+        bubbles: true,
+        detail: { id: ui.commitmentId, status: st, missReason, note: el.querySelector('[data-mcc-note]').value.trim(), respond({ ok, error }) {
+          if (!ok) { setBusy(false); say(error || 'That couldn’t be saved.', 'error'); return; }
+          reasons.style.display = 'none';
+          say(st === 'done' ? 'Marked done — well done.' : st === 'dropped' ? 'Dropped.' : 'Saved — thanks for saying why. I’ll take it into account.');
+        } },
+      }));
+    };
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-mcc]');
+      if (b) {
+        const st = b.getAttribute('data-mcc');
+        if (st === 'missed') {
+          const open = reasons.style.display === 'none';
+          reasons.style.display = open ? 'flex' : 'none';
+          b.setAttribute('aria-expanded', open ? 'true' : 'false');
+          if (open) reasons.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          return;
+        }
+        send(st);
+        return;
+      }
+      const r = e.target.closest('[data-mcc-reason]');
+      if (r) send('missed', r.getAttribute('data-mcc-reason'));
+    });
+    return el;
+  });
 
   // Who to hire next (src/utils/mentor-hire.ts — the same list as "Recommended next" on the Mentor's
   // Overview tab and the catalogue's "Recommended" badge). Hires nothing: each pick opens the catalogue.
@@ -2415,7 +2505,7 @@
         <button type="button" data-mhr-open="${esc(String(p.roleKey || ''))}" class="btn-swan-link mt-1 px-0 py-1 text-xs font-bold">See this assistant</button>
       </li>`).join('');
     const el = mentorCard(esc, {
-      eyebrow: 'Who to hire next', summary: ui.summary, why: ui.why, noGo: true, proposalId: ui.proposalId,
+      eyebrow: 'Who to hire next', summary: ui.summary, why: ui.why, noGo: true, proposalId: ui.proposalId, answered: ui.answered,
       bodyHtml: `<ol class="mt-2">${rows}</ol>
         ${cap.note ? `<p class="mt-2 text-xs rounded-lg px-2.5 py-1.5 ${cap.needsUpgrade ? 'border border-amber-200 bg-amber-50 text-amber-900' : 'bg-gray-50 text-gray-700'}">${esc(String(cap.note))}</p>` : ''}`,
       note: 'Nothing is hired from here. The same list is under "Recommended next" on your Mentor’s Overview tab.',
@@ -2483,7 +2573,7 @@
     const ass = Array.isArray(ui.assumptions) ? ui.assumptions : null;
     const assHtml = ass ? `<p class="text-xs font-bold text-gray-900 mt-2">Riskiest assumptions</p><ul class="mt-1 space-y-1 list-disc pl-4">${ass.map((a) => `<li class="text-xs text-gray-800 break-words">${esc(String(a.assumption || ''))}${a.test ? ` <span class="text-gray-500">→ ${esc(String(a.test))}</span>` : ''}</li>`).join('')}</ul>` : '';
     return mentorCard(esc, {
-      eyebrow: label, summary: ui.summary, why: ui.why, proposalId: ui.proposalId,
+      eyebrow: label, summary: ui.summary, why: ui.why, proposalId: ui.proposalId, answered: ui.answered,
       bodyHtml: `<ul class="mt-2">${rows}</ul>${assHtml}`,
       goLabel: ui.jobId ? 'Use this draft' : ui.kind === 'idea_check' ? 'Save to my idea check' : 'Save to my draft',
       eventName: 'mentor:strategySave', detail: { kind: ui.kind, sections: ui.sections || {}, assumptions: ass || undefined },

@@ -302,6 +302,19 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         ],
     },
     {
+        // The Business Mentor's weekly review (src/utils/mentor-review.ts; docs/business-mentor-plan.md §2.4).
+        // Its own row so each owner or admin chooses how they hear about it: the review itself always
+        // lands in their chat with the Mentor, whatever is switched off here. scope:'account' — it is
+        // about the workspace, not one hired assistant, and the Mentor has no notifications drawer.
+        key: 'mentor_weekly_review',
+        label: 'Business Mentor weekly review',
+        description: 'When your Business Mentor has written its weekly review and suggestions.',
+        scope: 'account',
+        push: PUSH_OFF,  // a weekly summary, never worth a buzz
+        inApp: ON, email: ON,
+        types: ['mentor_weekly_review'],
+    },
+    {
         key: 'onboarding_reminders',
         label: 'Onboarding',
         description: 'Setup reminders and your welcome / setup-complete milestones.',

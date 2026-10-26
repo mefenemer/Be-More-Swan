@@ -23,7 +23,7 @@ import { EMAIL_SUBJECT_STYLES, LONG_FORM_OPENINGS, OUTREACH_OPENINGS, SOCIAL_HOO
 import { CTA_BINDING_RULE } from './call-to-action';
 import { OUTREACH_FIRST_EMAIL_RULES } from './outreach-offer';
 import { ACTIVE_TEAMMATES_RULE, NO_TEAMMATES_BLOCK } from '../utils/team-activity';
-import { MENTOR_CRAFT, MENTOR_HONESTY_RULES, MENTOR_IDEA_CHECK_CRAFT, MENTOR_RESEARCH_CRAFT, MENTOR_STRATEGY_CRAFT } from '../constants/mentor-craft';
+import { MENTOR_CRAFT, MENTOR_HONESTY_RULES, MENTOR_IDEA_CHECK_CRAFT, MENTOR_RESEARCH_CRAFT, MENTOR_REVIEW_CRAFT, MENTOR_STRATEGY_CRAFT } from '../constants/mentor-craft';
 
 export interface PromptLayer {
     key: string;
@@ -114,18 +114,21 @@ const CAMPAIGNS: PromptLayer[] = [
       text: 'Its campaigns and saved lead searches, the content library, lessons kept from past campaigns, and the orders this workspace can run — only those whose assistants are active; paused ones are named so it can say to resume them.' },
 ];
 
-// Business Mentor: chat, plus its background jobs (src/utils/mentor-jobs.ts) — strategy drafts and
-// research, in ROLE_MODEL_PATHS. The weekly review joins in Phase 3 — docs/business-mentor-plan.md §3.11.
+// Business Mentor: chat, plus its background jobs — strategy drafts and research (src/utils/mentor-jobs.ts)
+// and the weekly review (src/utils/mentor-review.ts), in ROLE_MODEL_PATHS. docs/business-mentor-plan.md §3.11.
 const MENTOR: PromptLayer[] = [
     { key: 'mentor_craft', title: 'How it coaches', kind: 'craft', usedBy: 'Chat', source: 'src/constants/mentor-craft.ts', text: MENTOR_CRAFT },
     { key: 'mentor_idea_check', title: 'The idea check', kind: 'craft', usedBy: 'Chat', source: 'src/constants/mentor-craft.ts', text: MENTOR_IDEA_CHECK_CRAFT },
     { key: 'mentor_honesty', title: 'Honesty rules', kind: 'rule', usedBy: 'Chat', source: 'src/constants/mentor-craft.ts', text: MENTOR_HONESTY_RULES },
     { key: 'mentor_strategy', title: 'Drafting a plan', kind: 'craft', usedBy: 'Strategy documents', source: 'src/constants/mentor-craft.ts', text: MENTOR_STRATEGY_CRAFT },
     { key: 'mentor_research', title: 'Research with sources', kind: 'rule', usedBy: 'Research with sources', source: 'src/constants/mentor-craft.ts', text: MENTOR_RESEARCH_CRAFT },
+    { key: 'mentor_review', title: 'The weekly review', kind: 'craft', usedBy: 'Weekly review', source: 'src/constants/mentor-craft.ts', text: MENTOR_REVIEW_CRAFT },
+    { key: 'workspace_mentor_review', title: 'Filled in per workspace (weekly review)', kind: 'workspace', usedBy: 'Weekly review', source: 'src/utils/mentor-review.ts',
+      text: 'The workspace overview the chat reads, plus each ACTIVE assistant\'s work this week against last (Results), goals with a measured value, last week\'s commitments and why any were missed, its track record (what changed since each accepted suggestion), their customers from active assistants only (names and dates, never contact details), and how many of its 3 suggestions a week are left. Below the minimum sample no model is called: it says "not enough data yet" and asks one question. Every proposal is checked and rebuilt in code as in chat.' },
     { key: 'workspace_mentor_jobs', title: 'Filled in per workspace (background jobs)', kind: 'workspace', usedBy: 'Strategy documents', source: 'src/utils/mentor-jobs.ts',
       text: 'The workspace overview the chat reads, the document\'s sections with what is written now, their idea check, and the reviewed playbook for their kind of business (if any). Research gets only the question and a one-line description of the business; every link it gives is checked against the search tool\'s own results in code.' },
     { key: 'workspace_mentor', title: 'Filled in per workspace', kind: 'workspace', usedBy: 'Chat', source: 'netlify/functions/chat-orchestrator.ts',
-      text: 'Whether this is an established business or a new idea (its one set-up answer), plus everything every chat gets: the business identity, Products & Services, Brand Knowledge, its own settings and goals, and which teammates are active. Also its strategy documents (draft and approved), its last research answers with their links, and the reviewed playbook for their kind of business, if there is one.' },
+      text: 'Whether this is an established business or a new idea (its one set-up answer), plus everything every chat gets: the business identity, Products & Services, Brand Knowledge, its own settings and goals, and which teammates are active. Also its strategy documents (draft and approved), its last research answers with their links, the reviewed playbook for their kind of business, if there is one, the commitments and why any were missed, its track record, its weekly review settings, and — only when the user asks about customers — their customers from active assistants (names and dates only).' },
 ];
 
 const BY_ROLE: Record<string, PromptLayer[]> = {
@@ -167,6 +170,7 @@ export const ROLE_MODEL_PATHS: Record<string, { label: string; defaultModel: str
     business_mentor: [
         { label: 'Strategy documents', defaultModel: 'claude-opus-5-5' },
         { label: 'Research with sources', defaultModel: 'claude-opus-5-5' },
+        { label: 'Weekly review', defaultModel: 'claude-opus-5-5' },
     ],
 };
 /** Every role's chat. */

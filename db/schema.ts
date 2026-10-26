@@ -6297,3 +6297,72 @@ export const mentorJobs = pgTable("mentor_jobs", {
 }, (t) => [
   index("mentor_jobs_org_created_idx").on(t.organisationId, t.kind, t.createdAt),
 ]);
+
+// ── Business Mentor, Phase 3: the weekly review (db/z-business-mentor-phase-3.sql) ──────────────
+// docs/business-mentor-plan.md §5. Code tolerates all three missing (src/utils/mentor-review.ts).
+export const mentorReviews = pgTable("mentor_reviews", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  // Who pressed "Review my week now"; null for the schedule.
+  requestedBy: integer("requested_by").references(() => users.id, { onDelete: "set null" }),
+  // 'schedule' | 'on_demand'
+  trigger: text("trigger").notNull().default("schedule"),
+  // Monday of the review's week, UK time.
+  weekStart: date("week_start").notNull(),
+  // 'queued' | 'running' | 'done' | 'failed'
+  status: text("status").notNull().default("queued"),
+  // 'reviewed' | 'not_enough_data' (set when done)
+  outcome: text("outcome"),
+  summary: text("summary"),
+  // { sections: [{ title, text }], figures: [...], proposals: [{ id, type, title, target }] }
+  body: jsonb("body"),
+  proposalIds: integer("proposal_ids").array().notNull().default(sql`'{}'::integer[]`),
+  error: text("error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+}, (t) => [
+  index("mentor_reviews_org_created_idx").on(t.organisationId, t.createdAt),
+]);
+
+// §5.1: 1–3 things a person will do this week, and why a missed one was missed (a closed list).
+export const mentorCommitments = pgTable("mentor_commitments", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  ownerUserId: integer("owner_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  weekStart: date("week_start").notNull(),
+  text: text("text").notNull(),
+  // 'open' | 'done' | 'missed' | 'dropped'
+  status: text("status").notNull().default("open"),
+  // no_time | didnt_know_how | priorities_changed | waiting_on_someone | decided_against | other
+  missReason: text("miss_reason"),
+  note: text("note"),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  closedAt: timestamp("closed_at", { withTimezone: true }),
+  closedBy: integer("closed_by").references(() => users.id, { onDelete: "set null" }),
+}, (t) => [
+  index("mentor_commitments_org_week_idx").on(t.organisationId, t.weekStart),
+]);
+
+// §5.3: every accepted suggestion, the measure it was meant to move, and what happened SINCE.
+export const mentorOutcomes = pgTable("mentor_outcomes", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  proposalId: integer("proposal_id").notNull().references(() => mentorProposals.id, { onDelete: "cascade" }),
+  targetAssistantId: integer("target_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  kind: text("kind").notNull(),
+  change: text("change").notNull(),
+  measureKey: text("measure_key"),
+  measureLabel: text("measure_label"),
+  beforeValue: numeric("before_value"),
+  afterValue: numeric("after_value"),
+  // A draft the Mentor's suggestion asked for (content_generation_jobs.job_id) — its "Requested by" pill.
+  jobId: text("job_id"),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }).defaultNow().notNull(),
+  checkedAt: timestamp("checked_at", { withTimezone: true }),
+}, (t) => [
+  uniqueIndex("mentor_outcomes_proposal_uidx").on(t.proposalId),
+  index("mentor_outcomes_org_idx").on(t.organisationId, t.acceptedAt),
+]);

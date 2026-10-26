@@ -193,7 +193,7 @@ test('research and drafting are background jobs, metered at 1 task on delivery, 
     assert.match(jobs, /fetch\(`\$\{baseUrl\}\/\.netlify\/functions\/mentor-job-background`/);
     assert.match(read('netlify/functions/mentor-job-background.ts'), /CRON_TRIGGER_SECRET[\s\S]*runMentorJob\(getDb\(\), jobId\)/);
     assert.deepStrictEqual(ROLE_MODEL_PATHS.business_mentor.map((p) => [p.label, p.defaultModel]), [
-        ['Strategy documents', 'claude-opus-5-5'], ['Research with sources', 'claude-opus-5-5'],
+        ['Strategy documents', 'claude-opus-5-5'], ['Research with sources', 'claude-opus-5-5'], ['Weekly review', 'claude-opus-5-5'],
     ]);
     const layers = promptLayersFor('business_mentor').map((l) => l.usedBy);
     assert.ok(layers.includes('Strategy documents') && layers.includes('Research with sources'));

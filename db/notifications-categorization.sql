@@ -145,6 +145,7 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'site_draft_ready' THEN 'state_change'          -- a Website Assistant draft is ready (call site passes category)
     WHEN 'mentor_research_ready' THEN 'state_change'     -- Business Mentor research ready (call site passes category)
     WHEN 'mentor_draft_ready' THEN 'state_change'        -- Business Mentor strategy draft ready (call site passes category)
+    WHEN 'mentor_weekly_review' THEN 'state_change'      -- Business Mentor weekly review written (call site passes category)
     WHEN 'site_order_received' THEN 'state_change'       -- someone paid on the website (call site passes category)
     WHEN 'site_payments_ready' THEN 'state_change'       -- Stripe connected and able to take payments (call site passes category)
     -- celebratory

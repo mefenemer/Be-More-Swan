@@ -226,6 +226,22 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // The Business Mentor's weekly review is written (src/utils/mentor-review.ts). The review and its
+        // suggestions are in the owner's or admin's chat with the Mentor; the suggestions also wait in
+        // Notifications ▸ Needs you. Sent to owners and admins, each by their own preferences (§2.4).
+        templateKey: 'mentor_weekly_review',
+        name: 'Business Mentor weekly review',
+        category: 'Assistants',
+        type: 'mentor_weekly_review',
+        title: 'Your weekly review from {{assistant.name}}',
+        message: '{{review.summary}} ({{review.proposals}} — in your chat with {{assistant.name}}.)',
+        variables: [
+            ASSISTANT_NAME,
+            v('review.summary', 'The review’s headline (up to 200 characters)', 'A steady week: 12 posts out and the follower goal on track.'),
+            v('review.proposals', 'How many suggestions it made', '2 suggestions to look at'),
+        ],
+    },
+    {
         // The Business Mentor drafted a strategy document (src/utils/mentor-jobs.ts). Nothing is saved
         // until the user chooses "Use this draft".
         templateKey: 'mentor_draft_ready',

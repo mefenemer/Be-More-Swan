@@ -98,7 +98,7 @@ test('the chat route gates a suggestion before recording it, and the card carrie
     assert.ok(gate > 0 && record > gate, 'gate first');
     assert.match(o.slice(gate, record), /if \(!gate\.ok\) \{\s*\n\s*uiElement = null;/);
     assert.match(o.slice(record, record + 300), /uiElement = \{ \.\.\.filled, proposalId \};/);
-    assert.match(read('src/utils/mentor-snapshot.ts'), /renderMentorSnapshot\(data\) \+ '\\n' \+ renderProposalState\(proposals\)/);
+    assert.match(read('src/utils/mentor-snapshot.ts'), /\[renderMentorSnapshot\(data\), renderProposalState\(proposals\), \.\.\.extra\]\.join\('\\n'\)/);
 });
 
 const base: MentorSnapshotData = {

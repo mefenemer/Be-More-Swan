@@ -17,6 +17,10 @@
 //   setup_field_proposal    → src/utils/chat-setup-field.ts (any route; the Mentor may target any active assistant)
 //   strategy_proposal, mentor_research, mentor_break_even (Phase 2) → checked here, rebuilt from the
 //                             documents by src/utils/mentor-plan-cards.ts, applied through mentor.ts
+//   mentor_commitments (Phase 3) → mentor.ts commitments_add / commitment_close — the same actions as the
+//                             Commitments list on its Results tab (src/utils/mentor-commitments.ts). A
+//                             "close" card is rebuilt from the row (closeCommitmentCard).
+//   mentor_draft_request (Phase 3) → generate-post.ts, as "Create a Post" does (src/utils/mentor-draft-request.ts)
 // The clicks are window.MentorApply (src/components/mentor-apply.js), shared by chat, the Overview tab and
 // Inbox "Needs you". Every gap card carries a "why" — the evidence it's based on (§3.13). A gap card
 // without one is dropped.
@@ -24,11 +28,14 @@
 import { mentorSetupFieldPromptLine } from './chat-setup-field';
 import { isStrategyKind, type StrategyKind } from './strategy-documents';
 import { cleanQuestion, mentorPlanCardsPromptLines } from './mentor-plan-cards';
+import { cleanCommitmentTexts, MAX_PER_WEEK } from './mentor-commitments';
+import { draftRequestPromptLine } from './mentor-draft-request';
 
 export const MENTOR_CARD_TYPES = [
     'mentor_business_profile', 'mentor_products', 'mentor_quiet_mode', 'mentor_support_request',
     'mentor_business_stage', 'mentor_hire_recommendation', 'mentor_review_all',
     'strategy_proposal', 'mentor_research', 'mentor_break_even',
+    'mentor_commitments',
 ] as const;
 export type MentorCardType = typeof MENTOR_CARD_TYPES[number];
 
@@ -53,7 +60,9 @@ export type MentorCard =
     | { type: 'mentor_review_all'; summary: string }
     | { type: 'strategy_proposal'; op: 'revise' | 'approve' | 'draft'; kind: StrategyKind; summary: string; why: string | null; asked: boolean; sections?: unknown; assumptions?: unknown }
     | { type: 'mentor_research'; summary: string; question: string }
-    | { type: 'mentor_break_even'; summary: string; inputs: Record<string, unknown> };
+    | { type: 'mentor_break_even'; summary: string; inputs: Record<string, unknown> }
+    | { type: 'mentor_commitments'; op: 'set'; summary: string; texts: string[] }
+    | { type: 'mentor_commitments'; op: 'close'; summary: string; commitmentId: number };
 
 const text = (v: unknown, max: number): string | null => {
     if (typeof v !== 'string') return null;
@@ -131,6 +140,16 @@ export function mentorCardFromUiElement(ui: unknown, assistantId: number): Mento
         }
         case 'mentor_break_even':
             return { type: 'mentor_break_even', summary, inputs: (u.inputs && typeof u.inputs === 'object') ? u.inputs as Record<string, unknown> : {} };
+        case 'mentor_commitments': {
+            if (u.op === 'close') {
+                const id = Number(u.commitmentId);
+                if (!Number.isInteger(id) || id <= 0) return { error: 'It didn’t say which commitment.' };
+                return { type: 'mentor_commitments', op: 'close', summary, commitmentId: id };
+            }
+            const c = cleanCommitmentTexts(u.texts);
+            if (!c.ok) return { error: c.error };
+            return { type: 'mentor_commitments', op: 'set', summary, texts: c.texts };
+        }
     }
     return null;
 }
@@ -202,7 +221,19 @@ Set "asked": true ONLY when the user's latest message asked for exactly this cha
 
 ${mentorPlanCardsPromptLines()}
 
-Cards 1, 2, 6 and 7 are suggestions when you volunteer them ("asked": false) and count towards the 3 a week. At most one card per reply, and at most one suggestion card unless they asked for more. Never say a card has been applied — the user decides.`;
+${mentorCommitmentsPromptLines()}
+
+${draftRequestPromptLine()}
+
+Cards 1, 2, 6 and 7 and the post request are suggestions when you volunteer them ("asked": false) and count towards the 3 a week. At most one card per reply, and at most one suggestion card unless they asked for more. Never say a card has been applied — the user decides.`;
+}
+
+/** The commitments card (§5.1): set this week's, or the end-of-week check on one. */
+export function mentorCommitmentsPromptLines(): string {
+    return `Commitments — 1 to ${MAX_PER_WEEK} things the user will do THIS week, in their words (when they agree to some, or ask to set them). Their click saves them to the Commitments list on your Results tab, owned by them:
+{"type":"mentor_commitments","op":"set","summary":"<one sentence>","texts":["...", "..."]}
+The end-of-week check — for ONE commitment listed under COMMITMENTS that is still open (by its #number). Their click marks it done, missed (they pick why from a fixed list) or dropped:
+{"type":"mentor_commitments","op":"close","summary":"<one short question: how did it go?>","commitmentId":<its #number>}`;
 }
 
 /**

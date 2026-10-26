@@ -270,7 +270,7 @@ test('asked who to hire, or to review everything, and no card drawn: the server 
     assert.strictEqual(cardTheUserAskedFor('Can I review all your suggestions together?')?.type, 'mentor_review_all');
     assert.strictEqual(cardTheUserAskedFor('Show me all the suggestions')?.type, 'mentor_review_all');
     for (const q of ['How do I post to Instagram?', 'Help me write a sales email', 'I hired a designer last year']) assert.strictEqual(cardTheUserAskedFor(q), null, q);
-    assert.match(read('netlify/functions/chat-orchestrator.ts'), /if \(!uiElement\) uiElement = cardTheUserAskedFor\(typed\);\s*\n\s*const m = mentorCardFromUiElement/);
+    assert.match(read('netlify/functions/chat-orchestrator.ts'), /if \(!uiElement\) uiElement = cardTheUserAskedFor\(typed\);[\s\S]{0,300}const m = draftReq \? null : mentorCardFromUiElement/);
 });
 
 // ── 1. New-user opening ─────────────────────────────────────────────────────────────────────────
@@ -346,7 +346,7 @@ test('review all: nothing pre-ticked; each through its own action; failures one 
     const src = read('src/components/mentor-review-all.js');
     assert.match(src, /ticked: new Set\(\)/, 'starts with nothing ticked');
     assert.match(src, /\$\{st\.ticked\.has\(it\.id\) && !done \? 'checked' : ''\}/, 'checked only when the user ticked it');
-    assert.match(src, /await window\.MentorApply\.applyCard\(it\.card\);/);
+    assert.match(src, /await window\.MentorApply\.applyCard\(\{ \.\.\.it\.card, proposalId: it\.id \}\);/);
     assert.match(src, /for \(const it of chosen\) \{\s*\n\s*try \{/, 'one at a time, each caught on its own');
     assert.match(src, /✗ Not saved: \$\{esc\(r\.error\)\}/);
     assert.match(src, /each one that failed says why above/);
@@ -355,7 +355,7 @@ test('review all: nothing pre-ticked; each through its own action; failures one 
     for (const [type, call] of [['mentor_business_profile', 'businessProfile(card.fields)'], ['mentor_products', 'products(card.products)'], ['setup_field_proposal', 'setupAnswer(card.assistantId, card.key, card.value)']]) {
         assert.ok(fn.includes(`case '${type}': return ${call};`), type);
     }
-    assert.deepStrictEqual([...REVIEWABLE_KINDS], ['business_info_gap', 'products_gap', 'setup_field']);
+    assert.deepStrictEqual([...REVIEWABLE_KINDS], ['business_info_gap', 'products_gap', 'setup_field', 'draft_request']);
 });
 
 test('review all: the same gap suggested twice is one row', () => {

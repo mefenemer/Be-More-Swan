@@ -5,8 +5,8 @@
 //   always      — in its <workspace> block every turn (src/utils/mentor-snapshot.ts), or in a block
 //                 every chat already gets (business identity, products, Brand Knowledge, team activity,
 //                 plan and tasks).
-//   on_request  — may be read when the conversation needs it. Phase 1a reads none of these yet; each
-//                 one is read only once its loader is written, and only for the stated purpose.
+//   on_request  — may be read when the conversation needs it, only once its loader is written, and only
+//                 for the stated purpose. Those with a `shown` line are read today (the customers, §5.2).
 //   never       — the Mentor must not read it, for the reason given.
 //
 // tests/mentor-data-inventory.test.ts fails when a table with an organisation column is missing here,
@@ -41,18 +41,29 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('always', 'Its own strategy documents: the idea check, business plan and marketing plan (§4.4)', ['strategy_documents'], 'Your plans: the idea check, business plan and marketing plan'),
     ...group('always', 'Its own research answers and drafting jobs, with their links (§4.5)', ['mentor_jobs'], 'What it has looked up for you, with the links'),
     ...group('always', 'Its own suggestions and what the user did with them: the weekly cap and what not to suggest again (§3.13)', ['mentor_proposals'], 'Its own suggestions and the ones you dismissed'),
+    ...group('always', 'Its own weekly reviews (§5)', ['mentor_reviews'], 'Its weekly reviews'),
+    ...group('always', 'Commitments and why a missed one was missed (§5.1), with each owner\'s name', ['mentor_commitments'], 'What you and your team committed to each week, and why any were missed'),
+    ...group('always', 'Its track record: accepted suggestions and what happened since (§5.3)', ['mentor_outcomes'], 'What changed since you accepted its suggestions'),
     ...group('on_request', 'Task detail: what spent tasks this month and bonus tasks', ['task_ledger', 'task_bonus']),
     ...group('on_request', 'Drafting jobs in progress, and the compiled assistant brief', ['content_generation_jobs', 'ai_blueprints']),
     ...group('on_request', 'Results: goal measurements and post performance', ['goal_telemetry', 'post_insights', 'manual_follower_counts']),
-    ...group('on_request', 'Sales: lead counts, outcomes and reasons (counts, not people)', [
-        'discovered_leads', 'revenue_events', 'lead_reject_feedback', 'template_feedback', 'discovery_campaigns', 'discovery_guardrails',
+    // Phase 3b (§5.2): read by src/utils/mentor-customers.ts — in chat when the user asks about their
+    // customers, and always in the weekly review and on the Customers panel. Only while the assistant
+    // that records them is ACTIVE; names and dates only, never contact details or message bodies.
+    ...group('on_request', 'Customers: won, lost and why (Lead Generator active); won customers\' company and contact NAME only', [
+        'revenue_events', 'discovered_leads',
+    ], 'Your customers: deals won and lost and why, and won customers you haven\'t contacted lately (names and dates only) — when you ask, and in the weekly review'),
+    ...group('on_request', 'Quiet customers: the last-contact DATE only — never addresses or message bodies', ['lead_threads']),
+    ...group('on_request', 'Customer reviews: rating and a short excerpt, never the author', ['org_reviews'], 'Your customer reviews: ratings and short excerpts — when you ask, and in the weekly review'),
+    ...group('on_request', 'Support Agent tickets (subjects and counts) and overdue invoice counts, when those assistants are active', ['assistant_records'],
+        'Your Support Agent\'s ticket subjects and overdue invoice counts, when those assistants are active'),
+    ...group('on_request', 'Sales detail: why leads were rejected, outreach edit reasons, searches (counts, not people)', [
+        'lead_reject_feedback', 'template_feedback', 'discovery_campaigns', 'discovery_guardrails',
     ]),
-    ...group('on_request', 'Customers: counts, segments and reviews — never contact details', [
-        'audience_segments', 'org_reviews', 'review_requests', 'review_settings',
+    ...group('on_request', 'Customers: counts and segments; review requests — never contact details', [
+        'audience_segments', 'review_requests', 'review_settings',
     ]),
-    ...group('on_request', 'Quiet customers (Phase 3b): name, company and last-contact date only — never message bodies', ['lead_threads']),
-    ...group('on_request', 'Overdue invoices: count and total, when Accounts Receivable is active', ['invoices']),
-    ...group('on_request', 'Support Agent records: themes and counts; meeting action items', ['assistant_records', 'action_items']),
+    ...group('on_request', 'Meeting action items, when the Meeting Note Taker is active', ['action_items']),
     ...group('on_request', 'Campaigns and their orders: status, who asked for what', [
         'campaigns', 'campaign_orders', 'orchestration_runs', 'orchestration_links', 'campaign_learnings',
     ]),
@@ -83,7 +94,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
         'user_organisations', 'login_events', 'team_reads',
     ], 'Your team members\' email addresses and logins'),
     ...group('never', 'Billing and payment internals', [
-        'payments', 'stripe_disputes', 'site_orders', 'reward_redemptions', 'reward_audits', 'ai_credit_ledger', 'ai_credit_balance', 'trials', 'plan_moves',
+        'invoices', 'payments', 'stripe_disputes', 'site_orders', 'reward_redemptions', 'reward_audits', 'ai_credit_ledger', 'ai_credit_balance', 'trials', 'plan_moves',
     ], 'Card details and payments'),
     ...group('never', 'What Be More Swan records about the customer, and compliance records', [
         'dpa_acceptances', 'legal_holds', 'beta_endings', 'risk_assessments', 'security_audits', 'agent_anomalies',
@@ -116,7 +127,8 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
 export function mentorVisibility(): { sees: string[]; never: string[] } {
     const uniq = (access: MentorAccess) => [...new Set(Object.values(MENTOR_DATA_INVENTORY).filter((e) => e.access === access && e.shown).map((e) => e.shown!))];
     return {
-        sees: uniq('always'),
+        // On-request entries with a `shown` line are read today (Phase 3b customers), so they're listed too.
+        sees: [...uniq('always'), ...uniq('on_request')],
         never: [...uniq('never'), 'Any other workspace, even one you also belong to', 'Your chats with your other assistants'],
     };
 }
