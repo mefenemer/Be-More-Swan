@@ -162,6 +162,19 @@ export function bodyIsEmpty(b: StrategyBody | null | undefined): boolean {
     return !b || (!Object.values(b.sections ?? {}).some((v) => v && v.trim()) && !(b.assumptions ?? []).length);
 }
 
+/** Pure: the sections still holding a [question] the Mentor left for the owner (blocks approval). */
+export function sectionsWithOpenQuestions(kind: StrategyKind, b: StrategyBody | null): string[] {
+    const has = (t: string | undefined) => !!t && /\[[^\]\n]{3,}\]/.test(t);
+    const out = STRATEGY_KINDS[kind].sections.filter((s) => has(b?.sections[s.key])).map((s) => s.label);
+    if ((b?.assumptions ?? []).some((a) => has(a.assumption) || has(a.test))) out.push('Riskiest assumptions');
+    return out;
+}
+
+/** Pure: text with any [bracketed question] removed, for prompts (a second line behind the approval check). */
+export function withoutOpenQuestions(t: string): string {
+    return t.replace(/\[[^\]\n]{3,}\]/g, '').split('\n').map((l) => l.trim()).filter(Boolean).join('\n');
+}
+
 // ── Diff (Plan tab "Changes", and the approve card) ──────────────────────────────────────────────
 
 export type DiffPart = { op: 'same' | 'add' | 'del'; text: string };
@@ -385,6 +398,9 @@ export async function approveStrategyDraft(db: Db, orgId: number, userId: number
                 return { ok: false as const, status: 409, error: 'The draft has been edited since this was shown — check the latest changes before approving.' };
             }
             if (bodyIsEmpty(draft.body)) return { ok: false as const, status: 400, error: 'The draft is empty — write something before approving it.' };
+            // Like Publish on the Website tab: an open [question] must never reach every assistant's prompt.
+            const open = sectionsWithOpenQuestions(kind, draft.body);
+            if (open.length) return { ok: false as const, status: 400, error: `Answer or remove the parts in [square brackets] first — in ${open.join(', ')}.` };
             await tx.update(strategyDocuments).set({ status: 'superseded', updatedAt: new Date() })
                 .where(and(eq(strategyDocuments.organisationId, orgId), eq(strategyDocuments.kind, kind), eq(strategyDocuments.status, 'approved')));
             const [r] = await tx.update(strategyDocuments).set({ status: 'approved', approvedBy: userId, approvedAt: new Date(), updatedAt: new Date() })
@@ -407,8 +423,8 @@ export function renderApprovedStrategyForDrafts(docs: StrategyDoc[]): string | n
     for (const kind of ['business_plan', 'marketing_plan'] as const) {
         const approved = docs.find((d) => d.kind === kind && d.status === 'approved');
         if (!approved) continue;
-        const rows = STRATEGY_KINDS[kind].sections.filter((s) => s.feedsDrafts && approved.body.sections[s.key]?.trim())
-            .map((s) => `- ${s.label}: ${approved.body.sections[s.key].trim().replace(/\s*\n+\s*/g, '; ')}`);
+        const rows = STRATEGY_KINDS[kind].sections.filter((s) => s.feedsDrafts && withoutOpenQuestions(approved.body.sections[s.key] ?? ''))
+            .map((s) => `- ${s.label}: ${withoutOpenQuestions(approved.body.sections[s.key]).replace(/\s*\n+\s*/g, '; ')}`);
         if (rows.length) lines.push(`${STRATEGY_KINDS[kind].label} (approved by the owner):`, ...rows);
     }
     if (!lines.length) return null;

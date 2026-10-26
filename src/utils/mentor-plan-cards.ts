@@ -13,7 +13,7 @@
 // The browser draws them (disruptive-ui-registry.js); the clicks are window.MentorApply (mentor-apply.js).
 
 import { breakEven, BREAK_EVEN_INPUTS, BREAK_EVEN_KEYS, type BreakEvenInput, type BreakEvenKey } from './break-even';
-import { STRATEGY_KINDS, cleanStrategyPatch, diffStrategy, pickVersions, type StrategyDoc, type StrategyKind } from './strategy-documents';
+import { STRATEGY_KINDS, cleanStrategyPatch, diffStrategy, pickVersions, sectionsWithOpenQuestions, type StrategyDoc, type StrategyKind } from './strategy-documents';
 
 export const QUESTION_MIN = 8;
 export const QUESTION_MAX = 600;
@@ -67,6 +67,8 @@ export function buildStrategyCard(input: StrategyCardInput, docs: StrategyDoc[])
 
     if (input.op === 'approve') {
         if (!draft) return { error: `There’s no ${def.label.toLowerCase()} draft to approve yet — save one first.` };
+        const open = sectionsWithOpenQuestions(input.kind, draft.body);
+        if (open.length) return { error: `The draft still has parts in [square brackets] to answer or remove first — in ${open.join(', ')}.` };
         const diff = diffStrategy(input.kind, approved?.body ?? null, draft.body);
         if (!diff.length) return { error: `The draft is the same as the approved ${def.label.toLowerCase()}.` };
         return {

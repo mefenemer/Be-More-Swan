@@ -117,7 +117,7 @@
 
   function actionsHtml(kind) {
     const d = docOf(kind);
-    const canApprove = state.data.canApprove && d.draft && (d.diff || []).length && !dirty(kind);
+    const canApprove = state.data.canApprove && d.draft && (d.diff || []).length && !dirty(kind) && !openQuestions(kind);
     const busy = state.busy[kind];
     return `
       <div class="flex flex-wrap items-center gap-2 mt-4">
@@ -128,10 +128,14 @@
         <button type="button" data-mplan-draft="${kind}" class="btn-secondary px-3 py-2 border text-xs font-bold rounded-lg transition disabled:opacity-50" ${busy || draftJob(kind, true) ? 'disabled' : ''}>${kind === 'idea_check' ? 'Draft my canvas' : 'Draft it for me'} · 1 task</button>
         ${d.draft ? `<button type="button" data-mplan-changes aria-expanded="${state.showChanges ? 'true' : 'false'}" class="btn-swan-link px-1 py-2 text-xs font-bold">Changes (${(d.diff || []).length})</button>` : ''}
       </div>
+      ${openQuestions(kind) ? '<p class="text-[11px] text-amber-800 mt-1">Answer or remove the parts in [square brackets] before approving.</p>' : ''}
       <p class="text-[11px] text-gray-500 mt-1">${kind === 'idea_check' ? 'Approving keeps this as your record of the idea; it doesn’t change what your other assistants write.' : 'Approving makes this the plan every assistant writes from.'} Earlier versions are kept.</p>
       ${note(kind)}
       ${state.showChanges && d.draft ? `<div class="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3" data-mplan-panel="changes"><p class="text-xs font-bold uppercase tracking-wide text-gray-500">Changes since ${d.approved ? `approved v${Number(d.approved.version)}` : 'nothing approved yet'}</p>${diffHtml(d.diff)}</div>` : ''}`;
   }
+
+  // Approval refuses while a [question] is left (strategy-documents.ts sectionsWithOpenQuestions).
+  const openQuestions = (kind) => { const w = working(kind); return [...Object.values(w.sections || {}), ...(w.assumptions || []).flatMap((a) => [a.assumption, a.test])].some((t) => /\[[^\]\n]{3,}\]/.test(t || '')); };
 
   /** The newest drafting job for a kind: running (busy=true) or done and not yet used/dismissed. */
   function draftJob(kind, runningOnly) {

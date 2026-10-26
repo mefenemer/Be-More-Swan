@@ -19,7 +19,7 @@ import path from 'node:path';
 import { breakEven } from '../src/utils/break-even';
 import {
     STRATEGY_KINDS, cleanStrategyPatch, diffStrategy, diffWords, mergeBody, pickVersions, prefillStrategy,
-    renderApprovedStrategyForDrafts, renderStrategyForMentor, type StrategyDoc,
+    renderApprovedStrategyForDrafts, renderStrategyForMentor, sectionsWithOpenQuestions, type StrategyDoc,
 } from '../src/utils/strategy-documents';
 import { businessKnowledgePromptBlock } from '../src/utils/business-knowledge';
 import { parseResearchReply, shortQuestion } from '../src/utils/mentor-jobs';
@@ -138,6 +138,14 @@ test('only APPROVED text, and only the sections that feed drafts, reach every as
     assert.match(text, /The offer: Grooming at home/);
     assert.ok(!/£2k|Q1|DRAFT ONLY/.test(text), 'numbers, milestones and drafts stay out');
     assert.strictEqual(renderApprovedStrategyForDrafts([docs[1]]), null);
+    // A [question] left by the Mentor blocks approval and never reaches a prompt (staging, 2026-10-26: an
+    // approved draft carried "[Which niche subjects do you focus on?]" into every assistant's brief).
+    const q = { sections: { audience: 'Film fans\n[Which niche subjects do you focus on?]', messaging: 'True stories' } };
+    assert.deepStrictEqual(sectionsWithOpenQuestions('marketing_plan', q), ['Audience']);
+    const shown = renderApprovedStrategyForDrafts([doc({ kind: 'marketing_plan', status: 'approved', body: q })])!;
+    assert.ok(shown.includes('Audience: Film fans') && !shown.includes('['), shown);
+    assert.ok('error' in buildStrategyCard({ op: 'approve', kind: 'marketing_plan', summary: 's', why: null, asked: true }, [doc({ kind: 'marketing_plan', body: q })]));
+    assert.match(read('src/utils/strategy-documents.ts'), /const open = sectionsWithOpenQuestions\(kind, draft\.body\);\s*if \(open\.length\) return \{ ok: false as const, status: 400/);
     // The one renderer: chat, blog-generate and blueprint §11 all go through businessKnowledgePromptBlock.
     const block = businessKnowledgePromptBlock({ documents: [], links: [], strategy: text })!;
     assert.match(block, /^APPROVED STRATEGY — The business owner approved this strategy[\s\S]*Dog owners/);
