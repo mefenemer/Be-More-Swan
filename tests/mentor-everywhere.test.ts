@@ -53,4 +53,21 @@ check('other assistants: a Mentor pointer only when the workspace has an active 
     assert.match(ORCH, /myAccountBlock, mentorPointerBlock, mentorNoPlanBlock\]\.filter\(Boolean\)/);
 });
 
+check('pricing: the Business Mentor row is in the SQL and the seed, ticked on every plan', () => {
+    const sqlFile = read('db/z-business-mentor-plan-feature.sql');
+    assert.match(sqlFile, /'business_mentor',\s*'Business Mentor'/);
+    assert.match(sqlFile, /'Core Features — included on every plan'/);
+    assert.match(sqlFile, /\|\| '\{"business_mentor": true\}'::jsonb/);
+    const seed = read('db/seed-plan-features.ts');
+    assert.match(seed, /key: 'business_mentor', label: 'Business Mentor'[\s\S]{0,400}values: \{ saver: CHECK, buster: CHECK, employee: CHECK \}/, 'a re-seed must keep it');
+});
+
+check('FAQ: three Mentor answers, and no claim the competitor check does not back', () => {
+    const faq = read('faq.html');
+    for (const q of ['What is the Business Mentor?', 'Does the Business Mentor cost extra or use my tasks?', 'What can the Business Mentor see?']) assert.ok(faq.includes(q), q);
+    const at = faq.indexOf('<!-- Business Mentor (docs/business-mentor-plan.md');
+    const block = faq.slice(at, faq.indexOf('What can the Business Mentor see?') + 1200);
+    assert.doesNotMatch(block.replace(/<!--[\s\S]*?-->/g, ''), /\b(the first|first (platform|tool|AI|of its kind)|unique|disruptive|only platform|nobody else)\b/i);
+});
+
 console.log(`\n${passed} passed`);
