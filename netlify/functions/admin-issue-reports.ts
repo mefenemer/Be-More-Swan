@@ -14,6 +14,7 @@ import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import postgres from 'postgres';
 import { and, eq, ne, desc, asc, sql, or, isNull, isNotNull, inArray, notInArray } from 'drizzle-orm';
+import { incidentColumnsReady, loadIncidentFields } from '../../src/utils/platform-incident';
 import { getDb } from '../../db/client';
 import { issueReports, issueReportMessages, users } from '../../db/schema';
 import { hasPermission } from '../../src/utils/rbac';
@@ -28,6 +29,11 @@ const json = (statusCode: number, body: unknown) => ({
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
 });
+
+/** The bulk hand-offs' filter that keeps suspected incidents out. Nothing to filter before the SQL exists. */
+async function notSuspected(db: Parameters<typeof incidentColumnsReady>[0]) {
+    return (await incidentColumnsReady(db)) ? [sql`${issueReports}.source <> 'suspected'`] : [];
+}
 
 async function requireAdmin(event: any): Promise<{ id: number; role: string } | null> {
     if (!jwtSecret) return null;
@@ -96,6 +102,7 @@ export default withLambda(async (event) => {
         }).where(and(
             eq(issueReports.status, 'reported'),
             or(isNull(issueReports.devHandoffStatus), notInArray(issueReports.devHandoffStatus, ['queued', 'in_progress'])),
+            ...(await notSuspected(db)), // §6.2: a suspected issue is only ever passed on by hand
         )).returning({ id: issueReports.id, userId: issueReports.userId });
 
         if (updated.length === 0) return json(200, { ok: true, queued: 0 });
@@ -129,6 +136,7 @@ export default withLambda(async (event) => {
         }).where(and(
             eq(issueReports.status, 'backlog'),
             or(isNull(issueReports.devHandoffStatus), notInArray(issueReports.devHandoffStatus, ['queued', 'in_progress'])),
+            ...(await notSuspected(db)),
         )).returning({ id: issueReports.id, userId: issueReports.userId });
 
         if (updated.length === 0) return json(200, { ok: true, queued: 0 });
@@ -397,7 +405,8 @@ export default withLambda(async (event) => {
     if (event.httpMethod === 'GET' && id) {
         const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (!issue) return json(404, { error: 'Issue not found.' });
-        const [reporter] = await db
+        // No reporter on an automatic incident (source 'system' | 'suspected').
+        const [reporter] = issue.userId == null ? [] : await db
             .select({ email: users.email, firstName: users.firstName, lastName: users.lastName })
             .from(users).where(eq(users.id, issue.userId)).limit(1);
         const messages = await db.select().from(issueReportMessages)
@@ -407,8 +416,9 @@ export default withLambda(async (event) => {
             issue: {
                 ...issue,
                 statusLabel: ISSUE_STATUS_LABEL[issue.status as IssueStatus] || issue.status,
-                reporterName: [reporter?.firstName, reporter?.lastName].filter(Boolean).join(' ') || reporter?.email || `User #${issue.userId}`,
+                reporterName: issue.userId == null ? 'Automatic (Be More Swan)' : [reporter?.firstName, reporter?.lastName].filter(Boolean).join(' ') || reporter?.email || `User #${issue.userId}`,
                 reporterEmail: reporter?.email || null,
+                ...((await loadIncidentFields(db, [issue.id])).get(issue.id) ?? { source: 'user', occurrences: 1, lastSeenAt: null, incident: null }),
             },
             messages,
         });
@@ -455,6 +465,9 @@ export default withLambda(async (event) => {
             .from(issueReports)
             .groupBy(issueReports.status);
 
+        // Automatic incidents (§6.2): their columns are read raw, so this works before the SQL is applied.
+        const incidents = await loadIncidentFields(db, rows.map((r) => r.id));
+
         return json(200, {
             issues: rows.map((r) => ({
                 id: r.id,
@@ -473,8 +486,11 @@ export default withLambda(async (event) => {
                 devProdAt: r.devProdAt,
                 devRunnerId: r.devRunnerId,
                 devRunnerHeartbeat: r.devRunnerHeartbeat,
-                reporterName: [r.reporterFirst, r.reporterLast].filter(Boolean).join(' ') || r.reporterEmail || `User #${r.userId}`,
+                reporterName: r.userId == null ? 'Automatic (Be More Swan)' : [r.reporterFirst, r.reporterLast].filter(Boolean).join(' ') || r.reporterEmail || `User #${r.userId}`,
                 reporterEmail: r.reporterEmail,
+                source: incidents.get(r.id)?.source ?? 'user',
+                occurrences: incidents.get(r.id)?.occurrences ?? 1,
+                lastSeenAt: incidents.get(r.id)?.lastSeenAt ?? null,
             })),
             counts: Object.fromEntries(counts.map((c) => [c.status, c.n])),
         });

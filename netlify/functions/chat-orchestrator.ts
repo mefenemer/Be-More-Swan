@@ -111,6 +111,7 @@ import { renderReviewSettingsForMentor } from '../../src/utils/mentor-review';
 import { mentorVisibilityPromptBlock } from '../../src/config/mentor-data-inventory';
 import { buildBreakEvenCard, buildStrategyCard } from '../../src/utils/mentor-plan-cards';
 import { loadStrategyDocs } from '../../src/utils/strategy-documents';
+import { recordPlatformIncident } from '../../src/utils/platform-incident';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -2586,6 +2587,8 @@ export default withLambda(async (event) => {
         return await handleChatTurn(event);
     } catch (err) {
         console.error('[chat-orchestrator] unhandled error before the LLM boundary:', err);
+        // §6.2: no tenant is known here for certain, so the incident carries none.
+        await recordPlatformIncident(getDb(), { kind: 'chat_request', error: err, view: 'chat-orchestrator' });
         // Name the fault in the reply, not just the log.
         //
         // "Please try again — the details are in our logs" is only useful to someone who can read
@@ -3740,6 +3743,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         });
     } catch (err) {
         console.error('[chat-orchestrator] LLM error:', err);
+        await recordPlatformIncident(db, { kind: 'chat_turn', error: err, organisationId: orgId, assistantId: session.aiAssistantId, ids: { chatSessionId: session.id }, view: 'chat-orchestrator' });
         // The user's turn is already persisted; the client can retry into the same session.
         return json(502, { chatSessionId: session.id, userMessageId: userMessage.id, error: "I'm having trouble right now — please try again in a moment." });
     }

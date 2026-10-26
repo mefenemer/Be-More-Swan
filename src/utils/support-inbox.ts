@@ -120,7 +120,7 @@ export async function loadInbox(db: Db, scope: InboxScope): Promise<InboxItem[]>
                    m.author_type AS last_author,
                    u.email, u.first_name, u.last_name, c.id AS contact_id
               FROM issue_reports i
-              JOIN users u ON u.id = i.user_id
+              JOIN users u ON u.id = i.user_id  -- keeps automatic incidents (no reporter) out: they live on Issue Reports only
               LEFT JOIN LATERAL (
                 SELECT author_type, created_at FROM issue_report_messages WHERE issue_id = i.id ORDER BY created_at DESC LIMIT 1
               ) m ON true
@@ -225,9 +225,10 @@ export async function ticketToIssue(db: Db, ticketId: number, adminId: number): 
  */
 export async function issueToTicket(db: Db, issueId: number, adminId: number): Promise<RerouteResult> {
     return db.transaction(async (tx) => {
-        const [i] = await tx.execute<{ id: number; user_id: number; organisation_id: number | null; description: string; status: string }>(sql`
+        const [i] = await tx.execute<{ id: number; user_id: number | null; organisation_id: number | null; description: string; status: string }>(sql`
             SELECT id, user_id, organisation_id, description, status FROM issue_reports WHERE id = ${issueId} FOR UPDATE`) as unknown as Array<any>;
         if (!i) return { ok: false as const, status: 404, error: 'Reported problem not found.' };
+        if (i.user_id == null) return { ok: false as const, status: 409, error: 'An automatic report has no customer to answer, so it can\'t become a support request.' };
         if (i.status === 'closed') return { ok: false as const, status: 409, error: 'That report is already closed.' };
         const msgs = await tx.execute<{ body: string; author_type: string; created_at: Date }>(sql`
             SELECT body, author_type, created_at FROM issue_report_messages WHERE issue_id = ${issueId} ORDER BY created_at`) as unknown as Array<any>;

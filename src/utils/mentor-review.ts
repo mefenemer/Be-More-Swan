@@ -31,6 +31,8 @@ import { and, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm';
 import { aiAssistants, chatMessages, chatSessions, mentorReviews, organisations, userOrganisations, userProfiles, users } from '../../db/schema';
 import { adaptForModel, replyText } from '../config/model-options';
 import { MENTOR_HONESTY_RULES, MENTOR_REVIEW_CRAFT } from '../constants/mentor-craft';
+import { recordPlatformIncident } from './platform-incident';
+import { contentFindings, contentFindingsText, loadContentChecks, renderContentChecksForMentor, type ContentCheckInputs } from './mentor-content-checks';
 import { loadRoleModel, withRoleModel } from './assistant-model';
 import { MENTOR_ROLE_KEY } from './mentor-provision';
 import { renderMentorSnapshot, loadMentorSnapshotData, type MentorSnapshotData } from './mentor-snapshot';
@@ -111,6 +113,8 @@ export interface ReviewInputs {
     commitments: Commitment[] | null;
     record: TrackRecordItem[] | null;
     customers: CustomersView | null;
+    /** §6.1 content checks; null when they couldn't be read. Optional so older callers and tests still fit. */
+    content?: ContentCheckInputs | null;
 }
 
 /** Pure: is there anything that reaches its minimum sample? Otherwise the review says "not enough data yet". */
@@ -160,11 +164,12 @@ export async function readReviewInputs(db: Db, orgId: number, userId: number, no
             breakdown: (w?.breakdown ?? []).slice(0, 3).map((b) => `${b.count} ${b.label.toLowerCase()}`).join(', '),
         };
     });
-    return { data, proposals, figures, commitments, record, customers };
+    const content = await loadContentChecks(db, orgId, data);
+    return { data, proposals, figures, commitments, record, customers, content };
 }
 
 /** Pure: the "not enough data yet" review, written in code (no model call, nothing charged). */
-export function notEnoughDataReview(i: Pick<ReviewInputs, 'data' | 'figures' | 'commitments' | 'customers'>, now = new Date()): { summary: string; sections: Array<{ title: string; text: string }> } {
+export function notEnoughDataReview(i: Pick<ReviewInputs, 'data' | 'figures' | 'commitments' | 'customers' | 'content'>, now = new Date()): { summary: string; sections: Array<{ title: string; text: string }> } {
     const thin: string[] = [];
     if (!i.figures.length) thin.push('no assistant is active yet, so there are no results to compare');
     else thin.push(`your assistants produced ${i.figures.reduce((s, f) => s + f.thisWeek + f.lastWeek, 0)} items in two weeks — under ${MIN_WORK} each is too few to call a trend`);
@@ -175,10 +180,13 @@ export function notEnoughDataReview(i: Pick<ReviewInputs, 'data' | 'figures' | '
     const question = hasThisWeek
         ? 'How are this week’s commitments going? Tell me in chat, or tick them off on my Results tab.'
         : 'What’s the one thing that would make the biggest difference to your business this week? Tell me in chat and I’ll help you turn it into a commitment.';
+    // §6.1: what code can find on its own is worth saying even in a thin week — and costs nothing.
+    const checks = i.content ? contentFindingsText(contentFindings(i.content)) : null;
     return {
         summary: 'Not enough data yet for a proper review — so no suggestions this week.',
         sections: [
             { title: 'What I can’t judge yet', text: `I won’t invent a trend: ${thin.join('; ')}.` },
+            ...(checks ? [{ title: 'Worth fixing in your set-up', text: checks }] : []),
             { title: 'This week', text: question },
         ],
     };
@@ -481,6 +489,7 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
                 renderCommitmentsForMentor(inputs.commitments, null, now).join('\n'),
                 renderTrackRecordForMentor(inputs.record).join('\n'),
                 renderCustomersForMentor(inputs.customers).join('\n'),
+                renderContentChecksForMentor(inputs.content ?? null).join('\n'),
                 `SUGGESTIONS LEFT THIS WEEK: ${left}.`,
                 waitingLine,
                 reviewCardsPrompt(),
@@ -585,6 +594,7 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
         }
     } catch (err) {
         console.error('[mentor-review] review failed', { reviewId, message: err instanceof Error ? err.message : String(err) });
+        await recordPlatformIncident(db, { kind: 'mentor_review', error: err, organisationId: orgId, assistantId: review.aiAssistantId ?? null, role: 'business_mentor', ids: { reviewId, trigger: review.trigger }, view: 'mentor-review-background' });
         await db.update(mentorReviews).set({ status: 'failed', error: 'Your Mentor couldn’t finish this review. Nothing was charged.', finishedAt: new Date() })
             .where(eq(mentorReviews.id, reviewId)).catch(() => {});
     }

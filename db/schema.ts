@@ -1475,8 +1475,9 @@ export const issueReports = pgTable("issue_reports", {
   id: serial("id").primaryKey(),
   organisationId: integer("organisation_id")
       .references(() => organisations.id, { onDelete: "cascade" }),
+  // NULL for an automatic incident (source 'system' | 'suspected', db/z-platform-incidents.sql): no
+  // reporter, so it never reaches a user's own list or a status-change notification.
   userId: integer("user_id")
-      .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
 
   description: text("description").notNull(),
@@ -1530,6 +1531,10 @@ export const issueReports = pgTable("issue_reports", {
   devProdStatus: text("dev_prod_status"),
   devProdAt: timestamp("dev_prod_at"),
   devProdResult: text("dev_prod_result"),    // git/gh output or error from the promotion
+  // ⚠️ db/z-platform-incidents.sql adds source / fingerprint / fingerprint_day / occurrences /
+  // last_seen_at / incident_context. Deliberately NOT declared here: Drizzle names every declared
+  // column in an INSERT, so declaring them would break "Report an Issue" on any database the SQL
+  // hasn't reached. Read and written raw, behind incidentColumnsReady() (src/utils/platform-incident.ts).
 }, (t) => [
   index("issue_reports_user_idx").on(t.userId, t.createdAt),
   index("issue_reports_org_idx").on(t.organisationId),

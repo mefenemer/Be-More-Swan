@@ -716,6 +716,32 @@ goals with no connected platform (reuse `goal-connections.ts`). It shows proposa
 DB state. If more is ever needed, the privacy policy and DPA must say so first (the privacy policy and
 trust page already disagree on whether Be More Swan is controller or processor; settle that first).
 
+### 6.3 As built (2026-10-26)
+
+- **Incidents:** `src/utils/platform-incident.ts` → `recordPlatformIncident()`, called from: a social post job
+  after its last retry and after the AI-provider park runs out (`process-content-jobs.ts`), a blog job after its
+  last retry but **not** a deliberate stop (task cap, assistant gone; `process-blog-jobs.ts` `failJob`), both
+  chat error paths (`chat-orchestrator.ts`), a Mentor action (`mentor.ts`), a Mentor job and a weekly review.
+- **Migration decision:** `user_id` is made **nullable** (not attributed to the owner). NULL keeps an incident
+  out of every user's own list and every status notification (`notifyIssueUser` returns on NULL) and out of
+  the Support inbox (its inner join). A CHECK keeps user reports carrying a user. SQL: `db/z-platform-incidents.sql`
+  (manual, both DBs). ⚠️ The new columns are deliberately **not** declared in `db/schema.ts`: Drizzle names
+  every declared column in an INSERT, so declaring them would break Report an Issue wherever the SQL hasn't run.
+  They are read raw behind `incidentColumnsReady()`; until the SQL runs nothing is recorded and nothing breaks.
+- **Dedupe / limits:** fingerprint = kind + error class (Postgres code, Error subclass, or the message shape
+  with numbers and quoted text removed) + role, one row per UK day, repeats add to `occurrences`. At most 10
+  new rows per workspace per day. Stored: error class, a scrubbed 200-character message (no emails, links or
+  quoted text), role, ids, view.
+- **Admin:** Issue Reports shows an *Automatic ×N* chip and an incident panel; the developer runner gets the
+  incident context. `suspected` is supported in the schema and kept out of both bulk hand-offs, but **nothing
+  writes a suspected row yet** — no model-suspected path is wired.
+- **Content checks:** `src/utils/mentor-content-checks.ts`, on the weekly review. In code (free, also in a
+  "not enough data" week, as *Worth fixing in your set-up*): a chosen call to action that can't be used, a
+  recorded offer no content assistant uses, an active goal whose platform isn't connected. On the paid review
+  only, the model compares up to 3 Brand Knowledge excerpts (600 chars) with the recorded offer and approved
+  plan and mentions a clear contradiction. Findings are words with where to fix them — no new card (the call to
+  action card belongs to each content assistant's chat, not the Mentor's).
+
 ---
 
 ## 7. Later, only on evidence

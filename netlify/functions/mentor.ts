@@ -64,6 +64,7 @@ import { loadReviews, queueReviewNow, REVIEW_ROLES, reviewSettings } from '../..
 import { loadTrackRecord, recordOutcome } from '../../src/utils/mentor-outcomes';
 import { loadCustomers } from '../../src/utils/mentor-customers';
 import { addCommitments, closeCommitment, loadCommitments, MAX_PER_WEEK, MISS_REASONS, weekStartUk } from '../../src/utils/mentor-commitments';
+import { recordPlatformIncident } from '../../src/utils/platform-incident';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body: JSON.stringify(body),
@@ -239,6 +240,10 @@ export default withLambda(async (event) => {
         return json(405, { error: 'Method not allowed' });
     } catch (err) {
         console.error('[mentor] failed:', err);
+        // §6.2: a Mentor action (a card's write path, the Plan tab, a review) threw.
+        let action = event.httpMethod;
+        try { const a = JSON.parse(event.body || '{}').action; if (typeof a === 'string') action = a.slice(0, 40); } catch { /* the method will do */ }
+        await recordPlatformIncident(db, { kind: 'mentor_action', error: err, organisationId: orgId, role: 'business_mentor', view: `mentor:${action}` });
         return json(500, { error: 'Your Mentor couldn\'t do that just now — please try again.' });
     }
 });

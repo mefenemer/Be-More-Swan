@@ -31,6 +31,7 @@ import { fireOrchestrations } from '../../src/utils/orchestration';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { isUpstreamBlocked } from '../../src/lib/ai-gateway';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
+import { recordPlatformIncident } from '../../src/utils/platform-incident';
 
 const BACKOFF_SECS = [30, 120, 300];
 /**
@@ -498,6 +499,10 @@ async function failJob(
         await db.update(contentGenerationJobs)
             .set({ status: 'failed', errorMessage: message.slice(0, 1000), updatedAt: new Date() })
             .where(eq(contentGenerationJobs.id, job.id));
+        // §6.2: retries ran out. A terminal stop (task cap, assistant gone) is the customer's state, not a fault.
+        if (!opts.terminal) {
+            await recordPlatformIncident(db, { kind: 'blog_post_job', error: message, organisationId: job.organisation_id, assistantId: job.assistant_id, ids: { jobId: job.job_id, attempt }, view: 'process-blog-jobs' });
+        }
         return;
     }
 

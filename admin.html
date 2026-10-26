@@ -5752,7 +5752,7 @@ async function loadIssueReports() {
         <td class="px-5 py-3 max-w-xs truncate" title="${_escH(i.description)}">${_escH(i.description)}${i.hasImage ? ' 📎' : ''}</td>
         <td class="px-5 py-3 text-xs text-gray-500">${_escH(i.reporterEmail || i.reporterName)}</td>
         <td class="px-5 py-3 text-xs text-gray-500">${_escH(i.sourceLocation || '—')}</td>
-        <td class="px-5 py-3"><div class="flex items-center gap-1.5 flex-wrap">${_irBadge(i.status)}${_irHandoffBadge(i)}${_irRunnerChip(i)}</div></td>
+        <td class="px-5 py-3"><div class="flex items-center gap-1.5 flex-wrap">${_irBadge(i.status)}${_irSourceChip(i)}${_irHandoffBadge(i)}${_irRunnerChip(i)}</div></td>
         <td class="px-5 py-3 text-xs text-gray-400">${_irFmt(i.createdAt)}</td>
         <td class="px-5 py-3"><button onclick="openIssuePanel(${i.id})" class="text-xs text-emerald-600 font-semibold hover:underline">Manage →</button></td>
       </tr>`).join('') || '<tr><td colspan="7" class="px-5 py-8 text-center text-gray-400">No issues found.</td></tr>';
@@ -5792,6 +5792,7 @@ async function openIssuePanel(id) {
         </div>
         ${i.userAgent ? `<div class="col-span-2"><span class="text-gray-400 text-xs font-bold uppercase">User agent</span><br><span class="text-xs text-gray-500 break-all">${_escH(i.userAgent)}</span></div>` : ''}
       </div>
+      ${_irIncidentBlock(i)}
 
       <div class="border border-gray-200 rounded-xl p-4 space-y-2">
         <div class="flex items-center justify-between">
@@ -5935,13 +5936,36 @@ function _irHandoffCard(i) {
     </div>`;
 }
 
+// Automatic incidents (src/utils/platform-incident.ts): no reporter, one row per error a day.
+function _irSourceChip(i) {
+  if (!i.source || i.source === 'user') return '';
+  const label = i.source === 'suspected' ? 'Suspected' : 'Automatic';
+  const times = i.occurrences > 1 ? ` ×${i.occurrences}` : '';
+  return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-700" title="Recorded by Be More Swan, not a customer. Nobody is notified of status changes.">${label}${times}</span>`;
+}
+
+function _irIncidentBlock(i) {
+  const c = i.incident;
+  if (!c || i.source === 'user') return '';
+  const ids = Object.entries(c.ids || {}).map(([k, v]) => `${_escH(k)} ${_escH(String(v))}`).join(' · ');
+  const row = (k, v) => v ? `<div><span class="text-gray-400 text-xs font-bold uppercase">${k}</span><br><span class="text-xs break-all">${_escH(String(v))}</span></div>` : '';
+  return `
+      <div class="border border-gray-200 bg-gray-50 rounded-xl p-4 grid grid-cols-2 gap-3 text-sm">
+        <div class="col-span-2 text-xs text-gray-600">Recorded automatically. No customer reported it and nobody is told when its status changes.</div>
+        ${row('Error', c.errorClass)}${row('Role', c.role)}
+        <div class="col-span-2">${row('Message', c.message)}</div>
+        ${row('Where', c.view)}${row('Ids', ids)}
+        ${row('Times today', i.occurrences)}${row('Last seen', i.lastSeenAt ? _irFmt(i.lastSeenAt) : '')}
+      </div>`;
+}
+
 // "Pass all to Developer" — shown on the Reported tab when there are issues that
 // haven't been handed off yet (not already queued or being fixed).
 function _updatePassAllBtn(issues) {
   const btn = document.getElementById('ir-pass-all-btn');
   if (!btn) return;
   const eligible = (issues || []).filter(i =>
-    i.status === 'reported' && i.devHandoffStatus !== 'queued' && i.devHandoffStatus !== 'in_progress');
+    i.status === 'reported' && i.source !== 'suspected' && i.devHandoffStatus !== 'queued' && i.devHandoffStatus !== 'in_progress');
   if (_irFilter === 'reported' && eligible.length > 0) {
     btn.dataset.count = eligible.length;
     btn.disabled = false;
@@ -6000,7 +6024,7 @@ function _updateMoveAllToDeveloperBtn(issues) {
   const btn = document.getElementById('ir-backlog-dev-all-btn');
   if (!btn) return;
   const eligible = (issues || []).filter(i =>
-    i.status === 'backlog' && i.devHandoffStatus !== 'queued' && i.devHandoffStatus !== 'in_progress');
+    i.status === 'backlog' && i.source !== 'suspected' && i.devHandoffStatus !== 'queued' && i.devHandoffStatus !== 'in_progress');
   if (_irFilter === 'backlog' && eligible.length > 0) {
     btn.dataset.count = eligible.length;
     btn.disabled = false;

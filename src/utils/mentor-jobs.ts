@@ -40,6 +40,7 @@ import { logAiUsage } from './ai-usage';
 import { sanitizeForModel } from './text-safe';
 import { isGlobalAiDisabled } from './platform-config';
 import { resolveBaseUrl } from './base-url';
+import { recordPlatformIncident } from './platform-incident';
 
 type Db = any;
 
@@ -399,6 +400,7 @@ export async function runMentorJob(db: Db, jobId: number): Promise<void> {
         }
     } catch (err) {
         console.error('[mentor-jobs] job failed', { jobId, kind: job.kind, message: err instanceof Error ? err.message : String(err) });
+        await recordPlatformIncident(db, { kind: 'mentor_job', error: err, organisationId: job.organisationId, assistantId: job.aiAssistantId, role: 'business_mentor', ids: { mentorJobId: job.id, jobKind: job.kind }, view: 'mentor-job-background' });
         const error = 'Your Mentor couldn’t finish this time. Nothing was charged — please try again in a few minutes.';
         await db.update(mentorJobs).set({ status: 'failed', error, finishedAt: new Date() }).where(eq(mentorJobs.id, job.id)).catch(() => {});
         await postToChat(db, job, job.kind === 'research'
