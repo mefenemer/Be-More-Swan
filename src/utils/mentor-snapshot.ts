@@ -9,7 +9,7 @@
 //
 // Missing is not zero (§12.3): a paused or unhired assistant is described as such, never as idle.
 
-import { and, count, eq, inArray, ne, or, sql } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import { aiAssistants, goals, masterAssistants, masterPlans, mentorJobs, orgIntroOffer, orgOfferProfile, orgProducts, organisations, plans } from '../../db/schema';
 import { MENTOR_ROLE_KEY } from './mentor-provision';
 import { SEAT_OCCUPYING_STATUSES, takesASeat } from './assistant-capacity';
@@ -42,7 +42,8 @@ export interface MentorSnapshotData {
     team: Array<{ id: number; name: string; role: string; state: TeamState; roleKey?: string | null; setup?: Record<string, unknown> | null }>;
     /** The assistant catalogue with each role's status (only `live` ones are recommended, mentor-hire.ts). */
     catalogue?: Array<{ roleKey: string; name: string; description: string | null; status: AssistantStatus }>;
-    goals: Array<{ assistant: string; label: string; latest: number | null; target: number; targetDate: Date; status: string }>;
+    /** id = the goals row, so a goal card can name it (fixtures may leave it out). */
+    goals: Array<{ id?: number; assistant: string; label: string; latest: number | null; target: number; targetDate: Date; status: string }>;
     /** The live plan, to cross-check pause reasons: `status` null = no active or past-due plan; `freeSlots` null = unlimited. */
     plan: { status: 'active' | 'past_due' | null; freeSlots: number | null; nextPlanName?: string | null };
     /** Phase 2: its strategy documents (null = the table isn't there yet; undefined = not read). */
@@ -195,7 +196,7 @@ export function renderMentorSnapshot(d: MentorSnapshotData): string {
     if (!d.goals.length) lines.push('- No goals are set yet.');
     else lines.push(...d.goals.map((g) => {
         const latest = g.latest === null ? 'not measured yet (unknown — never treat as 0)' : String(g.latest);
-        return `- ${g.assistant}: ${g.label} — now ${latest}, target ${g.target} by ${g.targetDate.toISOString().slice(0, 10)} (${g.status.replace(/_/g, ' ')})`;
+        return `- ${g.id ? `#${g.id} ` : ''}${g.assistant}: ${g.label} — now ${latest}, target ${g.target} by ${g.targetDate.toISOString().slice(0, 10)} (${g.status.replace(/_/g, ' ')})`;
     }));
 
     if (d.strategyDocs !== undefined) lines.push('', ...renderStrategyForMentor(d.strategyDocs));
@@ -255,9 +256,13 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
         }
     };
 
+    // ACTIVE rows only, in the business's order — the list every other assistant drafts from
+    // (org-products.ts loadOrgProducts). Unfiltered, an archived product showed up here with no
+    // details behind it, and the Mentor told the owner they sold it.
     const products: Array<{ id: number; name: string; price: string | null }> = await optional(() => db
         .select({ id: orgProducts.id, name: orgProducts.name, price: orgProducts.price }).from(orgProducts)
-        .where(eq(orgProducts.organisationId, orgId)), []);
+        .where(and(eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active')))
+        .orderBy(asc(orgProducts.sortOrder), asc(orgProducts.id)), []);
     const [offer] = await optional(() => db.select({ offers: orgOfferProfile.offers }).from(orgOfferProfile)
         .where(eq(orgOfferProfile.organisationId, orgId)).limit(1), [] as Array<{ offers: string[] }>);
     const [intro] = await optional(() => db.select({ one: sql<number>`1` }).from(orgIntroOffer)
@@ -276,7 +281,7 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
         ));
 
     const goalRows = await db.select({
-        assistant: aiAssistants.name, title: goals.title, metricKey: goals.metricKey, latest: goals.latestValue,
+        id: goals.id, assistant: aiAssistants.name, title: goals.title, metricKey: goals.metricKey, latest: goals.latestValue,
         target: goals.targetValue, targetDate: goals.targetDate, status: goals.status,
     }).from(goals)
         .innerJoin(aiAssistants, eq(goals.assistantId, aiAssistants.id))
@@ -343,7 +348,7 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
             roleKey: t.roleKey ?? null, setup: (t.setup as Record<string, unknown> | null) ?? null,
         })),
         goals: goalRows.map((g: any) => ({
-            assistant: g.assistant || 'An assistant', label: g.title || g.metricKey,
+            id: g.id, assistant: g.assistant || 'An assistant', label: g.title || g.metricKey,
             latest: g.latest === null || g.latest === undefined ? null : Number(g.latest),
             target: Number(g.target), targetDate: new Date(g.targetDate), status: g.status || 'pending',
         })),

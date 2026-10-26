@@ -182,13 +182,26 @@
           ${i.done ? '' : `<p class="text-xs text-gray-500 mt-0.5">${esc(i.why)}</p>`}
         </div>
       </li>`).join('');
+    // Collapsible. The viewer's choice is kept (a repaint after a chat card must not reopen it);
+    // until they choose, it is open while anything is left to do.
+    const open = checklistOpenPref() ?? done < items.length;
     return card(`
-      <div class="flex items-baseline justify-between gap-2 flex-wrap">
-        <h2 class="text-base font-bold text-gray-900">Set-up checklist</h2>
-        <span class="text-xs font-semibold text-gray-500">${done} of ${items.length} done</span>
-      </div>
-      <p class="text-xs text-gray-500 mt-1 mb-2">The same gaps ${esc(state.assistantName)} raises in chat. Each opens its place in Business Information.</p>
-      <ul>${rows}</ul>`, 'data-mentor-panel="checklist"');
+      <details data-mentor-checklist class="group" ${open ? 'open' : ''}>
+        <summary class="cursor-pointer flex items-center justify-between gap-2">
+          <h2 class="text-base font-bold text-gray-900">Set-up checklist</h2>
+          <span class="flex items-center gap-2 shrink-0">
+            <span class="text-xs font-semibold text-gray-500">${done} of ${items.length} done</span>
+            <svg class="w-4 h-4 text-gray-400 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </span>
+        </summary>
+        <p class="text-xs text-gray-500 mt-1 mb-2">The same gaps ${esc(state.assistantName)} raises in chat. Each opens its place in Business Information.</p>
+        <ul>${rows}</ul>
+      </details>`, 'data-mentor-panel="checklist"');
+  }
+
+  const CHECKLIST_OPEN_KEY = 'mentorChecklistOpen';
+  function checklistOpenPref() {
+    try { const v = localStorage.getItem(CHECKLIST_OPEN_KEY); return v === null ? null : v === '1'; } catch { return null; }
   }
 
   function visibilityHtml(v) {
@@ -260,7 +273,9 @@
       <h2 class="text-base font-bold text-gray-900">Recommended next</h2>
       ${picks.length
         ? `<p class="text-xs text-gray-500 mt-1">Who ${esc(state.assistantName)} would hire next, and why. Nothing is hired from here.</p><ol class="mt-1">${rows}</ol>`
-        : '<p class="text-sm text-gray-600 mt-1">No clear gap for another assistant right now.</p>'}
+        : cap.remaining === 0
+          ? '<p class="text-sm text-gray-600 mt-1">You already have every assistant on offer.</p>'
+          : '<p class="text-sm text-gray-600 mt-1">No clear gap for another assistant right now.</p>'}
       ${cap.note ? `<p class="mt-2 text-xs rounded-lg px-2.5 py-1.5 ${cap.needsUpgrade ? 'border border-amber-200 bg-amber-50 text-amber-900' : 'bg-gray-50 text-gray-700'}">${esc(cap.note)}</p>` : ''}`, 'data-mentor-panel="recommended"');
   }
 
@@ -343,6 +358,10 @@
   document.addEventListener('click', (e) => {
     const t = e.target;
     if (!(t instanceof Element) || !host()?.contains(t)) return;
+    // The viewer opening/closing the checklist (click, or Enter/Space on the summary). Not `toggle`:
+    // that also fires when a render inserts it open, which would save a choice nobody made.
+    const checklist = t.closest('[data-mentor-checklist] > summary')?.parentElement;
+    if (checklist) { try { localStorage.setItem(CHECKLIST_OPEN_KEY, checklist.open ? '0' : '1'); } catch { /* per-viewer nicety only */ } return; }
     const open = t.closest('[data-mentor-open-field]');
     if (open) {
       window._bizinfoInitialTab = open.getAttribute('data-mentor-open-field');

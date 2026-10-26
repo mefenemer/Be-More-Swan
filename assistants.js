@@ -8186,6 +8186,44 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         window._detailCurrentData = currentData;
         window._renderStatusPill(currentData);
 
+        // Lifecycle "Pause Assistant" button (Profile drawer). Its label follows the pill; it had no
+        // handler at all after the Kick-Off card's own pause button went (issue #115), so clicking
+        // it did nothing. Pause runs the same manage-assistant transition as the My Assistants grid
+        // (window._assistantTogglePause); Resume / Initiate Kick-Off go to the Kick-Off card, since
+        // resuming re-runs the kick-off summary and never resumes silently (US4 AC4.4).
+        const toggleStatusBtn = document.getElementById('btn-toggle-status');
+        if (toggleStatusBtn) toggleStatusBtn.onclick = async () => {
+            const live = window._detailCurrentData || currentData;
+            if (window._resolveAssistantBadge(live, window._detailOpSignals).toggle !== 'Pause Assistant') {
+                window._closeBriefDrawer?.();
+                await _renderKickOff(assistantId);
+                document.getElementById('kickoff-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                return;
+            }
+            const ok = await window.confirmModal('It will stop all actions until you kick it off again.', {
+                title: 'Pause this assistant?',
+                confirmLabel: 'Yes, pause',
+                cancelLabel: 'Keep working',
+            });
+            if (!ok) return;
+            toggleStatusBtn.disabled = true;
+            try {
+                const r = await fetch(`/.netlify/functions/manage-assistant?id=${assistantId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'pause' }),
+                });
+                if (!r.ok) { const d = await r.json().catch(() => ({})); window.showToast?.(d.error || 'Failed to pause assistant.', { icon: '⚠️' }); return; }
+                window.showToast?.('Assistant paused.');
+                live.lifecycleStatus = 'paused';
+                live.isActive = false;
+                window._renderStatusPill?.();
+                // The Kick-Off card reappears for a paused assistant — it is the way back to working.
+                await _renderKickOff(assistantId);
+            } catch { window.showToast?.('Network error — please try again.', { icon: '⚠️' }); }
+            finally { toggleStatusBtn.disabled = false; }
+        };
+
         // US6 AC5.1: Archive Assistant — stops it and removes it from the active workspace.
         // Issue #191: no longer immediately permanent — a 14-day reinstate window follows.
         const archiveBtn = document.getElementById('btn-archive-assistant');

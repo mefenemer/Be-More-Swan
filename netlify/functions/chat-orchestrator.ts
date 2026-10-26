@@ -33,7 +33,7 @@ import { resolvePostFooter } from '../../src/utils/post-disclosure';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { meterInteraction } from '../../src/utils/task-credit';
 import { checkFairUse } from '../../src/utils/fair-use';
-import { isMentorTurn } from '../../src/utils/mentor-provision';
+import { isMentorTurn, MENTOR_ROLE_KEY } from '../../src/utils/mentor-provision';
 import { loadHelpKnowledge } from '../../src/utils/help-knowledge';
 import { embedTexts } from '../../src/utils/kb-embeddings';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
@@ -83,7 +83,7 @@ import {
 } from '../../src/utils/chat-assistant-settings';
 import { buildRulesListBlock, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock, type RuleCard } from '../../src/utils/chat-rules';
 import { buildPlanSnapshot } from '../../src/utils/chat-plan-snapshot';
-import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGoalProposal, type GoalCard } from '../../src/utils/chat-goals';
+import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGoalProposal, resolveTeamGoalProposal, type GoalCard } from '../../src/utils/chat-goals';
 import { introOfferCardFromUiElement, introOfferPromptBlock, type IntroOfferCard } from '../../src/utils/intro-offer';
 import { buildOutreachOfferChatBlock, OUTREACH_OFFER_CARD_TYPE, outreachOfferCardFrom, type OutreachOfferCard } from '../../src/utils/chat-outreach-offer';
 import { listGiftForms } from '../../src/utils/outreach-offer';
@@ -107,7 +107,7 @@ import { asksAboutCustomers, buildMentorSnapshotParts, type MentorSnapshotData }
 import { recommendHires } from '../../src/utils/mentor-hire';
 import { assistantSetupFieldBlock, resolveSetupFieldProposal, setupFieldRequestFromUiElement, type SetupFieldCard } from '../../src/utils/chat-setup-field';
 import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, onlyGapFields, proposalKind, recordMentorProposal, resolveProductRemoval } from '../../src/utils/mentor-cards';
-import { gateMentorSuggestion, proposalFields } from '../../src/utils/mentor-proposals';
+import { gateMentorSuggestion, proposalFields, supersedeSetupFieldProposals } from '../../src/utils/mentor-proposals';
 import { resolveDraftRequest } from '../../src/utils/mentor-draft-request';
 import { closeCommitmentCard } from '../../src/utils/mentor-commitments';
 import { cardOutcomeLine } from '../../src/utils/mentor-card-outcome';
@@ -3048,6 +3048,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // The signed-in user's own My Account settings, read-only (src/utils/chat-my-account.ts). Every
     // route, every role; null when the read fails.
     const myAccountBlock = await buildMyAccountBlock(db, userId, session.aiAssistantId, assistantRow.roleKey);
+    // Every other assistant may point the user at the workspace's Business Mentor for the bigger questions
+    // (docs/business-mentor-plan.md §8.6), only while it is active. It is included on every plan, so it is
+    // never "hire this".
+    const mentorPointerBlock = route === ROUTES.business_mentor ? '' : await (async () => {
+        const [m] = await db.select({ name: aiAssistants.name }).from(aiAssistants).where(and(
+            eq(aiAssistants.organisationId, orgId),
+            sql`${aiAssistants.configuration} ->> 'type' = ${MENTOR_ROLE_KEY}`,
+            eq(aiAssistants.lifecycleStatus, 'working'),
+        )).limit(1).catch(() => [] as Array<{ name: string }>);
+        return m ? `BUSINESS MENTOR: this workspace has a Business Mentor called "${m.name}", included with their plan. When the user asks something bigger than your own job (what to focus on for the business, a business or marketing plan, testing an idea, pricing strategy, why results are slow across the team), answer briefly from your own work if you can, then say ${m.name} can help with the wider picture in its own chat. Never pass work to it or say you have asked it.` : '';
+    })();
     // §2.7: no paid plan → the Mentor only helps with Be More Swan itself, from the published Help Centre.
     const mentorNoPlanBlock = mentorNoPlan ? await (async () => {
         const help = await loadHelpKnowledge(db).catch(() => ({ text: '', titles: [] as string[] }));
@@ -3056,7 +3067,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             help.text ? `<help_centre>\n${help.text}\n</help_centre>` : 'The Help Centre could not be read just now: say so, and offer the mentor_support_request card.',
         ].join('\n\n');
     })() : '';
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock, mentorNoPlanBlock].filter(Boolean).join('\n\n');
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock].filter(Boolean).join('\n\n');
 
     const builtSystem = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -3285,6 +3296,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 if (!gate.ok) { uiElement = null; content = `${content}\n\n(${gate.note})`; }
                 else {
                     const proposalId = await recordMentorProposal(db, { organisationId: orgId, aiAssistantId: session.aiAssistantId, kind: 'setup_field', title: card.summary, why: card.why, payload: { ...card, fields: { [`${card.assistantId}:${card.key}`]: card.value } }, chatSessionId: session.id, targetAssistantId: card.assistantId });
+                    if (proposalId) await supersedeSetupFieldProposals(db, orgId, { id: proposalId, assistantId: card.assistantId, key: card.key });
                     uiElement = { ...card, proposalId };
                 }
             } else {
@@ -3448,7 +3460,19 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // rules, realism included; the click calls manage-goals.ts as the Results tab does.
         let goalCard: GoalCard | null = null;
         const goalReq = route !== defaultRoute && !settingsReq && !ruleReq ? goalProposalFromUiElement(uiElement) : null;
-        if (goalReq) {
+        if (goalReq && route === ROUTES.business_mentor) {
+            // The Mentor changes another ACTIVE assistant's goal (date / target) — the same card and checks,
+            // run as the goal's own assistant (chat-goals.ts resolveTeamGoalProposal).
+            const card = await resolveTeamGoalProposal(db, orgId, goalReq);
+            // goalCard too, so the reply beside it is checked like any profile card's (confirmCardReply).
+            if (card && !('error' in card)) { goalCard = card; uiElement = card; }
+            else {
+                uiElement = null;
+                content = card
+                    ? `${content}\n\n(I didn’t include a card for that — ${card.error.charAt(0).toLowerCase()}${card.error.slice(1)} You can change it on that assistant’s Results tab instead.)`
+                    : `${content}\n\n(I couldn’t read your goals just now, so there’s no card — try again in a moment, or use that assistant’s Results tab.)`;
+            }
+        } else if (goalReq) {
             goalCard = await resolveGoalProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, goalReq);
             uiElement = goalCard;
             if (!goalCard) content = 'I couldn’t read your goals just now, so I haven’t set anything up. Please try again in a moment, or use the Results tab.';

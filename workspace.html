@@ -22029,9 +22029,11 @@ async function gpSubmitReject() {
     }
 
     function showAnswer(d, reply) {
-      // answer + up to two follow-ups: the Help Centre article it came from ("Read the article"),
-      // and either "Report an issue" or "Take me there". Each button closes the bar.
+      // answer + follow-ups: "Talk to <Mentor>" for a business question, the Help Centre article it came
+      // from ("Read the article"), and either "Report an issue" or "Take me there". Each button closes the bar.
       const actions = [];
+      // Business questions go to the workspace's Business Mentor (assistant-command.ts openMentor), with the question as a draft.
+      if (d.openAssistantId && window.openAssistantChat) actions.push([`Talk to ${d.openAssistantName || 'your Mentor'} →`, () => window.openAssistantChat({ assistantId: d.openAssistantId, draft: d.draft || '' })]);
       if (d.article && window.openHelpArticle) actions.push(['Read the article →', () => window.openHelpArticle(d.article)]);
       if (d.suggestReportIssue && window.openReportIssue) actions.push(['Report an issue →', () => window.openReportIssue('new')]);
       else if (d.suggestView && window.loadView) actions.push(['Take me there →', () => goToView(d.suggestView)]);

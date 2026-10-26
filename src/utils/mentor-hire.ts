@@ -36,6 +36,8 @@ export interface HireRecommendation {
     capacity: {
         /** null = unlimited. */
         freeSlots: number | null;
+        /** How many assistants the workspace could still hire (Live or Beta, not on the team). */
+        remaining: number;
         needsUpgrade: boolean;
         nextPlanName: string | null;
         /** Plain words for the card and the panel. */
@@ -103,35 +105,42 @@ export function recommendHires(d: MentorSnapshotData): HireRecommendation {
 
     const free = d.plan.freeSlots;
     const noPlan = d.plan.status === null;
-    const needsUpgrade = !noPlan && free !== null && free <= 0;
+    // Assistants a customer could still hire (Live or Beta, not on the team, not the Mentor). A plan
+    // whose free slots cover all of them includes every assistant: "3 free slots" read as a cap there.
+    const remaining = (d.catalogue ?? []).filter((c) => (c.status === 'live' || c.status === 'beta')
+        && c.roleKey !== 'business_mentor' && !has(d, c.roleKey)).length;
+    const needsUpgrade = !noPlan && free !== null && free <= 0 && remaining > 0;
     const nextPlanName = needsUpgrade ? d.plan.nextPlanName ?? null : null;
     const note = noPlan
         ? 'You need a plan to hire an assistant — see My Account ▸ Billing & Subscription.'
-        : needsUpgrade
-            ? (nextPlanName
-                ? `Your plan's assistant slots are all used, so hiring another needs the ${nextPlanName} plan, or swapping one you have. It's your call.`
-                : 'Your plan\'s assistant slots are all used, so hiring another means swapping one you have.')
-            : free === null
-                ? 'Your plan has room for more assistants.'
-                : `Your plan has ${free} free assistant ${free === 1 ? 'slot' : 'slots'}${nobodyHired ? ', included in what you pay' : ''}.`;
+        : remaining === 0
+            ? 'Your team already has every assistant on offer.'
+            : needsUpgrade
+                ? (nextPlanName
+                    ? `Your plan's assistant slots are all used, so hiring another needs the ${nextPlanName} plan, or swapping one you have. It's your call.`
+                    : 'Your plan\'s assistant slots are all used, so hiring another means swapping one you have.')
+                : free === null || free >= remaining
+                    ? 'Your plan includes every assistant, so hiring any of them is included in what you pay.'
+                    : `Your plan has ${free} free assistant ${free === 1 ? 'slot' : 'slots'}${nobodyHired ? ', included in what you pay' : ''}.`;
 
     const facts: string[] = [];
     facts.push(nobodyHired ? 'no assistants hired yet' : `${activeCount(d)} active ${activeCount(d) === 1 ? 'assistant' : 'assistants'}`);
     if (!d.business.website?.trim()) facts.push('no website address');
     if (d.productCount) facts.push(`${d.productCount} in Products & Services`);
-    facts.push(noPlan ? 'no plan' : free === null ? 'unlimited assistant slots' : `${Math.max(0, free)} free ${free === 1 ? 'slot' : 'slots'}`);
+    facts.push(noPlan ? 'no plan' : free === null || free >= remaining ? 'every assistant included in your plan' : `${Math.max(0, free)} free ${free === 1 ? 'slot' : 'slots'}`);
 
     return {
         picks,
         why: `Based on your workspace: ${facts.join(', ')}.`,
-        capacity: { freeSlots: free, needsUpgrade, nextPlanName, note },
+        capacity: { freeSlots: free, remaining, needsUpgrade, nextPlanName, note },
     };
 }
 
 /** Pure: the prompt's lines, so what the Mentor says matches the card and the page. */
 export function renderHireRecommendation(r: HireRecommendation): string[] {
     const lines = ['WHO TO HIRE NEXT (the same list as "Recommended next" on your Overview tab):'];
-    if (!r.picks.length) lines.push('- No clear gap for another assistant right now: don\'t recommend hiring unless the user asks.');
+    if (!r.picks.length && r.capacity.remaining === 0) lines.push('- The team has every assistant on offer: there is nobody left to hire.');
+    else if (!r.picks.length) lines.push('- No clear gap for another assistant right now: don\'t recommend hiring unless the user asks.');
     else lines.push(...r.picks.map((p, i) => `${i + 1}. ${p.name} — ${p.reason}`));
     lines.push(`- ${r.capacity.note}`);
     return lines;

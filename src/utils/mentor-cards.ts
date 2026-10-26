@@ -28,6 +28,7 @@
 // without one is dropped.
 
 import { mentorSetupFieldPromptLine } from './chat-setup-field';
+import { mentorGoalPromptLine } from './chat-goals';
 import { isStrategyKind, type StrategyKind } from './strategy-documents';
 import { cleanQuestion, mentorPlanCardsPromptLines } from './mentor-plan-cards';
 import { cleanCommitmentTexts, MAX_PER_WEEK } from './mentor-commitments';
@@ -260,6 +261,8 @@ Set "asked": true ONLY when the user's latest message asked for exactly this cha
 {"type":"mentor_business_stage","summary":"<one short sentence asking it>"}
 
 6. ${mentorSetupFieldPromptLine()}
+
+6b. ${mentorGoalPromptLine()}
 
 7. Who to hire next — whenever they ask who or what to hire (ALWAYS draw it then, "asked": true, even if you also advise fixing the team first — say that in the reply), or as a suggestion when WHO TO HIRE NEXT shows a clear gap. Never when WHO TO HIRE NEXT says there is no clear gap. The card lists the assistants under WHO TO HIRE NEXT with their reasons and whether the plan has room; you write only the summary. It hires nothing:
 {"type":"mentor_hire_recommendation","summary":"<one sentence>","asked":true|false}

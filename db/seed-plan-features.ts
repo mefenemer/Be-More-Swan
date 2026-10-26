@@ -90,6 +90,9 @@ const DEFS: Def[] = [
     // plan_features.is_enabled = true again — when a media-credit checkout ships.
 
     // ── Core Features — included on every plan ─────────────────────────────────
+    { key: 'business_mentor', label: 'Business Mentor', description: 'A business coach that sees what your team does and suggests changes you approve. Takes no assistant place',
+      category: 'Core Features — included on every plan', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
+      values: { saver: CHECK, buster: CHECK, employee: CHECK } },
     { key: 'safe_content_benchmark', label: 'Be More Swan Safe Content Benchmark', description: 'Brand-safety rules placed ahead of your own instructions in every assistant',
       category: 'Core Features — included on every plan', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: CHECK, buster: CHECK, employee: CHECK } },

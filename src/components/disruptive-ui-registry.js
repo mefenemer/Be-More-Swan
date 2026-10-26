@@ -2411,18 +2411,50 @@
   // One set-up answer on an active assistant (src/utils/chat-setup-field.ts) — the server rebuilt it from
   // the row, so the labels and the current answer are real. Any route can draw it; from the Mentor it is
   // a suggestion (proposalId) with Dismiss…. The click → mentor-apply.js setupAnswer (patchContext).
-  register('setup_field_proposal', (ui, esc) => mentorCard(esc, {
+  // A multi-line answer (an email signature) keeps its lines: `whitespace-pre-line`, or the card showed
+  // a three-line signature on one line.
+  register('setup_field_proposal', (ui, esc) => retireOlderSetupCards(mentorCard(esc, {
     eyebrow: `Set-up answer · ${String(ui.assistantName || 'Assistant')}`, summary: ui.summary, why: ui.why,
     bodyHtml: `<dl class="mt-2 text-xs text-gray-700 space-y-1">
         <div><dt class="inline font-semibold">${esc(String(ui.label || ui.key || ''))}</dt></div>
-        <div class="break-words"><dt class="inline text-gray-500">Now:</dt> <dd class="inline">${esc(String(ui.currentLabel || 'Not answered'))}</dd></div>
-        <div class="break-words"><dt class="inline text-gray-500">Change to:</dt> <dd class="inline font-semibold text-gray-900">${esc(String(ui.valueLabel ?? ui.value ?? ''))}</dd></div>
+        <div class="break-words"><dt class="inline text-gray-500">Now:</dt> <dd class="inline whitespace-pre-line">${esc(String(ui.currentLabel || 'Not answered'))}</dd></div>
+        <div class="break-words"><dt class="block text-gray-500">Change to:</dt> <dd class="font-semibold text-gray-900 whitespace-pre-line">${esc(String(ui.valueLabel ?? ui.value ?? ''))}</dd></div>
       </dl>`,
     goLabel: 'Save this', eventName: 'setupField:apply',
     detail: { assistantId: ui.assistantId, key: ui.key, value: ui.value }, proposalId: ui.proposalId, answered: ui.answered,
     doneText: `Saved — ${String(ui.assistantName || 'the assistant')} uses it from now on.`,
     note: `Only this answer changes. It’s also on ${esc(String(ui.assistantName || 'the assistant'))}’s profile.`,
-  }));
+  }), ui));
+
+  // Two open suggestions for the SAME answer on the same assistant (the owner corrected the draft: "change
+  // the signature to Catherine…"): only the newest (highest proposalId) stays clickable, or the old one
+  // could still be saved over the new. The server expires the older row too (mentor-proposals.ts
+  // supersedeSetupFieldProposals); this handles cards already on screen. Order-independent, because
+  // Review all lists newest first and chat oldest first.
+  function retireOlderSetupCards(el, ui) {
+    const id = Number(ui.proposalId);
+    if (!Number.isInteger(id) || id <= 0 || ui.answered) return el;
+    const sig = `${ui.assistantId}:${ui.key}`;
+    el.dataset.mcSetupSig = sig;
+    el.dataset.mcProposalId = String(id);
+    const retire = (card) => {
+      card.querySelectorAll('[data-mc-go], [data-mc-dismiss], [data-mc-cancel], [data-mc-reasons]').forEach((b) => b.remove());
+      const eyebrow = card.querySelector('p');
+      if (eyebrow) eyebrow.textContent = eyebrow.textContent.replace(' · Approval needed', '');
+      const status = card.querySelector('[data-mc-status]');
+      if (status) { status.textContent = 'Replaced by a newer suggestion — use that one.'; status.className = 'mt-2 text-xs font-semibold text-gray-500'; }
+      delete card.dataset.mcSetupSig;
+    };
+    let newest = id;
+    document.querySelectorAll('[data-mc-setup-sig]').forEach((other) => {
+      if (other.dataset.mcSetupSig !== sig) return;
+      const otherId = Number(other.dataset.mcProposalId);
+      if (otherId < id) retire(other);
+      else if (otherId > newest) newest = otherId;
+    });
+    if (newest > id) retire(el);
+    return el;
+  }
 
   // A post asked of an ACTIVE Social Media assistant (src/utils/mentor-draft-request.ts, Phase 3). The click
   // is "Create a Post" on that assistant's Posts tab (generate-post.ts), carrying the suggestion's id so the
@@ -4063,15 +4095,17 @@
     const assistantId = Number(ui.assistantId);
     if (!copy || !Number.isInteger(assistantId)) return null;
     const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    // Set when the Business Mentor proposes it for another assistant (chat-goals.ts resolveTeamGoalProposal).
+    const who = typeof ui.assistantName === 'string' && ui.assistantName.trim() ? ui.assistantName.trim() : '';
     const el = document.createElement('div');
     el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
       <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
-      <p class="text-xs text-gray-500 mt-2">Results tab${ui.goalId ? ` · goal #${Number(ui.goalId)}` : ''}${ui.metricLabel ? ` · ${esc(ui.metricLabel)}` : ''}</p>
+      <p class="text-xs text-gray-500 mt-2">${who ? `${esc(who)}’s ` : ''}Results tab${ui.goalId ? ` · goal #${Number(ui.goalId)}` : ''}${ui.metricLabel ? ` · ${esc(ui.metricLabel)}` : ''}</p>
       ${ui.current ? `<p class="text-sm text-gray-700 mt-2 break-words"><span class="font-bold">${ui.action === 'delete' ? 'Goal:' : 'Now:'}</span> ${esc(ui.current)}</p>` : ''}
       ${ui.proposed && ui.action !== 'delete' ? `<p class="text-sm text-gray-900 mt-1 break-words"><span class="font-bold">${ui.action === 'create' ? 'Goal:' : 'After:'}</span> ${esc(ui.proposed)}</p>` : ''}
       ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
-      ${!blocked && ui.action !== 'delete' ? '<p class="text-xs text-gray-600 mt-3">Your assistant steers what it drafts toward this from now on.</p>' : ''}
+      ${!blocked && ui.action !== 'delete' ? `<p class="text-xs text-gray-600 mt-3">${who ? esc(who) : 'Your assistant'} steers what it drafts toward this from now on.</p>` : ''}
       ${!blocked && ui.action === 'delete' ? '<p class="text-xs text-gray-600 mt-3">This removes the goal and its progress for good.</p>' : ''}
       <div class="flex flex-wrap items-center gap-2 mt-3">
         ${blocked ? '' : `<button type="button" data-gp-go class="${copy.danger ? 'btn-destructive' : 'btn-primary'} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>

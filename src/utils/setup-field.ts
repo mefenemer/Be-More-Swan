@@ -213,7 +213,9 @@ export function renderSetupFields(roleKey: string, ctx: Record<string, unknown> 
         const shown = cur.length > 100 ? `${cur.slice(0, 100)}…` : cur;
         const kind = d.options ? `one of ${d.options.map((o) => `"${o.value}" (${o.label})`).join(', ')}`
             : d.type === 'number' ? `a number${d.min !== null ? `, at least ${d.min}` : ''}${d.max !== null ? `, at most ${d.max}` : ''}`
-                : 'text';
+                // The limit is stated so a draft fits first time: unstated, the Mentor wrote a 260-character
+                // "Who is NOT a customer?" and the card was refused (validateSetupValue).
+                : `text, at most ${d.maxLength} characters`;
         return `  - ${d.key} — "${d.label}": now ${JSON.stringify(shown)}; ${kind}`;
     });
 }

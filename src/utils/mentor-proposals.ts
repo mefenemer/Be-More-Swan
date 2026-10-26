@@ -167,6 +167,24 @@ export async function decideProposal(
     return rows.length > 0;
 }
 
+/**
+ * A newer set-up answer card for the same assistant and question replaces any still open: the owner
+ * corrected the draft ("change the signature to Catherine…") and the old card must not be savable over
+ * the new one. Marked 'expired' (its chat card then says so — mentor-proposal-cards.ts). Never throws.
+ */
+export async function supersedeSetupFieldProposals(db: Db, orgId: number, keep: { id: number; assistantId: number; key: string }): Promise<void> {
+    try {
+        await db.update(mentorProposals).set({ status: 'expired', decidedAt: new Date() })
+            .where(and(
+                eq(mentorProposals.organisationId, orgId), eq(mentorProposals.kind, 'setup_field'),
+                eq(mentorProposals.status, 'shown'), eq(mentorProposals.targetAssistantId, keep.assistantId),
+                sql`${mentorProposals.payload} ->> 'key' = ${keep.key}`, sql`${mentorProposals.id} <> ${keep.id}`,
+            ));
+    } catch (err) {
+        console.warn('[mentor-proposals] could not expire older set-up cards (non-blocking):', (err as Error)?.message);
+    }
+}
+
 /** "Bring back": the dismissal stops holding that kind of suggestion back. */
 export async function bringBackProposal(db: Db, orgId: number, id: number): Promise<boolean> {
     const rows = await db.update(mentorProposals)

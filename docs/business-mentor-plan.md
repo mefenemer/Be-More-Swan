@@ -862,10 +862,25 @@ before (the public copy must not run ahead of the product).
       assistant", decision §2.3).
 
 **Website:**
-- [ ] **First: check the competitors** (adopted §15.2 item 10). Verify the products Gemini named
-      (MentorMe, Foundra, GhostCoach, iTrepreneur, CoachHub, BetterUp) and any others: real prices,
-      what they actually do, whether any connect strategy to execution. Record the findings in this
-      plan. No public claim of being "disruptive", "unique" or "first" until this is done and backs it.
+- [x] **First: check the competitors** (adopted §15.2 item 10). Done 2026-10-26 (web search; vendor pages and
+      third-party reviews, prices change often):
+
+      | Product | What it is | Price found | Does the work too? |
+      |---|---|---|---|
+      | MentorMe | Not found under that name. Nearest: "Mentor AI: Business Coach" (iPhone chat app) | Credits, $0.99 per 1,000 | No |
+      | Foundra (foundra.ai) | Guided "AI co-founder": validate an idea in 3 phases, strategy cards, free idea tools | $39/month, 3-day trial | No: strategy only |
+      | GhostCoach | Not found. Nearest: small "AI Business Coach" apps (assessments, accountability) | Unknown | No |
+      | iTrepreneur | Only a 2026 Canadian chamber event listing; no product page | Unknown | Unknown |
+      | CoachHub AIMY | AI career/leadership coach sold to employers | Quote only | No: employee coaching |
+      | BetterUp | Human + AI coaching for employees; individual plans closing (2026) | Enterprise quote; individual ~$71–279/month, third-party figures | No |
+      | **Sintra** (not named by Gemini) | 12 AI "helpers" incl. **Buddy** (strategy and planning) beside social, email and others, sharing one "Brain AI" | ~$97/month all helpers; single helpers discontinued | **Yes, partly**: strategy and execution helpers in one product. One review says helpers "don't run autonomously. You initiate each task". No source says Buddy reviews the other helpers' work. |
+
+      **What this backs:** pairing a strategy coach with AI workers is NOT new (Sintra), so no "first", "unique" or
+      "disruptive" claim, and no named competitor comparison. **What we can say, because the code does it:** a
+      Business Mentor is included on every plan and takes no assistant place; it reads what your team actually did
+      (results, goals, drafts) and suggests changes to them that only happen when you approve; a weekly review with
+      up to 3 suggestions; plans, a break-even calculator and sourced research; it never sees passwords, card
+      details or your contacts' personal details.
 - [ ] Public assistant page for the Mentor (the showcase pages: JSON → generated SQL, no real
       personal data).
 - [ ] Pricing page: plan cards and comparison table (Plan Features rows in the DB, not hard-coded),

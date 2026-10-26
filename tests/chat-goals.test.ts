@@ -14,7 +14,8 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { buildGoalsBlock, goalProposalFromUiElement, refreshGoalCards, resolveGoalProposal } from '../src/utils/chat-goals';
+import { buildGoalsBlock, goalProposalFromUiElement, refreshGoalCards, resolveGoalProposal, resolveTeamGoalProposal } from '../src/utils/chat-goals';
+import { renderMentorSnapshot } from '../src/utils/mentor-snapshot';
 
 let passed = 0;
 let total = 0;
@@ -32,7 +33,7 @@ function fakeDb(...answers: unknown[][]) {
     const q = () => {
         const rows = queue.shift() ?? [];
         const chain: any = {
-            from: () => chain, where: () => chain, orderBy: () => chain, limit: () => Promise.resolve(rows),
+            from: () => chain, leftJoin: () => chain, where: () => chain, orderBy: () => chain, limit: () => Promise.resolve(rows),
             then: (res: (v: unknown) => unknown, rej: (e: unknown) => unknown) => Promise.resolve(rows).then(res, rej),
         };
         return chain;
@@ -151,6 +152,60 @@ async function main() {
         assert.ok(src.includes("container.addEventListener('goal:change', onGoalChange)"));
         assert.ok(read('src/components/disruptive-ui-registry.js').includes("register('goal_proposal', renderGoalProposalCard)"));
         assert.ok(read('assistants.js').includes("document.addEventListener('assistant:goalsChanged'"));
+    });
+
+    console.log('\nThe Business Mentor changes another assistant\'s goal');
+
+    // The prod chat: "Dex's newsletter goal expired on 30 September … change it to 31st December 2026".
+    const dexGoal = goalRow({ assistantId: 7, targetDate: new Date('2026-09-30T00:00:00Z'), isPrimary: false });
+    const owner = (extra: Record<string, unknown> = {}) => ({ id: 7, name: 'Dex', roleKey: 'social_media_manager', lifecycleStatus: 'working', provisioningStatus: null, ...extra });
+    const redate = (extra: Record<string, unknown> = {}) => goalProposalFromUiElement({ type: 'goal_proposal', action: 'update', goalId: 4, targetDate: '2026-12-31', ...extra })!;
+
+    await check('re-dates an active assistant\'s goal, checked as that assistant, naming it', async () => {
+        const card = await resolveTeamGoalProposal(fakeDb([dexGoal], [owner()], [dexGoal]), 1, redate(), NOW);
+        assert.ok(card && !('error' in card));
+        if (!card || 'error' in card) return;
+        assert.strictEqual(card.assistantId, 7, 'the click PATCHes the goal as Dex\'s, not the Mentor\'s');
+        assert.strictEqual(card.assistantName, 'Dex');
+        assert.strictEqual(card.targetDate, '2026-12-31');
+        assert.strictEqual(card.targetValue, null, 'only what changes is sent');
+        assert.strictEqual(card.blocked, null);
+    });
+    await check('the same rules as the Results tab: a date in the past is refused', async () => {
+        const card = await resolveTeamGoalProposal(fakeDb([dexGoal], [owner()], [dexGoal]), 1, redate({ targetDate: '2026-10-01' }), NOW);
+        assert.ok(card && !('error' in card));
+        assert.match((card as { blocked: string }).blocked, /date has to be in the future/);
+    });
+    await check('never for a paused or archived assistant, a missing goal, or a new / deleted goal', async () => {
+        const paused = await resolveTeamGoalProposal(fakeDb([dexGoal], [owner({ lifecycleStatus: 'paused' })]), 1, redate(), NOW);
+        assert.match((paused as { error: string }).error, /Dex isn't active/);
+        const archived = await resolveTeamGoalProposal(fakeDb([dexGoal], [owner({ lifecycleStatus: 'archived' })]), 1, redate(), NOW);
+        assert.ok(archived && 'error' in archived);
+        const gone = await resolveTeamGoalProposal(fakeDb([]), 1, redate(), NOW);
+        assert.match((gone as { error: string }).error, /no longer exists/);
+        const notOurs = await resolveTeamGoalProposal(fakeDb([dexGoal], []), 1, redate(), NOW);
+        assert.match((notOurs as { error: string }).error, /no longer exists/, 'a goal whose assistant isn\'t in this workspace');
+        for (const action of ['create', 'delete'] as const) {
+            const r = await resolveTeamGoalProposal(fakeDb(), 1, { ...redate(), action }, NOW);
+            assert.match((r as { error: string }).error, /assistant's own chat or on its Results tab/, action);
+        }
+        assert.strictEqual(await resolveTeamGoalProposal(throwingDb, 1, redate(), NOW), null);
+    });
+    await check('the Mentor sees goals by "#" and is told about the card; the route and card are wired', () => {
+        const block = renderMentorSnapshot({
+            business: { description: 'x', industry: 'x', website: 'https://x.example' }, products: [], productCount: 0, offerKinds: null, introOfferAnswered: true,
+            team: [], plan: { status: 'active', freeSlots: 1 },
+            goals: [{ id: 4, assistant: 'Dex', label: 'General Newsletter', latest: 0, target: 1, targetDate: new Date('2026-09-30T00:00:00Z'), status: 'off_track' }],
+        });
+        assert.match(block, /- #4 Dex: General Newsletter — now 0, target 1 by 2026-09-30/);
+        const cards = read('src/utils/mentor-cards.ts');
+        assert.ok(cards.includes('6b. ${mentorGoalPromptLine()}'));
+        assert.ok(!read('src/constants/mentor-craft.ts').includes("another assistant's settings, goals or schedule"), 'the craft no longer says goals can\'t be changed');
+        const orch = read('netlify/functions/chat-orchestrator.ts');
+        assert.ok(orch.includes('if (goalReq && route === ROUTES.business_mentor) {'));
+        assert.ok(orch.includes("if (card && !('error' in card)) { goalCard = card; uiElement = card; }"), 'its reply is checked like any profile card');
+        const reg = read('src/components/disruptive-ui-registry.js');
+        assert.ok(reg.includes("${who ? `${esc(who)}’s ` : ''}Results tab"), 'the card names whose goal it is');
     });
 
     console.log(`\n${passed}/${total} passed`);

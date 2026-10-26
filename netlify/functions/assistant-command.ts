@@ -24,6 +24,7 @@ import { parseModelJson } from '../../src/utils/model-json';
 import { loadHelpKnowledge } from '../../src/utils/help-knowledge';
 
 import { liveRoleLabel } from '../../src/utils/live-role-label';
+import { MENTOR_ROLE_KEY } from '../../src/utils/mentor-provision';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-haiku-4-5-20251001';
 
@@ -90,6 +91,10 @@ export default withLambda(async (event) => {
     const DELEGATE_ROLE = 'social_media_manager';
     const assistants = allAssistants.filter(a => ['working', 'ready_for_work', 'paused'].includes(a.lifecycleStatus));
     const delegates = assistants.filter(a => a.roleKey === DELEGATE_ROLE);
+    // The workspace's Business Mentor (docs/business-mentor-plan.md §8.6), when it has one: business
+    // questions — what to focus on, plans, ideas, pricing, growth, feedback on their own writing — go
+    // to it, with a button that opens its chat. Never a quiet or missing Mentor.
+    const mentor = allAssistants.find(a => a.roleKey === MENTOR_ROLE_KEY && a.lifecycleStatus === 'working') ?? null;
 
     // Plain-English status per assistant so the LLM can give a real, specific answer instead of
     // deflecting to "let me look into it" with nothing to actually check.
@@ -169,7 +174,8 @@ Return ONE strict JSON object and nothing else — no markdown fences, no text b
   "brief": "<concise brief of what to create>",       // only for delegate
   "suggestView": "<one view key|null>",              // only for answer; the view where the user can do what they asked about
   "suggestReportIssue": <true|false>,                 // only for answer; true when you cannot fully resolve a "not working" question from the status data given
-  "article": "<exact title of the Help Centre article your answer comes from|null>"  // only for answer
+  "article": "<exact title of the Help Centre article your answer comes from|null>",  // only for answer
+  "openMentor": <true|false>                          // only for answer; true to offer a button that opens the Business Mentor's chat
 }
 
 Rules:
@@ -178,7 +184,8 @@ Rules:
 - "answer" for questions you can answer briefly, greetings, or anything that doesn't map to a view or a delegation.
 - For "why isn't <assistant> working" / "what's wrong with <assistant>" / "<assistant> isn't posting" style questions, use type "answer" and give a REAL, specific diagnosis straight from that assistant's status line above (e.g. name the actual paused/blocked/provisioning reason and the concrete fix). NEVER reply with a vague promise like "let me look into that" or "I'll help you diagnose this" — you have no way to investigate further than the status already given, so either state the concrete cause now or immediately say you can't tell from here.
 - If the assistant's status above already looks healthy ("active and running normally") but the user insists something is wrong, OR the status data doesn't explain the specific problem they describe, say plainly that you can't identify the cause from here and set "suggestReportIssue" to true so they can report it to be looked into — do not just say you'll look into it yourself and stop.
-- For setup/onboarding questions ("what's left to set up?", "what should I do next?", "how do I get started?", "am I done?"), use type "answer", base the reply on the setup-progress data above, and set "suggestView" to the next incomplete step's view (if any) so the user gets a "Take me there →" button to the right next step. If all steps are done, say so and do not push them through setup.
+${mentor ? `- Business advice — what to focus on or do next for the BUSINESS, growth, a business or marketing plan, testing an idea, pricing strategy, why sales or results are slow, or feedback on something they wrote — is for "${mentor.name}", their Business Mentor, who can see the whole workspace. Use type "answer": in one or two sentences say ${mentor.name} can help with exactly that, and set "openMentor" to true: the user gets a "Talk to ${mentor.name}" button. Say they can use it; never say you are opening the chat or asking ${mentor.name} yourself. Do not give the advice yourself. Questions about how Be More Swan works, and setup progress, stay with the rules below.
+` : ''}- For setup/onboarding questions ("what's left to set up?", "what should I do next?", "how do I get started?", "am I done?"), use type "answer", base the reply on the setup-progress data above, and set "suggestView" to the next incomplete step's view (if any) so the user gets a "Take me there →" button to the right next step. If all steps are done, say so and do not push them through setup.
 - For "how do I / where do I / where can I" questions whose answer lives in a workspace view (e.g. "how do I change my settings", "where do I update billing"), use type "answer" AND set "suggestView" to that view key. The client will show a "Take me there →" button, so the reply should name the place (e.g. "You can change that under Settings — I'll add a button to take you there.") and must NOT claim you have already navigated.
 - Only promise to take the user somewhere when you actually set "view" (navigate) or "suggestView" (answer). Never say "I'll point you there" or "taking you there" without one of those set.
 - ONLY set "view" or "suggestView" to a view that genuinely supports what the user asked, per the capability list above. If NO view supports the request (e.g. "change the dashboard colour", "turn on dark mode", "change the theme/font"), DO NOT navigate or set suggestView. Instead return type "answer", suggestView null, and say plainly that the feature isn't available — mention the closest real capability if there is one (e.g. "The dashboard's colours aren't customisable, but you can rearrange its widgets with the Customize button on the dashboard."). Never route the user to a view that can't do the thing they asked.
@@ -205,7 +212,7 @@ Rules:
         // anchored their strip to the start of the reply and lost any answer with a line above it.
         const parsed = parseModelJson<{
             type?: string; reply?: string; view?: string;
-            suggestView?: string; suggestReportIssue?: boolean; article?: unknown;
+            suggestView?: string; suggestReportIssue?: boolean; article?: unknown; openMentor?: unknown;
             assistantId?: unknown; platform?: unknown; brief?: unknown;
         }>(raw);
         if (!parsed) {
@@ -226,6 +233,12 @@ Rules:
             if (parsed.suggestReportIssue === true) out.suggestReportIssue = true;
             // Only a title that really exists — the client opens it by exact title.
             if (typeof parsed.article === 'string' && kb.titles.includes(parsed.article)) out.article = parsed.article;
+            // "Talk to <Mentor> →": only this workspace's own active Mentor, and the question goes with it.
+            if (parsed.openMentor === true && mentor) {
+                out.openAssistantId = mentor.id;
+                out.openAssistantName = mentor.name;
+                out.draft = command;
+            }
         } else if (type === 'delegate') {
             const picked = assistants.find(a => a.id === Number(parsed.assistantId));
             const validId = delegates.find(a => a.id === Number(parsed.assistantId)) || (delegates.length === 1 && !picked ? delegates[0] : undefined);

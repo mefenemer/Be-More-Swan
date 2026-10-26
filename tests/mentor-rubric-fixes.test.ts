@@ -39,7 +39,7 @@ check('W8: only a Mentor turn passes the no-plan paywall, never a Team note, and
 check('W8: help-only mode reads the Help Centre and draws nothing but the support card', () => {
     assert.match(ORCH, /const mentorNoPlanBlock = mentorNoPlan \?/);
     assert.match(ORCH, /loadHelpKnowledge\(db\)/);
-    assert.match(ORCH, /myAccountBlock, mentorNoPlanBlock\]\.filter\(Boolean\)/);
+    assert.match(ORCH, /myAccountBlock, mentorPointerBlock, mentorNoPlanBlock\]\.filter\(Boolean\)/);
     assert.match(ORCH, /if \(mentorNoPlan && \(uiElement as \{ type\?: unknown \} \| null\)\?\.type !== 'mentor_support_request'\) uiElement = null;/);
     assert.match(ORCH, /if \(!uiElement && !mentorNoPlan\) uiElement = cardTheUserAskedFor\(typed\);/);
     // The filter runs before any Mentor card is checked or recorded as a proposal.
