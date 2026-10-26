@@ -43,6 +43,19 @@ test('a products card adds product or service only, never a price, at most 8', (
     }
 });
 
+test('removing products: only when the user asked, ids only, rebuilt from the workspace\'s rows (prod 2026-10-26)', () => {
+    assert.ok('error' in (mentorCardFromUiElement({ type: 'mentor_products_remove', asked: false, productIds: [4] }, 50) as object), 'never volunteered');
+    assert.ok('error' in (mentorCardFromUiElement({ type: 'mentor_products_remove', asked: true, productIds: ['x', 0] }, 50) as object), 'needs real ids');
+    const c = mentorCardFromUiElement({ type: 'mentor_products_remove', asked: true, productIds: [4, '7', 4] }, 50);
+    assert.deepStrictEqual(c && !('error' in c) && c.type === 'mentor_products_remove' && c.productIds, [4, 7]);
+    assert.strictEqual(proposalKind(c as any), null, 'not a suggestion');
+    const o = read('netlify/functions/chat-orchestrator.ts');
+    assert.match(o, /m\.type === 'mentor_products_remove'\) \{[\s\S]{0,200}resolveProductRemoval\(db, orgId, m\)/, 'the card names the real rows');
+    const mc = read('src/utils/mentor-cards.ts');
+    assert.match(mc, /eq\(orgProducts\.organisationId, orgId\), inArray\(orgProducts\.id, card\.productIds\)/, 'this workspace only');
+    assert.ok(read('src/components/chat-session.js').includes("removeEventListener('mentor:productsRemove', onMentorProductsRemove)"), 'destroy() removes it');
+});
+
 test('quiet mode and support cards are the user\'s own requests: no why needed, not counted as suggestions', () => {
     const q = mentorCardFromUiElement({ type: 'mentor_quiet_mode', on: true }, 50);
     assert.deepStrictEqual(q, { type: 'mentor_quiet_mode', summary: '', on: true, assistantId: 50 });
@@ -86,6 +99,7 @@ test('every card has a renderer and a click handler that calls the screen\'s own
     for (const [ev, handler, call, endpoint] of [
         ['mentor:businessProfile', 'onMentorBusinessProfile', 'A.businessProfile(', '/.netlify/functions/organisation-profile'],
         ['mentor:products', 'onMentorProducts', 'A.products(', '/.netlify/functions/org-products'],
+        ['mentor:productsRemove', 'onMentorProductsRemove', 'A.removeProducts(d.ids)', "method: 'DELETE'"],
         ['mentor:quietMode', 'onMentorQuietMode', "A.setupAnswer(d.assistantId, 'quietMode'", '/.netlify/functions/update-assistant-context'],
         ['mentor:businessStage', 'onMentorBusinessStage', "A.setupAnswer(d.assistantId, 'businessStage'", '/.netlify/functions/update-assistant-context'],
         ['setupField:apply', 'onSetupFieldApply', 'A.setupAnswer(d.assistantId, d.key, d.value)', '/.netlify/functions/update-assistant-context'],
@@ -107,7 +121,7 @@ test('every card has a renderer and a click handler that calls the screen\'s own
 
 test('one click saves once, even if the event reaches two listeners', () => {
     const sess = read('src/components/chat-session.js');
-    for (const fn of ['onMentorBusinessProfile', 'onMentorProducts', 'onMentorQuietMode', 'onMentorSupport', 'onMentorBusinessStage', 'onSetupFieldApply', 'onMentorStrategySave', 'onMentorStrategyApprove', 'onMentorStrategyDraft', 'onMentorResearch']) {
+    for (const fn of ['onMentorBusinessProfile', 'onMentorProducts', 'onMentorProductsRemove', 'onMentorQuietMode', 'onMentorSupport', 'onMentorBusinessStage', 'onSetupFieldApply', 'onMentorStrategySave', 'onMentorStrategyApprove', 'onMentorStrategyDraft', 'onMentorResearch']) {
         assert.match(sess, new RegExp(`async function ${fn}\\(e\\) \\{\\s*\\n\\s*if \\(mentorAlreadyHandled\\(e\\)\\) return;`), fn);
     }
 });

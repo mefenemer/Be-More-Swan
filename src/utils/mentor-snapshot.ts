@@ -33,7 +33,8 @@ const MAX_RESEARCH = 5;
 
 export interface MentorSnapshotData {
     business: { description: string | null; industry: string | null; website: string | null; targetAudience?: string | null };
-    products: Array<{ name: string; hasPrice: boolean }>;
+    /** id = the org_products row, so a removal card can name it (fixtures may leave it out). */
+    products: Array<{ id?: number; name: string; hasPrice: boolean }>;
     productCount: number;
     offerKinds: string[] | null;          // null = the question hasn't been answered
     introOfferAnswered: boolean;
@@ -167,7 +168,7 @@ export function renderMentorSnapshot(d: MentorSnapshotData): string {
     lines.push(...(gaps.length ? gaps.map((g) => `- ${g}`) : ['- None: Business Information is filled in.']));
 
     if (d.productCount) {
-        const shown = d.products.map((p) => `${p.name}${p.hasPrice ? '' : ' (no price)'}`).join('; ');
+        const shown = d.products.map((p) => `${p.id ? `#${p.id} ` : ''}${p.name}${p.hasPrice ? '' : ' (no price)'}`).join('; ');
         lines.push('', `PRODUCTS & SERVICES (${d.productCount}): ${shown}${d.productCount > d.products.length ? '; …' : ''}`);
     }
 
@@ -254,8 +255,8 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
         }
     };
 
-    const products: Array<{ name: string; price: string | null }> = await optional(() => db
-        .select({ name: orgProducts.name, price: orgProducts.price }).from(orgProducts)
+    const products: Array<{ id: number; name: string; price: string | null }> = await optional(() => db
+        .select({ id: orgProducts.id, name: orgProducts.name, price: orgProducts.price }).from(orgProducts)
         .where(eq(orgProducts.organisationId, orgId)), []);
     const [offer] = await optional(() => db.select({ offers: orgOfferProfile.offers }).from(orgOfferProfile)
         .where(eq(orgOfferProfile.organisationId, orgId)).limit(1), [] as Array<{ offers: string[] }>);
@@ -332,7 +333,7 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
             status: statusOf({ isActive: !!c.isActive, comingSoon: !!c.comingSoon, lifecycleState: c.lifecycleState ?? '' }),
         })),
         business: { description: org?.description ?? null, industry: org?.industry ?? null, website: org?.website ?? null, targetAudience: org?.targetAudience ?? null },
-        products: products.slice(0, MAX_PRODUCTS).map((p) => ({ name: p.name, hasPrice: !!p.price?.trim() })),
+        products: products.slice(0, MAX_PRODUCTS).map((p) => ({ id: p.id, name: p.name, hasPrice: !!p.price?.trim() })),
         productCount: products.length,
         offerKinds: offer ? (offer.offers ?? []) : null,
         introOfferAnswered: !!intro,

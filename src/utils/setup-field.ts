@@ -29,6 +29,8 @@ export interface SetupFieldDef {
     max: number | null;
     /** Longest text accepted. */
     maxLength: number;
+    /** The option a blank answer already behaves as, or null when blank means nothing. */
+    blankMeans: string | null;
 }
 
 const TEXT_MAX = 200;
@@ -119,6 +121,7 @@ function toDef(f: SchemaField): SetupFieldDef {
         min: typeof f.min === 'number' ? f.min : null,
         max: typeof f.max === 'number' ? f.max : null,
         maxLength: f.type === 'textarea' ? TEXTAREA_MAX : TEXT_MAX,
+        blankMeans: typeof f.blankMeans === 'string' ? f.blankMeans : null,
     };
 }
 
@@ -174,17 +177,29 @@ export function validateSetupValue(def: SetupFieldDef, raw: unknown): { ok: true
     return { ok: true, value: t };
 }
 
-/** Pure: an answer as the card shows it — an option's label, not its stored value. */
+const isBlank = (v: unknown) => v === null || v === undefined || (typeof v === 'string' && !v.trim()) || (Array.isArray(v) && !v.length);
+
+/**
+ * Pure: an answer as the card shows it — an option's label, not its stored value. A blank answer that
+ * already behaves as an option says so, or the model reads "Not answered" as "off".
+ */
 export function displaySetupValue(def: SetupFieldDef, value: unknown): string {
-    if (value === null || value === undefined || value === '') return 'Not answered';
-    if (Array.isArray(value)) return value.join(', ') || 'Not answered';
+    if (isBlank(value)) {
+        const means = def.blankMeans ? def.options?.find((o) => o.value === def.blankMeans)?.label : null;
+        return means ? `Not answered, so it works as "${means}"` : 'Not answered';
+    }
+    if (Array.isArray(value)) return value.join(', ');
     const s = String(value);
     return def.options?.find((o) => o.value === s)?.label ?? s;
 }
 
-/** Same value? (so a card never proposes what is already saved) */
-export function sameSetupValue(a: unknown, b: unknown): boolean {
+/**
+ * Same value? (so a card never proposes what is already saved — or what a blank answer already does).
+ * `a` is the saved answer, `b` the proposed one.
+ */
+export function sameSetupValue(a: unknown, b: unknown, def?: SetupFieldDef): boolean {
     const norm = (v: unknown) => (v === null || v === undefined ? '' : String(v).trim());
+    if (def?.blankMeans && isBlank(a)) return norm(b) === def.blankMeans || norm(b) === '';
     return norm(a) === norm(b);
 }
 

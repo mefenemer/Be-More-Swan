@@ -7,6 +7,7 @@
  *
  *   mentor_business_profile → organisation-profile.ts POST, read-merge-write of only the profile fields
  *   mentor_products         → org-products.ts POST, one per product
+ *   mentor_products_remove  → org-products.ts DELETE ?id=, one per product, as the tab's Delete does
  *   mentor_quiet_mode       → update-assistant-context.ts PUT patchContext { quietMode }  (its own card,
  *                             setup-field.ts OWN_CARD_PATCH_KEYS)
  *   mentor_business_stage   → update-assistant-context.ts PUT patchContext { businessStage }
@@ -59,6 +60,26 @@
     } catch (err) {
       if (added) document.dispatchEvent(new CustomEvent('bizinfo:productsChanged'));
       throw new Error(added ? `${added} added, then: ${err.message}` : err.message);
+    }
+    document.dispatchEvent(new CustomEvent('bizinfo:productsChanged'));
+  }
+
+  // Products & Services: org-products.ts DELETE, one per product, exactly as the tab's Delete does.
+  // Already gone (404) counts as removed.
+  async function removeProducts(ids) {
+    let removed = 0;
+    try {
+      for (const id of (Array.isArray(ids) ? ids : [])) {
+        const res = await fetch(`/.netlify/functions/org-products?id=${encodeURIComponent(Number(id))}`, { method: 'DELETE', credentials: 'same-origin' });
+        if (!res.ok && res.status !== 404) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `That didn’t work (HTTP ${res.status}).`);
+        }
+        removed++;
+      }
+    } catch (err) {
+      if (removed) document.dispatchEvent(new CustomEvent('bizinfo:productsChanged'));
+      throw new Error(removed ? `${removed} removed, then: ${err.message}` : err.message);
     }
     document.dispatchEvent(new CustomEvent('bizinfo:productsChanged'));
   }
@@ -145,5 +166,5 @@
     throw new Error('This suggestion has nothing to apply here.');
   }
 
-  window.MentorApply = { businessProfile, products, setupAnswer, support, decide, applyCard, strategySave, strategyApprove, strategyDraft, research, jobStatus, commitmentsAdd, commitmentClose, draftRequest, reviewNow };
+  window.MentorApply = { businessProfile, products, removeProducts, setupAnswer, support, decide, applyCard, strategySave, strategyApprove, strategyDraft, research, jobStatus, commitmentsAdd, commitmentClose, draftRequest, reviewNow };
 })();

@@ -17,6 +17,8 @@
 // POST { action: 'decide', proposalId, decision: 'dismissed', reason }   → { ok }  the card's Dismiss
 //     reason ∈ not_relevant | already_done | disagree | not_now (not_now snoozes 14 days)
 // POST { action: 'bring_back', proposalId }                               → { ok }  the Overview's "Bring back"
+// POST { action: 'card_outcome', messageId, outcome, note? }             → { ok }  what the user did with a chat card
+//     outcome ∈ applied | failed | not_now | dismissed — read back by the chat route (mentor-card-outcome.ts)
 //
 // Phase 2 — the Plan tab (assistant-mentor-plan.js) and the chat's plan cards (mentor-apply.js):
 // GET ?plan=1                                       → { ready, kinds, docs, canApprove, stage, playbook, research, drafting }
@@ -42,6 +44,7 @@
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { requireTenant } from '../../src/utils/tenant';
+import { cleanCardOutcome, recordCardOutcome } from '../../src/utils/mentor-card-outcome';
 import { loadMentorSnapshotData, setupChecklist } from '../../src/utils/mentor-snapshot';
 import { recommendHires } from '../../src/utils/mentor-hire';
 import { findMentor } from '../../src/utils/mentor-provision';
@@ -213,6 +216,12 @@ export default withLambda(async (event) => {
             if (body.action === 'commitment_close') {
                 const r = await closeCommitment(db, orgId, ctx.userId, ctx.role, { id: body.id, status: body.status, missReason: body.missReason, note: body.note });
                 return r.ok ? json(200, { commitments: r.commitments }) : json(r.status, { error: r.error });
+            }
+            if (body.action === 'card_outcome') {
+                const c = cleanCardOutcome(body);
+                if (!c.ok) return json(400, { error: c.error });
+                const ok = await recordCardOutcome(db, orgId, ctx.userId, c);
+                return ok ? json(200, { ok: true }) : json(404, { error: 'That card isn’t in your chats.' });
             }
             if (body.action === 'break_even') {
                 const r = breakEven(body.inputs && typeof body.inputs === 'object' ? body.inputs as Record<string, unknown> : {});

@@ -35,7 +35,18 @@ export function confirmCardReply(content: string, card: { blocked?: unknown; set
  * 2026-10-26: "I've added a card that looks up the up-to-date rules" over no card at all). The prompt
  * can't hold this either, so the server says so plainly beside the reply.
  */
-const POINTS_AT_CARD = /\b(?:I(?:'|’)?ve|I have)\s+(?:added|included|attached|drafted|put)\b[^.\n]{0,40}\bcard\b|\bcard\s+(?:below|above|here)\b|\b(?:the|a|this)\s+card\s+(?:that|which)\b|\bbelow is a card\b|\btap (?:the|an?) (?:button|answer) below\b/i;
+const POINTS_AT_CARD = new RegExp([
+    /\b(?:I(?:'|’)?ve|I have)\s+(?:added|included|attached|drafted|put)\b[^.\n]{0,40}\bcard\b/.source,
+    /\bcard\s+(?:below|above|here)\b/.source,
+    /\b(?:the|a|this)\s+card\s+(?:that|which)\b/.source,
+    /\bbelow is a card\b/.source,
+    /\btap (?:the|an?) (?:button|answer) below\b/.source,
+    // Without the word "card" (prod 2026-10-26: "I've put that change below for you to approve" over no card).
+    /\b(?:I(?:'|’)?ve|I have)\s+(?:put|placed|attached|left|queued)\b[^.\n]{0,40}\b(?:below|above)\b/.source,
+    /\b(?:below|above) for you to (?:approve|confirm|save|accept|review)\b/.source,
+    /\b(?:the|that|this) (?:change|suggestion|update) (?:below|above)\b/.source,
+    /\b(?:approve|confirm|save|accept) (?:it|that|this|them) (?:below|above)\b/.source,
+].join('|'), 'i');
 
 export const NO_CARD_NOTE = '(No card came with this reply. Ask me again and I’ll add it.)';
 

@@ -106,10 +106,11 @@ import { asksForACall, callbackOfferElement } from '../../src/utils/callback-req
 import { asksAboutCustomers, buildMentorSnapshotParts, type MentorSnapshotData } from '../../src/utils/mentor-snapshot';
 import { recommendHires } from '../../src/utils/mentor-hire';
 import { assistantSetupFieldBlock, resolveSetupFieldProposal, setupFieldRequestFromUiElement, type SetupFieldCard } from '../../src/utils/chat-setup-field';
-import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, onlyGapFields, proposalKind, recordMentorProposal } from '../../src/utils/mentor-cards';
+import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, onlyGapFields, proposalKind, recordMentorProposal, resolveProductRemoval } from '../../src/utils/mentor-cards';
 import { gateMentorSuggestion, proposalFields } from '../../src/utils/mentor-proposals';
 import { resolveDraftRequest } from '../../src/utils/mentor-draft-request';
 import { closeCommitmentCard } from '../../src/utils/mentor-commitments';
+import { cardOutcomeLine } from '../../src/utils/mentor-card-outcome';
 import { renderReviewSettingsForMentor } from '../../src/utils/mentor-review';
 import { mentorVisibilityPromptBlock } from '../../src/config/mentor-data-inventory';
 import { buildBreakEvenCard, buildStrategyCard } from '../../src/utils/mentor-plan-cards';
@@ -3105,7 +3106,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const llmMessages = [
         ...history.map((m, i) => ({
             role: m.role as 'user' | 'assistant',
-            content: i === latestCardIdx ? `${m.content}\n\n${onScreenCardBlock(m.uiElementJson)}` : m.content,
+            content: i === latestCardIdx ? `${m.content}\n\n${onScreenCardBlock(m.uiElementJson)}`
+                // The Mentor's earlier cards: what the user did with each (mentor-card-outcome.ts), so an
+                // applied change isn't read as the Mentor's own mistake.
+                : route === ROUTES.business_mentor && m.role === 'assistant' && cardOutcomeLine(m.uiElementJson)
+                    ? `${m.content}\n\n${cardOutcomeLine(m.uiElementJson)}`
+                    : m.content,
         })),
         { role: 'user' as const, content: [
             recordContext,
@@ -3340,6 +3346,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 } else {
                     uiElement = card;
                     content = `${content}\n\n${card.sentence}`;
+                }
+            } else if (m && m.type === 'mentor_products_remove') {
+                // Asked-only, never a suggestion; rebuilt from the rows so the card names what is really deleted.
+                const card = await resolveProductRemoval(db, orgId, m).catch((err) => { console.error('[chat-orchestrator] products unreadable', err); return { error: 'I couldn’t read your Products & Services just now.' }; });
+                if ('error' in card) {
+                    uiElement = null;
+                    content = `${content}\n\n(I didn’t include a card for that — ${card.error.charAt(0).toLowerCase()}${card.error.slice(1)} You can remove them under Business Information ▸ Products & Services.)`;
+                } else {
+                    uiElement = card;
                 }
             } else if (m && m.type === 'mentor_research') {
                 uiElement = m; // the click queues the job (mentor.ts research); nothing runs until then

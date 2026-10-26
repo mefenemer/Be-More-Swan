@@ -14,6 +14,8 @@ export interface SchemaField {
     min?: number;
     max?: number;
     defaultValue?: unknown;
+    /** The option a blank answer behaves as (read by setup-field.ts so chat never misreads a blank). */
+    blankMeans?: string;
 }
 export interface SchemaStep { title: string; description?: string; operational?: boolean; fields: SchemaField[] }
 

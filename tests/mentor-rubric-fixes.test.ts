@@ -58,8 +58,16 @@ check('W6: other staging phrasings are caught, ordinary replies are not', () => 
     for (const s of ['Below is a card that adds your three services.', 'Just tap an answer below.', 'Approve the card below and I’ll do the rest.']) {
         assert.ok(replyPointsAtCard(s), s);
     }
-    for (const s of ['I can draft that list for you to approve.', 'Your Products & Services list is still empty.', 'A card game night could be a good event.']) {
+    for (const s of ['I can draft that list for you to approve.', 'Your Products & Services list is still empty.', 'A card game night could be a good event.',
+        'I\'ve listed the three steps below.', 'Go to Business Information and remove the entries below:']) {
         assert.ok(!replyPointsAtCard(s), s);
+    }
+});
+
+check('prod 2026-10-26: a reply that points at a change below without saying "card" is caught too', () => {
+    for (const s of ['I\'ve put that change below for you to approve.', 'I’ve put it below.', 'Approve it below and Marvin uses it from his next post.',
+        'The change below swaps his offer for the trial.', 'It’s below for you to confirm.']) {
+        assert.ok(replyPointsAtCard(s), s);
     }
 });
 

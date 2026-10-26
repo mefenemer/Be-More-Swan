@@ -7,6 +7,8 @@
 // (chat-session.js):
 //   mentor_business_profile → organisation-profile.ts POST (Business Information), read-merge-write
 //   mentor_products         → org-products.ts POST, one per product (Business Information ▸ Products & Services)
+//   mentor_products_remove  → org-products.ts DELETE, one per product — only when the user asked; rebuilt from
+//                             the rows by resolveProductRemoval, so the card names what is really deleted
 //   mentor_quiet_mode       → update-assistant-context.ts PUT, read-merge-write (its "Quiet mode" set-up answer)
 //   mentor_support_request  → support-tickets.ts POST, or issue-reports.ts POST for something broken
 //   mentor_business_stage   → update-assistant-context.ts PUT patchContext { businessStage } (its set-up answer, §3.1)
@@ -32,7 +34,7 @@ import { cleanCommitmentTexts, MAX_PER_WEEK } from './mentor-commitments';
 import { draftRequestPromptLine } from './mentor-draft-request';
 
 export const MENTOR_CARD_TYPES = [
-    'mentor_business_profile', 'mentor_products', 'mentor_quiet_mode', 'mentor_support_request',
+    'mentor_business_profile', 'mentor_products', 'mentor_products_remove', 'mentor_quiet_mode', 'mentor_support_request',
     'mentor_business_stage', 'mentor_hire_recommendation', 'mentor_review_all',
     'strategy_proposal', 'mentor_research', 'mentor_break_even',
     'mentor_commitments',
@@ -53,6 +55,7 @@ const PRODUCT_KINDS = ['product', 'service'] as const;
 export type MentorCard =
     | { type: 'mentor_business_profile'; summary: string; why: string; asked: boolean; fields: Partial<Record<ProfileField, string>> }
     | { type: 'mentor_products'; summary: string; why: string; asked: boolean; products: Array<{ name: string; kind: string; description: string | null }> }
+    | { type: 'mentor_products_remove'; summary: string; productIds: number[]; products?: Array<{ id: number; name: string }> }
     | { type: 'mentor_quiet_mode'; summary: string; on: boolean; assistantId: number }
     | { type: 'mentor_support_request'; summary: string; destination: 'issue' | 'support'; subject: string; description: string }
     | { type: 'mentor_business_stage'; summary: string; assistantId: number }
@@ -108,6 +111,14 @@ export function mentorCardFromUiElement(ui: unknown, assistantId: number): Mento
             });
             if (!products.length) return { error: 'There were no products or services to add.' };
             return { type: 'mentor_products', summary, why, asked, products };
+        }
+        case 'mentor_products_remove': {
+            // Deleting is for good, so never volunteered: the user asked (prod 2026-10-26: the Mentor could
+            // add products but had to send the owner to the page to delete three TEST ones).
+            if (!asked) return { error: 'I only remove products when you ask me to.' };
+            const ids = [...new Set((Array.isArray(u.productIds) ? u.productIds : []).map(Number))].filter((n) => Number.isInteger(n) && n > 0).slice(0, 20);
+            if (!ids.length) return { error: 'It didn’t say which products to remove.' };
+            return { type: 'mentor_products_remove', summary, productIds: ids };
         }
         case 'mentor_quiet_mode':
             if (typeof u.on !== 'boolean') return { error: 'Quiet mode needs to be on or off.' };
@@ -172,6 +183,22 @@ export function onlyGapFields(
     return Object.keys(out).length ? out : null;
 }
 
+/**
+ * A removal card rebuilt from this workspace's rows: the names shown are the real ones, and an id that
+ * isn't this workspace's is dropped. { error } when none is left.
+ */
+export async function resolveProductRemoval(
+    db: any, orgId: number, card: Extract<MentorCard, { type: 'mentor_products_remove' }>,
+): Promise<Extract<MentorCard, { type: 'mentor_products_remove' }> | { error: string }> {
+    const { orgProducts } = await import('../../db/schema');
+    const { and, eq, inArray } = await import('drizzle-orm');
+    const rows: Array<{ id: number; name: string }> = await db.select({ id: orgProducts.id, name: orgProducts.name }).from(orgProducts)
+        .where(and(eq(orgProducts.organisationId, orgId), inArray(orgProducts.id, card.productIds)));
+    if (!rows.length) return { error: 'Those products aren’t on your list any more.' };
+    const products = card.productIds.flatMap((id) => rows.filter((r) => r.id === id));
+    return { ...card, productIds: products.map((p) => p.id), products };
+}
+
 /** The kinds of mentor_proposals rows (§3.13): only suggestions count towards the weekly cap. */
 export function proposalKind(card: MentorCard): string | null {
     if (card.type === 'mentor_business_profile') return 'business_info_gap';
@@ -217,6 +244,9 @@ export function mentorCardsPromptBlock(): string {
 
 2. Add to Products & Services. Only products or services the user named or that already appear in the workspace. NEVER invent a price — leave prices for the user to add on the page:
 {"type":"mentor_products","summary":"<one sentence>","why":"<why, from the gaps above>","asked":false,"products":[{"name":"...","kind":"product"|"service","description":"<optional>"}]}
+
+2b. Remove from Products & Services — ONLY when the user's latest message asks you to remove or delete products or services (never volunteer it; suggest it in words instead). Name them by their #number under PRODUCTS & SERVICES. Their click deletes them for good:
+{"type":"mentor_products_remove","summary":"<one sentence>","asked":true,"productIds":[<#number>, ...]}
 
 3. Quiet mode — when they ask you to stop making suggestions (on) or to start again (off):
 {"type":"mentor_quiet_mode","summary":"<one sentence>","on":true}

@@ -20,7 +20,7 @@ import path from 'node:path';
 import schemas from '../src/public/assistant-onboarding-schemas.js';
 import {
     OWN_CARD_PATCH_KEYS, SETUP_FIELD_EXCLUDED, SOCIAL_WIZARD_EXCLUDED, SOCIAL_WIZARD_FIELDS, allSetupFields, changeableSetupFields,
-    displaySetupValue, exclusionReason, setupFieldDef, validateSetupValue,
+    displaySetupValue, exclusionReason, renderSetupFields, sameSetupValue, setupFieldDef, validateSetupValue,
 } from '../src/utils/setup-field';
 import { applySetupPatch, assistantSetupFieldBlock, resolveSetupFieldProposal, setupFieldRequestFromUiElement } from '../src/utils/chat-setup-field';
 import { recommendHires, renderHireRecommendation } from '../src/utils/mentor-hire';
@@ -102,6 +102,20 @@ test('values are checked against the question: options, numbers, required', () =
     assert.ok(!validateSetupValue(topics, '   ').ok, 'required can\'t be emptied');
     assert.ok(!validateSetupValue(topics, 'x'.repeat(201)).ok, 'too long');
     assert.strictEqual(displaySetupValue(setupFieldDef('campaign_orchestrator', 'capacityPosture')!, 'balanced').length > 3, true);
+});
+
+test('a blank answer that already does something says so, and a card can\'t "change" it to that (prod 2026-10-26)', () => {
+    // Zaphod's blank "Chase leads who do not reply?" already chases (outreach-sequences.ts); the Mentor
+    // read "Not answered" as "one email only" and proposed setting it to chase.
+    const chase = setupFieldDef('lead_qualifier', 'outreachFollowUps')!;
+    assert.strictEqual(chase.blankMeans, 'automatic');
+    assert.match(displaySetupValue(chase, undefined), /works as "Yes — chase automatically"/);
+    assert.match(displaySetupValue(chase, ''), /works as/);
+    assert.ok(renderSetupFields('lead_qualifier', {}).some((l) => l.includes('outreachFollowUps') && l.includes('works as')));
+    assert.ok(sameSetupValue(undefined, 'automatic', chase), 'blank → automatic changes nothing');
+    assert.ok(!sameSetupValue(undefined, 'none', chase), 'blank → one email only is a real change');
+    assert.ok(!sameSetupValue(undefined, 'automatic'), 'without the question, blank is just blank');
+    assert.strictEqual(displaySetupValue(setupFieldDef('blog_writer', 'blogTopics')!, ''), 'Not answered');
 });
 
 test('the write: only the patched keys, merged on the row; active only; excluded refused; own cards allowed', () => {

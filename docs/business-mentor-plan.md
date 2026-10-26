@@ -829,6 +829,12 @@ unbroken text) stay inside it, with nothing clipped.
    and see the existing-subscriber introduction (§13).
 7. Only then: pricing page, FAQ and website copy (§8.6).
 
+**2026-10-26, owner:** steps 1–5 done (merged as #490, checked end to end in workspace 37 on prod). Step 6 changed:
+the role **stays Hidden** in the catalogue and only the flag widens (enabled, 100%). Setting it Live would send the
+in-app "new role available" notification and waitlist emails (role-launch-notify.ts) and show a Hire button for a
+role every workspace already has; provisioning (mentor-provision.ts) never needed it. The four help articles are
+published with it.
+
 ### 8.6 Saved for later: knowledge base, help articles, website
 
 Not part of any build phase. Each item is done **after** the phase it describes is live on prod, never
