@@ -165,8 +165,8 @@ check('chat: every role gets products, the handoff call too', () => {
     // The Team thread joined the list (team-messages.ts, 2026-10-14); products and activity stay on every route.
     // Business Information's documents joined it 2026-10-23 (src/utils/business-knowledge.ts).
     // The free trial / introductory offer card joined it 2026-10-24 (src/utils/intro-offer.ts), then the call-to-action card (src/utils/chat-call-to-action.ts),
-    // then its own set-up answers card 2026-10-25 (src/utils/chat-setup-field.ts), then the Mentor's help-only block 2026-10-26 (§2.7, empty on every other turn).
-    assert.ok(/\[rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock, mentorNoPlanBlock\]/.test(src), 'not on every route');
+    // then its own set-up answers card 2026-10-25 (src/utils/chat-setup-field.ts), then the Mentor's pointer and help-only blocks 2026-10-26 (§8.6, §2.7, each empty where it doesn't apply).
+    assert.ok(/\[rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock\]/.test(src), 'not on every route');
     assert.ok(/buildRolePrompt\(\{[\s\S]{0,400}\}\) \+ \(productsBlock/.test(src), 'the handoff target writes without them');
 });
 

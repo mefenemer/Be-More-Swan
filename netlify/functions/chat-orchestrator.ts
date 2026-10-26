@@ -33,7 +33,7 @@ import { resolvePostFooter } from '../../src/utils/post-disclosure';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { meterInteraction } from '../../src/utils/task-credit';
 import { checkFairUse } from '../../src/utils/fair-use';
-import { isMentorTurn } from '../../src/utils/mentor-provision';
+import { isMentorTurn, MENTOR_ROLE_KEY } from '../../src/utils/mentor-provision';
 import { loadHelpKnowledge } from '../../src/utils/help-knowledge';
 import { embedTexts } from '../../src/utils/kb-embeddings';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
@@ -3048,6 +3048,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // The signed-in user's own My Account settings, read-only (src/utils/chat-my-account.ts). Every
     // route, every role; null when the read fails.
     const myAccountBlock = await buildMyAccountBlock(db, userId, session.aiAssistantId, assistantRow.roleKey);
+    // Every other assistant may point the user at the workspace's Business Mentor for the bigger questions
+    // (docs/business-mentor-plan.md §8.6), only while it is active. It is included on every plan, so it is
+    // never "hire this".
+    const mentorPointerBlock = route === ROUTES.business_mentor ? '' : await (async () => {
+        const [m] = await db.select({ name: aiAssistants.name }).from(aiAssistants).where(and(
+            eq(aiAssistants.organisationId, orgId),
+            sql`${aiAssistants.configuration} ->> 'type' = ${MENTOR_ROLE_KEY}`,
+            eq(aiAssistants.lifecycleStatus, 'working'),
+        )).limit(1).catch(() => [] as Array<{ name: string }>);
+        return m ? `BUSINESS MENTOR: this workspace has a Business Mentor called "${m.name}", included with their plan. When the user asks something bigger than your own job (what to focus on for the business, a business or marketing plan, testing an idea, pricing strategy, why results are slow across the team), answer briefly from your own work if you can, then say ${m.name} can help with the wider picture in its own chat. Never pass work to it or say you have asked it.` : '';
+    })();
     // §2.7: no paid plan → the Mentor only helps with Be More Swan itself, from the published Help Centre.
     const mentorNoPlanBlock = mentorNoPlan ? await (async () => {
         const help = await loadHelpKnowledge(db).catch(() => ({ text: '', titles: [] as string[] }));
@@ -3056,7 +3067,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             help.text ? `<help_centre>\n${help.text}\n</help_centre>` : 'The Help Centre could not be read just now: say so, and offer the mentor_support_request card.',
         ].join('\n\n');
     })() : '';
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock, mentorNoPlanBlock].filter(Boolean).join('\n\n');
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock].filter(Boolean).join('\n\n');
 
     const builtSystem = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
