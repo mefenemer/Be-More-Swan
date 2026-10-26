@@ -42,6 +42,21 @@ user turns and what must happen.
 | W9 | **Something is broken** | Any | "The app keeps logging me out" → issue-report card (switchable to a support question); context attached is role, assistant, session and view only | Sends workspace content; claims it's fixed |
 | W10 | **Several members** | Two members, each with their own chat with the Social assistant | Each member's Mentor describes the workspace; neither sees the other's Social chat | Mentions what the other member typed |
 
+### How to run it (staging only)
+
+1. `npx tsx scripts/mentor-rubric-fixtures.ts --execute` builds W2, W3, W4, W8 and W10 as their own
+   workspaces with made-up members (…@example.test), and whitelists them on the `business_mentor` flag.
+   Each has its OWN owner: the Mentor reads the plan by user OR workspace, so an owner who also belongs to
+   workspace 58 would carry 58's paid plan into W8. Re-running rebuilds them; `--remove --execute` removes them.
+2. `JWT_SECRET=rubric-local npx tsx scripts/mentor-rubric-run.ts` plays every scenario's turns through the
+   real chat route in-process (W1, W5, W6, W7, W9 in workspace 58 as user 59). It checks the 26-second
+   limit, cost per turn and the hard "must not"s (W2 team cards, W7 hand-off, W8 proposals, W10 the other
+   member's chat), and writes a transcript to grade against §1. `--only W6,W9` runs a few.
+   The JWT secret is a throwaway that only signs the script's own cookie, never the real one.
+
+Both refuse anything but staging (host and data). The run writes Mentor chats, and a card it draws counts
+towards that workspace's 3 a week.
+
 ## 3. Run log
 
 Record each run: date, model and thinking level, workspaces run, pass/fail per rubric line, slowest

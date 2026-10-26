@@ -802,10 +802,19 @@ Shipped with each phase so Ask Your Team can answer about it: *Meet your Busines
 *Your weekly review* (Phase 3). Through dated help-article files, not the retired seed. The full
 checklist, with the knowledge-base and website tasks, is §8.6.
 
+**2026-10-26:** all four written in `db/help-articles-2026-12zzzzzzzz-business-mentor.sql`, inserted
+**unpublished** (§8.6: no copy ahead of the product, and Ask Your Team reads published articles only).
+Publish them at rollout step 6 with the statement at the foot of that file.
+
 ### 8.4 Phone width
 
 Every Mentor card and the Plan tab are checked at phone width with the existing UI harness
 (`scrollWidth` vs `clientWidth`, no horizontal scroll) before each phase ships.
+
+**2026-10-26, Phases 1–4 on staging, 375 px, workspace 58:** no horizontal scroll on Chat, Overview,
+Results, Plan (Idea check, Business plan, Marketing plan, break-even calculator) or Activity, nor in the
+profile drawer. All 13 Mentor card types drawn in the chat column (9 from real history, 4 with long
+unbroken text) stay inside it, with nothing clipped.
 
 ### 8.5 Rollout
 
