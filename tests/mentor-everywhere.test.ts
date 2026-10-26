@@ -28,6 +28,7 @@ check('Ask Your Team: only an ACTIVE Mentor of this workspace, found by role', (
 check('Ask Your Team: the routing rule exists only when there is a Mentor', () => {
     assert.match(CMD, /\$\{mentor \? `- Business advice/);
     assert.match(CMD, /Do not give the advice yourself/);
+    assert.match(CMD, /never say you are opening the chat/, 'staging 2026-10-26: "Let me open their chat" over a button');
     assert.match(CMD, /"openMentor": <true\|false>/);
 });
 
