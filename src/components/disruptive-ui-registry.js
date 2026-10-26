@@ -2234,7 +2234,7 @@
     const el = document.createElement('div');
     el.className = 'bg-white border-2 border-pink-200 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
-      <p class="text-xs font-bold text-pink-700 tracking-wider uppercase">${esc(eyebrow)} · Approval needed</p>
+      <p class="text-xs font-bold text-pink-700 tracking-wider uppercase">${esc(eyebrow)}${suggestion && answered && MENTOR_ANSWERED[answered] ? '' : ' · Approval needed'}</p>
       ${summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(summary).slice(0, 300))}</p>` : ''}
       ${why ? `<p class="mt-2 text-xs rounded-lg border border-blue-200 bg-blue-50 text-blue-800 px-2.5 py-1.5"><span class="font-bold">Why?</span> ${esc(String(why).slice(0, 400))}</p>` : ''}
       ${bodyHtml}
