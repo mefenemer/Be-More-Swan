@@ -2621,6 +2621,12 @@ function _rqRecordActions(r, statusKey) {
     // happens to be at, and a note you can only take from one column is a note that does not get
     // taken. Placed before `reject`, which carries `ml-auto` and must stay the rightmost control.
     const notesBtn = isLead ? btn(r.data && r.data.notes ? 'Notes' : 'Add a note', 'notes', secondary) : '';
+    // Owner, 2026-10-27: fix the lead itself (name, contact, email address) without leaving the
+    // Outreach tab, and ask the assistant to rewrite the email rather than editing it by hand. Both
+    // only before the email has gone — after that there is nothing left for either to change.
+    const editLead = (isLead && window.AssistantDataHub?.editLead) ? btn('Edit lead', 'editLead', secondary) : '';
+    const who = _rqEsc(window._currentAssistantName || 'your assistant');
+    const improve = (isLead && hasDraft) ? btn(`Ask ${who} to improve it`, 'improveEmail', secondary) : '';
     let buttons = '';
     // A line above the buttons, for the cards where the state is the point and there is little left
     // to do — a lead whose email has gone out, or one waiting on an inbox connection.
@@ -2637,7 +2643,7 @@ function _rqRecordActions(r, statusKey) {
     }
     if (statusKey === 'review') {
         buttons = isLead
-            ? btn(leadApprove, 'approve', primary) + editDraft + selfSend + notesBtn + reject
+            ? btn(leadApprove, 'approve', primary) + improve + editDraft + editLead + selfSend + notesBtn + reject
             : btn('Approve', 'approve', primary) + btn('Approve &amp; Schedule', 'showSchedule', secondary) + editDraft + reject;
     } else if (statusKey === 'approved') {
         if (isLead) {
@@ -3791,6 +3797,54 @@ window._detailRqRecordAct = async function (btn, action) {
                 btn.textContent = 'Notes';
             },
         });
+        return;
+    }
+
+    // Edit the lead record itself — the Found leads tab's own form, opened here.
+    if (action === 'editLead') {
+        const rec = _rqRecordsById.get(Number(card.getAttribute('data-rq-record')));
+        if (!rec || !window.AssistantDataHub?.editLead) return;
+        window.AssistantDataHub.editLead(rec, {
+            async onSaved() {
+                await _detailRqRenderGroups(_detailRqCurrentStatus);
+                window.AssistantDataHub?.refresh?.();
+            },
+        });
+        return;
+    }
+
+    // Ask the assistant to rewrite the drafted email (lead-generation.ts `improve_draft`). Saves the
+    // new version in place; nothing is sent and the lead stays in this column to be read again.
+    if (action === 'improveEmail') {
+        const id = Number(card.getAttribute('data-rq-record'));
+        const name = window._currentAssistantName || 'your assistant';
+        const nameHtml = _rqEsc(name);   // the dialog renders title and message as HTML
+        const instruction = await window.promptModal(
+            `${nameHtml} will rewrite this email and save the new version here for you to read. Nothing is sent. Say what you’d like changed, or leave it blank to let ${nameHtml} improve it generally.`,
+            { title: `Ask ${nameHtml} to improve this email`, confirmLabel: 'Improve it', multiline: true,
+              placeholder: 'e.g. shorter, mention our free trial, less formal' },
+        );
+        if (instruction === null) return;
+        const original = btn.textContent;
+        card.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+        btn.textContent = 'Improving…';
+        try {
+            const res = await fetch('/.netlify/functions/lead-generation', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'improve_draft', assistantId: window._currentAssistantId, recordId: id, instruction: instruction.trim() || undefined }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Couldn’t improve this email just now.');
+            const rec = _rqRecordsById.get(id);
+            if (rec) rec.data = { ...(rec.data || {}), outreachDraft: data.outreachDraft };
+            _rqExpanded.add(id);
+            await _detailRqRenderGroups(_detailRqCurrentStatus);
+            window.showToast?.(`${name} has rewritten the email — read it before you approve.`, { icon: '✍️' });
+        } catch (e) {
+            card.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+            btn.textContent = original;
+            showErr(e.message || 'Something went wrong.');
+        }
         return;
     }
 

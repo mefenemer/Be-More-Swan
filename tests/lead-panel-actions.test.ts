@@ -249,4 +249,39 @@ check('the overlap that makes the columns exceed the total is stated on screen',
         'and only when such a lead is present — otherwise it explains a discrepancy that is not there');
 });
 
+// ── 2026-10-27: the open lead as sections, and the Outreach card's new buttons ──
+check('a lead opens as status → what happens next → notes → four collapsible sections', () => {
+    const layout = HUB.slice(landmark(HUB, 'function leadDetailLayout'), landmark(HUB, '// ── Working the table'));
+    const order = ["approvalBanner(record)", 'What happens next', 'notesBanner(record)',
+        "leadSection('score'", "leadSection('research'", "leadSection('contact'", "leadSection('activity'"];
+    let at = -1;
+    for (const m of order) {
+        const i = layout.indexOf(m, at + 1);
+        assert.ok(i > at, `${m} is missing or out of order`);
+        at = i;
+    }
+    // The one button lives in "What happens next", so the scoring card must not draw a second footer.
+    assert.match(layout, /render\(\{ \.\.\.d, suggestedNextStep: null, contactEmail: null \}, \{ sendsOnApproval: false \}\)/);
+    assert.match(HUB, /document\.createElement\('details'\)/);
+});
+
+check('changing the address in Edit lead also re-addresses the drafted email', () => {
+    const fn = HUB.slice(landmark(HUB, 'function stampContactProvenance'), landmark(HUB, 'function openEditLeadModal'));
+    assert.match(fn, /nextData\.outreachDraft = after \? \{ \.\.\.restDraft, to:/);
+});
+
+check('Outreach review cards offer "Ask … to improve it" and "Edit lead", before Reject', () => {
+    assert.match(SHELL, /btn\(leadApprove, 'approve', primary\) \+ improve \+ editDraft \+ editLead \+ selfSend \+ notesBtn \+ reject/);
+    assert.match(SHELL, /action: 'improve_draft'/);
+    assert.match(LEADGEN, /if \(action === 'improve_draft'\)/);
+    assert.match(HUB, /editLead: openEditLeadModal/);
+});
+
+check('improve_draft never sends and never touches the recipient', () => {
+    const fn = LEADGEN.slice(landmark(LEADGEN, "if (action === 'improve_draft')"), landmark(LEADGEN, '── Record the deal outcome'));
+    assert.ok(!/sendGmailMessage|sendOutlookMessage|approvalStatus/.test(fn), 'no send, no approval change');
+    assert.match(fn, /\{ \.\.\.freshDraft, subject: newSubject, body: newBody \}/, 'to is carried over untouched');
+    assert.match(fn, /loadAssistantRulesBlock/, 'the user\'s Do\'s and don\'ts reach the rewrite');
+});
+
 console.log(`\n${passed} checks passed.\n`);

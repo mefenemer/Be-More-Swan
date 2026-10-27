@@ -286,13 +286,13 @@ check('states the prod run this was built for', () => {
     // turns "Review only has 3 things in it" into "and here is why".
     assert.equal(
         agg({ contactTotal: 65, contactReachable: 4, contactNonePublished: 9, contactNotAttempted: 52 }),
-        'Contact details for 4 of 65 — 9 publish none, 52 were not companies you could sell to, so were never checked.',
+        'Email address found for 4 of 65 companies — 9 have no email address we could find, 52 weren’t companies you could sell to, so we didn’t look.',
     );
     // Campaign 1, same database: 20 found, not one of them worth a scrape. The line diagnoses
     // targeting without the user having to open a single lead.
     assert.equal(
         agg({ contactTotal: 20, contactNotAttempted: 20 }),
-        'Contact details for 0 of 20 — 20 were not companies you could sell to, so were never checked.',
+        'Email address found for 0 of 20 companies — 20 weren’t companies you could sell to, so we didn’t look.',
     );
 });
 
@@ -301,19 +301,19 @@ check('says nothing at all for a search with no leads', () => {
 });
 
 check('omits clauses that are zero', () => {
-    assert.equal(agg({ contactTotal: 3, contactReachable: 3 }), 'Contact details for 3 of 3.');
+    assert.equal(agg({ contactTotal: 3, contactReachable: 3 }), 'Email address found for 3 of 3 companies.');
     assert.equal(agg({ contactTotal: 5, contactReachable: 2, contactNonePublished: 3 }),
-        'Contact details for 2 of 5 — 3 publish none.');
+        'Email address found for 2 of 5 companies — 3 have no email address we could find.');
 });
 
 check('reads correctly in the singular', () => {
     assert.equal(agg({ contactTotal: 3, contactReachable: 1, contactNonePublished: 1, contactNotAttempted: 1 }),
-        'Contact details for 1 of 3 — 1 publishes none, 1 was not a company you could sell to, so was never checked.');
+        'Email address found for 1 of 3 companies — 1 has no email address we could find, 1 wasn’t a company you could sell to, so we didn’t look.');
 });
 
 check('names work still in progress rather than calling it a result', () => {
     assert.equal(agg({ contactTotal: 10, contactReachable: 1, contactPending: 9 }),
-        'Contact details for 1 of 10 — 9 still to check.');
+        'Email address found for 1 of 10 companies — 9 still being looked up.');
 });
 
 check('the line is only shown on a finished run', () => {

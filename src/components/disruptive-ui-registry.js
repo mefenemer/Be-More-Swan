@@ -157,12 +157,16 @@
     // who owns its next step — the sentence "approving clears this lead for outreach" is wrong the
     // instant it has been approved — and the panel is not rebuilt around it, so the host swaps
     // this node in place (assistant-data-hub.js syncNextStepFooter).
+    // The sentence sits on its own line under the chip and button (2026-10-27): beside them, on a
+    // phone, it was squeezed into a column two words wide.
     return `
-      <div data-next-step-footer class="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-emerald-200">
-        <span class="text-xs font-bold px-2 py-0.5 rounded-full border ${owner.cls}">${esc(owner.label)}</span>
-        ${guidance.note ? `<span class="text-xs text-emerald-800 flex-1 min-w-0">${esc(guidance.note)}</span>` : ''}
-        ${action ? `<button type="button" data-lead-next-step="${esc(action.key)}"
-          class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed ml-auto shrink-0">${esc(action.label)}</button>` : ''}
+      <div data-next-step-footer class="mt-2 pt-2 border-t border-emerald-200">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-xs font-bold px-2 py-0.5 rounded-full border ${owner.cls}">${esc(owner.label)}</span>
+          ${action ? `<button type="button" data-lead-next-step="${esc(action.key)}"
+            class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed ml-auto shrink-0">${esc(action.label)}</button>` : ''}
+        </div>
+        ${guidance.note ? `<p class="text-xs text-emerald-800 mt-1.5">${esc(guidance.note)}</p>` : ''}
       </div>`;
   }
 
@@ -3849,6 +3853,7 @@
   // this card. The click dispatches `lead:action`; chat-session.js calls the tabs' own endpoints.
   const LEAD_ACTION_COPY = {
     send: { head: 'Send this outreach email', busy: 'Sending…' },
+    improve: { head: 'Improve this outreach email', button: 'Rewrite it', busy: 'Rewriting…' },
     move_to_outreach: { head: 'Move this lead to Outreach', button: 'Move to Outreach', busy: 'Moving…' },
     reject: { head: 'Turn this lead down', button: 'Turn it down', busy: 'Turning it down…' },
     set_outcome: { head: 'Record how this deal ended', busy: 'Recording…' },
@@ -3939,6 +3944,14 @@
 
     // The email, exactly as send_outreach will send it: the stored draft, then the signature, then
     // the footer the server appends. Shown even when blocked — it is what the user asked about.
+    const isImprove = ui.action === 'improve';
+    const improveHtml = isImprove && ui.body ? `
+      <p class="text-xs text-gray-600 mt-3">The email as it is now — to ${esc(ui.to || 'no address')}:</p>
+      <div class="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 max-h-56 overflow-y-auto" tabindex="0">
+        <p class="text-xs font-bold text-gray-900 break-words">${esc(ui.subject || '')}</p>
+        <p class="text-sm text-gray-900 whitespace-pre-wrap break-words mt-1">${esc(ui.body)}</p>
+      </div>
+      <p class="text-sm text-gray-800 mt-2"><span class="font-bold">What to change:</span> ${esc(ui.instruction || 'improve it generally')}</p>` : '';
     const emailHtml = isSend && ui.body ? `
       <dl class="mt-3 text-sm space-y-1">
         <div class="flex gap-2"><dt class="font-bold text-gray-700 shrink-0">To:</dt><dd class="text-gray-900 break-all">${esc(ui.to || 'no address')}</dd></div>
@@ -3973,6 +3986,7 @@
     let actionHtml = '';
     if (!blocked) {
       if (isSend) actionHtml = `<p class="text-xs text-gray-600 mt-3">${ui.approveFirst ? 'Pressing the button approves the lead and sends this email now' : 'Pressing the button sends this email now'} from your connected inbox, then sets a reminder to chase.</p>`;
+      if (isImprove) actionHtml = '<p class="text-xs text-gray-600 mt-3">Pressing the button rewrites this email and saves it on the Outreach tab. Nothing is sent — read the new version there, or ask me to send it.</p>';
       if (ui.action === 'move_to_outreach') actionHtml = `<p class="text-xs text-gray-600 mt-3">It moves to the Outreach tab’s Review column. ${ui.hasEmail ? 'Its drafted email waits there for you to read.' : 'It has no email written or no address yet, so there will be nothing to send until it does.'} Nothing is sent.</p>`;
       if (ui.action === 'reject') actionHtml = '<p class="text-xs text-gray-600 mt-3">It’s turned down and nothing is sent. Turned-down leads teach your searches what to skip.</p>';
       if (ui.action === 'set_outcome') {
@@ -3988,7 +4002,7 @@
       <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
       <p class="text-xs text-gray-500 mt-2">#${recordId}${ui.rating ? ` · ${esc(ui.rating)}` : ''}</p>
       ${ui.title ? `<p class="text-sm font-bold text-gray-900 mt-1 break-words">${esc(ui.title)}</p>` : ''}
-      ${emailHtml}
+      ${emailHtml}${improveHtml}
       ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
       ${followHtml}
       ${actionHtml}
@@ -4011,6 +4025,7 @@
           action: ui.action, recordId, assistantId: Number(ui.assistantId) || null,
           draftHash: ui.draftHash || null, personalInbox: !!ui.personalInbox, approveFirst: !!ui.approveFirst,
           outcome: ui.outcome || null, lossReason: ui.lossReason || null, valueGbp: ui.valueGbp ?? null,
+          instruction: ui.instruction || null,
           confirmChange: !!ui.currentOutcome,
           respond({ ok, message, error, final }) {
             if (ok) { say(message || 'Done.'); return; }

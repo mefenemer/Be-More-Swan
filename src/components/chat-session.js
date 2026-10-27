@@ -1253,6 +1253,13 @@
           } else {
             respond({ ok: false, final: true, error: `${d.approveFirst ? 'Approved, but nothing was sent. ' : 'Nothing was sent. '}${leadWhy(r)} It’s in the “Approved” column — “Send email now” there tries again.` });
           }
+        } else if (d.action === 'improve') {
+          // The Outreach tab's "Ask … to improve it" — lead-generation.ts improve_draft. Sends nothing.
+          await postActionCall('lead-generation', {
+            action: 'improve_draft', assistantId: aid, recordId: d.recordId,
+            ...(d.instruction ? { instruction: d.instruction } : {}),
+          });
+          respond({ ok: true, message: 'Rewritten and saved. Read the new version on the Outreach tab — nothing has been sent. Ask me to send it when you’re happy.' });
         } else if (d.action === 'move_to_outreach') {
           // The same write as Enrichment's "Move to Outreach": status and stage in one PATCH. The
           // stage is merged server-side so the lead keeps its score, intel and draft.

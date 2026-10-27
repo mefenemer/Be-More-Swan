@@ -51,7 +51,7 @@ import { previewFollowUps } from './outreach-sequences';
 type Db = ReturnType<typeof getDb>;
 
 export const LEAD_ACTION_PROPOSAL_TYPE = 'lead_action_proposal';
-export const LEAD_ACTIONS = ['send', 'send_all', 'move_to_outreach', 'reject', 'set_outcome'] as const;
+export const LEAD_ACTIONS = ['send', 'send_all', 'improve', 'move_to_outreach', 'reject', 'set_outcome'] as const;
 
 /**
  * "Approve all" (owner, 2026-10-27): the most emails one card offers. Every one of them is shown on the
@@ -95,6 +95,8 @@ export interface LeadActionRequest {
     outcome: RevenueOutcome | null;
     lossReason: LossReason | null;
     valueGbp: number | null;
+    /** improve: what the user asked to change, in their words. Null = improve it generally. */
+    instruction?: string | null;
 }
 
 /** Shape check on the model's output. Pure. Null when it is not a usable proposal. */
@@ -111,6 +113,10 @@ export function leadActionFromUiElement(uiElement: unknown): LeadActionRequest |
     }
     const recordId = Number(String(ui.recordId ?? ui.leadId ?? '').replace(/^#/, ''));
     if (!action || !Number.isInteger(recordId) || recordId <= 0) return null;
+    if (action === 'improve') {
+        const instruction = typeof ui.instruction === 'string' && ui.instruction.trim() ? ui.instruction.trim().slice(0, 600) : null;
+        return { action, recordId, outcome: null, lossReason: null, valueGbp: null, instruction };
+    }
     if (action !== 'set_outcome') return { action, recordId, outcome: null, lossReason: null, valueGbp: null };
     const outcome = isOutcome(ui.outcome) ? ui.outcome : null;
     if (!outcome) return null;
@@ -155,6 +161,8 @@ export interface LeadActionCard {
     valueGbp?: number | null;
     /** set_outcome: what it is marked as now, when it is a correction. */
     currentOutcome?: string | null;
+    /** improve: what the user asked to change. */
+    instruction?: string | null;
     /** send_all: the emails the one click sends, each exactly as send_outreach will send it. */
     items?: Array<{ recordId: number; title: string; rating: string | null; to: string | null; subject: string; body: string; draftHash: string }>;
     /** send_all: leads in Review that this card will NOT send, and why — each needs its own decision. */
@@ -198,6 +206,12 @@ function rowBlock(req: LeadActionRequest, rec: LeadRow): string | null {
         if (!resolveLeadRecipient(data)) return 'There’s no email address on this lead, so it can’t be emailed. Add one on the Found leads tab.';
         const dnc = evaluateDoNotContact(data);
         if (dnc.blocked) return `This lead is flagged do-not-contact: ${dnc.reason || 'flagged during qualification'}. Only the Outreach tab can overrule that, and it asks you why.`;
+        return null;
+    }
+    if (req.action === 'improve') {
+        if (sent) return 'Its outreach email has already gone, so there is nothing left to improve.';
+        if (status === 'rejected') return 'This lead was turned down. Move it back to Outreach first if you want to work on its email.';
+        if (!hasOutreachDraft(data)) return 'No email has been written for this lead yet, so there is nothing to improve.';
         return null;
     }
     if (req.action === 'move_to_outreach') {
@@ -258,6 +272,13 @@ export async function resolveLeadActionProposal(
             card.valueGbp = req.valueGbp;
             const prior = (data.dealOutcome && typeof data.dealOutcome === 'object') ? (data.dealOutcome as Record<string, unknown>).outcome : null;
             card.currentOutcome = typeof prior === 'string' ? prior : null;
+        }
+
+        if (req.action === 'improve') {
+            // The email as it stands, so the user knows what is being rewritten. Nothing is sent.
+            const draft = sendableDraft(data, rec.title);
+            if (draft) { card.to = draft.to; card.subject = draft.subject; card.body = draft.body; }
+            card.instruction = req.instruction ?? null;
         }
 
         if (req.action === 'send') {

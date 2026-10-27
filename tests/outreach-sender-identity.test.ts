@@ -56,11 +56,11 @@ check('discovery-scoring.ts injects the rule into BOTH prompts that write a draf
     assert.strictEqual(uses.length, 2, `expected 2 interpolations, found ${uses.length}`);
 });
 
-check('lead-generation.ts injects the rule into BOTH of its drafting prompts', () => {
+check('lead-generation.ts injects the rule into ALL THREE of its drafting prompts', () => {
     // One scores a manual lead and emits an outreachDraft; the other generates at send time when no
-    // draft was stored. Exactly the split that tests/outreach-subject-rules.test.ts pins.
+    // draft was stored; the third rewrites a stored draft when asked to improve it (improve_draft). Exactly the split that tests/outreach-subject-rules.test.ts pins.
     const uses = read('netlify/functions/lead-generation.ts').match(/\$\{SENDER_IDENTITY_RULE\}/g) ?? [];
-    assert.strictEqual(uses.length, 2, `expected 2 interpolations, found ${uses.length}`);
+    assert.strictEqual(uses.length, 3, `expected 3 interpolations, found ${uses.length}`);
 });
 
 for (const seam of SEAMS.filter((s) => s.file !== 'netlify/functions/chat-orchestrator.ts')) {

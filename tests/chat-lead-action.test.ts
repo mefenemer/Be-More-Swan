@@ -105,6 +105,12 @@ async function main() {
         assert.match(read('assistant-chat.html'), /lead-bulk-send\.js/);
     });
 
+    await check('improve carries the user\'s words, trimmed and capped; none means improve generally', () => {
+        assert.strictEqual(leadActionFromUiElement({ type: 'lead_action_proposal', action: 'improve', recordId: 12, instruction: '  shorter  ' })?.instruction, 'shorter');
+        assert.strictEqual(leadActionFromUiElement({ type: 'lead_action_proposal', action: 'improve', recordId: 12 })?.instruction, null);
+        assert.match(read('src/components/chat-session.js'), /d\.action === 'improve'[\s\S]{0,300}action: 'improve_draft'/);
+    });
+
     console.log('\nThe send card shows the stored email, from the row');
 
     await check('a lead that is not this assistant\'s gives no card', async () => {
