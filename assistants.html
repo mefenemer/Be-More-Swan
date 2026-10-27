@@ -68,7 +68,7 @@
 </section>
 
 <!-- Search + Filter (sticky under the nav) -->
-<div class="sticky top-16 z-30 bg-gray-50/95 backdrop-blur-sm border-b border-gray-100">
+<div id="assistants-filter-bar" class="sticky top-16 z-30 bg-gray-50/95 backdrop-blur-sm border-b border-gray-100">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 w-full flex flex-col sm:flex-row gap-4 items-center justify-between">
     <!-- Search -->
     <div class="relative w-full sm:max-w-sm">
@@ -91,7 +91,7 @@
   </div>
 </div>
 
-<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-4 w-full">
+<div id="results-start" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-4 w-full">
 
   <!-- Live Assistants -->
   <div id="live-section">
@@ -607,7 +607,19 @@ document.getElementById('category-tabs').addEventListener('click', e => {
   btn.classList.add('active');
   _activeCategory = btn.dataset.cat;
   renderGrid();
+  scrollToResults();
 });
+
+// A new category starts at its first card. Choosing one from down by the footer used to leave you
+// there, looking at the end of a list you hadn't seen the start of (owner, 2026-10-27). Scrolls only
+// when the results' start is above the filter bar, so a pick near the top doesn't jump the page down.
+function scrollToResults() {
+  const start = document.getElementById('results-start');
+  const bar = document.getElementById('assistants-filter-bar');
+  if (!start) return;
+  const target = Math.max(0, Math.round(start.getBoundingClientRect().top + window.scrollY - (bar ? bar.getBoundingClientRect().bottom : 0)));
+  if (window.scrollY > target) window.scrollTo({ top: target, behavior: 'smooth' });
+}
 
 // ── Search ───────────────────────────────────────────────────────────────────
 let _searchTimer;

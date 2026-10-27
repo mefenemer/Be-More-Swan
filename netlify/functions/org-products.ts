@@ -43,6 +43,7 @@ import { listCtaAssistants, saveCta } from '../../src/utils/call-to-action';
 import { listGiftForms } from '../../src/utils/outreach-offer';
 import { splitOfferingNotes } from '../../src/utils/offerings-import';
 import { resolveBaseUrl } from '../../src/utils/base-url';
+import { applyPlanFacts } from '../../src/utils/plan-products';
 import { contentAssets } from '../../db/schema';
 
 const json = (statusCode: number, body: unknown) => ({
@@ -162,10 +163,12 @@ export default withLambda(async (event) => {
 
     try {
         if (method === 'GET') {
-            const products = await db.select(COLUMNS).from(orgProducts)
+            // Be More Swan's own plans show the plan settings' facts (src/utils/plan-products.ts), so the
+            // page and every assistant read the same thing.
+            const products = await applyPlanFacts(db, await db.select(COLUMNS).from(orgProducts)
                 .where(eq(orgProducts.organisationId, orgId))
                 // Active first, then the business's own order.
-                .orderBy(desc(sql`${orgProducts.status} = 'active'`), asc(orgProducts.sortOrder), asc(orgProducts.id));
+                .orderBy(desc(sql`${orgProducts.status} = 'active'`), asc(orgProducts.sortOrder), asc(orgProducts.id)));
             // The picture's link, for the editor's thumbnail (the same signed link sites and emails use).
             const base = resolveBaseUrl(event.headers as Record<string, string | undefined>) || 'https://bemoreswan.com';
             const [offer, introOffer, ctaAssistants, giftForms] = await Promise.all([

@@ -22,6 +22,7 @@ import { describeIntroOffer, introOfferShortLine, loadIntroOffer } from './intro
 import { and, asc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { orgProducts } from '../../db/schema';
+import { applyPlanFacts } from './plan-products';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -115,7 +116,8 @@ export function renderProductFacts(products: OrgProduct[] | null | undefined, ma
 /** The ACTIVE catalogue, in the business's own order. [] on any failure. */
 export async function loadOrgProducts(db: Db, organisationId: number): Promise<OrgProduct[]> {
     try {
-        return await db
+        // Be More Swan's own plans read as the plan settings say, never as typed in July (plan-products.ts).
+        return await applyPlanFacts(db, await db
             .select({
                 kind: orgProducts.kind, name: orgProducts.name, description: orgProducts.description,
                 benefits: orgProducts.benefits, price: orgProducts.price, audience: orgProducts.audience, url: orgProducts.url,
@@ -124,7 +126,7 @@ export async function loadOrgProducts(db: Db, organisationId: number): Promise<O
             .from(orgProducts)
             .where(and(eq(orgProducts.organisationId, organisationId), eq(orgProducts.status, 'active')))
             .orderBy(asc(orgProducts.sortOrder), asc(orgProducts.id))
-            .limit(PRODUCT_PROMPT_MAX + 1);
+            .limit(PRODUCT_PROMPT_MAX + 1));
     } catch (err) {
         console.error('[org-products] could not read products (continuing without them):', (err as Error)?.message ?? err);
         return [];
