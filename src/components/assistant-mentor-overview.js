@@ -127,10 +127,13 @@
   function trackRecordHtml() {
     const r = state.reviews;
     if (!r || r.error || !r.trackReady) return '';
-    const items = (r.trackRecord || []).map((t) => `<li class="py-2 border-b border-gray-100 last:border-0"><p class="text-xs break-words ${VERDICT[t.verdict] || 'text-gray-700'}">${esc(t.line)}</p>${t.target ? `<p class="text-[11px] text-gray-500">${esc(t.target)}</p>` : ''}</li>`).join('');
+    const list = r.trackRecord || [];
+    const items = list.map((t) => `<li class="py-2 border-b border-gray-100 last:border-0"><p class="text-xs break-words ${VERDICT[t.verdict] || 'text-gray-700'}">${esc(t.line)}</p>${t.target ? `<p class="text-[11px] text-gray-500">${esc(t.target)}</p>` : ''}</li>`).join('');
+    // Said once, not on every row (it repeated four times on staging, 27 Oct).
+    const early = list.some((t) => t.verdict === 'too_early');
     return card(`
       <h2 class="text-base font-bold text-gray-900">Track record</h2>
-      <p class="text-xs text-gray-500 mt-1">Suggestions you accepted and what changed since. “Since”, not “because” — other things change too.</p>
+      <p class="text-xs text-gray-500 mt-1">Suggestions you accepted and what changed since. “Since”, not “because” — other things change too.${early ? ' I look at each one again a week after you accept it.' : ''}</p>
       ${items ? `<ul class="mt-1">${items}</ul>` : '<p class="text-sm text-gray-500 mt-2">Nothing yet. When you accept a suggestion, I follow what happens next here.</p>'}`, 'data-mentor-panel="track-record"');
   }
 
@@ -141,7 +144,7 @@
     const parts = [];
     if (c.deals) {
       const d = c.deals;
-      parts.push(`<p class="text-sm text-gray-800">Last 90 days: <strong>${d.won}</strong> won, <strong>${d.lost}</strong> lost${d.disqualified ? `, ${d.disqualified} disqualified` : ''}.</p>
+      parts.push(`<p class="text-sm text-gray-800">Last 90 days: <strong>${d.won}</strong> won, <strong>${d.lost}</strong> lost, <strong>${d.disqualified || 0}</strong> disqualified.</p>
         <p class="text-xs text-gray-600 mt-0.5">${d.enough ? (d.lossReasons.length ? `Lost mostly to: ${esc(d.lossReasons.map((x) => `${x.reason} (${x.count})`).join(', '))}.` : 'No loss reasons recorded.') : 'Too few closed deals yet to say why deals are lost.'}</p>`);
     }
     if (c.quiet) {
@@ -194,7 +197,7 @@
             <svg class="w-4 h-4 text-gray-400 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
           </span>
         </summary>
-        <p class="text-xs text-gray-500 mt-1 mb-2">The same gaps ${esc(state.assistantName)} raises in chat. Each opens its place in Business Information.</p>
+        <p class="text-xs text-gray-500 mt-1 mb-2">The same gaps I raise in chat. Each opens its place in Business Information.</p>
         <ul>${rows}</ul>
       </details>`, 'data-mentor-panel="checklist"');
   }
@@ -209,7 +212,7 @@
     return card(`
       <details>
         <summary class="cursor-pointer text-base font-bold text-gray-900">What I can see</summary>
-        <p class="text-xs text-gray-500 mt-2">${esc(state.assistantName)} works from this list, and never changes anything without your click.</p>
+        <p class="text-xs text-gray-500 mt-2">I work from this list, and never change anything without your click.</p>
         <h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-3">Sees</h3>
         ${list(v.sees || [])}
         <h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-3">Never sees</h3>
@@ -235,7 +238,7 @@
       <details ${rows.length ? 'open' : ''}>
         <summary class="cursor-pointer text-base font-bold text-gray-900">Dismissed suggestions (${rows.length})</summary>
         ${rows.length
-          ? `<p class="text-xs text-gray-500 mt-2">${esc(state.assistantName)} won’t suggest these again. "Bring back" lets it.</p><ul class="mt-1">${items}</ul>`
+          ? `<p class="text-xs text-gray-500 mt-2">I won’t suggest these again. "Bring back" lets me.</p><ul class="mt-1">${items}</ul>`
           : `<p class="text-sm text-gray-500 mt-2">Nothing dismissed. When you dismiss a suggestion in chat, it’s listed here with your reason.</p>`}
       </details>`, 'data-mentor-panel="dismissed"');
   }
@@ -244,8 +247,8 @@
     const used = week && week.used != null ? week.used : null;
     return card(`
       <h2 class="text-base font-bold text-gray-900">Suggestions this week</h2>
-      <p class="text-sm text-gray-700 mt-1">${used == null ? 'Not available just now.' : `${Math.min(used, week.cap)} of ${week.cap} used`}</p>
-      <p class="text-xs text-gray-500 mt-1">${esc(state.assistantName)} makes at most ${week ? week.cap : 3} suggestions a week, picking the ones with the most evidence. Anything you ask for in chat doesn’t count.</p>`, 'data-mentor-panel="week"');
+      <p class="text-sm text-gray-700 mt-1">${used == null ? 'Not available just now.' : `${Math.min(used, week.cap)} of ${week.cap} used since Monday`}</p>
+      <p class="text-xs text-gray-500 mt-1">I make at most ${week ? week.cap : 3} suggestions a week, picking the ones with the most evidence. Anything you ask for in chat doesn’t count, and nor does answering one from an earlier week.</p>`, 'data-mentor-panel="week"');
   }
 
   function waitingHtml(open) {
@@ -254,7 +257,7 @@
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div class="min-w-0">
           <h2 class="text-base font-bold text-gray-900">Suggestions waiting (${open.length})</h2>
-          <p class="text-xs text-gray-500 mt-0.5">${esc(state.assistantName)}’s suggestions you haven’t answered yet. Review them together and tick the ones you want.</p>
+          <p class="text-xs text-gray-500 mt-0.5">My suggestions you haven’t answered yet. Review them together and tick the ones you want.</p>
         </div>
         <button type="button" data-mentor-review-all class="btn-primary shrink-0 px-4 py-2 text-sm font-bold rounded-lg transition">Review all</button>
       </div>`, 'data-mentor-panel="waiting"');
@@ -272,7 +275,7 @@
     return card(`
       <h2 class="text-base font-bold text-gray-900">Recommended next</h2>
       ${picks.length
-        ? `<p class="text-xs text-gray-500 mt-1">Who ${esc(state.assistantName)} would hire next, and why. Nothing is hired from here.</p><ol class="mt-1">${rows}</ol>`
+        ? `<p class="text-xs text-gray-500 mt-1">Who I would hire next, and why. Nothing is hired from here.</p><ol class="mt-1">${rows}</ol>`
         : cap.remaining === 0
           ? '<p class="text-sm text-gray-600 mt-1">You already have every assistant on offer.</p>'
           : '<p class="text-sm text-gray-600 mt-1">No clear gap for another assistant right now.</p>'}
@@ -283,7 +286,7 @@
     const f = state.feedback;
     return card(`
       <h2 class="text-base font-bold text-gray-900">Get feedback</h2>
-      <p class="text-xs text-gray-500 mt-1">Paste something you wrote — a sales email, a post, a flyer — and ${esc(state.assistantName)} will say what works and what to change, for your customers. Nothing is saved or changed.</p>
+      <p class="text-xs text-gray-500 mt-1">Paste something you wrote — a sales email, a post, a flyer — and I’ll say what works and what to change, for your customers. Nothing is saved or changed.</p>
       <label for="mentor-feedback-text" class="sr-only">Your draft</label>
       <textarea id="mentor-feedback-text" data-mentor-feedback-text rows="6" maxlength="${FEEDBACK_MAX}" class="mt-2 w-full rounded-lg border border-gray-300 p-2.5 text-sm" placeholder="Paste your draft here…" ${f.busy ? 'disabled' : ''}>${esc(f.text)}</textarea>
       <div class="flex flex-wrap items-center gap-2 mt-2">
@@ -331,7 +334,7 @@
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 items-start">
         <div class="space-y-4 min-w-0 lg:col-span-2">${waitingHtml(d.open || [])}${reviewsHtml()}${checklistHtml(d.checklist || [])}${customersHtml()}${feedbackHtml()}${dismissedHtml(d.dismissed || [])}</div>
         <div class="space-y-4 min-w-0">${recommendedHtml(d.recommended)}${weekHtml(d.week)}${trackRecordHtml()}${visibilityHtml(d.visibility || { sees: [], never: [] })}
-          ${card(`<p class="text-xs text-gray-600">Need help with Be More Swan? Ask ${esc(state.assistantName)} in chat, or use <button type="button" data-mentor-help class="font-semibold text-pink-700 hover:underline">Help &amp; Support</button>.</p>`)}
+          ${card(`<p class="text-xs text-gray-600">Need help with Be More Swan? Ask me in chat, or use <button type="button" data-mentor-help class="font-semibold text-pink-700 hover:underline">Help &amp; Support</button>.</p>`)}
         </div>
       </div>`;
   }

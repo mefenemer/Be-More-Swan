@@ -93,7 +93,7 @@ test('cards carry "asked", and the prompt says when to set it', () => {
 
 test('the chat route gates a suggestion before recording it, and the card carries its id', () => {
     const o = read('netlify/functions/chat-orchestrator.ts');
-    const gate = o.indexOf("const gate = await gateMentorSuggestion(db, orgId, { kind, fields: proposalFields(m), asked: 'asked' in m ? m.asked : false });");
+    const gate = o.indexOf("const gate = await gateMentorSuggestion(db, orgId, { kind, fields: proposalFields(m), asked: 'asked' in m ? m.asked : false, title:");
     const record = o.indexOf('const proposalId = await recordMentorProposal(', gate);
     assert.ok(gate > 0 && record > gate, 'gate first');
     assert.match(o.slice(gate, record), /if \(!gate\.ok\) \{\s*\n\s*uiElement = null;/);

@@ -9,6 +9,10 @@
 //     "Not relevant" stop it until the user brings it back; "Already done" stops nothing (the gap has
 //     closed, so the Mentor won't raise it).
 //   - Dismissed suggestions are listed on the Mentor's Overview tab with "Bring back".
+//   - Never suggested again once ACCEPTED (ACCEPTED_HOLD_DAYS): the change is made. Staging, 27 Oct: the
+//     review re-drew "add an email signature to Zaphod's outreach" the day after "Catherine's signature on
+//     Zaphod's outreach" was accepted — the gate only knew about dismissals. Accepting one also expires
+//     any other open card for the same change.
 //
 // One module for the chat route (gate before a card is drawn, and the prompt's summary), the card's
 // Dismiss button and the Overview tab — both reach it through netlify/functions/mentor.ts.
@@ -20,6 +24,10 @@ type Db = any;
 
 export const WEEKLY_CAP = 3;
 export const SNOOZE_DAYS = 14;
+/** An accepted change isn't suggested again for this long (unless asked for). */
+export const ACCEPTED_HOLD_DAYS = 60;
+/** Kinds that are new work each time, not a change to a setting: accepting one never holds the next back. */
+export const REPEATABLE_KINDS: readonly string[] = ['draft_request', 'strategy_revision'];
 
 export const DISMISS_REASONS = {
     not_relevant: 'Not relevant',
@@ -42,10 +50,14 @@ export interface DismissedRow {
     decidedAt: Date | null;
 }
 
+export interface AcceptedRow { kind: string; title: string; fields: string[]; decidedAt: Date | null }
+
 export interface ProposalState {
     /** Suggestions (not direct asks) shown since Monday. */
     usedThisWeek: number;
     dismissed: DismissedRow[];
+    /** Accepted in the last ACCEPTED_HOLD_DAYS. Optional so older callers and fixtures still fit. */
+    accepted?: AcceptedRow[];
 }
 
 /** The Business Information fields a card fills; [] for kinds that have none (products). */
@@ -69,11 +81,29 @@ export function holdingDismissal(kind: string, fields: string[], dismissed: Dism
     }) ?? null;
 }
 
-export type GateResult = { ok: true } | { ok: false; why: 'cap' | 'dismissed'; note: string };
+/**
+ * Pure: an accepted suggestion for the same change, or null. Same kind and (where both name fields) a
+ * field in common; a kind with no fields (hire, products) matches only another with no fields AND the
+ * same title, so accepting one product card doesn't silence every other.
+ */
+export function acceptedMatch(kind: string, fields: string[], accepted: AcceptedRow[] | undefined, title?: string): AcceptedRow | null {
+    if (REPEATABLE_KINDS.includes(kind)) return null;
+    return (accepted ?? []).find((a) => {
+        if (a.kind !== kind) return false;
+        if (fields.length && a.fields.length) return fields.some((f) => a.fields.includes(f));
+        return !fields.length && !a.fields.length && !!title && a.title.trim().toLowerCase() === title.trim().toLowerCase();
+    }) ?? null;
+}
+
+export type GateResult = { ok: true } | { ok: false; why: 'cap' | 'dismissed' | 'accepted'; note: string };
 
 /** Pure: may this suggestion be drawn? A direct ask always may. */
-export function gateSuggestion(input: { kind: string; fields: string[]; asked: boolean }, state: ProposalState, now: Date): GateResult {
+export function gateSuggestion(input: { kind: string; fields: string[]; asked: boolean; title?: string }, state: ProposalState, now: Date): GateResult {
     if (input.asked) return { ok: true };
+    const done = acceptedMatch(input.kind, input.fields, state.accepted, input.title);
+    if (done) {
+        return { ok: false, why: 'accepted', note: `I've left out a suggestion card: you already accepted "${done.title}". Ask me if you want to change it again.` };
+    }
     const held = holdingDismissal(input.kind, input.fields, state.dismissed, now);
     if (held) {
         return { ok: false, why: 'dismissed', note: held.reason === 'not_now' && held.snoozedUntil
@@ -97,7 +127,7 @@ const missingTable = (err: any) => ['42P01', '42703'].includes(err?.code ?? err?
 /** This week's count and every dismissed suggestion. Never throws: on a read error, nothing is held back. */
 export async function loadProposalState(db: Db, orgId: number): Promise<ProposalState | null> {
     try {
-        const [[week], rows] = await Promise.all([
+        const [[week], rows, acceptedRows] = await Promise.all([
             db.select({ n: sql<number>`count(*)::int` }).from(mentorProposals)
                 .where(and(eq(mentorProposals.organisationId, orgId), sql`${mentorProposals.shownAt} >= ${WEEK_START}`, NOT_ASKED)),
             db.select({
@@ -107,6 +137,11 @@ export async function loadProposalState(db: Db, orgId: number): Promise<Proposal
             }).from(mentorProposals)
                 .where(and(eq(mentorProposals.organisationId, orgId), eq(mentorProposals.status, 'dismissed')))
                 .orderBy(desc(mentorProposals.decidedAt)).limit(50),
+            db.select({ kind: mentorProposals.kind, title: mentorProposals.title, payload: mentorProposals.payload, decidedAt: mentorProposals.decidedAt })
+                .from(mentorProposals)
+                .where(and(eq(mentorProposals.organisationId, orgId), eq(mentorProposals.status, 'accepted'),
+                    sql`${mentorProposals.decidedAt} >= now() - make_interval(days => ${ACCEPTED_HOLD_DAYS})`))
+                .orderBy(desc(mentorProposals.decidedAt)).limit(50),
         ]);
         return {
             usedThisWeek: Number(week?.n ?? 0),
@@ -115,6 +150,9 @@ export async function loadProposalState(db: Db, orgId: number): Promise<Proposal
                 why: Array.isArray(r.evidence) && r.evidence[0]?.text ? String(r.evidence[0].text) : null,
                 reason: r.reason, snoozedUntil: r.snoozedUntil ? new Date(r.snoozedUntil) : null,
                 decidedAt: r.decidedAt ? new Date(r.decidedAt) : null,
+            })),
+            accepted: (acceptedRows ?? []).map((r: any) => ({
+                kind: r.kind, title: r.title, fields: proposalFields(r.payload), decidedAt: r.decidedAt ? new Date(r.decidedAt) : null,
             })),
         };
     } catch (err) {
@@ -135,11 +173,15 @@ export function renderProposalState(state: ProposalState | null, now = new Date(
         lines.push('DISMISSED BY THE USER — never suggest these again unless they ask:');
         lines.push(...holding.slice(0, 10).map((d) => `- ${d.title} (${DISMISS_REASONS[d.reason].toLowerCase()}${d.reason === 'not_now' && d.snoozedUntil ? `, until ${ukDate(d.snoozedUntil)}` : ''})`));
     }
+    if (state.accepted?.length) {
+        lines.push('ALREADY ACCEPTED — the change is made; never suggest it again, never call it waiting, and never raise its gap as still open unless the figures show it is:');
+        lines.push(...state.accepted.slice(0, 10).map((a) => `- ${a.title}${a.decidedAt ? ` (accepted ${ukDate(a.decidedAt)})` : ''}`));
+    }
     return lines.join('\n');
 }
 
 /** Gate a suggestion before it is drawn. On a read error it is allowed (the card is the user's choice anyway). */
-export async function gateMentorSuggestion(db: Db, orgId: number, input: { kind: string; fields: string[]; asked: boolean }): Promise<GateResult> {
+export async function gateMentorSuggestion(db: Db, orgId: number, input: { kind: string; fields: string[]; asked: boolean; title?: string }): Promise<GateResult> {
     const state = await loadProposalState(db, orgId);
     return state ? gateSuggestion(input, state, new Date()) : { ok: true };
 }
@@ -164,7 +206,34 @@ export async function decideProposal(
             inArray(mentorProposals.status, decision === 'accepted' ? ['shown', 'dismissed'] : ['shown']),
         ))
         .returning({ id: mentorProposals.id });
+    if (rows.length && decision === 'accepted') await expireSameChange(db, orgId, id);
     return rows.length > 0;
+}
+
+/** Pure: does an open card make the same change as the accepted one? Same kind and a field in common. */
+export function isSameChange(a: { kind: string; payload: unknown }, b: { kind: string; payload: unknown }): boolean {
+    if (a.kind !== b.kind || REPEATABLE_KINDS.includes(a.kind)) return false;
+    const fa = proposalFields(a.payload); const fb = proposalFields(b.payload);
+    return fa.length > 0 && fb.length > 0 && fa.some((f) => fb.includes(f));
+}
+
+/**
+ * Once one is accepted, any other card still open for the same change is expired — "Suggestions waiting"
+ * must not list a change that is already made. Never throws.
+ */
+async function expireSameChange(db: Db, orgId: number, acceptedId: number): Promise<void> {
+    try {
+        const [done] = await db.select({ kind: mentorProposals.kind, payload: mentorProposals.payload }).from(mentorProposals)
+            .where(and(eq(mentorProposals.id, acceptedId), eq(mentorProposals.organisationId, orgId))).limit(1);
+        if (!done) return;
+        const open = await db.select({ id: mentorProposals.id, kind: mentorProposals.kind, payload: mentorProposals.payload }).from(mentorProposals)
+            .where(and(eq(mentorProposals.organisationId, orgId), eq(mentorProposals.status, 'shown'), eq(mentorProposals.kind, done.kind)));
+        const ids = open.filter((o: any) => o.id !== acceptedId && isSameChange(done, o)).map((o: any) => o.id);
+        if (ids.length) await db.update(mentorProposals).set({ status: 'expired', decidedAt: new Date() })
+            .where(and(eq(mentorProposals.organisationId, orgId), inArray(mentorProposals.id, ids)));
+    } catch (err) {
+        console.warn('[mentor-proposals] could not expire the same change (non-blocking):', (err as Error)?.message);
+    }
 }
 
 /**

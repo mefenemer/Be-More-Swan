@@ -3308,7 +3308,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 content = `${content}\n\n(I didn’t include a card for that — ${card.error.charAt(0).toLowerCase()}${card.error.slice(1)} You can change it on the assistant’s own page instead.)`;
             } else if (isMentor) {
                 // §3.13: a volunteered one is a suggestion — 3 a week, never one they dismissed.
-                const gate = await gateMentorSuggestion(db, orgId, { kind: 'setup_field', fields: [`${card.assistantId}:${card.key}`], asked: card.asked });
+                const gate = await gateMentorSuggestion(db, orgId, { kind: 'setup_field', fields: [`${card.assistantId}:${card.key}`], asked: card.asked, title: card.summary ?? undefined });
                 if (!gate.ok) { uiElement = null; content = `${content}\n\n(${gate.note})`; }
                 else {
                     const proposalId = await recordMentorProposal(db, { organisationId: orgId, aiAssistantId: session.aiAssistantId, kind: 'setup_field', title: card.summary, why: card.why, payload: { ...card, fields: { [`${card.assistantId}:${card.key}`]: card.value } }, chatSessionId: session.id, targetAssistantId: card.assistantId });
@@ -3409,7 +3409,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 const kind = proposalKind(m);
                 if (kind && 'why' in filled) {
                     // §3.13: 3 a week, and never one the user dismissed — unless they asked (mentor-proposals.ts).
-                    const gate = await gateMentorSuggestion(db, orgId, { kind, fields: proposalFields(m), asked: 'asked' in m ? m.asked : false });
+                    const gate = await gateMentorSuggestion(db, orgId, { kind, fields: proposalFields(m), asked: 'asked' in m ? m.asked : false, title: 'summary' in m && typeof m.summary === 'string' ? m.summary : undefined });
                     if (!gate.ok) {
                         uiElement = null;
                         content = `${content}\n\n(${gate.note})`;

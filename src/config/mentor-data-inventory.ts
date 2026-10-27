@@ -55,8 +55,8 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ], 'Your customers: deals won and lost and why, and won customers you haven\'t contacted lately (names and dates only) — when you ask, and in the weekly review'),
     ...group('on_request', 'Quiet customers: the last-contact DATE only — never addresses or message bodies', ['lead_threads']),
     ...group('on_request', 'Customer reviews: rating and a short excerpt, never the author', ['org_reviews'], 'Your customer reviews: ratings and short excerpts — when you ask, and in the weekly review'),
-    ...group('on_request', 'Support Agent tickets (subjects and counts) and overdue invoice counts, when those assistants are active', ['assistant_records'],
-        'Your Support Agent\'s ticket subjects and overdue invoice counts, when those assistants are active'),
+    ...group('on_request', 'Support Agent tickets (subjects and counts) and Accounts Receivable overdue invoice counts, when those assistants are active', ['assistant_records'],
+        'Your Support Agent\'s ticket subjects and your Accounts Receivable assistant\'s overdue invoice counts, when those assistants are active'),
     ...group('on_request', 'Sales detail: why leads were rejected, outreach edit reasons, searches (counts, not people)', [
         'lead_reject_feedback', 'template_feedback', 'discovery_campaigns', 'discovery_guardrails',
     ]),

@@ -38,6 +38,9 @@ export interface TrackRecordItem {
     kind: string;
     target: string | null;
     acceptedAt: string;
+    /** When the suggestion was first shown — "suggested 20 Oct, accepted yesterday" explains why an
+     *  earlier week's suggestions don't count in this week's 3. Null for an outcome without a proposal row. */
+    suggestedAt?: string | null;
     measureLabel: string | null;
     before: number | null;
     after: number | null;
@@ -61,15 +64,17 @@ const ago = (from: Date, now: Date) => {
     if (days < 14) return `${days} day${days === 1 ? '' : 's'} ago`;
     return `${Math.round(days / 7)} weeks ago`;
 };
+const ukDay = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Europe/London' });
 const num = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
 /** Pure: one line of the track record. "Since", never "because". */
-export function sinceLine(o: { title: string; measureLabel: string | null; before: number | null; after: number | null; acceptedAt: Date }, verdict: Verdict, now: Date): string {
-    const head = `${o.title} — accepted ${ago(o.acceptedAt, now)}.`;
+export function sinceLine(o: { title: string; measureLabel: string | null; before: number | null; after: number | null; acceptedAt: Date; suggestedAt?: Date | null }, verdict: Verdict, now: Date): string {
+    const suggested = o.suggestedAt && ukDay(o.suggestedAt) !== ukDay(o.acceptedAt) ? `suggested ${ukDay(o.suggestedAt)}, ` : '';
+    const head = `${o.title} — ${suggested}accepted ${ago(o.acceptedAt, now)}.`;
     switch (verdict) {
         case 'no_measure': return `${head} No figure to follow for this one.`;
         case 'drafted': return `${head} The draft is with the assistant for your review.`;
-        case 'too_early': return `${head} Too early to tell — I’ll look again after a week.`;
+        case 'too_early': return `${head} Too early to tell.`;
         case 'too_small': return `${head} ${o.measureLabel}: ${num(o.before!)} then, ${num(o.after!)} now — too little activity to judge yet.`;
         case 'same': return `${head} ${o.measureLabel}: ${num(o.before!)} then, ${num(o.after!)} now — no change since.`;
         default: {
@@ -169,8 +174,10 @@ export async function loadTrackRecord(db: Db, orgId: number, now = new Date(), l
             id: mentorOutcomes.id, proposalId: mentorOutcomes.proposalId, kind: mentorOutcomes.kind, change: mentorOutcomes.change,
             measureKey: mentorOutcomes.measureKey, measureLabel: mentorOutcomes.measureLabel, before: mentorOutcomes.beforeValue, after: mentorOutcomes.afterValue,
             acceptedAt: mentorOutcomes.acceptedAt, checkedAt: mentorOutcomes.checkedAt, jobId: mentorOutcomes.jobId, target: aiAssistants.name,
+            suggestedAt: mentorProposals.shownAt,
         }).from(mentorOutcomes)
             .leftJoin(aiAssistants, eq(aiAssistants.id, mentorOutcomes.targetAssistantId))
+            .leftJoin(mentorProposals, eq(mentorProposals.id, mentorOutcomes.proposalId))
             .where(eq(mentorOutcomes.organisationId, orgId))
             .orderBy(desc(mentorOutcomes.acceptedAt)).limit(limit);
         return rows.map((r: any) => {
@@ -178,11 +185,12 @@ export async function loadTrackRecord(db: Db, orgId: number, now = new Date(), l
                 title: r.change, measureKey: r.measureKey, measureLabel: r.measureLabel,
                 before: r.before === null ? null : Number(r.before), after: r.after === null ? null : Number(r.after),
                 acceptedAt: new Date(r.acceptedAt), checkedAt: r.checkedAt ? new Date(r.checkedAt) : null, jobId: r.jobId,
+                suggestedAt: r.suggestedAt ? new Date(r.suggestedAt) : null,
             };
             const verdict = verdictFor(o, now);
             return {
                 id: r.id, proposalId: r.proposalId, title: r.change, kind: r.kind, target: r.target ?? null, acceptedAt: o.acceptedAt.toISOString(),
-                measureLabel: r.measureLabel ?? null, before: o.before, after: o.after, verdict, line: sinceLine(o, verdict, now),
+                suggestedAt: o.suggestedAt ? o.suggestedAt.toISOString() : null, measureLabel: r.measureLabel ?? null, before: o.before, after: o.after, verdict, line: sinceLine(o, verdict, now),
             };
         });
     } catch (err) {
