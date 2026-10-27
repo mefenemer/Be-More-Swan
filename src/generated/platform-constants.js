@@ -549,6 +549,28 @@
     },
   };
 
+  // ── Lead outreach phase ────────────────────────────────────────────────────
+  // From src/config/lead-outreach-phase.ts, stringified. Which step of the outreach journey a lead
+  // is at — To approve → Following up → Replied → Finished, or Archived. The staged Outreach tab,
+  // its counts and lead-threads.ts `board` all call this one function, so a lead cannot be in
+  // "Replied" on the tab and "Following up" in the count beside it.
+  var LEAD_OUTREACH_PHASES = ["to_approve","following_up","replied","finished","archived"];
+  var LEAD_OUTREACH_PHASE_LABELS = {"to_approve":"To approve","following_up":"Following up","replied":"Replied","finished":"Finished","archived":"Archived"};
+  var LEAD_OUTREACH_GROUPS = ["review","send_yourself","chasing","no_follow_ups","outside_app","replied","won","lost","disqualified","no_reply","opted_out","archived"];
+  var LEAD_OUTREACH_GROUP_LABELS = {"review":"Waiting for your approval","send_yourself":"Approved — send it yourself","chasing":"Follow-ups running","no_follow_ups":"No follow-ups","outside_app":"Contacted outside the app","replied":"Replied","won":"Won","lost":"Lost","disqualified":"Disqualified","no_reply":"No reply","opted_out":"Opted out","archived":"Archived"};
+  var leadOutreachPhase = function leadOutreachPhase(input){var i=input||{};var d=i.data&&typeof i.data==="object"&&!Array.isArray(i.data)?i.data:{};var e=i.enrolment||null;var thread=typeof i.threadState==="string"&&i.threadState?i.threadState:null;var halt=e&&typeof e.haltReason==="string"?e.haltReason:null;var attention=!!e&&(e.state==="halted"&&(halt==="not_connected"||halt==="send_failed")||e.state==="active"&&typeof e.lastError==="string"&&e.lastError.trim()!=="");if(i.approvalStatus==="rejected")return{phase:"archived",group:"archived",needsAttention:false};var outcome=d.dealOutcome&&typeof d.dealOutcome==="object"&&!Array.isArray(d.dealOutcome)?d.dealOutcome.outcome:null;if(typeof outcome==="string"&&outcome){if(outcome==="won"||outcome==="lost")return{phase:"finished",group:outcome,needsAttention:false};return{phase:"finished",group:"disqualified",needsAttention:false}}if(thread==="closed")return{phase:"finished",group:"opted_out",needsAttention:false};if(thread==="replied"||halt==="replied"||halt==="signed_up")return{phase:"replied",group:"replied",needsAttention:false};var sentAt=d.outreachSentAt;var sent=!!thread||typeof sentAt==="string"&&sentAt.trim()!=="";if(sent){if(!thread)return{phase:"following_up",group:"outside_app",needsAttention:false};if(thread==="stalled")return{phase:"finished",group:"no_reply",needsAttention:false};if(!e)return{phase:"following_up",group:"no_follow_ups",needsAttention:false};if(e.state==="active")return{phase:"following_up",group:"chasing",needsAttention:attention};if(attention)return{phase:"following_up",group:"chasing",needsAttention:true};if(halt==="suppressed"||halt==="do_not_contact")return{phase:"finished",group:"opted_out",needsAttention:false};return{phase:"finished",group:"no_reply",needsAttention:false}}if(i.approvalStatus==="approved"||i.approvalStatus==="scheduled")return{phase:"to_approve",group:"send_yourself",needsAttention:false};return{phase:"to_approve",group:"review",needsAttention:false}};
+
+  window.LeadOutreachPhase = {
+    /** Phase keys, left to right. */
+    phases: LEAD_OUTREACH_PHASES,
+    phaseLabels: LEAD_OUTREACH_PHASE_LABELS,
+    groups: LEAD_OUTREACH_GROUPS,
+    groupLabels: LEAD_OUTREACH_GROUP_LABELS,
+
+    /** { phase, group, needsAttention } for { approvalStatus, data, threadState, enrolment }. */
+    of: leadOutreachPhase,
+  };
+
   // ── Lead rating bands ──────────────────────────────────────────────────────
   // The hot/warm/cold definition the SCORING PROMPT uses, mirrored so the UI can explain a chip
   // without retyping the numbers. This is the copy that matters most to keep generated: the bands

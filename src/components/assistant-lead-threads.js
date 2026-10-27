@@ -13,8 +13,16 @@
  *   • what the human changed   generated_body vs body — the §2.6 edit, shown as a diff
  *   • what the cadence did     sequence_enrolments: step reached, next send, why it halted
  *
+ * ── Now stages 2–4 of the Outreach tab (2026-10-27) ──────────────────────────
+ * There is no Conversations tab any more. assistant-lead-outreach.js draws the Outreach stage strip
+ * and mounts this list for Following up, Replied and Finished, one stage at a time (`showPhase`).
+ * The rows come from lead-threads.ts `board`, which also returns leads marked sent by hand — they
+ * have no thread, so they open to their notes and outcome only. Which stage a row is in is the
+ * server's leadOutreachPhase (src/config/lead-outreach-phase.ts), recomputed here with the browser
+ * copy after a write moves a lead. docs/lead-outreach-restructure-plan.md.
+ *
  * Backed by netlify/functions/lead-threads.ts:
- *   • list  → POST { action:'list',  assistantId, cursor? }
+ *   • board → POST { action:'board', assistantId }                       (every row, with its stage)
  *   • get   → POST { action:'get',   assistantId, threadId }
  *   • nudge → POST { action:'nudge', assistantId, threadId }              (send the next chase now)
  *   • stop  → POST { action:'stop_follow_ups', assistantId, threadId }    (stop the cadence)
@@ -78,7 +86,21 @@
   let state = {
     assistantId: null,
     threads: [],
-    counts: { total: 0, open: 0, replied: 0, stalled: 0, closed: 0 },
+    // Counts in the shape lead-threads.ts `board` returns: { total, needsAttention, phases, groups }.
+    counts: { total: 0, needsAttention: 0, phases: {}, groups: {} },
+    // The Outreach stage on screen — 'following_up' | 'replied' | 'finished', or null before one has
+    // been shown (so the first showPhase applies that stage's default grouping). Rows outside it
+    // are held but not drawn; the stage strip counts all of them.
+    phase: null,
+    // How many follow-ups the assistant's plan sends, for "Chaser 2 of 3". Null when unknown.
+    planSteps: null,
+    // Ids moved to another stage by a write made HERE (an outcome recorded, follow-ups stopped).
+    // They stay drawn in the stage they were in until the user changes stage, so the row the user
+    // just acted on does not vanish from under the confirmation it is showing.
+    sticky: new Set(),
+    // threadId → { loading, result, error } for "Preview the next one" (lead-generation.ts
+    // preview_follow_up). Drafted and shown here only — nothing is sent or stored.
+    preview: {},
     // The role's label for this tab, from the registry (conversationsTab.label). Held here rather
     // than read back off the button, because the button's text carries the record count once one
     // has landed and re-wrapping it would give "Conversations (12) (12)".
@@ -117,9 +139,10 @@
     erasing: {},
     eraseNotice: {},     // threadId → what was actually removed, kept until the row is closed
     eraseError: {},      // threadId → why an erasure could not be completed
-    // Set from the reply notification's deep link (window._assistantDetailFocusThreadId), consumed
-    // once by paintRows so a later repaint cannot re-scroll the page.
-    focusThreadId: null,
+    // A row to open and scroll to — from the reply notification's deep link
+    // (window._assistantDetailFocusThreadId) or the All leads tab's "Open in Outreach"
+    // ({ recordId }). Consumed once by paintRows so a later repaint cannot re-scroll the page.
+    focus: null,
     loading: false,
     error: null,
     rendered: false,
@@ -173,19 +196,6 @@
     return `in ${Math.round(hours / 24)}d`;
   }
 
-  const THREAD_CHIP = {
-    open: 'bg-amber-50 text-amber-700 border-amber-200',
-    replied: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-    stalled: 'bg-gray-100 text-gray-500 border-gray-200',
-    closed: 'bg-gray-100 text-gray-500 border-gray-200',
-  };
-  const THREAD_LABEL = {
-    open: 'Awaiting reply',
-    replied: 'Replied',
-    stalled: 'Stalled',
-    closed: 'Closed',
-  };
-
   // How the classifier's verdict on an inbound reply is shown. Mirrors the `classification`
   // vocabulary on lead_messages; an unknown value falls through to the raw string rather than
   // vanishing, so a newly-added class is visible rather than silently dropped.
@@ -235,15 +245,47 @@
   //
   // ⚠️ `key` is what state.view.filters / groupKey / sortKey hold. Renaming one silently drops any
   // view the user had; the labels are free to change.
-  const COLUMNS = [
-    { key: 'title', label: 'Lead' },
-    { key: 'state', label: 'Status' },
-    { key: 'classification', label: 'Their reply' },
-    { key: 'outcome', label: 'Outcome' },
-    { key: 'followUps', label: 'Follow-ups' },
-    { key: 'messageCount', label: 'Messages' },
-    { key: 'updatedAt', label: 'Last activity' },
-  ];
+  const ALL_COLUMNS = {
+    title: { key: 'title', label: 'Lead' },
+    group: { key: 'group', label: 'Status' },
+    next: { key: 'next', label: 'Next follow-up' },
+    classification: { key: 'classification', label: 'Their reply' },
+    outcome: { key: 'outcome', label: 'Outcome' },
+    followUps: { key: 'followUps', label: 'Follow-ups' },
+    messageCount: { key: 'messageCount', label: 'Messages' },
+    updatedAt: { key: 'updatedAt', label: 'Last activity' },
+  };
+
+  /**
+   * The columns for each stage — what a decision ON THAT STAGE needs. Following up is about the
+   * plan (what goes next, and when); Replied is about the reply; Finished is about how it ended.
+   */
+  const PHASE_COLUMNS = {
+    following_up: ['title', 'group', 'next', 'followUps', 'messageCount', 'updatedAt'],
+    replied: ['title', 'classification', 'messageCount', 'updatedAt'],
+    finished: ['title', 'group', 'outcome', 'classification', 'updatedAt'],
+  };
+
+  /** The columns on screen now. Everything below that used to read a fixed list reads this. */
+  function columns() {
+    return (PHASE_COLUMNS[state.phase] || PHASE_COLUMNS.following_up).map((k) => ALL_COLUMNS[k]);
+  }
+
+  /** The group label for a row — "Needs attention" wins, so those rows group together, first. */
+  function groupLabel(t) {
+    if (t.needsAttention) return 'Needs attention';
+    const P = window.LeadOutreachPhase;
+    return (P && P.groupLabels && P.groupLabels[t.group]) || t.group || '';
+  }
+
+  /** "Chaser 2 of 3 · in 4d" — what goes next on a running plan, and when. */
+  function nextFollowUp(t) {
+    const s = t.sequence;
+    if (!s || s.state !== 'active') return '—';
+    const n = (Number(s.lastStepSent) || 0) + 1;
+    const of = state.planSteps ? ` of ${state.planSteps}` : '';
+    return `Chaser ${n}${of}${s.nextSendAt ? ` · ${until(s.nextSendAt)}` : ''}`;
+  }
 
   /**
    * The follow-up cadence as ONE word, which is what a column can hold.
@@ -271,7 +313,8 @@
   function cellValue(t, key) {
     switch (key) {
       case 'title': return t.title || '';
-      case 'state': return THREAD_LABEL[t.state] || t.state || '';
+      case 'group': return groupLabel(t);
+      case 'next': return nextFollowUp(t);
       case 'classification':
         return t.classification ? (CLASS_LABEL[t.classification] || t.classification) : 'No reply yet';
       case 'outcome':
@@ -287,8 +330,11 @@
 
   /** Column values with a natural order the alphabet does not agree with. */
   const ORDERED_VALUES = {
-    // The order of the funnel: what needs you, then what is alive, then what is over.
-    state: ['Replied', 'Awaiting reply', 'Stalled', 'Closed'],
+    // What needs you first, then the stage's own groups in vocabulary order.
+    get group() {
+      const P = window.LeadOutreachPhase;
+      return ['Needs attention', ...((P && P.groups) || []).map((g) => (P.groupLabels && P.groupLabels[g]) || g)];
+    },
     // Warmest first — the point of the column is that "Interested" outranks "Not interested".
     classification: ['Interested', 'Objection', 'Not right now', 'Out of office', 'Other', 'No reply yet', 'Not interested', 'Unsubscribed'],
     outcome: ['Won', 'Lost', 'Disqualified', 'Not recorded'],
@@ -304,6 +350,10 @@
       return Number.isNaN(ms) ? -Infinity : ms;
     }
     if (key === 'messageCount') return Number(t.messageCount) || 0;
+    if (key === 'next') {
+      const ms = t.sequence && t.sequence.state === 'active' && t.sequence.nextSendAt ? new Date(t.sequence.nextSendAt).getTime() : NaN;
+      return Number.isNaN(ms) ? Infinity : ms;     // nothing scheduled sorts after everything that is
+    }
     const shown = cellValue(t, key);
     const ordered = ORDERED_VALUES[key];
     if (ordered) {
@@ -325,7 +375,7 @@
   /** Every distinct rendered value in a column, in the column's own order. */
   function distinctValues(key) {
     const seen = new Set();
-    for (const t of state.threads) seen.add(cellValue(t, key));
+    for (const t of stageRows()) seen.add(cellValue(t, key));
     const ordered = ORDERED_VALUES[key];
     return [...seen].sort((x, y) => {
       if (!ordered) return x.localeCompare(y, undefined, { numeric: true });
@@ -352,10 +402,10 @@
    * nobody wants, and which then silently vanishes once an account has more than twenty distinct
    * message counts. Sorting is the control that serves it, and the heading is wired for that.
    */
-  const NEVER_FILTERABLE = new Set(['title', 'updatedAt', 'messageCount']);
+  const NEVER_FILTERABLE = new Set(['title', 'updatedAt', 'messageCount', 'next']);
 
   function filterableColumns() {
-    return COLUMNS.filter((c) => {
+    return columns().filter((c) => {
       if (NEVER_FILTERABLE.has(c.key)) return false;
       // A column currently being filtered on keeps its dropdown whatever the data has become —
       // otherwise clearing the last "Won" row takes the control away and leaves the filter running
@@ -373,7 +423,7 @@
     if (q) {
       // The email address is in the haystack but not in a column — searching for a domain is one
       // of the two things anyone actually types here.
-      const hay = [...COLUMNS.map((c) => cellValue(t, c.key)), t.contactEmail || '', t.lastExcerpt || '']
+      const hay = [...columns().map((c) => cellValue(t, c.key)), t.contactEmail || '', t.lastExcerpt || '']
         .join('  ').toLowerCase();
       if (!hay.includes(q)) return false;
     }
@@ -384,8 +434,13 @@
     return true;
   }
 
+  /** The rows in the stage on screen, plus any a write here just moved out of it (state.sticky). */
+  function stageRows() {
+    return state.threads.filter((t) => t.phase === state.phase || state.sticky.has(t.id));
+  }
+
   function visibleThreads() {
-    const list = state.threads.filter(matchesView);
+    const list = stageRows().filter(matchesView);
     if (state.view.sortKey) list.sort((a, b) => compareThreads(a, b, state.view.sortKey, state.view.sortDir));
     return list;
   }
@@ -425,8 +480,10 @@
   function cellHtml(t, key) {
     const text = cellValue(t, key);
     switch (key) {
-      case 'state':
-        return chip(THREAD_CHIP[t.state] || THREAD_CHIP.closed, text);
+      case 'group':
+        return t.needsAttention
+          ? chip('bg-red-50 text-red-700 border-red-200', text)
+          : `<span class="text-xs text-gray-600">${esc(text)}</span>`;
       case 'classification':
         return t.classification
           ? chip(CLASS_CHIP[t.classification] || CLASS_CHIP.other, text)
@@ -451,7 +508,7 @@
   }
 
   function rowHtml(t) {
-    return `${COLUMNS.map((c, i) => `<td class="px-4 py-3 align-top ${i === 0 ? '' : 'whitespace-nowrap'}">${cellHtml(t, c.key)}</td>`).join('')}
+    return `${columns().map((c, i) => `<td class="px-4 py-3 align-top ${i === 0 ? '' : 'whitespace-nowrap'}">${cellHtml(t, c.key)}</td>`).join('')}
       <td class="px-4 py-3 text-right align-top">
         <svg class="w-4 h-4 text-gray-400 inline transition-transform" data-lt-chevron fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
       </td>`;
@@ -601,6 +658,24 @@
    * only evidence was the emails appearing. Saying it plainly, on the screen where they appear, is
    * most of the fix; the buttons beside it are the rest.
    */
+  /**
+   * A drafted-but-unsent follow-up, shown under the buttons. Shared shape with the Follow-up plan
+   * panel's preview (assistant-follow-up-plan.js renders the same server result).
+   */
+  function previewHtml(p) {
+    if (!p || p.loading) return '';
+    if (p.error) return `<p class="text-xs font-bold text-amber-700 mt-2">${esc(p.error)}</p>`;
+    const r = p.result;
+    if (!r) return '';
+    return `
+      <div class="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Preview · follow-up ${esc(r.position)}${r.isLast ? ' · the last one' : ''} · not sent</p>
+        <p class="text-sm font-semibold text-gray-900 mt-1">${esc(r.subject)}</p>
+        <p class="text-sm text-gray-700 mt-1 whitespace-pre-wrap">${esc(r.body)}</p>
+        <p class="text-[11px] text-gray-500 mt-2">${esc(r.note || '')}</p>
+      </div>`;
+  }
+
   function cadenceBanner(t, e) {
     const busy = !!state.busy[t.id];
     const btn = 'px-2.5 py-1 text-xs font-bold rounded-lg border transition disabled:opacity-50';
@@ -632,7 +707,11 @@
             class="${btn} bg-white border-gray-200 text-gray-700 hover:border-red-300 hover:text-red-700">Stop follow-ups</button>
           <button type="button" data-lt-direct="${t.id}" ${busy ? 'disabled' : ''}
             class="${btn} bg-white border-gray-200 text-gray-700 hover:border-amber-400 hover:text-amber-800">They replied to me directly</button>
+          <button type="button" data-lt-preview="${t.id}" ${busy || (state.preview[t.id] && state.preview[t.id].loading) ? 'disabled' : ''}
+            class="${btn} bg-white border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800">
+            ${state.preview[t.id] && state.preview[t.id].loading ? 'Writing a preview…' : 'Preview the next one'}</button>
         </div>
+        ${previewHtml(state.preview[t.id])}
         <p class="text-[11px] text-gray-500 mt-1.5">
           Chasers stop by themselves only when a reply comes back to the tracked address.
           If they answered your own inbox instead &mdash; or rang, or replied on another thread &mdash;
@@ -707,8 +786,25 @@
       </div>`;
   }
 
+  /**
+   * A lead with no thread — the user marked it sent by hand, so the app never saw the email, cannot
+   * see a reply, and has nothing to chase with. What it CAN hold is the notes and the outcome.
+   */
+  function recordOnlyHtml(t) {
+    const when = t.outreachSentAt ? ` on ${esc(new Date(t.outreachSentAt).toLocaleDateString())}` : '';
+    const reminder = t.chaseReminderAt ? ` Your chase reminder is on the Calendar for ${esc(new Date(t.chaseReminderAt).toLocaleDateString())}.` : '';
+    return `
+      ${actionBar(t)}
+      <div class="p-4 bg-gray-50">
+        <p class="text-xs text-gray-600"><span class="font-bold">Contacted outside the app${when}.</span>
+          You marked this lead as sent yourself, so there is no conversation here and no follow-ups go out on their own — replies arrive in your own inbox.${reminder}
+          Record how it ends above when you know.</p>
+      </div>`;
+  }
+
   /** Everything inside an expanded row. */
   function detailHtml(t) {
+    if (t.threadId == null) return recordOnlyHtml(t);
     if (state.loadingThread[t.id]) {
       return '<div class="p-6 text-center text-xs text-gray-500">Loading this conversation…</div>';
     }
@@ -893,14 +989,14 @@
     return `
       <div class="mb-3 flex flex-wrap items-center gap-3">
         <input type="search" data-lt-search value="${esc(v.search)}"
-          placeholder="Search conversations…"
+          placeholder="Search leads…"
           class="px-3 py-1.5 text-sm border border-gray-200 rounded-lg w-full sm:w-64 focus:outline-none focus:border-emerald-400">
         ${filters}
         <label class="inline-flex items-center gap-1.5">
           <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Group by</span>
           <select data-lt-group class="${selectCls}">
             <option value="">Nothing</option>
-            ${COLUMNS.map((c) => `<option value="${esc(c.key)}"${v.groupKey === c.key ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}
+            ${columns().map((c) => `<option value="${esc(c.key)}"${v.groupKey === c.key ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}
           </select>
         </label>
         <span class="text-xs text-gray-500 ml-auto" data-lt-count></span>
@@ -911,51 +1007,45 @@
 
   // ── List view ──────────────────────────────────────────────────────────────
 
+  /** What each stage says when it is empty — the honest next step, not a blank table. */
+  const EMPTY = {
+    following_up: ['Nobody is being followed up right now',
+      'When you approve a lead in To approve, its email goes from your connected inbox and the lead moves here while your follow-up plan runs.'],
+    replied: ['No replies waiting for you',
+      'When a prospect writes back, the conversation lands here so you can answer it and record how it ends.'],
+    finished: ['Nothing finished yet',
+      'Leads land here once you record an outcome, or when the follow-up plan runs out with no reply.'],
+  };
+
   function listView() {
-    const c = state.counts;
     const v = state.view;
     const arrow = (key) => (v.sortKey === key ? (v.sortDir === 'asc' ? ' ↑' : ' ↓') : '');
 
-    if (!state.threads.length) {
+    if (!stageRows().length) {
+      const [title, body] = EMPTY[state.phase] || EMPTY.following_up;
       return `
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center">
-          <p class="text-sm font-semibold text-gray-900">No conversations yet</p>
-          <p class="text-xs text-gray-500 mt-1 max-w-md mx-auto">Approve a lead on the Outreach tab and the email it sends starts a conversation here &mdash;
-            along with every chaser your assistant sends and anything the prospect writes back. This is where a lead finishes its life: you record the outcome here.</p>
+          <p class="text-sm font-semibold text-gray-900">${esc(title)}</p>
+          <p class="text-xs text-gray-500 mt-1 max-w-md mx-auto">${esc(body)}</p>
         </div>`;
     }
 
     return `
-      <div class="mb-4">
-        <p class="text-sm text-gray-600">
-          Every prospect your assistant has emailed, and what happened next. Chasers are written and sent from your own connected mailbox
-          and stop the moment someone replies &mdash; open a conversation to reply in your own words, send the next chaser early, stop them,
-          add a note, or record how the deal ended.
-        </p>
-      </div>
-
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-        ${[['Conversations', c.total], ['Awaiting reply', c.open], ['Replied', c.replied], ['Stalled', c.stalled]]
-          .map(([label, n]) => `
-          <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4">
-            <p class="text-2xl font-bold text-gray-900">${n}</p>
-            <p class="text-xs text-gray-500 mt-0.5">${label}</p>
-          </div>`).join('')}
-      </div>
-
       ${state.truncated ? `
       <div class="mb-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
-        <p class="text-xs text-amber-800">Showing your ${state.threads.length} most recent conversations. The filters below search those, not the full history.</p>
+        <p class="text-xs text-amber-800">Showing your ${state.threads.length} most recently active leads. The filters below search those, not the full history.</p>
       </div>` : ''}
 
       ${controlsHtml()}
 
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-        <div class="overflow-x-auto">
+        <!-- relative: the header's sr-only "Open" label is absolutely positioned, and without a
+             positioned ancestor it escapes this scroller and widens the whole page on a phone. -->
+        <div class="overflow-x-auto relative">
           <table class="w-full text-sm">
             <thead>
               <tr class="text-left text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">
-                ${COLUMNS.map((col) => `
+                ${columns().map((col) => `
                   <th class="px-4 py-3">
                     <button type="button" data-lt-sort="${esc(col.key)}" class="uppercase tracking-wider hover:text-gray-900 cursor-pointer transition-colors">${esc(col.label)}${arrow(col.key)}</button>
                   </th>`).join('')}
@@ -969,6 +1059,15 @@
       <div class="mt-3" data-lt-pager></div>`;
   }
 
+  /** Is this the row a deep link asked for? */
+  function isFocus(t) {
+    const f = state.focus;
+    if (!f) return false;
+    if (f.threadId != null) return t.threadId === Number(f.threadId);
+    if (f.recordId != null) return t.assistantRecordId === Number(f.recordId);
+    return false;
+  }
+
   /**
    * Repaint the rows for the current view. Cheap enough to run on every keystroke, and deliberately
    * does NOT touch the controls above it (see controlsHtml).
@@ -978,13 +1077,14 @@
     const tbody = h && h.querySelector('[data-lt-tbody]');
     if (!tbody) return;
     const list = visibleThreads();
-    const span = COLUMNS.length + 1;
+    const span = columns().length + 1;
+    const total = stageRows().length;
 
     tbody.innerHTML = '';
     if (!list.length) {
       const tr = document.createElement('tr');
       tr.innerHTML = `<td colspan="${span}" class="px-4 py-8 text-center text-sm text-gray-500">
-        Nothing matches these filters. <button type="button" data-lt-clear-inline class="font-bold text-emerald-700 underline cursor-pointer">Clear them</button> to see all ${state.threads.length}.
+        Nothing matches these filters. <button type="button" data-lt-clear-inline class="font-bold text-emerald-700 underline cursor-pointer">Clear them</button> to see all ${total}.
       </td>`;
       tr.querySelector('[data-lt-clear-inline]').addEventListener('click', () => h.querySelector('[data-lt-clear]')?.click());
       tbody.appendChild(tr);
@@ -1053,11 +1153,12 @@
         tbody.appendChild(tr);
         tbody.appendChild(detailTr);
 
-        // Deep link from the "a prospect replied" notification (notifications.js sets the global).
-        // Consumed once — a repaint after a note or a nudge must not yank the page back here, and the
-        // row stays open on its own from state.open after the first pass.
-        if (state.focusThreadId === t.id) {
-          state.focusThreadId = null;
+        // Deep link from the "a prospect replied" notification (notifications.js sets the global),
+        // or "Open in Outreach" on the All leads tab. Consumed once — a repaint after a note or a
+        // nudge must not yank the page back here, and the row stays open on its own from
+        // state.open after the first pass.
+        if (isFocus(t)) {
+          state.focus = null;
           if (!wasOpen) toggleRow(t, tr, detailTr, td);
           // After the row's own paint, or the browser scrolls to a collapsed row and the panel
           // opens below the fold.
@@ -1070,16 +1171,16 @@
     if (count) {
       // The FILTER's number, not the page's — "25 of 400" beside a filter that matched 137 would
       // read as the filter having matched 25.
-      count.textContent = list.length === state.threads.length
-        ? `${state.threads.length} ${state.threads.length === 1 ? 'conversation' : 'conversations'}`
-        : `${list.length} of ${state.threads.length}`;
+      count.textContent = list.length === total
+        ? `${total} ${total === 1 ? 'lead' : 'leads'}`
+        : `${list.length} of ${total}`;
     }
 
     const pager = h.querySelector('[data-lt-pager]');
     if (pager) {
       state.view.page = pg.page || 1;             // clamped: the list may have shrunk under us
       pager.innerHTML = window.ListPager
-        ? window.ListPager.controlsHtml(pg, { attr: 'data-lt-page', noun: 'conversations' })
+        ? window.ListPager.controlsHtml(pg, { attr: 'data-lt-page', noun: 'leads' })
         : '';
     }
   }
@@ -1097,6 +1198,14 @@
     }
     detailTr.classList.remove('hidden');
     chev?.classList.add('rotate-180');
+
+    // No thread to load — the row opens to its notes and outcome (recordOnlyHtml).
+    if (t.threadId == null) {
+      state.open[t.id] = { recordOnly: true };
+      td.innerHTML = detailHtml(t);
+      wireDetail(td, t);
+      return;
+    }
 
     if (!state.open[t.id]) {
       state.loadingThread[t.id] = true;
@@ -1117,8 +1226,14 @@
         delete state.loadingThread[t.id];
       }
     }
-    td.innerHTML = detailHtml(t);
-    wireDetail(td, t);
+    // ⚠️ The list may have been redrawn while the conversation was loading — a refresh, a stage
+    // switch, or a deep link opening this row in the middle of load(). The `td` captured above is
+    // then detached, and writing into it left the live row on "Loading this conversation…" for good.
+    // Write into whichever cell is on the page now.
+    const live = td.isConnected ? td : host()?.querySelector(`[data-lt-detail="${t.id}"] td`);
+    if (!live) return;
+    live.innerHTML = detailHtml(t);
+    wireDetail(live, t);
   }
 
   /** Repaint ONE open row's detail in place, without disturbing the rest of the table. */
@@ -1195,7 +1310,8 @@
         onSaved: (dealOutcome) => {
           t.dealOutcome = dealOutcome;
           if (state.open[t.id]?.thread) state.open[t.id].thread.dealOutcome = dealOutcome;
-          state.rowNotice[t.id] = 'Outcome recorded.';
+          const moved = rephase(t);
+          state.rowNotice[t.id] = moved ? `Outcome recorded — moved to ${phaseLabel(t.phase)}.` : 'Outcome recorded.';
           repaintDetail(t);
         },
       });
@@ -1237,8 +1353,28 @@
 
     td.querySelector('[data-lt-erase]')?.addEventListener('click', () => eraseProspectData(t));
 
+    td.querySelector('[data-lt-preview]')?.addEventListener('click', () => previewNext(t));
     td.querySelector('[data-lt-nudge]')?.addEventListener('click', () => runCadenceAction(t, 'nudge'));
     td.querySelector('[data-lt-stop]')?.addEventListener('click', () => runCadenceAction(t, 'stop_follow_ups'));
+  }
+
+  /** Draft this lead's next follow-up without sending it (lead-generation.ts preview_follow_up). */
+  async function previewNext(t) {
+    if (state.preview[t.id] && state.preview[t.id].loading) return;
+    state.preview[t.id] = { loading: true };
+    repaintDetail(t);
+    try {
+      const res = await fetch('/.netlify/functions/lead-generation', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ action: 'preview_follow_up', assistantId: state.assistantId, threadId: t.threadId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'The preview couldn’t be written.');
+      state.preview[t.id] = { result: data };
+    } catch (err) {
+      state.preview[t.id] = { error: err.message || 'The preview couldn’t be written.' };
+    }
+    repaintDetail(t);
   }
 
   /**
@@ -1260,8 +1396,9 @@
       if (state.open[t.id]) state.open[t.id].enrolment = data.enrolment || null;
       // The list row's Follow-ups cell reads from `t.sequence`, so it has to move too.
       t.sequence = data.enrolment || t.sequence;
+      const moved = rephase(t);
       if (action === 'stop_follow_ups') {
-        state.rowNotice[t.id] = 'Follow-ups stopped. Nothing further will be sent automatically.';
+        state.rowNotice[t.id] = `Follow-ups stopped. Nothing further will be sent automatically.${moved ? ` Moved to ${phaseLabel(t.phase)}.` : ''}`;
       } else if (data.sent) {
         state.rowNotice[t.id] = 'Chase sent from your mailbox.';
         // The new message is only in the database — refetch this one conversation so it appears.
@@ -1362,6 +1499,7 @@
         t.sequence = fresh.enrolment || t.sequence;
         if (fresh.thread) t.state = fresh.thread.state;
       } catch { /* the notice is still true; the panel catches up on the next open */ }
+      if (rephase(t)) state.rowNotice[t.id] = `${state.rowNotice[t.id]} Moved to ${phaseLabel(t.phase)}.`;
     } catch (err) {
       state.rowError[t.id] = err.message || 'Could not record that.';
     } finally {
@@ -1565,63 +1703,99 @@
     paintRows();
   }
 
-  // ── Data ───────────────────────────────────────────────────────────────────
+  // ── Moving between stages ─────────────────────────────────────────────────
 
-  /**
-   * The tab button: how many conversations exist.
-   *
-   * ⚠️ `counts.total` is the server's count over the WHOLE set, not the page or the filtered view —
-   * the tab has to agree with the "Conversations" tile, and both have to be the real total.
-   *
-   * No amber pill here, deliberately. The natural candidate is `counts.replied` — a stranger has
-   * written back and nobody has looked — but this tab has no "mark as seen", so the pill could
-   * only ever be cleared by the conversation being closed. A permanent badge is a broken badge.
-   */
-  function updateTab() {
-    window.AssistantDashboardRegistry?.setTabCount(
-      'conversations-tab-label', state.tabLabel, state.counts && state.counts.total,
-    );
+  function phaseLabel(phase) {
+    const P = window.LeadOutreachPhase;
+    return (P && P.phaseLabels && P.phaseLabels[phase]) || phase;
   }
 
   /**
-   * Load every conversation, draining the server's cursor.
+   * Re-place one row after a write made here, with the SAME function the server used
+   * (window.LeadOutreachPhase.of — src/config/lead-outreach-phase.ts, stringified). Returns true when
+   * the row changed stage. The row stays drawn where it was (state.sticky) until the user changes
+   * stage, and the strip's counts move at once.
    *
-   * ⚠️ The drain is what makes the filter strip honest. Every control compares the rendered cell
-   * across `state.threads`, so a partially-loaded list would silently redefine "filter to Replied"
-   * as "…among the most recent page" — the failure mode where the strip says 3 and the truth is 40.
-   * `truncated` is set when the cap is reached instead, and the view says so.
+   * The server's needs-attention flag also reads the enrolment's last error, which the browser is
+   * not given; a row the server flagged keeps its flag while its plan is still running.
+   */
+  function rephase(t) {
+    const P = window.LeadOutreachPhase;
+    if (!P || typeof P.of !== 'function') return false;
+    const before = t.phase;
+    const r = P.of({
+      approvalStatus: t.approvalStatus,
+      data: { dealOutcome: t.dealOutcome, outreachSentAt: t.outreachSentAt },
+      threadState: t.state,
+      enrolment: t.sequence,
+    });
+    t.needsAttention = r.needsAttention || (!!t.needsAttention && !!t.sequence && t.sequence.state === 'active');
+    t.phase = r.phase;
+    t.group = r.group;
+    if (t.phase !== before) {
+      if (before === state.phase) state.sticky.add(t.id);
+      publishCounts(recount());
+      return true;
+    }
+    return false;
+  }
+
+  /** Counts over the rows held, in the shape `board` returns. */
+  function recount() {
+    const c = { total: state.threads.length, needsAttention: 0, phases: {}, groups: {} };
+    for (const t of state.threads) {
+      c.phases[t.phase] = (c.phases[t.phase] || 0) + 1;
+      c.groups[t.group] = (c.groups[t.group] || 0) + 1;
+      if (t.needsAttention) c.needsAttention += 1;
+    }
+    return c;
+  }
+
+  /** The stage strip's numbers (assistant-lead-outreach.js). */
+  function publishCounts(counts) {
+    state.counts = counts;
+    window.AssistantLeadOutreach?.setBoardCounts(counts);
+  }
+
+  // ── Data ───────────────────────────────────────────────────────────────────
+
+  /**
+   * Load every sent lead, with its stage, from lead-threads.ts `board`.
+   *
+   * One request: the server reads one past its cap and says `truncated` when it hits it, and the
+   * view says so. The filters compare the whole set client-side, so a partial set behind a filter
+   * would quietly redefine "filter to Won" as "…among the most recent page".
+   *
+   * Rows with no thread (marked sent by hand) get their key as `id`, so every per-row map below
+   * (open, busy, notices) still has one stable key per row; `threadId` says whether there is a
+   * conversation to load.
    */
   async function load() {
     state.loading = true;
     state.error = null;
     render();
     try {
-      const all = [];
-      let cursor;
-      let truncated = false;
-      let counts = state.counts;
-      // Bounded: PAGE_SIZE is 200 server-side, so this is at most five requests.
-      for (let i = 0; i < 10; i++) {
-        const data = await call('list', { cursor });
-        all.push(...(data.threads || []));
-        counts = data.counts || counts;
-        cursor = data.nextCursor || null;
-        if (!cursor) break;
-        if (all.length >= MAX_THREADS) { truncated = true; break; }
-      }
-      state.threads = all;
-      state.counts = counts;
-      state.truncated = truncated;
-      // Drop cached details for conversations that are no longer in the list.
-      const live = new Set(all.map((t) => t.id));
-      for (const id of Object.keys(state.open)) if (!live.has(Number(id))) delete state.open[id];
-      updateTab();
+      const data = await call('board');
+      state.threads = (data.rows || [])
+        // Approved-but-unsent leads are To approve's — drawn there by the review cards.
+        .filter((r) => r.phase === 'following_up' || r.phase === 'replied' || r.phase === 'finished')
+        .map((r) => ({ ...r, id: r.threadId != null ? r.threadId : r.key, assistantRecordId: r.recordId }));
+      state.truncated = !!data.truncated;
+      state.planSteps = data.plan && Number.isInteger(data.plan.steps) ? data.plan.steps : null;
+      state.sticky.clear();
+      // Drop cached details for rows that are no longer in the list.
+      const live = new Set(state.threads.map((t) => String(t.id)));
+      for (const id of Object.keys(state.open)) if (!live.has(String(id))) delete state.open[id];
+      publishCounts(recount());
+      // A deep link names a row, not a stage: open whichever stage it is in.
+      const target = state.focus && state.threads.find(isFocus);
+      if (target && target.phase !== state.phase) window.AssistantLeadOutreach?.open(target.phase);
     } catch (err) {
       // lead_threads / sequence_enrolments are MANUAL applies (db/lead-threads.sql,
       // db/outreach-sequences.sql). Name that rather than showing a generic failure.
       state.error = err.code === 'MIGRATION_PENDING'
         ? 'Conversations are not set up on this environment yet.'
-        : (err.message || 'Could not load your conversations.');
+        : (err.message || 'Could not load your outreach.');
     } finally {
       state.loading = false;
       render();
@@ -1631,7 +1805,12 @@
   // ── Public API ─────────────────────────────────────────────────────────────
 
   window.AssistantLeadThreads = {
-    init({ assistantId, cfg }) {
+    /**
+     * Called from _applyDashboardRegistry for a role whose Outreach tab is staged. Loads at once:
+     * the stage strip's Following up / Replied / Finished counts come from this one request, and
+     * the strip is on screen before any of those stages is opened.
+     */
+    init({ assistantId }) {
       state.assistantId = assistantId;
       state.rendered = false;
       state.threads = [];
@@ -1643,45 +1822,61 @@
       state.replySending = {};
       state.replyError = {};
       state.replyNotice = {};
-      // Read here rather than in activate(): init() runs during _applyDashboardRegistry and starts
-      // the fetch, so the id has to be in state before the rows it targets are painted. Cleared off
-      // the window immediately — a stale global would re-open this thread on the next assistant the
-      // user visits.
-      state.focusThreadId = Number(window._assistantDetailFocusThreadId) || null;
+      state.sticky = new Set();
+      state.phase = null;
+      state.preview = {};
+      // Read here rather than on activation: init() starts the fetch, so the row it targets has to
+      // be known before the rows are painted. Cleared off the window immediately — a stale global
+      // would re-open this thread on the next assistant the user visits.
+      const threadId = Number(window._assistantDetailFocusThreadId) || null;
+      state.focus = threadId ? { threadId } : null;
       window._assistantDetailFocusThreadId = null;
       state.view = { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1, collapsed: new Set() };
-      if (cfg && cfg.label) state.tabLabel = cfg.label;
-      // ⚠️ This DOES prefetch, and the comment that used to sit below said the opposite for a good
-      // reason: "no tab badge depends on the counts, so a user who never opens the tab should never
-      // pay for the query". A count on the button is exactly such a dependency, and it is the
-      // point — Conversations was the one tab in the funnel with no number on it, so the tab gave
-      // no indication that anything had ever replied.
-      //
-      // The cost is one drained list per assistant-detail page load. `activate()` reuses this
-      // result rather than fetching again, so opening the tab is now free where it used to cost the
-      // query — the spend moved rather than doubled.
       state.rendered = true;
       load();
     },
+
     /**
-     * Called on first activation of the tab. init() has normally loaded already, so the usual
-     * outcome here is a repaint or nothing at all.
-     *
-     * ⚠️ The empty-host check is load-bearing now that init() prefetches. init() runs during
-     * _applyDashboardRegistry, and its render() writes into `lead-threads-host`; if that fetch
-     * resolved before the panel existed, the paint went nowhere and `rendered` was already true —
-     * which, with a bare `if (state.rendered) return`, left the tab permanently blank. Repainting
-     * from state costs nothing and cannot produce that.
+     * Show one stage. Grouping defaults to Status where a stage has groups worth reading
+     * (Following up: running / no follow-ups / outside the app; Finished: won / lost / no reply).
      */
-    activate() {
-      if (!state.rendered) {
-        state.rendered = true;
-        load();
-        return;
+    showPhase(phase) {
+      if (!PHASE_COLUMNS[phase]) return;
+      if (phase !== state.phase) {
+        state.phase = phase;
+        state.sticky.clear();
+        state.view = {
+          search: '', filters: {}, sortKey: null, sortDir: 'asc',
+          groupKey: phase === 'replied' ? null : 'group', page: 1, collapsed: new Set(),
+        };
       }
-      const h = host();
-      if (h && !h.innerHTML.trim()) render();
+      render();
     },
+
+    /** Open and scroll to one row — by thread (notification) or by lead (All leads tab). */
+    focus(target) {
+      state.focus = target || null;
+      const row = state.focus && state.threads.find(isFocus);
+      if (row) window.AssistantLeadOutreach?.open(row.phase);
+      // Not loaded yet: load() resolves the stage when the rows arrive.
+    },
+
+    /**
+     * Leads a follow-up could be previewed for — emailed from the app, still being followed up, no
+     * reply. For the Follow-up plan panel's lead picker. Most recent first.
+     */
+    previewableLeads() {
+      return state.threads
+        .filter((t) => t.threadId != null && t.phase === 'following_up' && t.state === 'open')
+        .map((t) => ({ threadId: t.threadId, title: t.title }));
+    },
+
+    /** The stage of the row a deep link is waiting to open, once the rows are here; else null. */
+    pendingFocusPhase() {
+      const row = state.focus && state.threads.find(isFocus);
+      return row ? row.phase : null;
+    },
+
     refresh: load,
   };
 })();

@@ -61,4 +61,21 @@ check('the key buttons sit in the right category', () => {
     assert.match(read('src/components/assistant-onboarding-shell.js'), /data-aos-next class="btn-primary /);
 });
 
+check('every button carries a 1px border, so solid and outlined buttons are one height', () => {
+    for (const f of ['input.css', 'style.css']) {
+        const css = read(f);
+        const rule = css.match(/([^{}]*)\{\s*border-width: 1px;\s*border-style: solid;\s*\}/);
+        assert.ok(rule, `${f}: no shared border-width rule for the buttons`);
+        for (const c of [...CATS, 'inverse']) {
+            assert.match(rule![1], new RegExp(`\\.btn-${c}\\b`), `${f}: .btn-${c} has no border, so it stands 2px shorter`);
+        }
+    }
+});
+
+check("the home hero's primary matches Explore Assistants' 2px outline", () => {
+    const html = read('index.html');
+    assert.match(html, /class="btn-primary border-2 px-8 py-4/);
+    assert.match(html, /href="assistants\.html" class="[^"]*\bborder-2\b/);
+});
+
 console.log(`\n${passed} checks passed`);

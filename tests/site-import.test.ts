@@ -312,6 +312,50 @@ async function main() {
         assert.strictEqual(d.calls.pictures.length, 0);
     });
 
+    await check('a JavaScript-only site we CAN run: each thin page is read again with its JavaScript run, and imported', async () => {
+        const shell = read('tests/fixtures/site-pages/spa-shell.html');
+        const d = deps({ plan: null, pages: Object.fromEntries(Object.keys(PAGES).map((u) => [u, shell])) });
+        const rendered: string[] = [];
+        d.renderHtml = async (url) => {
+            rendered.push(url);
+            const html = PAGES[url] ?? PAGES[url.replace(/\/$/, '')];
+            return html ? { ok: true, html, finalUrl: url } : { ok: false, message: 'no' };
+        };
+        // The shell has no menu; the rendered home page's menu is what finds the other pages.
+        const r = await runImport({ url: `${SITE}/`, pictures: 'skip', current: current(), maxPages: 5 }, d);
+        assert.ok(r.ok, r.ok ? '' : r.message);
+        assert.ok(rendered.includes(`${SITE}/`) && rendered.length > 1);
+        assert.ok(r.ok && r.report.wordsRead >= 80);
+    });
+
+    await check('a page that already has its words is never run in a browser', async () => {
+        const d = deps({ plan: null });
+        const rendered: string[] = [];
+        d.renderHtml = async (url) => { rendered.push(url); return { ok: false, message: 'no' }; };
+        const r = await runImport({ url: `${SITE}/`, pictures: 'skip', current: current(), maxPages: 5 }, d);
+        assert.ok(r.ok);
+        assert.ok(!rendered.includes(`${SITE}/`));
+    });
+
+    await check('a render that fails or finds nothing more leaves the plain read — told plainly, nothing charged', async () => {
+        const d = deps({ pages: { 'https://spa.example/': read('tests/fixtures/site-pages/spa-shell.html') } });
+        d.renderHtml = async () => { throw new Error('no browser'); };
+        const r = await runImport({ url: 'https://spa.example/', pictures: 'copy', current: current(), maxPages: 5 }, d);
+        assert.ok(!r.ok && /We could only read a little of your site/.test(r.message));
+        assert.strictEqual(d.calls.plan, 0);
+    });
+
+    await check('the rendering browser never fetches for itself: every request goes through the SSRF fence', () => {
+        const src = read('src/utils/site-js-render.ts');
+        assert.ok(src.includes('setRequestInterception(true)'));
+        assert.ok(src.includes('safeFetchText(target'));
+        assert.ok(!/req\.continue\(\)/.test(src.replace("if (target.startsWith('data:')) { await req.continue().catch(() => {}); return; }", '')), 'only data: URLs continue unfenced');
+        assert.ok(src.includes("'WebSocket'"), 'WebSockets are not intercepted, so the page has none');
+        const store = read('src/utils/site-import-store.ts');
+        assert.ok(store.includes('await renderer.close()'), 'the browser is always closed');
+        assert.ok(read('netlify.toml').includes('[functions.draft-site-background]\n  external_node_modules = ["@sparticuz/chromium", "puppeteer-core"]'));
+    });
+
     await check('a site we can\'t reach at all says why, and nothing more', async () => {
         const r = await runImport({ url: 'https://gone.example/', pictures: 'skip', current: current(), maxPages: 5 }, deps({ pages: {} }));
         assert.ok(!r.ok && r.report === null && r.message.includes('404'));

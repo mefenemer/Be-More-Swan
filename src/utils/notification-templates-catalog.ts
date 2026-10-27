@@ -319,7 +319,7 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         category: 'Assistants',
         type: 'lead_reply_received',
         title: '{{lead.company}} replied to your outreach',
-        message: 'A prospect has written back to {{assistant.name}}. Follow-up emails to them have stopped automatically — read the reply and answer it on the Conversations tab.',
+        message: 'A prospect has written back to {{assistant.name}}. Follow-up emails to them have stopped automatically — read the reply and answer it under Outreach › Replied.',
         variables: [
             ASSISTANT_NAME,
             // Falls back to the contact's domain, then to a plain "A prospect", at the call site —

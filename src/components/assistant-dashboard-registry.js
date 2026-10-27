@@ -62,7 +62,7 @@
  *                //   and holds the Goal Progress, Performance Metrics and Autopilot cards, above the
  *                //   goals (owner, 2026-10-21 — trialled on Social Media, then rolled out). A role
  *                //   with hideGoals still gets the tab, with its cards and no goals section.
- *   cfg.resultsTabAfter // → optional tab key (e.g. 'conversations'); the Results tab is moved to sit
+ *   cfg.resultsTabAfter // → optional tab key (e.g. 'review-queue'); the Results tab is moved to sit
  *                //   straight after that tab instead of its default place before Activity.
  *   cfg.inspoTab // → optional Inspo tab config (assistant-inspo.js); the content roles
  *                //   (social_media_manager, blog_writer) only — { label, description }
@@ -708,9 +708,10 @@
     lead_qualifier: {
       // Rules tab: read by its outreach drafting (discovery scoring) and its chat — never its scores.
       rulesScope: 'outreach',
-      // Results straight after Conversations (owner, 2026-10-27): the tabs read as the funnel —
-      // Searches → Leads → Outreach → Conversations → Results — with Calendar and Activity after.
-      resultsTabAfter: 'conversations',
+      // Results straight after Outreach (owner, 2026-10-27): the tabs read as the funnel —
+      // Searches → All leads → Outreach → Results — with Calendar and Activity after. (It sat after
+      // Conversations until that tab became Outreach's Following up / Replied / Finished stages.)
+      resultsTabAfter: 'review-queue',
       // These four cards are fed by get-lead-performance, NOT by the shared
       // get-assistant-performance the social roles use — that one reads post_insights, and this
       // assistant publishes nothing, so it returned hasData:false for ever and the section told
@@ -846,20 +847,29 @@
         // BEFORE the subtitle: growing the subtitle once pushed columnLabels past 2400, and moving
         // this to the top to fix that pushed `label` past 1400. Either way the assertion silently
         // stops reaching the thing it checks. Long prose goes below both keys.
-        columnLabels: { scheduled: 'Awaiting reply' },
+        // Since the tab became staged (below), these name the STAGE each column's leads are now in,
+        // because card and toast copy reads them ("it's in the … column") through _rqColumnLabel.
+        columnLabels: { review: 'To approve', approved: 'To approve', scheduled: 'Following up' },
         // Hedged on the send because it's conditional: a user who picked manual outreach during
         // onboarding (outreachMode 'none'), or who hasn't connected an inbox, gets the draft to
         // send themselves — send_outreach returns 'no_provider' / 'not_connected' and nothing goes out.
         //
         // ⚠️ THE LAST SENTENCE IS THE CONSENT DISCLOSURE — do not trim it back. This copy used to stop
         // at "sets a chase reminder", which describes a diary entry; what approving actually starts is
-        // up to three further emails to a stranger (src/config/outreach-sequences.ts
-        // DEFAULT_SEQUENCE_STEPS, gated on the `outreachFollowUps` setup answer). A user cannot
-        // consent to a sequence they were told was a reminder. Where to switch it off is stated in the
-        // setup question itself and in the post-send toast, not crammed in here.
-        subtitle: 'Leads awaiting your approval — read the drafted email on each one. Approving sends it from your connected inbox, if you have one, '
-          + 'and sets a chase reminder. With automatic chasing on, it also starts up to three follow-ups — 3 days, a week, then a sign-off — '
-          + 'stopping the moment they reply.',
+        // further emails to a stranger — the assistant's follow-up plan, gated on the `outreachFollowUps`
+        // setup answer. A user cannot consent to a sequence they were told was a reminder. The plan is
+        // editable (assistant-follow-up-plan.js), so its length and timing are NOT typed here: the
+        // To approve note under the stage strip quotes the saved plan, and this names where it lives.
+        subtitle: 'Every lead you email, step by step. Approving a drafted email sends it from your connected inbox, if you have one, '
+          + 'and sets a chase reminder. With automatic chasing on, it also starts your follow-up plan — more emails, each stopping '
+          + 'the moment they reply. See and change it with Follow-up plan.',
+        // The tab is laid out as the steps a lead goes through — To approve → Following up → Replied
+        // → Finished, plus Archived — instead of the shared lifecycle columns, and the old
+        // Conversations tab is its middle three stages (assistant-lead-outreach.js,
+        // docs/lead-outreach-restructure-plan.md). Which stage a lead is in is ONE function,
+        // src/config/lead-outreach-phase.ts. columnLabels above still names the shared columns for
+        // any code that asks, but this role no longer shows them.
+        staged: true,
       },
       hubTab: {
         id: 'datahub',
@@ -985,13 +995,8 @@
       signalInbox: {
         label: 'Searches',
       },
-      // Conversations tab (assistant-lead-threads.js → lead-threads.ts). What happened after a
-      // lead was approved: the outreach thread, the reply, the classification, and what the
-      // follow-up sequence did. Named for what's BUILT — the mockup's "Deal Thread" also showed
-      // the deal envelope and Closing Agent, which are Phase 4 and don't exist.
-      conversationsTab: {
-        label: 'Conversations',
-      },
+      // No conversationsTab (retired 2026-10-27): the conversations are the Outreach tab's
+      // Following up / Replied / Finished stages — see reviewQueue.staged above.
       // Strategy tab (assistant-strategy.js → strategy-proposals.ts). Phase 5a §7: changes the
       // agent proposes to how it targets and writes, each with its evidence, none applied until a
       // human clicks Apply.

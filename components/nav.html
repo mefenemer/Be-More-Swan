@@ -1,7 +1,8 @@
 <!-- Header spacing (2026-10-06): seven links + Log In + the CTA did not fit one row from 768px up —
      "How it Works" wrapped to two lines, the buttons went tall, and waitlist mode's longer "Join the
      waitlist" made it worse. Links never wrap; gaps tighten below 1280px, where the page subtitle
-     also steps aside; below 1024px the hamburger menu takes over. A <style> here because this file
+     also steps aside; below 1024px the hamburger menu takes over, and above it too whenever
+     mobileMenu.js measures that the links don't fit (2026-10-27). A <style> here because this file
      is innerHTML-injected (styles apply, scripts would not) and the prebuilt style.css has none of
      the responsive gap utilities — unlayered, so it outranks the md: display utilities. -->
 <style>
@@ -12,11 +13,15 @@
     #nav-public-links, #nav-app-links { column-gap: 1.25rem; }
     #nav-page-title { display: none; }
   }
-  @media (min-width: 1024px) { #mobile-menu { display: none !important; } }
+  @media (min-width: 1024px) { html:not(.bms-nav-compact) #mobile-menu { display: none !important; } }
   @media (max-width: 1023px) {
     .bms-nav-desktop { display: none !important; }
     .bms-nav-burger { display: flex !important; }
   }
+  /* mobileMenu.js sets this when the links don't fit beside the logo at any width (a longer
+     translation or the waitlist label) — the nav ran off the page up to ~1460px in Spanish. */
+  html.bms-nav-compact .bms-nav-desktop { display: none !important; }
+  html.bms-nav-compact .bms-nav-burger { display: flex !important; }
 </style>
 <nav class="bg-white shadow-sm sticky top-0 z-50 w-full relative">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

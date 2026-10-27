@@ -9,6 +9,8 @@
 //   mentor_products         → org-products.ts POST, one per product (Business Information ▸ Products & Services)
 //   mentor_products_remove  → org-products.ts DELETE, one per product — only when the user asked; rebuilt from
 //                             the rows by resolveProductRemoval, so the card names what is really deleted
+//   mentor_products_update  → org-products.ts PATCH { id, ...changes }, as the tab's Save does — only when the
+//                             user asked; rebuilt by resolveProductUpdate so the card shows what is replaced
 //   mentor_quiet_mode       → update-assistant-context.ts PUT, read-merge-write (its "Quiet mode" set-up answer)
 //   mentor_support_request  → support-tickets.ts POST, or issue-reports.ts POST for something broken
 //   mentor_business_stage   → update-assistant-context.ts PUT patchContext { businessStage } (its set-up answer, §3.1)
@@ -35,7 +37,7 @@ import { cleanCommitmentTexts, MAX_PER_WEEK } from './mentor-commitments';
 import { draftRequestPromptLine } from './mentor-draft-request';
 
 export const MENTOR_CARD_TYPES = [
-    'mentor_business_profile', 'mentor_products', 'mentor_products_remove', 'mentor_quiet_mode', 'mentor_support_request',
+    'mentor_business_profile', 'mentor_products', 'mentor_products_remove', 'mentor_products_update', 'mentor_quiet_mode', 'mentor_support_request',
     'mentor_business_stage', 'mentor_hire_recommendation', 'mentor_review_all',
     'strategy_proposal', 'mentor_research', 'mentor_break_even',
     'mentor_commitments',
@@ -53,10 +55,23 @@ type ProfileField = keyof typeof PROFILE_FIELDS;
 // What org-products.ts accepts.
 const PRODUCT_KINDS = ['product', 'service'] as const;
 
+// What an edit card may change on one product (org-products.ts PRODUCT_LIMITS). Never the price: the
+// Mentor never sets one, and the deposit is checked against it on the tab.
+const PRODUCT_EDIT_FIELDS = {
+    name: { label: 'Name', max: 120 },
+    kind: { label: 'Kind', max: 10 },
+    description: { label: 'What it is', max: 1200 },
+    benefits: { label: 'Key benefits', max: 1200 },
+    audience: { label: 'Who it is for', max: 400 },
+} as const;
+type ProductEditField = keyof typeof PRODUCT_EDIT_FIELDS;
+type ProductChange = { field: ProductEditField; label: string; from: string | null; to: string };
+
 export type MentorCard =
     | { type: 'mentor_business_profile'; summary: string; why: string; asked: boolean; fields: Partial<Record<ProfileField, string>> }
     | { type: 'mentor_products'; summary: string; why: string; asked: boolean; products: Array<{ name: string; kind: string; description: string | null }> }
     | { type: 'mentor_products_remove'; summary: string; productIds: number[]; products?: Array<{ id: number; name: string }> }
+    | { type: 'mentor_products_update'; summary: string; productId: number; fields: Partial<Record<ProductEditField, string>>; productName?: string; changes?: ProductChange[] }
     | { type: 'mentor_quiet_mode'; summary: string; on: boolean; assistantId: number }
     | { type: 'mentor_support_request'; summary: string; destination: 'issue' | 'support'; subject: string; description: string }
     | { type: 'mentor_business_stage'; summary: string; assistantId: number }
@@ -120,6 +135,23 @@ export function mentorCardFromUiElement(ui: unknown, assistantId: number): Mento
             const ids = [...new Set((Array.isArray(u.productIds) ? u.productIds : []).map(Number))].filter((n) => Number.isInteger(n) && n > 0).slice(0, 20);
             if (!ids.length) return { error: 'It didn’t say which products to remove.' };
             return { type: 'mentor_products_remove', summary, productIds: ids };
+        }
+        case 'mentor_products_update': {
+            // An edit replaces the owner's words, so only when they asked (prod 2026-10-27: asked to put a
+            // tidied description on "Create and Make", the Mentor said it couldn't edit an entry and told
+            // them to paste it in by hand).
+            if (!asked) return { error: 'I only change a product when you ask me to.' };
+            const id = Number(u.productId);
+            if (!Number.isInteger(id) || id <= 0) return { error: 'It didn’t say which product to change.' };
+            const raw = (u.fields && typeof u.fields === 'object') ? u.fields as Record<string, unknown> : {};
+            const fields: Partial<Record<ProductEditField, string>> = {};
+            for (const k of Object.keys(PRODUCT_EDIT_FIELDS) as ProductEditField[]) {
+                const v = text(raw[k], PRODUCT_EDIT_FIELDS[k].max);
+                if (v) fields[k] = v;
+            }
+            if (fields.kind && !(PRODUCT_KINDS as readonly string[]).includes(fields.kind)) delete fields.kind;
+            if (!Object.keys(fields).length) return { error: 'There was nothing to change.' };
+            return { type: 'mentor_products_update', summary, productId: id, fields };
         }
         case 'mentor_quiet_mode':
             if (typeof u.on !== 'boolean') return { error: 'Quiet mode needs to be on or off.' };
@@ -200,6 +232,43 @@ export async function resolveProductRemoval(
     return { ...card, productIds: products.map((p) => p.id), products };
 }
 
+/**
+ * An edit card rebuilt from this workspace's row: the product's real name, and each field as it is now
+ * beside what replaces it. A field that already says exactly that is dropped. { error } when the product
+ * isn't this workspace's or nothing would change.
+ */
+export async function resolveProductUpdate(
+    db: any, orgId: number, card: Extract<MentorCard, { type: 'mentor_products_update' }>,
+): Promise<Extract<MentorCard, { type: 'mentor_products_update' }> | { error: string }> {
+    const { orgProducts } = await import('../../db/schema');
+    const { and, eq } = await import('drizzle-orm');
+    const [row] = await db.select({
+        id: orgProducts.id, name: orgProducts.name, kind: orgProducts.kind, description: orgProducts.description,
+        benefits: orgProducts.benefits, audience: orgProducts.audience,
+    }).from(orgProducts).where(and(eq(orgProducts.organisationId, orgId), eq(orgProducts.id, card.productId))).limit(1);
+    if (!row) return { error: 'That product isn’t on your list any more.' };
+    return productUpdateCard(card, row);
+}
+
+/** Pure: the card's changes against the current row (resolveProductUpdate). */
+export function productUpdateCard(
+    card: Extract<MentorCard, { type: 'mentor_products_update' }>,
+    row: Partial<Record<ProductEditField, string | null>> & { name: string },
+): Extract<MentorCard, { type: 'mentor_products_update' }> | { error: string } {
+    const fields: Partial<Record<ProductEditField, string>> = {};
+    const changes: ProductChange[] = [];
+    for (const k of Object.keys(PRODUCT_EDIT_FIELDS) as ProductEditField[]) {
+        const to = card.fields[k];
+        if (!to) continue;
+        const from = (row[k] ?? '').trim() || null;
+        if (from === to) continue;
+        fields[k] = to;
+        changes.push({ field: k, label: PRODUCT_EDIT_FIELDS[k].label, from, to });
+    }
+    if (!changes.length) return { error: `“${row.name}” already says that.` };
+    return { ...card, fields, productName: row.name, changes };
+}
+
 /** The kinds of mentor_proposals rows (§3.13): only suggestions count towards the weekly cap. */
 export function proposalKind(card: MentorCard): string | null {
     if (card.type === 'mentor_business_profile') return 'business_info_gap';
@@ -248,6 +317,9 @@ export function mentorCardsPromptBlock(): string {
 
 2b. Remove from Products & Services — ONLY when the user's latest message asks you to remove or delete products or services (never volunteer it; suggest it in words instead). Name them by their #number under PRODUCTS & SERVICES. Their click deletes them for good:
 {"type":"mentor_products_remove","summary":"<one sentence>","asked":true,"productIds":[<#number>, ...]}
+
+2c. Change one product or service already listed — ONLY when the user's latest message asks you to change, update, tidy or replace something about it (its description, name, benefits or who it is for). Name it by its #number under PRODUCTS & SERVICES and include only the fields that change, written in full as they should read. Never add it again to change it, and never send them to paste it in by hand: this card does it. You cannot change a price here — they set prices on the page:
+{"type":"mentor_products_update","summary":"<one sentence>","asked":true,"productId":<#number>,"fields":{"name":"...","kind":"product"|"service","description":"...","benefits":"...","audience":"..."}}
 
 3. Quiet mode — when they ask you to stop making suggestions (on) or to start again (off):
 {"type":"mentor_quiet_mode","summary":"<one sentence>","on":true}

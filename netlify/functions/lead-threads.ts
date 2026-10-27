@@ -4,6 +4,9 @@
 //
 //   POST { action: 'list',   assistantId, state?, cursor? }
 //        → { threads: ThreadSummary[], counts, nextCursor }
+//   POST { action: 'board',  assistantId }
+//        → { rows: BoardRow[], counts, truncated } — every SENT lead (and approved-but-unsent one)
+//          with its outreach phase, for the staged Outreach tab
 //   POST { action: 'get',    assistantId, threadId }
 //        → { thread, messages: Message[], enrolment }
 //   POST { action: 'nudge',  assistantId, threadId }
@@ -59,7 +62,8 @@ import {
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { haltReasonLabel } from '../../src/config/outreach-sequences';
-import { haltEnrolment } from '../../src/utils/outreach-sequences';
+import { leadOutreachPhase } from '../../src/config/lead-outreach-phase';
+import { haltEnrolment, previewFollowUps } from '../../src/utils/outreach-sequences';
 import { loadOutreachOffer, offerLinkForThread } from '../../src/utils/outreach-offer';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { drainSequenceSends } from './process-sequence-sends';
@@ -166,6 +170,102 @@ function decodeCursor(raw: unknown): { updatedAt: Date; id: number } | null {
     } catch { return null; }
 }
 
+type Db = ReturnType<typeof getDb>;
+
+/** One thread's message rollup — counts, the latest excerpt and the latest reply's classification. */
+interface ThreadRollup {
+    messageCount: number; inboundCount: number;
+    lastExcerpt: string; lastDirection: string | null;
+    classification: string | null; sentiment: string | null;
+}
+
+/**
+ * Per-thread message rollup in ONE query, for `list` and `board`.
+ *
+ * `left(body, N)` keeps full message bodies out of the response entirely — a page of threads would
+ * otherwise ship every word ever exchanged, and both callers only render a one-line preview.
+ */
+async function loadThreadRollups(db: Db, orgId: number, threadIds: number[]): Promise<Map<number, ThreadRollup>> {
+    const rollup = new Map<number, ThreadRollup>();
+    if (!threadIds.length) return rollup;
+    const msgs = await db
+        .select({
+            leadThreadId: leadMessages.leadThreadId,
+            direction: leadMessages.direction,
+            classification: leadMessages.classification,
+            sentiment: leadMessages.sentiment,
+            occurredAt: leadMessages.occurredAt,
+            excerpt: sql<string>`left(${leadMessages.body}, ${EXCERPT_CHARS})`,
+        })
+        .from(leadMessages)
+        .where(and(
+            eq(leadMessages.organisationId, orgId),
+            inArray(leadMessages.leadThreadId, threadIds),
+        ))
+        .orderBy(leadMessages.leadThreadId, leadMessages.occurredAt);
+
+    for (const m of msgs) {
+        const cur = rollup.get(m.leadThreadId) ?? {
+            messageCount: 0, inboundCount: 0, lastExcerpt: '', lastDirection: null,
+            classification: null, sentiment: null,
+        };
+        cur.messageCount += 1;
+        if (m.direction === 'inbound') {
+            cur.inboundCount += 1;
+            // Latest inbound classification wins — it's what the thread means NOW, not what
+            // the first reply happened to say.
+            cur.classification = m.classification ?? cur.classification;
+            cur.sentiment = m.sentiment ?? cur.sentiment;
+        }
+        // Rows arrive ordered by occurredAt, so the final write is the newest message.
+        cur.lastExcerpt = m.excerpt ?? '';
+        cur.lastDirection = m.direction;
+        rollup.set(m.leadThreadId, cur);
+    }
+    return rollup;
+}
+
+/**
+ * Cadence state per thread. sequence_enrolments is unique on lead_thread_id, so this is at most one
+ * row each. `lastError` is selected for the outreach phase (a cadence retrying and failing needs
+ * attention) and is never returned to the browser as text.
+ */
+async function loadThreadEnrolments(db: Db, orgId: number, threadIds: number[]) {
+    const enrolments = !threadIds.length ? [] : await db
+        .select({
+            leadThreadId: sequenceEnrolments.leadThreadId,
+            state: sequenceEnrolments.state,
+            haltReason: sequenceEnrolments.haltReason,
+            lastStepSent: sequenceEnrolments.lastStepSent,
+            nextSendAt: sequenceEnrolments.nextSendAt,
+            lastError: sequenceEnrolments.lastError,
+        })
+        .from(sequenceEnrolments)
+        .where(and(
+            eq(sequenceEnrolments.organisationId, orgId),
+            inArray(sequenceEnrolments.leadThreadId, threadIds),
+        ));
+    return new Map(enrolments.map((e) => [e.leadThreadId, e]));
+}
+
+/** The `sequence` object both `list` and `board` return. Null when follow-ups never started. */
+function sequenceSummary(e: { state: string; haltReason: string | null; lastStepSent: number; nextSendAt: Date | null } | undefined) {
+    return e ? {
+        state: e.state,
+        haltReason: e.haltReason,
+        haltReasonLabel: haltReasonLabel(e.haltReason),
+        lastStepSent: e.lastStepSent,
+        nextSendAt: e.nextSendAt?.toISOString() ?? null,
+    } : null;
+}
+
+/**
+ * Upper bound on rows `board` returns. Same reasoning as the Conversations tab's MAX_THREADS: the
+ * staged tab filters client-side, so the whole set has to be there — and past this many the
+ * response says `truncated` rather than quietly showing part of it.
+ */
+const BOARD_MAX = 1000;
+
 /** A thread's four states, in the order a user thinks about them. */
 const THREAD_STATES = ['open', 'replied', 'stalled', 'closed'] as const;
 
@@ -265,65 +365,8 @@ export default withLambda(async (event) => {
 
             const threadIds = page.map((t) => t.id);
 
-            // Per-thread message rollup in ONE query. `left(body, N)` keeps full message bodies out
-            // of the list response entirely — a 40-thread page would otherwise ship every word ever
-            // exchanged, and the list only ever renders a one-line preview.
-            const msgs = threadIds.length ? await db
-                .select({
-                    leadThreadId: leadMessages.leadThreadId,
-                    direction: leadMessages.direction,
-                    classification: leadMessages.classification,
-                    sentiment: leadMessages.sentiment,
-                    occurredAt: leadMessages.occurredAt,
-                    excerpt: sql<string>`left(${leadMessages.body}, ${EXCERPT_CHARS})`,
-                })
-                .from(leadMessages)
-                .where(and(
-                    eq(leadMessages.organisationId, orgId),
-                    inArray(leadMessages.leadThreadId, threadIds),
-                ))
-                .orderBy(leadMessages.leadThreadId, leadMessages.occurredAt) : [];
-
-            const rollup = new Map<number, {
-                messageCount: number; inboundCount: number;
-                lastExcerpt: string; lastDirection: string | null;
-                classification: string | null; sentiment: string | null;
-            }>();
-            for (const m of msgs) {
-                const cur = rollup.get(m.leadThreadId) ?? {
-                    messageCount: 0, inboundCount: 0, lastExcerpt: '', lastDirection: null,
-                    classification: null, sentiment: null,
-                };
-                cur.messageCount += 1;
-                if (m.direction === 'inbound') {
-                    cur.inboundCount += 1;
-                    // Latest inbound classification wins — it's what the thread means NOW, not what
-                    // the first reply happened to say.
-                    cur.classification = m.classification ?? cur.classification;
-                    cur.sentiment = m.sentiment ?? cur.sentiment;
-                }
-                // Rows arrive ordered by occurredAt, so the final write is the newest message.
-                cur.lastExcerpt = m.excerpt ?? '';
-                cur.lastDirection = m.direction;
-                rollup.set(m.leadThreadId, cur);
-            }
-
-            // Cadence state per thread. sequence_enrolments is unique on lead_thread_id, so this is
-            // at most one row each.
-            const enrolments = threadIds.length ? await db
-                .select({
-                    leadThreadId: sequenceEnrolments.leadThreadId,
-                    state: sequenceEnrolments.state,
-                    haltReason: sequenceEnrolments.haltReason,
-                    lastStepSent: sequenceEnrolments.lastStepSent,
-                    nextSendAt: sequenceEnrolments.nextSendAt,
-                })
-                .from(sequenceEnrolments)
-                .where(and(
-                    eq(sequenceEnrolments.organisationId, orgId),
-                    inArray(sequenceEnrolments.leadThreadId, threadIds),
-                )) : [];
-            const enrolmentByThread = new Map(enrolments.map((e) => [e.leadThreadId, e]));
+            const rollup = await loadThreadRollups(db, orgId, threadIds);
+            const enrolmentByThread = await loadThreadEnrolments(db, orgId, threadIds);
 
             return json(200, {
                 counts,
@@ -354,15 +397,180 @@ export default withLambda(async (event) => {
                         lastInboundAt: t.lastInboundAt?.toISOString() ?? null,
                         updatedAt: t.updatedAt.toISOString(),
                         createdAt: t.createdAt.toISOString(),
-                        sequence: e ? {
-                            state: e.state,
-                            haltReason: e.haltReason,
-                            haltReasonLabel: haltReasonLabel(e.haltReason),
-                            lastStepSent: e.lastStepSent,
-                            nextSendAt: e.nextSendAt?.toISOString() ?? null,
-                        } : null,
+                        sequence: sequenceSummary(e),
                     };
                 }),
+            });
+        }
+
+        // ── board ─────────────────────────────────────────────────────────────
+        // The staged Outreach tab's data: every lead that has been SENT — by the app or marked sent
+        // by hand — plus approved leads still waiting for the user to send them, each with its
+        // outreach phase from src/config/lead-outreach-phase.ts. docs/lead-outreach-restructure-plan.md.
+        //
+        // Two sources, because a sent lead does not always have a thread: "Mark outreach sent" mints
+        // none (lead-generation.ts), and those leads are exactly the ones the app cannot chase, so
+        // leaving them out would hide them. So: this assistant's threads, plus its approved /
+        // scheduled lead records that no thread points at.
+        //
+        // ⚠️ The Review cards (pending_approval) are NOT here — they keep their own source, the
+        // assistant-records ?deliverable=1 slice, whose predicate has one home.
+        if (action === 'board') {
+            const threadRows = await db
+                .select({
+                    id: leadThreads.id,
+                    state: leadThreads.state,
+                    channel: leadThreads.channel,
+                    contactEmail: leadThreads.contactEmail,
+                    lastOutboundAt: leadThreads.lastOutboundAt,
+                    lastInboundAt: leadThreads.lastInboundAt,
+                    updatedAt: leadThreads.updatedAt,
+                    createdAt: leadThreads.createdAt,
+                    assistantRecordId: leadThreads.assistantRecordId,
+                    recordTitle: assistantRecords.title,
+                    recordApprovalStatus: assistantRecords.approvalStatus,
+                    recordScheduledFor: assistantRecords.scheduledFor,
+                    recordData: assistantRecords.data,
+                })
+                .from(leadThreads)
+                .leftJoin(assistantRecords, eq(assistantRecords.id, leadThreads.assistantRecordId))
+                .where(and(
+                    eq(leadThreads.organisationId, orgId),
+                    eq(leadThreads.aiAssistantId, assistantId),
+                ))
+                .orderBy(desc(leadThreads.updatedAt), desc(leadThreads.id))
+                .limit(BOARD_MAX + 1);
+
+            // One row per LEAD. A lead re-approved after its first conversation can carry an older
+            // thread too; the newest one (first, in this order) is the conversation that is live.
+            const seenRecords = new Set<number>();
+            const threads = threadRows.filter((t) => {
+                if (t.assistantRecordId == null) return true;
+                if (seenRecords.has(t.assistantRecordId)) return false;
+                seenRecords.add(t.assistantRecordId);
+                return true;
+            });
+
+            const recordRows = await db
+                .select({
+                    id: assistantRecords.id,
+                    title: assistantRecords.title,
+                    approvalStatus: assistantRecords.approvalStatus,
+                    scheduledFor: assistantRecords.scheduledFor,
+                    data: assistantRecords.data,
+                    updatedAt: assistantRecords.updatedAt,
+                    createdAt: assistantRecords.createdAt,
+                })
+                .from(assistantRecords)
+                .where(and(
+                    eq(assistantRecords.organisationId, orgId),
+                    eq(assistantRecords.aiAssistantId, assistantId),
+                    eq(assistantRecords.recordType, 'lead'),
+                    inArray(assistantRecords.approvalStatus, ['approved', 'scheduled']),
+                ))
+                .orderBy(desc(assistantRecords.updatedAt), desc(assistantRecords.id))
+                .limit(BOARD_MAX + 1);
+            const threadless = recordRows.filter((r) => !seenRecords.has(r.id));
+
+            const threadIds = threads.map((t) => t.id);
+            const rollup = await loadThreadRollups(db, orgId, threadIds);
+            const enrolmentByThread = await loadThreadEnrolments(db, orgId, threadIds);
+
+            // Lifted one key at a time off the record blob, never the blob itself — same restraint as
+            // dealOutcomeOf. These two say how the lead was contacted when there is no thread to ask.
+            const sentOf = (data: unknown) => {
+                const d = (data && typeof data === 'object' && !Array.isArray(data)) ? data as Record<string, unknown> : {};
+                return {
+                    outreachSentAt: typeof d.outreachSentAt === 'string' ? d.outreachSentAt : null,
+                    outreachSentVia: typeof d.outreachSentVia === 'string' ? d.outreachSentVia : null,
+                };
+            };
+
+            const rows = [
+                ...threads.map((t) => {
+                    const r = rollup.get(t.id);
+                    const e = enrolmentByThread.get(t.id);
+                    const phase = leadOutreachPhase({
+                        approvalStatus: t.recordApprovalStatus,
+                        data: t.recordData,
+                        threadState: t.state,
+                        enrolment: e ?? null,
+                    });
+                    return {
+                        key: `t:${t.id}`,
+                        threadId: t.id,
+                        recordId: t.assistantRecordId,
+                        title: t.recordTitle || t.contactEmail || `Thread #${t.id}`,
+                        ...phase,
+                        approvalStatus: t.recordApprovalStatus ?? null,
+                        state: t.state,
+                        channel: t.channel,
+                        contactEmail: t.contactEmail,
+                        ...sentOf(t.recordData),
+                        chaseReminderAt: t.recordScheduledFor?.toISOString() ?? null,
+                        dealOutcome: dealOutcomeOf(t.recordData),
+                        notes: notesOf(t.recordData),
+                        messageCount: r?.messageCount ?? 0,
+                        inboundCount: r?.inboundCount ?? 0,
+                        lastExcerpt: r?.lastExcerpt ?? '',
+                        lastDirection: r?.lastDirection ?? null,
+                        classification: r?.classification ?? null,
+                        sentiment: r?.sentiment ?? null,
+                        lastOutboundAt: t.lastOutboundAt?.toISOString() ?? null,
+                        lastInboundAt: t.lastInboundAt?.toISOString() ?? null,
+                        updatedAt: t.updatedAt.toISOString(),
+                        createdAt: t.createdAt.toISOString(),
+                        sequence: sequenceSummary(e),
+                    };
+                }),
+                ...threadless.map((rec) => ({
+                    key: `r:${rec.id}`,
+                    threadId: null,
+                    recordId: rec.id,
+                    title: rec.title,
+                    ...leadOutreachPhase({ approvalStatus: rec.approvalStatus, data: rec.data, threadState: null, enrolment: null }),
+                    approvalStatus: rec.approvalStatus,
+                    state: null,
+                    channel: null,
+                    contactEmail: null,
+                    ...sentOf(rec.data),
+                    chaseReminderAt: rec.scheduledFor?.toISOString() ?? null,
+                    dealOutcome: dealOutcomeOf(rec.data),
+                    notes: notesOf(rec.data),
+                    messageCount: 0,
+                    inboundCount: 0,
+                    lastExcerpt: '',
+                    lastDirection: null,
+                    classification: null,
+                    sentiment: null,
+                    lastOutboundAt: null,
+                    lastInboundAt: null,
+                    updatedAt: rec.updatedAt.toISOString(),
+                    createdAt: rec.createdAt.toISOString(),
+                    sequence: null,
+                })),
+            ].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
+
+            // Counts over the whole returned set, by phase and by group, so the stage strip and the
+            // groups inside each stage are counted by the same function that placed each row.
+            const counts: { total: number; needsAttention: number; phases: Record<string, number>; groups: Record<string, number> } = {
+                total: rows.length, needsAttention: 0, phases: {}, groups: {},
+            };
+            for (const row of rows) {
+                counts.phases[row.phase] = (counts.phases[row.phase] ?? 0) + 1;
+                counts.groups[row.group] = (counts.groups[row.group] ?? 0) + 1;
+                if (row.needsAttention) counts.needsAttention += 1;
+            }
+
+            // How many follow-ups the plan sends, for "Chaser 2 of 3". Read-only (previewFollowUps
+            // provisions nothing); null when it cannot be read, and 0 when chasing is switched off.
+            const plan = await previewFollowUps(db, assistantId);
+
+            return json(200, {
+                rows,
+                counts,
+                plan: { steps: plan ? (plan.enabled ? plan.steps.length : 0) : null },
+                truncated: threadRows.length > BOARD_MAX || recordRows.length > BOARD_MAX,
             });
         }
 

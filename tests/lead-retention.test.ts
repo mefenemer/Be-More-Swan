@@ -44,7 +44,6 @@ const LEADGEN = read('netlify/functions/lead-generation.ts');
 const HUB = read('src/components/assistant-data-hub.js');
 const DETAIL = read('assistants.js');
 const REGISTRY = read('src/components/assistant-dashboard-registry.js');
-const THREADS = read('src/components/assistant-lead-threads.js');
 const INBOX = read('src/components/assistant-signal-inbox.js');
 const GENERATED = read('src/generated/platform-constants.js');
 const TOML = read('netlify.toml');
@@ -263,19 +262,20 @@ check('the on-demand path reaches leads the worker never could', () => {
         'the domain must fall back to the record itself, or imported leads stay unreachable');
 });
 
-console.log('\n──── 6. one count format across the four tabs ────');
+console.log('\n──── 6. one count format across the three tabs ────');
 
-check('all four tabs print their count through the shared formatter', () => {
+// Three since 2026-10-27: Conversations is now stages of the Outreach tab, whose stage strip carries
+// its own counts (assistant-lead-outreach.js).
+check('all three tabs print their count through the shared formatter', () => {
     assert.match(REGISTRY, /function setTabCount/, 'the shared tab-count formatter is gone');
     for (const [name, src, id] of [
         ['Searches', INBOX, 'signals-tab-label'],
         ['Enrichment', HUB, 'datahub-tab-label'],
-        ['Conversations', THREADS, 'conversations-tab-label'],
         ['Outreach', DETAIL, 'review-queue-tab-label'],
     ] as Array<[string, string, string]>) {
         assert.ok(src.includes(`setTabCount(\n      '${id}'`) || src.includes(`setTabCount('${id}'`),
             `the ${name} tab no longer formats its count through AssistantDashboardRegistry.setTabCount — `
-            + 'the four tabs drift apart the moment one of them formats its own');
+            + 'the tabs drift apart the moment one of them formats its own');
     }
 });
 

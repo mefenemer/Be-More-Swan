@@ -31,6 +31,7 @@ check('the guess follows what the business already did, then its industry', () =
     assert.deepStrictEqual(inferOffers({ industry: 'Consulting' }), ['services']);
     assert.deepStrictEqual(inferOffers({ industry: 'Retail' }), ['products', 'visits']);
     assert.deepStrictEqual(inferOffers({ industry: 'Food & Beverage' }), ['menu']);
+    assert.deepStrictEqual(inferOffers({ industry: 'Health & Wellbeing' }), ['services', 'bookings']);
     // "bar" must be a word, not "barrister"
     assert.deepStrictEqual(inferOffers({ industry: 'Barristers' }), []);
 });

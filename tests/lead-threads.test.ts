@@ -317,10 +317,20 @@ check('the label is resolved server-side, so the client holds no copy of the voc
 });
 
 check('the thread list ships excerpts, not whole message bodies', () => {
+    // The rollup is one helper shared by `list` and `board`, so the truncation is checked THERE and
+    // both branches are checked to call it rather than reading messages themselves.
+    const helper = readApiText.slice(
+        landmark(readApiText, 'async function loadThreadRollups('),
+        landmark(readApiText, 'async function loadThreadEnrolments('),
+    );
+    assert.ok(helper.includes('left(') && helper.includes('EXCERPT_CHARS'),
+        'the rollup must truncate bodies in SQL — a full page would otherwise ship every word exchanged');
     const listBranch = readApiText.slice(landmark(readApiText, "action === 'list'"), landmark(readApiText, "action === 'get'"));
-    assert.ok(listBranch.includes('left(') && listBranch.includes('EXCERPT_CHARS'),
-        'the list rollup must truncate bodies in SQL — a full page would otherwise ship every word exchanged');
-    assert.ok(!/body: leadMessages\.body/.test(listBranch), 'the list must not select full bodies');
+    assert.ok(!/body: leadMessages\.body/.test(listBranch), 'list/board must not select full bodies');
+    assert.ok(!listBranch.includes('.from(leadMessages)'),
+        'list/board must read messages only through loadThreadRollups');
+    const calls = listBranch.match(/loadThreadRollups\(db, orgId, threadIds\)/g) || [];
+    assert.strictEqual(calls.length, 2, `list and board must both use loadThreadRollups (found ${calls.length})`);
 });
 
 check('the paging cursor sorts on the same keys as the ORDER BY', () => {
@@ -348,11 +358,15 @@ check('the UI escapes every server value it renders', () => {
     }
 });
 
-check('Conversations is registered for the lead role only', () => {
+check('the conversations are a staged Outreach tab, for the lead role only', () => {
+    // The Conversations tab was folded into the Outreach tab's Following up / Replied / Finished
+    // stages (2026-10-27, docs/lead-outreach-restructure-plan.md). No role declares the old tab.
+    assert.equal((registryText.match(/conversationsTab:/g) || []).length, 0,
+        'conversationsTab is retired — its rows are the staged Outreach tab now');
     const leadBlock = registryText.slice(landmark(registryText, 'lead_qualifier: {'));
-    assert.ok(leadBlock.includes('conversationsTab'), 'lead_qualifier must declare conversationsTab');
-    assert.equal((registryText.match(/conversationsTab:/g) || []).length, 1,
-        'only lead_qualifier has lead threads — no other role should show this tab');
+    assert.ok(/staged: true/.test(leadBlock), 'lead_qualifier must declare reviewQueue.staged');
+    assert.equal((registryText.match(/staged: true/g) || []).length, 1,
+        'only lead_qualifier has lead threads — no other role should stage its review queue');
 });
 
 check('every utility class the Conversations UI uses is already compiled into style.css', () => {
@@ -364,7 +378,9 @@ check('every utility class the Conversations UI uses is already compiled into st
     const addAll = (text: string) => {
         for (const raw of text.split(/\s+/)) if (raw) tokens.add(raw);
     };
-    for (const m of conversationsUiText.matchAll(/class="([^"]*)"/g)) {
+    // The staged Outreach strip is part of the same surface now, so its classes are checked too.
+    const outreachUiText = readFileSync(join(root, 'src/components/assistant-lead-outreach.js'), 'utf8');
+    for (const m of (conversationsUiText + outreachUiText).matchAll(/class="([^"]*)"/g)) {
         const attr = m[1];
         // A class attribute in a template literal is part static text, part `${…}` expression.
         // Both halves carry real class names, and skipping the expressions would leave every
@@ -379,7 +395,7 @@ check('every utility class the Conversations UI uses is already compiled into st
     // The chip palettes are class lists held in consts rather than written inline, so the attribute
     // scan above never sees them — they reach the DOM through `${cls}`. Named explicitly because
     // any "does this literal look like classes?" heuristic also matches the data-* selector names.
-    for (const mapName of ['THREAD_CHIP', 'CLASS_CHIP', 'OUTCOME_CHIP']) {
+    for (const mapName of ['CLASS_CHIP', 'OUTCOME_CHIP']) {
         const at = conversationsUiText.indexOf(`const ${mapName} = {`);
         assert.ok(at > -1, `${mapName} not found — update this check if the palettes were renamed`);
         const bodyEnd = landmark(conversationsUiText, '};', at);
@@ -388,7 +404,11 @@ check('every utility class the Conversations UI uses is already compiled into st
 
     assert.ok(tokens.size > 40, `expected a real class list, parsed ${tokens.size}`);
     const escapeSel = (t: string) => t.replace(/([:[\].])/g, '\\$1');
-    const missing = [...tokens].filter((t) => !cssText.includes(escapeSel(t)));
+    // Not utilities: behaviour hooks styled in assistant-detail.html's own <style> block.
+    // `tab-scroller` gives the stage strip the same edge fade as every other tab strip
+    // (assistants.js _syncTabScrollerFade).
+    const HOOK_CLASSES = new Set(['tab-scroller']);
+    const missing = [...tokens].filter((t) => !HOOK_CLASSES.has(t) && !cssText.includes(escapeSel(t)));
     assert.deepEqual(missing, [], `not compiled into style.css: ${missing.join(', ')}`);
 });
 
@@ -579,10 +599,17 @@ check('the API returns the outcome but not the rest of the lead record', () => {
         'lead-threads.ts must lift dealOutcome through a single helper');
     assert.ok(!/recordData: t\.recordData|recordData: thread\.recordData/.test(readApiText),
         'the raw record data blob must never be returned to the browser');
+    // list, get, and board's two row kinds (with a thread / record only).
     const responses = [...readApiText.matchAll(/dealOutcome: dealOutcomeOf\(/g)];
-    assert.strictEqual(responses.length, 2,
-        `both list and get must expose the outcome (found ${responses.length}) — a chip that only `
+    assert.strictEqual(responses.length, 4,
+        `list, get and both board row kinds must expose the outcome (found ${responses.length}) — a chip that only `
         + 'appears once the thread is open cannot answer "which of these are closed out?"');
+    // The blob may go INTO leadOutreachPhase (it reads two keys); it must never be a row field.
+    const boardRows = readApiText
+        .slice(landmark(readApiText, "action === 'board'"), landmark(readApiText, '// ── calendar'))
+        .replace(/leadOutreachPhase\(\{[^}]*\}\)/g, '');
+    assert.ok(!/\bdata: (rec\.data|t\.recordData)\b|\.\.\.(rec\.data|t\.recordData)\b/.test(boardRows),
+        'board must lift single keys off the record, never return its data blob');
 });
 
 void runOneTokenOneAddressChecks().then(() => {

@@ -8,7 +8,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { MENTOR_CARD_TYPES, mentorCardFromUiElement, mentorCardsPromptBlock, proposalKind } from '../src/utils/mentor-cards';
+import { MENTOR_CARD_TYPES, mentorCardFromUiElement, mentorCardsPromptBlock, productUpdateCard, proposalKind } from '../src/utils/mentor-cards';
 
 let passed = 0, total = 0;
 function test(name: string, fn: () => void) {
@@ -56,6 +56,28 @@ test('removing products: only when the user asked, ids only, rebuilt from the wo
     assert.ok(read('src/components/chat-session.js').includes("removeEventListener('mentor:productsRemove', onMentorProductsRemove)"), 'destroy() removes it');
 });
 
+test('changing a product: only when asked, never the price, shows what it replaces (prod 2026-10-27)', () => {
+    assert.ok('error' in (mentorCardFromUiElement({ type: 'mentor_products_update', asked: false, productId: 4, fields: { description: 'x' } }, 50) as object), 'never volunteered');
+    assert.ok('error' in (mentorCardFromUiElement({ type: 'mentor_products_update', asked: true, productId: 0, fields: { description: 'x' } }, 50) as object), 'needs a real id');
+    assert.ok('error' in (mentorCardFromUiElement({ type: 'mentor_products_update', asked: true, productId: 4, fields: { price: '£20' } }, 50) as object), 'price is not an editable field');
+    const c = mentorCardFromUiElement({ type: 'mentor_products_update', asked: true, productId: '9', fields: { description: ' A relaxed workshop. ', kind: 'bundle', price: '£5' } }, 50);
+    assert.ok(c && !('error' in c) && c.type === 'mentor_products_update');
+    assert.deepStrictEqual((c as any).fields, { description: 'A relaxed workshop.' }, 'trimmed; bad kind and price dropped');
+    assert.strictEqual((c as any).productId, 9);
+    assert.strictEqual(proposalKind(c as any), null, 'not a suggestion');
+    const r = productUpdateCard(c as any, { name: 'Create and Make', description: 'Old words', kind: 'service' });
+    assert.ok(!('error' in r));
+    assert.deepStrictEqual((r as any).changes, [{ field: 'description', label: 'What it is', from: 'Old words', to: 'A relaxed workshop.' }]);
+    assert.strictEqual((r as any).productName, 'Create and Make');
+    assert.ok('error' in productUpdateCard(c as any, { name: 'Create and Make', description: 'A relaxed workshop.' }), 'nothing would change');
+    const o = read('netlify/functions/chat-orchestrator.ts');
+    assert.match(o, /m\.type === 'mentor_products_update'\) \{[\s\S]{0,200}resolveProductUpdate\(db, orgId, m\)/, 'the card is rebuilt from the row');
+    assert.match(read('src/utils/mentor-cards.ts'), /eq\(orgProducts\.organisationId, orgId\), eq\(orgProducts\.id, card\.productId\)/, 'this workspace only');
+    const cs = read('src/components/chat-session.js');
+    assert.ok(cs.includes("removeEventListener('mentor:productsUpdate', onMentorProductsUpdate)"), 'destroy() removes it');
+    assert.match(read('src/components/mentor-apply.js'), /org-products', \{ id: Number\(id\), \.\.\.\(fields \|\| \{\}\) \}, 'PATCH'/, 'the tab\'s own PATCH');
+});
+
 test('quiet mode and support cards are the user\'s own requests: no why needed, not counted as suggestions', () => {
     const q = mentorCardFromUiElement({ type: 'mentor_quiet_mode', on: true }, 50);
     assert.deepStrictEqual(q, { type: 'mentor_quiet_mode', summary: '', on: true, assistantId: 50 });
@@ -88,7 +110,7 @@ test('the Mentor route is structured and its cards are checked before any other 
     const firstOther = o.indexOf('settingsProposalFromUiElement(uiElement)');
     assert.ok(parsed > 0 && check > parsed && check < firstOther, 'Mentor check must run first');
     // Any other route's card shape is dropped — except a goal card, which the goal block checks (chat-goals.ts).
-    assert.match(o.slice(check, check + 9000), /\} else if \(!goalProposalFromUiElement\(uiElement\)\) \{\n\s+\/\/ Never another route's card shape[^]*?uiElement = null;/);
+    assert.match(o.slice(check, check + 11000), /\} else if \(!goalProposalFromUiElement\(uiElement\)\) \{\n\s+\/\/ Never another route's card shape[^]*?uiElement = null;/);
 });
 
 test('every card has a renderer and a click handler that calls the screen\'s own endpoint (§14)', () => {

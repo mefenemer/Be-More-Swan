@@ -115,30 +115,26 @@ check('blog_writer has a route of its own — not defaultRoute', () => {
     assert.ok(route.includes('parseResponse: parseStructuredReply'), 'the route stopped parsing a structured envelope');
 });
 
-check('the route keeps enough tokens for a whole article plus the envelope', () => {
-    // A blog body is an order of magnitude longer than a caption, and the social route has
-    // already shown what truncation costs: the JSON never parses and the finished post is
-    // thrown away in front of the user.
+check('the route keeps enough tokens for the reply plus a thinking model', () => {
+    // Thinking shares this ceiling with the answer; truncation means the JSON never parses.
     const maxTokens = route.match(/maxTokens:\s*(\d+)/);
     assert.ok(maxTokens, 'blog route has no maxTokens');
     assert.ok(Number(maxTokens[1]) >= 4096, `blog maxTokens fell back to ${maxTokens[1]}`);
 });
 
-check('the prompt tells the model the draft is NOT saved by emitting it', () => {
-    assert.ok(/does NOT save anything/.test(route), 'the "not saved yet" contract left the prompt');
-    assert.ok(/Save this draft/.test(route) && /Discard/.test(route), 'the prompt no longer names the two buttons');
+check('a new article is a background card, never written in the reply (the HTTP 504, 2026-10-27)', () => {
+    // A whole article inside a 26s chat request timed out on a thinking model ("Write a blog from
+    // this" on the Inspo tab). Every new article — one or several — is a blog_batch_proposal.
+    assert.ok(/you do NOT write it in your reply/.test(route), 'the prompt no longer forbids writing the article in-turn');
+    assert.ok(/ONE topic per article/.test(route), 'one article is no longer a one-topic card');
+    assert.ok(route.includes('"type": "blog_batch_proposal"'), 'the contract no longer asks for the batch card');
+    assert.ok(!route.includes('"type": "blog_post_draft"'), 'the prompt asks for an in-turn article again');
+    assert.ok(!route.includes('"bodyMarkdown"'), 'the prompt asks for an article body again');
 });
 
-check('the prompt still bans the false save claim and the copy-it-out instruction', () => {
-    assert.ok(/NEVER say the post has been saved/.test(route), 'the ban on claiming a save is gone');
-    assert.ok(/Never tell them to copy the text out/.test(route), 'the ban on "copy this into Blog Studio" is gone');
-});
-
-check('the wire shape the prompt asks for is the one the normaliser accepts', () => {
-    assert.ok(route.includes(`"type": "${BLOG_POST_DRAFT_TYPE}"`), 'the prompt and BLOG_POST_DRAFT_TYPE disagree');
-    for (const field of ['bodyMarkdown', 'title', 'tags']) {
-        assert.ok(route.includes(`"${field}"`), `the prompt stopped asking for ${field}`);
-    }
+check('the prompt still bans claiming the article exists and the copy-it-out instruction', () => {
+    assert.ok(/NEVER say an article is written, drafted, saved, ready or underway/.test(route), 'the ban on claiming a draft is gone');
+    assert.ok(/never tell them to copy text out/.test(route), 'the ban on "copy this into Blog Studio" is gone');
 });
 
 check('the turn normalises the draft before persisting the transcript', () => {
@@ -160,7 +156,7 @@ check('the turn normalises the draft before persisting the transcript', () => {
 check('an unbacked blog claim is still replaced', () => {
     assert.ok(
         // A turn carrying an action card is exempt: "it's booked for Friday" describes the card.
-        /route === ROUTES\.blog_writer && !blogDraft && !blogAction && !profileCard && replyClaimsPostSaved\(content\)/.test(orchestrator),
+        /route === ROUTES\.blog_writer && !blogDraft && !blogBatch && !blogAction && !profileCard && replyClaimsPostSaved\(content\)/.test(orchestrator),
         'the blog claim guard is gone or no longer scoped to a draftless turn',
     );
     assert.ok(orchestrator.includes("honestDraftReply('blog_no_draft')"), 'the false reply is no longer replaced');

@@ -67,9 +67,9 @@ export function cleanOffers(v: unknown): OfferKind[] | null {
 // datalist). A guess only — the owner's answer always wins.
 const INDUSTRY_WORDS: Record<OfferKind, RegExp> = {
     products: /\b(retail|e-?commerce|fashion|apparel|manufactur\w*|shop|store|bakery|brewery|winery|agricultur\w*|crafts?)\b/i,
-    services: /\b(consult\w*|agency|agencies|marketing|advertising|legal|law|accounting|accountan\w*|financ\w*|architecture|design|construction|trades?|recruit\w*|hr|coach\w*|creative|media|education|training|healthcare|beauty|wellness|insurance|property|real estate|logistics|transport|automotive|events|photograph\w*|cleaning|it services)\b/i,
+    services: /\b(consult\w*|agency|agencies|marketing|advertising|legal|law|accounting|accountan\w*|financ\w*|architecture|design|construction|trades?|recruit\w*|hr|coach\w*|creative|media|education|training|healthcare|health|wellbeing|beauty|wellness|insurance|property|real estate|logistics|transport|automotive|events|photograph\w*|cleaning|it services)\b/i,
     subscriptions: /\b(saas|software|subscriptions?|memberships?|telecom\w*|apps?)\b/i,
-    bookings: /\b(beauty|wellness|salon|barber|spa|fitness|sport|gym|yoga|pilates|clinic|healthcare|therap\w*|physio|dental|massage|tutor\w*|coach\w*|restaurant|hospitality|events?|travel|tourism)\b/i,
+    bookings: /\b(beauty|wellness|wellbeing|salon|barber|spa|fitness|sport|gym|yoga|pilates|clinic|healthcare|therap\w*|physio|dental|massage|tutor\w*|coach\w*|restaurant|hospitality|events?|travel|tourism)\b/i,
     visits: /\b(retail|shop|store|hospitality|restaurant|caf[eé]|coffee|bar|pub|salon|barber|spa|gym|fitness|clinic|dental|venue|hotel|bakery|deli|garden centre|showroom)\b/i,
     menu: /\b(food|beverage|drink|hospitality|restaurant|caf[eé]|coffee|bakery|bar|pub|catering|takeaway|deli|brewery|winery)\b/i,
 };

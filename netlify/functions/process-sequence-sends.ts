@@ -51,6 +51,7 @@ import { checkSuppression } from '../../src/utils/suppression';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { OUTREACH_SUBJECT_RULES } from '../../src/constants/outreach-subject';
 import { followUpLinkTarget, outreachFollowUpBlock, withOfferLink } from '../../src/config/outreach-offer';
+import { LAST_FOLLOW_UP_RULE } from '../../src/config/follow-up-plan';
 import { offerLinkForThread } from '../../src/utils/outreach-offer';
 import { evaluateDoNotContact } from '../../src/config/do-not-contact';
 import {
@@ -186,6 +187,9 @@ async function draftFollowUp(
     originalSubject: string | null,
     /** The code adds the offer's link after the body (src/config/outreach-offer.ts) — the prompt introduces it. */
     withOfferLinkLine = false,
+    /** Where the step sits in the plan (1-based), and whether it is the last — see the caller.
+     *  `preview` only relabels the usage log: previewFollowUp drafts the same email and sends nothing. */
+    place: { position: number; isLast: boolean; preview?: boolean } = { position: step.stepNumber, isLast: false },
 ): Promise<{ subject: string; body: string } | null> {
     const history = await threadHistory(db, enrolment.lead_thread_id, 6);
 
@@ -206,11 +210,11 @@ ${senderIdentityBlock(sender)}
 
 ${SENDER_IDENTITY_RULE}
 
-This is follow-up number ${step.stepNumber} in an outreach sequence to a prospect who has NOT replied.
+This is follow-up number ${place.position} in an outreach sequence to a prospect who has NOT replied.
 
 What this specific follow-up must do:
 ${step.bodyPrompt}
-
+${place.isLast ? `\n${LAST_FOLLOW_UP_RULE}\n` : ''}
 Hard rules:
 - The prospect has not answered. Do not thank them for their reply, do not reference a conversation that did not happen, and do not invent facts about their business that are not in the transcript below.
 - No placeholders, no square brackets, no "Dear [Name]".
@@ -247,7 +251,7 @@ Otherwise return STRICT JSON only (no markdown, no prose outside the JSON):
         model: MODEL,
         inputTokens: resp.usage.input_tokens,
         outputTokens: resp.usage.output_tokens,
-        sessionId: `sequence-send:${enrolment.ai_assistant_id}:step${step.stepNumber}`,
+        sessionId: `${place.preview ? 'sequence-preview' : 'sequence-send'}:${enrolment.ai_assistant_id}:step${step.stepNumber}`,
         dataCategories: ['business_context'],
     });
 
@@ -272,6 +276,59 @@ Otherwise return STRICT JSON only (no markdown, no prose outside the JSON):
         : (originalSubject ? `Re: ${originalSubject}`.slice(0, 300) : 'Following up');
 
     return { subject, body };
+}
+
+// ── Preview ──────────────────────────────────────────────────────────────────
+
+/**
+ * What a follow-up would say to one lead, written exactly as the worker would write it, and SENT TO
+ * NOBODY. docs/lead-outreach-restructure-plan.md, Phase 4 — the Follow-up plan panel's "Preview",
+ * the "Preview the next one" button on a conversation, and the chat's follow_up_preview card, all
+ * through lead-generation.ts `preview_follow_up`.
+ *
+ * Same prompt, same transcript, same sender identity and voice: draftFollowUp, not a copy of it —
+ * a preview built from a second prompt would show the user an email the worker never writes.
+ * What is deliberately NOT the same:
+ *   • no link is minted — a tracked offer link is per conversation, and a preview must not create
+ *     one; where the real email carries it, the preview shows a placeholder line;
+ *   • no footer — it is boilerplate added at send time, and says so in the result;
+ *   • nothing is written: no message, no enrolment change, no ledger row, no task. The caller meters
+ *     it as an editing helper (fair use), like the post editor's rewrite buttons.
+ *
+ * The caller has already checked the thread belongs to this organisation and assistant.
+ * Null = the model declined or returned nothing usable.
+ */
+export async function previewFollowUp(db: Db, input: {
+    organisationId: number;
+    aiAssistantId: number;
+    leadThreadId: number;
+    brief: string;
+    position: number;
+    isLast: boolean;
+}): Promise<{ subject: string; body: string; withOfferLink: boolean } | null> {
+    const assistant = await loadAssistant(db, input.aiAssistantId);
+    if (!assistant) return null;
+    const [opener] = await db
+        .select({ subject: leadMessages.subject })
+        .from(leadMessages)
+        .where(and(eq(leadMessages.leadThreadId, input.leadThreadId), eq(leadMessages.direction, 'outbound')))
+        .orderBy(leadMessages.occurredAt)
+        .limit(1);
+    const sender = await loadSenderIdentity(db, input.organisationId, input.aiAssistantId);
+    const withLink = !!(followUpLinkTarget(sender.outreachOffer, input.position) && sender.outreachOffer);
+    // draftFollowUp reads only these fields of the row (the transcript and the usage log).
+    const row = {
+        organisation_id: input.organisationId, ai_assistant_id: input.aiAssistantId, lead_thread_id: input.leadThreadId,
+    } as ClaimedRow;
+    const step = { id: 0, stepNumber: input.position, delayDays: 0, bodyPrompt: input.brief };
+    const draft = await draftFollowUp(db, row, assistant, sender, step, opener?.subject ?? null, withLink,
+        { position: input.position, isLast: input.isLast, preview: true });
+    if (!draft) return null;
+    return {
+        subject: draft.subject,
+        body: appendSignature(withLink ? `${draft.body.trimEnd()}\n\n[Your offer’s link goes here — added when it sends]` : draft.body, sender.signature || ''),
+        withOfferLink: withLink,
+    };
 }
 
 // ── One enrolment ────────────────────────────────────────────────────────────
@@ -330,8 +387,13 @@ async function processEnrolment(
     }
 
     const step = steps.find((s) => s.stepNumber > row.last_step_sent);
+    // Where this step sits in the plan, 1-based. The plan is editable (src/config/follow-up-plan.ts):
+    // a removed step keeps its number switched off and a new one takes the next number up, so step
+    // NUMBERS have gaps and can pass 5 while the plan itself is three long. Everything that means
+    // "the first follow-up" or "the last one" or "how many" reads the POSITION, never the number.
+    const position = step ? steps.indexOf(step) + 1 : 0;
     // (5) Hard per-enrolment ceiling, independent of what the steps table holds.
-    if (!step || step.stepNumber > MAX_STEPS_PER_ENROLMENT) {
+    if (!step || position > MAX_STEPS_PER_ENROLMENT) {
         await advanceEnrolment(db, ref, row.last_step_sent, steps);
         return 'halted';
     }
@@ -430,13 +492,14 @@ async function processEnrolment(
     // The outreach offer's link, on the first chaser only (src/config/outreach-offer.ts): a gift form's
     // page with this conversation's signed ref, so a sign-up through it credits the lead and stops the
     // chasers; or the intro offer's own address. Null = this step carries no link.
-    const offerLink = followUpLinkTarget(sender.outreachOffer, step.stepNumber) && sender.outreachOffer
+    const offerLink = followUpLinkTarget(sender.outreachOffer, position) && sender.outreachOffer
         ? await offerLinkForThread(db, sender.outreachOffer, row.lead_thread_id)
         : null;
 
     let draft: { subject: string; body: string } | null;
     try {
-        draft = await draftFollowUp(db, row, assistant, sender, step, opener?.subject ?? null, !!offerLink);
+        draft = await draftFollowUp(db, row, assistant, sender, step, opener?.subject ?? null, !!offerLink,
+            { position, isLast: position === steps.length });
     } catch (err) {
         return await handleSendFailure(db, ref, row, err, 'draft failed');
     }

@@ -112,9 +112,13 @@ check('the notification does not carry the prospect’s address', () => {
 
 check('the notification links to the conversation, not to the dashboard', () => {
     const handler = NOTIFICATIONS_UI.slice(landmark(NOTIFICATIONS_UI, "notif.type === 'lead_reply_received'"));
-    assert.match(handler.slice(0, 600), /_assistantDetailInitialTab = 'conversations'/,
+    // The reply lives on one screen and no global page can show it: the Outreach tab's Replied stage
+    // (it was the Conversations tab until 2026-10-27).
+    assert.match(handler.slice(0, 700), /_assistantDetailInitialTab = 'review-queue'/,
         'the reply lives on one screen and no global page can show it');
-    assert.match(handler.slice(0, 600), /threadId/, 'and it should open the right thread');
+    assert.match(handler.slice(0, 700), /_assistantDetailInitialRqStatus = 'replied'/,
+        'it should open the Replied stage');
+    assert.match(handler.slice(0, 700), /threadId/, 'and it should open the right thread');
 });
 
 console.log('\n──── 2. the human can answer ────');

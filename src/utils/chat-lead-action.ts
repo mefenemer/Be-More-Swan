@@ -6,7 +6,7 @@
 // ── Why ──────────────────────────────────────────────────────────────────────────────────────────
 // Every capability is meant to be reachable from the GUI and from chat, through the same server
 // action. The Lead Generation chat could propose searches and count its leads, but every decision on
-// a lead — the ones the Enrichment, Outreach and Conversations tabs exist for — was page-only.
+// a lead — the ones the All leads and Outreach tabs exist for — was page-only.
 //
 // ── How ──────────────────────────────────────────────────────────────────────────────────────────
 // The model never acts. It proposes a `lead_action_proposal` naming a lead by the "#id" its list
@@ -215,8 +215,8 @@ function rowBlock(req: LeadActionRequest, rec: LeadRow): string | null {
         return null;
     }
     if (req.action === 'move_to_outreach') {
-        if (status === 'approved' || status === 'scheduled') return sent ? 'Its outreach email has already gone.' : 'It’s already through Outreach — approved and waiting in the "Approved" column.';
-        if (status === 'pending_approval' && isInOutreachReview(data)) return 'It’s already in Outreach, waiting in the Review column.';
+        if (status === 'approved' || status === 'scheduled') return sent ? 'Its outreach email has already gone.' : 'It’s already approved — waiting under Outreach › To approve › "Approved — send it yourself".';
+        if (status === 'pending_approval' && isInOutreachReview(data)) return 'It’s already in Outreach, waiting under To approve.';
         return null;
     }
     if (req.action === 'reject') {
@@ -386,7 +386,7 @@ async function resolveBulkSend(
     if (!items.length) {
         card.blocked = pool.length
             ? 'None of these emails can be sent from here — the reasons are listed. Each can be dealt with on the Outreach tab.'
-            : 'There are no emails waiting in the Outreach tab’s Review column.';
+            : 'There are no emails waiting in the Outreach tab’s To approve stage.';
         return card;
     }
     await addSendContext(db, organisationId, aiAssistantId, card);

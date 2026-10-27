@@ -8,6 +8,7 @@
  *   mentor_business_profile → organisation-profile.ts POST, read-merge-write of only the profile fields
  *   mentor_products         → org-products.ts POST, one per product
  *   mentor_products_remove  → org-products.ts DELETE ?id=, one per product, as the tab's Delete does
+ *   mentor_products_update  → org-products.ts PATCH { id, ...fields }, as the tab's Save does
  *   mentor_quiet_mode       → update-assistant-context.ts PUT patchContext { quietMode }  (its own card,
  *                             setup-field.ts OWN_CARD_PATCH_KEYS)
  *   mentor_business_stage   → update-assistant-context.ts PUT patchContext { businessStage }
@@ -81,6 +82,12 @@
       if (removed) document.dispatchEvent(new CustomEvent('bizinfo:productsChanged'));
       throw new Error(removed ? `${removed} removed, then: ${err.message}` : err.message);
     }
+    document.dispatchEvent(new CustomEvent('bizinfo:productsChanged'));
+  }
+
+  // Products & Services: org-products.ts PATCH, only the card's fields, exactly as the tab's Save does.
+  async function updateProduct(id, fields) {
+    await post('/.netlify/functions/org-products', { id: Number(id), ...(fields || {}) }, 'PATCH');
     document.dispatchEvent(new CustomEvent('bizinfo:productsChanged'));
   }
 
@@ -166,5 +173,5 @@
     throw new Error('This suggestion has nothing to apply here.');
   }
 
-  window.MentorApply = { businessProfile, products, removeProducts, setupAnswer, support, decide, applyCard, strategySave, strategyApprove, strategyDraft, research, jobStatus, commitmentsAdd, commitmentClose, draftRequest, reviewNow };
+  window.MentorApply = { businessProfile, products, removeProducts, updateProduct, setupAnswer, support, decide, applyCard, strategySave, strategyApprove, strategyDraft, research, jobStatus, commitmentsAdd, commitmentClose, draftRequest, reviewNow };
 })();

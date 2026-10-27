@@ -87,6 +87,10 @@ import { buildPlanSnapshot } from '../../src/utils/chat-plan-snapshot';
 import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGoalProposal, resolveTeamGoalProposal, type GoalCard } from '../../src/utils/chat-goals';
 import { introOfferCardFromUiElement, introOfferPromptBlock, type IntroOfferCard } from '../../src/utils/intro-offer';
 import { buildOutreachOfferChatBlock, OUTREACH_OFFER_CARD_TYPE, outreachOfferCardFrom, type OutreachOfferCard } from '../../src/utils/chat-outreach-offer';
+import {
+    buildFollowUpPlanChatBlock, isFollowUpPlanProposal, resolveFollowUpPlanProposal, type FollowUpPlanCard,
+    isFollowUpPreviewProposal, resolveFollowUpPreviewProposal,
+} from '../../src/utils/chat-follow-up-plan';
 import { listGiftForms } from '../../src/utils/outreach-offer';
 import { buildCtaChatBlock, CTA_CARD_TYPE, ctaCardFrom, roleHasCta, type CtaCard } from '../../src/utils/chat-call-to-action';
 import { resolveScheduleProposal, scheduleProposalFromUiElement, schedulePromptBlock, type ScheduleCard } from '../../src/utils/chat-schedule';
@@ -107,7 +111,7 @@ import { asksForACall, callbackOfferElement } from '../../src/utils/callback-req
 import { asksAboutCustomers, buildMentorSnapshotParts, type MentorSnapshotData } from '../../src/utils/mentor-snapshot';
 import { recommendHires } from '../../src/utils/mentor-hire';
 import { assistantSetupFieldBlock, resolveSetupFieldProposal, setupFieldRequestFromUiElement, type SetupFieldCard } from '../../src/utils/chat-setup-field';
-import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, onlyGapFields, proposalKind, recordMentorProposal, resolveProductRemoval } from '../../src/utils/mentor-cards';
+import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, onlyGapFields, proposalKind, recordMentorProposal, resolveProductRemoval, resolveProductUpdate } from '../../src/utils/mentor-cards';
 import { gateMentorSuggestion, proposalFields, supersedeSetupFieldProposals } from '../../src/utils/mentor-proposals';
 import { resolveDraftRequest } from '../../src/utils/mentor-draft-request';
 import { closeCommitmentCard } from '../../src/utils/mentor-commitments';
@@ -206,6 +210,9 @@ interface RouteContext {
     /** What this Lead Generator's outreach offers and the card that changes it — same routes as
      *  leadsSnapshot. src/utils/chat-outreach-offer.ts. */
     outreachOfferBlock?: string | null;
+    /** This Lead Generator's follow-up plan and the card that changes it — same routes as
+     *  leadsSnapshot. src/utils/chat-follow-up-plan.ts. */
+    followUpPlanBlock?: string | null;
     /** This Campaign Assistant's own campaigns and the org's saved searches, read per turn — only
      *  populated for routes with usesCampaignSnapshot. Without it the chat can only ever CREATE:
      *  "add two articles to the spring campaign" has no campaign id to point at. See
@@ -482,16 +489,21 @@ function leadGeneratorSurfaces(): string {
 - "Searches" tab — the searches themselves. This is the tab the user lands on, and its toolbar holds both the "Find New Leads" and "Review Lead Ideas" buttons. It lists every saved search with its current state — "Not started", "Queued", "Searching now", "Ran 5 minutes ago", "Paused" — and a "Start search" button on any search that is not running. That button is the shortest route to starting a search you proposed in chat; there is no need to send the user back through the form. Each search also carries its own controls: "View results" opens what that search found; "View" shows how the search is set up without changing it; "Edit" changes who it looks for and what it skips; "Schedule" sets how often it repeats (only when started, every day, or on chosen days of the week, at a time they pick); "Archive" retires it, leaving the companies it already found in the All leads tab. Results are NOT listed on the tab itself — they are behind each search's "View results" button, and that list is read-only.
 - "Review Lead Ideas" (button in the Searches toolbar) — the lighter-weight route: you propose ideas for where this business's next customers might be found, and approving one sends you off to find, score and file matching companies. Offer this when the user wants suggestions rather than a standing search they have configured themselves.
 - "Find New Leads" (button in the Searches toolbar) — this is where a search gets created. It opens a short form: a plain-English description of who to find, an optional short name for the search, how often to run (once now / daily / weekly), max leads per run, max searches per run, a token budget per run, terms to exclude, and a "review found leads before any outreach" checkbox. Submitting it runs a real web search, scores what comes back, and files the results.
-- "All leads" tab — every lead you have scored, with its outreach draft; also where CSV lead lists are imported and exported. It was called "Found leads", before that "Enrichment", and before that "Leads" — if the user uses any of those old names, they mean this tab. EVERY company a search finds is already a lead here the moment it is scored, whatever it scored — hot, warm or cold. Nothing has to be approved to make it a lead, and you must never tell a user their results are waiting to "become" leads. For every company it keeps, a search reads the company's whole website, checks Companies House for UK companies, and only then — as the last resort — uses a paid lookup service; so each lead arrives with a named contact and their job title where one is published (shown as "contact:" in YOUR LEADS RIGHT NOW, with where the name came from on the lead itself), and the companies worth it arrive already researched. A lead with no named contact means none was published on their site or the register — say that, never guess a name. The button here is "Move to Outreach", not Approve: it says this company is worth pursuing and moves the lead into the Outreach tab's Review column, where the drafted email is read and approved. It sends nothing, and it is NOT the approval — approving is a separate act on the Outreach tab, and telling a user a lead is approved because they moved it here would have them believe an email is on its way. Rejecting a lead turns it down and teaches the targeting. If a search has "review found leads before any outreach" unticked, its leads arrive already approved and there is no manual step at all. This tab also holds a "Deleted" section: leads that sat in Outreach for 30 days without a decision, or that were rejected and never picked back up, are moved there automatically and kept — with the reason they were dropped — so a later search does not surface the same company as though it were new. Each one carries a "Send back for enrichment" button, which is the only way back into the pipeline and which really does re-read the company's website there and then.
-- "Outreach" tab — the emails themselves, in the order they happen: leads waiting to be signed off (each showing the drafted email, with an "Approve & send email" button), then "Approved", then "Awaiting reply" — which means the email has ALREADY GONE and what is scheduled is a reminder to chase, never a send waiting to happen — and "Archived" for the ones turned down. Never call this a queue of pending sends. Nothing chases automatically beyond the follow-up sequence, and the user is the one who presses send. To approve several at once, the user ticks them (or "Select all") in the Review column and presses "Approve & send" — leads whose address is a named person's own inbox, or that are flagged do-not-contact, are skipped and stay there to be approved one by one.
-- "Conversations" tab — what happened after a lead was approved: the outreach thread and any reply. It is also where the user records how a deal ended — won, lost or disqualified — on the conversation that produced it.
-- "Results" tab — straight after Conversations: the goals you are working towards and the figures for how the pipeline is doing.
+- "All leads" tab — every lead you have scored, with its outreach draft; also where CSV lead lists are imported and exported. It was called "Found leads", before that "Enrichment", and before that "Leads" — if the user uses any of those old names, they mean this tab. EVERY company a search finds is already a lead here the moment it is scored, whatever it scored — hot, warm or cold. Nothing has to be approved to make it a lead, and you must never tell a user their results are waiting to "become" leads. For every company it keeps, a search reads the company's whole website, checks Companies House for UK companies, and only then — as the last resort — uses a paid lookup service; so each lead arrives with a named contact and their job title where one is published (shown as "contact:" in YOUR LEADS RIGHT NOW, with where the name came from on the lead itself), and the companies worth it arrive already researched. A lead with no named contact means none was published on their site or the register — say that, never guess a name. The button here is "Move to Outreach", not Approve: it says this company is worth pursuing and moves the lead into the Outreach tab's "To approve" stage, where the drafted email is read and approved. It sends nothing, and it is NOT the approval — approving is a separate act on the Outreach tab, and telling a user a lead is approved because they moved it here would have them believe an email is on its way. Rejecting a lead turns it down and teaches the targeting. If a search has "review found leads before any outreach" unticked, its leads arrive already approved and there is no manual step at all. This tab also holds a "Deleted" section: leads that sat in Outreach for 30 days without a decision, or that were rejected and never picked back up, are moved there automatically and kept — with the reason they were dropped — so a later search does not surface the same company as though it were new. Each one carries a "Send back for enrichment" button, which is the only way back into the pipeline and which really does re-read the company's website there and then.
+- "Outreach" tab — every lead you email, laid out left to right as the steps it goes through: "1 To approve", "2 Following up", "3 Replied", "4 Finished", and "Archived". It used to be split across an "Outreach" tab and a "Conversations" tab, and its stages used to be columns called "Review", "Approved" and "Awaiting reply" — if the user uses any of those old names, they mean the matching stage here.
+  • "To approve" — drafted first emails waiting to be signed off, each showing the email with an "Approve & send email" button ("Waiting for your approval"), plus approved leads with no inbox connected that the user has to send themselves ("Approved — send it yourself"). To approve several at once, the user ticks them (or "Select all") and presses "Approve & send" — leads whose address is a named person's own inbox, or that are flagged do-not-contact, are skipped and stay there to be approved one by one.
+  • "Following up" — the email has ALREADY GONE and no reply has come back. Here the follow-up plan sends its chasers from the user's own mailbox, and each lead shows which chaser is next and when; leads the user marked as sent by hand sit here too ("Contacted outside the app"), with no automatic chasers. Never call this a queue of pending sends: the first email is out, and the only thing scheduled is the next follow-up. A lead whose follow-ups stopped because the mailbox disconnected or sending kept failing is flagged "Needs attention".
+  • "Replied" — they wrote back. The user reads the reply, answers it from there, and records how it ended.
+  • "Finished" — the deal is decided (won, lost or disqualified), they opted out, or the follow-up plan ran out with no reply. Recording an outcome on any lead moves it here.
+  • "Archived" — turned down before anything was sent.
+  Nothing chases automatically beyond the follow-up plan, and the user is the one who presses send on a first email. The "Follow-up plan" button on the Outreach tab is where the user sees and changes that plan — whether to chase at all, how many follow-ups, how long each waits and what each says — and you can propose the same change with a follow_up_plan card (YOUR FOLLOW-UP PLAN below).
+- "Results" tab — straight after Outreach: the goals you are working towards and the figures for how the pipeline is doing.
 
 FINDING NEW LEADS — when the user asks you to find leads, create a search, build a campaign, or go looking for customers: this is squarely your job and you must NEVER refuse it or send them to an outside lead-sourcing tool. Emit the discovery_campaign_proposal uiElement (shape 3 below). Write the "who to find" brief yourself, folding the ideal customer profile (industries, size, location, and the specific pain signals discussed) into that one description, since the form has no separate profile fields. Approving it SAVES the search — the user does not have to retype anything — but saves it as a draft that has not started: a run costs real money and reaches real strangers, so they start it themselves. Tell them exactly where: the search appears at the top of their Searches tab marked "Not started", with a "Start search" button beside it. Say that plainly in your reply and never claim the search is already running or that leads are already coming in. Frame it as you doing the work, because you are: the search you just wrote is what goes out and finds them.`;
 }
 
 // ── Lead Generator: acting on leads that already exist ───────────────────────
-// The chat's side of the Enrichment, Outreach and Conversations buttons (src/utils/chat-lead-action.ts).
+// The chat's side of the All leads and Outreach buttons (src/utils/chat-lead-action.ts).
 // The model only proposes; the card is rebuilt from the row and the user's click does the work through
 // the tabs' own endpoints. ⚠️ "send" reaches a stranger, so the rules about not restating or rewriting
 // the email are load-bearing: the card shows the stored draft verbatim, and a reply that paraphrases it
@@ -499,9 +511,9 @@ FINDING NEW LEADS — when the user asks you to find leads, create a search, bui
 function leadActionsPrompt(): string {
     return `EXISTING LEADS — you can act on the leads listed in YOUR LEADS RIGHT NOW, each named by its "#" number, by emitting a lead_action_proposal (shape 4). Six actions:
 - "send" — approve a lead's outreach email and send it. Only for a lead under "IN OUTREACH, NOT YET EMAILED" that has an email written. The card shows the user the whole email exactly as it will go: who it is to, the subject, every word of the message, the signature and legal footer added at the bottom, and the follow-up emails that would follow if they do not reply. Nothing is sent until they press the button on the card. Do NOT restate, summarise or rewrite the email in your reply — the card shows it word for word. If they want different wording, offer the "improve" card, or tell them to use "Edit draft" on that lead in the Outreach tab, and then ask you again.
-- "send_all" — approve and send several outreach emails at once, when the user asks to approve or send all of them (or a list of them). Leave out "recordIds" for every email waiting in the Outreach tab's Review column, or give the "#" numbers they named. The card shows every email word for word, up to ${LEAD_BULK_MAX} at a time, and lists any lead it will not send and why — a named person's own inbox and a do-not-contact flag each need their own decision, so those are never sent this way. Nothing is sent until they press the card's one button. Do NOT list or summarise the emails in your reply — the card shows them.
+- "send_all" — approve and send several outreach emails at once, when the user asks to approve or send all of them (or a list of them). Leave out "recordIds" for every email waiting in the Outreach tab's "To approve" stage, or give the "#" numbers they named. The card shows every email word for word, up to ${LEAD_BULK_MAX} at a time, and lists any lead it will not send and why — a named person's own inbox and a do-not-contact flag each need their own decision, so those are never sent this way. Nothing is sent until they press the card's one button. Do NOT list or summarise the emails in your reply — the card shows them.
 - "improve" — ask for a lead's drafted email (not yet sent) to be rewritten, when the user wants it better, shorter, warmer, to mention something, and so on. Put what they asked for in "instruction", in their words, or null to improve it generally. Clicking rewrites and saves the email — it sends nothing; the new version is on the Outreach tab, and they can ask you to send it afterwards. Do not write the new email yourself in your reply.
-- "move_to_outreach" — move a lead from the All leads tab into the Outreach tab's Review column, where its email waits to be read. It sends nothing and it is not an approval.
+- "move_to_outreach" — move a lead from the All leads tab into the Outreach tab's "To approve" stage, where its email waits to be read. It sends nothing and it is not an approval.
 - "reject" — turn a lead down, before its email has gone.
 - "set_outcome" — record how a deal ended: "won" (with valueGbp only if the user gave a value), or "lost" / "disqualified", which need a lossReason. If they say it was lost but not why, ask them why before emitting the card.
 You never do any of these yourself: the user confirms on the card, and only that click changes anything. So never say an email HAS been sent, or a lead HAS been moved, turned down or marked — say the card is there to confirm. One card per reply. If you cannot tell which lead they mean, ask, quoting the candidates by name. You cannot overrule a do-not-contact flag, type an email's words for them, add or change an email address, or connect an inbox from this chat: for those, name the tab — Outreach for the email and the do-not-contact override, All leads for the lead's details.`;
@@ -614,7 +626,7 @@ async function buildLeadsSnapshot(
         }).join('\n');
 
         // The leads whose email can be sent from a lead_action_proposal card right now — the Outreach
-        // tab's Review and Approved columns, judged by the SAME predicates those columns use
+        // tab's To approve stage (both of its groups), judged by the SAME predicates those columns use
         // (lead-recipient.ts, lead-outreach-state.ts). Separate from the sample above, which is
         // ordered by rating and can leave out exactly the lead the user is asking to send.
         const outreachRows = await db
@@ -635,7 +647,7 @@ async function buildLeadsSnapshot(
         const outreachList = waiting.length
             ? `\nIN OUTREACH, NOT YET EMAILED (newest ${waiting.length}${waiting.length === LEAD_SNAPSHOT_OUTREACH ? ', there may be more' : ''}):\n${waiting.map((r) => {
                 const draft = sendableDraft(r.data, r.title);
-                const where = r.approvalStatus === 'approved' ? 'Approved column' : 'Review column';
+                const where = r.approvalStatus === 'approved' ? 'To approve › Approved — send it yourself' : 'To approve › Waiting for your approval';
                 return `- #${r.id} ${r.title} (${where}${draft ? `, email to ${draft.to ?? 'no address'}: "${draft.subject}"` : ', no email written yet'})`;
             }).join('\n')}`
             : '\nIN OUTREACH, NOT YET EMAILED: none.';
@@ -798,7 +810,7 @@ function blogSurfaces(): string {
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above, or Blog Studio. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
-EXISTING ARTICLES — you can act on the articles listed below, each named by its "#" number, in seven ways: approve one in "Review" (you pick the time, from its posting schedule), book one for a time the user names (in "Review", "Scheduled" or "Needs attention"), take one in "Scheduled" off the schedule (it goes back to a draft), reject and redraft one (say what is wrong; a replacement is written, and the user can also keep the reason as a rule), remove one they simply don't want (it moves to "Archived"; nothing is learned and no replacement is written — if it is wrong rather than unwanted, offer reject and redraft instead), or make one shorter or longer (action "shorter" or "longer" — the article is rewritten to the new length and saved, keeping its pictures, links, title and schedule; not for a live article, which must be unpublished first), or revise one to the user's instruction (action "revise" with "instruction" — "improve it", "bring it up to date with what we know now", "make the opening punchier": the article is rewritten in the background to that instruction and saved in place, using the business knowledge for anything new, keeping its pictures, links, title and schedule; same rule about live articles). When the user asks you to update, improve, refresh or rework an article that already exists, ALWAYS use "revise" — never write the whole article out again in your reply, and never answer it with a new draft unless they asked for a separate new article. To do any of them, emit a blog_action_proposal naming the article's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say an article HAS been approved, scheduled, unscheduled, rejected, removed, shortened, lengthened or revised — say the card is there to confirm. One article per reply. If you cannot tell which one they mean, ask, quoting the candidates. You cannot publish one immediately, and apart from shorter, longer and revise you cannot edit an existing article's words: for those, tell them which column of the "Blogs" tab it is in so they can open it in Blog Studio. To remove several at once, they can tick them in the "Review" column and press Remove. You CAN write a new version as a fresh draft if they want one.`;
+EXISTING ARTICLES — you can act on the articles listed below, each named by its "#" number, in seven ways: approve one in "Review" (you pick the time, from its posting schedule), book one for a time the user names (in "Review", "Scheduled" or "Needs attention"), take one in "Scheduled" off the schedule (it goes back to a draft), reject and redraft one (say what is wrong; a replacement is written, and the user can also keep the reason as a rule), remove one they simply don't want (it moves to "Archived"; nothing is learned and no replacement is written — if it is wrong rather than unwanted, offer reject and redraft instead), or make one shorter or longer (action "shorter" or "longer" — the article is rewritten to the new length and saved, keeping its pictures, links, title and schedule; not for a live article, which must be unpublished first), or revise one to the user's instruction (action "revise" with "instruction" — "improve it", "bring it up to date with what we know now", "make the opening punchier": the article is rewritten in the background to that instruction and saved in place, using the business knowledge for anything new, keeping its pictures, links, title and schedule; same rule about live articles). When the user asks you to update, improve, refresh or rework an article that already exists, ALWAYS use "revise" — never write the whole article out again in your reply, and never answer it with a new draft unless they asked for a separate new article. To do any of them, emit a blog_action_proposal naming the article's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say an article HAS been approved, scheduled, unscheduled, rejected, removed, shortened, lengthened or revised — say the card is there to confirm. One article per reply. If you cannot tell which one they mean, ask, quoting the candidates. You cannot publish one immediately, and apart from shorter, longer and revise you cannot edit an existing article's words: for those, tell them which column of the "Blogs" tab it is in so they can open it in Blog Studio. To remove several at once, they can tick them in the "Review" column and press Remove. You CAN start a new version as a separate new article (a blog_batch_proposal) if they want one.`;
 }
 
 function emailSurfaces(): string {
@@ -1434,7 +1446,7 @@ YOUR USUAL POSTS. While a campaign runs, the business's usual Autopilot posts ca
 
 TONE AND PICTURES. A campaign can carry its own tone ("warm, no discount language") which every colleague writes in, inside the brand voice — it narrows the voice, it never replaces it. It can also have its own pictures from their library: posts the campaign commissions use those first, so a six-week flight looks like one campaign. Only attach assetId values from the library list above, and name them exactly as listed; never invent one. If they want pictures that are not in the library yet, commission them from the Brand Designer with "commission_visuals" if it is hired (the list of assistants you can brief says so), say they can upload their own to the content library, or brief a person (a designer) with "request_human_task". Change tone or pictures on an existing campaign with a campaign_edit_proposal.
 
-EXISTING CUSTOMERS. By default a campaign's lead searches leave out companies the user has marked as won in "Conversations", plus any company domains listed in "excludeDomains". For a campaign aimed at winning NEW business keep it that way, and if the user names customers who are not in the platform, add their domains (e.g. "acme.co.uk") to "excludeDomains". A retention or upsell campaign is aimed AT customers: say so, and tell the user to switch "Leave out existing customers" off with "Edit" on the "Campaigns" tab — you can never switch it off yourself, only on.
+EXISTING CUSTOMERS. By default a campaign's lead searches leave out companies the user has marked as won on the "Outreach" tab, plus any company domains listed in "excludeDomains". For a campaign aimed at winning NEW business keep it that way, and if the user names customers who are not in the platform, add their domains (e.g. "acme.co.uk") to "excludeDomains". A retention or upsell campaign is aimed AT customers: say so, and tell the user to switch "Leave out existing customers" off with "Edit" on the "Campaigns" tab — you can never switch it off yourself, only on.
 
 TESTING TWO ANGLES. When the user wants to know which message works ("does long-form beat short-form on LinkedIn?"), propose an "ab_test_posts" order: a hypothesis, two genuinely different angles, and quantity = posts PER ANGLE (4 or more; fewer can never give an answer). The Social Media Assistant drafts both halves, interleaved over the same days, and every post still comes to the user for approval. Report a test ONLY with the sentence listed under "Tests" above: with fewer than four measured posts per angle it says there is not enough data, and you must never name a winner it does not name.
 
@@ -1882,7 +1894,7 @@ ${rc.leadsSnapshot
     ?? 'YOUR LEADS RIGHT NOW — unavailable for this turn: the lead counts could not be read. If the user asks how many leads they have, say you cannot see the count right now and point them at the All leads tab. Do NOT estimate, and do NOT answer from anything else in this conversation.'}
 
 ${leadActionsPrompt()}
-${rc.outreachOfferBlock ? `\n${rc.outreachOfferBlock}\n` : ''}
+${rc.outreachOfferBlock ? `\n${rc.outreachOfferBlock}\n` : ''}${rc.followUpPlanBlock ? `\n${rc.followUpPlanBlock}\n` : ''}
 Score every lead against the ideal customer profile below — a lead that matches it well scores high; one that misses it scores low, and your reasons must say which criteria it met or missed.
 
 Ideal customer profile (from setup):
@@ -2441,31 +2453,27 @@ A sign-up form:
         // Same library that shapes an autopilot blog draft (process-blog-jobs → generateBlogBody),
         // so a post written in chat sounds like one written overnight.
         usesInspo: true,
-        // A finished ~800-word post lives JSON-escaped inside "bodyMarkdown", with the reply on
-        // top. The social route has already paid for getting this wrong: when the envelope
-        // truncates mid-string the JSON never parses, parseStructuredReply degrades to
-        // STRUCTURED_REPLY_FALLBACK, and the post the model had just written is discarded in
-        // front of the user. max_tokens is a ceiling, not a spend.
-        // ⚠️ 4096 → 12000 (2026-10-27). With a thinking model on this role (Opus 5.5 thinks always —
-        // Admin ▸ Assistants ▸ Model & rules) the thinking shares this ceiling with the answer, and a
-        // ~950-word article plus its thinking ran out mid-JSON: the owner got "I said that was done,
-        // but no draft came through" on the fifth of five articles.
+        // ⚠️ No article is written in this reply any more (2026-10-27). A whole ~950-word article
+        // inside a chat turn ran past the 26s request limit whenever the role's model thinks (Opus
+        // 5.5 thinks always — Admin ▸ Assistants ▸ Model & rules): the user got a bare HTTP 504 on
+        // "Write a blog from this" (Inspo tab) and on "write me an article about…". Every new
+        // article now goes through a blog_batch_proposal card — one topic for one article — and
+        // is written by the background worker (generate-blog → process-blog-jobs), the same as
+        // Blog Studio's draft button and "Write all N". The reply is a sentence or two plus a
+        // small card, so this ceiling is generous; it stays high because thinking shares it.
         maxTokens: 12000,
         contentSnapshot: 'blog',
         buildRolePrompt: (rc) => [
             sharedContextBlock(rc),
-            `You are this business's blog writer. When the user gives you a topic, an angle, a brief or a rough idea — or asks you to write about something you already have enough context for — write the ACTUAL finished article, ready to publish as-is: no outlines, no placeholders, no "[insert example here]".
+            `You are this business's blog writer. When the user gives you a topic, an angle, a brief or a rough idea — or asks you to write about something you already have enough context for — you set the article writing; you do NOT write it in your reply.
 
-Write it in Markdown: a single H1 title on the first line, a short hook intro, three to six H2 sections with substantive paragraphs under them, and a brief conclusion. Aim for 700-1,100 words unless the user asks for something shorter or longer. Weave any keywords they give you in naturally and never keyword-stuff.`,
-            // The one thing this route must never get wrong. The card is an OFFER, so a reply
-            // that reports the post as filed is false at the exact moment the user reads it.
-            `WHAT HAPPENS TO THE DRAFT — including the draft object below does NOT save anything. It puts the post on screen underneath your reply with two buttons on it: "Save this draft" and "Discard". Pressing Save is what puts it in this business's blog drafts; pressing Discard throws it away and nothing is kept. Until they press one, the post exists only in this conversation.
+HOW A NEW ARTICLE GETS WRITTEN — articles are written in the background, never inside this conversation (a whole article written here is too slow and the chat times out). So when they want an article, emit a blog_batch_proposal (shape below) with ONE topic per article they asked for: one topic for one article, several for "draft all 5", "write those three", "do them all". Never say you can only do one, and never leave out an article they asked for.
 
-So: NEVER say the post has been saved, filed, added, created, scheduled, published or queued — not even loosely. Say it is ready and that they can keep it or bin it with the buttons. Never tell them to copy the text out, to paste it somewhere, or to go and re-create it themselves — the button does that, and telling them to retype work you have already done is the single worst thing you can say here.
+Each topic has a title (the article's real headline, plain text) and a brief. The brief is everything the writer needs that it cannot otherwise know: the angle, who it is for, and the specifics the user gave you — their own details, examples, wording and what they liked about any Inspo they shared. Write the brief as a few plain sentences, up to about 1,200 characters. The writer already has the business's knowledge, voice and Inspo library, so do not repeat those.
 
-Once saved, a draft appears in this assistant's "Blogs" tab and opens in Blog Studio, where they edit it, add pictures, set its SEO, schedule it or publish it. A draft that is only on screen here cannot be approved or scheduled yet — it has to be saved first. Once it is saved and in your list below, you can offer to approve, schedule or reject it (see EXISTING ARTICLES). You can never publish one immediately from this chat: point at Blog Studio for that.
+The card shows the titles and briefs with one button ("Write it", or "Write all N"). Pressing it sets them writing; each lands in the Review column of the "Blogs" tab, usually within a minute or two, and nothing is published. Until they press it nothing is being written, so NEVER say an article is written, drafted, saved, ready or underway — say the card is there to start it, and that it will appear in Review on the Blogs tab. Never paste an article, an outline or a draft into your reply, and never tell them to copy text out or re-create anything themselves.
 
-ONE ARTICLE ON SCREEN PER REPLY — AND SEVERAL AT ONCE BY A DIFFERENT ROUTE. The draft object holds exactly one article. When the user asks for more than one in one go ("draft all 5", "write those three", "do them all"), do NOT write any of them in your reply and do NOT say you can only do one. Emit a blog_batch_proposal instead (shape below) listing every article they asked for — its title and a one-sentence brief of the angle, taken from what was discussed. The card has one button, "Write all N". Pressing it sets them all writing in the background; each lands in the Review column of the "Blogs" tab within a few minutes, and nothing is published. Until they press it nothing is being written, so never say the articles are written, drafted, saved or underway — say the card is there to start them. Never leave out an article they asked for.
+If what they want is too vague to title (just "write me a blog"), ask one short question about the subject instead of guessing. Once an article is in your list below, you can offer to approve, schedule, revise or reject it (see EXISTING ARTICLES). You can never publish one immediately from this chat: point at Blog Studio for that.
 
 WHAT YOU CANNOT SEE — you can see your own articles (listed below), but not how any of them is performing. If they ask about performance, say plainly that you cannot see it from here (it is on this assistant's page) and offer to write something new. Never guess at a figure.
 
@@ -2475,22 +2483,16 @@ NEVER claim you have written a post unless THIS reply carries the draft object. 
             // Before the JSON contract, deliberately — the block ends with exemplar copy, so it
             // must not be the last thing shaping the reply's SHAPE. Same ordering as the social route.
             rc.inspoBlock ?? '',
-            `Return STRICT JSON and NOTHING else — no markdown, no code fences, no prose before or after the object. Keep "reply" to one or two short sentences: the article itself belongs in bodyMarkdown, never in the reply. Every string must be valid JSON — escape the quotes and newlines inside bodyMarkdown:
+            `Return STRICT JSON and NOTHING else — no markdown, no code fences, no prose before or after the object. Keep "reply" to one or two short sentences. Every string must be valid JSON — escape any quotes and newlines:
 {
   "reply": "your conversational message to the user",
-  "uiElement": {                      // or null when there is nothing to write yet
-    "type": "blog_post_draft",
-    "title": "<the post's title, plain text, no markdown>",
-    "bodyMarkdown": "<the complete article in Markdown, starting with the H1>",
-    "tags": ["<up to 5 short topic tags>"]
+  "uiElement": {                      // or null when there is nothing to start yet
+    "type": "blog_batch_proposal",
+    "topics": [{ "title": "<the article's headline, plain text>", "brief": "<the angle, who it is for and the user's own specifics — a few sentences>" }]
   }
 }
 
-OR, when they ask for several articles at once (see ONE ARTICLE ON SCREEN PER REPLY), uiElement is instead:
-{
-  "type": "blog_batch_proposal",
-  "topics": [{ "title": "<article title>", "brief": "<one sentence: the angle and what it covers>" }, ...]
-}
+(One entry in "topics" per article they asked for — see HOW A NEW ARTICLE GETS WRITTEN.)
 
 OR, to act on an article that already exists (see EXISTING ARTICLES), uiElement is instead:
 {
@@ -2921,6 +2923,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const outreachOfferBlock = route.usesLeadSnapshot
         ? await buildOutreachOfferChatBlock(db, orgId, session.aiAssistantId)
         : null;
+    // Its follow-up plan (src/utils/chat-follow-up-plan.ts) — per turn, for the same reason.
+    const followUpPlanBlock = route.usesLeadSnapshot
+        ? await buildFollowUpPlanChatBlock(db, orgId, session.aiAssistantId)
+        : null;
 
     // Per turn, for the same reason as the leads snapshot: a plan approved on the Campaigns tab a
     // moment ago must be visible to the next message, not the one that opened the conversation.
@@ -2989,6 +2995,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         inspoBlock,
         leadsSnapshot,
         outreachOfferBlock,
+        followUpPlanBlock,
         campaignsSnapshot,
         briefsSnapshot,
         siteAuditSnapshot,
@@ -3390,6 +3397,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 } else {
                     uiElement = card;
                 }
+            } else if (m && m.type === 'mentor_products_update') {
+                // Asked-only, never a suggestion; rebuilt from the row so the card shows what it replaces.
+                const card = await resolveProductUpdate(db, orgId, m).catch((err) => { console.error('[chat-orchestrator] products unreadable', err); return { error: 'I couldn’t read your Products & Services just now.' }; });
+                if ('error' in card) {
+                    uiElement = null;
+                    content = `${content}\n\n(I didn’t include a card for that — ${card.error.charAt(0).toLowerCase()}${card.error.slice(1)} You can change it under Business Information ▸ Products & Services.)`;
+                } else {
+                    uiElement = card;
+                }
             } else if (m && m.type === 'mentor_research') {
                 uiElement = m; // the click queues the job (mentor.ts research); nothing runs until then
             } else if (m && m.type === 'mentor_commitments') {
@@ -3547,6 +3563,20 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             if (r && 'error' in r) { uiElement = null; content = `${r.error} I haven’t changed anything — you can also change the offer on the Outreach tab.`; }
             else if (r) { outreachOfferCard = r; uiElement = r; }
         }
+        // The Lead Generator's follow-up plan (src/utils/chat-follow-up-plan.ts), rebuilt against the
+        // stored plan; the click calls lead-generation.ts save_follow_up_plan.
+        let followUpPlanCard: FollowUpPlanCard | null = null;
+        if (route === ROUTES.lead_qualifier && !introReq && !outreachOfferCard && isFollowUpPlanProposal(uiElement)) {
+            followUpPlanCard = await resolveFollowUpPlanProposal(db, orgId, session.aiAssistantId, uiElement);
+            uiElement = followUpPlanCard;
+            if (!followUpPlanCard) content = 'I couldn’t read your follow-up plan just now, so I haven’t set anything up. Please try again in a moment, or use Follow-up plan on the Outreach tab.';
+        }
+        // A preview of one follow-up for one lead (same module) — the card's button drafts it via
+        // lead-generation.ts preview_follow_up and sends nothing. Not a profile card: it changes nothing.
+        if (route === ROUTES.lead_qualifier && !followUpPlanCard && isFollowUpPreviewProposal(uiElement)) {
+            uiElement = await resolveFollowUpPreviewProposal(db, orgId, session.aiAssistantId, uiElement);
+            if (!uiElement) content = 'I couldn’t look that lead up just now. Please try again in a moment, or use Preview the next one on that lead under Outreach › Following up.';
+        }
         // A content assistant's call to action (src/utils/chat-call-to-action.ts), rebuilt against the
         // real gift forms; the click calls org-products.ts PATCH { callToAction }.
         let ctaCard: CtaCard | null = null;
@@ -3556,7 +3586,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             else if (r) { ctaCard = r; uiElement = r; }
         }
         // One card for the "keep it" checks below: a change to the assistant's own profile.
-        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | OutreachOfferCard | CtaCard | SetupFieldCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard ?? outreachOfferCard ?? ctaCard ?? setupFieldCard;
+        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | OutreachOfferCard | FollowUpPlanCard | CtaCard | SetupFieldCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard ?? outreachOfferCard ?? followUpPlanCard ?? ctaCard ?? setupFieldCard;
         // The Blog Writer's twin (src/utils/chat-blog-action.ts): same checks, built from blog_posts
         // rows; a time in the user's words is worked out here so the card shows the exact instant.
         let blogAction: BlogActionCard | null = null;
@@ -3663,10 +3693,11 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // re-rendered on every reload of this conversation, so a half-formed draft object would
         // come back as a broken card with a Save button on it for as long as the transcript lives.
         const blogDraft = route === ROUTES.blog_writer ? blogPostDraftFromUiElement(uiElement) : null;
+        // Every new article — one or several — is a card that queues it in the background
+        // (src/utils/blog-chat-batch.ts). blog_post_draft is no longer asked for, but still accepted.
+        const blogBatch = route === ROUTES.blog_writer && !blogDraft ? blogBatchFromUiElement(uiElement) : null;
         if (route === ROUTES.blog_writer) {
             // An action card on an existing article was already checked and rebuilt above — keep it.
-            // "Draft all 5" — a card that queues them all in the background (src/utils/blog-chat-batch.ts).
-            const blogBatch = blogDraft ? null : blogBatchFromUiElement(uiElement);
             uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft }
                 : blogBatch ? { ...blogBatch, assistantId: session.aiAssistantId }
                 : blogAction ?? profileCard;
@@ -3748,7 +3779,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // persists), so the only unbacked claim available to it is claiming an article it did not
         // write — which is the identical bug: a confident reply about a post that does not exist.
         // An action card is the thing a "scheduled" reply is about, so it is not an unbacked claim.
-        if (route === ROUTES.blog_writer && !blogDraft && !blogAction && !profileCard && replyClaimsPostSaved(content) && !alreadyApologised) {
+        if (route === ROUTES.blog_writer && !blogDraft && !blogBatch && !blogAction && !profileCard && replyClaimsPostSaved(content) && !alreadyApologised) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked blog draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );

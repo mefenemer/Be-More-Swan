@@ -2356,6 +2356,19 @@
     });
   });
 
+  register('mentor_products_update', (ui, esc) => {
+    const changes = Array.isArray(ui.changes) ? ui.changes : [];
+    const fields = ui.fields && typeof ui.fields === 'object' ? ui.fields : {};
+    const rows = changes.map((c) => `<li class="text-xs text-gray-700 break-words"><span class="font-semibold">${esc(String(c.label || ''))}:</span> ${esc(String(c.to || ''))}${c.from ? `<span class="block text-gray-500 mt-0.5">Replaces: ${esc(String(c.from))}</span>` : ''}</li>`).join('');
+    return mentorCard(esc, {
+      eyebrow: 'Products & Services', summary: ui.summary || (ui.productName ? `Update “${ui.productName}”` : ''), why: null,
+      bodyHtml: `${ui.productName ? `<p class="mt-2 text-xs font-bold text-gray-900 break-words">${esc(String(ui.productName))}</p>` : ''}<ul class="mt-1 space-y-1.5">${rows}</ul>`,
+      goLabel: 'Save this change', eventName: 'mentor:productsUpdate', detail: { id: Number(ui.productId), fields },
+      doneText: 'Saved to Business Information ▸ Products & Services — every assistant now uses it.',
+      note: 'Only these fields change. The price and everything else stay as they are.',
+    });
+  });
+
   register('mentor_quiet_mode', (ui, esc) => mentorCard(esc, {
     eyebrow: 'Quiet mode', summary: ui.summary, why: null,
     bodyHtml: `<p class="mt-2 text-xs text-gray-700">${ui.on ? 'Your Mentor will answer your questions but stop making suggestions until you ask.' : 'Your Mentor will point out what to fix and suggest next steps again.'}</p>`,
@@ -2770,6 +2783,108 @@
     return el;
   }
   register('outreach_offer', renderOutreachOfferCard);
+
+  // { type: 'follow_up_plan', summary, enabled, steps:[{stepNumber, delayDays, brief}]|null, current,
+  // proposed, running, blocked } — a Lead Generator's chasers after a first email, rebuilt by the
+  // server against the stored plan (src/utils/chat-follow-up-plan.ts). The click → lead-generation.ts
+  // save_follow_up_plan, the same action as the Outreach tab's Follow-up plan panel.
+  function renderFollowUpPlanCard(ui, esc) {
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    const steps = Array.isArray(ui.steps) ? ui.steps : [];
+    const days = (d) => `${d} day${d === 1 ? '' : 's'}`;
+    const list = ui.enabled && steps.length
+      ? `<ol class="mt-2 flex flex-col gap-1.5">${steps.map((s, i) => `
+          <li class="text-xs text-gray-700"><span class="font-semibold">${i + 1}. After ${esc(days(s.delayDays))}${i === steps.length - 1 ? ' · the last one' : ''}:</span> ${esc(String(s.brief).slice(0, 600))}</li>`).join('')}</ol>`
+      : '';
+    const running = Number(ui.running) || 0;
+    const stopChoice = !ui.enabled && running && !ui.blocked
+      ? `<label class="flex items-start gap-2 mt-2 text-xs text-gray-700"><input type="checkbox" data-fp-card-stop class="mt-0.5 rounded border-gray-300">
+           <span>Also stop the ${running} lead${running === 1 ? '' : 's'} being followed up now. Otherwise only leads approved from here on are affected.</span></label>`
+      : '';
+    const live = !ui.blocked && !ui.settled;
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Follow-up plan · Approval needed</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <p class="text-xs text-gray-600 mt-2 break-words">Now: ${esc(ui.current || '')}</p>
+      <p class="text-xs text-gray-900 mt-1 break-words"><span class="font-semibold">New:</span> ${esc(ui.proposed || '')}</p>
+      ${list}
+      ${stopChoice}
+      ${ui.blocked ? `<p class="text-xs font-semibold text-amber-800 mt-2">${esc(ui.blocked)}</p>` : ''}
+      ${live ? `<div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-fp-card-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save this plan</button>
+        <button type="button" data-fp-card-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>` : ''}
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-fp-card-status></p>`;
+    const status = el.querySelector('[data-fp-card-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button, input').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-fp-card-cancel]')) { setBusy(true); say('Not changed.'); return; }
+      if (!e.target.closest('[data-fp-card-go]')) return;
+      const stopRunning = !!el.querySelector('[data-fp-card-stop]')?.checked;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('lead:followUpPlan', {
+        bubbles: true,
+        detail: {
+          enabled: !!ui.enabled, steps: ui.enabled ? steps : null, stopRunning,
+          respond({ ok, error, summary, stopped }) {
+            if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved — nothing was changed.', 'error'); return; }
+            say(`Saved — ${String(summary || ui.proposed).replace(/^No /, 'no ')}.${stopped ? ` Stopped follow-ups for ${stopped} lead${stopped === 1 ? '' : 's'}.` : ''}`);
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('follow_up_plan', renderFollowUpPlanCard);
+
+  // { type: 'follow_up_preview', recordId, threadId, leadTitle, position|null, blocked } — "what would
+  // the next follow-up to Acme say?" (src/utils/chat-follow-up-plan.ts). The button drafts it through
+  // lead-generation.ts preview_follow_up — the same action as Preview on the Outreach tab — and the
+  // card shows it. Nothing is sent or saved; it is metered as an editing helper.
+  function renderFollowUpPreviewCard(ui, esc) {
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-gray-200 rounded-xl shadow-sm p-5 max-w-lg';
+    const which = ui.position ? `Follow-up ${ui.position}` : 'Their next follow-up';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-gray-500 tracking-wider uppercase">Follow-up preview · nothing is sent</p>
+      <p class="text-sm font-bold text-gray-900 mt-2">${esc(which)} to ${esc(ui.leadTitle || 'this lead')}</p>
+      ${ui.blocked ? `<p class="text-xs font-semibold text-amber-800 mt-2">${esc(ui.blocked)}</p>` : `
+      <p class="text-xs text-gray-600 mt-1">Written the way your assistant writes the real one — from the conversation so far and your follow-up plan.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-fpv-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Write the preview</button>
+      </div>`}
+      <div data-fpv-out></div>`;
+    const out = el.querySelector('[data-fpv-out]');
+    el.addEventListener('click', (e) => {
+      const go = e.target.closest('[data-fpv-go]');
+      if (!go) return;
+      go.disabled = true;
+      go.textContent = 'Writing…';
+      el.dispatchEvent(new CustomEvent('lead:followUpPreview', {
+        bubbles: true,
+        detail: {
+          threadId: ui.threadId, position: ui.position ?? null,
+          respond({ ok, error, result }) {
+            go.disabled = false;
+            go.textContent = 'Write it again';
+            if (!ok) { out.innerHTML = `<p class="mt-2 text-xs font-semibold text-red-600">${esc(error || 'The preview couldn\'t be written.')}</p>`; return; }
+            out.innerHTML = `
+              <div class="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Follow-up ${esc(result.position)}${result.isLast ? ' · the last one' : ''} · not sent</p>
+                <p class="text-sm font-semibold text-gray-900 mt-1">${esc(result.subject)}</p>
+                <p class="text-sm text-gray-700 mt-1 whitespace-pre-wrap">${esc(result.body)}</p>
+                <p class="text-[11px] text-gray-500 mt-2">${esc(result.note || '')}</p>
+              </div>`;
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('follow_up_preview', renderFollowUpPreviewCard);
 
   // { type: 'call_to_action', summary, kind, kindLabel, formId, formName, giftLabel } — what a Social,
   // Blog or Email assistant's work invites people to do (src/config/call-to-action.ts), rebuilt by the
@@ -3987,7 +4102,7 @@
       } else if (f && !f.enabled) {
         followHtml = '<p class="mt-3 text-xs text-gray-600">No follow-ups: this assistant is set to send one email only.</p>';
       } else {
-        followHtml = '<p class="mt-3 text-xs text-amber-800">I couldn’t check whether follow-ups would start. If this assistant chases automatically, up to three more emails follow unless they reply.</p>';
+        followHtml = '<p class="mt-3 text-xs text-amber-800">I couldn’t check whether follow-ups would start. If this assistant chases automatically, its follow-up plan sends more emails unless they reply.</p>';
       }
     }
 
@@ -4972,14 +5087,14 @@
     const el = document.createElement('div');
     el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-lg';
     el.innerHTML = `
-      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Write ${n} article${n === 1 ? '' : 's'} · ${ui.queued ? 'Started' : 'Needs your OK'}</p>
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${n === 1 ? 'Write this article' : `Write ${n} articles`} · ${ui.queued ? 'Started' : 'Needs your OK'}</p>
       <ol class="mt-3 space-y-2 list-decimal pl-5">
         ${topics.map((t) => `<li class="text-sm text-gray-900"><span class="font-bold">${esc(t.title)}</span>${t.brief ? `<span class="block text-xs text-gray-600 mt-0.5">${esc(t.brief)}</span>` : ''}</li>`).join('')}
       </ol>
       ${ui.more ? `<p class="text-xs text-amber-800 mt-2">${esc(String(ui.more))} more were asked for — ask again once these are written.</p>` : ''}
-      <p class="text-xs text-gray-600 mt-3">Each one is written in the background — a minute or two apiece — and lands in the Review column of the Blogs tab. Nothing is published, and each counts as one task.</p>
+      <p class="text-xs text-gray-600 mt-3">${n === 1 ? 'It’s written in the background — usually a minute or two — and lands in the Review column of the Blogs tab. Nothing is published, and it counts as one task.' : 'Each one is written in the background — a minute or two apiece — and lands in the Review column of the Blogs tab. Nothing is published, and each counts as one task.'}</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
-        ${ui.queued ? '' : `<button type="button" data-bb-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Write all ${n}</button>
+        ${ui.queued ? '' : `<button type="button" data-bb-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${n === 1 ? 'Write it' : `Write all ${n}`}</button>
         <button type="button" data-bb-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
       </div>
       <p class="hidden mt-2 text-xs font-semibold" data-bb-status role="status" aria-live="polite"></p>`;

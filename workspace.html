@@ -6023,6 +6023,11 @@ function formatCurrency(amount, currency) {
 <!-- Conversations tab (lead_qualifier) — the thread an approved lead turned into: outreach,
      replies, what the classifier made of them, and what the follow-up sequence did (lead-threads.ts). -->
 <script src="/src/components/assistant-lead-threads.js"></script>
+<!-- The Lead Generator's staged Outreach tab: To approve → Following up → Replied → Finished. Mounts
+     assistant-lead-threads.js (above) for the middle three stages. -->
+<!-- Its Follow-up plan panel (opened from the strip's button). -->
+<script src="/src/components/assistant-follow-up-plan.js"></script>
+<script src="/src/components/assistant-lead-outreach.js"></script>
 <!-- Strategy tab (lead_qualifier, gated on the `strategy_agent` plan feature — default OFF) —
      changes the agent proposes to how it targets and writes, with the evidence behind each one.
      Nothing applies until a human clicks Apply (strategy-proposals.ts). -->

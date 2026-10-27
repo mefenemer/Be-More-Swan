@@ -1221,7 +1221,9 @@
       try {
         const r = await postActionCall('generate-blog', { assistantId: d.assistantId || assistantId, batch: d.topics || [] });
         const n = Number(r.queued) || 0;
-        respond({ ok: true, message: `Writing ${n} article${n === 1 ? '' : 's'} now. Each appears in the Review column of the Blogs tab as it’s finished — usually a minute or two apiece.` });
+        respond({ ok: true, message: n === 1
+          ? 'Writing it now. It appears in the Review column of the Blogs tab when it’s finished — usually a minute or two.'
+          : `Writing ${n} articles now. Each appears in the Review column of the Blogs tab as it’s finished — usually a minute or two apiece.` });
       } catch (err) {
         respond({ ok: false, error: err.message });
       }
@@ -1503,6 +1505,12 @@
       mentorRun(e, (A, d) => A.removeProducts(d.ids));
     }
 
+    // Products & Services → org-products.ts PATCH, one product (only drawn when the user asked).
+    async function onMentorProductsUpdate(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.updateProduct(d.id, d.fields));
+    }
+
     // Quiet mode → update-assistant-context.ts, only that set-up answer (patchContext).
     async function onMentorQuietMode(e) {
       if (mentorAlreadyHandled(e)) return;
@@ -1584,6 +1592,41 @@
         if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
         respond({ ok: true });
         document.dispatchEvent(new CustomEvent('lead:outreachOfferSaved', { detail: { choice: data.choice, resolved: data.resolved } }));
+      }).catch((err) => respond({ ok: false, error: err.message }));
+    }
+
+    // "Save this plan" on a follow_up_plan card (Lead Generator) → lead-generation.ts save_follow_up_plan,
+    // the same action as the Outreach tab's Follow-up plan panel (src/config/follow-up-plan.ts).
+    function onFollowUpPlan(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const payload = { action: 'save_follow_up_plan', assistantId, enabled: !!d.enabled, stopRunning: !!d.stopRunning };
+      if (d.enabled && Array.isArray(d.steps)) payload.steps = d.steps;
+      fetch('/.netlify/functions/lead-generation', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify(payload),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+        respond({ ok: true, summary: data.summary, stopped: data.stopped || 0 });
+        document.dispatchEvent(new CustomEvent('lead:followUpPlanSaved', { detail: { plan: data } }));
+      }).catch((err) => respond({ ok: false, error: err.message }));
+    }
+
+    // "Write the preview" on a follow_up_preview card (Lead Generator) → lead-generation.ts
+    // preview_follow_up, the same action as Preview on the Outreach tab. Sends nothing.
+    function onFollowUpPreview(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const payload = { action: 'preview_follow_up', assistantId, threadId: d.threadId };
+      if (d.position != null) payload.position = d.position;
+      fetch('/.netlify/functions/lead-generation', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify(payload),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+        respond({ ok: true, result: data });
       }).catch((err) => respond({ ok: false, error: err.message }));
     }
 
@@ -1987,6 +2030,7 @@
     container.addEventListener('mentor:businessProfile', onMentorBusinessProfile);
     container.addEventListener('mentor:products', onMentorProducts);
     container.addEventListener('mentor:productsRemove', onMentorProductsRemove);
+    container.addEventListener('mentor:productsUpdate', onMentorProductsUpdate);
     container.addEventListener('mentor:cardOutcome', onMentorCardOutcome);
     container.addEventListener('mentor:quietMode', onMentorQuietMode);
     container.addEventListener('mentor:support', onMentorSupport);
@@ -2001,6 +2045,8 @@
     container.addEventListener('mentor:draftRequest', onMentorDraftRequest);
     container.addEventListener('setupField:apply', onSetupFieldApply);
     container.addEventListener('lead:outreachOffer', onOutreachOffer);
+    container.addEventListener('lead:followUpPlan', onFollowUpPlan);
+    container.addEventListener('lead:followUpPreview', onFollowUpPreview);
     container.addEventListener('cta:change', onCallToAction);
     container.addEventListener('site:reviewDecisions', onReviewDecisions);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
@@ -2078,6 +2124,7 @@
         container.removeEventListener('mentor:businessProfile', onMentorBusinessProfile);
         container.removeEventListener('mentor:products', onMentorProducts);
         container.removeEventListener('mentor:productsRemove', onMentorProductsRemove);
+        container.removeEventListener('mentor:productsUpdate', onMentorProductsUpdate);
         container.removeEventListener('mentor:cardOutcome', onMentorCardOutcome);
         container.removeEventListener('mentor:quietMode', onMentorQuietMode);
         container.removeEventListener('mentor:support', onMentorSupport);
@@ -2092,6 +2139,8 @@
         container.removeEventListener('mentor:draftRequest', onMentorDraftRequest);
         container.removeEventListener('setupField:apply', onSetupFieldApply);
         container.removeEventListener('lead:outreachOffer', onOutreachOffer);
+        container.removeEventListener('lead:followUpPlan', onFollowUpPlan);
+        container.removeEventListener('lead:followUpPreview', onFollowUpPreview);
         container.removeEventListener('cta:change', onCallToAction);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('blog:batch', onBlogBatch);

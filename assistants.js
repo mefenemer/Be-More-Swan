@@ -1046,6 +1046,12 @@ function _resizeBriefAutoGrow() {
 // Activate a main tab by name ('datahub' | 'goals' | 'activity'). Exposed so other code
 // (deep-links, attention CTAs, child-tab clicks) can surface the right section.
 window._activateMainTab = function(name) {
+    // The retired Conversations tab is now stages 2–4 of a staged Outreach tab. Old links,
+    // bookmarks and in-app buttons still say 'conversations'; they land on Outreach instead.
+    if (name === 'conversations' && window.AssistantLeadOutreach?.isStaged()) {
+        name = 'review-queue';
+        window._assistantDetailInitialRqStatus = window._assistantDetailInitialRqStatus || 'conversations';
+    }
     // The strip belongs to the landing tab only; re-judged after the tab has switched.
     setTimeout(() => window._renderNeedsYou?.(), 0);
     document.querySelectorAll('.main-tab-btn').forEach(b => {
@@ -1082,11 +1088,6 @@ window._activateMainTab = function(name) {
     if (name === 'siteenquiries') siteEditor((ed) => ed.activate('enquiries'));
     if (name === 'siteorders') siteEditor((ed) => ed.activate('orders'));
     if (name === 'sitebookings') siteEditor((ed) => ed.activate('bookings'));
-    // Conversations already fetched at init() — its thread total feeds the tab's own count, so it
-    // cannot wait for the tab to be opened. activate() repaints from that result rather than
-    // refetching. (This comment used to say the opposite and was stale: the prefetch landed when
-    // the tab grew a count, and a badge nothing loads is a badge that is always blank.)
-    if (name === 'conversations') window.AssistantLeadThreads?.activate();
     // Strategy resolved its gate (and loaded) on init — activation only paints.
     if (name === 'strategy') window.AssistantStrategy?.activate();
     // A hub whose rows change in the background (the Campaign Assistant's Orders) re-reads on open.
@@ -1100,7 +1101,12 @@ window._activateMainTab = function(name) {
         // consumed once, so a later tab switch goes back to the default.
         const wantedCol = window._assistantDetailInitialRqStatus;
         window._assistantDetailInitialRqStatus = null;
-        const renderDone = detailRqOpenStatus(_DETAIL_RQ_COLUMNS[wantedCol] ? wantedCol : 'review');
+        // A staged Outreach tab (the Lead Generator) draws its own stage strip and picks what goes
+        // under it; it understands the old column names too ('approved' from the mailbox connect
+        // return, 'conversations' from the retired tab).
+        const staged = window.AssistantLeadOutreach?.isStaged();
+        if (staged) window.AssistantLeadOutreach.activate(wantedCol);
+        const renderDone = staged ? null : detailRqOpenStatus(_DETAIL_RQ_COLUMNS[wantedCol] ? wantedCol : 'review');
         // Populate every lifecycle column's count, not just the one being rendered.
         window._detailRqRefreshColumnCounts?.();
         // Issue #180 follow-up: a chat "review & approve" link can name the exact post it
@@ -1338,6 +1344,7 @@ window.detailRqRefresh = function() {
     if (!document.getElementById('detail-rq-groups')) return;
     window._refreshAssistantMetrics?.();
     window._detailRqRefreshColumnCounts();
+    if (window.AssistantLeadOutreach?.isStaged()) window.AssistantLeadThreads?.refresh(); // its `board` stages
     return _detailRqRenderGroups(_detailRqCurrentStatus);
 };
 
@@ -1460,6 +1467,18 @@ document.addEventListener('bms:notifications-arrived', () => {
  * button that the list underneath contradicts — which is the specific bug that made this queue
  * read as a duplicate of the All leads tab.
  */
+/**
+ * Is this lead approved but not yet sent — the user's to send (no inbox connected, or one-email-only)?
+ * The staged Outreach tab's "Approved — send it yourself" pill. Decided by the shared phase function
+ * (src/config/lead-outreach-phase.ts) with no thread: a lead whose email went has `outreachSentAt`,
+ * and that alone moves it to Following up.
+ */
+function _rqIsSendYourself(r) {
+    const P = window.LeadOutreachPhase;
+    if (!P || typeof P.of !== 'function') return !(r.data || {}).outreachSentAt && (r.approvalStatus === 'approved' || r.approvalStatus === 'scheduled');
+    return P.of({ approvalStatus: r.approvalStatus, data: r.data, threadState: null, enrolment: null }).group === 'send_yourself';
+}
+
 async function _detailRqRefreshRecordCounts() {
     const aid = window._currentAssistantId;
     const rq = window._detailReviewQueue || {};
@@ -1495,6 +1514,17 @@ async function _detailRqRefreshRecordCounts() {
         _detailRqSetColumnBadge('approved', approved);
         _detailRqSetColumnBadge('scheduled', scheduled);
         _detailRqSetColumnBadge('archived', rejected);
+
+        // The staged Outreach strip (Lead Generator): To approve counts the review cards plus the
+        // approved leads still waiting for the user to send — placed by the same function the
+        // 'approved' pill filters on (_rqIsSendYourself).
+        if (isLead && window.AssistantLeadOutreach?.isStaged()) {
+            window.AssistantLeadOutreach.setRecordCounts({
+                review: reviewRecords.length,
+                sendYourself: restRecords.filter(_rqIsSendYourself).length,
+                archived: rejected,
+            });
+        }
 
         // The tab's own parenthetical: what this tab HOLDS, across its columns. Deliberately not
         // the pending count — that is the amber pill's job, and having the two show the same
@@ -3182,6 +3212,13 @@ async function _detailRqRenderRecords(statusKey) {
         if (seq !== _detailRqRenderSeq) return;
     } catch { if (seq === _detailRqRenderSeq) _detailRqRenderError(container, statusKey); return; }
 
+    // Staged Outreach (Lead Generator): 'approved' is the "Approved — send it yourself" pill under
+    // To approve. A lead whose email has gone is in Following up now, not here — so the two-state
+    // query above is narrowed to the unsent ones.
+    if (recordType === 'lead' && statusKey === 'approved' && window.AssistantLeadOutreach?.isStaged()) {
+        records = records.filter(_rqIsSendYourself);
+    }
+
     // The briefs behind each pending decision (see _rqDecisionDetail). Best effort: without them
     // the card still shows its evidence lines, so a failure here must not fail the column.
     if (recordType === 'campaign_decision') {
@@ -3386,6 +3423,7 @@ function _detailRqPaintRecords(statusKey, opts) {
     // explains the arithmetic, and it is only true of these leads. Suppressed when the column holds
     // none of them, where it would explain a discrepancy that is not there.
     const _overlap = (window._detailReviewQueue || {}).recordType === 'lead'
+        && !window.AssistantLeadOutreach?.isStaged()
         && (statusKey === 'approved' || statusKey === 'scheduled')
         && records.some((r) => (r.data || {}).outreachSentAt);
     const overlapHtml = _overlap
@@ -3395,19 +3433,9 @@ function _detailRqPaintRecords(statusKey, opts) {
         : '';
 
     // The send-readiness banner, above the columns where a send is actually triggered.
-    // Awaiting reply → Conversations (owner, 2026-10-27). This column and the Conversations tab show
-    // the same leads from two angles; the replies, the follow-ups and recording how a deal ended all
-    // live there, so the column says so and gives the way across, rather than looking like a second
-    // place to work the same lead.
-    const convLabel = document.getElementById('conversations-tab-label')?.textContent?.trim() || 'Conversations';
-    const convHtml = ((window._detailReviewQueue || {}).recordType === 'lead' && statusKey === 'scheduled'
-        && !document.getElementById('maintab-btn-conversations')?.classList.contains('hidden'))
-        ? `<div class="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 my-3">
-             <p class="text-xs text-emerald-900 flex-1 min-w-0">These leads have had their email. Their replies, follow-ups and how each deal ended are on the ${_rqEsc(convLabel)} tab — work them there.</p>
-             <button type="button" onclick="window._activateMainTab && window._activateMainTab('conversations')" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer shrink-0">Open ${_rqEsc(convLabel)}</button>
-           </div>`
-        : '';
-    const readyHtml = _rqOutreachReadinessHtml(statusKey) + convHtml;
+    // (The "Awaiting reply → Open Conversations" banner that sat here is gone: on the staged
+    // Outreach tab those leads are their own stage, Following up.)
+    const readyHtml = _rqOutreachReadinessHtml(statusKey);
 
     if (!records.length) {
         container.innerHTML = readyHtml + noticeHtml + `<p class="text-sm text-gray-500 py-10 text-center">${emptyMsg}</p>`;
@@ -3700,8 +3728,10 @@ async function _rqSendLeadOutreach(recordId, opts) {
             // (lead-generation.ts), so this cannot claim a cadence that was skipped — or hide one
             // that was not. Approving one email can start up to four; the toast is the last moment
             // that fact can reach the person who pressed the button.
+            // The plan's own length, when the Follow-up plan panel has loaded it (it is editable).
+            const planSteps = window.LeadFollowUpPlan?.plan()?.steps?.length;
             const chasers = sdata.followUps === 'started'
-                ? ' Automatic chasers are on for this assistant, so up to three more emails will follow unless they reply.'
+                ? ` Automatic chasers are on for this assistant, so ${planSteps ? `up to ${planSteps} more email${planSteps === 1 ? '' : 's'}` : 'more emails'} will follow unless they reply — see Follow-up plan.`
                 : '';
             // Names the column as THIS role labels it — the Lead Generator calls it "Awaiting
             // reply", and a toast sending the user to a "Scheduled" tab they do not have is the
@@ -6636,8 +6666,8 @@ function _applyDashboardRegistry(data) {
     toggle('tab-goals', !cfg.hideGoals);
     setText('maintab-btn-goals', goalsTab.label || 'Goals');
     // Where the Results tab sits. Its home in the markup is just before Activity; a role may pull it
-    // forward with cfg.resultsTabAfter (the Lead Generator: straight after Conversations — owner,
-    // 2026-10-27 — so the funnel reads find → leads → outreach → conversations → results). Re-placed
+    // forward with cfg.resultsTabAfter (the Lead Generator: straight after Outreach — owner,
+    // 2026-10-27 — so the funnel reads find → leads → outreach → results). Re-placed
     // on EVERY apply, not only when the key is set: workspace.html reuses this view across
     // assistant switches, so a move made for one role would otherwise stick for the next.
     const goalsBtn = document.getElementById('maintab-btn-goals');
@@ -7018,14 +7048,17 @@ function _applyDashboardRegistry(data) {
         window.AssistantSignalInbox?.init({ assistantId: data.id, cfg: signalInbox });
     }
 
-    // Conversations tab — lead roles only (conversationsTab: lead_qualifier): the thread an
-    // approved lead turned into. init() only records the assistant id; the first fetch happens on
-    // _activateMainTab('conversations').
-    const conversations = cfg.conversationsTab;
-    toggle('maintab-btn-conversations', !!conversations);
-    if (conversations) {
-        setText('conversations-tab-label', conversations.label || 'Conversations');
-        window.AssistantLeadThreads?.init({ assistantId: data.id, cfg: conversations });
+    // Staged Outreach — lead roles only (reviewQueue.staged: lead_qualifier). The Outreach tab is
+    // laid out as the steps a lead goes through (assistant-lead-outreach.js), and its Following up /
+    // Replied / Finished stages are the conversations list (assistant-lead-threads.js), which loads
+    // now because the stage strip's counts come from it. This replaced the Conversations tab.
+    // ⚠️ reset() on every other role: this view is reused across assistant switches, and a strip
+    // left over from a Lead Generator would hide another role's lifecycle columns.
+    if ((cfg.reviewQueue || {}).staged) {
+        window.AssistantLeadOutreach?.init({ assistantId: data.id });
+        window.AssistantLeadThreads?.init({ assistantId: data.id });
+    } else {
+        window.AssistantLeadOutreach?.reset();
     }
 
     // Strategy tab — lead roles only (strategyTab: lead_qualifier) AND gated on the
@@ -8574,8 +8607,14 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         // must not fire detailRqOpenStatus() before _detailReviewQueue.kind is known, or a
         // records-backed queue would render with the wrong (default 'posts') renderer.
         if (window._assistantDetailInitialTab) {
-            const wanted = window._assistantDetailInitialTab;
+            let wanted = window._assistantDetailInitialTab;
             window._assistantDetailInitialTab = null;
+            // ?tab=conversations (the retired tab) → the staged Outreach tab; _activateMainTab
+            // carries the alias the rest of the way.
+            if (wanted === 'conversations' && window.AssistantLeadOutreach?.isStaged()) {
+                window._assistantDetailInitialRqStatus = window._assistantDetailInitialRqStatus || 'conversations';
+                wanted = 'review-queue';
+            }
             // :not(.hidden) — a role-hidden tab (e.g. social's retired Data Hub) must not be
             // reachable by deep-link either, or activating it re-shows a panel the role retired.
             if (document.querySelector(`.main-tab-btn[data-maintab="${wanted}"]:not(.hidden)`)) {

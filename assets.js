@@ -675,6 +675,30 @@ window.initBrandAssets = function() {
         const bpSave = debounce(saveBusinessProfile, 700);
         ['bp-input-name','bp-input-industry','bp-input-website','bp-input-postal-address','bp-input-description','bp-input-audience']
             .forEach(id => document.getElementById(id)?.addEventListener('input', bpSave));
+        // A datalist only suggests options matching what's already in the box, so once an industry is
+        // chosen the other options never appear and it can't be changed by picking. Empty the box on
+        // focus (old value kept as the placeholder) so the full list shows; put it back on blur unless
+        // they typed or picked something. Clearing here fires no 'input', so nothing is saved.
+        const industryEl = document.getElementById('bp-input-industry');
+        if (industryEl) {
+            let held = null;
+            industryEl.addEventListener('focus', () => {
+                if (!industryEl.value) return;
+                held = { value: industryEl.value, placeholder: industryEl.placeholder };
+                industryEl.placeholder = industryEl.value;
+                industryEl.value = '';
+            });
+            industryEl.addEventListener('input', () => {
+                if (held) industryEl.placeholder = held.placeholder;
+                held = null;
+            });
+            industryEl.addEventListener('blur', () => {
+                if (!held) return;
+                if (!industryEl.value) industryEl.value = held.value;
+                industryEl.placeholder = held.placeholder;
+                held = null;
+            });
+        }
         // Clear the compliance warning as soon as an address is typed, not on the next load.
         document.getElementById('bp-input-postal-address')
             ?.addEventListener('input', (e) => togglePostalAddressWarning(e.target.value));

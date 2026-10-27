@@ -17,6 +17,8 @@
 
 /** How much of an author's typing is carried. Long enough for a real brief, short enough to bound the row. */
 const MAX_FIELD = 500;
+/** Notes run longer: the Blog Writer chat's brief carries the user's own specifics (an Inspo idea). */
+const MAX_NOTES = 1500;
 
 export type InteractiveBlogBrief = {
     topic: string;
@@ -36,8 +38,8 @@ export type InteractiveBlogBrief = {
 const RESIZE = ['shorter', 'longer'] as const;
 const asResize = (v: unknown): 'shorter' | 'longer' | undefined => RESIZE.find((r) => r === v);
 
-function clip(value: unknown): string {
-    return typeof value === 'string' ? value.trim().slice(0, MAX_FIELD) : '';
+function clip(value: unknown, max = MAX_FIELD): string {
+    return typeof value === 'string' ? value.trim().slice(0, max) : '';
 }
 
 /** Pack a brief for `content_generation_jobs.context_prompt`. */
@@ -48,7 +50,7 @@ export function encodeInteractiveBrief(brief: InteractiveBlogBrief): string {
         v: 1,
         topic: clip(brief.topic),
         keywords: clip(brief.keywords),
-        notes: clip(brief.notes),
+        notes: clip(brief.notes, MAX_NOTES),
         tone: clip(brief.tone),
         // Optional, so v stays 1: an older worker simply ignores the key.
         articleType: clip(brief.articleType) || undefined,
@@ -79,7 +81,7 @@ export function decodeInteractiveBrief(raw: string | null | undefined): Interact
     return {
         topic,
         keywords: clip(obj.keywords) || undefined,
-        notes: clip(obj.notes) || undefined,
+        notes: clip(obj.notes, MAX_NOTES) || undefined,
         tone: clip(obj.tone) || undefined,
         articleType: clip(obj.articleType) || undefined,
         resize,

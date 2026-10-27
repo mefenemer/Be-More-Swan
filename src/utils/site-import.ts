@@ -549,6 +549,11 @@ export function draftWordsAllFromSource(definition: SiteDefinition, pages: ReadP
 export interface ImportDeps {
     /** One page, through robots.txt and the SSRF fence (site-fetch.ts). */
     fetchHtml(url: string): Promise<{ ok: true; html: string; finalUrl: string } | { ok: false; message: string }>;
+    /**
+     * The same page with its JavaScript run (site-js-render.ts) — asked for only when the plain read
+     * found under IMPORT_THIN_WORDS, i.e. a site that draws its words after the page loads.
+     */
+    renderHtml?(url: string): Promise<{ ok: true; html: string; finalUrl: string } | { ok: false; message: string }>;
     /** The model's reply to the plan prompt, parsed — or null when it failed (the import still runs, unplanned). */
     plan(prompt: { system: string; user: string }): Promise<unknown | null>;
     /** Copy one picture into the workspace's library: its asset id, or null when it couldn't be copied. */
@@ -579,9 +584,9 @@ async function inTurns<T, R>(list: T[], n: number, fn: (x: T) => Promise<R>): Pr
 }
 
 export async function runImport(input: ImportInput, deps: ImportDeps): Promise<ImportOutcome> {
-    const home = await deps.fetchHtml(input.url);
+    const home = await readPage(input.url, deps);
     if (!home.ok) return { ok: false, message: `We couldn't read ${input.url}: ${home.message}`, report: null };
-    const homePage = readImportPageSafe(home.html, home.finalUrl);
+    const homePage = home.page;
     const pageCap = Math.max(1, Math.min(IMPORT_MAX_PAGES, input.maxPages));
     const menu = pickImportPages(homePage, IMPORT_MAX_PAGES * 2);
     const toRead = menu.slice(0, pageCap - 1);
@@ -592,10 +597,10 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
 
     const reports: ImportReport['pages'] = [{ url: homePage.url, title: homeLabel ?? 'Home', words: homePage.words, read: true, note: null }];
     const read: ReadPage[] = [{ url: homePage.url, menuLabel: homeLabel, page: homePage }];
-    const fetched = await inTurns(toRead, 3, async (l) => ({ l, r: await deps.fetchHtml(l.href) }));
+    const fetched = await inTurns(toRead, 3, async (l) => ({ l, r: await readPage(l.href, deps) }));
     for (const { l, r } of fetched) {
         if (!r.ok) { reports.push({ url: l.href, title: l.text, words: 0, read: false, note: r.message }); continue; }
-        const page = readImportPageSafe(r.html, r.finalUrl);
+        const page = r.page;
         if (!page.words && !page.blocks.length) { reports.push({ url: l.href, title: l.text, words: 0, read: false, note: 'We couldn\'t read any words on this page.' }); continue; }
         reports.push({ url: page.url, title: l.text, words: page.words, read: true, note: null });
         read.push({ url: page.url, menuLabel: l.text, page });
@@ -642,6 +647,23 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
     report.notCarried = built.notCarried;
     report.placeholders = countPlaceholders(definition);
     return { ok: true, definition, report, warnings: built.warnings };
+}
+
+/**
+ * One page: the plain read, and — when that found almost no words — the page again with its
+ * JavaScript run. The rendered read is kept only when it found more words; the menu still comes from
+ * whichever read had it (a JavaScript menu is read from the rendered page).
+ */
+async function readPage(url: string, deps: ImportDeps): Promise<{ ok: true; page: ImportPage } | { ok: false; message: string }> {
+    const r = await deps.fetchHtml(url);
+    if (!r.ok) return r;
+    const page = readImportPageSafe(r.html, r.finalUrl);
+    if (page.words >= IMPORT_THIN_WORDS || !deps.renderHtml) return { ok: true, page };
+    const rendered = await deps.renderHtml(r.finalUrl).catch(() => null);
+    if (!rendered?.ok) return { ok: true, page };
+    const fuller = readImportPageSafe(rendered.html, r.finalUrl);
+    if (fuller.words <= page.words) return { ok: true, page };
+    return { ok: true, page: { ...fuller, navLinks: fuller.navLinks.length ? fuller.navLinks : page.navLinks } };
 }
 
 /** readImportPage, never throwing: a page cheerio can't make sense of reads as empty. */

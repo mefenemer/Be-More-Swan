@@ -60,6 +60,10 @@ import {
 } from '../src/config/lead-email-kind';
 import { LEAD_OUTREACH_CHIPS, leadOutreachState } from '../src/config/lead-outreach-state';
 import {
+    LEAD_OUTREACH_PHASES, LEAD_OUTREACH_PHASE_LABELS, LEAD_OUTREACH_GROUPS, LEAD_OUTREACH_GROUP_LABELS,
+    leadOutreachPhase,
+} from '../src/config/lead-outreach-phase';
+import {
     ASSISTANT_COLORS, ASSISTANT_COLOR_VALUES, ASSISTANT_COLOR_NEUTRAL,
 } from '../src/config/assistant-colors';
 import {
@@ -666,6 +670,28 @@ ${formatRows}
       var s = leadOutreachState(data);
       return s ? LEAD_OUTREACH_CHIPS[s] : null;
     },
+  };
+
+  // ── Lead outreach phase ────────────────────────────────────────────────────
+  // From src/config/lead-outreach-phase.ts, stringified. Which step of the outreach journey a lead
+  // is at — To approve → Following up → Replied → Finished, or Archived. The staged Outreach tab,
+  // its counts and lead-threads.ts \`board\` all call this one function, so a lead cannot be in
+  // "Replied" on the tab and "Following up" in the count beside it.
+  var LEAD_OUTREACH_PHASES = ${JSON.stringify(LEAD_OUTREACH_PHASES)};
+  var LEAD_OUTREACH_PHASE_LABELS = ${JSON.stringify(LEAD_OUTREACH_PHASE_LABELS)};
+  var LEAD_OUTREACH_GROUPS = ${JSON.stringify(LEAD_OUTREACH_GROUPS)};
+  var LEAD_OUTREACH_GROUP_LABELS = ${JSON.stringify(LEAD_OUTREACH_GROUP_LABELS)};
+  var leadOutreachPhase = ${leadOutreachPhase.toString()};
+
+  window.LeadOutreachPhase = {
+    /** Phase keys, left to right. */
+    phases: LEAD_OUTREACH_PHASES,
+    phaseLabels: LEAD_OUTREACH_PHASE_LABELS,
+    groups: LEAD_OUTREACH_GROUPS,
+    groupLabels: LEAD_OUTREACH_GROUP_LABELS,
+
+    /** { phase, group, needsAttention } for { approvalStatus, data, threadState, enrolment }. */
+    of: leadOutreachPhase,
   };
 
   // ── Lead rating bands ──────────────────────────────────────────────────────

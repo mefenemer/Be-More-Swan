@@ -1076,18 +1076,19 @@
     return (window._detailReviewQueue || {}).label || 'Review';
   }
 
-  /** Ditto for Conversations. The span carries setTabCount's " (12)"; a badge is not a tab name. */
+  /**
+   * Where a contacted lead's conversation lives. The Conversations tab is gone (2026-10-27) — it is
+   * now the Outreach tab's Following up / Replied / Finished stages — so this names the Outreach tab
+   * as the role labels it.
+   */
   function conversationsTabLabel() {
-    const el = document.getElementById('conversations-tab-label');
-    const raw = el ? el.textContent.trim() : '';
-    return raw.replace(/\s*\(\d+\)\s*$/, '') || 'Conversations';
+    return reviewTabLabel();
   }
 
-  /** Whether the Conversations tab is actually on screen and reachable. Lead roles only, and
+  /** Whether the staged Outreach tab is on screen and reachable. Lead roles only, and
    *  `_activateMainTab` is absent when this hub renders inside the Searches tab's modal. */
   function conversationsTabAvailable() {
-    const btn = document.querySelector('.main-tab-btn[data-maintab="conversations"]');
-    return !!(btn && !btn.classList.contains('hidden') && typeof window._activateMainTab === 'function');
+    return !!(window.AssistantLeadOutreach?.isStaged() && typeof window._activateMainTab === 'function');
   }
 
   /**
@@ -1207,7 +1208,7 @@
       if (hasConversationThread(record) && conversationsTabAvailable()) {
         const conv = conversationsTabLabel();
         return { owner: 'assistant', action: { key: 'open-conversations', label: `Open ${conv}` },
-          note: `The outreach email has gone and the follow-ups are handled for you. Anything else in that step — a call, a meeting, a look at their site — is yours, and you record how it ends on the conversation in ${conv}.` };
+          note: `The outreach email has gone and the follow-ups are handled for you. Anything else in that step — a call, a meeting, a look at their site — is yours, and you record how it ends on its conversation in ${conv}.` };
       }
       // No thread means we did not send it — see hasConversationThread. On the "Mark outreach sent"
       // path that is literally true of the follow-ups too: `enrolInSequence` runs only on a
@@ -1287,7 +1288,7 @@
     if (html) host.outerHTML = html; else host.remove();
   }
 
-  function wireNextStepAction(panel) {
+  function wireNextStepAction(panel, record) {
     panel.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-lead-next-step]');
       if (!btn) return;
@@ -1297,7 +1298,13 @@
         return;
       }
       if (key === 'open-conversations') {
-        window._activateMainTab?.('conversations');
+        // Straight to THIS lead, in whichever Outreach stage it is in (Following up / Replied /
+        // Finished) — not to the top of a list the user then has to search.
+        if (record && record.id != null && window.AssistantLeadOutreach?.isStaged()) {
+          window.AssistantLeadOutreach.openRecord(record.id);
+        } else {
+          window._activateMainTab?.('conversations');
+        }
         return;
       }
       const target = panel.querySelector(`[data-hub-action="${key}"]`);
@@ -2026,7 +2033,7 @@
       }));
       const erasure = erasureStrip(record);
       if (erasure) panel.appendChild(erasure);
-      wireNextStepAction(panel);
+      wireNextStepAction(panel, record);
       return panel;
     }
     // A lead leads with where it stands: first the approval gate (pending / approved / rejected),
@@ -2060,7 +2067,7 @@
     const erasure = state.hub.recordType === 'lead' ? erasureStrip(record) : null;
     if (erasure) panel.appendChild(erasure);
     // Delegated, and attached after the bar exists: the next-step button presses a control in it.
-    if (state.hub.recordType === 'lead') wireNextStepAction(panel);
+    if (state.hub.recordType === 'lead') wireNextStepAction(panel, record);
     return panel;
   }
 

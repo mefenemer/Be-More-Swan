@@ -20,6 +20,7 @@ import { createNotification } from './notify';
 import { safeFetchBinary } from './safe-fetch';
 import { normaliseSiteDefinition, type SiteDefinition } from './site-definition';
 import { fetchSiteHtml } from './site-fetch';
+import { createPageRenderer, type PageRenderer } from './site-js-render';
 import { runImport, type ImportDeps, type ImportReport, type PictureChoice } from './site-import';
 import { claimDraft, definitionOf, endDraft, maxPagesFor, verifySiteAssets, type SiteRow } from './site-store';
 import { triggerSiteDraft } from './trigger-site-draft';
@@ -30,6 +31,8 @@ export type SiteImportRow = typeof siteImports.$inferSelect;
 
 const PAGE_TIMEOUT_MS = 15_000;
 const PAGE_MAX_BYTES = 5 * 1024 * 1024;   // a Wix home page is 0.6–2.2 MB of HTML (measured 2026-10-21)
+/** One page with its JavaScript run, scripts and data included (site-js-render.ts). */
+const RENDER_TIMEOUT_MS = 25_000;
 const PICTURE_MAX_BYTES = 8 * 1024 * 1024;
 const PICTURE_TYPES = /^image\/(jpeg|png|webp|gif)$/i;
 
@@ -95,9 +98,11 @@ async function failImport(db: Db, siteId: number, message: string, report: Impor
 }
 
 /** The real outside world for runImport: robots + SSRF fence, the model, the picture library. */
-function liveDeps(db: Db, site: SiteRow, userId: number): ImportDeps {
+function liveDeps(db: Db, site: SiteRow, userId: number, renderer: PageRenderer): ImportDeps {
     return {
         fetchHtml: (url) => fetchSiteHtml(url, CRAWLERS.siteImport, { timeoutMs: PAGE_TIMEOUT_MS, maxBytes: PAGE_MAX_BYTES }),
+        // Only after fetchHtml read the same page — so robots.txt has already said yes to it.
+        renderHtml: (url) => renderer.render(url),
         async plan(prompt) {
             const res = await gatewayGenerate({
                 system: prompt.system, messages: [{ role: 'user', content: prompt.user }], maxTokens: 6000,
@@ -147,6 +152,7 @@ export async function runSiteImport(db: Db, siteId: number): Promise<void> {
     if (!site) return;
     const row = await loadImport(db, site.id);
     if (!row || row.status !== 'reading') { await endDraft(db, site.id, null); return; }
+    const renderer = createPageRenderer(CRAWLERS.siteImport, { timeoutMs: RENDER_TIMEOUT_MS, maxBytes: PAGE_MAX_BYTES });
     try {
         if (!(await hasTaskCapacity(db, site.organisationId))) { await failImport(db, site.id, TASK_LIMIT_MESSAGE, null); await endDraft(db, site.id, null); return; }
         const maxPages = await maxPagesFor(db, site.organisationId);
@@ -156,7 +162,7 @@ export async function runSiteImport(db: Db, siteId: number): Promise<void> {
         if (!owner) { await failImport(db, site.id, 'The import couldn\'t be completed. Nothing was charged — try again.', null); await endDraft(db, site.id, null); return; }
         const outcome = await runImport(
             { url: row.sourceUrl, pictures: row.pictures === 'copy' ? 'copy' : 'skip', current: definitionOf(site, maxPages).definition, maxPages },
-            liveDeps(db, site, owner),
+            liveDeps(db, site, owner, renderer),
         );
         if (!outcome.ok) { await failImport(db, site.id, outcome.message, outcome.report); await endDraft(db, site.id, null); return; }
 
@@ -179,6 +185,8 @@ export async function runSiteImport(db: Db, siteId: number): Promise<void> {
         console.error('[site-import] import failed', { siteId, message: err instanceof Error ? err.message : String(err) });
         await failImport(db, site.id, 'The import couldn\'t be completed this time — your site is unchanged and nothing was charged. Try again in a few minutes.', null).catch(() => {});
         await endDraft(db, site.id, null).catch(() => {});
+    } finally {
+        await renderer.close();
     }
 }
 

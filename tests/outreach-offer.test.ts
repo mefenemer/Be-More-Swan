@@ -63,7 +63,7 @@ check('every seam that writes an opener gets the first-email block', () => {
 check('the follow-up seam gets the follow-up block and appends the link in code', () => {
     const f = read('netlify/functions/process-sequence-sends.ts');
     assert.ok(f.includes('${outreachFollowUpBlock(sender.outreachOffer, withOfferLinkLine)}'));
-    assert.ok(f.includes('followUpLinkTarget(sender.outreachOffer, step.stepNumber)') && f.includes('offerLinkForThread(db, sender.outreachOffer, row.lead_thread_id)'));
+    assert.ok(f.includes('followUpLinkTarget(sender.outreachOffer, position)') /* the plan is editable: the FIRST follow-up is position 1, whatever its step number */ && f.includes('offerLinkForThread(db, sender.outreachOffer, row.lead_thread_id)'));
     assert.ok(f.includes('draft = { ...draft, body: withOfferLink(draft.body, offerLink) };'));
     assert.ok(!f.includes('no links unless one already appears in the transcript'));
     // Every outreach prompt reads the offer through the one sender loader.

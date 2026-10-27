@@ -316,7 +316,10 @@ window.NotifKit = (function () {
         // where we know which one it was.
         if (notif.type === 'lead_reply_received' && meta.assistantId) {
             return { label: 'Read the reply', run: () => {
-                window._assistantDetailInitialTab = 'conversations';
+                // The Outreach tab's Replied stage (it was the Conversations tab until 2026-10-27).
+                // The thread id below picks the stage the lead is actually in by the time it opens.
+                window._assistantDetailInitialTab = 'review-queue';
+                window._assistantDetailInitialRqStatus = 'replied';
                 if (meta.threadId) window._assistantDetailFocusThreadId = meta.threadId;
                 window.routeToAssistantDetail?.(meta.assistantId);
             } };
