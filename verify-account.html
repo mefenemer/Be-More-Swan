@@ -3,13 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Verifying Account | Be More Swan</title>
+  <title>Log In | Be More Swan</title>
   <style>
-    body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f9fafb; }
-    .card { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 400px; }
+    body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 0 16px; box-sizing: border-box; background-color: #f9fafb; }
+    .card { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 400px; width: 100%; box-sizing: border-box; }
     .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3b82f6; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 1rem; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    #error-message { color: #ef4444; display: none; margin-top: 1rem; }
+    #loading-state, #error-message { display: none; }
+    #error-message { color: #ef4444; margin-top: 1rem; }
+    /* .btn-primary colours (style.css isn't loaded on this page) */
+    .btn-primary { background: #d6006b; color: #fff; border: 0; border-radius: 8px; padding: 14px 28px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 0.5rem; }
+    .btn-primary:hover { background: #b0005a; }
+    .btn-primary:focus-visible { outline: 2px solid #ff007f; outline-offset: 2px; }
   </style>
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
@@ -18,6 +23,15 @@
 <body>
 
 <div class="card">
+  <!-- Ready state: the token is only used when the person clicks. Email link scanners (Outlook /
+       Hotmail Safe Links) open the page and run its script but never click — when this page used
+       the token on load, the scanner logged in and the person's own click found the single-use
+       link already spent ("Verification Failed", prod user 39, 2026-10-27). -->
+  <div id="ready-state">
+    <h2>Log in to Be More Swan</h2>
+    <p>Click below to finish logging in.</p>
+    <button type="button" id="login-btn" class="btn-primary">Log me in</button>
+  </div>
   <div id="loading-state">
     <div class="spinner"></div>
     <h2>Verifying your account...</h2>
@@ -31,7 +45,7 @@
 </div>
 
 <script>
-  document.addEventListener('DOMContentLoaded', async () => {
+  document.addEventListener('DOMContentLoaded', () => {
     // 1. Extract the token from the URL (?token=XYZ)
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('token');
@@ -39,49 +53,61 @@
     // US-ONB-2.1.2 AC9: post-login redirect preserved through magic-link URL
     const redirect = urlParams.get('redirect');
 
+    const readyState = document.getElementById('ready-state');
     const loadingState = document.getElementById('loading-state');
     const errorMessage = document.getElementById('error-message');
     const errorText = document.getElementById('error-text');
+    const loginBtn = document.getElementById('login-btn');
 
-    if (!token) {
+    const showError = (text) => {
+      readyState.style.display = 'none';
       loadingState.style.display = 'none';
       errorMessage.style.display = 'block';
+      if (text) errorText.textContent = text;
+    };
+
+    if (!token) {
+      showError();
       return;
     }
 
-    try {
-      // 2. Safely POST the token to the backend
-      const response = await fetch('/.netlify/functions/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token: token,
-          tier: tier, // Read from URL param — survives email client cross-tab navigation
-          redirect: redirect || undefined, // US-ONB-2.1.2 AC9: post-login redirect destination
-        })
-      });
+    loginBtn.addEventListener('click', async () => {
+      loginBtn.disabled = true;
+      readyState.style.display = 'none';
+      loadingState.style.display = 'block';
 
-      // 3. Handle the response
-      if (response.ok) {
-        const data = await response.json();
-        // The backend successfully set the HTTPOnly cookie.
-        // Mark this as a fresh login so the workspace can run its one-time "focus the inbox"
-        // bell count-up once (consumed there). sessionStorage is per-tab and survives the
-        // redirect + any reload within this session, so it fires once per login, not per reload.
-        try { sessionStorage.setItem('bms_freshLogin', '1'); } catch {}
-        // Redirect the user to the protected dashboard.
-        window.location.href = data.redirect || '/onboarding.html';
-      } else {
-        const errorData = await response.json();
-        loadingState.style.display = 'none';
-        errorMessage.style.display = 'block';
-        errorText.textContent = errorData.error || 'Invalid or expired link.';
+      try {
+        // 2. Safely POST the token to the backend
+        const response = await fetch('/.netlify/functions/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            token: token,
+            tier: tier, // Read from URL param — survives email client cross-tab navigation
+            redirect: redirect || undefined, // US-ONB-2.1.2 AC9: post-login redirect destination
+          })
+        });
+
+        // 3. Handle the response
+        if (response.ok) {
+          const data = await response.json();
+          // The backend successfully set the HTTPOnly cookie.
+          // Mark this as a fresh login so the workspace can run its one-time "focus the inbox"
+          // bell count-up once (consumed there). sessionStorage is per-tab and survives the
+          // redirect + any reload within this session, so it fires once per login, not per reload.
+          try { sessionStorage.setItem('bms_freshLogin', '1'); } catch {}
+          // Redirect the user to the protected dashboard.
+          window.location.href = data.redirect || '/onboarding.html';
+        } else {
+          const errorData = await response.json().catch(() => ({}));
+          showError(errorData.error || 'Invalid or expired link.');
+        }
+      } catch (error) {
+        showError('A network error occurred. Please try again.');
       }
-    } catch (error) {
-      loadingState.style.display = 'none';
-      errorMessage.style.display = 'block';
-      errorText.textContent = 'A network error occurred. Please try again.';
-    }
+    });
+
+    loginBtn.focus();
   });
 </script>
 
