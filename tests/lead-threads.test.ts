@@ -317,10 +317,20 @@ check('the label is resolved server-side, so the client holds no copy of the voc
 });
 
 check('the thread list ships excerpts, not whole message bodies', () => {
+    // The rollup is one helper shared by `list` and `board`, so the truncation is checked THERE and
+    // both branches are checked to call it rather than reading messages themselves.
+    const helper = readApiText.slice(
+        landmark(readApiText, 'async function loadThreadRollups('),
+        landmark(readApiText, 'async function loadThreadEnrolments('),
+    );
+    assert.ok(helper.includes('left(') && helper.includes('EXCERPT_CHARS'),
+        'the rollup must truncate bodies in SQL — a full page would otherwise ship every word exchanged');
     const listBranch = readApiText.slice(landmark(readApiText, "action === 'list'"), landmark(readApiText, "action === 'get'"));
-    assert.ok(listBranch.includes('left(') && listBranch.includes('EXCERPT_CHARS'),
-        'the list rollup must truncate bodies in SQL — a full page would otherwise ship every word exchanged');
-    assert.ok(!/body: leadMessages\.body/.test(listBranch), 'the list must not select full bodies');
+    assert.ok(!/body: leadMessages\.body/.test(listBranch), 'list/board must not select full bodies');
+    assert.ok(!listBranch.includes('.from(leadMessages)'),
+        'list/board must read messages only through loadThreadRollups');
+    const calls = listBranch.match(/loadThreadRollups\(db, orgId, threadIds\)/g) || [];
+    assert.strictEqual(calls.length, 2, `list and board must both use loadThreadRollups (found ${calls.length})`);
 });
 
 check('the paging cursor sorts on the same keys as the ORDER BY', () => {
@@ -579,10 +589,17 @@ check('the API returns the outcome but not the rest of the lead record', () => {
         'lead-threads.ts must lift dealOutcome through a single helper');
     assert.ok(!/recordData: t\.recordData|recordData: thread\.recordData/.test(readApiText),
         'the raw record data blob must never be returned to the browser');
+    // list, get, and board's two row kinds (with a thread / record only).
     const responses = [...readApiText.matchAll(/dealOutcome: dealOutcomeOf\(/g)];
-    assert.strictEqual(responses.length, 2,
-        `both list and get must expose the outcome (found ${responses.length}) — a chip that only `
+    assert.strictEqual(responses.length, 4,
+        `list, get and both board row kinds must expose the outcome (found ${responses.length}) — a chip that only `
         + 'appears once the thread is open cannot answer "which of these are closed out?"');
+    // The blob may go INTO leadOutreachPhase (it reads two keys); it must never be a row field.
+    const boardRows = readApiText
+        .slice(landmark(readApiText, "action === 'board'"), landmark(readApiText, '// ── calendar'))
+        .replace(/leadOutreachPhase\(\{[^}]*\}\)/g, '');
+    assert.ok(!/\bdata: (rec\.data|t\.recordData)\b|\.\.\.(rec\.data|t\.recordData)\b/.test(boardRows),
+        'board must lift single keys off the record, never return its data blob');
 });
 
 void runOneTokenOneAddressChecks().then(() => {
