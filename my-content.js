@@ -915,15 +915,20 @@ window._mcGenerateAI = async function () {
             document.getElementById('ai-balance').textContent = _mcAmount(balance);
             _mcSetAiAffordable(balance >= 1);
         }
-        resultsEl.innerHTML = (images || []).map(img => `
-            <button type="button" data-ai-index="${img.index}" onclick="window._mcToggleAI(this, ${img.index})"
-              class="relative group rounded-xl overflow-hidden border border-gray-200 hover:border-emerald-500 hover:ring-2 hover:ring-emerald-400 transition cursor-pointer aspect-square">
+        // An enlarge button on each tile (image-lightbox.js) — choosing from thumbnails alone was guesswork.
+        const zoom = window.ImageLightbox ? window.ImageLightbox.ZOOM_BUTTON_STYLE : '';
+        resultsEl.innerHTML = (images || []).map((img, i) => `
+            <div class="relative">
+            <button type="button" data-ai-index="${img.index}" data-ai-url="${img.url}" onclick="window._mcToggleAI(this, ${img.index})"
+              class="relative group w-full rounded-xl overflow-hidden border border-gray-200 hover:border-emerald-500 hover:ring-2 hover:ring-emerald-400 transition cursor-pointer aspect-square">
               <img src="${img.url}" alt="" class="w-full h-full object-cover">
               <span class="ai-pick-badge hidden absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold shadow">✓</span>
               <span class="absolute inset-0 flex items-center justify-center">
                 <span class="ai-pick-label opacity-0 group-hover:opacity-100 bg-white text-emerald-700 text-xs font-bold px-3 py-1 rounded-full shadow transition">Use this</span>
               </span>
-            </button>`).join('');
+            </button>
+            ${zoom ? `<button type="button" aria-label="See option ${i + 1} larger" title="See it larger" style="${zoom}" onclick="window._mcZoomAI(${i})">&#128269;</button>` : ''}
+            </div>`).join('');
         resultsEl.classList.remove('hidden');
         hintEl.classList.remove('hidden');
     } catch (e) {
@@ -933,6 +938,13 @@ window._mcGenerateAI = async function () {
         loadingEl.classList.add('hidden');
         btn.disabled = false;
     }
+};
+
+// Enlarge one option; "Use this" in the preview ticks it exactly as clicking its tile does.
+window._mcZoomAI = function (i) {
+    const tiles = [...document.querySelectorAll('[data-ai-index]')];
+    window.ImageLightbox?.open({ urls: tiles.map((t) => t.dataset.aiUrl), index: i,
+        actionLabel: 'Use this', onAction: (at) => { const t = tiles[at]; if (t && !_mcAiSelected.has(Number(t.dataset.aiIndex))) t.click(); } });
 };
 
 // Tick / untick one variation. Nothing is persisted until "Add … to My Content" — clicking a tile

@@ -310,11 +310,23 @@
       if (!res.ok) { say(res.body && res.body.error === 'insufficient_credits' ? creditMessage(res.body) : (res.body && (res.body.message || res.body.error)) || 'It couldn\'t be created. Please try again.', true); return; }
       say('Choose the one you like — it\'s saved to your library.');
       const jobId = res.body.jobId;
+      // Each tile has an enlarge button (image-lightbox.js): four 120px thumbnails are not enough to choose by.
+      const zoom = window.ImageLightbox ? window.ImageLightbox.ZOOM_BUTTON_STYLE : '';
       aiGrid.innerHTML = (res.body.images || []).map((im, i, all) => `
-        <button type="button" aria-label="Use picture ${i + 1} of ${all.length}" data-mp-ai-pick="${esc(im.index)}" data-job="${esc(jobId)}" data-url="${esc(im.url)}" class="border border-gray-200 rounded-lg overflow-hidden hover:border-gray-400">
-          <img src="${esc(im.url)}" alt="" style="width:100%;height:120px;object-fit:cover;display:block"></button>`).join('');
+        <div style="position:relative">
+          <button type="button" aria-label="Use picture ${i + 1} of ${all.length}" data-mp-ai-pick="${esc(im.index)}" data-job="${esc(jobId)}" data-url="${esc(im.url)}" class="w-full border border-gray-200 rounded-lg overflow-hidden hover:border-gray-400">
+            <img src="${esc(im.url)}" alt="" style="width:100%;height:120px;object-fit:cover;display:block"></button>
+          ${zoom ? `<button type="button" data-mp-ai-zoom="${i}" aria-label="See picture ${i + 1} larger" title="See it larger" style="${zoom}">&#128269;</button>` : ''}
+        </div>`).join('');
     }
     aiGrid.addEventListener('click', async (e) => {
+      const z = e.target.closest('[data-mp-ai-zoom]');
+      if (z) {
+        const picks = [...aiGrid.querySelectorAll('[data-mp-ai-pick]')];
+        window.ImageLightbox.open({ urls: picks.map((p) => p.dataset.url), index: Number(z.dataset.mpAiZoom),
+          actionLabel: 'Use this one', onAction: (i) => picks[i] && picks[i].click() });
+        return;
+      }
       const b = e.target.closest('[data-mp-ai-pick]');
       if (!b) return;
       say('Saving it to your library…');

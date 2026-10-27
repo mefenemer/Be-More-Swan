@@ -73,4 +73,36 @@ check('Lead Generator: All leads, a divider before supporting tabs, and Awaiting
     assert.ok(!read('index.html').includes('Autonomous Digital Workforce'));
 });
 
+// ── Later the same day: AI images, the preview, the AI notice, the QR card ──
+check('every AI image is asked for no text, and typed requests are turned into a scene first', () => {
+    const gw = read('src/lib/fal-gateway.ts');
+    assert.match(gw, /prompt: opts\.allowText \? opts\.prompt : `\$\{opts\.prompt\.trim\(\)\}\\n\\n\$\{NO_TEXT_RULE\}`/);
+    assert.match(read('netlify/functions/generate-ai-image.ts'), /prompt: await visualisePrompt\(prompt/);
+    assert.match(read('src/lib/image-prompt.ts'), /return request;/, 'fails open to the person\'s own words');
+});
+
+check('all three pickers offer a large preview whose button runs the picker\'s own choose', () => {
+    assert.match(read('src/components/media-picker.js'), /ImageLightbox\.open\([\s\S]{0,200}picks\[i\]\.click\(\)/);
+    assert.match(read('my-content.js'), /window\._mcZoomAI = function/);
+    assert.match(read('src/components/blog-studio-modal.js'), /ImageLightbox\.open\(/);
+    for (const page of ['workspace.html', 'assistant-chat.html', 'blog-studio.html']) assert.match(read(page), /image-lightbox\.js/, page);
+});
+
+check('emails follow the workspace\'s AI-notice wording, so the assistant is only named if chosen', () => {
+    const f = read('src/utils/ai-email-footer.ts');
+    assert.match(f, /workspaceText\?\.trim\(\) \? workspaceText\.trim\(\) : DEFAULT_FOOTER_TEXT/);
+    assert.match(f, /split\('\{assistant\}'\)\.join\(assistantName\)/);
+    assert.match(read('netlify/functions/send-outbound-email.ts'), /injectAiFooter\(bodyText, assistant\.name, customDisclosureText, false, workspaceText\)/);
+    assert.match(read('user-settings.html'), /name="ai-notice-mode" value="plain"/);
+});
+
+check('the QR business card: name, purpose, email, website links, company details, not indexed', () => {
+    const c = read('card.html');
+    assert.match(c, /noindex/);
+    assert.match(c, /mailto:hello@bemoreswan\.com/);
+    assert.match(c, /href="https:\/\/bemoreswan\.com\/"/);
+    assert.match(c, /company number 17378263/);
+    assert.match(read('be-more-swan.vcf'), /EMAIL;TYPE=WORK:hello@bemoreswan\.com/);
+});
+
 console.log(`\n${passed} checks passed.`);

@@ -22,6 +22,7 @@
 const FAL_KEY     = process.env.FAL_KEY;
 import { logMediaCost } from '../utils/ai-usage';
 
+import { NO_TEXT_RULE } from './image-prompt';
 const IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
 export const VIDEO_MODEL = process.env.FAL_VIDEO_MODEL ?? 'fal-ai/minimax/hailuo-2.3/standard/text-to-video';
 
@@ -202,12 +203,16 @@ export async function generateImages(opts: {
     timeoutMs?: number;
     /** Who this is for, so its cost lands on the right workspace in the COGS view. Recorded either way. */
     usage?: { workspaceId?: number | null; userId?: number | null; assistantId?: number | null };
+    /** Leave lettering allowed. Off by default — see NO_TEXT_RULE. */
+    allowText?: boolean;
 }): Promise<GeneratedImage[]> {
     // FLUX 1.1 Pro auto-routes inference internally — we deliberately DON'T pass legacy SDXL
     // knobs (scheduler / num_inference_steps / guidance_scale); forcing them degrades the model's
     // text rendering. Only prompt, size, count, safety and output format are supplied.
+    // Every image, from every assistant: no words in the picture (src/lib/image-prompt.ts says why —
+    // FLUX paints text as shapes and misspells it). A caller that truly wants lettering opts out.
     const input: Record<string, unknown> = {
-        prompt: opts.prompt,
+        prompt: opts.allowText ? opts.prompt : `${opts.prompt.trim()}\n\n${NO_TEXT_RULE}`,
         image_size: imageSizeForAspect(opts.aspectRatio),
         num_images: Math.min(Math.max(opts.numImages ?? 4, 1), 4),
         safety_tolerance: SAFETY_TOLERANCE,

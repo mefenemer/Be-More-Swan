@@ -414,18 +414,37 @@
                         <span aria-hidden="true" class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
                     </button>
                 </div>
-                <div id="ai-disclosure-text-section" class="hidden space-y-2">
-                    <label for="ai-disclosure-text" data-explain="acct-ai-footer-text" class="block text-sm font-semibold text-gray-700">Footer text</label>
-                    <div class="flex gap-2 items-start">
-                        <input type="text" id="ai-disclosure-text" maxlength="500"
-                            placeholder="Composed with your assistant, our Be More Swan AI Digital Assistant. What's yours called 😉?"
-                            class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition">
-                        <button type="button" id="btn-save-ai-disclosure-text"
-                            class="btn-primary shrink-0 px-4 py-2 text-sm font-bold rounded-lg shadow transition cursor-pointer">
-                            Save
-                        </button>
+                <!-- Whether the assistant is NAMED in what goes out (owner, 2026-10-27). Three choices, stored in the
+                     one existing field (organisations.ai_disclosure_footer_text): blank = the default, which names
+                     the assistant; AI_NOTICE_PLAIN = no name; anything else = the person's own words, where
+                     {assistant} is the name. Applies to social posts AND outbound emails (ai-email-footer.ts). -->
+                <div id="ai-disclosure-text-section" class="hidden space-y-3">
+                    <p class="text-sm font-semibold text-gray-700">What the notice says</p>
+                    <label class="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+                        <input type="radio" name="ai-notice-mode" value="named" class="mt-1">
+                        <span><span class="font-semibold text-gray-900">Name the assistant</span> — “Composed with Nova, our Be More Swan AI Digital Assistant. What’s yours called 😉?”</span>
+                    </label>
+                    <label class="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+                        <input type="radio" name="ai-notice-mode" value="plain" class="mt-1">
+                        <span><span class="font-semibold text-gray-900">Don’t name it</span> — “This was composed with AI assistance.”</span>
+                    </label>
+                    <label class="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+                        <input type="radio" name="ai-notice-mode" value="custom" class="mt-1">
+                        <span class="font-semibold text-gray-900">Your own wording</span>
+                    </label>
+                    <div id="ai-notice-custom" class="hidden pl-6 space-y-2">
+                        <div class="flex gap-2 items-start">
+                            <input type="text" id="ai-disclosure-text" maxlength="500" data-explain="acct-ai-footer-text"
+                                placeholder="e.g. Written with help from {assistant}, our AI assistant."
+                                class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition">
+                            <button type="button" id="btn-save-ai-disclosure-text"
+                                class="btn-primary shrink-0 px-4 py-2 text-sm font-bold rounded-lg shadow transition cursor-pointer">
+                                Save
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-500">Max 500 characters. Include <code>{assistant}</code> where you want the assistant’s name, or leave it out to never name it. Keep the word “AI” in it — the notice exists to say AI was involved.</p>
                     </div>
-                    <p class="text-xs text-gray-400">Max 500 characters. Leave blank to use the default. Tip: include <code>{assistant}</code> and it's replaced with the assistant's name on each post.</p>
+                    <p class="text-xs text-gray-500">Used on social posts and on emails your assistants send. Blog articles carry their own short notice, which never names the assistant.</p>
                 </div>
                 <p id="ai-disclosure-save-feedback" class="hidden text-xs text-emerald-600 font-semibold">✓ Saved</p>
             </div>
@@ -467,12 +486,27 @@
             }
 
             // Load current settings
+            // The "don't name it" wording. ⚠️ Matched exactly on load to tell this choice from custom text.
+            const AI_NOTICE_PLAIN = 'This was composed with AI assistance.';
+            const customBox = document.getElementById('ai-notice-custom');
+            const radios = [...document.querySelectorAll('input[name="ai-notice-mode"]')];
+            const showMode = (mode) => {
+                radios.forEach(r => { r.checked = r.value === mode; });
+                customBox.classList.toggle('hidden', mode !== 'custom');
+            };
+            radios.forEach(r => r.addEventListener('change', () => {
+                showMode(r.value);
+                if (r.value === 'named') saveDisclosure({ text: '' });
+                else if (r.value === 'plain') saveDisclosure({ text: AI_NOTICE_PLAIN });
+                else textInput.focus();
+            }));
             fetch('/.netlify/functions/workspace-ai-disclosure')
                 .then(r => r.json())
                 .then(data => {
                     setToggleState(data.enabled);
-                    textInput.value = data.text || '';
-                    textInput.placeholder = data.defaultText || "Composed with your assistant, our Be More Swan AI Digital Assistant. What's yours called 😉?";
+                    const text = (data.text || '').trim();
+                    textInput.value = text && text !== AI_NOTICE_PLAIN ? text : '';
+                    showMode(!text ? 'named' : text === AI_NOTICE_PLAIN ? 'plain' : 'custom');
                     if (data.isEuJurisdiction) euBadge.classList.remove('hidden');
                 })
                 .catch(() => {});
@@ -484,7 +518,13 @@
             });
 
             saveBtn.addEventListener('click', () => {
-                saveDisclosure({ text: textInput.value.trim() });
+                const t = textInput.value.trim();
+                if (t && !/\bAI\b|artificial intelligence/i.test(t)) {
+                    window.showToast?.('Keep the word “AI” in the notice — it is there to say AI was involved.', { icon: '⚠️' });
+                    return;
+                }
+                saveDisclosure({ text: t });
+                if (!t) showMode('named');
             });
         })();
         </script>

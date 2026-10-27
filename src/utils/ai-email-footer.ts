@@ -14,11 +14,15 @@ const DEFAULT_FOOTER_TEXT = DISCLOSURE.emailFooterDefault;
  * Uses the integration's custom disclosure text if provided and valid;
  * otherwise falls back to the default.
  */
-export function resolveFooterText(assistantName: string, customDisclosureText?: string | null): string {
+export function resolveFooterText(assistantName: string, customDisclosureText?: string | null, workspaceText?: string | null): string {
+    // Precedence: this integration's own text → the workspace's AI notice wording (Account settings ▸
+    // Branding & AI Notices — the one place a person chooses whether the assistant is NAMED in what
+    // goes out, owner 2026-10-27) → the default. Emails used to skip the workspace wording entirely,
+    // so they named the assistant whatever the person had chosen for their posts.
     const base = customDisclosureText?.trim()
         ? customDisclosureText.trim()
-        : DEFAULT_FOOTER_TEXT;
-    return base.replace('[Assistant Name]', assistantName);
+        : workspaceText?.trim() ? workspaceText.trim() : DEFAULT_FOOTER_TEXT;
+    return base.replace('[Assistant Name]', assistantName).split('{assistant}').join(assistantName);
 }
 
 /**
@@ -31,8 +35,9 @@ export function injectAiFooter(
     assistantName: string,
     customDisclosureText?: string | null,
     isHtml = false,
+    workspaceText?: string | null,
 ): string {
-    const footerText = resolveFooterText(assistantName, customDisclosureText);
+    const footerText = resolveFooterText(assistantName, customDisclosureText, workspaceText);
 
     if (isHtml) {
         const htmlFooter = `<hr style="margin-top:24px;border:none;border-top:1px solid #e5e7eb;">` +

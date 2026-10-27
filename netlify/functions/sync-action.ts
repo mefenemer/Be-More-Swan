@@ -46,7 +46,7 @@ import { Handler } from '@netlify/functions';
 import { and, eq, inArray } from 'drizzle-orm';
 import { Resend } from 'resend';
 import { getDb } from '../../db/client';
-import { actionItems } from '../../db/schema';
+import { actionItems, organisations } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logApiCall } from '../../src/utils/vault';
 import { getFreshAccessToken, getIntegration, IntegrationError, providerLabel } from '../../src/utils/workspace-integrations';
@@ -764,7 +764,10 @@ async function handleEmailMeetingFollowup(db: Db, userId: number, organisationId
 
     const assistantName = typeof payload.assistantName === 'string' && payload.assistantName.trim()
         ? payload.assistantName.trim() : 'Your Be More Swan assistant';
-    const finalBody = injectAiFooter(rawBody, assistantName, null, false);
+    // The workspace's AI-notice wording decides whether the assistant is named (see ai-email-footer.ts).
+    const [orgRow] = await db.select({ text: organisations.aiDisclosureFooterText })
+        .from(organisations).where(eq(organisations.id, organisationId)).limit(1);
+    const finalBody = injectAiFooter(rawBody, assistantName, null, false, orgRow?.text ?? null);
     const plural = recipients.length === 1 ? '' : 's';
 
     // Primary: send from the org's connected Gmail (the user's own inbox). One message to all
