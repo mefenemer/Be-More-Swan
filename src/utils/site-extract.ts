@@ -95,6 +95,14 @@ const cap = (s: string, n: number): string => {
     return `${(atWord.length >= n * 0.6 ? atWord : cut).trimEnd()}…`;
 };
 const orNull = (s: string): string | null => (s ? s : null);
+// A pricing block shortened to the sentences that carry the price, not its first 120 characters: a
+// paragraph that opens with a pitch and names the price later read as "The Workflow Saver…" with
+// the price cut off (home page, 2026-10-27).
+const pricingSignal = (b: string): string => {
+    const sentences = b.split(/(?<=[.!?])\s+/);
+    const priced = sentences.filter((x) => PRICE.test(x) || PRICING_PHRASES.test(x));
+    return cap((priced.length ? priced : sentences).join(' '), 240);
+};
 
 /** Lower-cased, whitespace-collapsed, curly quotes straightened — the form two strings are compared in. */
 export function normaliseText(s: string): string {
@@ -144,7 +152,7 @@ const BUTTONISH = /(^|[\s_-])(btn|button|cta)([\s_-]|$)|w-button|sqs-block-butto
 // ── Pricing, proof, FAQ ─────────────────────────────────────────────────────────────────────
 
 const PRICE = /(?:£|\$|€)\s?\d[\d,]*(?:\.\d{1,2})?(?:\s?(?:k|\+))?(?:\s?(?:\/|per|a)\s?(?:mo(?:nth)?|month|yr|year|annum|hr|hour|week|wk|day|session|person|user|seat))?/i;
-const PRICING_PHRASES = /\b(free trial|cancel any ?time|no (setup|set-up) fee|money[- ]back|guarantee[d]?|no contract|pay as you go|from only|fixed price|no obligation)\b/i;
+const PRICING_PHRASES = /\b(free trial|cancel any ?time|no (setup|set-up) fee|money[- ]back|guarantee[d]?|no contract|pay as you go|from only|fixed price|no obligation|no hidden (?:fees?|costs?|charges?|tiers?))\b/i;
 const PROOF_PHRASES = /(\b\d(\.\d)?\s?\/\s?5\b|★|\b\d[\d,]*\+?\s+(reviews|ratings|clients|customers|businesses|companies|users|projects|five-star)\b|\btrusted by\b|\bcase stud(y|ies)\b|\bas (seen|featured) (in|on)\b|\baward)/i;
 const PROOF_CLASS = /testimonial|review|quote|rating|trust|case-stud/i;
 
@@ -247,7 +255,7 @@ export function extractSitePage(html: string, url: string): SitePage {
 
     const pricing = dedupe(
         // A quoted testimonial that mentions "£4,200 saved" is proof, not a price.
-        blocks.filter((b) => !/^["'\u201C\u2018]/.test(b) && (PRICE.test(b) || PRICING_PHRASES.test(b))).map((b) => cap(b, 120)),
+        blocks.filter((b) => !/^["'\u201C\u2018]/.test(b) && (PRICE.test(b) || PRICING_PHRASES.test(b))).map(pricingSignal),
         EXTRACT_LIMITS.pricing,
     );
 

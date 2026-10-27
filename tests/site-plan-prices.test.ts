@@ -39,9 +39,12 @@ check('the homepage, as the audit reads it, quotes the prices a visitor sees', (
 });
 
 check('a price that is missing keeps the whole sentence out, as it stays hidden on screen', () => {
+    // Only the £29 price known: the hero's "Plans start at" line needs nothing else, so it shows;
+    // the What's Included line also names the £69 plan, so all of it stays out.
     const text = textOf(fillPlanPriceMarkers(read('index.html'), [PLANS[0]]));
     assert.match(text, /No hidden tiers\./);
-    assert.doesNotMatch(text, /\/month/);
+    assert.match(text, /Plans start at £29\/month, and you can try/);
+    assert.doesNotMatch(text, /The Workflow Saver \(|\(\/month\)| at \/month/);
     assert.doesNotMatch(textOf(fillPlanPriceMarkers(read('index.html'), [])), /\/month/);
 });
 
