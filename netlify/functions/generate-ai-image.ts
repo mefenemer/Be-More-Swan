@@ -24,6 +24,7 @@ import {
     FalContentPolicyError, FalServiceError, FalError, type AspectRatio, type GeneratedImage,
 } from '../../src/lib/fal-gateway';
 import { holdCredits, settleHold, getBalance, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
+import { visualisePrompt } from '../../src/lib/image-prompt';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const PROMPT_MAX = 1000;
@@ -106,7 +107,9 @@ export default withLambda(async (event) => {
 
     try {
         const images = falConfigured()
-            ? await generateImages({ prompt, aspectRatio, numImages: 4, usage: { workspaceId: orgId, userId } })
+            // What the person typed becomes a scene to draw first (src/lib/image-prompt.ts) — a sentence
+            // passed straight through was painted on as misspelt text. The job keeps their own words.
+            ? await generateImages({ prompt: await visualisePrompt(prompt, { workspaceId: orgId, userId }), aspectRatio, numImages: 4, usage: { workspaceId: orgId, userId }, timeoutMs: 20_000 })
             : mockImages(aspectRatio);
 
         // Success → debit the held credit and record the completed job with its candidate URLs.

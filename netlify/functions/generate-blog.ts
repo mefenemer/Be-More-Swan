@@ -28,10 +28,11 @@ import { HandlerEvent } from '@netlify/functions';
 import { and, eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { getDb } from '../../db/client';
-import { blogPosts, contentGenerationJobs } from '../../db/schema';
+import { aiAssistants, blogPosts, contentGenerationJobs } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { encodeInteractiveBrief } from '../../src/utils/blog-interactive-brief';
+import { BLOG_BATCH_PROPOSAL_TYPE, blogBatchFromUiElement } from '../../src/utils/blog-chat-batch';
 import { triggerBlogDrain } from '../../src/utils/trigger-drain';
 import { meterInteraction } from '../../src/utils/task-credit';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -84,6 +85,75 @@ export default withLambda(async (event: HandlerEvent) => {
     let body: any;
     try { body = JSON.parse(event.body || '{}'); }
     catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON body.' }) }; }
+
+    // ── Several articles at once: the Blog Writer chat's "Write all N" card (owner, 2026-10-27) ──
+    //   POST { assistantId, batch: [{ title, brief? }, …] } → 202 { queued, jobIds }
+    // One blog_posts row and one job per article, through the SAME interactive path as Blog Studio's
+    // draft button (result_blog_post_id pre-set, so the worker drafts into the row and never ideates).
+    // The row is stamped with its job and parked in pending_approval with an empty body, which is
+    // exactly what notStillGenerating() hides — so nobody opens an empty page while it is written,
+    // and it appears in Review the moment its body lands. Each article is a task, charged by the
+    // worker when it runs, as for any other draft.
+    if (Array.isArray(body.batch)) {
+        const assistantId = Number(body.assistantId);
+        if (!Number.isInteger(assistantId)) return { statusCode: 400, body: JSON.stringify({ error: 'assistantId is required.' }) };
+        const card = blogBatchFromUiElement({ type: BLOG_BATCH_PROPOSAL_TYPE, topics: body.batch });
+        if (!card) return { statusCode: 400, body: JSON.stringify({ error: 'Add at least one article title.' }) };
+        const [assistant] = await db.select({ id: aiAssistants.id, name: aiAssistants.name })
+            .from(aiAssistants)
+            .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, organisationId)))
+            .limit(1);
+        if (!assistant) return { statusCode: 404, body: JSON.stringify({ error: 'Assistant not found.' }) };
+        try {
+            const [{ jobCount }] = await db.execute<{ jobCount: number }>(
+                `SELECT COUNT(*)::int AS "jobCount" FROM content_generation_jobs
+                 WHERE organisation_id = ${organisationId} AND status IN ('queued','processing')`
+            );
+            if (jobCount + card.topics.length > MAX_PENDING_JOBS) {
+                return { statusCode: 429, body: JSON.stringify({ error: 'Too many drafts are already being written. Please wait for them to finish.' }) };
+            }
+            const jobIds: string[] = [];
+            for (const t of card.topics) {
+                const jobId = randomUUID();
+                const [post] = await db.insert(blogPosts).values({
+                    organisationId,
+                    userId,
+                    assistantId: assistant.id,
+                    ownerLabel: `AI: ${assistant.name}`,
+                    title: t.title,
+                    status: 'pending_approval',
+                    isAutonomous: false,
+                    generationReason: 'chat_request',
+                    jobId,
+                }).returning({ id: blogPosts.id });
+                await db.insert(contentGenerationJobs).values({
+                    jobId,
+                    assistantId: assistant.id,
+                    organisationId,
+                    userId,
+                    status: 'queued',
+                    attempt: 0,
+                    maxAttempts: 3,
+                    triggerType: 'on_demand',
+                    contentType: 'blog',
+                    contextPrompt: encodeInteractiveBrief({ topic: t.title, notes: t.brief ?? undefined }),
+                    resultBlogPostId: post.id,
+                });
+                jobIds.push(jobId);
+            }
+            const started = await triggerBlogDrain(
+                event.headers as Record<string, string | undefined>, jobIds[0], 'generate-blog-batch');
+            console.log(`[generate-blog] queued a batch of ${jobIds.length} for assistant ${assistant.id} (org ${organisationId}), drain started=${started}`);
+            return {
+                statusCode: 202,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ queued: jobIds.length, jobIds, started }),
+            };
+        } catch (error) {
+            console.error('[generate-blog] could not queue the batch:', error, (error as { cause?: unknown })?.cause ?? '');
+            return { statusCode: 500, body: JSON.stringify({ error: 'Could not start those drafts. Please try again.' }) };
+        }
+    }
 
     const id = Number(body.blogPostId);
     if (!Number.isFinite(id)) return { statusCode: 400, body: JSON.stringify({ error: 'blogPostId is required.' }) };

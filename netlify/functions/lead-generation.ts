@@ -87,6 +87,7 @@ import { outreachDraftFingerprint } from '../../src/utils/chat-lead-action';
 import { normaliseLeadCard, type LeadScoringCard } from '../../src/lib/discovery-scoring';
 import { classifyEmailKind } from '../../src/config/lead-email-kind';
 import { voiceDirective } from '../../src/utils/voice-profile';
+import { loadAssistantRulesBlock } from '../../src/utils/assistant-rules-prompt';
 import { withLambda } from '@netlify/aws-lambda-compat';import { addWonCustomerToAudience } from '../../src/utils/won-customer-audience';
 
 
@@ -182,7 +183,7 @@ export default withLambda(async (event) => {
     // confirmChange: the caller has explicitly OK'd overwriting a deal outcome already recorded.
     let body: {
         action?: string; assistantId?: number; ideaId?: number; recordId?: number;
-        lead?: Record<string, unknown>; confirmPersonal?: boolean; reason?: string; expectDraftHash?: string; checkOnly?: boolean;
+        lead?: Record<string, unknown>; confirmPersonal?: boolean; reason?: string; expectDraftHash?: string; checkOnly?: boolean; instruction?: string;
         outcome?: string; lossReason?: string; valueGbp?: number | string | null; confirmChange?: boolean;
         editReason?: string; provider?: string; note?: string;
         email?: string; confirmErase?: boolean; eraseScope?: string;
@@ -868,6 +869,79 @@ ${outreachFirstEmailBlock(leadSender.outreachOffer)}`;
                 .where(eq(assistantRecords.id, recordId));
 
             return json(200, { notes });
+        }
+
+        // ── Ask the assistant to improve a lead's drafted email (owner, 2026-10-27) ──
+        // The Outreach tab's "Ask <name> to improve this email" and the chat's `improve` card. Rewrites
+        // the STORED draft and saves it in place — nothing is sent, and the lead stays where it is, so
+        // the user reads the new version before approving it. Same rules as every other outreach
+        // prompt (voice, sender identity — which carries Products & Services — the subject rules, the
+        // first-email offer, the user's Do's and don'ts), and `to` is never touched: the address is a
+        // fact, not wording. `draftOriginal` is left alone — it is the agent's FIRST draft, which is
+        // what the template-feedback loop compares a human's edit against.
+        if (action === 'improve_draft') {
+            const recordId = Number(body.recordId);
+            if (!Number.isInteger(recordId)) return json(400, { error: 'recordId is required.' });
+            const instruction = str(body.instruction, 600);
+
+            const [rec] = await db
+                .select({ id: assistantRecords.id, title: assistantRecords.title, data: assistantRecords.data })
+                .from(assistantRecords)
+                .where(and(
+                    eq(assistantRecords.id, recordId),
+                    eq(assistantRecords.organisationId, orgId),
+                    eq(assistantRecords.aiAssistantId, assistant.id),
+                    eq(assistantRecords.recordType, 'lead'),
+                ))
+                .limit(1);
+            if (!rec) return json(404, { error: 'Lead not found.' });
+            const data = (rec.data && typeof rec.data === 'object' && !Array.isArray(rec.data)) ? rec.data as Record<string, unknown> : {};
+            const draft = (data.outreachDraft && typeof data.outreachDraft === 'object') ? data.outreachDraft as Record<string, unknown> : null;
+            const curBody = str(draft?.body as string, 4000);
+            if (!curBody) return json(409, { error: 'This lead has no drafted email to improve yet.' });
+            if (data.outreachSentAt) return json(409, { error: 'This email has already been sent, so it can’t be changed.' });
+
+            const sendSender = await sender();
+            const rulesBlock = await loadAssistantRulesBlock(db, { assistantId: assistant.id, organisationId: orgId });
+            const system =
+`You improve a short cold outreach email that has already been drafted for the lead below. Keep what is
+good, fix what is weak: a sharper, more specific opening tied to something real about this company, one
+clear reason to reply, plain and natural wording, and no filler. Never invent facts, people, numbers or
+events that are not in the lead details. No placeholders or brackets.
+
+${voiceDirective(onboarding.salesTone, { surface: 'outreach', fallback: 'professional' })}
+
+WHO THE EMAIL IS FROM:
+${senderIdentityBlock(sendSender)}
+
+${SENDER_IDENTITY_RULE}
+
+${OUTREACH_SUBJECT_RULES}
+
+${outreachFirstEmailBlock(sendSender.outreachOffer)}
+${rulesBlock ? `\nRULES FOR THE OUTREACH EMAILS — the business's own rules for this assistant. Follow every one.\n${rulesBlock}\n` : ''}
+${instruction ? `WHAT THE USER ASKED FOR — follow it unless it breaks a rule above:\n${instruction}\n` : ''}
+Return STRICT JSON only: { "subject": "<subject>", "body": "<email body, UNDER 75 WORDS>" }`;
+            const { resp, model: usedModel } = await leadCall({
+                max_tokens: 700, system,
+                messages: [{ role: 'user', content: `Lead: ${JSON.stringify({ title: rec.title, ...data, outreachDraft: undefined, draftOriginal: undefined })}\n\nCurrent draft:\nSubject: ${str(draft?.subject as string, 300) ?? ''}\n\n${curBody}` }],
+            });
+            logUsage(resp, 'improve_draft', usedModel);
+            const gen = parseModelJson<{ subject?: string; body?: string }>(replyText(resp.content)) || {};
+            const newBody = str(gen.body, 4000);
+            if (!newBody) return json(502, { error: 'Couldn’t improve this email just now — please try again.' });
+            const newSubject = str(gen.subject, 300) || str(draft?.subject as string, 300);
+
+            // Re-read and merge onto the CURRENT row, so a note or edit saved while the model ran is kept.
+            const [fresh] = await db.select({ data: assistantRecords.data }).from(assistantRecords)
+                .where(eq(assistantRecords.id, recordId)).limit(1);
+            const freshData = (fresh?.data && typeof fresh.data === 'object' && !Array.isArray(fresh.data)) ? fresh.data as Record<string, unknown> : data;
+            const freshDraft = (freshData.outreachDraft && typeof freshData.outreachDraft === 'object') ? freshData.outreachDraft as Record<string, unknown> : {};
+            const outreachDraft = { ...freshDraft, subject: newSubject, body: newBody };
+            await db.update(assistantRecords)
+                .set({ data: { ...freshData, outreachDraft }, updatedAt: new Date() })
+                .where(eq(assistantRecords.id, recordId));
+            return json(200, { improved: true, outreachDraft });
         }
 
         // ── Record the deal outcome for a lead (Phase 4.5) ────────────────────────
@@ -1921,7 +1995,7 @@ Return STRICT JSON only (no markdown), an array of exactly 3 objects:
                 jobId,
                 searchConfigured: isSearchConfigured(),
                 message: isSearchConfigured()
-                    ? 'Discovery run started — found leads will appear in your Found leads tab for approval shortly.'
+                    ? 'Discovery run started — found leads will appear in your All leads tab for approval shortly.'
                     : 'Idea approved, but no web search provider is connected yet — connect one to start discovering real leads.',
             });
         }

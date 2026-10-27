@@ -252,7 +252,7 @@
     // merged. Empty on every hub but the Lead Generator's.
     deletedRecords: [],
     // Is the Deleted section folded open? Collapsed by default: it is a graveyard, and a user
-    // arriving at the Found leads tab is there for live leads. Part of the view state rather than
+    // arriving at the All leads tab is there for live leads. Part of the view state rather than
     // the DOM for the same reason `collapsed` below is — the section is re-rendered on every
     // refresh and a fold recorded in the markup would spring open.
     deletedOpen: false,
@@ -303,7 +303,7 @@
    *
    * Leads only, and fetched separately rather than filtered out of one big response, for two
    * reasons. The graveyard grows without bound while the live list does not, so folding them into
-   * the same fetch would make every Found leads tab load pay for every lead ever dropped. And
+   * the same fetch would make every All leads tab load pay for every lead ever dropped. And
    * `state.records` is read by nine other things (table, filters, groups, counts, selection,
    * paging, CSV, deep-link focus); a single array holding two populations would need each of them
    * to remember which one it meant.
@@ -1999,6 +1999,21 @@
         nextStep: nextStepGuidance(record),
       });
     }
+    // ── A lead: one status line, what happens next, then sections you open and close ──
+    // (owner, 2026-10-27). The same parts as below, regrouped: they were stacked one after another
+    // — chips, profiles, research, notes, then the scoring card with the next step buried inside
+    // it — and read as one long page with no order. See leadDetailLayout.
+    if (state.hub.recordType === 'lead' && window.DisruptiveUIRegistry) {
+      const rendered = leadDetailLayout(record);
+      panel.appendChild(rendered);
+      panel.appendChild(detailActions(record, {
+        hasNextStepFooter: !!rendered.querySelector?.('[data-next-step-footer]'),
+      }));
+      const erasure = erasureStrip(record);
+      if (erasure) panel.appendChild(erasure);
+      wireNextStepAction(panel);
+      return panel;
+    }
     // A lead leads with where it stands: first the approval gate (pending / approved / rejected),
     // then a recorded deal outcome if there is one. Both above the card, so they read as facts
     // about the lead rather than more fields buried inside it.
@@ -2032,6 +2047,161 @@
     // Delegated, and attached after the bar exists: the next-step button presses a control in it.
     if (state.hub.recordType === 'lead') wireNextStepAction(panel);
     return panel;
+  }
+
+  // ── The open lead, as sections (owner, 2026-10-27) ──────────────────────────
+  //
+  // Top to bottom, in the order a person reads a lead:
+  //   1. where it stands   — approval chip, outcome, rating and score, in one line;
+  //   2. what happens next — who does it, and the one button (always open, never in a section);
+  //   3. your notes        — what a human wrote outranks everything scraped;
+  //   4. sections, each with a one-line summary in its header so a closed one still says something:
+  //      Why it scored · Research · Contact · Activity.
+  // The parts are the existing builders (intelBanner, socialBanner, notesBanner, the scoring card),
+  // so every rule they carry — source links on every claim, the personal-inbox warning, the
+  // no-DM wording — comes with them. Which sections are open is remembered for the session, per
+  // section, so opening Research once keeps it open on the next lead too.
+  const leadSectionOpen = {};
+
+  function leadSection(key, title, summary, contentNode, defaultOpen) {
+    const det = document.createElement('details');
+    det.className = 'group mb-2 rounded-xl border border-gray-200 bg-white';
+    det.setAttribute('data-lead-section', key);
+    if (leadSectionOpen[key] ?? defaultOpen) det.open = true;
+    det.innerHTML = `
+      <summary class="flex items-center gap-2 px-3 py-2.5 cursor-pointer select-none list-none">
+        <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+        <span class="text-sm font-bold text-gray-900 shrink-0">${esc(title)}</span>
+        <span class="text-xs text-gray-500 min-w-0 truncate">${esc(summary || '')}</span>
+      </summary>
+      <div class="px-3 pb-3" data-lead-section-body></div>`;
+    det.querySelector('[data-lead-section-body]').appendChild(contentNode);
+    det.addEventListener('toggle', () => { leadSectionOpen[key] = det.open; });
+    return det;
+  }
+
+  /** A plain paragraph node — for a section whose honest content is one sentence. */
+  function leadPara(text) {
+    const p = document.createElement('p');
+    p.className = 'text-sm text-gray-600';
+    p.textContent = text;
+    return p;
+  }
+
+  /** What has happened to this lead, oldest first, from the dates the record already carries. */
+  function leadActivity(record) {
+    const d = record.data || {};
+    const ev = [];
+    const add = (at, text) => { if (at && !Number.isNaN(new Date(at).getTime())) ev.push({ at: new Date(at), text }); };
+    add(record.createdAt, record.source === 'manual' ? 'Added by you, and scored'
+      : record.source === 'csv_import' ? 'Imported from a spreadsheet, and scored'
+      : 'Found by a search, and scored');
+    add(d.enrichAttemptedAt, contactEmailOf(record) ? 'Looked for an email address — found one' : 'Looked for an email address — none published');
+    add(d.intel && d.intel.gatheredAt, d.intel && d.intel.changeSummary ? `Researched — ${d.intel.changeSummary}` : 'Researched');
+    add(d.outreachDraftedAt, 'Email handed to you to send yourself');
+    add(d.outreachSentAt, d.outreachSentVia === 'manual' ? 'You marked the email as sent' : 'Outreach email sent from your inbox');
+    if (record.approvalStatus === 'scheduled') add(record.scheduledFor, 'Reminder to chase');
+    const out = d.dealOutcome;
+    if (out && out.outcome) add(out.at, `Marked ${window.RevenueConstants ? window.RevenueConstants.outcomeLabel(out.outcome) : out.outcome}`);
+    ev.sort((a, b) => a.at - b.at);
+    return ev;
+  }
+
+  function leadDetailLayout(record) {
+    const d = record.data || {};
+    const wrap = document.createElement('div');
+    wrap.setAttribute('data-lead-layout', '');
+
+    // 1. Where it stands.
+    const top = document.createElement('div');
+    top.className = 'flex flex-wrap items-center gap-2 mb-3';
+    top.appendChild(approvalBanner(record));
+    top.firstChild.className = '';
+    const outcome = outcomeBanner(record);
+    if (outcome) { outcome.className = 'flex flex-wrap items-center gap-2'; top.appendChild(outcome); }
+    const scoreNum = Number(d.score);
+    const rating = typeof d.rating === 'string' && d.rating ? d.rating.charAt(0).toUpperCase() + d.rating.slice(1) : '';
+    const scoreText = [rating, Number.isFinite(scoreNum) && d.score != null ? `${Math.round(scoreNum)}/100` : ''].filter(Boolean).join(' · ');
+    if (scoreText) {
+      const sc = document.createElement('span');
+      sc.className = 'text-xs font-semibold text-gray-600';
+      sc.textContent = scoreText;
+      top.appendChild(sc);
+    }
+    wrap.appendChild(top);
+
+    // 2. What happens next — the model's suggestion, then who does it and the one button.
+    const guidance = nextStepGuidance(record);
+    const footer = window.DisruptiveUIRegistry.nextStepFooterHtml
+      ? window.DisruptiveUIRegistry.nextStepFooterHtml(guidance) : '';
+    if (d.suggestedNextStep || footer) {
+      const next = document.createElement('div');
+      next.className = 'mb-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3';
+      next.innerHTML = `
+        <p class="text-xs font-bold text-emerald-800 uppercase tracking-wide">What happens next</p>
+        ${d.suggestedNextStep ? `<p class="text-sm text-emerald-900 mt-1"><span class="font-semibold">Suggested:</span> ${esc(d.suggestedNextStep)}</p>` : ''}
+        ${footer}`;
+      wrap.appendChild(next);
+    }
+
+    // 3. Your notes (hidden while empty; the Notes button fills it in place).
+    wrap.appendChild(notesBanner(record));
+
+    // 4a. Why it scored — the scoring card, minus the parts that now have their own place.
+    const card = window.DisruptiveUIRegistry.render({ ...d, suggestedNextStep: null, contactEmail: null }, { sendsOnApproval: false });
+    if (card) {
+      card.classList.remove('border', 'border-gray-200', 'shadow-sm', 'p-5', 'max-w-md', 'rounded-xl');
+      // Its header ("Lead score · <name> · Hot") repeats the panel title and the section's own summary.
+      card.firstElementChild?.remove();
+      wrap.appendChild(leadSection('score', 'Why it scored', scoreText, card, true));
+    } else {
+      wrap.appendChild(leadSection('score', 'Details', '', keyValueFallback(d), true));
+    }
+
+    // 4b. Research.
+    const intel = intelBanner(record);
+    const ig = d.intel && typeof d.intel === 'object' ? d.intel : null;
+    const signals = ig && Array.isArray(ig.signals) ? ig.signals.filter((x) => x && x.summary && x.url).length : 0;
+    const people = ig && Array.isArray(ig.people) ? ig.people.filter((x) => x && x.name).length : 0;
+    const researchSummary = !ig ? 'Not researched yet'
+      : [`Researched ${fmtDate(ig.gatheredAt)}`,
+         signals ? `${signals} finding${signals === 1 ? '' : 's'}` : '',
+         people ? `${people} ${people === 1 ? 'person' : 'people'} named` : ''].filter(Boolean).join(' · ');
+    // Inside a section it needs no box of its own — the section is the box.
+    if (intel) intel.className = '';
+    wrap.appendChild(leadSection('research', 'Research', researchSummary,
+      intel || leadPara('Nothing has been researched on this company yet. “Research this lead” below reads their site and recent news, then re-scores it.'),
+      !!(signals || people)));
+
+    // 4c. Contact — the address, what kind it is, and any profiles.
+    const email = contactEmailOf(record);
+    const contact = document.createElement('div');
+    const cs = contactState(record);
+    contact.innerHTML = email
+      ? `<p class="text-sm font-semibold text-gray-900 break-all">${esc(email)}</p>
+         ${d.emailKind === 'personal'
+           ? '<p class="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">This looks like a named person’s own inbox rather than a general one like info@. You’ll be asked to confirm before anything is sent to it.</p>'
+           : '<p class="text-xs text-gray-500 mt-1">A general company inbox — the usual place to send a first email.</p>'}`
+      : `<p class="text-sm text-gray-700">${d.enrichAttemptedAt
+           ? `No email address — we checked their website${d.paidLookupAt ? ' and our email-lookup service' : ''} on ${esc(fmtDate(d.enrichAttemptedAt))} and found none published.`
+           : 'No email address yet — this lead hasn’t been checked.'} Add one with Edit lead if you have it.</p>`;
+    const social = socialBanner(record);
+    if (social) { social.classList.remove('mb-4'); social.classList.add('mt-3'); contact.appendChild(social); }
+    const NO_EMAIL = { none: 'No email address published', unchecked: 'Not checked — not a company you can sell to',
+      missed: 'Not checked yet', checking: 'Checking…' };
+    wrap.appendChild(leadSection('contact', 'Contact', email || NO_EMAIL[cs] || 'No email address', contact, !email));
+
+    // 4d. Activity.
+    const events = leadActivity(record);
+    const act = document.createElement('ol');
+    act.className = 'space-y-1.5';
+    act.innerHTML = events.length
+      ? events.map((e) => `<li class="flex gap-3 text-sm"><span class="text-xs text-gray-500 w-24 shrink-0 mt-0.5">${esc(fmtDate(e.at))}</span><span class="text-gray-700">${esc(e.text)}</span></li>`).join('')
+      : '<li class="text-sm text-gray-600">Nothing recorded yet.</li>';
+    const last = events[events.length - 1];
+    wrap.appendChild(leadSection('activity', 'Activity', last ? `${last.text} · ${fmtDate(last.at)}` : '', act, false));
+
+    return wrap;
   }
 
   // ── Working the table: filter, sort, group, select ──────────────────────────
@@ -3508,6 +3678,15 @@
     const after = String(nextData.contactEmail || '').trim().toLowerCase();
     if (before === after) return;                       // untouched — leave its provenance alone
 
+    // ⚠️ The drafted email's own `to` OUTRANKS contactEmail when it is sent (lead-recipient.ts:
+    // outreachDraft.to → contactEmail → lead.email). Left as it was, changing the address here
+    // changed what the lead showed and not where its email went (found 2026-10-27, when Edit lead
+    // came to the Outreach tab). The draft follows the address the user just typed.
+    if (nextData.outreachDraft && typeof nextData.outreachDraft === 'object') {
+      const { to: _oldTo, ...restDraft } = nextData.outreachDraft;
+      nextData.outreachDraft = after ? { ...restDraft, to: String(nextData.contactEmail).trim() } : restDraft;
+    }
+
     if (!after) {                                       // cleared: the provenance describes nothing
       delete nextData.emailKind;
       delete nextData.emailSource;
@@ -3588,7 +3767,10 @@
         record.status = nextStatus;
         record.data = nextData;
         close();
-        renderTable();
+        // The Outreach tab opens this same form on its own card (window.AssistantDataHub.editLead)
+        // and repaints itself; this table is refreshed from the server next time it is shown.
+        if (opts && typeof opts.onSaved === 'function') opts.onSaved(record);
+        else renderTable();
         window.showToast?.('Lead updated.');
       } catch (err) {
         submit.disabled = false;
@@ -3656,5 +3838,5 @@
     if (state.hub && state.hub.recordType === 'campaign_order') refresh();
   }
 
-  window.AssistantDataHub = { init, refresh, activate, focusRecord, openRecordModal };
+  window.AssistantDataHub = { init, refresh, activate, focusRecord, openRecordModal, editLead: openEditLeadModal };
 })();

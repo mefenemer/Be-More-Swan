@@ -2625,7 +2625,8 @@
           setStatus('bs-media-status', 'Pick a variation');
           var jobId = res.body.jobId;
           mediaEls.picker.innerHTML = '';
-          (res.body.images || []).forEach(function (im) {
+          var allImages = res.body.images || [];
+          allImages.forEach(function (im, at) {
             var img = document.createElement('img');
             img.src = im.url;
             img.title = 'Keep this variation';
@@ -2644,7 +2645,29 @@
                   setStatus('bs-media-status', 'Saved — click it to add it to your post, or press Feature.');
                 });
             });
-            mediaEls.picker.appendChild(img);
+            // An enlarge button (image-lightbox.js): the variations are thumbnails, and "Use this" in
+            // the preview keeps the one on screen exactly as clicking it here does.
+            if (window.ImageLightbox) {
+              var wrap = document.createElement('span');
+              wrap.style.cssText = 'position:relative;display:inline-block';
+              var zoom = document.createElement('button');
+              zoom.type = 'button';
+              zoom.title = 'See it larger';
+              zoom.setAttribute('aria-label', 'See variation ' + (at + 1) + ' larger');
+              zoom.style.cssText = window.ImageLightbox.ZOOM_BUTTON_STYLE;
+              zoom.innerHTML = '&#128269;';
+              zoom.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var imgs = mediaEls.picker.querySelectorAll('img');
+                window.ImageLightbox.open({ urls: allImages.map(function (x) { return x.url; }), index: at,
+                  actionLabel: 'Keep this one', onAction: function (k) { if (imgs[k]) imgs[k].click(); } });
+              });
+              wrap.appendChild(img);
+              wrap.appendChild(zoom);
+              mediaEls.picker.appendChild(wrap);
+            } else {
+              mediaEls.picker.appendChild(img);
+            }
           });
         });
     });

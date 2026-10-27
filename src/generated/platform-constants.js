@@ -481,7 +481,7 @@
     urgency: retentionUrgency,
 
     /** The standing notice above the Review and Archived columns. */
-    NOTICE: "Leads left here for 30 days are moved to Deleted automatically. Nothing is sent, and the move cannot be undone — but the lead is kept, with the reason it was dropped, in the Deleted section of the Found leads tab. To stop the countdown on a lead, send it back for enrichment before it runs out.",
+    NOTICE: "Leads left here for 30 days are moved to Deleted automatically. Nothing is sent, and the move cannot be undone — but the lead is kept, with the reason it was dropped, in the Deleted section of the All leads tab. To stop the countdown on a lead, send it back for enrichment before it runs out.",
 
     /** The Deleted section's own header line. */
     DELETED_NOTICE: "Leads you deleted, plus leads that sat in Outreach for 30 days without a decision or that were rejected and never picked back up. They are kept so a later search does not surface the same company as though it were new. Sending one back for enrichment returns it to the pipeline.",

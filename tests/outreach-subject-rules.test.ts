@@ -46,11 +46,11 @@ for (const seam of SEAMS) {
     });
 }
 
-check('lead-generation.ts injects the rules into BOTH of its prompts', () => {
+check('lead-generation.ts injects the rules into ALL THREE of its prompts', () => {
     // One seam scores a manual lead and emits an outreachDraft; the other generates at send time
-    // when no draft was stored. The real send used the second — usedStoredDraft: false.
+    // when no draft was stored. The real send used the second — usedStoredDraft: false. The third is improve_draft, which rewrites a stored draft.
     const uses = read('netlify/functions/lead-generation.ts').match(/\$\{OUTREACH_SUBJECT_RULES\}/g) ?? [];
-    assert.strictEqual(uses.length, 2, `expected 2 interpolations, found ${uses.length}`);
+    assert.strictEqual(uses.length, 3, `expected 3 interpolations, found ${uses.length}`);
 });
 
 for (const seam of SEAMS.filter((s) => s.file !== 'netlify/functions/lead-generation.ts')) {

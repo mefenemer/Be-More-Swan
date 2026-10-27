@@ -62,6 +62,8 @@
  *                //   and holds the Goal Progress, Performance Metrics and Autopilot cards, above the
  *                //   goals (owner, 2026-10-21 — trialled on Social Media, then rolled out). A role
  *                //   with hideGoals still gets the tab, with its cards and no goals section.
+ *   cfg.resultsTabAfter // → optional tab key (e.g. 'conversations'); the Results tab is moved to sit
+ *                //   straight after that tab instead of its default place before Activity.
  *   cfg.inspoTab // → optional Inspo tab config (assistant-inspo.js); the content roles
  *                //   (social_media_manager, blog_writer) only — { label, description }
  *   cfg.myContentTab // → optional My Content tab config (assistant-my-content.js); the content
@@ -706,6 +708,9 @@
     lead_qualifier: {
       // Rules tab: read by its outreach drafting (discovery scoring) and its chat — never its scores.
       rulesScope: 'outreach',
+      // Results straight after Conversations (owner, 2026-10-27): the tabs read as the funnel —
+      // Searches → Leads → Outreach → Conversations → Results — with Calendar and Activity after.
+      resultsTabAfter: 'conversations',
       // These four cards are fed by get-lead-performance, NOT by the shared
       // get-assistant-performance the social roles use — that one reads post_insights, and this
       // assistant publishes nothing, so it returned hasData:false for ever and the section told
@@ -873,7 +878,7 @@
         // in chat-orchestrator.ts names the tab too — the assistant tells users which tab to go
         // to, and a stale name there sends them to a tab that does not exist. Same coupling the
         // reviewQueue label above carries.
-        label: 'Found leads',
+        label: 'All leads',
         recordType: 'lead',
         // ⚠️ The last two sentences state the RETENTION RULES, and they belong here rather than
         // only on the Deleted section below. The table on this tab carries a "Deletes in" column
@@ -945,7 +950,7 @@
       ideasReview: {
         label: 'Review Lead Ideas',
         title: 'Lead Ideas',
-        description: 'Ideas for where to find your next customers. Approve one and the {role:lead_qualifier} finds matching companies, scores them into your Found leads tab, and suggests the next best action for each.',
+        description: 'Ideas for where to find your next customers. Approve one and the {role:lead_qualifier} finds matching companies, scores them into your All leads tab, and suggests the next best action for each.',
       },
       // "Find New Leads" (assistant-discovery-campaigns.js) — the outbound discovery engine:
       // author an Idea/Blueprint + cadence + guardrails; a background run searches the web,

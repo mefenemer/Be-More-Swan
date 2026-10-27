@@ -455,7 +455,7 @@ export default withLambda(async (event) => {
 
             // ── The human override on top of it: data.outreachStage ─────────────────────────
             // The filter above is automatic and it is right about the automatic case, but it was
-            // the ONLY thing separating the Found leads tab from the Outreach tab's Review column —
+            // the ONLY thing separating the All leads tab from the Outreach tab's Review column —
             // both are `pending_approval` — so a person had no way to move a lead between the two.
             // Enrichment's promote button had to write `approved` to make the lead go anywhere,
             // which walked it straight past the review gate, and "Send back to review" on a lead
@@ -480,10 +480,10 @@ export default withLambda(async (event) => {
             // ── Retention filter (?retention=live|deleted|all) ───────────────────────────────
             // Which side of the 30-day sweep to read (src/config/lead-retention.ts). A lead the
             // sweep has moved carries `data.retention.deletedAt` and belongs in exactly one place:
-            // the Deleted section of the Found leads tab.
+            // the Deleted section of the All leads tab.
             //
             // ⚠️ 'live' is the DEFAULT, and that default is the whole point of the parameter. Every
-            // existing caller — the Found leads table, all four Outreach columns, the CSV export,
+            // existing caller — the All leads table, all four Outreach columns, the CSV export,
             // the chat prompt's lead counts — asked a question about leads the user can still act
             // on, and none of them knew this state was coming. Defaulting to 'all' would leave a
             // moved lead sitting in the Review column it was just swept out of, which is the one

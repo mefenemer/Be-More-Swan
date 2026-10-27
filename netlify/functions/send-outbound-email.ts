@@ -21,7 +21,7 @@ import jwt from 'jsonwebtoken';
 import { and, eq } from 'drizzle-orm';
 import { Resend } from 'resend';
 import { getDb } from '../../db/client';
-import { taskRuns, aiAssistants, integrationAuthorizations, agentRunEvents } from '../../db/schema';
+import { taskRuns, aiAssistants, integrationAuthorizations, agentRunEvents, organisations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { injectAiFooter, FOOTER_VERSION } from '../../src/utils/ai-email-footer';
 import { getSession } from '../../src/utils/session';
@@ -96,10 +96,15 @@ export default withLambda(async (event) => {
         customDisclosureText = auth?.disclosureText ?? null;
     }
 
+    // The workspace's own AI-notice wording, which decides whether the assistant is named.
+    const [orgRow] = await db.select({ text: organisations.aiDisclosureFooterText })
+        .from(organisations).where(eq(organisations.id, orgId)).limit(1);
+    const workspaceText = orgRow?.text ?? null;
+
     // ── 6. Inject footer (mandatory — no bypass) ───────────────────────────────
-    const finalText = injectAiFooter(bodyText, assistant.name, customDisclosureText, false);
+    const finalText = injectAiFooter(bodyText, assistant.name, customDisclosureText, false, workspaceText);
     const finalHtml = bodyHtml
-        ? injectAiFooter(bodyHtml, assistant.name, customDisclosureText, true)
+        ? injectAiFooter(bodyHtml, assistant.name, customDisclosureText, true, workspaceText)
         : undefined;
 
     // ── 7. Send email ──────────────────────────────────────────────────────────

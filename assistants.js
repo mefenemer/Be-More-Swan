@@ -329,7 +329,7 @@ window.generateAssistantCardHTML = function(assistant) {
     // counted, and a role whose configuration.type has drifted still gets an honest strip.
     //
     // The three lead words are lifted verbatim from the surfaces they link to, so the card and the
-    // page agree: "found" is what the Found leads tab holds, "awaiting you" is the Outreach ▸ Review
+    // page agree: "found" is what the All leads tab holds, "awaiting you" is the Outreach ▸ Review
     // column, and "cleared for outreach" is Approved + Awaiting reply — the same two states the
     // qualified_leads goal counts. Deliberately NOT "qualified": that word means two different
     // things on the detail page already (a live count on the goal, a 90-day count on the
@@ -1458,7 +1458,7 @@ document.addEventListener('bms:notifications-arrived', () => {
  * ⚠️ The Review column is counted with `deliverable=1`, matching what that column actually renders
  * (leads with an address AND a drafted body). Counting it any other way would put a number on the
  * button that the list underneath contradicts — which is the specific bug that made this queue
- * read as a duplicate of the Found leads tab.
+ * read as a duplicate of the All leads tab.
  */
 async function _detailRqRefreshRecordCounts() {
     const aid = window._currentAssistantId;
@@ -1941,7 +1941,13 @@ function _rqOutreachReadinessHtml(statusKey) {
     if (statusKey !== 'review' && statusKey !== 'approved') return '';
 
     const parts = [];
+    // The assistant says it out loud too (assistant-bubbles.js) — once per page visit.
     if (!_rqReadiness.postalAddress) {
+        window.AssistantBubbles?.say('outreach-no-postal', {
+            assistantId: window._currentAssistantId, name: window._currentAssistantName,
+            text: 'I can’t send any outreach yet — anti-spam law needs your business postal address in every email. Add it in Business Information and I’ll be ready.',
+            action: { label: 'Add it', run: () => window.loadView && window.loadView('assets') },
+        });
         parts.push(`<div class="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 my-3">
             <span class="text-sm leading-none mt-0.5">📮</span>
             <p class="text-xs text-amber-900">
@@ -2621,6 +2627,12 @@ function _rqRecordActions(r, statusKey) {
     // happens to be at, and a note you can only take from one column is a note that does not get
     // taken. Placed before `reject`, which carries `ml-auto` and must stay the rightmost control.
     const notesBtn = isLead ? btn(r.data && r.data.notes ? 'Notes' : 'Add a note', 'notes', secondary) : '';
+    // Owner, 2026-10-27: fix the lead itself (name, contact, email address) without leaving the
+    // Outreach tab, and ask the assistant to rewrite the email rather than editing it by hand. Both
+    // only before the email has gone — after that there is nothing left for either to change.
+    const editLead = (isLead && window.AssistantDataHub?.editLead) ? btn('Edit lead', 'editLead', secondary) : '';
+    const who = _rqEsc(window._currentAssistantName || 'your assistant');
+    const improve = (isLead && hasDraft) ? btn(`Ask ${who} to improve it`, 'improveEmail', secondary) : '';
     let buttons = '';
     // A line above the buttons, for the cards where the state is the point and there is little left
     // to do — a lead whose email has gone out, or one waiting on an inbox connection.
@@ -2637,7 +2649,7 @@ function _rqRecordActions(r, statusKey) {
     }
     if (statusKey === 'review') {
         buttons = isLead
-            ? btn(leadApprove, 'approve', primary) + editDraft + selfSend + notesBtn + reject
+            ? btn(leadApprove, 'approve', primary) + improve + editDraft + editLead + selfSend + notesBtn + reject
             : btn('Approve', 'approve', primary) + btn('Approve &amp; Schedule', 'showSchedule', secondary) + editDraft + reject;
     } else if (statusKey === 'approved') {
         if (isLead) {
@@ -2953,7 +2965,7 @@ function _rqCardChips(r) {
  *
  * ⚠️ Same two columns as the banner, and for the same reason: Review and Archived are the only
  * states the sweep collects. Rendered from the generated mirror (window.LeadRetention) so the
- * number here, the number in the Found leads table's "Deletes in" column and the night the sweep
+ * number here, the number in the All leads table's "Deletes in" column and the night the sweep
  * actually runs are one calculation rather than three.
  */
 function _rqRetentionChip(r, statusKey) {
@@ -3067,9 +3079,14 @@ function _detailRqRecordCard(r, statusKey) {
     const sched = r.scheduledFor ? ` · ${schedVerb} ${new Date(r.scheduledFor).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : '';
     const sync = r.recordType === 'meeting' ? _rqMeetingSync(r) : { summary: '', pills: '' };
     const open = _rqExpanded.has(r.id);
+    // Lead Review only: a tick box for the "Approve & send" bar (_rqLeadBulkBar).
+    const pick = _rqLeadBulkOn(statusKey)
+        ? `<input type="checkbox" class="rq-lead-select mt-3 h-4 w-4 shrink-0 rounded border-gray-300 text-emerald-800 focus:ring-emerald-700 cursor-pointer" data-rq-lead-id="${r.id}" aria-label="Select ${_rqEsc(r.title)}" ${_rqLeadSelected.has(r.id) ? 'checked' : ''}>`
+        : '';
     return `<div class="py-2" data-rq-record="${r.id}">
+      <div class="flex items-start gap-2">${pick}
       <button type="button" onclick="_rqToggleCard(this)" aria-expanded="${open ? 'true' : 'false'}"
-        class="w-full flex items-start gap-3 text-left py-2 cursor-pointer group">
+        class="w-full min-w-0 flex items-start gap-3 text-left py-2 cursor-pointer group">
         <svg class="rq-card-chevron w-4 h-4 mt-0.5 shrink-0 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
         <span class="min-w-0 flex-1">
           <span class="block text-sm font-bold text-gray-900 truncate">${_rqEsc(r.title)}</span>
@@ -3081,6 +3098,7 @@ function _detailRqRecordCard(r, statusKey) {
           </span>
         </span>
       </button>
+      </div>
       <div class="rq-card-body ${open ? '' : 'hidden'} pl-7 pb-2">
         ${snippet ? `<p class="text-xs text-gray-500 line-clamp-2">${_rqEsc(snippet)}</p>` : ''}
         ${_rqRecipient(r, statusKey)}
@@ -3216,6 +3234,90 @@ async function _detailRqRenderRecords(statusKey) {
     _detailRqPaintRecords(statusKey, { deliverableOnly });
 }
 
+// ── Approve & send several leads at once (owner, 2026-10-27) ─────────────────
+// The Review column's tick boxes and the bar above them. The run itself is
+// src/components/lead-bulk-send.js — shared with the chat's "approve all" card — which sends each
+// lead through the single-lead path and SKIPS any lead that needs its own decision (a named
+// person's inbox, a do-not-contact flag), leaving it in Review.
+const _rqLeadSelected = new Set();
+
+function _rqLeadBulkOn(statusKey) {
+    return statusKey === 'review' && (window._detailReviewQueue || {}).recordType === 'lead' && !!window.LeadBulkSend;
+}
+
+function _rqLeadBulkBar(statusKey) {
+    if (!_rqLeadBulkOn(statusKey) || !_rqRecordsLoaded.length) return '';
+    return `<div id="rq-lead-bulkbar" class="flex flex-wrap items-center gap-3 py-2 border-b border-gray-100">
+      <label class="flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
+        <input type="checkbox" id="rq-lead-select-all" class="h-4 w-4 rounded border-gray-300 text-emerald-800 focus:ring-emerald-700 cursor-pointer">
+        Select all ${_rqRecordsLoaded.length}
+      </label>
+      <span id="rq-lead-select-count" class="text-xs text-gray-500" aria-live="polite"></span>
+      <button type="button" id="rq-lead-send-selected" onclick="_rqBulkSendLeads()"
+        class="btn-golive hidden ml-auto px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">Approve &amp; send</button>
+    </div>`;
+}
+
+function _rqLeadSyncBulkBar() {
+    const n = _rqLeadSelected.size;
+    const total = _rqRecordsLoaded.length;
+    const all = document.getElementById('rq-lead-select-all');
+    if (all) { all.checked = n > 0 && n === total; all.indeterminate = n > 0 && n < total; }
+    const count = document.getElementById('rq-lead-select-count');
+    if (count) count.textContent = n ? `${n} selected` : '';
+    const btn = document.getElementById('rq-lead-send-selected');
+    if (btn && !btn.disabled) {
+        btn.classList.toggle('hidden', !n);
+        btn.textContent = n > 1 ? `Approve & send ${n} emails` : 'Approve & send email';
+    }
+}
+
+// Bound once on the document, never from a render path — the column is re-rendered constantly.
+document.addEventListener('change', (e) => {
+    const t = e.target;
+    if (!(t instanceof HTMLInputElement) || !t.closest('#detail-rq-groups')) return;
+    if (t.id === 'rq-lead-select-all') {
+        // The whole column, not just the page on screen — the label says how many.
+        for (const r of _rqRecordsLoaded) { if (t.checked) _rqLeadSelected.add(r.id); else _rqLeadSelected.delete(r.id); }
+        document.querySelectorAll('#detail-rq-groups .rq-lead-select').forEach((cb) => { cb.checked = t.checked; });
+    } else if (t.classList.contains('rq-lead-select')) {
+        const id = Number(t.dataset.rqLeadId);
+        if (t.checked) _rqLeadSelected.add(id); else _rqLeadSelected.delete(id);
+    } else {
+        return;
+    }
+    _rqLeadSyncBulkBar();
+});
+
+window._rqBulkSendLeads = async function () {
+    const ids = _rqRecordsLoaded.map((r) => r.id).filter((id) => _rqLeadSelected.has(id));
+    if (!ids.length || !window.LeadBulkSend) return;
+    const n = ids.length;
+    const ok = await window.confirmModal(
+        `${n === 1 ? 'This lead’s drafted email is' : `The drafted emails for these ${n} leads are`} sent now from your connected inbox, exactly as shown on ${n === 1 ? 'its card' : 'their cards'}, and each lead moves to ${_rqEsc(_rqColumnLabel('scheduled'))}. `
+        + 'If this assistant chases leads who don’t reply, follow-ups start for each one.<br><br>'
+        + 'Any lead whose address looks like a named person’s own inbox, or that is flagged do-not-contact, is skipped and stays here for you to decide on its own.',
+        { title: `Approve and send ${n === 1 ? '1 email' : `${n} emails`}?`, confirmLabel: n === 1 ? 'Send it' : `Send ${n} emails`, cancelLabel: 'Not yet' },
+    );
+    if (!ok) return;
+    const btn = document.getElementById('rq-lead-send-selected');
+    if (btn) { btn.disabled = true; btn.textContent = `Sending 0 of ${n}…`; }
+    document.querySelectorAll('#detail-rq-groups .rq-lead-select, #rq-lead-select-all').forEach((cb) => { cb.disabled = true; });
+    const result = await window.LeadBulkSend.run({
+        assistantId: window._currentAssistantId,
+        items: ids.map((id) => ({ recordId: id, title: (_rqRecordsById.get(id) || {}).title, approveFirst: true })),
+        onProgress(done) { if (btn) btn.textContent = `Sending ${Math.min(done + 1, n)} of ${n}…`; },
+    });
+    _rqLeadSelected.clear();
+    window.showToast?.(window.LeadBulkSend.summarise(result), { icon: result.stopped || result.skipped.length ? '⚠️' : '✉️' });
+    await _detailRqRenderGroups(_detailRqCurrentStatus);
+    window._detailRqRefreshColumnCounts?.();
+    // Real sends mint conversation threads and chase reminders — the same refreshes one Approve does.
+    if (result.sent.length) window.AssistantLeadThreads?.refresh?.();
+    const calHost = document.getElementById('assistant-calendar-host');
+    if (calHost) calHost.dataset.ready = '';
+};
+
 /**
  * Draw one page of the already-fetched column.
  *
@@ -3234,7 +3336,7 @@ function _detailRqPaintRecords(statusKey, opts) {
     const emptyMsg = statusKey !== 'review'
         ? 'Nothing here yet.'
         : (opts && opts.deliverableOnly)
-            ? 'No emails waiting for you. Leads without a contact address can’t be emailed yet — they’re in the Found leads tab.'
+            ? 'No emails waiting for you. Leads without a contact address can’t be emailed yet — they’re in the All leads tab.'
             : 'Nothing awaiting your review.';
 
     // ── Send readiness (the pre-flight) ──────────────────────────────────────────
@@ -3292,7 +3394,19 @@ function _detailRqPaintRecords(statusKey, opts) {
         : '';
 
     // The send-readiness banner, above the columns where a send is actually triggered.
-    const readyHtml = _rqOutreachReadinessHtml(statusKey);
+    // Awaiting reply → Conversations (owner, 2026-10-27). This column and the Conversations tab show
+    // the same leads from two angles; the replies, the follow-ups and recording how a deal ended all
+    // live there, so the column says so and gives the way across, rather than looking like a second
+    // place to work the same lead.
+    const convLabel = document.getElementById('conversations-tab-label')?.textContent?.trim() || 'Conversations';
+    const convHtml = ((window._detailReviewQueue || {}).recordType === 'lead' && statusKey === 'scheduled'
+        && !document.getElementById('maintab-btn-conversations')?.classList.contains('hidden'))
+        ? `<div class="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 my-3">
+             <p class="text-xs text-emerald-900 flex-1 min-w-0">These leads have had their email. Their replies, follow-ups and how each deal ended are on the ${_rqEsc(convLabel)} tab — work them there.</p>
+             <button type="button" onclick="window._activateMainTab && window._activateMainTab('conversations')" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer shrink-0">Open ${_rqEsc(convLabel)}</button>
+           </div>`
+        : '';
+    const readyHtml = _rqOutreachReadinessHtml(statusKey) + convHtml;
 
     if (!records.length) {
         container.innerHTML = readyHtml + noticeHtml + `<p class="text-sm text-gray-500 py-10 text-center">${emptyMsg}</p>`;
@@ -3306,12 +3420,17 @@ function _detailRqPaintRecords(statusKey, opts) {
     // on page 4) lands on the last real page rather than rendering nothing.
     _rqRecordsPage = pg.page || 1;
     const noun = (window._detailReviewQueue || {}).recordType === 'lead' ? 'leads' : 'records';
+    // A tick survives paging and re-renders, but never outlives the lead leaving this column.
+    const inColumn = new Set(records.map((r) => r.id));
+    for (const id of [..._rqLeadSelected]) if (!inColumn.has(id)) _rqLeadSelected.delete(id);
     container.innerHTML = readyHtml + noticeHtml + overlapHtml
+        + _rqLeadBulkBar(statusKey)
         + `<div class="divide-y divide-gray-100">${pg.items.map((r) => _detailRqRecordCard(r, statusKey)).join('')}</div>`
         + (window.ListPager ? window.ListPager.controlsHtml(pg, { attr: 'data-rq-page', noun }) : '');
     // The container outlives every repaint, so one delegated listener covers every page of every
     // column. `opts` is re-derived rather than captured: a page change must not resurrect the
     // deliverable flag of a column the user has since left.
+    _rqLeadSyncBulkBar();
     window.ListPager?.bind(container, 'data-rq-page', (n) => {
         _rqRecordsPage = n;
         _detailRqPaintRecords(_detailRqCurrentStatus, { deliverableOnly: (window._detailReviewQueue || {}).recordType === 'lead' && _detailRqCurrentStatus === 'review' });
@@ -3696,6 +3815,54 @@ window._detailRqRecordAct = async function (btn, action) {
                 btn.textContent = 'Notes';
             },
         });
+        return;
+    }
+
+    // Edit the lead record itself — the All leads tab's own form, opened here.
+    if (action === 'editLead') {
+        const rec = _rqRecordsById.get(Number(card.getAttribute('data-rq-record')));
+        if (!rec || !window.AssistantDataHub?.editLead) return;
+        window.AssistantDataHub.editLead(rec, {
+            async onSaved() {
+                await _detailRqRenderGroups(_detailRqCurrentStatus);
+                window.AssistantDataHub?.refresh?.();
+            },
+        });
+        return;
+    }
+
+    // Ask the assistant to rewrite the drafted email (lead-generation.ts `improve_draft`). Saves the
+    // new version in place; nothing is sent and the lead stays in this column to be read again.
+    if (action === 'improveEmail') {
+        const id = Number(card.getAttribute('data-rq-record'));
+        const name = window._currentAssistantName || 'your assistant';
+        const nameHtml = _rqEsc(name);   // the dialog renders title and message as HTML
+        const instruction = await window.promptModal(
+            `${nameHtml} will rewrite this email and save the new version here for you to read. Nothing is sent. Say what you’d like changed, or leave it blank to let ${nameHtml} improve it generally.`,
+            { title: `Ask ${nameHtml} to improve this email`, confirmLabel: 'Improve it', multiline: true,
+              placeholder: 'e.g. shorter, mention our free trial, less formal' },
+        );
+        if (instruction === null) return;
+        const original = btn.textContent;
+        card.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+        btn.textContent = 'Improving…';
+        try {
+            const res = await fetch('/.netlify/functions/lead-generation', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'improve_draft', assistantId: window._currentAssistantId, recordId: id, instruction: instruction.trim() || undefined }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Couldn’t improve this email just now.');
+            const rec = _rqRecordsById.get(id);
+            if (rec) rec.data = { ...(rec.data || {}), outreachDraft: data.outreachDraft };
+            _rqExpanded.add(id);
+            await _detailRqRenderGroups(_detailRqCurrentStatus);
+            window.showToast?.(`${name} has rewritten the email — read it before you approve.`, { icon: '✍️' });
+        } catch (e) {
+            card.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+            btn.textContent = original;
+            showErr(e.message || 'Something went wrong.');
+        }
         return;
     }
 
@@ -4907,6 +5074,30 @@ window._setNextUp = function(text) {
     window._detailNextUp = text ? String(text) : null;
     window._renderNeedsYou();
 };
+// ── What pops up when an assistant's page opens (owner, 2026-10-27) ───────────
+// assistant-bubbles.js + assistant-nudges.ts. Waits a moment so the queue loaders have fed the
+// pending-review count, then says only what is true right now: work waiting for you, or being
+// paused. The server adds the Business Mentor's suggestions about this assistant and copies every
+// nudge to Team Chat (once a day). Nothing is said for an archived assistant.
+function _scheduleAssistantNudges(data) {
+    if (!window.AssistantBubbles || !data || data.lifecycleStatus === 'archived') return;
+    const id = Number(data.id);
+    setTimeout(() => {
+        if (Number(window._currentAssistantId) !== id) return;     // the user has moved on
+        const items = [];
+        const n = window._detailOpSignals?.pendingReview || 0;
+        const where = (window._detailReviewQueue || {}).label || 'Review';
+        if (n > 0) {
+            items.push({ key: 'review-waiting', tab: 'review-queue', label: `Open ${where}`,
+                text: `${n} ${n === 1 ? 'thing is' : 'things are'} waiting for you in ${where}. Nothing goes out until you approve it.` });
+        }
+        if (data.lifecycleStatus === 'paused') {
+            items.push({ key: 'paused', text: 'I’m paused, so I’m not doing anything until you start me again.' });
+        }
+        window.AssistantBubbles.pageNudges({ assistantId: id, name: data.name || 'Your assistant', items });
+    }, 2500);
+}
+
 window._renderNeedsYou = function() {
     const strip = document.getElementById('detail-needs-you');
     if (!strip) return;
@@ -5640,7 +5831,7 @@ window._renderLeadRejectionEvidence = async function(assistantId) {
     show();
     if (!payload.reasons.length) {
         host.innerHTML = `
-          <p class="text-sm text-gray-500">Nothing recorded yet. When you reject a lead in the Outreach tab or the Found leads tab, the reason you pick is filed here.</p>`;
+          <p class="text-sm text-gray-500">Nothing recorded yet. When you reject a lead in the Outreach tab or the All leads tab, the reason you pick is filed here.</p>`;
         return;
     }
 
@@ -6443,6 +6634,21 @@ function _applyDashboardRegistry(data) {
     toggle('goal-progress-card', !cfg.hideGoals);
     toggle('tab-goals', !cfg.hideGoals);
     setText('maintab-btn-goals', goalsTab.label || 'Goals');
+    // Where the Results tab sits. Its home in the markup is just before Activity; a role may pull it
+    // forward with cfg.resultsTabAfter (the Lead Generator: straight after Conversations — owner,
+    // 2026-10-27 — so the funnel reads find → leads → outreach → conversations → results). Re-placed
+    // on EVERY apply, not only when the key is set: workspace.html reuses this view across
+    // assistant switches, so a move made for one role would otherwise stick for the next.
+    const goalsBtn = document.getElementById('maintab-btn-goals');
+    const goalsAnchor = cfg.resultsTabAfter && document.getElementById(`maintab-btn-${cfg.resultsTabAfter}`);
+    if (goalsBtn && goalsAnchor) goalsAnchor.after(goalsBtn);
+    else if (goalsBtn) document.getElementById('maintab-btn-activity')?.before(goalsBtn);
+    // …and the divider that marks Calendar and Activity as supporting views, on the same roles.
+    const supportDivider = document.getElementById('maintab-support-divider');
+    if (supportDivider) {
+        supportDivider.classList.toggle('hidden', !goalsAnchor);
+        supportDivider.style.display = goalsAnchor ? '' : 'none';
+    }
     if (window._detailResultsInGoalsTab) {
         const panel = document.getElementById('maintab-goals');
         const goalsList = document.getElementById('tab-goals');
@@ -8348,6 +8554,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         // (must run before attachAutoSave so the operational-setup editor inputs exist).
         _applyDashboardRegistry(currentData);
         _detailHydrate(currentData);
+        _scheduleAssistantNudges(currentData);
         _renderMandateSuggestions(currentData);
         _renderOnboardingSummary(currentData);
         _renderOutreachEmailConnect(currentData);

@@ -451,7 +451,7 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         // per lead: a tenant back from a fortnight away would otherwise be handed forty rows.
         //
         // The warning exists because the sweep was silent in both directions — nothing before it
-        // moved a lead and nothing after. A user who had never opened the Found leads tab's Deleted
+        // moved a lead and nothing after. A user who had never opened the All leads tab's Deleted
         // section had no way to learn that unreviewed leads expire at all.
         templateKey: 'leads_expiring_soon',
         name: 'Leads about to be retired',

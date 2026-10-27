@@ -86,7 +86,7 @@ check('role filtering — each assistant only sees metrics for its role', () => 
     assert.deepEqual(tracked('accounts_receivable_clerk', ['instagram']), ['cash_recovered', 'invoices_chased']);
 
     // Lead Generator sees its two lead metrics; Support sees tickets; nobody bleeds across.
-    assert.deepEqual(tracked('lead_qualifier'), ['leads_scored', 'qualified_leads']);
+    assert.deepEqual(tracked('lead_qualifier'), ['leads_scored', 'outreach_emails_sent', 'qualified_leads']);
     assert.deepEqual(tracked('tier1_support_agent'), ['tickets_resolved']);
     assert.deepEqual(tracked('crm_enricher'), ['records_enriched']);
     assert.deepEqual(tracked('meeting_note_taker'), ['meetings_summarized']);

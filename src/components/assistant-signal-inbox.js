@@ -381,7 +381,9 @@
     // Each clause explains a different remedy, which is the whole point of not collapsing them:
     // "publishes none" sends you to find an address by hand, "were not companies" sends you to
     // targeting, "not looked up" sends you to run the search again.
-    if (none) parts.push(`${none} publish${none === 1 ? 'es' : ''} none`);
+    // Plain words (owner, 2026-10-27): "19 publish none" read as nonsense. It means we looked —
+    // their website, then the paid lookup where it is switched on — and no address exists to find.
+    if (none) parts.push(`${none} ${none === 1 ? 'has' : 'have'} no email address we could find`);
     // ⚠️ Covers BOTH causes of `notAttempted`: not a sellable company, and never scored. The two
     // have separate chips in the table (a per-lead answer must be exact) but share one clause
     // here, because a sixth bucket that is nearly always zero would add a clause to every
@@ -392,14 +394,14 @@
     // directory, an article, a supplier. So the clause can name that cause outright again.
     // No em-dash — the lead-in already uses one and the clauses are comma-joined.
     if (notCompanies) parts.push(notCompanies === 1
-        ? '1 was not a company you could sell to, so was never checked'
-        : `${notCompanies} were not companies you could sell to, so were never checked`);
+        ? '1 wasn’t a company you could sell to, so we didn’t look'
+        : `${notCompanies} weren’t companies you could sell to, so we didn’t look`);
     // ⚠️ Distinct from `pending`, which is a promise. These are hot/warm leads the run ended
     // without reaching, so nothing will look them up unless someone asks it to (item 11).
-    if (missed) parts.push(`${missed} ${missed === 1 ? 'was' : 'were'} not looked up`);
-    if (pending) parts.push(`${pending} still to check`);
+    if (missed) parts.push(`${missed} ${missed === 1 ? 'wasn’t' : 'weren’t'} looked up before the search finished`);
+    if (pending) parts.push(`${pending} still being looked up`);
 
-    const lead = `Contact details for ${found} of ${total}`;
+    const lead = `Email address found for ${found} of ${total} compan${total === 1 ? 'y' : 'ies'}`;
     return parts.length ? `${lead} — ${parts.join(', ')}.` : `${lead}.`;
   }
 

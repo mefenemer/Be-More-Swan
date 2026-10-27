@@ -151,7 +151,7 @@ check('the turn normalises the draft before persisting the transcript', () => {
     // Anything else is dropped — except an action card on an existing article, which is not model
     // output by then: resolveBlogActionProposal rebuilt it from the row (null when it could not).
     assert.ok(
-        /uiElement = blogDraft \? \{ type: BLOG_POST_DRAFT_TYPE, \.\.\.blogDraft \} : blogAction \?\? profileCard;/.test(orchestrator),
+        /uiElement = blogDraft \? \{ type: BLOG_POST_DRAFT_TYPE, \.\.\.blogDraft \}\s*: blogBatch \? \{ \.\.\.blogBatch, assistantId: session\.aiAssistantId \}\s*: blogAction \?\? profileCard;/.test(orchestrator),
         'an unusable blog draft is no longer dropped',
     );
     assert.ok(/blogAction = await resolveBlogActionProposal\(/.test(orchestrator), 'the action card is not rebuilt from the row');

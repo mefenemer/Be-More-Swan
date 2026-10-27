@@ -1210,6 +1210,20 @@
       }
     }
 
+    // "Write all N" (blog_batch_proposal) → generate-blog.ts's batch branch: one background draft per
+    // article, each landing in Review on the Blogs tab when it is written.
+    async function onBlogBatch(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      try {
+        const r = await postActionCall('generate-blog', { assistantId: d.assistantId || assistantId, batch: d.topics || [] });
+        const n = Number(r.queued) || 0;
+        respond({ ok: true, message: `Writing ${n} article${n === 1 ? '' : 's'} now. Each appears in the Review column of the Blogs tab as it’s finished — usually a minute or two apiece.` });
+      } catch (err) {
+        respond({ ok: false, error: err.message });
+      }
+    }
+
     async function onLeadAction(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -1222,7 +1236,19 @@
         return data;
       });
       try {
-        if (d.action === 'send') {
+        if (d.action === 'send_all') {
+          // "Approve all" — the Outreach tab's bulk run, one lead at a time through the single-lead
+          // path. Never confirms a personal inbox or overrules a do-not-contact flag: those leads are
+          // skipped and listed back (src/components/lead-bulk-send.js).
+          if (!window.LeadBulkSend) throw new Error('Bulk sending isn’t available on this page — use the Outreach tab.');
+          const result = await window.LeadBulkSend.run({
+            assistantId: aid, items: Array.isArray(d.items) ? d.items : [],
+            onProgress: (done) => { if (typeof d.progress === 'function') d.progress(done); },
+          });
+          const summary = window.LeadBulkSend.summarise(result);
+          if (result.sent.length) respond({ ok: true, message: `${summary} They’re in the “Awaiting reply” column.` });
+          else respond({ ok: false, final: true, error: summary });
+        } else if (d.action === 'send') {
           const sendBody = {
             action: 'send_outreach', assistantId: aid, recordId: d.recordId,
             expectDraftHash: d.draftHash, ...(d.personalInbox ? { confirmPersonal: true } : {}),
@@ -1241,6 +1267,13 @@
           } else {
             respond({ ok: false, final: true, error: `${d.approveFirst ? 'Approved, but nothing was sent. ' : 'Nothing was sent. '}${leadWhy(r)} It’s in the “Approved” column — “Send email now” there tries again.` });
           }
+        } else if (d.action === 'improve') {
+          // The Outreach tab's "Ask … to improve it" — lead-generation.ts improve_draft. Sends nothing.
+          await postActionCall('lead-generation', {
+            action: 'improve_draft', assistantId: aid, recordId: d.recordId,
+            ...(d.instruction ? { instruction: d.instruction } : {}),
+          });
+          respond({ ok: true, message: 'Rewritten and saved. Read the new version on the Outreach tab — nothing has been sent. Ask me to send it when you’re happy.' });
         } else if (d.action === 'move_to_outreach') {
           // The same write as Enrichment's "Move to Outreach": status and stage in one PATCH. The
           // stage is merged server-side so the lead keeps its score, intel and draft.
@@ -1968,6 +2001,7 @@
     container.addEventListener('cta:change', onCallToAction);
     container.addEventListener('site:reviewDecisions', onReviewDecisions);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
+    container.addEventListener('blog:batch', onBlogBatch);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
     container.addEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
     container.addEventListener('audience:createForm', onAudienceFormCreate);
@@ -2057,6 +2091,7 @@
         container.removeEventListener('lead:outreachOffer', onOutreachOffer);
         container.removeEventListener('cta:change', onCallToAction);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
+        container.removeEventListener('blog:batch', onBlogBatch);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
         container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
         container.removeEventListener('audience:createForm', onAudienceFormCreate);

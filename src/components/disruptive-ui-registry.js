@@ -157,12 +157,16 @@
     // who owns its next step — the sentence "approving clears this lead for outreach" is wrong the
     // instant it has been approved — and the panel is not rebuilt around it, so the host swaps
     // this node in place (assistant-data-hub.js syncNextStepFooter).
+    // The sentence sits on its own line under the chip and button (2026-10-27): beside them, on a
+    // phone, it was squeezed into a column two words wide.
     return `
-      <div data-next-step-footer class="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-emerald-200">
-        <span class="text-xs font-bold px-2 py-0.5 rounded-full border ${owner.cls}">${esc(owner.label)}</span>
-        ${guidance.note ? `<span class="text-xs text-emerald-800 flex-1 min-w-0">${esc(guidance.note)}</span>` : ''}
-        ${action ? `<button type="button" data-lead-next-step="${esc(action.key)}"
-          class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed ml-auto shrink-0">${esc(action.label)}</button>` : ''}
+      <div data-next-step-footer class="mt-2 pt-2 border-t border-emerald-200">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-xs font-bold px-2 py-0.5 rounded-full border ${owner.cls}">${esc(owner.label)}</span>
+          ${action ? `<button type="button" data-lead-next-step="${esc(action.key)}"
+            class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed ml-auto shrink-0">${esc(action.label)}</button>` : ''}
+        </div>
+        ${guidance.note ? `<p class="text-xs text-emerald-800 mt-1.5">${esc(guidance.note)}</p>` : ''}
       </div>`;
   }
 
@@ -3849,12 +3853,84 @@
   // this card. The click dispatches `lead:action`; chat-session.js calls the tabs' own endpoints.
   const LEAD_ACTION_COPY = {
     send: { head: 'Send this outreach email', busy: 'Sending…' },
+    improve: { head: 'Improve this outreach email', button: 'Rewrite it', busy: 'Rewriting…' },
     move_to_outreach: { head: 'Move this lead to Outreach', button: 'Move to Outreach', busy: 'Moving…' },
     reject: { head: 'Turn this lead down', button: 'Turn it down', busy: 'Turning it down…' },
     set_outcome: { head: 'Record how this deal ended', busy: 'Recording…' },
   };
 
+  // "Approve all" (send_all): every email on the card, word for word, and ONE button. The click
+  // dispatches `lead:action` with the items; chat-session.js runs them through LeadBulkSend
+  // (src/components/lead-bulk-send.js), the same run as the Outreach tab's bulk bar.
+  function renderLeadBulkSendCard(ui, esc) {
+    const items = Array.isArray(ui.items) ? ui.items : [];
+    const skipped = Array.isArray(ui.skipped) ? ui.skipped : [];
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const n = items.length;
+    const emails = items.map((it, i) => `
+      <details class="rounded-lg border border-gray-200 bg-gray-50" ${i === 0 ? 'open' : ''}>
+        <summary class="cursor-pointer px-3 py-2 text-sm">
+          <span class="font-bold text-gray-900 break-words">${esc(it.title || `#${it.recordId}`)}</span>
+          <span class="block text-xs text-gray-600 break-all">To ${esc(it.to || 'no address')} · ${esc(it.subject || '')}</span>
+        </summary>
+        <div class="px-3 pb-3">
+          <p class="text-sm text-gray-900 whitespace-pre-wrap break-words">${esc(it.body || '')}</p>
+          ${ui.signature ? `<p class="text-sm text-gray-700 whitespace-pre-wrap break-words mt-3">${esc(ui.signature)}</p>` : ''}
+        </div>
+      </details>`).join('');
+    const skippedHtml = skipped.length ? `
+      <div class="mt-3">
+        <p class="text-sm font-bold text-gray-900">Not on this card (${skipped.length})</p>
+        <ul class="mt-1 space-y-1">${skipped.map((x) => `<li class="text-xs text-gray-700"><span class="font-bold">${esc(x.title || `#${x.recordId}`)}</span> — ${esc(x.why || '')}</li>`).join('')}</ul>
+      </div>` : '';
+    const f = ui.followUps;
+    const followHtml = blocked || !n ? ''
+      : f && f.enabled && Array.isArray(f.steps) && f.steps.length
+        ? `<p class="mt-3 text-xs text-gray-700">If a lead doesn’t reply, up to ${f.steps.length} follow-up${f.steps.length === 1 ? '' : 's'} go automatically (day ${f.steps.map((st) => esc(String(st.daysAfterOpener))).join(', ')}), each written when it’s due and stopped the moment they reply.</p>`
+        : f && !f.enabled ? '<p class="mt-3 text-xs text-gray-600">No follow-ups: this assistant is set to send one email only.</p>'
+        : '<p class="mt-3 text-xs text-amber-800">I couldn’t check whether follow-ups would start. If this assistant chases automatically, more emails follow unless they reply.</p>';
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-lg';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Approve &amp; send ${n === 1 ? '1 email' : `${n} emails`} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      ${n ? `<p class="text-xs text-gray-600 mt-2">Each email below goes exactly as shown — tap one to read it. Added at the bottom of each: ${ui.signature ? 'your signature, then ' : ''}a one-click unsubscribe line and ${esc(ui.footerName || 'your business name')}${ui.footerAddress ? `, ${esc(ui.footerAddress)}` : ' and postal address'}.</p>
+      <div class="mt-3 space-y-2 max-h-96 overflow-y-auto" tabindex="0" aria-label="The emails that will be sent">${emails}</div>` : ''}
+      ${ui.more ? `<p class="mt-2 text-xs text-gray-600">${esc(String(ui.more))} more are waiting — ask again once these have gone.</p>` : ''}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${skippedHtml}
+      ${followHtml}
+      ${blocked ? '' : `<p class="text-xs text-gray-600 mt-3">Pressing the button approves ${n === 1 ? 'this lead' : `these ${n} leads`} and sends ${n === 1 ? 'its email' : 'their emails'} now from your connected inbox, one after another.</p>`}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-lap-go class="btn-golive min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${n === 1 ? 'Approve &amp; send email' : `Approve &amp; send ${n} emails`}</button>
+        <button type="button" data-lap-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-lap-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-lap-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-lap-go], [data-lap-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-lap-cancel]')) { setBusy(true); say('Left as they are.'); return; }
+      if (!e.target.closest('[data-lap-go]')) return;
+      setBusy(true);
+      say(`Sending 1 of ${n}…`);
+      el.dispatchEvent(new CustomEvent('lead:action', {
+        bubbles: true,
+        detail: {
+          action: 'send_all', assistantId: Number(ui.assistantId) || null,
+          items: items.map((it) => ({ recordId: Number(it.recordId), title: it.title, draftHash: it.draftHash, approveFirst: true })),
+          progress(done) { say(`Sending ${Math.min(done + 1, n)} of ${n}…`); },
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Done.'); return; }
+            say(error || 'That didn’t work.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
   function renderLeadActionProposalCard(ui, esc) {
+    if (ui.action === 'send_all') return renderLeadBulkSendCard(ui, esc);
     const copy = LEAD_ACTION_COPY[ui.action];
     const recordId = Number(ui.recordId);
     if (!copy || !Number.isInteger(recordId)) return null;
@@ -3868,6 +3944,14 @@
 
     // The email, exactly as send_outreach will send it: the stored draft, then the signature, then
     // the footer the server appends. Shown even when blocked — it is what the user asked about.
+    const isImprove = ui.action === 'improve';
+    const improveHtml = isImprove && ui.body ? `
+      <p class="text-xs text-gray-600 mt-3">The email as it is now — to ${esc(ui.to || 'no address')}:</p>
+      <div class="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 max-h-56 overflow-y-auto" tabindex="0">
+        <p class="text-xs font-bold text-gray-900 break-words">${esc(ui.subject || '')}</p>
+        <p class="text-sm text-gray-900 whitespace-pre-wrap break-words mt-1">${esc(ui.body)}</p>
+      </div>
+      <p class="text-sm text-gray-800 mt-2"><span class="font-bold">What to change:</span> ${esc(ui.instruction || 'improve it generally')}</p>` : '';
     const emailHtml = isSend && ui.body ? `
       <dl class="mt-3 text-sm space-y-1">
         <div class="flex gap-2"><dt class="font-bold text-gray-700 shrink-0">To:</dt><dd class="text-gray-900 break-all">${esc(ui.to || 'no address')}</dd></div>
@@ -3902,6 +3986,7 @@
     let actionHtml = '';
     if (!blocked) {
       if (isSend) actionHtml = `<p class="text-xs text-gray-600 mt-3">${ui.approveFirst ? 'Pressing the button approves the lead and sends this email now' : 'Pressing the button sends this email now'} from your connected inbox, then sets a reminder to chase.</p>`;
+      if (isImprove) actionHtml = '<p class="text-xs text-gray-600 mt-3">Pressing the button rewrites this email and saves it on the Outreach tab. Nothing is sent — read the new version there, or ask me to send it.</p>';
       if (ui.action === 'move_to_outreach') actionHtml = `<p class="text-xs text-gray-600 mt-3">It moves to the Outreach tab’s Review column. ${ui.hasEmail ? 'Its drafted email waits there for you to read.' : 'It has no email written or no address yet, so there will be nothing to send until it does.'} Nothing is sent.</p>`;
       if (ui.action === 'reject') actionHtml = '<p class="text-xs text-gray-600 mt-3">It’s turned down and nothing is sent. Turned-down leads teach your searches what to skip.</p>';
       if (ui.action === 'set_outcome') {
@@ -3917,7 +4002,7 @@
       <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
       <p class="text-xs text-gray-500 mt-2">#${recordId}${ui.rating ? ` · ${esc(ui.rating)}` : ''}</p>
       ${ui.title ? `<p class="text-sm font-bold text-gray-900 mt-1 break-words">${esc(ui.title)}</p>` : ''}
-      ${emailHtml}
+      ${emailHtml}${improveHtml}
       ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
       ${followHtml}
       ${actionHtml}
@@ -3940,6 +4025,7 @@
           action: ui.action, recordId, assistantId: Number(ui.assistantId) || null,
           draftHash: ui.draftHash || null, personalInbox: !!ui.personalInbox, approveFirst: !!ui.approveFirst,
           outcome: ui.outcome || null, lossReason: ui.lossReason || null, valueGbp: ui.valueGbp ?? null,
+          instruction: ui.instruction || null,
           confirmChange: !!ui.currentOutcome,
           respond({ ok, message, error, final }) {
             if (ok) { say(message || 'Done.'); return; }
@@ -4866,6 +4952,54 @@
   register('NewsletterCampaignDraftCard', renderNewsletterCampaignDraftCard);
 
   register('blog_post_draft', renderBlogPostDraftCard);
+
+  // ── Built-in: several articles at once (Blog Writer chat, owner 2026-10-27) ──
+  // { type: 'blog_batch_proposal', topics: [{ title, brief }], more, assistantId }
+  // src/utils/blog-chat-batch.ts. One button queues every article through generate-blog.ts (the
+  // background worker); the click dispatches `blog:batch` and chat-session.js makes the call.
+  function renderBlogBatchProposalCard(ui, esc) {
+    const topics = Array.isArray(ui.topics) ? ui.topics.filter((t) => t && t.title) : [];
+    if (!topics.length) return null;
+    const n = topics.length;
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-lg';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Write ${n} article${n === 1 ? '' : 's'} · ${ui.queued ? 'Started' : 'Needs your OK'}</p>
+      <ol class="mt-3 space-y-2 list-decimal pl-5">
+        ${topics.map((t) => `<li class="text-sm text-gray-900"><span class="font-bold">${esc(t.title)}</span>${t.brief ? `<span class="block text-xs text-gray-600 mt-0.5">${esc(t.brief)}</span>` : ''}</li>`).join('')}
+      </ol>
+      ${ui.more ? `<p class="text-xs text-amber-800 mt-2">${esc(String(ui.more))} more were asked for — ask again once these are written.</p>` : ''}
+      <p class="text-xs text-gray-600 mt-3">Each one is written in the background — a minute or two apiece — and lands in the Review column of the Blogs tab. Nothing is published, and each counts as one task.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${ui.queued ? '' : `<button type="button" data-bb-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Write all ${n}</button>
+        <button type="button" data-bb-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-bb-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-bb-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-bb-go], [data-bb-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-bb-cancel]')) { setBusy(true); say('Nothing started.'); return; }
+      if (!e.target.closest('[data-bb-go]')) return;
+      setBusy(true);
+      say('Starting…');
+      el.dispatchEvent(new CustomEvent('blog:batch', {
+        bubbles: true,
+        detail: {
+          assistantId: Number(ui.assistantId) || null,
+          topics: topics.map((t) => ({ title: t.title, brief: t.brief || null })),
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Started.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('blog_batch_proposal', renderBlogBatchProposalCard);
   register('BlogPostDraftCard', renderBlogPostDraftCard);
 
   // ── Built-in: Upgrade Required Card (paywall) ───────────────────────────────
