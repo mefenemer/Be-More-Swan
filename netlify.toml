@@ -890,6 +890,12 @@ node_bundler = "esbuild"
   path = "/.netlify/functions/site-audit-public"
 
 # SC3: Daily task-volume threshold check — 08:00 UTC every day
+# "Import my current site" runs a site's JavaScript in headless Chrome when the plain read finds
+# almost no words (src/utils/site-js-render.ts). Chromium is a ~65 MB binary that esbuild cannot
+# bundle, so both packages ship as they are, and only in this one function.
+[functions.draft-site-background]
+  external_node_modules = ["@sparticuz/chromium", "puppeteer-core"]
+
 [functions.task-volume-check]
   schedule = "0 8 * * *"
 
