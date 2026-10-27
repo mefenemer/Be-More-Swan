@@ -77,7 +77,7 @@ check('Lead Generator: All leads, a divider before supporting tabs, and Awaiting
 check('every AI image is asked for no text, and typed requests are turned into a scene first', () => {
     const gw = read('src/lib/fal-gateway.ts');
     assert.match(gw, /prompt: opts\.allowText \? opts\.prompt : `\$\{opts\.prompt\.trim\(\)\}\\n\\n\$\{NO_TEXT_RULE\}`/);
-    assert.match(read('netlify/functions/generate-ai-image.ts'), /prompt: await visualisePrompt\(prompt/);
+    assert.match(read('netlify/functions/generate-ai-image.ts'), /prompts: await visualisePrompts\(prompt, 4/);
     assert.match(read('src/lib/image-prompt.ts'), /return request;/, 'fails open to the person\'s own words');
 });
 
@@ -102,6 +102,11 @@ check('the QR business card: name, purpose, email, website links, company detail
     assert.match(c, /mailto:hello@bemoreswan\.com/);
     assert.match(c, /href="https:\/\/bemoreswan\.com\/"/);
     assert.match(c, /company number 17378263/);
+    // Option A wording (owner, 2026-10-27): the growing team, approval, brand rules, time and cost.
+    assert.match(c, /A growing team of AI assistants for your business/);
+    assert.match(c, /You check and approve the work; they take the hours\./);
+    assert.match(c, /<meta name="description" content="Be More Swan: a growing team of pre-trained AI assistants/);
+    assert.doesNotMatch(c, /Your AI team for the busywork/);
     assert.match(read('be-more-swan.vcf'), /EMAIL;TYPE=WORK:hello@bemoreswan\.com/);
 });
 

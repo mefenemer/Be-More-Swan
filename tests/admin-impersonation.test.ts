@@ -253,5 +253,22 @@ const TARGET_ORG = 37;
         assert.match(w, /window\.initImpersonationBanner\(\);/);
     });
 
+    await check('notifications.ts lists the IMPERSONATED user\'s notifications, read-only — not the admin\'s own', () => {
+        // Prod, Oct 2026: impersonating a customer showed the admin's "Quarterly Bias Review Due".
+        const f = read('netlify/functions/notifications.ts');
+        const sw = f.slice(landmark(f, 'const imp = await resolveImpersonation(db, event.headers.cookie, userId);'), landmark(f, "if (event.httpMethod === 'GET')"));
+        assert.match(sw, /impersonationWriteBlock\(event\.httpMethod, imp\)/);
+        assert.match(sw, /userId = imp\.impersonatingUserId;/);
+    });
+
+    await check('partner-hub.ts shows the IMPERSONATED user\'s Partner page and mints nothing on a read', () => {
+        // Prod, Oct 2026: impersonating a partner showed "This page is for Be More Swan partners" —
+        // the admin's own (absent) partner row was read.
+        const f = read('netlify/functions/partner-hub.ts');
+        assert.match(f, /const imp = await resolveImpersonation\(db, event\.headers\.cookie, userId\);\s*if \(imp\) \{ userId = imp\.impersonatingUserId; impersonating = true; \}/);
+        assert.match(f, /impersonating \? await readReferralCode\(db, userId\) : await ensureReferralCode\(db, userId\)/);
+        assert.match(f, /if \(impersonating\) return json\(403/);
+    });
+
     console.log(`\n${passed} checks passed${process.exitCode ? ' — WITH FAILURES' : ''}\n`);
 })();

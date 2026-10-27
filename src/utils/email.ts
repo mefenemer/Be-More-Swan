@@ -219,11 +219,11 @@ export async function renderTemplate(
     const bodyRaw = opts.overrideBody ?? src?.bodyHtml ?? '';
     const transactional = opts.transactional ?? src?.transactional ?? false;
 
-    const { subject, body, text } = mergeTemplateParts(
-        { subject: subjectRaw, bodyHtml: bodyRaw, bodyText: opts.overrideText ?? src?.bodyText ?? null },
+    const { subject, body, text, preheader } = mergeTemplateParts(
+        { subject: subjectRaw, bodyHtml: bodyRaw, bodyText: opts.overrideText ?? src?.bodyText ?? null, preheader: src?.preheader },
         vars,
     );
-    const html = renderMasterTemplate(body, { preheader: src?.preheader ?? undefined, transactional });
+    const html = renderMasterTemplate(body, { preheader: preheader || undefined, transactional });
 
     return { subject, html, text, isActive: src?.isActive ?? true, usedFallback };
 }

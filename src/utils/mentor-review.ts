@@ -28,14 +28,15 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { and, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm';
-import { aiAssistants, chatMessages, chatSessions, mentorReviews, organisations, userOrganisations, userProfiles, users } from '../../db/schema';
+import { aiAssistants, chatMessages, chatSessions, mentorReviews, organisations, scheduledPosts, userOrganisations, userProfiles, users } from '../../db/schema';
+import { AWAITING_REVIEW_STATUSES } from '../config/post-status';
 import { adaptForModel, replyText } from '../config/model-options';
 import { MENTOR_HONESTY_RULES, MENTOR_REVIEW_CRAFT } from '../constants/mentor-craft';
 import { recordPlatformIncident } from './platform-incident';
 import { contentFindings, contentFindingsText, loadContentChecks, renderContentChecksForMentor, type ContentCheckInputs } from './mentor-content-checks';
 import { loadRoleModel, withRoleModel } from './assistant-model';
 import { MENTOR_ROLE_KEY } from './mentor-provision';
-import { renderMentorSnapshot, loadMentorSnapshotData, type MentorSnapshotData } from './mentor-snapshot';
+import { goalNotes, renderMentorSnapshot, loadMentorSnapshotData, type MentorSnapshotData } from './mentor-snapshot';
 import { gateSuggestion, loadOpenProposals, loadProposalState, proposalFields, renderProposalState, WEEKLY_CAP, type ProposalState } from './mentor-proposals';
 import { mentorCardFromUiElement, onlyGapFields, proposalKind, recordMentorProposal } from './mentor-cards';
 import { mentorSetupFieldPromptLine, resolveSetupFieldProposal, setupFieldRequestFromUiElement } from './chat-setup-field';
@@ -105,7 +106,15 @@ export function isReviewDue(settings: { on: boolean; quiet: boolean; day: Review
 
 // ── Reading the week ─────────────────────────────────────────────────────────────────────────────
 
-export interface AssistantFigures { id: number; name: string; role: string; thisWeek: number; lastWeek: number; enough: boolean; breakdown: string }
+export interface AssistantFigures {
+    id: number; name: string; role: string; thisWeek: number; lastWeek: number; enough: boolean;
+    /** This week's work by kind ("24 social posts drafted"). */
+    breakdown: string;
+    /** The week before's, so a drop to 0 still has a unit ("Finn: 10 items → 0" said nothing). Optional for older rows. */
+    lastBreakdown?: string;
+    /** Social posts waiting for the user's review now; null/undefined = not read. */
+    awaitingReview?: number | null;
+}
 export interface ReviewInputs {
     data: MentorSnapshotData;
     proposals: ProposalState | null;
@@ -129,15 +138,45 @@ export function hasEnoughData(i: Pick<ReviewInputs, 'data' | 'figures' | 'commit
 }
 
 /** Pure: the figures block. "not enough data" is written beside every figure below its sample. */
-export function renderFigures(figures: AssistantFigures[], data: MentorSnapshotData): string[] {
+export function renderFigures(figures: AssistantFigures[], data: MentorSnapshotData, now = new Date()): string[] {
     const lines = ['THIS WEEK\'S FIGURES (active assistants only; work = items each produced, as on their Results tab):'];
     if (!figures.length) lines.push('- No active assistant: there are no assistant results to review. Review Business Information, their plans and commitments instead.');
     for (const f of figures) {
-        lines.push(`- ${f.name} (${f.role}, assistantId ${f.id}): ${f.thisWeek} this week, ${f.lastWeek} the week before${f.breakdown ? ` (${f.breakdown})` : ''}${f.enough ? '' : ' — not enough data to call a trend'}`);
+        const waiting = typeof f.awaitingReview === 'number' ? `; ${f.awaitingReview} post${f.awaitingReview === 1 ? '' : 's'} waiting for your review now` : '';
+        lines.push(`- ${f.name} (${f.role}, assistantId ${f.id}): ${f.thisWeek} this week${f.breakdown ? ` (${f.breakdown})` : ''}, ${f.lastWeek} the week before${f.lastBreakdown ? ` (${f.lastBreakdown})` : ''}${waiting}${f.enough ? '' : ' — not enough data to call a trend'}`);
     }
     const goals = data.goals.filter((g) => g.latest !== null);
-    if (goals.length) lines.push(`Goals with a measured value: ${goals.map((g) => `${g.assistant}: ${g.label} ${g.latest}/${g.target} by ${g.targetDate.toISOString().slice(0, 10)} (${g.status.replace(/_/g, ' ')})`).join('; ')}.`);
+    if (goals.length) {
+        lines.push('Goals with a measured value (a goal\'s number can count something different from the figures above — explain the difference from "counts:", never ask the user to find out why):');
+        lines.push(...goals.map((g) => `- ${g.assistant}: ${g.label} ${g.latest}/${g.target} by ${g.targetDate.toISOString().slice(0, 10)} (${g.status.replace(/_/g, ' ')})${goalNotes(g, now)}`));
+    }
     return lines;
+}
+
+type BreakdownLine = { key: string; label: string; count: number };
+const describeBreakdown = (b: BreakdownLine[]) => b.filter((x) => x.count > 0).slice(0, 3).map((x) => `${x.count} ${x.label.toLowerCase()}`).join(', ');
+
+/** Pure: the week before's work by kind — the fortnight's less this week's. */
+export function weekBeforeBreakdown(week: BreakdownLine[], fortnight: BreakdownLine[]): BreakdownLine[] {
+    const w = new Map(week.map((b) => [b.key, b.count]));
+    return fortnight.map((b) => ({ ...b, count: Math.max(0, b.count - (w.get(b.key) ?? 0)) })).filter((b) => b.count > 0);
+}
+
+/** Social posts waiting for review now, per assistant (a cross-post counts once). Null on a read error. */
+async function countAwaitingReview(db: Db, orgId: number, ids: number[]): Promise<Map<number, number> | null> {
+    if (!ids.length) return new Map();
+    try {
+        const rows = await db.select({
+            id: scheduledPosts.assistantId,
+            n: sql<number>`count(DISTINCT coalesce(${scheduledPosts.crosspostGroupId}, ${scheduledPosts.id}::text))::int`,
+        }).from(scheduledPosts)
+            .where(and(eq(scheduledPosts.organisationId, orgId), inArray(scheduledPosts.assistantId, ids), inArray(scheduledPosts.status, [...AWAITING_REVIEW_STATUSES])))
+            .groupBy(scheduledPosts.assistantId);
+        return new Map(rows.map((r: any) => [Number(r.id), Number(r.n)]));
+    } catch (err) {
+        console.error('[mentor-review] posts awaiting review unreadable (non-fatal)', err instanceof Error ? err.message : err);
+        return null;
+    }
 }
 
 export async function readReviewInputs(db: Db, orgId: number, userId: number, now = new Date()): Promise<ReviewInputs> {
@@ -155,13 +194,16 @@ export async function readReviewInputs(db: Db, orgId: number, userId: number, no
         countRoiActivityByAssistant(db, { organisationId: orgId, assistantIds: ids, windowStart: new Date(now.getTime() - 7 * DAY) }),
         countRoiActivityByAssistant(db, { organisationId: orgId, assistantIds: ids, windowStart: new Date(now.getTime() - 14 * DAY) }),
     ]);
+    const awaiting = await countAwaitingReview(db, orgId, ids);
     const figures = active.map((t) => {
         const w = week.get(t.id); const f = fortnight.get(t.id);
         const thisWeek = w?.completedTasks ?? 0;
         const lastWeek = Math.max(0, (f?.completedTasks ?? 0) - thisWeek);
         return {
             id: t.id, name: t.name, role: t.role, thisWeek, lastWeek, enough: thisWeek + lastWeek >= MIN_WORK && !w?.degraded && !f?.degraded,
-            breakdown: (w?.breakdown ?? []).slice(0, 3).map((b) => `${b.count} ${b.label.toLowerCase()}`).join(', '),
+            breakdown: describeBreakdown(w?.breakdown ?? []),
+            lastBreakdown: describeBreakdown(weekBeforeBreakdown(w?.breakdown ?? [], f?.breakdown ?? [])),
+            awaitingReview: awaiting ? (awaiting.get(t.id) ?? 0) : null,
         };
     });
     const content = await loadContentChecks(db, orgId, data);
@@ -191,6 +233,22 @@ export function notEnoughDataReview(i: Pick<ReviewInputs, 'data' | 'figures' | '
         ],
     };
 }
+
+/**
+ * The review is read beside the Overview tab, so every claim is checked against the rest of the page.
+ * Each rule is one contradiction found on staging, 27 Oct (Nova's "Week of 26 Oct" review).
+ */
+export const REVIEW_CONSISTENCY_RULES = `CONSISTENCY — the owner reads this beside the rest of your Overview tab, so it must agree with itself and with the blocks above:
+- Name an assistant as producing work only if its figure THIS WEEK is above 0. One with 0 is "not producing yet", never in a list of those producing.
+- Use each figure's own unit from its breakdown ("social posts", "leads", "newsletter issues"); never "items".
+- The two-sentence summary names only what the sections stand behind. Something a section calls "not a trend yet" is never a headline.
+- "What went well" holds only good news. A goal at risk, behind or missed goes under "What needs attention", even when its week was good.
+- A goal marked DATE PASSED is missed: say so with its date and suggest moving the date or closing it. Never write "by <that date>".
+- When a figure and a goal disagree, explain the difference from the goal's "counts:" line. Never ask the user to work out why.
+- Anything under ALREADY ACCEPTED is done: never list it as waiting or suggest it again. If a CONTENT CHECK still finds the same gap, say what the accepted change did and what is still missing.
+- "Still waiting for your answer" lists only what is under STILL WAITING FOR THEIR ANSWER, by its own title.
+- Drafts to approve: give a number only from "waiting for your review now". Without one, don't say how many are waiting.
+- Customer reviews come only from THEIR CUSTOMERS. Deals are said the way it says them: won, lost and disqualified.`;
 
 // ── Cards the review may draw ─────────────────────────────────────────────────────────────────────
 
@@ -483,9 +541,9 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
                 : '';
             const system = [
                 `You are ${name}, the Business Mentor of ${org?.name || 'this business'} on Be More Swan.`,
-                MENTOR_REVIEW_CRAFT, MENTOR_HONESTY_RULES,
+                MENTOR_REVIEW_CRAFT, MENTOR_HONESTY_RULES, REVIEW_CONSISTENCY_RULES,
                 renderMentorSnapshot(inputs.data), renderProposalState(inputs.proposals, now),
-                renderFigures(inputs.figures, inputs.data).join('\n'),
+                renderFigures(inputs.figures, inputs.data, now).join('\n'),
                 renderCommitmentsForMentor(inputs.commitments, null, now).join('\n'),
                 renderTrackRecordForMentor(inputs.record).join('\n'),
                 renderCustomersForMentor(inputs.customers).join('\n'),
@@ -531,7 +589,7 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
                 if (d.target && !inputs.data.team.some((t) => t.id === d.target && t.state === 'active')) continue;
                 if (drawn.some((x) => x.kind === d.kind && x.fields.join() === d.fields.join())) continue;
                 if (isStillWaiting(d, waiting)) continue;
-                if (!gateSuggestion({ kind: d.kind, fields: d.fields, asked: false }, state, now).ok) continue;
+                if (!gateSuggestion({ kind: d.kind, fields: d.fields, asked: false, title: d.title }, state, now).ok) continue;
                 drawn.push(d);
                 state.usedThisWeek++;
             }
@@ -587,7 +645,9 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
                     vars: {
                         user: { first_name: p.firstName ?? '' }, assistant: { name }, workspace: { name: org?.name ?? '' },
                         review: { summary, proposals: proposalsLine },
-                        link: { action_url: `${base}/workspace.html` },
+                        // "Open my review" lands on the Mentor with this person's review chat open (workspace.html
+                        // ?view=assistant-detail&chatSessionId=…) — not the bare dashboard it once went to.
+                        link: { action_url: mentorReviewLink(base, mentor.id, sessions.get(p.userId) ?? null) },
                     },
                 }).catch((err: unknown) => console.warn('[mentor-review] email failed for user', p.userId, err instanceof Error ? err.message : err));
             }
@@ -600,6 +660,12 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
     }
 }
 
+
+/** Pure: where the weekly review email's "Open my review" button goes. */
+export function mentorReviewLink(base: string, mentorId: number, chatSessionId: number | null): string {
+    const q = `view=assistant-detail&assistantId=${mentorId}` + (chatSessionId ? `&chatSessionId=${chatSessionId}` : '');
+    return `${base}/workspace.html?${q}`;
+}
 
 /** Pure: the Mentor's own review settings, for its chat prompt — and how to change them with the set-up card. */
 export function renderReviewSettingsForMentor(mentorId: number, ctx: unknown): string {

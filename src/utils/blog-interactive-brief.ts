@@ -28,6 +28,9 @@ export type InteractiveBlogBrief = {
     /** "Make it shorter" / "Make it longer" (src/utils/blog-resize.ts): rewrite the post's EXISTING body
      *  to a new length instead of drafting one. Needs no topic. */
     resize?: 'shorter' | 'longer';
+    /** "Revise it" (src/utils/blog-resize.ts): rewrite the post's EXISTING body to the owner's
+     *  instruction ("improve it", "bring it up to date"). Needs no topic. */
+    revise?: string;
 };
 
 const RESIZE = ['shorter', 'longer'] as const;
@@ -50,6 +53,7 @@ export function encodeInteractiveBrief(brief: InteractiveBlogBrief): string {
         // Optional, so v stays 1: an older worker simply ignores the key.
         articleType: clip(brief.articleType) || undefined,
         resize: asResize(brief.resize),
+        revise: clip(brief.revise) || undefined,
     });
 }
 
@@ -69,8 +73,9 @@ export function decodeInteractiveBrief(raw: string | null | undefined): Interact
     if (obj.v !== 1) return null;
     const topic = clip(obj.topic);
     const resize = asResize(obj.resize);
-    // A resize rewrites what is there, so it is the one brief that needs no topic.
-    if (!topic && !resize) return null;
+    const revise = clip(obj.revise) || undefined;
+    // A resize or a revise rewrites what is there, so they are the briefs that need no topic.
+    if (!topic && !resize && !revise) return null;
     return {
         topic,
         keywords: clip(obj.keywords) || undefined,
@@ -78,5 +83,6 @@ export function decodeInteractiveBrief(raw: string | null | undefined): Interact
         tone: clip(obj.tone) || undefined,
         articleType: clip(obj.articleType) || undefined,
         resize,
+        revise,
     };
 }

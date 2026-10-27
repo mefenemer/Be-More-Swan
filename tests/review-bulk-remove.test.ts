@@ -107,7 +107,7 @@ check('Remove picks the blog endpoint for a blog queue and forgets the cached li
 });
 check('the blog chat can propose remove, through the same endpoint', () => {
     assert.deepStrictEqual(blogActionFromUiElement({ type: 'blog_action_proposal', action: 'remove', postId: 8, reason: 'x', when: 'y' }),
-        { action: 'remove', postId: 8, reason: null, when: null });
+        { action: 'remove', postId: 8, reason: null, when: null, instruction: null });
     const cs = read('src/components/chat-session.js');
     const h = cs.slice(cs.indexOf('async function onBlogAction('));
     assert.ok(h.includes("blog-posts?ids=${d.postId}`, { method: 'DELETE'"));

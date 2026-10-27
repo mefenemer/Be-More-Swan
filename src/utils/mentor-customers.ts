@@ -5,7 +5,8 @@
 //   Won, lost and why          revenue_events                      Lead Generator active
 //   Quiet won customers        revenue_events → discovered_leads   Lead Generator active
 //                              (company and contact NAME only) + lead_threads (last contact DATE only)
-//   Customer feedback          org_reviews (published: rating and a short excerpt, never the author)
+//   Customer feedback          org_reviews (published or hidden — the honest set reviews.ts counts:
+//                              rating and a short excerpt, never the author; pending ones as a count)
 //   Recurring support problems assistant_records 'ticket'          Support Agent active
 //   Overdue invoices           assistant_records 'invoice'         Accounts Receivable active
 //
@@ -20,6 +21,7 @@
 import { and, desc, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm';
 import { aiAssistants, assistantRecords, discoveredLeads, leadThreads, masterAssistants, orgReviews, revenueEvents } from '../../db/schema';
 import { teamState } from './mentor-snapshot';
+import { COUNTED_STATUSES } from './reviews';
 
 type Db = any;
 
@@ -45,6 +47,12 @@ export interface CustomersView {
     deals: { won: number; lost: number; disqualified: number; lossReasons: Array<{ reason: string; count: number }>; enough: boolean } | null;
     quiet: Array<{ company: string; contact: string | null; wonAt: string; lastContactAt: string | null }> | null;
     reviews: { count: number; average: number | null; low: Array<{ rating: number; excerpt: string; date: string | null }> } | null;
+    /**
+     * Customer-sent reviews waiting for the owner's approval — never counted, never quoted. Optional for
+     * older fixtures. Staging, 27 Oct: the weekly review praised "your first review, 5/5" while this panel
+     * said "No reviews have been added yet"; a review only exists for the Mentor through this view.
+     */
+    reviewsPending?: number;
     tickets: { last30: number; open: number; subjects: string[] } | null;
     overdueInvoices: number | null;
 }
@@ -118,11 +126,14 @@ export async function loadCustomers(db: Db, orgId: number, now = new Date()): Pr
         }).slice(0, MAX_QUIET);
     }
 
-    // ── Reviews: the business's own published reviews ─────────────────────────────────────────
+    // ── Reviews: the business's own reviews — the set Audience ▸ Reviews counts (reviews.ts) ──────
     const reviews: any[] = await optional(() => db.select({ rating: orgReviews.rating, body: orgReviews.body, reviewedOn: orgReviews.reviewedOn, createdAt: orgReviews.createdAt })
-        .from(orgReviews).where(and(eq(orgReviews.organisationId, orgId), eq(orgReviews.status, 'published')))
+        .from(orgReviews).where(and(eq(orgReviews.organisationId, orgId), inArray(orgReviews.status, [...COUNTED_STATUSES])))
         .orderBy(desc(orgReviews.createdAt)).limit(100), []);
-    view.sources.push({ key: 'reviews', label: 'Customer reviews', available: reviews.length > 0, note: reviews.length ? 'From the reviews on Business Information.' : 'No reviews have been added yet.' });
+    const [pending] = await optional(() => db.select({ n: sql<number>`count(*)::int` }).from(orgReviews)
+        .where(and(eq(orgReviews.organisationId, orgId), eq(orgReviews.status, 'pending'))), [] as any[]);
+    view.reviewsPending = Number(pending?.n ?? 0);
+    view.sources.push({ key: 'reviews', label: 'Customer reviews', available: reviews.length > 0, note: reviewsNote(reviews.length, view.reviewsPending) });
     if (reviews.length) {
         const rated = reviews.filter((r) => typeof r.rating === 'number');
         view.reviews = {
@@ -157,12 +168,21 @@ export async function loadCustomers(db: Db, orgId: number, now = new Date()): Pr
     return view;
 }
 
+/** Pure: where the reviews come from, or why there are none to read. */
+export function reviewsNote(counted: number, pending: number): string {
+    const waiting = pending ? `${pending} sent in by customers ${pending === 1 ? 'is' : 'are'} waiting for your approval in Audience ▸ Reviews` : '';
+    if (counted) return `From Audience ▸ Reviews.${waiting ? ` ${waiting.charAt(0).toUpperCase()}${waiting.slice(1)}.` : ''}`;
+    return waiting ? `None approved yet — ${waiting}.` : 'No reviews have been added yet.';
+}
+
 /** Pure: the prompt's block — honest about what isn't there. */
 export function renderCustomersForMentor(v: CustomersView | null): string[] {
     if (!v) return ['THEIR CUSTOMERS: couldn\'t be read just now — don\'t guess.'];
     const lines = ['THEIR CUSTOMERS (the business\'s own customers — names and dates only; never contact details):'];
     if (nothingToSee(v)) {
         lines.push('- Nothing to read: no active assistant records deals, tickets or invoices, and no reviews are added. Ask them about their customers instead (who buys, who comes back, who has gone quiet).');
+        if (v.reviewsPending) lines.push(`- Reviews waiting for their approval in Audience ▸ Reviews: ${v.reviewsPending} (not approved, so not counted — never quote or score them).`);
+        lines.push('- This block is the ONLY source of customer reviews. They have none approved: never say they have a review or a rating.');
         return lines;
     }
     if (v.deals) {
@@ -174,6 +194,8 @@ export function renderCustomersForMentor(v: CustomersView | null): string[] {
     if (v.quiet) lines.push(v.quiet.length
         ? `- Won customers not heard from in ${QUIET_AFTER_DAYS}+ days: ${v.quiet.map((q) => `${q.company}${q.contact ? ` (${q.contact})` : ''}, last contact ${q.lastContactAt ? q.lastContactAt.slice(0, 10) : 'none recorded'}`).join('; ')}.`
         : `- No won customer has gone quiet (${QUIET_AFTER_DAYS}+ days).`);
+    if (v.reviewsPending) lines.push(`- Reviews waiting for their approval in Audience ▸ Reviews: ${v.reviewsPending} (not approved, so not counted — never quote or score them; you may say they are waiting).`);
+    lines.push('- This block is the ONLY source of customer reviews. Never call any other figure, score or rating a review.');
     if (v.reviews) lines.push(`- Reviews: ${v.reviews.count}${v.reviews.average !== null ? `, average ${v.reviews.average}/5` : ''}.${v.reviews.low.length ? ` Low ones: ${v.reviews.low.map((r) => `${r.rating}/5 "${r.excerpt}"`).join(' | ')}` : ''}`);
     if (v.tickets) lines.push(`- Support tickets in 30 days: ${v.tickets.last30} (${v.tickets.open} open).${v.tickets.subjects.length ? ` Recent subjects: ${v.tickets.subjects.join('; ')}.` : ''}`);
     if (v.overdueInvoices !== null) lines.push(`- Overdue invoices: ${v.overdueInvoices}.`);

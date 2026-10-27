@@ -114,10 +114,10 @@ async function main() {
     await check('the endpoint meters it as a helper and refuses a live article', () => {
         const g = read('netlify/functions/generate-blog.ts');
         assert.ok(g.includes("meterInteraction(db, organisationId, 'helpers')"));
-        assert.ok(g.includes("resize && (post.status === 'published' || post.status === 'publishing')"));
+        assert.ok(g.includes("rewrite && (post.status === 'published' || post.status === 'publishing')"));
         const w = read('netlify/functions/process-blog-jobs.ts');
-        assert.ok(w.includes('if (!resize && job.trigger_type !== \'admin_test\' && !(await hasTaskCapacity('), 'no task check for a helper');
-        assert.ok(w.indexOf('if (interactive && resize)') < w.indexOf('await generateBlogBody('), 'resize never drafts a new article');
+        assert.ok(w.includes('if (!resize && !revise && job.trigger_type !== \'admin_test\' && !(await hasTaskCapacity('), 'no task check for a helper');
+        assert.ok(w.indexOf('if (interactive && (resize || revise))') < w.indexOf('await generateBlogBody('), 'resize never drafts a new article');
     });
     await check('Blog Studio has both buttons, through the same queue', () => {
         const bs = read('src/components/blog-studio-modal.js');
@@ -127,10 +127,10 @@ async function main() {
     });
     await check('chat can propose shorter / longer for a saved post and a saved article', () => {
         assert.deepStrictEqual(postActionFromUiElement({ type: 'post_action_proposal', action: 'shorter', postId: 4 }), { action: 'shorter', postId: 4, reason: null, when: null });
-        assert.deepStrictEqual(blogActionFromUiElement({ type: 'blog_action_proposal', action: 'longer', postId: 9 }), { action: 'longer', postId: 9, reason: null, when: null });
+        assert.deepStrictEqual(blogActionFromUiElement({ type: 'blog_action_proposal', action: 'longer', postId: 9 }), { action: 'longer', postId: 9, reason: null, when: null, instruction: null });
         const cs = read('src/components/chat-session.js');
         assert.ok(cs.includes("postActionCall('rewrite-post-text', { postId: id, action: d.action })"), 'social: the editor\'s rewrite');
-        assert.ok(cs.includes("postActionCall('generate-blog', { blogPostId: d.postId, resize: d.action })"), 'blog: Blog Studio\'s job');
+        assert.ok(cs.includes("{ blogPostId: d.postId, revise: d.instruction }") && cs.includes(": { blogPostId: d.postId, resize: d.action });"), 'blog: Blog Studio\'s job');
         const reg = read('src/components/disruptive-ui-registry.js');
         assert.ok(reg.includes("shorter: { head: 'Make this post shorter'") && reg.includes("shorter: { head: 'Make this article shorter'"));
     });

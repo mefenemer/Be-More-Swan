@@ -135,19 +135,23 @@ export function renderMergeVars(text: string, context: MergeContext, escape = tr
  * assistant names), so getting this wrong lets a name render as markup:
  *   • body  — HTML: admin input sanitised, merged values HTML-escaped. URL vars land in
  *             href="..." attributes, where `&` → `&amp;` is the correct encoding.
- *   • subject / text — plain text: merged values verbatim (escaping would show `&lt;` literally).
+ *   • subject / text / preheader — plain text: merged values verbatim (escaping would show `&lt;`
+ *             literally; renderMasterTemplate escapes the preheader once when it wraps it).
  * The text part, when not supplied, is derived from the sanitised body BEFORE merging, so tags
  * survive the tag-stripper and the two parts can't drift.
  */
 export function mergeTemplateParts(
-    parts: { subject: string; bodyHtml: string; bodyText?: string | null },
+    parts: { subject: string; bodyHtml: string; bodyText?: string | null; preheader?: string | null },
     vars: MergeContext,
-): { subject: string; body: string; text: string } {
+): { subject: string; body: string; text: string; preheader: string } {
     const sanitisedBody = sanitiseBodyHtml(parts.bodyHtml);
     return {
         subject: renderMergeVars(parts.subject, vars, false),
         body: renderMergeVars(sanitisedBody, vars, true),
         text: renderMergeVars(parts.bodyText ?? htmlToPlainText(sanitisedBody), vars, false),
+        // The inbox preview line. It was once passed to the wrapper unmerged, so customers saw
+        // `{{review.proposals | "…"}}` as the preview text of the Business Mentor email.
+        preheader: renderMergeVars(parts.preheader ?? '', vars, false),
     };
 }
 

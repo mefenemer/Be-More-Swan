@@ -3946,7 +3946,13 @@ function formatCurrency(amount, currency) {
       // modal straight to it instead of leaving the user to find it in the list.
       const postIdParam = qs.get('postId');
       if (postIdParam && Number.isInteger(Number(postIdParam))) window._assistantDetailInitialPostId = Number(postIdParam);
+      // ?chatSessionId=… — the Business Mentor's weekly review email ("Open my review"): the review was
+      // posted into this chat, so open it over the detail page, as the in-app notification does.
+      const chatSessionParam = Number(qs.get('chatSessionId'));
       await loadView('assistant-detail', qs.get('assistantId'));
+      if (Number.isInteger(chatSessionParam) && chatSessionParam > 0 && typeof window.openAssistantChat === 'function') {
+        window.openAssistantChat({ assistantId: Number(qs.get('assistantId')), sessionId: chatSessionParam });
+      }
     } else if (viewParam && routes[viewParam]) {
       // ⚠️ replaceState below drops the WHOLE query string, so any param the view itself needs has
       // to be lifted onto a global first — the same pattern as _assistantDetailInitialTab above.

@@ -17,6 +17,8 @@ import { resolveAssistantLimit } from './release-paused-limit';
 import { loadProposalState, renderProposalState } from './mentor-proposals';
 import { recommendHires, renderHireRecommendation } from './mentor-hire';
 import { renderSetupFields } from './setup-field';
+import { CTA_ROLES } from '../config/call-to-action';
+import { getGoalMetric } from '../config/goal-metrics';
 import { statusOf, type AssistantStatus } from './assistant-go-live';
 import { loadNextPlan } from './next-plan';
 import { loadStrategyDocs, renderStrategyForMentor, type StrategyDoc } from './strategy-documents';
@@ -38,12 +40,14 @@ export interface MentorSnapshotData {
     productCount: number;
     offerKinds: string[] | null;          // null = the question hasn't been answered
     introOfferAnswered: boolean;
+    /** A free trial / intro offer is recorded (not just "we don't have one"). Optional for older fixtures. */
+    introOfferHas?: boolean;
     /** roleKey and setup (its set-up answers) are read for set-up cards and hiring advice. */
     team: Array<{ id: number; name: string; role: string; state: TeamState; roleKey?: string | null; setup?: Record<string, unknown> | null }>;
     /** The assistant catalogue with each role's status (only `live` ones are recommended, mentor-hire.ts). */
     catalogue?: Array<{ roleKey: string; name: string; description: string | null; status: AssistantStatus }>;
     /** id = the goals row, so a goal card can name it (fixtures may leave it out). */
-    goals: Array<{ id?: number; assistant: string; label: string; latest: number | null; target: number; targetDate: Date; status: string }>;
+    goals: Array<{ id?: number; assistant: string; label: string; latest: number | null; target: number; targetDate: Date; status: string; metricKey?: string | null }>;
     /** The live plan, to cross-check pause reasons: `status` null = no active or past-due plan; `freeSlots` null = unlimited. */
     plan: { status: 'active' | 'past_due' | null; freeSlots: number | null; nextPlanName?: string | null };
     /** Phase 2: its strategy documents (null = the table isn't there yet; undefined = not read). */
@@ -106,7 +110,7 @@ export function startingPoint(d: MentorSnapshotData): 'established' | 'new' {
 
 /** One line of the Mentor page's "Set-up checklist" (§14), and the gap the prompt names when it isn't done. */
 export interface ChecklistItem {
-    key: 'description' | 'products' | 'offer' | 'website' | 'industry' | 'intro_offer';
+    key: 'description' | 'products' | 'offer' | 'website' | 'industry' | 'intro_offer' | 'offer_cta';
     label: string;
     done: boolean;
     optional: boolean;
@@ -145,12 +149,44 @@ export function setupChecklist(d: MentorSnapshotData): ChecklistItem[] {
         { key: 'intro_offer', label: 'Free trial or intro offer', done: d.introOfferAnswered, optional: true, tab: 'products',
             why: 'Optional. Used in outreach and posts when you have one.',
             gap: 'The free trial / intro offer question hasn\'t been answered (optional).' },
+        ...offerCtaItem(d),
     ];
+}
+
+/**
+ * Pure: "Your offer as a call to action" — only when an offer is recorded and a Social, Blog or Email
+ * assistant is active (the review's content check raises the same gap, so the page must show it too).
+ * Done when at least one of them invites people to take the offer.
+ */
+function offerCtaItem(d: MentorSnapshotData): ChecklistItem[] {
+    const content = d.team.filter((t) => t.state === 'active' && (CTA_ROLES as readonly string[]).includes(t.roleKey ?? ''));
+    if (!d.introOfferHas || !content.length) return [];
+    return [{ key: 'offer_cta', label: 'Your offer as a call to action', done: content.some((t) => t.setup?.ctaOffer === 'intro_offer'), optional: true, tab: 'products',
+        why: 'Your free trial or intro offer is recorded, but no content assistant asks people to take it. Set it under Calls to action.',
+        gap: 'The free trial / intro offer is recorded but no content assistant uses it as its call to action (Business Information ▸ Products & Services ▸ Calls to action).' }];
 }
 
 /** Pure: the Business Information gaps, most important first. */
 export function businessGaps(d: MentorSnapshotData): string[] {
     return setupChecklist(d).filter((i) => !i.done).map((i) => i.gap);
+}
+
+/**
+ * Pure: what the model must know to describe a goal honestly — what its number counts (staging, 27 Oct:
+ * "Find 300 Leads" read 16 while the Results tab said 101 leads, and the review asked the owner to find
+ * out why; the goal counts leads approved for outreach, the tab counts leads found), and whether its date
+ * has passed unmet (the same review called a goal due a month earlier "0 of 1 by 30 September").
+ */
+export function goalNotes(g: { latest: number | null; target: number; targetDate: Date; metricKey?: string | null }, now = new Date()): string {
+    const out: string[] = [];
+    const m = g.metricKey ? getGoalMetric(g.metricKey) : null;
+    if (m?.description) out.push(`counts: ${m.description.replace(/\s+/g, ' ').trim().replace(/\.$/, '')}`);
+    const daysPast = Math.floor((now.getTime() - g.targetDate.getTime()) / 86_400_000);
+    if (daysPast >= 1 && (g.latest === null || g.latest < g.target)) {
+        const day = g.targetDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', timeZone: 'Europe/London' });
+        out.push(`DATE PASSED ${daysPast} day${daysPast === 1 ? '' : 's'} ago, target not reached: call it "missed on ${day}" (never "by ${day}") and suggest moving the date or closing it on the assistant's Results tab`);
+    }
+    return out.length ? ` — ${out.join('; ')}` : '';
 }
 
 /** Pure: the <workspace> block. */
@@ -196,7 +232,7 @@ export function renderMentorSnapshot(d: MentorSnapshotData): string {
     if (!d.goals.length) lines.push('- No goals are set yet.');
     else lines.push(...d.goals.map((g) => {
         const latest = g.latest === null ? 'not measured yet (unknown — never treat as 0)' : String(g.latest);
-        return `- ${g.id ? `#${g.id} ` : ''}${g.assistant}: ${g.label} — now ${latest}, target ${g.target} by ${g.targetDate.toISOString().slice(0, 10)} (${g.status.replace(/_/g, ' ')})`;
+        return `- ${g.id ? `#${g.id} ` : ''}${g.assistant}: ${g.label} — now ${latest}, target ${g.target} by ${g.targetDate.toISOString().slice(0, 10)} (${g.status.replace(/_/g, ' ')})${goalNotes(g)}`;
     }));
 
     if (d.strategyDocs !== undefined) lines.push('', ...renderStrategyForMentor(d.strategyDocs));
@@ -265,8 +301,8 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
         .orderBy(asc(orgProducts.sortOrder), asc(orgProducts.id)), []);
     const [offer] = await optional(() => db.select({ offers: orgOfferProfile.offers }).from(orgOfferProfile)
         .where(eq(orgOfferProfile.organisationId, orgId)).limit(1), [] as Array<{ offers: string[] }>);
-    const [intro] = await optional(() => db.select({ one: sql<number>`1` }).from(orgIntroOffer)
-        .where(eq(orgIntroOffer.organisationId, orgId)).limit(1), [] as Array<{ one: number }>);
+    const [intro] = await optional(() => db.select({ offer: orgIntroOffer.offer }).from(orgIntroOffer)
+        .where(eq(orgIntroOffer.organisationId, orgId)).limit(1), [] as Array<{ offer: unknown }>);
 
     const team = await db.select({
         id: aiAssistants.id, name: aiAssistants.name, role: masterAssistants.name, roleKey: masterAssistants.roleKey,
@@ -342,6 +378,7 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
         productCount: products.length,
         offerKinds: offer ? (offer.offers ?? []) : null,
         introOfferAnswered: !!intro,
+        introOfferHas: (intro?.offer as { has?: unknown } | null)?.has === true,
         team: team.map((t: any) => ({
             id: t.id, name: t.name || t.role || 'Assistant', role: t.role || 'Assistant',
             state: teamState(t.lifecycleStatus, t.provisioningStatus),
@@ -350,7 +387,7 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
         goals: goalRows.map((g: any) => ({
             id: g.id, assistant: g.assistant || 'An assistant', label: g.title || g.metricKey,
             latest: g.latest === null || g.latest === undefined ? null : Number(g.latest),
-            target: Number(g.target), targetDate: new Date(g.targetDate), status: g.status || 'pending',
+            target: Number(g.target), targetDate: new Date(g.targetDate), status: g.status || 'pending', metricKey: g.metricKey ?? null,
         })),
     };
 }

@@ -27,8 +27,13 @@ export const MAX_KNOWLEDGE_DOCS = 3;
 export const KNOWLEDGE_EXCERPT_CHARS = 600;
 
 export interface ContentCheckInputs {
-    /** Active Social / Blog / Email assistants: what they were set to invite, and what that resolved to. */
-    ctas: Array<{ name: string; chosen: CtaKind; resolved: ResolvedCta }>;
+    /**
+     * Active Social / Blog / Email assistants: what they were set to invite, and what that resolved to.
+     * `incentive` is the Social wizard's "Incentive or offer" answer — a detail INSIDE posts, not the call
+     * to action. Staging, 27 Oct: the Mentor suggested changing Marvin's incentive to the free trial, then
+     * the next review said no assistant used the trial as its call to action — both true, never explained.
+     */
+    ctas: Array<{ name: string; chosen: CtaKind; resolved: ResolvedCta; incentive?: string | null }>;
     /** The recorded free trial / intro offer, summarised; null when none is recorded. */
     offer: string | null;
     /** Active assistants' active goals. */
@@ -54,8 +59,12 @@ export function contentFindings(i: Pick<ContentCheckInputs, 'ctas' | 'offer' | '
         }
     }
     if (i.offer && i.ctas.length && i.ctas.every((c) => c.chosen === 'own')) {
+        const mention = i.ctas.filter((c) => c.incentive?.trim()).map((c) => c.name);
+        const also = mention.length
+            ? ` ${listNames(mention)} ${mention.length === 1 ? 'mentions an offer in its' : 'mention an offer in their'} "Incentive or offer" answer, but that only adds a detail to posts — it doesn't change what they ask people to do.`
+            : '';
         out.push({
-            text: `Your offer (${i.offer.replace(/\.$/, '')}) is recorded, but none of your content assistants uses it as its call to action.`,
+            text: `Your offer (${i.offer.replace(/\.$/, '')}) is recorded, but none of your content assistants uses it as its call to action.${also}`,
             where: 'Business Information ▸ Products & Services ▸ Calls to action',
         });
     }
@@ -73,6 +82,8 @@ export function contentFindings(i: Pick<ContentCheckInputs, 'ctas' | 'offer' | '
     return out;
 }
 
+const listNames = (n: string[]) => (n.length < 2 ? n.join('') : `${n.slice(0, -1).join(', ')} and ${n[n.length - 1]}`);
+
 /** Pure: the findings as one review section's text, or null when there are none. */
 export function contentFindingsText(findings: ContentFinding[]): string | null {
     if (!findings.length) return null;
@@ -85,6 +96,7 @@ export function renderContentChecksForMentor(i: ContentCheckInputs | null): stri
     const lines = ['CONTENT CHECKS (already found in code — mention each under "What needs attention", in your own words, with where to fix it; never claim you changed anything):'];
     const found = contentFindings(i);
     lines.push(...(found.length ? found.map((f) => `- ${f.text} Fix: ${f.where}.`) : ['- None found.']));
+    if (i.offer) lines.push('- NOTE: the Social set-up answer "Incentive or offer" is NOT the call to action. Never suggest changing it to make the offer the call to action, and never count a change to it as fixing that; the only place that sets it is Business Information ▸ Products & Services ▸ Calls to action (there is no card for it — point them there).');
     if (i.knowledge.length && (i.offer || i.hasApprovedPlan)) {
         lines.push('BRAND KNOWLEDGE (excerpts; the owner\'s documents every assistant drafts from). Compare them with the recorded offer'
             + `${i.hasApprovedPlan ? ' and the approved plan' : ''}. ONLY if one clearly contradicts it — a different offer, price, length of trial or audience — say which document and what differs, and that they can fix it under Brand Knowledge. If they agree or you can't tell, say nothing about them.`);
@@ -103,6 +115,7 @@ export async function loadContentChecks(db: Db, orgId: number, data: MentorSnaps
         const [ctas, intro, goalRows, services, knowledge] = await Promise.all([
             Promise.all(ctaTeam.map(async (t) => ({
                 name: t.name, chosen: ctaChoiceFromContext(t.setup).kind, resolved: await resolveCta(db, orgId, t.setup),
+                incentive: typeof t.setup?.incentive === 'string' ? t.setup.incentive : null,
             }))),
             loadIntroOffer(db, orgId),
             activeIds.length

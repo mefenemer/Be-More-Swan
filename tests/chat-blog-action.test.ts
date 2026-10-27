@@ -56,13 +56,29 @@ async function main() {
     await check('a well-formed proposal is read, "#7" included', () => {
         assert.deepStrictEqual(
             blogActionFromUiElement({ type: 'blog_action_proposal', action: 'approve', postId: '#7' }),
-            { action: 'approve', postId: 7, reason: null, when: null });
+            { action: 'approve', postId: 7, reason: null, when: null, instruction: null });
     });
     await check('publishing at once is not an action the chat has, and a schedule needs a time', () => {
         assert.strictEqual(blogActionFromUiElement({ type: 'blog_action_proposal', action: 'publish', postId: 7 }), null);
         assert.strictEqual(blogActionFromUiElement({ type: 'blog_action_proposal', action: 'schedule', postId: 7 }), null);
         assert.strictEqual(blogActionFromUiElement({ type: 'blog_action_proposal', action: 'approve' }), null);
         assert.strictEqual(blogActionFromUiElement({ type: 'post_action_proposal', action: 'approve', postId: 7 }), null);
+    });
+    await check('revise needs an instruction, and only revise carries one', () => {
+        assert.strictEqual(blogActionFromUiElement({ type: 'blog_action_proposal', action: 'revise', postId: 7 }), null);
+        const r = blogActionFromUiElement({ type: 'blog_action_proposal', action: 'revise', postId: '#7', instruction: '  Bring it up to date  ' });
+        assert.strictEqual(r?.action, 'revise');
+        assert.strictEqual(r?.instruction, 'Bring it up to date');
+        assert.strictEqual(blogActionFromUiElement({ type: 'blog_action_proposal', action: 'approve', postId: 7, instruction: 'x' })?.instruction, null);
+    });
+    await check('revise: the card carries the instruction, and a live article is refused', async () => {
+        const card = await resolveBlogActionProposal(fakeDb([article('pending_approval')]), 1, 2,
+            { action: 'revise', postId: 7, reason: null, when: null, instruction: 'Improve it' }, null, neverParse, NOW);
+        assert.strictEqual(card?.instruction, 'Improve it');
+        assert.strictEqual(card?.blocked, null);
+        const live = await resolveBlogActionProposal(fakeDb([article('published')]), 1, 2,
+            { action: 'revise', postId: 7, reason: null, when: null, instruction: 'Improve it' }, null, neverParse, NOW);
+        assert.match(String(live?.blocked), /unpublish it first/);
     });
     await check('reason and time only ride on the action that uses them', () => {
         const r = blogActionFromUiElement({ type: 'blog_action_proposal', action: 'approve', postId: 7, reason: 'meh', when: 'Friday' });
