@@ -95,7 +95,7 @@ check('signal queries are date-restricted, and the restriction reaches the provi
 
 check('the per-lead search budget is respected as it is spent', () => {
     const fn = INTEL_CODE.slice(landmark(INTEL_CODE, 'export async function gatherLeadIntel'), INTEL_CODE.length);
-    assert.match(fn, /if \(searchCallsMade >= budget\) break/,
+    assert.match(fn, /if \(searchCallsMade >= budget( \|\| outOfTime\(\))?\) break/,
         'the budget is no longer checked between queries');
     assert.ok(!/Promise\.all\(SIGNAL_QUERIES|SIGNAL_QUERIES\.map/.test(fn),
         'the signal queries run concurrently — a Promise.all has already bought all four by the '

@@ -162,7 +162,12 @@ check('every Serper search, Hunter lookup and Voyage embedding records its cost'
 
 check('callers that know the workspace pass it on', () => {
     assert.ok(/search\(query, \{[^}]*usage: \{ workspaceId: job\.organisation_id/.test(read('netlify/functions/process-discovery-jobs.ts')));
-    assert.ok(/lookupProviderContact\(s\.lead\.domain, \{[^}]*usage: \{ workspaceId: job\.organisation_id/.test(read('netlify/functions/process-discovery-jobs.ts')));
+    // The paid lookups run inside the shared waterfall; the worker hands it the workspace, and the
+    // waterfall passes it to both Hunter calls.
+    assert.ok(/runContactWaterfall\(\{[\s\S]{0,300}usage: \{ workspaceId: job\.organisation_id/.test(read('netlify/functions/process-discovery-jobs.ts')));
+    const waterfall = read('src/utils/lead-enrichment.ts');
+    assert.ok(/findPersonEmail\(opts\.domain, parts, \{[^}]*usage: opts\.usage/.test(waterfall), 'Email Finder loses the workspace');
+    assert.ok(/lookupProviderContact\(opts\.domain, \{[^}]*usage: opts\.usage/.test(waterfall), 'Domain Search loses the workspace');
     for (const f of ['netlify/functions/kb-articles.ts', 'netlify/functions/inspo-items.ts', 'netlify/functions/process-inspo-background.ts', 'netlify/functions/chat-orchestrator.ts', 'src/utils/inspo-profile.ts']) {
         assert.ok(/embedTexts\([^)]*\{ workspaceId:/.test(read(f)), `${f} embeds without saying whose workspace it is`);
     }

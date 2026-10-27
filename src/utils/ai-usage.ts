@@ -197,6 +197,8 @@ export function logMediaCost(
 export const SERVICE_UNIT_PRICE_USD: Record<string, { envVar: string; fallback: number; unit: string }> = {
     'serper-search': { envVar: 'SERPER_COST_USD_PER_QUERY', fallback: 0.001, unit: 'search' },
     'hunter-domain-search': { envVar: 'HUNTER_COST_USD_PER_CREDIT', fallback: 0.0285, unit: 'credit' },
+    // Email Finder: 1 credit per address FOUND for a named person, none on a miss — the same credit.
+    'hunter-email-finder': { envVar: 'HUNTER_COST_USD_PER_CREDIT', fallback: 0.0285, unit: 'credit' },
 };
 
 export function serviceUnitPriceUsd(service: string): number {

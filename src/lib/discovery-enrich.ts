@@ -337,13 +337,47 @@ function classify(email: string, leadDomain: string | null): EmailKind | null {
     return roleOrPersonal(prefix);
 }
 
+/** One address seen on the company's own site, with the page it was printed on. */
+export interface FoundEmail {
+    email: string;
+    kind: EmailKind;
+    foundOn: string;
+}
+
 /** Everything one lead's scrape yielded. `contact` is null far more often than not — that is normal. */
 export interface EnrichmentOutcome {
     contact: EnrichmentResult | null;
     handles: SocialHandles;
+    /**
+     * EVERY address the pages we read printed, not only the one chosen as `contact`
+     * (docs/lead-search-one-pass-plan.md §2 step 1). The person-to-address match reads this: a
+     * named owner's own address (`debbie@`) is often printed beside the shop's `info@`, and
+     * stopping at the first address threw it away. Optional so older callers' literals still type.
+     */
+    emails?: FoundEmail[];
+    /**
+     * UK postcodes printed on the pages read, normalised (`NR1 3QX`). Companies House matching uses
+     * them as the location check: a register entry whose registered office postcode the company's
+     * own site prints is the same company (src/lib/companies-house.ts).
+     */
+    postcodes?: string[];
 }
 
-const NOTHING: EnrichmentOutcome = { contact: null, handles: {} };
+const NOTHING: EnrichmentOutcome = { contact: null, handles: {}, emails: [], postcodes: [] };
+
+const UK_POSTCODE_RE = /\b([A-Z]{1,2}\d[A-Z\d]?)\s*(\d[A-Z]{2})\b/g;
+
+/** UK postcodes in a page's text, normalised to `OUTWARD INWARD`. Exported for the tests. */
+export function extractPostcodes(html: string): string[] {
+    const text = html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').toUpperCase();
+    const out = new Set<string>();
+    for (const m of text.matchAll(UK_POSTCODE_RE)) out.add(`${m[1]} ${m[2]}`);
+    return [...out];
+}
+
+// After a role inbox is found, how many about / team pages are still read for a named person's own
+// address. Two, as lead-intel.ts reads for people: a third rarely adds anyone.
+const MAX_PEOPLE_PAGES_AFTER_HIT = 2;
 
 /**
  * Find a contact address — and any social profiles — for one lead by reading its own website.
@@ -351,9 +385,11 @@ const NOTHING: EnrichmentOutcome = { contact: null, handles: {} };
  * no published address, SSRF rejection). A lead with no email is a normal outcome, not a
  * failure — it just stays un-emailable, exactly as it is today.
  *
- * ⚠️ Handles are harvested from EVERY page fetched, and merged, while the address search keeps its
- * early return. Those two want opposite things: the email search stops the moment it finds a role
- * address (each extra fetch is budget the whole batch shares), but a site that publishes its email
+ * ⚠️ Once a role address is found, only the about / team pages are read after it — at most
+ * MAX_PEOPLE_PAGES_AFTER_HIT — for a named person's own address (one-pass plan §2 step 1). Every
+ * address seen is returned in `emails`; `contact` stays the role inbox.
+ *
+ * ⚠️ Handles are harvested from EVERY page fetched, and merged. A site that publishes its email
  * on the homepage may still carry its Instagram only in a /contact footer. Collecting per page
  * costs nothing — the HTML is already in memory — and a handle found on a page we were fetching
  * anyway is free, which is the entire economic argument for this feature.
@@ -364,6 +400,10 @@ export async function enrichLeadContact(domain: string | null): Promise<Enrichme
     if (!host || !host.includes('.')) return NOTHING;
 
     let best: { email: string; kind: EmailKind; foundOn: string } | null = null;
+    let role: { email: string; foundOn: string } | null = null;
+    const emails = new Map<string, FoundEmail>();
+    const postcodes = new Set<string>();
+    let aboutPaths: string[] = [];
     const handles: SocialHandles = {};
     const deadline = Date.now() + LEAD_BUDGET_MS;
 
@@ -420,19 +460,31 @@ export async function enrichLeadContact(domain: string | null): Promise<Enrichme
                 .filter((p) => !tried.has(p.toLowerCase()))
                 .slice(0, MAX_LINKED_PAGES);
             queue.unshift(...linked);
+            aboutPaths = discoverSitePaths(body, host, 'about');
         }
 
+        for (const pc of extractPostcodes(body)) postcodes.add(pc);
         const hits = extractEmails(body, host);
+        for (const h of hits) if (!emails.has(h.email)) emails.set(h.email, { email: h.email, kind: h.kind, foundOn: url });
         if (hits.length === 0) continue;
 
-        // A role address is the best outcome available — take it and stop paying for fetches.
-        if (hits[0].kind === 'role') {
-            return { contact: { email: hits[0].email, kind: 'role', source: 'scrape', foundOn: url }, handles };
+        // A role address is still the CONTACT — the safe, durable lane for cold outreach. But the
+        // search no longer stops there (one-pass plan §2 step 1): the owner's own address is
+        // usually on the about / team page, so those are read next, and nothing else.
+        if (hits[0].kind === 'role' && !role) {
+            role = { email: hits[0].email, foundOn: url };
+            const people = aboutPaths.filter((p) => !tried.has(p.toLowerCase())).slice(0, MAX_PEOPLE_PAGES_AFTER_HIT);
+            queue.length = 0;
+            queue.push(...people);
+            continue;
         }
 
         // Hold the personal address but keep looking: /contact may yet yield a role inbox.
         if (!best) best = { email: hits[0].email, kind: hits[0].kind, foundOn: url };
     }
 
-    return { contact: best ? { ...best, source: 'scrape' } : null, handles };
+    const all = [...emails.values()];
+    const pcs = [...postcodes];
+    if (role) return { contact: { email: role.email, kind: 'role', source: 'scrape', foundOn: role.foundOn }, handles, emails: all, postcodes: pcs };
+    return { contact: best ? { ...best, source: 'scrape' } : null, handles, emails: all, postcodes: pcs };
 }

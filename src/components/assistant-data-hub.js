@@ -123,6 +123,21 @@
     return typeof v === 'string' && v.trim() ? v.trim() : null;
   }
 
+  // Where a named contact came from (src/config/lead-person.ts LeadPersonSource), said plainly.
+  const PERSON_SOURCE = {
+    website: 'named on their website',
+    companies_house: 'from Companies House',
+    hunter: 'from Hunter',
+  };
+
+  /** "Debbie Jones, Founder", or '' when the search named nobody. */
+  function contactPersonLine(record) {
+    const d = record.data || {};
+    const name = typeof d.contactName === 'string' ? d.contactName.trim() : '';
+    if (!name) return '';
+    return d.contactTitle ? `${name}, ${d.contactTitle}` : name;
+  }
+
   /**
    * Has this lead been erased at the request of the person it named?
    *
@@ -2173,23 +2188,42 @@
       intel || leadPara('Nothing has been researched on this company yet. “Research this lead” below reads their site and recent news, then re-scores it.'),
       !!(signals || people)));
 
-    // 4c. Contact — the address, what kind it is, and any profiles.
+    // 4c. Contact — who to write to, the address, what kind it is, and any profiles.
     const email = contactEmailOf(record);
     const contact = document.createElement('div');
     const cs = contactState(record);
-    contact.innerHTML = email
+    // The named person (docs/lead-search-one-pass-plan.md §3): name, title, and where each came
+    // from, so a human can check it before an email goes out addressed to them.
+    const who = contactPersonLine(record);
+    const src = PERSON_SOURCE[d.contactNameSource] || '';
+    const srcUrl = typeof d.contactNameSourceUrl === 'string' && /^https:\/\//.test(d.contactNameSourceUrl) ? d.contactNameSourceUrl : '';
+    const ownEmail = typeof d.contactPersonEmail === 'string' && d.contactPersonEmail.trim() && d.contactPersonEmail.trim() !== email
+      ? d.contactPersonEmail.trim() : '';
+    const ch = d.companiesHouse && typeof d.companiesHouse === 'object' ? d.companiesHouse : null;
+    const personHtml = who
+      ? `<p class="text-sm font-semibold text-gray-900">${esc(who)}</p>
+         ${src ? `<p class="text-xs text-gray-500 mt-0.5">${srcUrl ? `<a href="${esc(srcUrl)}" target="_blank" rel="noopener noreferrer" class="underline">${esc(src)}</a>` : esc(src)}</p>` : ''}
+         ${ownEmail ? `<p class="text-xs text-gray-700 mt-1">Their own address: <span class="font-semibold break-all">${esc(ownEmail)}</span>${d.contactPersonEmailSource === 'provider' ? ' (from Hunter)' : ' (on their website)'} — use Edit lead to send to it instead.</p>` : ''}`
+      : (d.enrichAttemptedAt ? `<p class="text-xs text-gray-500">No named person found on their website${ch ? ' or on Companies House' : ''}.</p>` : '');
+    if (personHtml) {
+      const p = document.createElement('div');
+      p.className = 'mb-3';
+      p.innerHTML = personHtml;
+      contact.appendChild(p);
+    }
+    contact.insertAdjacentHTML('beforeend', email
       ? `<p class="text-sm font-semibold text-gray-900 break-all">${esc(email)}</p>
          ${d.emailKind === 'personal'
            ? '<p class="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">This looks like a named person’s own inbox rather than a general one like info@. You’ll be asked to confirm before anything is sent to it.</p>'
            : '<p class="text-xs text-gray-500 mt-1">A general company inbox — the usual place to send a first email.</p>'}`
       : `<p class="text-sm text-gray-700">${d.enrichAttemptedAt
            ? `No email address — we checked their website${d.paidLookupAt ? ' and our email-lookup service' : ''} on ${esc(fmtDate(d.enrichAttemptedAt))} and found none published.`
-           : 'No email address yet — this lead hasn’t been checked.'} Add one with Edit lead if you have it.</p>`;
+           : 'No email address yet — this lead hasn’t been checked.'} Add one with Edit lead if you have it.</p>`);
     const social = socialBanner(record);
     if (social) { social.classList.remove('mb-4'); social.classList.add('mt-3'); contact.appendChild(social); }
     const NO_EMAIL = { none: 'No email address published', unchecked: 'Not checked — not a company you can sell to',
       missed: 'Not checked yet', checking: 'Checking…' };
-    wrap.appendChild(leadSection('contact', 'Contact', email || NO_EMAIL[cs] || 'No email address', contact, !email));
+    wrap.appendChild(leadSection('contact', 'Contact', [who, email || NO_EMAIL[cs] || 'No email address'].filter(Boolean).join(' · '), contact, !email));
 
     // 4d. Activity.
     const events = leadActivity(record);
@@ -2483,7 +2517,10 @@
         // only discoverable by opening every red chip in the table one at a time, which is the same
         // dead end the chip had before, one click further in.
         const tip = email || [s.why, socialHint(record)].filter(Boolean).join(' ') || '';
-        cell = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${s.cls} whitespace-nowrap"${tip ? ` title="${esc(tip)}"` : ''}>${esc(s.short)}</span>`;
+        // The named person rides in front of it, for the same reason the address is in the tooltip.
+        const who = contactPersonLine(record);
+        const shown = who ? `${who} — ${tip}` : tip;
+        cell = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${s.cls} whitespace-nowrap"${shown ? ` title="${esc(shown)}"` : ''}>${esc(s.short)}</span>`;
       } else if (c.key === 'retention') {
         // The 30-day countdown. Coloured by urgency rather than by state — this is the one column
         // whose job is to be noticed BEFORE it matters, because what it counts down to cannot be
