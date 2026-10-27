@@ -51,6 +51,7 @@ import { checkSuppression } from '../../src/utils/suppression';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { OUTREACH_SUBJECT_RULES } from '../../src/constants/outreach-subject';
 import { followUpLinkTarget, outreachFollowUpBlock, withOfferLink } from '../../src/config/outreach-offer';
+import { LAST_FOLLOW_UP_RULE } from '../../src/config/follow-up-plan';
 import { offerLinkForThread } from '../../src/utils/outreach-offer';
 import { evaluateDoNotContact } from '../../src/config/do-not-contact';
 import {
@@ -186,6 +187,8 @@ async function draftFollowUp(
     originalSubject: string | null,
     /** The code adds the offer's link after the body (src/config/outreach-offer.ts) — the prompt introduces it. */
     withOfferLinkLine = false,
+    /** Where the step sits in the plan (1-based), and whether it is the last — see the caller. */
+    place: { position: number; isLast: boolean } = { position: step.stepNumber, isLast: false },
 ): Promise<{ subject: string; body: string } | null> {
     const history = await threadHistory(db, enrolment.lead_thread_id, 6);
 
@@ -206,11 +209,11 @@ ${senderIdentityBlock(sender)}
 
 ${SENDER_IDENTITY_RULE}
 
-This is follow-up number ${step.stepNumber} in an outreach sequence to a prospect who has NOT replied.
+This is follow-up number ${place.position} in an outreach sequence to a prospect who has NOT replied.
 
 What this specific follow-up must do:
 ${step.bodyPrompt}
-
+${place.isLast ? `\n${LAST_FOLLOW_UP_RULE}\n` : ''}
 Hard rules:
 - The prospect has not answered. Do not thank them for their reply, do not reference a conversation that did not happen, and do not invent facts about their business that are not in the transcript below.
 - No placeholders, no square brackets, no "Dear [Name]".
@@ -330,8 +333,13 @@ async function processEnrolment(
     }
 
     const step = steps.find((s) => s.stepNumber > row.last_step_sent);
+    // Where this step sits in the plan, 1-based. The plan is editable (src/config/follow-up-plan.ts):
+    // a removed step keeps its number switched off and a new one takes the next number up, so step
+    // NUMBERS have gaps and can pass 5 while the plan itself is three long. Everything that means
+    // "the first follow-up" or "the last one" or "how many" reads the POSITION, never the number.
+    const position = step ? steps.indexOf(step) + 1 : 0;
     // (5) Hard per-enrolment ceiling, independent of what the steps table holds.
-    if (!step || step.stepNumber > MAX_STEPS_PER_ENROLMENT) {
+    if (!step || position > MAX_STEPS_PER_ENROLMENT) {
         await advanceEnrolment(db, ref, row.last_step_sent, steps);
         return 'halted';
     }
@@ -430,13 +438,14 @@ async function processEnrolment(
     // The outreach offer's link, on the first chaser only (src/config/outreach-offer.ts): a gift form's
     // page with this conversation's signed ref, so a sign-up through it credits the lead and stops the
     // chasers; or the intro offer's own address. Null = this step carries no link.
-    const offerLink = followUpLinkTarget(sender.outreachOffer, step.stepNumber) && sender.outreachOffer
+    const offerLink = followUpLinkTarget(sender.outreachOffer, position) && sender.outreachOffer
         ? await offerLinkForThread(db, sender.outreachOffer, row.lead_thread_id)
         : null;
 
     let draft: { subject: string; body: string } | null;
     try {
-        draft = await draftFollowUp(db, row, assistant, sender, step, opener?.subject ?? null, !!offerLink);
+        draft = await draftFollowUp(db, row, assistant, sender, step, opener?.subject ?? null, !!offerLink,
+            { position, isLast: position === steps.length });
     } catch (err) {
         return await handleSendFailure(db, ref, row, err, 'draft failed');
     }

@@ -915,6 +915,10 @@
          (reviewQueue.staged; assistant-lead-outreach.js). Replaces the shared lifecycle columns
          below for that role only; every other role leaves this empty and hidden. -->
     <div id="lead-outreach-stages" class="hidden"></div>
+    <!-- The Follow-up plan panel (assistant-follow-up-plan.js), opened from the strip's button. Its own
+         element, OUTSIDE the strip: the strip repaints on every count, and an editor inside it would
+         lose the caret mid-sentence. -->
+    <div id="lead-follow-up-plan" class="hidden"></div>
 
     <div id="detail-rq-card" class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
       <!-- Lifecycle columns -->

@@ -87,6 +87,7 @@ import { buildPlanSnapshot } from '../../src/utils/chat-plan-snapshot';
 import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGoalProposal, resolveTeamGoalProposal, type GoalCard } from '../../src/utils/chat-goals';
 import { introOfferCardFromUiElement, introOfferPromptBlock, type IntroOfferCard } from '../../src/utils/intro-offer';
 import { buildOutreachOfferChatBlock, OUTREACH_OFFER_CARD_TYPE, outreachOfferCardFrom, type OutreachOfferCard } from '../../src/utils/chat-outreach-offer';
+import { buildFollowUpPlanChatBlock, isFollowUpPlanProposal, resolveFollowUpPlanProposal, type FollowUpPlanCard } from '../../src/utils/chat-follow-up-plan';
 import { listGiftForms } from '../../src/utils/outreach-offer';
 import { buildCtaChatBlock, CTA_CARD_TYPE, ctaCardFrom, roleHasCta, type CtaCard } from '../../src/utils/chat-call-to-action';
 import { resolveScheduleProposal, scheduleProposalFromUiElement, schedulePromptBlock, type ScheduleCard } from '../../src/utils/chat-schedule';
@@ -206,6 +207,9 @@ interface RouteContext {
     /** What this Lead Generator's outreach offers and the card that changes it — same routes as
      *  leadsSnapshot. src/utils/chat-outreach-offer.ts. */
     outreachOfferBlock?: string | null;
+    /** This Lead Generator's follow-up plan and the card that changes it — same routes as
+     *  leadsSnapshot. src/utils/chat-follow-up-plan.ts. */
+    followUpPlanBlock?: string | null;
     /** This Campaign Assistant's own campaigns and the org's saved searches, read per turn — only
      *  populated for routes with usesCampaignSnapshot. Without it the chat can only ever CREATE:
      *  "add two articles to the spring campaign" has no campaign id to point at. See
@@ -489,7 +493,7 @@ function leadGeneratorSurfaces(): string {
   • "Replied" — they wrote back. The user reads the reply, answers it from there, and records how it ended.
   • "Finished" — the deal is decided (won, lost or disqualified), they opted out, or the follow-up plan ran out with no reply. Recording an outcome on any lead moves it here.
   • "Archived" — turned down before anything was sent.
-  Nothing chases automatically beyond the follow-up plan, and the user is the one who presses send on a first email.
+  Nothing chases automatically beyond the follow-up plan, and the user is the one who presses send on a first email. The "Follow-up plan" button on the Outreach tab is where the user sees and changes that plan — whether to chase at all, how many follow-ups, how long each waits and what each says — and you can propose the same change with a follow_up_plan card (YOUR FOLLOW-UP PLAN below).
 - "Results" tab — straight after Outreach: the goals you are working towards and the figures for how the pipeline is doing.
 
 FINDING NEW LEADS — when the user asks you to find leads, create a search, build a campaign, or go looking for customers: this is squarely your job and you must NEVER refuse it or send them to an outside lead-sourcing tool. Emit the discovery_campaign_proposal uiElement (shape 3 below). Write the "who to find" brief yourself, folding the ideal customer profile (industries, size, location, and the specific pain signals discussed) into that one description, since the form has no separate profile fields. Approving it SAVES the search — the user does not have to retype anything — but saves it as a draft that has not started: a run costs real money and reaches real strangers, so they start it themselves. Tell them exactly where: the search appears at the top of their Searches tab marked "Not started", with a "Start search" button beside it. Say that plainly in your reply and never claim the search is already running or that leads are already coming in. Frame it as you doing the work, because you are: the search you just wrote is what goes out and finds them.`;
@@ -1887,7 +1891,7 @@ ${rc.leadsSnapshot
     ?? 'YOUR LEADS RIGHT NOW — unavailable for this turn: the lead counts could not be read. If the user asks how many leads they have, say you cannot see the count right now and point them at the All leads tab. Do NOT estimate, and do NOT answer from anything else in this conversation.'}
 
 ${leadActionsPrompt()}
-${rc.outreachOfferBlock ? `\n${rc.outreachOfferBlock}\n` : ''}
+${rc.outreachOfferBlock ? `\n${rc.outreachOfferBlock}\n` : ''}${rc.followUpPlanBlock ? `\n${rc.followUpPlanBlock}\n` : ''}
 Score every lead against the ideal customer profile below — a lead that matches it well scores high; one that misses it scores low, and your reasons must say which criteria it met or missed.
 
 Ideal customer profile (from setup):
@@ -2926,6 +2930,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const outreachOfferBlock = route.usesLeadSnapshot
         ? await buildOutreachOfferChatBlock(db, orgId, session.aiAssistantId)
         : null;
+    // Its follow-up plan (src/utils/chat-follow-up-plan.ts) — per turn, for the same reason.
+    const followUpPlanBlock = route.usesLeadSnapshot
+        ? await buildFollowUpPlanChatBlock(db, orgId, session.aiAssistantId)
+        : null;
 
     // Per turn, for the same reason as the leads snapshot: a plan approved on the Campaigns tab a
     // moment ago must be visible to the next message, not the one that opened the conversation.
@@ -2994,6 +3002,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         inspoBlock,
         leadsSnapshot,
         outreachOfferBlock,
+        followUpPlanBlock,
         campaignsSnapshot,
         briefsSnapshot,
         siteAuditSnapshot,
@@ -3561,6 +3570,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             if (r && 'error' in r) { uiElement = null; content = `${r.error} I haven’t changed anything — you can also change the offer on the Outreach tab.`; }
             else if (r) { outreachOfferCard = r; uiElement = r; }
         }
+        // The Lead Generator's follow-up plan (src/utils/chat-follow-up-plan.ts), rebuilt against the
+        // stored plan; the click calls lead-generation.ts save_follow_up_plan.
+        let followUpPlanCard: FollowUpPlanCard | null = null;
+        if (route === ROUTES.lead_qualifier && !introReq && !outreachOfferCard && isFollowUpPlanProposal(uiElement)) {
+            followUpPlanCard = await resolveFollowUpPlanProposal(db, orgId, session.aiAssistantId, uiElement);
+            uiElement = followUpPlanCard;
+            if (!followUpPlanCard) content = 'I couldn’t read your follow-up plan just now, so I haven’t set anything up. Please try again in a moment, or use Follow-up plan on the Outreach tab.';
+        }
         // A content assistant's call to action (src/utils/chat-call-to-action.ts), rebuilt against the
         // real gift forms; the click calls org-products.ts PATCH { callToAction }.
         let ctaCard: CtaCard | null = null;
@@ -3570,7 +3587,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             else if (r) { ctaCard = r; uiElement = r; }
         }
         // One card for the "keep it" checks below: a change to the assistant's own profile.
-        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | OutreachOfferCard | CtaCard | SetupFieldCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard ?? outreachOfferCard ?? ctaCard ?? setupFieldCard;
+        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | OutreachOfferCard | FollowUpPlanCard | CtaCard | SetupFieldCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard ?? outreachOfferCard ?? followUpPlanCard ?? ctaCard ?? setupFieldCard;
         // The Blog Writer's twin (src/utils/chat-blog-action.ts): same checks, built from blog_posts
         // rows; a time in the user's words is worked out here so the card shows the exact instant.
         let blogAction: BlogActionCard | null = null;

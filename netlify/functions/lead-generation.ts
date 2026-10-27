@@ -10,6 +10,8 @@
 //   POST { action: 'generate_ideas', assistantId }
 //        → LLM proposes ~3 lead-generation ideas from the ICP; stores each as recordType:'lead_idea'; returns them.
 //   POST { action: 'list_ideas',     assistantId }
+//   POST { action: 'get_follow_up_plan',  assistantId }  → the chasers after a first email, and on/off
+//   POST { action: 'save_follow_up_plan', assistantId, enabled, steps?: [{ stepNumber|null, delayDays, brief }], stopRunning? }
 //        → returns this assistant's lead_idea records (proposed | approved | declined).
 //   POST { action: 'approve_idea',   assistantId, ideaId }
 //        → LLM finds ~3-4 example leads matching the idea, scores each, tags a next-best-action
@@ -76,7 +78,11 @@ import { eraseProspect } from '../../src/utils/prospect-erasure';
 import { openLeadThread, recordOutboundMessage } from '../../src/utils/lead-threads';
 import { replyAddress } from '../../src/utils/reply-address';
 import { checkSuppression } from '../../src/utils/suppression';
-import { enrolInSequence, haltEnrolmentsForRecord } from '../../src/utils/outreach-sequences';
+import {
+    enrolInSequence, haltEnrolmentsForRecord, loadFollowUpPlan, saveSequenceSteps, haltActiveEnrolmentsForAssistant,
+} from '../../src/utils/outreach-sequences';
+import { FOLLOW_UP_LIMITS, describeFollowUpPlan, validateFollowUpSteps } from '../../src/config/follow-up-plan';
+import { DEFAULT_SEQUENCE_STEPS } from '../../src/config/outreach-sequences';
 import { OUTREACH_SUBJECT_RULES } from '../../src/constants/outreach-subject';
 import { cleanOutreachOfferKind, outreachFirstEmailBlock } from '../../src/config/outreach-offer';
 import { listGiftForms, offerChoiceFromContext, resolveOutreachOffer } from '../../src/utils/outreach-offer';
@@ -192,6 +198,10 @@ export default withLambda(async (event) => {
         /** set_outreach_offer: gift | intro_offer | reply, and the gift form. */
         offer?: unknown;
         formId?: unknown;
+        /** save_follow_up_plan: chase at all, the whole new list of steps, and whether to stop the running ones. */
+        enabled?: unknown;
+        steps?: unknown;
+        stopRunning?: unknown;
     };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
@@ -1876,6 +1886,52 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
                 choice: { kind, formId },
                 resolved: await resolveOutreachOffer(db, orgId, next),
             });
+        }
+
+        // ── The follow-up plan (docs/lead-outreach-restructure-plan.md, Phase 3) ────
+        // The chasers after a first email: whether they run at all (the owner's `outreachFollowUps`
+        // setup answer) and what each one waits and says (sequence_steps). Read and saved here for the
+        // Outreach tab's Follow-up plan panel AND the chat's follow_up_plan card — one action, two
+        // callers, per the GUI/chat parity rule. Rules: src/config/follow-up-plan.ts. Writer:
+        // src/utils/outreach-sequences.ts saveSequenceSteps.
+        if (action === 'get_follow_up_plan' || action === 'save_follow_up_plan') {
+            if (assistant.roleKey !== 'lead_qualifier') return json(400, { error: 'Only a Lead Generator has a follow-up plan.' });
+            const describe = (p: { enabled: boolean; steps: Array<{ delayDays: number }> }) => describeFollowUpPlan(p.enabled, p.steps);
+            const defaults = DEFAULT_SEQUENCE_STEPS.map((d) => ({ delayDays: d.delayDays, brief: d.bodyPrompt }));
+
+            if (action === 'get_follow_up_plan') {
+                const plan = await loadFollowUpPlan(db, orgId, assistant.id);
+                if (!plan) return json(500, { error: 'The follow-up plan couldn’t be read. Please try again.' });
+                return json(200, { ...plan, summary: describe(plan), limits: FOLLOW_UP_LIMITS, defaults });
+            }
+
+            // save_follow_up_plan
+            const enabled = body.enabled !== false;
+            const before = await loadFollowUpPlan(db, orgId, assistant.id);
+            if (!before) return json(500, { error: 'The follow-up plan couldn’t be read. Please try again.' });
+            if (body.steps !== undefined) {
+                // Checked against the numbers the plan WILL have: an unprovisioned plan saves onto the
+                // default's numbers, which are what `before.usedNumbers` lists in that case.
+                const v = validateFollowUpSteps(body.steps, before.usedNumbers);
+                if (!v.ok) return json(400, { error: v.error });
+                const saved = await saveSequenceSteps(db, orgId, assistant.id, v.steps);
+                if (!saved.ok) return json(409, { error: saved.error });
+            }
+            // The on/off is the setup answer the send path already reads (followUpsEnabled), merged as
+            // one key — never update-assistant-context, which REPLACES the context.
+            const wasEnabled = before.enabled;
+            if (enabled !== wasEnabled) {
+                await db.update(aiAssistants)
+                    .set({ onboardingContext: { ...onboarding, outreachFollowUps: enabled ? 'automatic' : 'none' }, updatedAt: new Date() })
+                    .where(and(eq(aiAssistants.id, assistant.id), eq(aiAssistants.organisationId, orgId)));
+            }
+            // Switching off only changes what NEW approvals start; leads already being chased keep
+            // going unless the owner asks for those to stop too.
+            const stopped = !enabled && body.stopRunning === true
+                ? await haltActiveEnrolmentsForAssistant(db, orgId, assistant.id)
+                : 0;
+            const after = await loadFollowUpPlan(db, orgId, assistant.id);
+            return json(200, { ...(after ?? before), summary: describe(after ?? before), limits: FOLLOW_UP_LIMITS, defaults, stopped });
         }
 
         // ── List this assistant's lead ideas ─────────────────────────────────────

@@ -143,8 +143,27 @@
       <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-4">
         <div class="tab-scroller flex gap-1 px-4 pt-3 border-b border-gray-100 overflow-x-auto" role="tablist" aria-label="Outreach stages">${buttons}</div>
         ${subs}
-        <p class="text-xs text-gray-500 px-4 py-3" data-lo-note>${esc(STAGE_NOTES[state.stage] || '')}</p>
+        <div class="flex flex-wrap items-start justify-between gap-2 px-4 py-3">
+          <p class="text-xs text-gray-500 flex-1 min-w-0" data-lo-note>${esc(noteText())}</p>
+          <button type="button" data-lo-plan aria-expanded="${window.LeadFollowUpPlan?.isOpen() ? 'true' : 'false'}" aria-controls="lead-follow-up-plan"
+            class="btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border shrink-0">Follow-up plan</button>
+        </div>
       </div>`;
+  }
+
+  /**
+   * The note under the strip. To approve's carries the consent disclosure: approving starts the
+   * follow-up plan, so the note says what that plan is NOW (assistant-follow-up-plan.js), not a
+   * cadence typed into the copy that the user may since have changed.
+   */
+  function noteText() {
+    const base = STAGE_NOTES[state.stage] || '';
+    if (state.stage !== 'to_approve') return base;
+    const plan = window.LeadFollowUpPlan?.plan();
+    if (!plan || !plan.summary) return base;
+    return plan.enabled
+      ? `${base} Approving also starts your follow-up plan: ${plan.summary}, stopping the moment they reply.`
+      : `${base} Follow-ups are off, so approving sends one email only.`;
   }
 
   function paintStrip() {
@@ -173,8 +192,16 @@
     const stageBtn = e.target.closest('[data-lo-stage]');
     if (stageBtn) { open(stageBtn.getAttribute('data-lo-stage')); return; }
     const subBtn = e.target.closest('[data-lo-sub]');
-    if (subBtn) open('to_approve', subBtn.getAttribute('data-lo-sub'));
+    if (subBtn) { open('to_approve', subBtn.getAttribute('data-lo-sub')); return; }
+    if (e.target.closest('[data-lo-plan]')) {
+      window.LeadFollowUpPlan?.toggle();
+      paintStrip();                                // aria-expanded on the button
+    }
   });
+
+  // The plan loaded or changed (the panel, or the chat's card) — the To approve note quotes it.
+  document.addEventListener('lead:followUpPlanChanged', () => paintStrip());
+  document.addEventListener('lead:followUpPlanToggled', () => paintStrip());
 
   // Arrow keys move along the strip, as on the other tab strips (roving tabindex).
   document.addEventListener('keydown', (e) => {
@@ -212,6 +239,8 @@
       };
       show($('detail-rq-colstrip'), false);
       show($('lead-outreach-stages'), true);
+      show($('lead-follow-up-plan'), true);
+      window.LeadFollowUpPlan?.init({ assistantId });
       paintStrip();
     },
 
@@ -221,6 +250,9 @@
       const host = $('lead-outreach-stages');
       if (host) host.innerHTML = '';
       show(host, false);
+      const plan = $('lead-follow-up-plan');
+      if (plan) plan.innerHTML = '';
+      show(plan, false);
       show($('detail-rq-colstrip'), true);
       show($('detail-rq-card'), true);
       show($('lead-threads-host'), false);

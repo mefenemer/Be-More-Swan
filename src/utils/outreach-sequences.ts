@@ -216,6 +216,169 @@ export async function previewFollowUps(
     }
 }
 
+// ── The follow-up plan, as the user edits it ──────────────────────────────────
+// docs/lead-outreach-restructure-plan.md, Phase 3. Read and written by lead-generation.ts
+// `get_follow_up_plan` / `save_follow_up_plan` — the Outreach tab's Follow-up plan panel and the
+// chat's follow_up_plan card both call those. The rules (limits, no renumbering, no reordering) are
+// src/config/follow-up-plan.ts, so the panel, the card and this writer cannot disagree.
+
+export interface FollowUpPlanStep { stepNumber: number; delayDays: number; brief: string }
+
+export interface FollowUpPlan {
+    /** The owner's `outreachFollowUps` answer — anything but 'none' chases. */
+    enabled: boolean;
+    /** The steps that will send, in order. */
+    steps: FollowUpPlanStep[];
+    /** Every number this plan has ever used — a removed step's number is never reused. */
+    usedNumbers: number[];
+    /** False until the first save or the first send provisions the plan; `steps` are then the defaults. */
+    provisioned: boolean;
+    /** Switched off by an operator (outreach_sequences.is_enabled). Nothing the user saves can send. */
+    lockedOff: boolean;
+    /** Leads whose follow-ups are running right now. */
+    running: number;
+}
+
+/** The plan as it stands. Null when it cannot be read. */
+export async function loadFollowUpPlan(db: Db, organisationId: number, aiAssistantId: number): Promise<FollowUpPlan | null> {
+    try {
+        const enabled = await followUpsEnabled(db, aiAssistantId);
+        const [seq] = await db
+            .select({ id: outreachSequences.id, isEnabled: outreachSequences.isEnabled })
+            .from(outreachSequences)
+            .where(and(eq(outreachSequences.aiAssistantId, aiAssistantId), eq(outreachSequences.organisationId, organisationId)))
+            .limit(1);
+        const [{ n: running } = { n: 0 }] = await db
+            .select({ n: sql<number>`count(*)::int` })
+            .from(sequenceEnrolments)
+            .where(and(
+                eq(sequenceEnrolments.organisationId, organisationId),
+                eq(sequenceEnrolments.aiAssistantId, aiAssistantId),
+                eq(sequenceEnrolments.state, 'active'),
+            ));
+        if (!seq) {
+            const steps = DEFAULT_SEQUENCE_STEPS.slice(0, MAX_STEPS_PER_ENROLMENT)
+                .map((d) => ({ stepNumber: d.stepNumber, delayDays: d.delayDays, brief: d.bodyPrompt }));
+            return { enabled, steps, usedNumbers: steps.map((x) => x.stepNumber), provisioned: false, lockedOff: false, running: Number(running) || 0 };
+        }
+        const all = await db
+            .select({ stepNumber: sequenceSteps.stepNumber, delayDays: sequenceSteps.delayDays, bodyPrompt: sequenceSteps.bodyPrompt, isEnabled: sequenceSteps.isEnabled })
+            .from(sequenceSteps)
+            .where(eq(sequenceSteps.sequenceId, seq.id))
+            .orderBy(sequenceSteps.stepNumber);
+        const steps = all.filter((r) => r.isEnabled).slice(0, MAX_STEPS_PER_ENROLMENT)
+            .map((r) => ({ stepNumber: r.stepNumber, delayDays: r.delayDays, brief: r.bodyPrompt }));
+        return {
+            enabled, steps, usedNumbers: all.map((r) => r.stepNumber),
+            provisioned: true, lockedOff: !seq.isEnabled, running: Number(running) || 0,
+        };
+    } catch (err) {
+        logQuietly('loadFollowUpPlan', err);
+        return null;
+    }
+}
+
+/**
+ * Save a whole new list of steps — THE writer of sequence_steps after provisioning.
+ *
+ * Edited steps keep their number; steps left out are switched off, never deleted (their number must
+ * not be reused while a lead's last_step_sent may point at it); new steps take the next number up.
+ * One transaction, so a plan is never half-saved. Takes the list already checked by
+ * validateFollowUpSteps (src/config/follow-up-plan.ts) against `usedNumbers` — and checks again
+ * here, because the numbers it was checked against may have moved since.
+ *
+ * Unlike the rest of this module, the result says what went wrong: this is a user's save, and a
+ * silent no-op would read as saved.
+ */
+export async function saveSequenceSteps(
+    db: Db,
+    organisationId: number,
+    aiAssistantId: number,
+    steps: ReadonlyArray<{ stepNumber: number | null; delayDays: number; brief: string }>,
+): Promise<{ ok: true; steps: FollowUpPlanStep[] } | { ok: false; error: string }> {
+    try {
+        // Provision first, so a plan that has never sent still saves onto the default's numbers.
+        // ensureDefaultSequence answers null for a plan an operator switched off — refused, because
+        // saving would promise follow-ups that cannot go out.
+        const seq = await ensureDefaultSequence(db, organisationId, aiAssistantId);
+        if (!seq) return { ok: false, error: 'Follow-ups are switched off for this assistant by support, so a plan can’t be saved. Contact us if that’s unexpected.' };
+
+        const saved = await db.transaction(async (tx) => {
+            const all = await tx
+                .select({ id: sequenceSteps.id, stepNumber: sequenceSteps.stepNumber, isEnabled: sequenceSteps.isEnabled })
+                .from(sequenceSteps)
+                .where(eq(sequenceSteps.sequenceId, seq.id));
+            const byNumber = new Map(all.map((r) => [r.stepNumber, r]));
+            let next = all.reduce((m, r) => Math.max(m, r.stepNumber), 0) + 1;
+            const keep = new Set<number>();
+            const out: FollowUpPlanStep[] = [];
+            for (const st of steps) {
+                if (st.stepNumber != null) {
+                    const row = byNumber.get(st.stepNumber);
+                    if (!row) throw new Error(`STEP_GONE:${st.stepNumber}`);
+                    await tx.update(sequenceSteps)
+                        .set({ delayDays: st.delayDays, bodyPrompt: st.brief, isEnabled: true })
+                        .where(eq(sequenceSteps.id, row.id));
+                    keep.add(st.stepNumber);
+                    out.push({ stepNumber: st.stepNumber, delayDays: st.delayDays, brief: st.brief });
+                } else {
+                    const stepNumber = next++;
+                    await tx.insert(sequenceSteps).values({
+                        organisationId, sequenceId: seq.id, stepNumber, delayDays: st.delayDays, bodyPrompt: st.brief,
+                    });
+                    keep.add(stepNumber);
+                    out.push({ stepNumber, delayDays: st.delayDays, brief: st.brief });
+                }
+            }
+            for (const r of all) {
+                if (r.isEnabled && !keep.has(r.stepNumber)) {
+                    await tx.update(sequenceSteps).set({ isEnabled: false }).where(eq(sequenceSteps.id, r.id));
+                }
+            }
+            await tx.update(outreachSequences).set({ updatedAt: new Date() }).where(eq(outreachSequences.id, seq.id));
+            return out;
+        });
+        return { ok: true, steps: saved };
+    } catch (err) {
+        if (err instanceof Error && err.message.startsWith('STEP_GONE:')) {
+            return { ok: false, error: 'The plan changed while you were editing it. Reload it and try again.' };
+        }
+        logQuietly('saveSequenceSteps', err);
+        return { ok: false, error: 'The follow-up plan couldn’t be saved. Please try again.' };
+    }
+}
+
+/**
+ * Stop every running follow-up for one assistant — the "also stop the ones already running" choice
+ * when the owner switches chasing off. Through haltEnrolment, so each stop is written to the ledger
+ * as a human decision ('manual'). Returns how many were stopped.
+ */
+export async function haltActiveEnrolmentsForAssistant(db: Db, organisationId: number, aiAssistantId: number): Promise<number> {
+    try {
+        const rows = await db
+            .select({
+                id: sequenceEnrolments.id,
+                organisationId: sequenceEnrolments.organisationId,
+                aiAssistantId: sequenceEnrolments.aiAssistantId,
+                assistantRecordId: sequenceEnrolments.assistantRecordId,
+                discoveredLeadId: sequenceEnrolments.discoveredLeadId,
+                lastStepSent: sequenceEnrolments.lastStepSent,
+            })
+            .from(sequenceEnrolments)
+            .where(and(
+                eq(sequenceEnrolments.organisationId, organisationId),
+                eq(sequenceEnrolments.aiAssistantId, aiAssistantId),
+                eq(sequenceEnrolments.state, 'active'),
+            ));
+        let halted = 0;
+        for (const r of rows) if (await haltEnrolment(db, r, 'manual', 'follow-ups switched off for this assistant')) halted++;
+        return halted;
+    } catch (err) {
+        logQuietly('haltActiveEnrolmentsForAssistant', err);
+        return 0;
+    }
+}
+
 // ── Enrolment ────────────────────────────────────────────────────────────────
 
 export interface EnrolInput {

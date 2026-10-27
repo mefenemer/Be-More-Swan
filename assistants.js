@@ -3728,8 +3728,10 @@ async function _rqSendLeadOutreach(recordId, opts) {
             // (lead-generation.ts), so this cannot claim a cadence that was skipped — or hide one
             // that was not. Approving one email can start up to four; the toast is the last moment
             // that fact can reach the person who pressed the button.
+            // The plan's own length, when the Follow-up plan panel has loaded it (it is editable).
+            const planSteps = window.LeadFollowUpPlan?.plan()?.steps?.length;
             const chasers = sdata.followUps === 'started'
-                ? ' Automatic chasers are on for this assistant, so up to three more emails will follow unless they reply.'
+                ? ` Automatic chasers are on for this assistant, so ${planSteps ? `up to ${planSteps} more email${planSteps === 1 ? '' : 's'}` : 'more emails'} will follow unless they reply — see Follow-up plan.`
                 : '';
             // Names the column as THIS role labels it — the Lead Generator calls it "Awaiting
             // reply", and a toast sending the user to a "Scheduled" tab they do not have is the

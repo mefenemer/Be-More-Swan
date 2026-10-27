@@ -93,7 +93,7 @@ check('GUI and chat save through ONE path, naming the same choices', () => {
     assert.ok(chat.includes("addEventListener('cta:change', onCallToAction)") && chat.includes("removeEventListener('cta:change', onCallToAction)") && chat.includes('callToAction: { assistantId, kind: d.kind'));
     for (const k of CTA_KINDS) assert.ok(html.includes(`${k}: '${CTA_LABELS[k]}'`), `tab ${k}`);
     const orch = read('netlify/functions/chat-orchestrator.ts');
-    assert.ok(orch.includes('buildCtaChatBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey)') && orch.includes('?? outreachOfferCard ?? ctaCard'));
+    assert.ok(orch.includes('buildCtaChatBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey)') && orch.includes('?? outreachOfferCard ?? followUpPlanCard ?? ctaCard'));
 });
 
 check('the chat card is only for content roles, and rebuilt against real forms', () => {

@@ -574,7 +574,7 @@
             blankMeans: 'automatic',
             helpText: 'Chasers are written in the context of each conversation and sent from the same mailbox. They stop the moment someone replies, and the last one always says it is the last.',
             options: [
-              { value: 'automatic', label: 'Yes — chase automatically', description: 'Up to three follow-ups: 3 days after the first email, then a week later, then a polite sign-off. Nothing after that.' },
+              { value: 'automatic', label: 'Yes — chase automatically', description: 'Your follow-up plan: three follow-ups to start with — 3 days after the first email, then a week later, then a polite sign-off. Change them any time with Follow-up plan on the Outreach tab.' },
               { value: 'none', label: 'No — one email only', description: 'Approving a lead sends exactly one email. You can still send follow-ups yourself from the Conversations tab.' },
             ],
           },

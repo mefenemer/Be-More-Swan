@@ -1593,6 +1593,24 @@
       }).catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // "Save this plan" on a follow_up_plan card (Lead Generator) → lead-generation.ts save_follow_up_plan,
+    // the same action as the Outreach tab's Follow-up plan panel (src/config/follow-up-plan.ts).
+    function onFollowUpPlan(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const payload = { action: 'save_follow_up_plan', assistantId, enabled: !!d.enabled, stopRunning: !!d.stopRunning };
+      if (d.enabled && Array.isArray(d.steps)) payload.steps = d.steps;
+      fetch('/.netlify/functions/lead-generation', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify(payload),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+        respond({ ok: true, summary: data.summary, stopped: data.stopped || 0 });
+        document.dispatchEvent(new CustomEvent('lead:followUpPlanSaved', { detail: { plan: data } }));
+      }).catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     // "Save this" on a call_to_action card (Social, Blog or Email) → org-products.ts PATCH
     // { callToAction }, the same save as Products & Services ▸ Calls to action.
     function onCallToAction(e) {
@@ -2008,6 +2026,7 @@
     container.addEventListener('mentor:draftRequest', onMentorDraftRequest);
     container.addEventListener('setupField:apply', onSetupFieldApply);
     container.addEventListener('lead:outreachOffer', onOutreachOffer);
+    container.addEventListener('lead:followUpPlan', onFollowUpPlan);
     container.addEventListener('cta:change', onCallToAction);
     container.addEventListener('site:reviewDecisions', onReviewDecisions);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
@@ -2100,6 +2119,7 @@
         container.removeEventListener('mentor:draftRequest', onMentorDraftRequest);
         container.removeEventListener('setupField:apply', onSetupFieldApply);
         container.removeEventListener('lead:outreachOffer', onOutreachOffer);
+        container.removeEventListener('lead:followUpPlan', onFollowUpPlan);
         container.removeEventListener('cta:change', onCallToAction);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('blog:batch', onBlogBatch);

@@ -856,13 +856,13 @@
         //
         // ⚠️ THE LAST SENTENCE IS THE CONSENT DISCLOSURE — do not trim it back. This copy used to stop
         // at "sets a chase reminder", which describes a diary entry; what approving actually starts is
-        // up to three further emails to a stranger (src/config/outreach-sequences.ts
-        // DEFAULT_SEQUENCE_STEPS, gated on the `outreachFollowUps` setup answer). A user cannot
-        // consent to a sequence they were told was a reminder. Where to switch it off is stated in the
-        // setup question itself and in the post-send toast, not crammed in here.
+        // further emails to a stranger — the assistant's follow-up plan, gated on the `outreachFollowUps`
+        // setup answer. A user cannot consent to a sequence they were told was a reminder. The plan is
+        // editable (assistant-follow-up-plan.js), so its length and timing are NOT typed here: the
+        // To approve note under the stage strip quotes the saved plan, and this names where it lives.
         subtitle: 'Every lead you email, step by step. Approving a drafted email sends it from your connected inbox, if you have one, '
-          + 'and sets a chase reminder. With automatic chasing on, it also starts up to three follow-ups — 3 days, a week, then a sign-off — '
-          + 'stopping the moment they reply.',
+          + 'and sets a chase reminder. With automatic chasing on, it also starts your follow-up plan — more emails, each stopping '
+          + 'the moment they reply. See and change it with Follow-up plan.',
         // The tab is laid out as the steps a lead goes through — To approve → Following up → Replied
         // → Finished, plus Archived — instead of the shared lifecycle columns, and the old
         // Conversations tab is its middle three stages (assistant-lead-outreach.js,

@@ -2784,6 +2784,62 @@
   }
   register('outreach_offer', renderOutreachOfferCard);
 
+  // { type: 'follow_up_plan', summary, enabled, steps:[{stepNumber, delayDays, brief}]|null, current,
+  // proposed, running, blocked } — a Lead Generator's chasers after a first email, rebuilt by the
+  // server against the stored plan (src/utils/chat-follow-up-plan.ts). The click → lead-generation.ts
+  // save_follow_up_plan, the same action as the Outreach tab's Follow-up plan panel.
+  function renderFollowUpPlanCard(ui, esc) {
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    const steps = Array.isArray(ui.steps) ? ui.steps : [];
+    const days = (d) => `${d} day${d === 1 ? '' : 's'}`;
+    const list = ui.enabled && steps.length
+      ? `<ol class="mt-2 flex flex-col gap-1.5">${steps.map((s, i) => `
+          <li class="text-xs text-gray-700"><span class="font-semibold">${i + 1}. After ${esc(days(s.delayDays))}${i === steps.length - 1 ? ' · the last one' : ''}:</span> ${esc(String(s.brief).slice(0, 600))}</li>`).join('')}</ol>`
+      : '';
+    const running = Number(ui.running) || 0;
+    const stopChoice = !ui.enabled && running && !ui.blocked
+      ? `<label class="flex items-start gap-2 mt-2 text-xs text-gray-700"><input type="checkbox" data-fp-card-stop class="mt-0.5 rounded border-gray-300">
+           <span>Also stop the ${running} lead${running === 1 ? '' : 's'} being followed up now. Otherwise only leads approved from here on are affected.</span></label>`
+      : '';
+    const live = !ui.blocked && !ui.settled;
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Follow-up plan · Approval needed</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <p class="text-xs text-gray-600 mt-2 break-words">Now: ${esc(ui.current || '')}</p>
+      <p class="text-xs text-gray-900 mt-1 break-words"><span class="font-semibold">New:</span> ${esc(ui.proposed || '')}</p>
+      ${list}
+      ${stopChoice}
+      ${ui.blocked ? `<p class="text-xs font-semibold text-amber-800 mt-2">${esc(ui.blocked)}</p>` : ''}
+      ${live ? `<div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-fp-card-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save this plan</button>
+        <button type="button" data-fp-card-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>` : ''}
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-fp-card-status></p>`;
+    const status = el.querySelector('[data-fp-card-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button, input').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-fp-card-cancel]')) { setBusy(true); say('Not changed.'); return; }
+      if (!e.target.closest('[data-fp-card-go]')) return;
+      const stopRunning = !!el.querySelector('[data-fp-card-stop]')?.checked;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('lead:followUpPlan', {
+        bubbles: true,
+        detail: {
+          enabled: !!ui.enabled, steps: ui.enabled ? steps : null, stopRunning,
+          respond({ ok, error, summary, stopped }) {
+            if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved — nothing was changed.', 'error'); return; }
+            say(`Saved — ${String(summary || ui.proposed).replace(/^No /, 'no ')}.${stopped ? ` Stopped follow-ups for ${stopped} lead${stopped === 1 ? '' : 's'}.` : ''}`);
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('follow_up_plan', renderFollowUpPlanCard);
+
   // { type: 'call_to_action', summary, kind, kindLabel, formId, formName, giftLabel } — what a Social,
   // Blog or Email assistant's work invites people to do (src/config/call-to-action.ts), rebuilt by the
   // server against the real gift forms. The click → org-products.ts PATCH { callToAction }, the same
@@ -4000,7 +4056,7 @@
       } else if (f && !f.enabled) {
         followHtml = '<p class="mt-3 text-xs text-gray-600">No follow-ups: this assistant is set to send one email only.</p>';
       } else {
-        followHtml = '<p class="mt-3 text-xs text-amber-800">I couldn’t check whether follow-ups would start. If this assistant chases automatically, up to three more emails follow unless they reply.</p>';
+        followHtml = '<p class="mt-3 text-xs text-amber-800">I couldn’t check whether follow-ups would start. If this assistant chases automatically, its follow-up plan sends more emails unless they reply.</p>';
       }
     }
 

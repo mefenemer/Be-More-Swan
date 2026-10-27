@@ -18,7 +18,16 @@ Raised by the owner 2026-10-27. Status:
   - **Two bugs found and fixed in that check:**
     - A conversation opened while the list was redrawn stayed on "Loading…" for good.
     - The table's hidden "Open" label widened the whole page on a phone. That one was already true of the old Conversations tab.
-- Phases 3–4 not started.
+- **Phase 3 — BUILT 2026-10-27, not committed.** Details:
+  - **Rules:** `src/config/follow-up-plan.ts` (limits, no reordering, numbers never reused, the last-email rule).
+  - **Writer:** `saveSequenceSteps`, `loadFollowUpPlan` and `haltActiveEnrolmentsForAssistant` in `outreach-sequences.ts`.
+  - **Actions:** `get_follow_up_plan` / `save_follow_up_plan`, in **`lead-generation.ts`** rather than `lead-threads.ts`. That's where the other setup answers (`set_outreach_provider`, `set_outreach_offer`) are merged.
+  - **Panel:** `src/components/assistant-follow-up-plan.js`, opened from the stage strip.
+  - **Chat card:** `follow_up_plan` (`src/utils/chat-follow-up-plan.ts`).
+  - **Copy:** the To approve note quotes the saved plan, and the fixed "3 days, a week" wording is gone from the code. Help copy is in `db/help-articles-2026-12zzzzzzzzzzz-follow-up-plan.sql` (**not applied**).
+  - **Tests:** `tests/follow-up-plan.test.ts`.
+- **Found while building Phase 3: the worker used step NUMBERS** for "the first follow-up" (where the offer link goes), the 5-email cap, and "follow-up number N". Once a plan is edited, numbers have gaps, so all three now use the step's position in the plan. Switching chasing off still affects only NEW approvals unless the owner ticks "also stop the ones running".
+- Phase 4 (preview with a lead) not started.
 
 Two refinements made during the build:
 - **Finished** gained an **Opted out** group, for a reply opt-out, suppression or do-not-contact.
