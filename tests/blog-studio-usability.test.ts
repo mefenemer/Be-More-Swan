@@ -422,4 +422,21 @@ check('feature_unavailable is handled, not printed', () => {
         'an out-of-credits org is shown the raw machine code');
 });
 
+console.log('\n(11) Every element wireEvents binds is in the markup\n');
+
+// 2026-10-27: a comment line inside MARKUP started with `+` (`+ // The same words as…`), so the next
+// line became `+ + '<button id="bs-decide-approve"…'` — a unary plus that turns the Approve button's
+// HTML into the string "NaN". wireEvents then threw on el('bs-decide-approve') and every blog
+// review opened onto "Something went wrong on this page".
+check('no MARKUP line starts with `+` and then a comment', () => {
+    const bad = markup.split('\n').filter((l) => /^\s*\+\s*\/\//.test(l));
+    assert.deepStrictEqual(bad, [], 'a `+ //` line makes the next string a unary plus, rendering "NaN"');
+});
+check('every el(…).addEventListener id exists in MARKUP', () => {
+    const ids = [...new Set([...modal.matchAll(/el\('(bs-[a-z0-9-]+)'\)\.addEventListener/g)].map((m) => m[1]))];
+    assert.ok(ids.length > 20, 'the bound-id scan found almost nothing — the pattern has drifted');
+    const missing = ids.filter((id) => !markup.includes(`id="${id}"`));
+    assert.deepStrictEqual(missing, [], 'wireEvents binds an element the markup never draws — opening the studio throws');
+});
+
 console.log(`\n${passed} checks passed.\n`);

@@ -179,8 +179,18 @@ async function readPage(domain: string, path: string): Promise<{ url: string; ht
 export async function gatherLeadIntel(
     domain: string | null,
     companyName: string,
-    opts: { maxSearches?: number; usage?: { workspaceId?: number | null; assistantId?: number | null; userId?: number | null } } = {},
+    opts: {
+        maxSearches?: number;
+        usage?: { workspaceId?: number | null; assistantId?: number | null; userId?: number | null };
+        /**
+         * Epoch ms after which no further search or page read starts. The discovery worker runs
+         * this inside a search slice (docs/lead-search-one-pass-plan.md §5.6) and must hand back on
+         * time; a button press passes nothing and reads everything.
+         */
+        deadline?: number;
+    } = {},
 ): Promise<LeadIntel> {
+    const outOfTime = () => opts.deadline !== undefined && Date.now() >= opts.deadline;
     if (!ENABLED || !domain) return { ...EMPTY, gatheredAt: new Date().toISOString() };
 
     const budget = Math.max(0, Math.min(opts.maxSearches ?? LEAD_INTEL_SEARCHES, LEAD_INTEL_SEARCHES));
@@ -193,7 +203,7 @@ export async function gatherLeadIntel(
     // Promise.all of four queries has already bought all four by the time the first one returns.
     if (budget > 0 && isSearchConfigured()) {
         for (const q of SIGNAL_QUERIES) {
-            if (searchCallsMade >= budget) break;
+            if (searchCallsMade >= budget || outOfTime()) break;
             // The company name is quoted and the domain is included so a common name ("Bramble &
             // Co") does not return four pages about a different business entirely. Unquoted, this
             // is the single biggest source of junk evidence.
@@ -219,7 +229,7 @@ export async function gatherLeadIntel(
     const pagesRead: string[] = [];
     let hasCareersPage = false;
 
-    const home = await readPage(domain, '/');
+    const home = outOfTime() ? null : await readPage(domain, '/');
     if (home) {
         pagesRead.push(home.url);
         for (const m of PLATFORM_MARKERS) if (m.re.test(home.html)) platforms.add(m.name);
@@ -234,7 +244,7 @@ export async function gatherLeadIntel(
     const linkedPeoplePaths = home ? discoverSitePaths(home.html, domain, 'about').slice(0, 3) : [];
     const peoplePaths = [...new Set([...linkedPeoplePaths, ...PEOPLE_PATHS])];
     for (const path of peoplePaths) {
-        if (peopleSources.length >= 2) break;
+        if (peopleSources.length >= 2 || outOfTime()) break;
         const page = await readPage(domain, path);
         if (!page) continue;
         const text = visibleText(page.html);

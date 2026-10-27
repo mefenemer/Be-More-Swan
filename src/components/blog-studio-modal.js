@@ -625,7 +625,7 @@
     + '      <div id="bs-decide" class="bs-decide bs-hidden" role="region" aria-label="Decide on this draft">'
     + '        <span class="bs-decide-q">Waiting for you \u2014 how should it go out?</span>'
     + '        <div class="bs-row">'
-    + // The same words as the social Review (workspace.html #post-review-reschedule): "Approve" — the
+    // The same words as the social Review (workspace.html #post-review-reschedule): "Approve" — the
     // assistant picks the next free slot — or "Pick the time myself" (owner, 2026-10-27).
     + '          <button type="button" id="bs-decide-approve" class="bs-btn bs-btn-primary">Approve</button>'
     + '          <button type="button" id="bs-decide-time" class="bs-btn bs-btn-ghost">Pick the time myself</button>'

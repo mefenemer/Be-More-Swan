@@ -27,11 +27,11 @@ import { scoreCandidates, discardReason, type LeadScoringCard, type ScoreCandida
 import { resolveSearchArea } from '../../src/lib/discovery-search-area';
 import { loadSenderIdentity } from '../../src/utils/sender-identity';
 import { search, isSearchConfigured, normaliseDomain, fetchSiteIdentity, SearchNotConfiguredError } from '../../src/lib/discovery-search';
-import { enrichLeadContact } from '../../src/lib/discovery-enrich';
-import { ENRICH_ELIGIBLE_SQL, isPaidEnrichEligible } from '../../src/config/lead-contact-state';
-import { recordEnrichment } from '../../src/utils/lead-enrichment';
+import { ENRICH_ELIGIBLE_SQL, PAID_ENRICH_ELIGIBLE_SQL, isPaidEnrichEligible } from '../../src/config/lead-contact-state';
+import { recordEnrichment, runContactWaterfall, researchAndName } from '../../src/utils/lead-enrichment';
+import type { SenderIdentity } from '../../src/config/sender-identity';
 import {
-    isEnrichProviderConfigured, lookupProviderContact, ENRICH_COST_GBP_PER_LOOKUP,
+    isEnrichProviderConfigured,
 } from '../../src/lib/discovery-enrich-provider';
 import { classifyCandidate, resolveCandidateDomain } from '../../src/lib/discovery-domain-filter';
 import { logAiUsage } from '../../src/utils/ai-usage';
@@ -80,10 +80,22 @@ const ENRICH_BATCH = 5;
 // rewritten hits need one, they run concurrently, and the slice already spends ~10s on a search
 // plus a scoring call — so this is deliberately smaller than the per-lead enrichment budget.
 const IDENTITY_BUDGET_MS = 4000;
-// Whole-slice budget for the PAID enrichment phase. Runs after the scrape phase and concurrently
-// across the batch, so the slice costs the slower of the two phases rather than their sum — the
-// compounding that cost this worker a round of 504s the first time round.
-const PAID_ENRICH_BUDGET_MS = 3000;
+// Whole-slice budget for ONE batch of the contact waterfall (docs/lead-search-one-pass-plan.md §2).
+// The leads run concurrently and each one's steps run in order inside this deadline — website (its
+// own 6s LEAD_BUDGET_MS), Companies House (≤3s), then Hunter (≤5s per call) — so the slice costs the
+// slowest lead. Below the 26s synchronous ceiling with room for the writes.
+const ENRICH_LEAD_BUDGET_MS = 16000;
+// Leads researched per slice once every lead's contact step is done (§5.6): four searches, the team
+// pages and one model call each. Two at a time keeps a slice under the same ceiling as the waterfall.
+const RESEARCH_BATCH = 2;
+const RESEARCH_LEAD_BUDGET_MS = 14000;
+
+/** What the research pass needs that the contact pass does not — the identity and ICP the re-score reads. */
+interface ResearchContext {
+    sender: SenderIdentity;
+    icp: Record<string, unknown>;
+    blueprintVersion: string | null;
+}
 
 type JobRow = {
     id: number; job_id: string; organisation_id: number; campaign_id: number;
@@ -475,7 +487,8 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
 
         // ── STAGE enriching: find a contact address for each promoted hot/warm lead ──
         if (state?.stage === 'enriching') {
-            await enrichBatch(db, job, guardrails, { leadsFound, searchCallsMade, tokensUsed, costGbp });
+            const ukSearch = resolveSearchArea([campaign.idea, readTerritoryPlan(campaign.approvedBrief)?.area])?.country === 'gb';
+            await enrichBatch(db, job, guardrails, { leadsFound, searchCallsMade, tokensUsed, costGbp }, ukSearch, { sender, icp, blueprintVersion });
             return;
         }
 
@@ -826,7 +839,7 @@ async function promoteBatch(db: Db, job: JobRow, assistantId: number, guardrails
 // Runs after promoting so the Leads tab still fills live during the run. Leads that
 // yield nothing are stamped attempted so they're never re-scraped by a later tick.
 
-async function enrichBatch(db: Db, job: JobRow, guardrails: Guardrails, counters: Counters): Promise<void> {
+async function enrichBatch(db: Db, job: JobRow, guardrails: Guardrails, counters: Counters, ukSearch: boolean, research: ResearchContext): Promise<void> {
     // WHICH leads are worth a fetch is defined once, in src/config/lead-contact-state.ts, because
     // the Searches tab's "never checked" count and the Leads tab's Contact chip both assert what
     // this query does. Hot/warm, plus any lead the scorer called a `target_business` whatever its
@@ -834,8 +847,8 @@ async function enrichBatch(db: Db, job: JobRow, guardrails: Guardrails, counters
     // to refuse to learn how to contact a real company.
     // ai_assistant_id is joined in (rather than fetched separately) purely so the ledger event can
     // be attributed to the assistant — this stage has the job, not the campaign row.
-    const batch = await db.execute<{ id: number; domain: string | null; assistant_record_id: number | null; ai_assistant_id: number; prospect_type: string | null }>(
-        `SELECT dl.id, dl.domain, dl.assistant_record_id, dc.ai_assistant_id,
+    const batch = await db.execute<{ id: number; domain: string | null; company_name: string; assistant_record_id: number | null; ai_assistant_id: number; prospect_type: string | null }>(
+        `SELECT dl.id, dl.domain, dl.company_name, dl.assistant_record_id, dc.ai_assistant_id,
                 dl.scoring_card ->> 'prospectType' AS prospect_type
            FROM discovered_leads dl
            JOIN discovery_campaigns dc ON dc.id = dl.campaign_id
@@ -860,102 +873,69 @@ async function enrichBatch(db: Db, job: JobRow, guardrails: Guardrails, counters
         aiAssistantId: batch[0]?.ai_assistant_id ?? null,
     });
 
-    // Concurrent: 5 leads x up to 4 sequential fetches would blow the tick budget serially.
-    const scraped = await Promise.all(batch.map(async (lead) => {
-        let found: Awaited<ReturnType<typeof enrichLeadContact>> = { contact: null, handles: {} };
-        try {
-            found = await enrichLeadContact(lead.domain);
-        } catch {
-            // Best-effort: a scrape failure must never fail the run.
-        }
-        return { lead, found, paidAttempted: false, paidFailedReason: null as string | null };
-    }));
-
-    // ── Tier 2: BUY an address for the leads the free scrape could not reach ────────────────
+    // ── The contact waterfall (docs/lead-search-one-pass-plan.md §2): website fully → Companies
+    // House → Hunter Email Finder → Hunter Domain Search, LAST. One order, shared with the per-lead
+    // buttons through runContactWaterfall (src/utils/lead-enrichment.ts).
     //
-    // Waterfall, deliberately in this order: the scrape is free and hits roughly one in three
-    // SMB sites, so paying for those would be spending money on data we already have. Only the
-    // misses reach a provider.
+    // ⚠️ TWO GATES, and the paid one is narrow. The free steps read anything that might be a
+    // company, including leads with no prospect type. Buying costs money, and `paidLookupAt` is
+    // stamped on a MISS too, so it counts money SPENT rather than addresses found — only a confirmed
+    // `target_business` may buy (PAID_ENRICH_ELIGIBLE_SQL in src/config/lead-contact-state.ts).
     //
-    // ⚠️ Runs as a SECOND phase rather than inside the map above. Chaining a paid lookup onto
-    // each scrape makes the per-lead worst case 6s (LEAD_BUDGET_MS) + the provider timeout, and
-    // the leads run concurrently, so the slice would inherit the sum on a bad batch — the same
-    // compounding that already cost this worker a round of 504s. Splitting the phases means the
-    // slice is bounded by the SLOWER of the two, not their total, and the paid phase gets its
-    // own deadline it can abandon without failing anything.
-    //
-    // Costs nothing and does nothing unless DISCOVERY_ENRICH_PROVIDER names a configured
-    // provider — the default. See src/lib/discovery-enrich-provider.ts.
-    // ⚠️ TWO GATES, and this is the narrow one. The scrape above reads anything that might be a
-    // company, including leads with no prospect type — that costs seconds, and it might hand the
-    // user an address. Buying one costs money, and `paidLookupAt` is stamped on a MISS too, so it
-    // counts money SPENT rather than addresses found. An unclassified lead is either legacy or
-    // unscored (§4.2); paying for one is a blank cheque against a lead nobody has judged.
-    // See PAID_ENRICH_ELIGIBLE_SQL in src/config/lead-contact-state.ts.
-    const misses = scraped.filter((s) =>
-        !s.found.contact && s.lead.domain && isPaidEnrichEligible({ prospectType: s.lead.prospect_type }));
-    if (misses.length > 0 && isEnrichProviderConfigured()) {
-        // What this RUN has already spent. Counted from the `paidLookupAt` stamp rather than a
-        // job column, mirroring `enrichAttemptedAt`, and stamped on a MISS too so the cap counts
-        // money SPENT rather than addresses found.
+    // ⚠️ The per-run cap is ALLOCATED BEFORE the concurrent map: decrementing a shared counter inside
+    // parallel callbacks would let a batch overrun the cap by however many run at once.
+    const paidEligible = batch.filter((l) => isPaidEnrichEligible({ prospectType: l.prospect_type }));
+    let allowed = 0;
+    if (paidEligible.length > 0 && isEnrichProviderConfigured()) {
         const [{ spent } = { spent: 0 }] = await db.execute<{ spent: number }>(
             `SELECT count(*)::int AS spent FROM discovered_leads
              WHERE job_id = ${job.id} AND signals ->> 'paidLookupAt' IS NOT NULL`
         );
-        // Allocation is decided BEFORE the concurrent map: decrementing a shared counter inside
-        // parallel callbacks would let a batch overrun the cap by however many run at once.
-        const allowed = Math.max(0, Math.min(misses.length, guardrails.maxEnrichmentCallsPerRun - spent));
-        if (allowed < misses.length) {
-            console.log(`[discovery] job ${job.job_id} paid-enrichment cap reached (${spent}/${guardrails.maxEnrichmentCallsPerRun}) — ${misses.length - allowed} lead(s) left to the scraper`);
-        }
-        const deadline = Date.now() + PAID_ENRICH_BUDGET_MS;
-        await Promise.all(misses.slice(0, allowed).map(async (s) => {
-            const outcome = await lookupProviderContact(s.lead.domain, { timeoutMs: deadline - Date.now(), usage: { workspaceId: job.organisation_id } });
-            // ⚠️ THE THREE OUTCOMES ARE NOT TWO. `error` means the provider never answered us —
-            // out of credits, rate limited, timed out — so nothing was spent and nothing was
-            // learned about this company. Charging it and stamping it as a purchase is precisely
-            // how the 2026-08-27 outage disguised itself as 172 schools with no published address,
-            // and the tenant deleted 104 of them by hand on the strength of that. See
-            // src/lib/discovery-enrich-provider.ts.
-            if (outcome.status === 'error') {
-                s.paidFailedReason = outcome.reason;
-                return;
-            }
-            // Answered. Stamp the ATTEMPT whether or not it found anything — a miss costs the same
-            // as a find, that is what the cap counts, and it stops a later slice paying again for
-            // the same domain.
-            s.paidAttempted = true;
-            counters.costGbp += ENRICH_COST_GBP_PER_LOOKUP;
-            if (outcome.status === 'hit') {
-                const bought = outcome.contact;
-                s.found = {
-                    ...s.found,
-                    contact: { email: bought.email, kind: bought.kind, source: 'provider', foundOn: bought.provider },
-                };
-            }
-        }));
-
-        // ── Say it out loud when the provider is the thing that failed ──────────────────────────
-        //
-        // ⚠️ A run that buys nothing because the account is dry looks EXACTLY like a run whose
-        // companies publish nothing — until someone counts. Counting it here is the cheapest
-        // possible alarm, and it names the reason, so `http_401` (bad key) and `http_429` (out of
-        // credits) can be told apart without reproducing anything.
-        const failed = misses.slice(0, allowed).filter((s) => s.paidFailedReason);
-        if (failed.length > 0) {
-            const reasons = [...new Set(failed.map((s) => s.paidFailedReason))].join(', ');
-            console.warn(
-                `[discovery] job ${job.job_id} paid enrichment FAILED for ${failed.length}/${allowed} lookup(s) — ${reasons}. ` +
-                `Nothing was charged and these leads are NOT settled; the next run on campaign ${job.campaign_id} will retry them.`,
-            );
+        allowed = Math.max(0, Math.min(paidEligible.length, guardrails.maxEnrichmentCallsPerRun - spent));
+        if (allowed < paidEligible.length) {
+            console.log(`[discovery] job ${job.job_id} paid-enrichment cap reached (${spent}/${guardrails.maxEnrichmentCallsPerRun}) — ${paidEligible.length - allowed} lead(s) left to the free steps`);
         }
     }
+    const mayBuy = new Set(paidEligible.slice(0, allowed).map((l) => l.id));
+    const deadline = Date.now() + ENRICH_LEAD_BUDGET_MS;
 
-    await Promise.all(scraped.map((s) => recordEnrichment(
-        db, s.lead.id, s.lead.assistant_record_id, s.found,
-        { organisationId: job.organisation_id, aiAssistantId: s.lead.ai_assistant_id, blueprintVersion, icpSnapshot },
-        s.paidAttempted === true,
-        s.paidFailedReason,
+    // Concurrent: each lead's waterfall is sequential inside, bounded by `deadline`, so the slice
+    // costs the slowest lead, not the sum.
+    const results = await Promise.all(batch.map(async (lead) => ({
+        lead,
+        r: await runContactWaterfall({
+            domain: lead.domain as string,
+            companyName: lead.company_name,
+            ukSearch,
+            allowPaid: mayBuy.has(lead.id),
+            deadline,
+            usage: { workspaceId: job.organisation_id, assistantId: lead.ai_assistant_id },
+        }),
+    })));
+
+    // ── Say it out loud when the provider is the thing that failed ──────────────────────────
+    //
+    // ⚠️ A run that buys nothing because the account is dry looks EXACTLY like a run whose
+    // companies publish nothing — until someone counts. `error` means the provider never answered
+    // us — out of credits, rate limited, timed out — so nothing was spent and nothing was learned.
+    // Charging it and stamping it as a purchase is precisely how the 2026-08-27 outage disguised
+    // itself as 172 schools with no published address. See src/lib/discovery-enrich-provider.ts.
+    const failed = results.filter((x) => x.r.paidFailedReason);
+    if (failed.length > 0) {
+        const reasons = [...new Set(failed.map((x) => x.r.paidFailedReason))].join(', ');
+        console.warn(
+            `[discovery] job ${job.job_id} paid enrichment FAILED for ${failed.length}/${allowed} lookup(s) — ${reasons}. ` +
+            `Nothing was charged and these leads are NOT settled; the next run on campaign ${job.campaign_id} will retry them.`,
+        );
+    }
+    for (const x of results) counters.costGbp += x.r.costGbp;
+
+    await Promise.all(results.map(({ lead, r }) => recordEnrichment(
+        db, lead.id, lead.assistant_record_id, r.found,
+        { organisationId: job.organisation_id, aiAssistantId: lead.ai_assistant_id, blueprintVersion, icpSnapshot },
+        r.paidAttempted,
+        r.paidFailedReason,
+        r.named,
     )));
 
     const [{ remaining } = { remaining: 0 }] = await db.execute<{ remaining: number }>(
@@ -967,7 +947,12 @@ async function enrichBatch(db: Db, job: JobRow, guardrails: Guardrails, counters
            AND dl.contact_email IS NULL AND ${ENRICH_ELIGIBLE_SQL}
            AND dl.signals ->> 'enrichAttemptedAt' IS NULL`
     );
-    const done = remaining === 0;
+    // Contacts first, for every lead; THEN research (§5.6). Research is the slower, model-backed
+    // half, and a run that ran out of time should have every lead reachable before any is re-read.
+    const researchLeft = remaining === 0
+        ? await researchBatch(db, job, guardrails, counters, research)
+        : 1;
+    const done = remaining === 0 && researchLeft === 0;
     await db.update(discoveryJobs)
         .set({
             status: done ? 'completed' : 'queued', stage: 'enriching', errorMessage: null,
@@ -976,6 +961,88 @@ async function enrichBatch(db: Db, job: JobRow, guardrails: Guardrails, counters
         .where(eq(discoveryJobs.id, job.id));
 
     if (done) await publishSignals(db, job);
+}
+
+/**
+ * The research pass (docs/lead-search-one-pass-plan.md §5.6): for each lead worth it, the four
+ * signal searches, the team pages and the re-score the "Research this lead" button runs — inside
+ * the search, so the lead arrives rated on evidence and addressed to a named person.
+ *
+ * Who is worth it: hot or warm, or a company the scorer called a `target_business` — the same
+ * companies a paid lookup is allowed for. A cold, unclassified lead is a targeting problem that a
+ * model call will not fix. Erased leads are never researched: it would re-collect the person.
+ *
+ * Returns how many such leads are still waiting, so the caller can tell a finished run from a
+ * paused one. `researchedAt` is stamped on every attempt, success or not, so no lead is paid for twice.
+ */
+async function researchBatch(db: Db, job: JobRow, guardrails: Guardrails, counters: Counters, ctx: ResearchContext): Promise<number> {
+    const ELIGIBLE = `dl.campaign_id = ${job.campaign_id}
+           AND dl.status = 'promoted'
+           AND dl.domain IS NOT NULL
+           AND dl.assistant_record_id IS NOT NULL
+           AND dl.signals ->> 'enrichAttemptedAt' IS NOT NULL
+           AND dl.signals ->> 'researchedAt' IS NULL
+           AND (dl.rating IN ('hot', 'warm') OR ${PAID_ENRICH_ELIGIBLE_SQL})
+           AND COALESCE(ar.data ->> 'erasedAt', '') = ''`;
+    const batch = await db.execute<{ id: number; domain: string; assistant_record_id: number; ai_assistant_id: number; prospect_type: string | null; paid: boolean }>(
+        `SELECT dl.id, dl.domain, dl.assistant_record_id, dc.ai_assistant_id,
+                dl.scoring_card ->> 'prospectType' AS prospect_type,
+                (dl.signals ->> 'paidLookupAt') IS NOT NULL AS paid
+           FROM discovered_leads dl
+           JOIN discovery_campaigns dc ON dc.id = dl.campaign_id
+           JOIN assistant_records ar ON ar.id = dl.assistant_record_id
+          WHERE ${ELIGIBLE}
+          LIMIT ${RESEARCH_BATCH}`
+    );
+    if (batch.length === 0) return 0;
+
+    // A run's spend guardrails hold here too: past either cap, the rest of the leads are left as
+    // they are (stamped, so the run can finish) rather than researched over budget.
+    const overBudget = counters.costGbp >= guardrails.maxCostGbpPerRun || counters.searchCallsMade >= guardrails.maxSearchCallsPerRun;
+    const [{ spent } = { spent: 0 }] = await db.execute<{ spent: number }>(
+        `SELECT count(*)::int AS spent FROM discovered_leads
+         WHERE job_id = ${job.id} AND signals ->> 'paidLookupAt' IS NOT NULL`
+    );
+    let paidSlots = Math.max(0, guardrails.maxEnrichmentCallsPerRun - spent);
+    const deadline = Date.now() + RESEARCH_LEAD_BUDGET_MS;
+
+    await Promise.all(batch.map(async (lead) => {
+        let paidAnswered = false;
+        if (!overBudget) {
+            // A lead already bought for holds its cap slot; a new one takes a slot only if one is left.
+            const mayBuy = isPaidEnrichEligible({ prospectType: lead.prospect_type }) && (lead.paid || paidSlots-- > 0);
+            try {
+                const r = await researchAndName(db, {
+                    assistantRecordId: lead.assistant_record_id,
+                    discoveredLeadId: lead.id,
+                    domain: lead.domain,
+                    sender: ctx.sender,
+                    icp: ctx.icp,
+                    ledger: { organisationId: job.organisation_id, aiAssistantId: lead.ai_assistant_id, blueprintVersion: ctx.blueprintVersion },
+                    allowPaid: mayBuy,
+                    deadline,
+                });
+                counters.costGbp += r.costGbp;
+                counters.searchCallsMade += r.deep.searchCallsMade;
+                paidAnswered = r.paidAttempted && !lead.paid;
+            } catch (err) {
+                // One lead's failure must not fail the run; it is stamped below and not retried.
+                console.warn(`[discovery] job ${job.job_id} research failed for lead ${lead.id}:`, err instanceof Error ? err.message : err);
+            }
+        }
+        const stamp: Record<string, string> = { researchedAt: new Date().toISOString() };
+        if (paidAnswered) stamp.paidLookupAt = stamp.researchedAt;
+        await db.update(discoveredLeads)
+            .set({ signals: sql`COALESCE(${discoveredLeads.signals}, '{}'::jsonb) || ${JSON.stringify(stamp)}::jsonb`, updatedAt: new Date() })
+            .where(eq(discoveredLeads.id, lead.id));
+    }));
+
+    const [{ left } = { left: 0 }] = await db.execute<{ left: number }>(
+        `SELECT count(*)::int AS left FROM discovered_leads dl
+           JOIN assistant_records ar ON ar.id = dl.assistant_record_id
+          WHERE ${ELIGIBLE}`
+    );
+    return left;
 }
 
 /**
@@ -1042,6 +1109,18 @@ async function publishSignals(db: Db, job: JobRow): Promise<void> {
         // Quoted back to the user in the cap sentences — "your limit of 50 leads" is actionable
         // where "a limit" is not.
         const caps = await loadGuardrails(db, job.campaign_id);
+        // What the one-pass search found to write TO (docs/lead-search-one-pass-plan.md §3), told in
+        // the same notification so nobody has to open every lead to learn it. Appended to the
+        // existing `outcome` sentence rather than a new merge variable: a stored template override
+        // that never heard of a new variable would print it blank.
+        const [reach] = await db.execute<{ named: number; emails: number }>(
+            `SELECT count(*) FILTER (WHERE COALESCE(contact_name, '') <> '')::int AS named,
+                    count(*) FILTER (WHERE contact_email IS NOT NULL)::int AS emails
+               FROM discovered_leads WHERE job_id = ${job.id} AND status = 'promoted'`
+        );
+        const reachLine = found > 0 && reach
+            ? ` ${reach.named} with a named contact, ${reach.emails} with an email address.`
+            : '';
 
         await createNotification(db, 'search_signals_published', {
             userId: campaign.createdBy,
@@ -1055,7 +1134,7 @@ async function publishSignals(db: Db, job: JobRow): Promise<void> {
                     // "finished" vs "stopped early" — the word the whole message turns on.
                     ending: isComplete(stopReason) ? 'finished running' : 'stopped early',
                     coverage: coverageSentence(coverage),
-                    outcome: outcomeSentence(stopReason, found, caps),
+                    outcome: outcomeSentence(stopReason, found, caps) + reachLine,
                 },
             },
             metadata: { assistantId: campaign.aiAssistantId, campaignId: job.campaign_id, jobId: job.id },

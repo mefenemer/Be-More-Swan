@@ -87,6 +87,15 @@ const PERSONAL_RECORD_KEYS = [
     'outreachDraft',    // an email written TO them, naming them
     'draftOriginal',
     'lead',             // the raw submitted blob on a hand-added lead
+    // The one-pass contact search's named contact (src/utils/lead-enrichment.ts
+    // NAMED_CONTACT_RECORD_KEYS — tests/lead-person.test.ts holds the two lists in step).
+    'contactTitle',
+    'contactNameSource',
+    'contactNameSourceUrl',
+    'contactPersonEmail',
+    'contactPersonEmailSource',
+    'foundEmails',      // every address their site printed
+    'companiesHouse',   // the register entry, which names the officers
 ] as const;
 
 /** Additionally removed when the company identity is itself personal data (a sole trader). */
@@ -386,8 +395,10 @@ export async function eraseProspect(db: Db, input: EraseProspectInput): Promise<
             // with `contact_email IS NULL` and no stamp — which is precisely what an erased lead now
             // looks like — and would walk back to their website and scrape the address again. The
             // stamp is what makes an erased lead permanently ineligible for that pass.
-            signals: sql`COALESCE(${discoveredLeads.signals}, '{}'::jsonb) - 'socialHandles' - 'contactEmail' - 'people' - 'emails'
-                         || jsonb_build_object('enrichAttemptedAt', ${new Date().toISOString()}::text)`,
+            // `researchedAt` is stamped for the same reason: the search's research pass selects leads
+            // without it, and would re-read the team pages and the register for the erased person.
+            signals: sql`COALESCE(${discoveredLeads.signals}, '{}'::jsonb) - 'socialHandles' - 'contactEmail' - 'people' - 'emails' - 'person' - 'companiesHouse'
+                         || jsonb_build_object('enrichAttemptedAt', ${new Date().toISOString()}::text, 'researchedAt', ${new Date().toISOString()}::text)`,
             updatedAt: new Date(),
         };
         // Safe only because the exclusion above was written first: the dedupe key is (campaign,

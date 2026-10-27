@@ -66,6 +66,12 @@ export interface ProviderContact {
     confidence: number | null;
     /** Which provider supplied it — provenance for the Review Queue and the ledger. */
     provider: string;
+    /**
+     * Every named person the provider returned for the domain, with their address and position.
+     * Bought with the same call and previously discarded — the one-pass search keeps them so the
+     * lead gets a person to address (docs/lead-search-one-pass-plan.md §2 step 6). Domain Search only.
+     */
+    people?: Array<{ name: string; title: string | null; email: string }>;
 }
 
 /**
@@ -162,13 +168,20 @@ async function lookupHunter(domain: string, timeoutMs: number, usage?: { workspa
         // whether or not we use them — so the units are the length of the list, not 1.
         logServiceCost('hunter-domain-search', raw.length, { ...usage, sessionId: 'hunter' });
 
-        const candidates = raw
-            .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object')
+        const rows = raw.filter((e): e is Record<string, unknown> => !!e && typeof e === 'object');
+        const candidates = rows
             .map((e) => ({
                 email: typeof e.value === 'string' ? e.value.trim() : '',
                 confidence: confidenceOf(e.confidence),
             }))
             .filter((e) => e.email.includes('@'));
+        const people = rows
+            .map((e) => ({
+                name: [e.first_name, e.last_name].filter((v) => typeof v === 'string' && v.trim()).join(' ').trim(),
+                title: typeof e.position === 'string' && e.position.trim() ? e.position.trim() : null,
+                email: typeof e.value === 'string' ? e.value.trim().toLowerCase() : '',
+            }))
+            .filter((p) => p.name.includes(' ') && p.email.includes('@'));
 
         // Answered, parsed, and genuinely nothing usable on this domain. THIS is a miss: a fact
         // about the company, worth recording and worth a cap slot, because we paid to learn it.
@@ -176,7 +189,7 @@ async function lookupHunter(domain: string, timeoutMs: number, usage?: { workspa
         if (!best) return { status: 'miss' };
         return {
             status: 'hit',
-            contact: { email: best.email, kind: best.kind, confidence: best.confidence, provider: 'hunter' },
+            contact: { email: best.email, kind: best.kind, confidence: best.confidence, provider: 'hunter', people },
         };
     } catch (err) {
         // Aborted by our own timeout, DNS, TLS, socket — we never got an answer.
@@ -213,4 +226,65 @@ export async function lookupProviderContact(
     if (timeoutMs <= 0) return { status: 'error', reason: 'no_budget' };
     if (PROVIDER === 'hunter') return lookupHunter(host, timeoutMs, opts.usage);
     return { status: 'error', reason: 'not_configured' };
+}
+
+const HUNTER_FINDER_ENDPOINT = 'https://api.hunter.io/v2/email-finder';
+
+/**
+ * Hunter Email Finder: one named person's address at one domain.
+ *
+ * Step 5 of the one-pass search (docs/lead-search-one-pass-plan.md §2): called only when we already
+ * have a real person's name — from their own site, the Companies House register or Hunter — and no
+ * published address for them. Hunter bills this only when it returns an address, which is why it
+ * runs BEFORE the Domain Search, which bills per address listed.
+ *
+ * Same three outcomes as `lookupProviderContact`: an unanswered call is an `error`, never a `miss`.
+ */
+export async function findPersonEmail(
+    domain: string | null,
+    person: { first: string; last: string },
+    opts: { timeoutMs?: number; usage?: { workspaceId?: number | null; assistantId?: number | null; userId?: number | null } } = {},
+): Promise<ProviderOutcome> {
+    if (!isEnrichProviderConfigured() || PROVIDER !== 'hunter') return { status: 'error', reason: 'not_configured' };
+    const host = String(domain || '').toLowerCase().replace(/^www\./, '').replace(/\/+$/, '');
+    if (!host.includes('.')) return { status: 'error', reason: 'no_domain' };
+    if (!person.first || !person.last) return { status: 'error', reason: 'no_name' };
+    const timeoutMs = Math.min(opts.timeoutMs ?? TIMEOUT_MS, TIMEOUT_MS);
+    if (timeoutMs <= 0) return { status: 'error', reason: 'no_budget' };
+
+    const url = `${HUNTER_FINDER_ENDPOINT}?domain=${encodeURIComponent(host)}&first_name=${encodeURIComponent(person.first)}`
+        + `&last_name=${encodeURIComponent(person.last)}&api_key=${encodeURIComponent(HUNTER_API_KEY as string)}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) {
+            console.warn(`[enrich-provider] hunter email-finder HTTP ${res.status} for ${host} — NOT a miss, the lookup did not happen`);
+            return { status: 'error', reason: `http_${res.status}` };
+        }
+        const body = await res.json().catch(() => null) as { data?: Record<string, unknown> } | null;
+        if (!body || typeof body.data !== 'object' || body.data === null) {
+            console.warn(`[enrich-provider] hunter email-finder 200 but no data object for ${host} — response shape changed?`);
+            return { status: 'error', reason: 'bad_body' };
+        }
+        const email = typeof body.data.email === 'string' ? body.data.email.trim().toLowerCase() : '';
+        // Answered with no address: a fact about this person at this company. Hunter does not bill it.
+        if (!email.includes('@') || !email.endsWith(`@${host}`)) return { status: 'miss' };
+        logServiceCost('hunter-email-finder', 1, { ...opts.usage, sessionId: 'hunter' });
+        return {
+            status: 'hit',
+            contact: {
+                email,
+                kind: roleOrPersonal(email.split('@')[0] ?? ''),
+                confidence: confidenceOf(body.data.score),
+                provider: 'hunter',
+            },
+        };
+    } catch (err) {
+        const reason = err instanceof Error && err.name === 'AbortError' ? 'timeout' : 'network';
+        console.warn(`[enrich-provider] hunter email-finder ${reason} for ${host}:`, err instanceof Error ? err.message : err);
+        return { status: 'error', reason };
+    } finally {
+        clearTimeout(timer);
+    }
 }

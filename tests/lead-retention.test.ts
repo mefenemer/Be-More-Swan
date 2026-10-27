@@ -250,7 +250,7 @@ check('enrichment has ONE writer, shared by the worker and the on-demand path', 
     const worker = read('netlify/functions/process-discovery-jobs.ts');
     assert.ok(!/async function recordEnrichment/.test(worker),
         'the worker has its own copy of recordEnrichment again — one write path, per the notify.ts rule');
-    assert.match(worker, /import \{ recordEnrichment \} from '\.\.\/\.\.\/src\/utils\/lead-enrichment'/,
+    assert.match(worker, /import \{ recordEnrichment(, [A-Za-z, ]+)? \} from '\.\.\/\.\.\/src\/utils\/lead-enrichment'/,
         'the worker no longer imports the shared writer');
 });
 

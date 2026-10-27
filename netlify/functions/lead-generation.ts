@@ -52,7 +52,7 @@ import { IntegrationError } from '../../src/utils/workspace-integrations';
 import { recordEvent, cycleDaysBetween } from '../../src/utils/revenue-ledger';
 import { getBlueprintVersion } from '../../src/utils/blueprint-version';
 import { makeIcpSnapshotCache } from '../../src/utils/icp-snapshot';
-import { enrichOneLead, deepEnrichLead } from '../../src/utils/lead-enrichment';
+import { enrichOneLead, deepEnrichLead, researchAndName } from '../../src/utils/lead-enrichment';
 import {
     OUTCOMES, LOSS_REASONS, EVENT_FOR_OUTCOME, OUTCOMES_REQUIRING_LOSS_REASON,
     isOutcome, isLossReason, type LossReason,
@@ -795,7 +795,10 @@ ${outreachFirstEmailBlock(leadSender.outreachOffer)}`;
                 return json(400, { error: 'No website is recorded for this company, so there is nothing to research. Add one with Edit first.' });
             }
 
-            const outcome = await deepEnrichLead(db, {
+            // researchAndName runs the same deep pass, then names the person to write to — the
+            // same rule the search uses (docs/lead-search-one-pass-plan.md §2) — and, for a
+            // decision-maker with no address of their own, asks Hunter's Email Finder once.
+            const named = await researchAndName(db, {
                 assistantRecordId: recordId,
                 discoveredLeadId: link?.id ?? null,
                 domain,
@@ -807,7 +810,12 @@ ${outreachFirstEmailBlock(leadSender.outreachOffer)}`;
                     blueprintVersion: await blueprintVersion(),
                     icpSnapshot: await icpSnapshot(recordId),
                 },
+                allowPaid: true,
             });
+            const outcome = named.deep;
+            const personLine = named.person
+                ? ` Contact: ${named.person.name}${named.person.title ? `, ${named.person.title}` : ''}${named.personEmail ? ` (${named.personEmail})` : ''}.`
+                : '';
 
             return json(200, {
                 enriched: outcome.ran,
@@ -817,7 +825,9 @@ ${outreachFirstEmailBlock(leadSender.outreachOffer)}`;
                 signals: outcome.signals,
                 people: outcome.people,
                 hooks: outcome.hooks,
-                message: outcome.message,
+                person: named.person,
+                personEmail: named.personEmail,
+                message: outcome.message + personLine,
             });
         }
 

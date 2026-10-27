@@ -170,18 +170,22 @@ check('a provider that did not answer returns error, never miss', () => {
 });
 
 check('an error costs neither a cap slot nor a penny', () => {
-    const i = landmark(WORKER, 'async function enrichBatch');
-    const body = WORKER.slice(i, landmark(WORKER, 'async function publishSignals'));
-    // The early return has to come BEFORE both the stamp and the charge, or the outage is
-    // invisible again.
-    const iErr = body.indexOf("if (outcome.status === 'error')");
-    const iStamp = body.indexOf('s.paidAttempted = true;');
-    const iCharge = body.indexOf('counters.costGbp += ENRICH_COST_GBP_PER_LOOKUP');
-    assert.ok(iErr !== -1, 'the error outcome is not handled separately from a miss');
-    assert.ok(iErr < iStamp && iErr < iCharge,
-        'a failed lookup is still stamped as an attempt or charged to the run budget');
-    assert.ok(/s\.paidFailedReason = outcome\.reason;/.test(body),
-        'the failure reason is discarded — http_401 and http_429 would be indistinguishable');
+    // The paid steps moved into the shared waterfall (docs/lead-search-one-pass-plan.md §2), so the
+    // rule is checked there: an `error` outcome is recorded as a failure and returns before either
+    // the attempt flag or the charge, for BOTH paid calls.
+    const body = ENRICH.slice(landmark(ENRICH, 'export async function runContactWaterfall('), landmark(ENRICH, 'export function worthFindingAddressFor('));
+    const finder = body.slice(body.indexOf('await findPersonEmail('), body.indexOf('await lookupProviderContact('));
+    const domain = body.slice(body.indexOf('await lookupProviderContact('));
+    for (const [label, part, failure] of [['Email Finder', finder, 'paidFailedReason = outcome.reason'], ['Domain Search', domain, 'paidFailedReason = paidFailedReason ?? outcome.reason']] as const) {
+        const iErr = part.indexOf("if (outcome.status === 'error')");
+        const iStamp = part.indexOf('paidAttempted = true;');
+        const iCharge = part.indexOf('costGbp += ENRICH_COST_GBP_PER_LOOKUP');
+        assert.ok(iErr !== -1, `${label}: the error outcome is not handled separately from a miss`);
+        assert.ok(iErr < iStamp && iErr < iCharge, `${label}: a failed lookup is still stamped as an attempt or charged`);
+        assert.ok(part.includes(failure), `${label}: the failure reason is discarded — http_401 and http_429 would be indistinguishable`);
+    }
+    // And the worker carries the outcome through to the writer, unchanged.
+    assert.ok(/r\.paidAttempted,\s*r\.paidFailedReason,/.test(WORKER), 'the worker no longer passes the paid outcome to recordEnrichment');
 });
 
 check('a failed lookup is stamped distinctly, and never as a purchase', () => {
@@ -216,34 +220,38 @@ check('a stranded lead is re-queued once per run, from query_gen', () => {
 // ── 3. Waterfall ordering and the cap ────────────────────────────────────────
 
 check('the free scrape runs BEFORE any purchase', () => {
-    const i = landmark(WORKER, 'async function enrichBatch');
-    const body = WORKER.slice(i, landmark(WORKER, 'async function publishSignals'));
+    const body = ENRICH.slice(landmark(ENRICH, 'export async function runContactWaterfall('), landmark(ENRICH, 'export function worthFindingAddressFor('));
     const iScrape = body.indexOf('enrichLeadContact(');
+    const iFinder = body.indexOf('findPersonEmail(');
     const iPaid = body.indexOf('lookupProviderContact(');
-    assert.ok(iScrape !== -1 && iPaid !== -1, 'one of the two enrichment tiers is gone');
-    assert.ok(iScrape < iPaid, 'the paid lookup runs first — that buys data the free scrape already had');
-    assert.ok(/const misses = scraped\.filter\(\(s\) =>\s*\n?\s*!s\.found\.contact/.test(body),
-        'the paid tier no longer targets only the scrape misses');
+    assert.ok(iScrape !== -1 && iPaid !== -1 && iFinder !== -1, 'one of the enrichment tiers is gone');
+    assert.ok(iScrape < iFinder && iScrape < iPaid, 'a paid lookup runs first — that buys data the free scrape already had');
+    // Domain Search — the expensive, per-address one — only when nothing found any address.
+    assert.ok(/if \(paid && !found\.contact\)/.test(body), 'the domain search no longer targets only leads with no address');
     // ⚠️ §5 (2026-08-25): the paid tier is gated NARROWER than the scrape. The scrape reads
     // anything that might be a company, including leads with no prospect type at all — that costs
     // seconds and might hand the user an address for free. Buying one costs money, and
     // `paidLookupAt` is stamped on a MISS too, so an unclassified lead would be a blank cheque.
-    assert.ok(/isPaidEnrichEligible\(/.test(body),
+    const worker = WORKER.slice(landmark(WORKER, 'async function enrichBatch'), landmark(WORKER, 'async function publishSignals'));
+    assert.ok(/isPaidEnrichEligible\(/.test(worker),
         'the paid tier no longer gates on prospect type — it would buy addresses for unclassified leads');
 });
 
 check('the purchase is skipped entirely when no provider is configured', () => {
-    assert.ok(/misses\.length > 0 && isEnrichProviderConfigured\(\)/.test(WORKER),
+    assert.ok(/paidEligible\.length > 0 && isEnrichProviderConfigured\(\)/.test(WORKER),
         'the configured check is gone — an unconfigured run would do pointless work');
+    assert.ok(/const paid = opts\.allowPaid && isEnrichProviderConfigured\(\)/.test(ENRICH),
+        'the waterfall no longer checks a provider is configured before its paid steps');
 });
 
 check('the cap is allocated BEFORE the concurrent map', () => {
     // ⚠️ Decrementing a shared counter inside parallel callbacks lets a batch overrun the cap by
     // however many run at once. The allocation has to be decided up front.
-    const iAllowed = WORKER.indexOf('const allowed = Math.max(0, Math.min(misses.length');
-    const iMap = WORKER.indexOf('misses.slice(0, allowed).map');
-    assert.ok(iAllowed !== -1 && iMap !== -1, 'the cap allocation is gone');
-    assert.ok(iAllowed < iMap, 'the cap is computed inside the concurrent map — it can be overrun');
+    const iAllowed = WORKER.indexOf('allowed = Math.max(0, Math.min(paidEligible.length');
+    const iMayBuy = WORKER.indexOf('const mayBuy = new Set(paidEligible.slice(0, allowed)');
+    const iMap = WORKER.indexOf('allowPaid: mayBuy.has(lead.id)');
+    assert.ok(iAllowed !== -1 && iMayBuy !== -1 && iMap !== -1, 'the cap allocation is gone');
+    assert.ok(iAllowed < iMayBuy && iMayBuy < iMap, 'the cap is computed inside the concurrent map — it can be overrun');
 });
 
 check('the cap counts ATTEMPTS, so a miss costs a slot', () => {
@@ -258,16 +266,21 @@ check('the cap counts ATTEMPTS, so a miss costs a slot', () => {
 });
 
 check('each purchase is charged to the run budget', () => {
-    assert.ok(/counters\.costGbp \+= ENRICH_COST_GBP_PER_LOOKUP/.test(WORKER),
-        'purchases are not charged to the run cost — maxCostGbpPerRun would never trip');
+    assert.ok(/costGbp \+= ENRICH_COST_GBP_PER_LOOKUP/.test(ENRICH),
+        'purchases are not charged — maxCostGbpPerRun would never trip');
+    assert.ok(/counters\.costGbp \+= x\.r\.costGbp/.test(WORKER),
+        'the waterfall\'s spend is not added to the run cost');
 });
 
 check('the paid phase has its own slice budget', () => {
-    // Chaining a paid lookup onto each scrape makes the per-lead worst case the SUM of both
-    // timeouts, and the leads run concurrently — the compounding that caused 504s before.
-    assert.ok(/PAID_ENRICH_BUDGET_MS/.test(WORKER), 'the paid phase is unbounded');
-    assert.ok(/timeoutMs: deadline - Date\.now\(\)/.test(WORKER),
-        'the remaining slice budget is not passed to the lookup');
+    // Each lead's steps run in order inside one deadline, and the leads run concurrently — so the
+    // slice costs the slowest lead, never the sum (the compounding that caused 504s before).
+    assert.ok(/const deadline = Date\.now\(\) \+ ENRICH_LEAD_BUDGET_MS/.test(WORKER), 'the waterfall is unbounded');
+    assert.ok(/deadline,\s*usage:/.test(WORKER), 'the deadline is not passed to the waterfall');
+    const body = ENRICH.slice(landmark(ENRICH, 'export async function runContactWaterfall('), landmark(ENRICH, 'export function worthFindingAddressFor('));
+    assert.ok(/findPersonEmail\(opts\.domain, parts, \{ timeoutMs: Math\.min\(5000, left\(\)\)/.test(body)
+        && /lookupProviderContact\(opts\.domain, \{ timeoutMs: Math\.min\(5000, left\(\)\)/.test(body),
+        'the remaining budget is not passed to the paid lookups');
     // ⚠️ Abandoning a lookup because OUR slice ran out of time is an error, not a miss — we ran
     // out of clock, not out of their addresses.
     assert.ok(/if \(timeoutMs <= 0\) return \{ status: 'error', reason: 'no_budget' \};/.test(PROVIDER),
@@ -277,9 +290,9 @@ check('the paid phase has its own slice budget', () => {
 // ── 4. What gets bought, and how it is labelled ──────────────────────────────
 
 check('a bought address is labelled provider, never scrape or manual', () => {
-    assert.ok(/source: 'provider'/.test(WORKER),
+    assert.ok(/source: 'provider'/.test(ENRICH),
         'a purchased address is not distinguishable from a scraped one');
-    assert.ok(!/source: 'manual'/.test(WORKER),
+    assert.ok(!/source: 'manual'/.test(ENRICH) && !/source: 'manual'/.test(WORKER),
         "a purchased address must never be labelled 'manual' — that is the one source the gate exempts");
 });
 
