@@ -1,8 +1,11 @@
 // netlify/functions/assistant-nudges.ts
 // What pops up when you open an assistant's page (owner, 2026-10-27) — src/components/assistant-bubbles.js.
 //
-//   POST { assistantId, nudges: [{ key, text, tab?, label? }] }
-//     → 200 { nudges: [{ key, text, tab?, label?, from: { id, name } }] }
+//   POST { assistantId, nudges: [{ key, text, tab?, view?, label? }], spotted? }
+//     → 200 { nudges: [{ key, text, tab?, view?, label?, from: { id, name } }] }
+//
+// `spotted: true` is a bubble said WHILE you work (assistant-bubbles.js say()): it is recorded in Team
+// Chat the same way, but the Mentor's suggestions are only added when the page is opened.
 //
 // The page sends what it already knows (work waiting for you, being paused). This adds the Business
 // Mentor's open suggestions ABOUT this assistant, and posts every nudge to Team Chat as a message
@@ -26,7 +29,7 @@ const MAX_TEXT = 300;
 const MENTOR_SUGGESTIONS = 2;
 const ONCE_PER_MS = 24 * 60 * 60 * 1000;
 
-type Nudge = { key: string; text: string; tab?: string; label?: string; from: { id: number; name: string } };
+type Nudge = { key: string; text: string; tab?: string; view?: string; label?: string; from: { id: number; name: string } };
 
 const clean = (v: unknown, max: number): string | null =>
     typeof v === 'string' && v.trim() ? v.replace(/\s+/g, ' ').trim().slice(0, max) : null;
@@ -54,12 +57,16 @@ export default withLambda(async (event: HandlerEvent) => {
         const key = clean(n?.key, 60);
         const text = clean(n?.text, MAX_TEXT);
         if (!key || !text) continue;
-        nudges.push({ key, text, tab: clean(n?.tab, 40) ?? undefined, label: clean(n?.label, 40) ?? undefined, from: { id: assistant.id, name: assistant.name } });
+        nudges.push({
+            key, text, tab: clean(n?.tab, 40) ?? undefined, view: clean(n?.view, 40) ?? undefined,
+            label: clean(n?.label, 40) ?? undefined, from: { id: assistant.id, name: assistant.name },
+        });
     }
+    const spotted = body.spotted === true;
 
     // The Business Mentor's open suggestions about THIS assistant. Best-effort: the table is a
     // manual apply (db/z-business-mentor.sql) and an environment without it simply has none.
-    try {
+    if (!spotted) try {
         const rows = await db.select({ id: mentorProposals.id, title: mentorProposals.title, mentorId: mentorProposals.aiAssistantId })
             .from(mentorProposals)
             .where(and(
@@ -104,7 +111,7 @@ export default withLambda(async (event: HandlerEvent) => {
             await postTeamMessage(db, {
                 organisationId, fromAssistantId: n.from.id, toUser: true, kind: 'message', body: n.text,
                 link: n.from.id === assistant.id
-                    ? { assistantId: assistant.id, ...(n.tab ? { tab: n.tab } : {}), label: n.label || `Open ${assistant.name}` }
+                    ? { assistantId: assistant.id, ...(n.tab ? { tab: n.tab } : {}), ...(n.view ? { view: n.view } : {}), label: n.label || `Open ${assistant.name}` }
                     : { assistantId: n.from.id, chat: true, label: n.label || 'Talk it through' },
             });
         } catch (err) {

@@ -16,7 +16,7 @@
 
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { classifyEmailKind, roleOrPersonal, ROLE_EMAIL_PREFIXES } from '../src/config/lead-email-kind';
+import { classifyEmailKind, needsPersonalInboxConfirmation, roleOrPersonal, ROLE_EMAIL_PREFIXES } from '../src/config/lead-email-kind';
 import { landmark } from './landmark';
 
 let passed = 0;
@@ -38,6 +38,21 @@ check('a named individual is not', () => {
     for (const e of ['jane.smith@acme.co.uk', 'j.doe@acme.co.uk', 'rachel@acme.co.uk']) {
         assert.equal(classifyEmailKind(e), 'personal', `${e} should be a named person`);
     }
+});
+
+check('a department inbox is a role address, not a person', () => {
+    // design@ on a studio's own site was flagged "Email a named individual?" (2026-10-27).
+    for (const e of ['design@studioburntwood.co.uk', 'marketing@acme.co.uk', 'accounts@acme.co.uk', 'press@acme.co.uk', 'careers@acme.co.uk']) {
+        assert.equal(classifyEmailKind(e), 'role', `${e} should be a role inbox`);
+    }
+});
+
+check('the gate re-reads the address, so a lead stored as personal under an older list is released', () => {
+    assert.equal(needsPersonalInboxConfirmation('personal', 'scrape', 'design@studioburntwood.co.uk'), false);
+    assert.equal(needsPersonalInboxConfirmation('personal', 'scrape', 'jane.smith@acme.co.uk'), true);
+    // No address, or junk, leaves the stored verdict standing — never the lenient direction.
+    assert.equal(needsPersonalInboxConfirmation('personal', 'scrape'), true);
+    assert.equal(needsPersonalInboxConfirmation('personal', 'provider', 'not an email'), true);
 });
 
 check('separators do not disguise a role inbox', () => {

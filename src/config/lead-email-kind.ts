@@ -72,7 +72,12 @@ export function emailSourceLabel(source: unknown): string {
  * warning shown before approval). They must agree, which is why this predicate exists rather
  * than the condition being written out twice.
  */
-export function needsPersonalInboxConfirmation(kind: unknown, source: unknown): boolean {
+export function needsPersonalInboxConfirmation(kind: unknown, source: unknown, email?: unknown): boolean {
+    // The stored kind is a verdict from whenever the lead was found. Re-read the address itself, so
+    // a role word added to ROLE_EMAIL_PREFIXES later also lifts the caution on leads already saved
+    // as 'personal' (design@ was flagged as a named person, 2026-10-27). Only ever relaxes towards
+    // 'role' on the current list — a missing or junk address leaves the stored verdict standing.
+    if (typeof email === 'string' && classifyEmailKind(email) === 'role') return false;
     return kind === 'personal' && source !== 'manual' && !!source;
 }
 
@@ -91,6 +96,19 @@ export const ROLE_EMAIL_PREFIXES: ReadonlySet<string> = new Set([
     // but it puts needless friction on the reviewer, so keep this list current.
     'reservations', 'reservation', 'booking', 'events', 'event', 'enquires', 'frontdesk',
     'stay', 'guestservices', 'concierge', 'hire', 'orders', 'shop', 'studio', 'welcome',
+    // Departments and functions — a team's shared inbox, not a person. design@ on a studio's own
+    // site was flagged as a named individual (2026-10-27), so cover the common ones in bulk.
+    'design', 'marketing', 'accounts', 'accountsreceivable', 'accountspayable', 'finance',
+    'billing', 'invoices', 'invoice', 'payments', 'payroll', 'press', 'media', 'pr', 'news',
+    'newsletter', 'editor', 'editorial', 'advertising', 'commercial', 'partnerships', 'partners',
+    'hr', 'people', 'jobs', 'careers', 'recruitment', 'recruiting', 'legal', 'compliance',
+    'privacy', 'dataprotection', 'gdpr', 'projects', 'project', 'quotes', 'quote', 'estimates',
+    'estimating', 'service', 'services', 'customerservice', 'customerservices', 'customercare',
+    'care', 'operations', 'ops', 'it', 'tech', 'web', 'webmaster', 'digital', 'creative',
+    'production', 'workshop', 'showroom', 'store', 'trade', 'wholesale', 'deliveries',
+    'delivery', 'dispatch', 'despatch', 'warehouse', 'membership', 'members', 'feedback',
+    'appointments', 'admissions', 'lettings', 'rentals', 'valuations', 'helpdesk',
+    'servicedesk', 'headoffice', 'hq', 'studios', 'gallery', 'designteam',
 ]);
 
 /**

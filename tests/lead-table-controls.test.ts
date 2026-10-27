@@ -359,7 +359,7 @@ check('the provenance itself is still recorded, and still gates the send', () =>
     assert.ok(/emailSource = 'manual'/.test(HUB) && /LeadEmailKind\.classify/.test(HUB),
         'the Edit form must still stamp where a typed address came from');
     const send = read('netlify/functions/lead-generation.ts');
-    assert.ok(/needsPersonalInboxConfirmation\(emailKind, emailSource\)/.test(send),
+    assert.ok(/needsPersonalInboxConfirmation\(emailKind, emailSource, recipient\)/.test(send),
         'the send seam must still read the provenance — that is the gate the card never was');
 });
 

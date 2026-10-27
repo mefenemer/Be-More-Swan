@@ -346,6 +346,8 @@
         return;
       }
       if (l.chat) { window.openAssistantChat?.({ assistantId: l.assistantId }); return; }
+      // A page that is not the assistant's (a "while you work" reminder: Business Information, say).
+      if (l.view) { window.loadView?.(l.view); return; }
       window._assistantDetailInitialTab = l.tab || null;
       window.routeToAssistantDetail?.(String(l.assistantId));
       return;
