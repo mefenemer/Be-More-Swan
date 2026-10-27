@@ -2356,6 +2356,19 @@
     });
   });
 
+  register('mentor_products_update', (ui, esc) => {
+    const changes = Array.isArray(ui.changes) ? ui.changes : [];
+    const fields = ui.fields && typeof ui.fields === 'object' ? ui.fields : {};
+    const rows = changes.map((c) => `<li class="text-xs text-gray-700 break-words"><span class="font-semibold">${esc(String(c.label || ''))}:</span> ${esc(String(c.to || ''))}${c.from ? `<span class="block text-gray-500 mt-0.5">Replaces: ${esc(String(c.from))}</span>` : ''}</li>`).join('');
+    return mentorCard(esc, {
+      eyebrow: 'Products & Services', summary: ui.summary || (ui.productName ? `Update “${ui.productName}”` : ''), why: null,
+      bodyHtml: `${ui.productName ? `<p class="mt-2 text-xs font-bold text-gray-900 break-words">${esc(String(ui.productName))}</p>` : ''}<ul class="mt-1 space-y-1.5">${rows}</ul>`,
+      goLabel: 'Save this change', eventName: 'mentor:productsUpdate', detail: { id: Number(ui.productId), fields },
+      doneText: 'Saved to Business Information ▸ Products & Services — every assistant now uses it.',
+      note: 'Only these fields change. The price and everything else stay as they are.',
+    });
+  });
+
   register('mentor_quiet_mode', (ui, esc) => mentorCard(esc, {
     eyebrow: 'Quiet mode', summary: ui.summary, why: null,
     bodyHtml: `<p class="mt-2 text-xs text-gray-700">${ui.on ? 'Your Mentor will answer your questions but stop making suggestions until you ask.' : 'Your Mentor will point out what to fix and suggest next steps again.'}</p>`,

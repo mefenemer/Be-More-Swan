@@ -1503,6 +1503,12 @@
       mentorRun(e, (A, d) => A.removeProducts(d.ids));
     }
 
+    // Products & Services → org-products.ts PATCH, one product (only drawn when the user asked).
+    async function onMentorProductsUpdate(e) {
+      if (mentorAlreadyHandled(e)) return;
+      mentorRun(e, (A, d) => A.updateProduct(d.id, d.fields));
+    }
+
     // Quiet mode → update-assistant-context.ts, only that set-up answer (patchContext).
     async function onMentorQuietMode(e) {
       if (mentorAlreadyHandled(e)) return;
@@ -1987,6 +1993,7 @@
     container.addEventListener('mentor:businessProfile', onMentorBusinessProfile);
     container.addEventListener('mentor:products', onMentorProducts);
     container.addEventListener('mentor:productsRemove', onMentorProductsRemove);
+    container.addEventListener('mentor:productsUpdate', onMentorProductsUpdate);
     container.addEventListener('mentor:cardOutcome', onMentorCardOutcome);
     container.addEventListener('mentor:quietMode', onMentorQuietMode);
     container.addEventListener('mentor:support', onMentorSupport);
@@ -2078,6 +2085,7 @@
         container.removeEventListener('mentor:businessProfile', onMentorBusinessProfile);
         container.removeEventListener('mentor:products', onMentorProducts);
         container.removeEventListener('mentor:productsRemove', onMentorProductsRemove);
+        container.removeEventListener('mentor:productsUpdate', onMentorProductsUpdate);
         container.removeEventListener('mentor:cardOutcome', onMentorCardOutcome);
         container.removeEventListener('mentor:quietMode', onMentorQuietMode);
         container.removeEventListener('mentor:support', onMentorSupport);
