@@ -35,7 +35,7 @@ async function seed() {
               description: 'Reclaim hours every day. Hand your most draining task to a helper that never takes a day off.' },
             { tierKey: 'buster', name: 'The Busywork Buster', monthlyPriceGbp: '99.00',
               tierDescription: 'Tier 2 · Best for Scaling Founders',
-              description: 'Scale your business with autonomous goal tracking, an in-house editor, and your own mini digital department.',
+              description: 'Every assistant, working as one team on your social media, blog, email and leads. Includes goal tracking and The Quality Reviewer.',
               isMostPopular: true },
             { tierKey: 'employee', name: 'The Digital Employee', monthlyPriceGbp: '349.00',
               tierDescription: 'Tier 3 · Best for Teams',

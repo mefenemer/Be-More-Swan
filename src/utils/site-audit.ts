@@ -27,6 +27,7 @@ import { gatewayGenerate } from '../lib/ai-gateway';
 import { gatewayRoleModel } from './assistant-model';
 import { CRAWLERS } from '../lib/robots';
 import { fetchSiteHtml } from './site-fetch';
+import { fillSitePlanPrices } from './site-plan-prices';
 import { parseModelJson } from './model-json';
 import { createNotification } from './notify';
 import { loadProductsBlock } from './org-products';
@@ -304,7 +305,10 @@ export function fixesNowDone(open: Array<{ id: number; beforeText: string; after
 /** Read and extract one page, politely and safely (site-fetch.ts). Never throws. */
 export async function fetchSitePageLive(url: string): Promise<FetchResult> {
     const r = await fetchSiteHtml(url, CRAWLERS.mysteryShopper, { timeoutMs: FETCH_TIMEOUT_MS, maxBytes: FETCH_MAX_BYTES });
-    return r.ok ? { ok: true, page: extractSitePage(r.html, r.finalUrl) } : r;
+    if (!r.ok) return r;
+    // Our own pages fill plan prices with a script the audit doesn't run (site-plan-prices.ts).
+    const html = await fillSitePlanPrices(r.html, r.finalUrl, CRAWLERS.mysteryShopper, FETCH_TIMEOUT_MS);
+    return { ok: true, page: extractSitePage(html, r.finalUrl) };
 }
 
 // ── Database layer ──────────────────────────────────────────────────────────────────────────
