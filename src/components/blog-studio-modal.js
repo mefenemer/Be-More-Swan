@@ -785,17 +785,18 @@
     if (!swanAvailable()) return;
     var title = el('bs-title').value.trim();
     var md = state.editor ? state.editor.getMarkdown().trim() : '';
-    resolveAssistantMeta(state.assistantId).then(function (meta) {
+    // The article is NAMED, not pasted. Pasting the whole body ran past the chat's 4,000-character
+    // message limit ("Message too long") on any real article, and a whole article rewritten inside a
+    // chat turn outruns its 26 seconds anyway. Saved first, so the assistant's "Revise" card
+    // (generate-blog { revise }, src/utils/blog-resize.ts) rewrites what is on screen.
+    var saved = (state.postId && (md || title)) ? flushDraft() : Promise.resolve();
+    Promise.all([saved, resolveAssistantMeta(state.assistantId)]).then(function (res) {
+      var meta = res[1];
       var session = window.openAssistantChatModal(state.assistantId, meta.name, meta.role, meta.roleKey);
       if (!md && !title) return;   // nothing to critique yet — just open the chat
-      // The body normally opens with the title as its own H1, so only prepend the title when it
-      // isn't already the first heading — otherwise the draft reads as if it were titled twice.
-      var firstHeading = (md.match(/^#\s+(.*)$/m) || [])[1];
-      var needsTitle = title && (!firstHeading || firstHeading.trim() !== title);
-      var parts = ['Here’s a draft blog post I’m working on. Please suggest improvements and give me a stronger version I can use.', ''];
-      if (needsTitle) parts.push('# ' + title, '');
-      parts.push(md || '(no body yet)');
-      var seed = parts.join('\n');
+      var seed = state.postId
+        ? 'Please improve my article #' + state.postId + (title ? ' “' + title + '”' : '') + ' and give me a stronger version I can use.'
+        : 'I’m working on a blog post' + (title ? ' called “' + title + '”' : '') + '. Please help me improve it.';
       setTimeout(function () { try { if (session) session.sendMessage(seed); } catch (_) {} }, 60);
     });
   }

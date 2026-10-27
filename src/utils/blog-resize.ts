@@ -4,7 +4,12 @@
 //
 // Reached two ways, through ONE queue path (generate-blog.ts → process-blog-jobs.ts):
 //   • Blog Studio's two buttons;
-//   • the Blog Writer chat's confirm card (blog_action_proposal 'shorter' / 'longer').
+//   • the Blog Writer chat's confirm card (blog_action_proposal 'shorter' / 'longer' / 'revise').
+//
+// "Revise" is the same rewrite steered by the owner's own instruction ("improve it", "bring it up to
+// date with what we know now"). It exists because the chat used to do this in its reply: a whole
+// article written inside a 26-second chat turn timed out (HTTP 504), and Blog Studio's "Ask … to
+// improve" pasted the whole article into the chat, past its 4,000-character message limit.
 // It runs in the background worker for the same reason drafting does: a whole article rewritten is
 // a long model call, far past a synchronous function's 10-second ceiling.
 //
@@ -77,15 +82,26 @@ export function resizeDirective(direction: BlogResizeDirection, words: number): 
             + 'prices, quotes, customers, offers or claims that are not in the article or the business knowledge.';
 }
 
+/** The owner's instruction as a rewrite task. New facts may come only from the Business Knowledge. */
+export function reviseDirective(instruction: string, words: number): string {
+    return `Revise the article as the owner asks: "${instruction.replace(/"/g, "'")}". It is currently ${words} words; keep it about `
+        + 'that length unless they asked otherwise. Keep the title (the single level-1 heading) unless they asked to change it, and keep '
+        + 'the tone and any call to action. Where the business knowledge above is newer or more complete than the article, bring the '
+        + 'article in line with it. Do NOT invent facts, figures, names, prices, quotes, customers, offers or claims that are not in the '
+        + 'article or the business knowledge — if the owner asks for something only they could know, leave that part as it is.';
+}
+
 /**
- * Rewrite the post's body shorter or longer and save it. Returns the new and old word counts.
+ * Rewrite the post's body shorter, longer or to an instruction, and save it. Returns the new and old word counts.
  * Throws on an empty article, a missing post or an unusable reply — the worker turns that into the
  * job's error, which Blog Studio shows.
  */
 export async function resizeBlogBody(
     db: Db,
-    opts: { blogPostId: number; organisationId: number; userId: number; direction: BlogResizeDirection },
+    opts: { blogPostId: number; organisationId: number; userId: number; direction?: BlogResizeDirection; instruction?: string },
 ): Promise<{ before: number; after: number }> {
+    const instruction = opts.instruction?.trim();
+    if (!opts.direction && !instruction) throw new Error('Nothing to rewrite to — say what should change.');
     const [post] = await db
         .select({ id: blogPosts.id, body: blogPosts.bodyMarkdown, assistantId: blogPosts.assistantId, publishDate: blogPosts.publishDate })
         .from(blogPosts)
@@ -127,7 +143,7 @@ export async function resizeBlogBody(
             + 'Keep every line of the form [[PICTURE n]] exactly as written, on its own line, near the text it illustrates. '
             + 'Keep links only as they already appear; add no new ones. Match the language of the original.'
             + (guardrails ? `\n\n${guardrails}` : ''),
-        messages: [{ role: 'user', content: `Article:\n"""\n${text}\n"""\n\nTask: ${resizeDirective(opts.direction, before)}` }],
+        messages: [{ role: 'user', content: `Article:\n"""\n${text}\n"""\n\nTask: ${instruction ? reviseDirective(instruction, before) : resizeDirective(opts.direction as BlogResizeDirection, before)}` }],
     });
 
     const raw = stripCodeFences(((response.content[0] as { text?: string })?.text ?? '').trim()).trim();

@@ -149,7 +149,7 @@ for (const r of ROLES) {
             assert.ok(/never say a post HAS been approved, rejected, retried, moved, removed, shortened or lengthened/.test(surfaces));
         } else if (r.helper === 'blogSurfaces') {
             assert.ok(/only that click changes anything/.test(surfaces), 'the blog chat must say the user\'s click acts, not the chat');
-            assert.ok(/never say an article HAS been approved, scheduled, unscheduled, rejected, removed, shortened or lengthened/.test(surfaces));
+            assert.ok(/never say an article HAS been approved, scheduled, unscheduled, rejected, removed, shortened, lengthened or revised/.test(surfaces));
             assert.ok(/You cannot publish one immediately/.test(surfaces));
         } else {
             // Email (chat-email-action.ts, 2026-10-21): the same confirm-card rule.

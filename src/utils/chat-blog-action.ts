@@ -1,8 +1,11 @@
 // src/utils/chat-blog-action.ts
 // The Blog Writer chat's hands on articles that ALREADY exist: approve one (the assistant picks the
 // time), book one for a time the user names, take one off the schedule, reject one with a reason,
-// remove one nobody wants (archived, as the Blogs tab's Remove does), and make one shorter or longer
-// (Blog Studio's two buttons — generate-blog { resize }, src/utils/blog-resize.ts).
+// remove one nobody wants (archived, as the Blogs tab's Remove does), make one shorter or longer
+// (Blog Studio's two buttons — generate-blog { resize }, src/utils/blog-resize.ts), and revise one
+// to the user's instruction ("improve it", "bring it up to date") — generate-blog { revise }, the
+// same background rewrite. Revise exists because the chat used to rewrite the article in its own
+// reply: too long for a 26-second turn (HTTP 504).
 //
 // ── Why ──────────────────────────────────────────────────────────────────────────────────────────
 // Every capability is meant to be reachable from the GUI and from chat, through the same server
@@ -33,7 +36,7 @@ import { blogPosts } from '../../db/schema';
 type Db = ReturnType<typeof getDb>;
 
 export const BLOG_ACTION_PROPOSAL_TYPE = 'blog_action_proposal';
-export const BLOG_ACTIONS = ['approve', 'schedule', 'unschedule', 'reject', 'remove', 'shorter', 'longer'] as const;
+export const BLOG_ACTIONS = ['approve', 'schedule', 'unschedule', 'reject', 'remove', 'shorter', 'longer', 'revise'] as const;
 export type BlogAction = typeof BLOG_ACTIONS[number];
 
 /** Which statuses each action applies to. Mirrors the Blogs tab's columns (assistants.js). */
@@ -53,6 +56,7 @@ const ACTIONABLE: Record<BlogAction, readonly string[]> = {
     // change) — so does the card.
     shorter: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'failed', 'paused'],
     longer: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'failed', 'paused'],
+    revise: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'failed', 'paused'],
 };
 
 /** Said on the card when the article is not in a state the action applies to. */
@@ -64,6 +68,7 @@ const NOT_NOW: Record<BlogAction, string> = {
     remove: 'This article can’t be removed: it is live, publishing right now, or already archived.',
     shorter: 'This article can’t be rewritten now: it is live or publishing (unpublish it first), or it was turned down or archived.',
     longer: 'This article can’t be rewritten now: it is live or publishing (unpublish it first), or it was turned down or archived.',
+    revise: 'This article can’t be rewritten now: it is live or publishing (unpublish it first), or it was turned down or archived.',
 };
 
 const TITLE_MAX = 200;
@@ -77,6 +82,8 @@ export interface BlogActionRequest {
     reason: string | null;
     /** Schedule: the time in the user's own words. */
     when: string | null;
+    /** Revise: what should change, in the user's terms. */
+    instruction?: string | null;
 }
 
 /** Shape check on the model's output. Pure. Null when it is not a usable proposal. */
@@ -91,11 +98,15 @@ export function blogActionFromUiElement(uiElement: unknown): BlogActionRequest |
     const when = str(ui.when, WHEN_MAX);
     // A schedule with no time is not a proposal.
     if (action === 'schedule' && !when) return null;
+    const instruction = str(ui.instruction, REASON_MAX);
+    // Nor is a revise with nothing to change.
+    if (action === 'revise' && !instruction) return null;
     return {
         action,
         postId,
         reason: action === 'reject' ? str(ui.reason, REASON_MAX) : null,
         when: action === 'schedule' ? when : null,
+        instruction: action === 'revise' ? instruction : null,
     };
 }
 
@@ -112,6 +123,7 @@ export interface BlogActionCard {
     timezone: string | null;
     reason: string | null;
     when: string | null;
+    instruction: string | null;
     /** Set when the action does not apply; the card says it and offers no button. */
     blocked: string | null;
     settled?: boolean;
@@ -149,6 +161,7 @@ export async function resolveBlogActionProposal(
             timezone: timezone ?? null,
             reason: req.reason,
             when: req.when,
+            instruction: req.instruction ?? null,
             blocked: ACTIONABLE[req.action].includes(post.status) ? null : NOT_NOW[req.action],
         };
 

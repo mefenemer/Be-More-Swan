@@ -18,6 +18,8 @@
 //   POST { blogPostId, resize: 'shorter'|'longer' }      → 202 { jobId, … } — "Make it shorter/longer"
 //        (src/utils/blog-resize.ts): rewrites the saved body to a new length; metered as a helper,
 //        like the social post editor's same two buttons.
+//   POST { blogPostId, revise: '<instruction>' }       → 202 { jobId, … } — the same rewrite, to the
+//        owner's words (the chat's "Revise" card, Blog Studio's "Ask … to improve"). Same price.
 //   GET  ?jobId=<uuid>                                   → 200 { status, resultBlogPostId, errorMessage }
 //
 // The job carries the blogPostId in `result_blog_post_id`, which is what tells the worker to draft
@@ -159,8 +161,12 @@ export default withLambda(async (event: HandlerEvent) => {
     if (!Number.isFinite(id)) return { statusCode: 400, body: JSON.stringify({ error: 'blogPostId is required.' }) };
 
     const resize = body.resize === 'shorter' || body.resize === 'longer' ? body.resize as 'shorter' | 'longer' : undefined;
+    // "Revise": rewrite the saved body to the owner's instruction (src/utils/blog-resize.ts). Same job,
+    // same price and same live-article rule as Shorter / Longer.
+    const revise = !resize && typeof body.revise === 'string' && body.revise.trim() ? body.revise.trim().slice(0, 500) : undefined;
+    const rewrite = !!(resize || revise);
     const topic = typeof body.topic === 'string' ? body.topic.trim() : '';
-    if (!topic && !resize) return { statusCode: 400, body: JSON.stringify({ error: 'Add a topic to draft from.' }) };
+    if (!topic && !rewrite) return { statusCode: 400, body: JSON.stringify({ error: 'Add a topic to draft from.' }) };
 
     // Ownership is settled HERE, while there is still someone to tell. The worker re-checks by
     // org-scoping its write, but it runs minutes later with no way to answer the browser — and this
@@ -173,14 +179,14 @@ export default withLambda(async (event: HandlerEvent) => {
     if (!post) return { statusCode: 404, body: JSON.stringify({ error: 'Blog post not found.' }) };
     // A live article is not rewritten underneath its readers: the new body would sit in the editor
     // while the published copy stayed as it was. Take it off the site first.
-    if (resize && (post.status === 'published' || post.status === 'publishing')) {
-        return { statusCode: 409, body: JSON.stringify({ error: 'This article is live. Unpublish it first, then make it shorter or longer.' }) };
+    if (rewrite && (post.status === 'published' || post.status === 'publishing')) {
+        return { statusCode: 409, body: JSON.stringify({ error: resize ? 'This article is live. Unpublish it first, then make it shorter or longer.' : 'This article is live. Unpublish it first, then ask for the rewrite.' }) };
     }
 
     // Shorter / Longer cost what the social editor's same buttons cost: a helper, under fair use —
     // not a task, which is what a whole new article is charged. Settled here, while there is
     // someone to tell; the worker skips the task check for these.
-    if (resize) {
+    if (rewrite) {
         const credit = await meterInteraction(db, organisationId, 'helpers');
         if (!credit.allowed) {
             const code = credit.failed ? 503 : credit.fairUse ? 429 : 403;
@@ -223,6 +229,7 @@ export default withLambda(async (event: HandlerEvent) => {
             // Blog Studio's "Type of article" — validated where it is used (articleTypeByKey).
             articleType: typeof body.articleType === 'string' ? body.articleType : undefined,
             resize,
+            revise,
         }),
         // ⚠️ THE DISCRIMINATOR. Pre-set to the post already open in the editor, which is what tells
         // process-blog-jobs to draft into it rather than insert a second one.

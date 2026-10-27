@@ -3545,6 +3545,10 @@
           <span>Also keep this as a rule for future posts. A replacement is written either way.</span>
         </label>` : ''}
       ${!blocked && ui.action === 'approve' ? '<p class="text-xs text-gray-600 mt-3">It’s booked into a free slot in your posting schedule.</p>' : ''}
+      ${!blocked && ui.action === 'revise' ? `
+        <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-instruction-${postId}">What to change</label>
+        <textarea id="bap-instruction-${postId}" data-bap-instruction rows="3" maxlength="500" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
+        <p class="text-xs text-gray-600 mt-2">The article is rewritten and saved in place, using your Business Knowledge for anything new — no invented facts. Pictures and links stay. The title, SEO and schedule don’t change.</p>` : ''}
       ${!blocked && ui.action === 'remove' ? '<p class="text-xs text-gray-600 mt-3">It moves to Archived. Nothing is learned from it and no replacement is written.</p>' : ''}
       ${!blocked && (ui.action === 'shorter' || ui.action === 'longer') ? `<p class="text-xs text-gray-600 mt-3">${ui.action === 'shorter' ? 'About half the length — same message, nothing new added.' : 'About half as long again — it develops what the post already says, with no invented facts.'} Each platform’s caption is rewritten and saved. It stays where it is in your queue.</p>` : ''}
       ${!blocked && ui.action === 'retry' && ui.when ? `<p class="text-sm text-gray-700 mt-3"><span class="font-bold">Try again at:</span> ${esc(ui.when)}</p>
@@ -3606,6 +3610,8 @@
     // Blog Studio's "Make it shorter" / "Make it longer".
     shorter: { head: 'Make this article shorter', button: 'Make it shorter', busy: 'Rewriting — about a minute…' },
     longer: { head: 'Make this article longer', button: 'Make it longer', busy: 'Rewriting — about a minute…' },
+    // The same background rewrite, to the user's own words ("improve it", "bring it up to date").
+    revise: { head: 'Revise this article', button: 'Rewrite it', busy: 'Rewriting — about a minute…' },
   };
 
   function renderBlogActionProposalCard(ui, esc) {
@@ -3654,7 +3660,7 @@
       <p class="hidden mt-2 text-xs font-semibold" data-bap-status role="status" aria-live="polite"></p>`;
     const status = el.querySelector('[data-bap-status]');
     const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
-    const setBusy = (b) => el.querySelectorAll('[data-bap-go], [data-bap-cancel], [data-bap-reason], [data-bap-rule], [data-bap-redraft]').forEach((x) => { x.disabled = b; });
+    const setBusy = (b) => el.querySelectorAll('[data-bap-go], [data-bap-cancel], [data-bap-reason], [data-bap-instruction], [data-bap-rule], [data-bap-redraft]').forEach((x) => { x.disabled = b; });
     el.addEventListener('change', (e) => {
       if (!e.target.matches('[data-bap-redraft]')) return;
       const go = el.querySelector('[data-bap-go]');
@@ -3666,12 +3672,14 @@
       if (!e.target.closest('[data-bap-go]')) return;
       const reason = el.querySelector('[data-bap-reason]')?.value.trim() || '';
       if (ui.action === 'reject' && !reason) { say('Say what’s wrong with it first — that is what your assistant learns from.', 'error'); return; }
+      const instruction = el.querySelector('[data-bap-instruction]')?.value.trim() || '';
+      if (ui.action === 'revise' && !instruction) { say('Say what should change first.', 'error'); return; }
       setBusy(true);
       say(copy.busy);
       el.dispatchEvent(new CustomEvent('blog:action', {
         bubbles: true,
         detail: {
-          action: ui.action, postId, scheduleAt: ui.scheduleAt || null, timezone: ui.timezone || null, reason,
+          action: ui.action, postId, scheduleAt: ui.scheduleAt || null, timezone: ui.timezone || null, reason, instruction,
           applyAsRule: !!el.querySelector('[data-bap-rule]')?.checked,
           redraft: !!el.querySelector('[data-bap-redraft]')?.checked,
           respond({ ok, message, error }) {

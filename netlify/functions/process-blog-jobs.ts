@@ -193,7 +193,10 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
     // "Make it shorter / longer" (src/utils/blog-resize.ts) rides the interactive path: it rewrites the
     // body of the post the author has open. Metered as a helper in generate-blog.ts, so the task
     // check and the task charge below are skipped for it.
-    const resize = interactive ? decodeInteractiveBrief(job.context_prompt)?.resize : undefined;
+    const rewrite = interactive ? decodeInteractiveBrief(job.context_prompt) : null;
+    const resize = rewrite?.resize;
+    // "Revise" (the chat's card, Blog Studio's "Ask … to improve"): the same rewrite, to the owner's words.
+    const revise = rewrite?.revise;
 
     // Set with the 'completed' write. Everything after that point is a follow-up — a notification, a
     // hand-off — and a failure there must not re-queue a job whose post is already written: the
@@ -205,7 +208,7 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
         // Monthly task allowance (src/utils/work-metering.ts). Before any model call; terminal,
         // because the allowance does not come back until the 1st. An interactive draft's own post is
         // left untouched — the author keeps what they wrote and sees why nothing was added.
-        if (!resize && job.trigger_type !== 'admin_test' && !(await hasTaskCapacity(db, job.organisation_id))) {
+        if (!resize && !revise && job.trigger_type !== 'admin_test' && !(await hasTaskCapacity(db, job.organisation_id))) {
             console.warn(`[process-blog-jobs] job ${job.job_id}: org ${job.organisation_id} is out of tasks — not drafting.`);
             await failJob(db, job, attempt, TASK_LIMIT_MESSAGE, { terminal: true });
             return;
@@ -239,18 +242,19 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
         let tone: string | undefined;
         let articleType: string | undefined;
 
-        if (interactive && resize) {
+        if (interactive && (resize || revise)) {
             const { before, after } = await resizeBlogBody(db, {
                 blogPostId: job.result_blog_post_id as number,
                 organisationId: job.organisation_id,
                 userId: job.user_id,
                 direction: resize,
+                instruction: resize ? undefined : revise,
             });
             await db.update(contentGenerationJobs)
                 .set({ status: 'completed', errorMessage: null, updatedAt: new Date() })
                 .where(eq(contentGenerationJobs.id, job.id));
             jobCompleted = true;
-            console.log(`[process-blog-jobs] job ${job.job_id}: resized post ${job.result_blog_post_id} ${resize} (${before} → ${after} words)`);
+            console.log(`[process-blog-jobs] job ${job.job_id}: resized post ${job.result_blog_post_id} ${resize ?? 'revise'} (${before} → ${after} words)`);
             return;
         }
 
