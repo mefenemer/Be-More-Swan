@@ -387,6 +387,25 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         available: true,
         realism: { maxDailyDelta: 1000, maxDailyGrowthPct: 1 },
     },
+    // Owner, 2026-10-27: a goal for the Lead Generator's own effort, beside Qualified Leads (the
+    // decision) — how many emails actually went out. Counted from lead_messages, the thread log every
+    // real send writes (the first email, each automatic follow-up, a reply from Conversations), so it
+    // only ever rises. A lead the user marked "outreach sent" by hand is NOT counted: we never sent
+    // it, and this number must stay a count of what the assistant did.
+    {
+        key: 'outreach_emails_sent',
+        label: 'Outreach Emails Sent',
+        unit: 'emails',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'outcome',
+        roles: ['lead_qualifier'],
+        description: 'Emails this assistant has sent to prospects from your connected inbox — first emails, '
+            + 'automatic follow-ups and replies from the Conversations tab, counted over all time. Emails you '
+            + 'sent yourself and marked as sent aren’t counted.',
+        available: true,
+        realism: { maxDailyDelta: 1000, maxDailyGrowthPct: 1 },
+    },
     {
         key: 'leads_scored',
         label: 'Leads Scored',

@@ -75,6 +75,36 @@ async function main() {
         assert.strictEqual(leadActionFromUiElement({ type: 'lead_action_proposal', action: 'delete', recordId: 12 }), null);
     });
 
+    console.log('\n"Approve all" (send_all, 2026-10-27)');
+
+    await check('send_all needs no recordId; named leads ride in recordIds, "#" stripped and deduped', () => {
+        assert.deepStrictEqual(leadActionFromUiElement({ type: 'lead_action_proposal', action: 'send_all' }),
+            { action: 'send_all', recordId: 0, recordIds: null, outcome: null, lossReason: null, valueGbp: null });
+        assert.deepStrictEqual(leadActionFromUiElement({ type: 'lead_action_proposal', action: 'send_all', recordIds: ['#12', 14, 12, 'x'] })?.recordIds, [12, 14]);
+    });
+    await check('the bulk card carries every sendable email verbatim and SKIPS a named person\'s inbox', async () => {
+        const personal = { ...lead('pending_approval', { emailKind: 'personal', emailSource: 'scrape' }), id: 13, title: 'Bob Ltd' };
+        const db = fakeDb([lead('pending_approval'), personal], ASSISTANT, ORG, []);
+        const card = await resolveLeadActionProposal(db, 1, 7, { action: 'send_all', recordId: 0, recordIds: null, outcome: null, lossReason: null, valueGbp: null });
+        assert.ok(card && !card.blocked, `blocked: ${card?.blocked}`);
+        assert.strictEqual(card!.items!.length, 1);
+        assert.strictEqual(card!.items![0].body, DRAFT.body);
+        assert.strictEqual(card!.items![0].draftHash, outreachDraftFingerprint(DRAFT.to, DRAFT.subject, DRAFT.body));
+        assert.deepStrictEqual(card!.skipped!.map((x) => x.recordId), [13]);
+    });
+    await check('an empty Review column gives a blocked bulk card, not a button', async () => {
+        const card = await resolveLeadActionProposal(fakeDb([]), 1, 7, { action: 'send_all', recordId: 0, recordIds: null, outcome: null, lossReason: null, valueGbp: null });
+        assert.ok(card?.blocked && !card.items!.length);
+    });
+    await check('the bulk run never confirms a personal inbox or overrules do-not-contact', () => {
+        const run = read('src/components/lead-bulk-send.js');
+        assert.ok(!/confirmPersonal|override_do_not_contact/.test(run.replace(/\/\/[^\n]*/g, '')));
+        assert.match(run, /checkOnly: true/);
+        assert.match(read('src/components/chat-session.js'), /d\.action === 'send_all'[\s\S]{0,900}LeadBulkSend\.run/);
+        assert.match(read('workspace.html'), /lead-bulk-send\.js/);
+        assert.match(read('assistant-chat.html'), /lead-bulk-send\.js/);
+    });
+
     console.log('\nThe send card shows the stored email, from the row');
 
     await check('a lead that is not this assistant\'s gives no card', async () => {

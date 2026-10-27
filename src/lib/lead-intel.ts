@@ -38,6 +38,7 @@
 import * as cheerio from 'cheerio';
 import { safeFetchText } from '../utils/safe-fetch';
 import { isSearchConfigured, search, type SearchResult } from './discovery-search';
+import { discoverSitePaths } from './discovery-enrich';
 
 const TIMEOUT_MS = Number(process.env.LEAD_INTEL_TIMEOUT_MS ?? '8000');
 const ENABLED = (process.env.LEAD_INTEL_ENABLED ?? 'true').toLowerCase() !== 'false';
@@ -228,7 +229,11 @@ export async function gatherLeadIntel(
 
     // Two team pages at most. A third rarely says anything the first two did not, and each one is
     // a fetch against a stranger's server that we are making on a timer they never agreed to.
-    for (const path of PEOPLE_PATHS) {
+    // The homepage's own about / meet-the-maker links first: a Shopify shop's is
+    // `/pages/meet-the-maker`, which no fixed guess reaches (see discoverSitePaths).
+    const linkedPeoplePaths = home ? discoverSitePaths(home.html, domain, 'about').slice(0, 3) : [];
+    const peoplePaths = [...new Set([...linkedPeoplePaths, ...PEOPLE_PATHS])];
+    for (const path of peoplePaths) {
         if (peopleSources.length >= 2) break;
         const page = await readPage(domain, path);
         if (!page) continue;

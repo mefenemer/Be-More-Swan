@@ -6,7 +6,8 @@
 // Run:  npx tsx tests/discovery-enrich.test.ts
 
 import assert from 'node:assert';
-import { extractEmails } from '../src/lib/discovery-enrich';
+import { readFileSync } from 'node:fs';
+import { extractEmails, discoverSitePaths } from '../src/lib/discovery-enrich';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -178,6 +179,39 @@ check('strips mailto query params like ?subject=', () => {
 
 check('a page with no contact address yields nothing', () => {
     assert.equal(extractEmails(page('<h1>Welcome</h1><p>Call 0800 000 000</p>'), 'acme.co.uk').length, 0);
+});
+
+// ── Following the site's own links (debonaircandles.co.uk, 2026-10-27) ──
+// A Shopify shop: /contact, /contact-us and /about all 404, and the address is published only on
+// the /policies/ pages its footer links to. The fixed path list could never reach it.
+const shopifyHome = page(`
+    <nav><a href="/pages/meet-the-maker">Meet the Maker</a><a href="/pages/contact">Contact</a></nav>
+    <footer>
+      <a href="/policies/privacy-policy">Privacy policy</a>
+      <a href="/policies/contact-information">Contact information</a>
+      <a href="https://www.instagram.com/debonaircandles">Instagram</a>
+      <a href="https://elsewhere.example/contact">Partner</a>
+      <a href="/cdn/shop/files/logo.png">logo</a>
+    </footer>`);
+
+check('contact discovery follows the shop\'s own contact and policy links, best first', () => {
+    const paths = discoverSitePaths(shopifyHome, 'www.debonaircandles.co.uk', 'contact');
+    assert.deepEqual(paths.slice(0, 3), ['/pages/contact', '/policies/contact-information', '/policies/privacy-policy']);
+});
+
+check('link discovery never leaves the lead\'s own domain', () => {
+    const paths = discoverSitePaths(shopifyHome, 'debonaircandles.co.uk', 'contact');
+    assert.ok(!paths.some((p) => p.includes('elsewhere') || p.includes('instagram')));
+    assert.ok(!paths.some((p) => p.endsWith('.png')));
+});
+
+check('about discovery finds a meet-the-maker page', () => {
+    assert.deepEqual(discoverSitePaths(shopifyHome, 'debonaircandles.co.uk', 'about'), ['/pages/meet-the-maker']);
+});
+
+check('the enrichment loop queues the homepage\'s links ahead of the fixed guesses', () => {
+    const src = readFileSync(new URL('../src/lib/discovery-enrich.ts', import.meta.url), 'utf8');
+    assert.match(src, /queue\.unshift\(\.\.\.linked\)/);
 });
 
 console.log(`\n${passed} checks passed.`);

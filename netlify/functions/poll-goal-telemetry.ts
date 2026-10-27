@@ -427,6 +427,23 @@ async function fetchMetric(
             // tables share a name and nothing else; the schema calls the collision out at
             // db/schema.ts:3273.
             return countRecords(db, goal, 'lead', sql`approval_status IN ('approved', 'scheduled')`);
+        case 'outreach_emails_sent':
+            // Every email this assistant actually sent a prospect: lead_messages is written by each
+            // real send (lead-generation.ts send_outreach, process-sequence-sends.ts, lead-threads.ts
+            // replies) and never by "Mark outreach sent". Scoped through the thread, which carries the
+            // assistant; the message row only carries the org. countOrUnmeasured: an environment
+            // without the threads schema reads "unmeasured", not a failure.
+            return countOrUnmeasured(async () => {
+                const [row] = await db.execute(sql`
+                    SELECT count(*)::int AS v
+                      FROM lead_messages m
+                      JOIN lead_threads t ON t.id = m.lead_thread_id
+                     WHERE m.direction = 'outbound'
+                       AND m.organisation_id = ${goal.organisationId}
+                       AND t.organisation_id = ${goal.organisationId}
+                       AND t.ai_assistant_id = ${goal.assistantId}`);
+                return Number((row as { v?: number })?.v ?? 0);
+            });
         case 'content_published': {
             const [row] = await db
                 .select({ v: sql<number>`count(*)::int` })

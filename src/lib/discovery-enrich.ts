@@ -37,6 +37,62 @@ export interface EnrichmentResult {
 // carries a footer address on most SMB sites and costs one fetch.
 const CANDIDATE_PATHS = ['', '/contact', '/contact-us', '/about'];
 
+// ── Following the site's own links (debonaircandles.co.uk, 2026-10-27) ──────
+// The fixed list above only works where a site happens to use those exact URLs. Shopify — the
+// default platform for the small DTC shops this product prospects — puts every page under
+// `/pages/…` and the legal pages under `/policies/…`, so on a Shopify shop all three guesses 404.
+// On debonaircandles.co.uk the address (info@) is published ONLY on the five /policies/ pages,
+// which the homepage footer links to; the scraper never looked there and filed "None found".
+// A Copilot search found it because a search engine has already crawled those pages.
+//
+// So the homepage's own links are read first: whatever the site calls its contact, about and
+// policy pages, it links to them. Still extraction only — a linked page is a page the company
+// published, and every address still has to be literally on it and on the lead's own domain.
+const CONTACT_LINK_RE = /contact|get-in-touch|enquir|policies\/(contact-information|privacy-policy|refund-policy|terms-of-service)/i;
+const ABOUT_LINK_RE = /about|meet-the-|our-story|our-team|^\/team|founder|who-we-are/i;
+
+/**
+ * Same-site pages worth reading, from a page's own links, best first: contact pages, then policy
+ * pages (Shopify's contact-information page carries the store's address by design), then about /
+ * meet-the-maker pages. Paths only — the host is the caller's, so a link to another domain can
+ * never be followed. Exported for lead-intel.ts, which wants the about half for named people.
+ */
+export function discoverSitePaths(html: string, host: string, kind: 'contact' | 'about'): string[] {
+    const $ = cheerio.load(html);
+    const bare = host.toLowerCase().replace(/^www\./, '');
+    const scored: Array<{ path: string; rank: number }> = [];
+    const seen = new Set<string>();
+    $('a[href]').each((_, el) => {
+        const href = ($(el).attr('href') || '').trim();
+        if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
+        let url: URL;
+        try { url = new URL(href, `https://${bare}`); } catch { return; }
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') return;
+        if (url.hostname.toLowerCase().replace(/^www\./, '') !== bare) return;
+        const path = url.pathname.replace(/\/+$/, '');
+        if (!path || seen.has(path.toLowerCase())) return;
+        if (ASSET_EXTENSIONS.test(path)) return;
+        const label = `${path} ${$(el).text()}`.toLowerCase();
+        let rank = -1;
+        if (kind === 'contact') {
+            if (/contact|get-in-touch|enquir/.test(label) && !/policies\//.test(path)) rank = 0;
+            else if (/policies\/contact-information/i.test(path)) rank = 1;
+            else if (CONTACT_LINK_RE.test(path)) rank = 2;
+            else if (ABOUT_LINK_RE.test(path)) rank = 3;
+        } else if (ABOUT_LINK_RE.test(path) || /\b(about|meet the|our story|team)\b/.test(label)) {
+            rank = 0;
+        }
+        if (rank < 0) return;
+        seen.add(path.toLowerCase());
+        scored.push({ path, rank });
+    });
+    return scored.sort((a, b) => a.rank - b.rank).map((s) => s.path);
+}
+
+// Linked pages read per lead, on top of the homepage. The LEAD_BUDGET_MS wall clock still bounds
+// the whole lead; this bounds how many requests one stranger's server gets from us.
+const MAX_LINKED_PAGES = 4;
+
 // The role-vs-personal vocabulary now lives in src/config/lead-email-kind.ts. It moved out of this
 // file when the scraper stopped being the only writer of `emailKind`: a hand-typed address (item 9)
 // has to be classified by the SAME rule, in the browser, or the two writers label the same inbox
@@ -311,7 +367,15 @@ export async function enrichLeadContact(domain: string | null): Promise<Enrichme
     const handles: SocialHandles = {};
     const deadline = Date.now() + LEAD_BUDGET_MS;
 
-    for (const path of CANDIDATE_PATHS) {
+    // The queue grows after the homepage is read: its own links go to the FRONT (they exist), and
+    // the fixed guesses stay behind them as the fallback for a homepage we could not read.
+    const queue = [...CANDIDATE_PATHS];
+    const tried = new Set<string>();
+
+    while (queue.length) {
+        const path = queue.shift()!;
+        if (tried.has(path.toLowerCase())) continue;
+        tried.add(path.toLowerCase());
         // Give up on a slow site rather than starve the rest of the batch. Anything
         // already found (a personal address) is still returned below.
         const remaining = deadline - Date.now();
@@ -349,6 +413,13 @@ export async function enrichLeadContact(domain: string | null): Promise<Enrichme
         // canonical place a company lists its own profiles.
         for (const [k, v] of Object.entries(extractSocialHandles(body, host))) {
             if (!handles[k as SocialPlatformKey]) handles[k as SocialPlatformKey] = v;
+        }
+
+        if (path === '') {
+            const linked = discoverSitePaths(body, host, 'contact')
+                .filter((p) => !tried.has(p.toLowerCase()))
+                .slice(0, MAX_LINKED_PAGES);
+            queue.unshift(...linked);
         }
 
         const hits = extractEmails(body, host);

@@ -3854,7 +3854,78 @@
     set_outcome: { head: 'Record how this deal ended', busy: 'Recording…' },
   };
 
+  // "Approve all" (send_all): every email on the card, word for word, and ONE button. The click
+  // dispatches `lead:action` with the items; chat-session.js runs them through LeadBulkSend
+  // (src/components/lead-bulk-send.js), the same run as the Outreach tab's bulk bar.
+  function renderLeadBulkSendCard(ui, esc) {
+    const items = Array.isArray(ui.items) ? ui.items : [];
+    const skipped = Array.isArray(ui.skipped) ? ui.skipped : [];
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const n = items.length;
+    const emails = items.map((it, i) => `
+      <details class="rounded-lg border border-gray-200 bg-gray-50" ${i === 0 ? 'open' : ''}>
+        <summary class="cursor-pointer px-3 py-2 text-sm">
+          <span class="font-bold text-gray-900 break-words">${esc(it.title || `#${it.recordId}`)}</span>
+          <span class="block text-xs text-gray-600 break-all">To ${esc(it.to || 'no address')} · ${esc(it.subject || '')}</span>
+        </summary>
+        <div class="px-3 pb-3">
+          <p class="text-sm text-gray-900 whitespace-pre-wrap break-words">${esc(it.body || '')}</p>
+          ${ui.signature ? `<p class="text-sm text-gray-700 whitespace-pre-wrap break-words mt-3">${esc(ui.signature)}</p>` : ''}
+        </div>
+      </details>`).join('');
+    const skippedHtml = skipped.length ? `
+      <div class="mt-3">
+        <p class="text-sm font-bold text-gray-900">Not on this card (${skipped.length})</p>
+        <ul class="mt-1 space-y-1">${skipped.map((x) => `<li class="text-xs text-gray-700"><span class="font-bold">${esc(x.title || `#${x.recordId}`)}</span> — ${esc(x.why || '')}</li>`).join('')}</ul>
+      </div>` : '';
+    const f = ui.followUps;
+    const followHtml = blocked || !n ? ''
+      : f && f.enabled && Array.isArray(f.steps) && f.steps.length
+        ? `<p class="mt-3 text-xs text-gray-700">If a lead doesn’t reply, up to ${f.steps.length} follow-up${f.steps.length === 1 ? '' : 's'} go automatically (day ${f.steps.map((st) => esc(String(st.daysAfterOpener))).join(', ')}), each written when it’s due and stopped the moment they reply.</p>`
+        : f && !f.enabled ? '<p class="mt-3 text-xs text-gray-600">No follow-ups: this assistant is set to send one email only.</p>'
+        : '<p class="mt-3 text-xs text-amber-800">I couldn’t check whether follow-ups would start. If this assistant chases automatically, more emails follow unless they reply.</p>';
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-lg';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Approve &amp; send ${n === 1 ? '1 email' : `${n} emails`} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      ${n ? `<p class="text-xs text-gray-600 mt-2">Each email below goes exactly as shown — tap one to read it. Added at the bottom of each: ${ui.signature ? 'your signature, then ' : ''}a one-click unsubscribe line and ${esc(ui.footerName || 'your business name')}${ui.footerAddress ? `, ${esc(ui.footerAddress)}` : ' and postal address'}.</p>
+      <div class="mt-3 space-y-2 max-h-96 overflow-y-auto" tabindex="0" aria-label="The emails that will be sent">${emails}</div>` : ''}
+      ${ui.more ? `<p class="mt-2 text-xs text-gray-600">${esc(String(ui.more))} more are waiting — ask again once these have gone.</p>` : ''}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${skippedHtml}
+      ${followHtml}
+      ${blocked ? '' : `<p class="text-xs text-gray-600 mt-3">Pressing the button approves ${n === 1 ? 'this lead' : `these ${n} leads`} and sends ${n === 1 ? 'its email' : 'their emails'} now from your connected inbox, one after another.</p>`}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-lap-go class="btn-golive min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${n === 1 ? 'Approve &amp; send email' : `Approve &amp; send ${n} emails`}</button>
+        <button type="button" data-lap-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-lap-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-lap-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-lap-go], [data-lap-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-lap-cancel]')) { setBusy(true); say('Left as they are.'); return; }
+      if (!e.target.closest('[data-lap-go]')) return;
+      setBusy(true);
+      say(`Sending 1 of ${n}…`);
+      el.dispatchEvent(new CustomEvent('lead:action', {
+        bubbles: true,
+        detail: {
+          action: 'send_all', assistantId: Number(ui.assistantId) || null,
+          items: items.map((it) => ({ recordId: Number(it.recordId), title: it.title, draftHash: it.draftHash, approveFirst: true })),
+          progress(done) { say(`Sending ${Math.min(done + 1, n)} of ${n}…`); },
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Done.'); return; }
+            say(error || 'That didn’t work.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
   function renderLeadActionProposalCard(ui, esc) {
+    if (ui.action === 'send_all') return renderLeadBulkSendCard(ui, esc);
     const copy = LEAD_ACTION_COPY[ui.action];
     const recordId = Number(ui.recordId);
     if (!copy || !Number.isInteger(recordId)) return null;

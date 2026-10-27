@@ -33,7 +33,7 @@
 // ⚠️ Never throws.
 
 import { createHash } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords, organisations } from '../../db/schema';
 import { hasOutreachDraft, isInOutreachReview, resolveLeadRecipient } from '../config/lead-recipient';
@@ -51,7 +51,14 @@ import { previewFollowUps } from './outreach-sequences';
 type Db = ReturnType<typeof getDb>;
 
 export const LEAD_ACTION_PROPOSAL_TYPE = 'lead_action_proposal';
-export const LEAD_ACTIONS = ['send', 'move_to_outreach', 'reject', 'set_outcome'] as const;
+export const LEAD_ACTIONS = ['send', 'send_all', 'move_to_outreach', 'reject', 'set_outcome'] as const;
+
+/**
+ * "Approve all" (owner, 2026-10-27): the most emails one card offers. Every one of them is shown on the
+ * card word for word, so this is also a limit on how long a card a person can honestly be said to have
+ * read. The card says when there are more.
+ */
+export const LEAD_BULK_MAX = 20;
 export type LeadAction = typeof LEAD_ACTIONS[number];
 
 const TITLE_MAX = 200;
@@ -82,7 +89,9 @@ export function outreachDraftFingerprint(to: string | null, subject: string, bod
 
 export interface LeadActionRequest {
     action: LeadAction;
+    /** 0 for send_all, which names its leads in `recordIds` (null = every email in the Review column). */
     recordId: number;
+    recordIds?: number[] | null;
     outcome: RevenueOutcome | null;
     lossReason: LossReason | null;
     valueGbp: number | null;
@@ -94,6 +103,12 @@ export function leadActionFromUiElement(uiElement: unknown): LeadActionRequest |
     const ui = uiElement as Record<string, unknown>;
     if (ui.type !== LEAD_ACTION_PROPOSAL_TYPE) return null;
     const action = LEAD_ACTIONS.find((a) => a === ui.action);
+    if (action === 'send_all') {
+        const ids = Array.isArray(ui.recordIds)
+            ? [...new Set(ui.recordIds.map((v) => Number(String(v ?? '').replace(/^#/, ''))).filter((n) => Number.isInteger(n) && n > 0))]
+            : [];
+        return { action, recordId: 0, recordIds: ids.length ? ids : null, outcome: null, lossReason: null, valueGbp: null };
+    }
     const recordId = Number(String(ui.recordId ?? ui.leadId ?? '').replace(/^#/, ''));
     if (!action || !Number.isInteger(recordId) || recordId <= 0) return null;
     if (action !== 'set_outcome') return { action, recordId, outcome: null, lossReason: null, valueGbp: null };
@@ -140,6 +155,12 @@ export interface LeadActionCard {
     valueGbp?: number | null;
     /** set_outcome: what it is marked as now, when it is a correction. */
     currentOutcome?: string | null;
+    /** send_all: the emails the one click sends, each exactly as send_outreach will send it. */
+    items?: Array<{ recordId: number; title: string; rating: string | null; to: string | null; subject: string; body: string; draftHash: string }>;
+    /** send_all: leads in Review that this card will NOT send, and why — each needs its own decision. */
+    skipped?: Array<{ recordId: number; title: string; why: string }>;
+    /** send_all: emails waiting beyond LEAD_BULK_MAX, left for the next card. */
+    more?: number;
     blocked: string | null;
     settled?: boolean;
 }
@@ -206,6 +227,12 @@ export async function resolveLeadActionProposal(
     db: Db, organisationId: number, aiAssistantId: number, req: LeadActionRequest,
 ): Promise<LeadActionCard | null> {
     try {
+        if (req.action === 'send_all') {
+            return await resolveBulkSend(db, organisationId, aiAssistantId, req, {
+                type: LEAD_ACTION_PROPOSAL_TYPE, action: 'send_all', recordId: 0, assistantId: aiAssistantId,
+                title: '', rating: null, approvalStatus: 'pending_approval', blocked: null,
+            });
+        }
         const rec = await loadLead(db, organisationId, aiAssistantId, req.recordId);
         if (!rec) return null;
         const title = String(rec.title ?? '').replace(/\s+/g, ' ').trim();
@@ -244,35 +271,105 @@ export async function resolveLeadActionProposal(
             }
             card.personalInbox = needsPersonalInboxConfirmation(data.emailKind, data.emailSource);
             card.approveFirst = rec.approvalStatus === 'pending_approval';
-            if (!card.blocked) {
-                const [assistant] = await db.select({ onboardingContext: aiAssistants.onboardingContext })
-                    .from(aiAssistants)
-                    .where(and(eq(aiAssistants.id, aiAssistantId), eq(aiAssistants.organisationId, organisationId)))
-                    .limit(1);
-                const ctx = (assistant?.onboardingContext && typeof assistant.onboardingContext === 'object')
-                    ? assistant.onboardingContext as Record<string, unknown> : {};
-                card.signature = signatureFromContext(ctx) || null;
-                const provider = typeof ctx.outreachEmailProvider === 'string' ? ctx.outreachEmailProvider : '';
-                if (provider !== 'google' && provider !== 'microsoft') {
-                    card.blocked = 'No inbox is set up to send from. Connect Gmail or Outlook from the Outreach tab, or copy the draft there and send it yourself.';
-                }
-                const [org] = await db.select({ name: organisations.name, postalAddress: organisations.outreachPostalAddress })
-                    .from(organisations)
-                    .where(eq(organisations.id, organisationId))
-                    .limit(1);
-                card.footerName = org?.name ?? null;
-                card.footerAddress = org?.postalAddress ?? null;
-                if (!card.blocked && !isUsablePostalAddress(org?.postalAddress)) {
-                    card.blocked = 'Add your business postal address in Business Information first — anti-spam law requires one in every outreach email.';
-                }
-                card.followUps = await previewFollowUps(db, aiAssistantId);
-            }
+            if (!card.blocked) await addSendContext(db, organisationId, aiAssistantId, card);
         }
         return card;
     } catch (err) {
         console.error('[chat-lead-action] could not resolve the proposal (non-fatal)', err);
         return null;
     }
+}
+
+/**
+ * What every send card shows beneath the email — the signature, the footer's name and address, the
+ * follow-ups — and the two WORKSPACE gates (an inbox to send from, a postal address), which fail the
+ * same way on every lead and so belong to the card, not to any one email on it.
+ */
+async function addSendContext(db: Db, organisationId: number, aiAssistantId: number, card: LeadActionCard): Promise<void> {
+    const [assistant] = await db.select({ onboardingContext: aiAssistants.onboardingContext })
+        .from(aiAssistants)
+        .where(and(eq(aiAssistants.id, aiAssistantId), eq(aiAssistants.organisationId, organisationId)))
+        .limit(1);
+    const ctx = (assistant?.onboardingContext && typeof assistant.onboardingContext === 'object')
+        ? assistant.onboardingContext as Record<string, unknown> : {};
+    card.signature = signatureFromContext(ctx) || null;
+    const provider = typeof ctx.outreachEmailProvider === 'string' ? ctx.outreachEmailProvider : '';
+    if (provider !== 'google' && provider !== 'microsoft') {
+        card.blocked = 'No inbox is set up to send from. Connect Gmail or Outlook from the Outreach tab, or copy the draft there and send it yourself.';
+    }
+    const [org] = await db.select({ name: organisations.name, postalAddress: organisations.outreachPostalAddress })
+        .from(organisations)
+        .where(eq(organisations.id, organisationId))
+        .limit(1);
+    card.footerName = org?.name ?? null;
+    card.footerAddress = org?.postalAddress ?? null;
+    if (!card.blocked && !isUsablePostalAddress(org?.postalAddress)) {
+        card.blocked = 'Add your business postal address in Business Information first — anti-spam law requires one in every outreach email.';
+    }
+    card.followUps = await previewFollowUps(db, aiAssistantId);
+}
+
+/** Why one Review-column lead is not on an "approve all" card, or null when it can go. */
+function bulkSkipReason(rec: LeadRow): string | null {
+    const block = rowBlock({ action: 'send', recordId: rec.id, outcome: null, lossReason: null, valueGbp: null }, rec);
+    if (block) return block;
+    const d = (rec.data && typeof rec.data === 'object' ? rec.data : {}) as Record<string, unknown>;
+    // A named person's inbox needs its own yes — the one-lead card asks for it. A bulk click never gives it.
+    if (needsPersonalInboxConfirmation(d.emailKind, d.emailSource)) return 'The address looks like a named person’s own inbox, so it needs its own OK — ask me to send this one on its own.';
+    return null;
+}
+
+/**
+ * "Approve all": every email waiting in the Outreach tab's Review column (or the ones the user named),
+ * each shown exactly as it will go, with the leads that cannot go this way listed and why.
+ */
+async function resolveBulkSend(
+    db: Db, organisationId: number, aiAssistantId: number, req: LeadActionRequest, card: LeadActionCard,
+): Promise<LeadActionCard> {
+    const rows: LeadRow[] = await db.select({
+        id: assistantRecords.id, title: assistantRecords.title, status: assistantRecords.status,
+        approvalStatus: assistantRecords.approvalStatus, data: assistantRecords.data,
+    })
+        .from(assistantRecords)
+        .where(and(
+            eq(assistantRecords.organisationId, organisationId),
+            eq(assistantRecords.aiAssistantId, aiAssistantId),
+            eq(assistantRecords.recordType, 'lead'),
+            eq(assistantRecords.approvalStatus, 'pending_approval'),
+        ))
+        .orderBy(desc(assistantRecords.updatedAt))
+        .limit(500);
+    const wanted = req.recordIds ? new Set(req.recordIds) : null;
+    // The Review column, by the predicate the column itself uses — or exactly the leads named.
+    const pool = rows.filter((r) => (wanted ? wanted.has(r.id) : isInOutreachReview(r.data)));
+
+    const items: NonNullable<LeadActionCard['items']> = [];
+    const skipped: NonNullable<LeadActionCard['skipped']> = [];
+    let more = 0;
+    for (const rec of pool) {
+        const title = String(rec.title ?? '').replace(/\s+/g, ' ').trim().slice(0, TITLE_MAX);
+        const why = bulkSkipReason(rec);
+        const draft = why ? null : sendableDraft(rec.data, rec.title);
+        if (why || !draft) { skipped.push({ recordId: rec.id, title, why: why || 'No email has been written for it yet.' }); continue; }
+        if (items.length >= LEAD_BULK_MAX) { more++; continue; }
+        items.push({
+            recordId: rec.id, title, rating: rec.status ? String(rec.status).toLowerCase() : null,
+            to: draft.to, subject: draft.subject, body: draft.body,
+            draftHash: outreachDraftFingerprint(draft.to, draft.subject, draft.body),
+        });
+    }
+    card.items = items;
+    card.skipped = skipped.slice(0, LEAD_BULK_MAX);
+    card.more = more;
+    card.approveFirst = true;
+    if (!items.length) {
+        card.blocked = pool.length
+            ? 'None of these emails can be sent from here — the reasons are listed. Each can be dealt with on the Outreach tab.'
+            : 'There are no emails waiting in the Outreach tab’s Review column.';
+        return card;
+    }
+    await addSendContext(db, organisationId, aiAssistantId, card);
+    return card;
 }
 
 /**
@@ -288,6 +385,25 @@ export async function refreshLeadActionCards<M extends { uiElement: unknown }>(
         if (!ui || ui.type !== LEAD_ACTION_PROPOSAL_TYPE || ui.settled) return m;
         const req = leadActionFromUiElement(ui);
         if (!req) return m;
+        if (req.action === 'send_all') {
+            // Settled once none of its emails could still go: each was sent, turned down or edited.
+            const items = Array.isArray(ui.items) ? ui.items as Array<{ recordId: number; draftHash: string }> : [];
+            try {
+                const still: typeof items = [];
+                for (const it of items) {
+                    const rec = await loadLead(db, organisationId, aiAssistantId, Number(it.recordId));
+                    if (!rec || bulkSkipReason(rec)) continue;
+                    const draft = sendableDraft(rec.data, rec.title);
+                    if (draft && outreachDraftFingerprint(draft.to, draft.subject, draft.body) === it.draftHash) still.push(it);
+                }
+                if (items.length && !still.length) {
+                    return { ...m, uiElement: { ...ui, settled: true, blocked: ui.blocked || 'Already dealt with — none of these emails is still waiting to be sent as shown.' } };
+                }
+            } catch (err) {
+                console.error('[chat-lead-action] could not refresh a stored bulk card (non-fatal)', err);
+            }
+            return m;
+        }
         try {
             const rec = await loadLead(db, organisationId, aiAssistantId, req.recordId);
             if (!rec) return { ...m, uiElement: { ...ui, settled: true, blocked: 'This lead no longer exists.' } };

@@ -1222,7 +1222,19 @@
         return data;
       });
       try {
-        if (d.action === 'send') {
+        if (d.action === 'send_all') {
+          // "Approve all" — the Outreach tab's bulk run, one lead at a time through the single-lead
+          // path. Never confirms a personal inbox or overrules a do-not-contact flag: those leads are
+          // skipped and listed back (src/components/lead-bulk-send.js).
+          if (!window.LeadBulkSend) throw new Error('Bulk sending isn’t available on this page — use the Outreach tab.');
+          const result = await window.LeadBulkSend.run({
+            assistantId: aid, items: Array.isArray(d.items) ? d.items : [],
+            onProgress: (done) => { if (typeof d.progress === 'function') d.progress(done); },
+          });
+          const summary = window.LeadBulkSend.summarise(result);
+          if (result.sent.length) respond({ ok: true, message: `${summary} They’re in the “Awaiting reply” column.` });
+          else respond({ ok: false, final: true, error: summary });
+        } else if (d.action === 'send') {
           const sendBody = {
             action: 'send_outreach', assistantId: aid, recordId: d.recordId,
             expectDraftHash: d.draftHash, ...(d.personalInbox ? { confirmPersonal: true } : {}),
