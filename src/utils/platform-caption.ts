@@ -119,6 +119,15 @@ function isDisclosureLine(line: string): boolean {
 }
 
 /**
+ * The caption with every AI-disclosure line taken out, wherever it sits — for READERS of a caption
+ * that must not judge the disclosure as if the business had written it (the compliance reviewer).
+ * Never for writing back: the disclosure is a legal line, and only the footer code may move it.
+ */
+export function withoutDisclosureLines(caption: string | null | undefined): string {
+    return String(caption ?? '').split('\n').filter((line) => !isDisclosureLine(line)).join('\n').replace(/\s+$/, '');
+}
+
+/**
  * Remove model-echoed AI-disclosure lines from the END of a caption body.
  *
  * Runs before the canonical footer is appended, so the post ends with exactly one disclosure — the

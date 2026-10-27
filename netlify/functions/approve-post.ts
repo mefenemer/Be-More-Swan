@@ -232,7 +232,20 @@ export default withLambda(async (event) => {
         return { statusCode: 404, body: JSON.stringify({ error: 'Post not found.' }) };
     }
 
-    if (!['draft', 'in_review', 'pending_approval'].includes(post.status)) {
+    // A post that is already 'scheduled' has been approved but has not gone out, so it can still be
+    // MOVED ("Pick the time myself") or sent now. Refusing it told a user who had just approved a
+    // post — or whose second tap landed after the first — that their new date "cannot be approved",
+    // with no way forward from the review modal. A plain re-approve of a scheduled post is a no-op:
+    // re-running the slot picker would silently move it.
+    const alreadyScheduled = post.status === 'scheduled';
+    if (alreadyScheduled && action === 'approve') {
+        return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ approved: true, alreadyScheduled: true, post, confirmation: 'This post is already approved and scheduled.' }),
+        };
+    }
+    if (!['draft', 'in_review', 'pending_approval'].includes(post.status) && !alreadyScheduled) {
         return {
             statusCode: 409,
             body: JSON.stringify({ error: `Post is already in '${post.status}' state and cannot be approved.` }),
@@ -560,8 +573,17 @@ export default withLambda(async (event) => {
             publishDate: newPublishDate,
             updatedAt:   now,
         })
-        .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.userId, userId)))
+        // Guarded on the status we read: the publisher claims a due 'scheduled' row by flipping it to
+        // 'publishing', and a reschedule must never drag a post back out of that.
+        .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.userId, userId), eq(scheduledPosts.status, post.status)))
         .returning();
+    if (!updated) {
+        return {
+            statusCode: 409,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ error: 'This post changed while you were deciding (it may be publishing now). Refresh and try again.' }),
+        };
+    }
 
     // US2 AC2.5: a scheduled post commits its chosen Pexels image — burn the asset ID so it
     // can never be reused across the workspace. Idempotent; best-effort (never blocks approval).

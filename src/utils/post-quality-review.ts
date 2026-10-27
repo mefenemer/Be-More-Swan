@@ -45,6 +45,7 @@ import type { getDb } from '../../db/client';
 import { aiAssistants, aiBlueprints, scheduledPosts } from '../../db/schema';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { parseModelJson } from './model-json';
+import { withoutDisclosureLines } from './platform-caption';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -154,7 +155,17 @@ export function readCachedReview(
     const cached = qualityReview as QualityReview | null;
     if (!cached || typeof cached !== 'object') return null;
     if (cached.captionHash !== hashCaption(caption || '')) return null;
+    // Reviews stored before the reviewer stopped seeing the AI-disclosure footer can still carry a
+    // warning about it; drop those on read so they neither show nor gate approval.
+    if (Array.isArray(cached.complianceWarnings) && cached.complianceWarnings.some(isAboutDisclosureFooter)) {
+        return { ...cached, complianceWarnings: cached.complianceWarnings.filter(w => !isAboutDisclosureFooter(w)) };
+    }
     return cached;
+}
+
+/** A warning raised about the platform's own AI-disclosure line, which quotes it. */
+export function isAboutDisclosureFooter(warning: string): boolean {
+    return /\bcomposed with\b/i.test(warning) && /be more swan|ai digital assistant/i.test(warning);
 }
 
 /**
@@ -368,6 +379,12 @@ export async function runQualityReview(
     }
 
     const caption = post.caption || '';
+    // What the model reads, NOT what the cache is keyed on (hashCaption below still takes the real
+    // caption). The AI-disclosure footer ("Composed with Athena, our Be More Swan AI Digital
+    // Assistant…") is appended by our own code to meet the AI-transparency rules. Shown to the
+    // reviewer, it was flagged on customers' posts as an undeclared "third-party AI product" — the
+    // platform's own legally required line, raised as a problem on every post that carries it.
+    const reviewedCaption = withoutDisclosureLines(caption);
     const hashtags = post.hashtags || '';
     const platform = post.platform || 'instagram';
 
@@ -384,6 +401,11 @@ told as fact ("someone just picked up a bouquet…", "a bride called on Tuesday�
 warn and ask them to confirm it happened or reword it as hypothetical. A plainly hypothetical scene
 ("Picture…") is not. Do NOT raise one for matters of style, tone,
 length or hashtag choice.${withSuggestions ? ' Those belong in the suggestion.' : ''}
+
+Never warn about the post's AI-disclosure line (e.g. "Composed with <name>, our Be More Swan AI
+Digital Assistant") or about Be More Swan / the assistant being named as the tool that drafted it.
+That line is added by the platform the business uses to publish, as a required AI disclosure; it is
+not a claim the business makes about its own products.
 
 Raise a warning ONLY where there is a specific, nameable problem a person can act on. A caption
 with nothing to verify must return an empty array — do not invent a warning to seem thorough.
@@ -427,7 +449,7 @@ ${knownFacts}
 ` : ''}
 Caption:
 """
-${caption}
+${reviewedCaption}
 """
 Hashtags: ${hashtags}
 ${contentRulesText ? `Content rules:\n${contentRulesText}` : ''}
