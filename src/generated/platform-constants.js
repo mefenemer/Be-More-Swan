@@ -497,7 +497,7 @@
   // Free variables (ROLE_EMAIL_PREFIXES, roleOrPersonal) resolve to the declarations directly
   // above, so the names must match. The Set is rebuilt from its members because JSON.stringify
   // renders a Set as {} — a silently empty vocabulary that would classify every address as a person.
-  var ROLE_EMAIL_PREFIXES = new Set(["info","hello","hi","contact","contactus","enquiries","enquiry","inquiries","sales","admin","office","team","mail","general","reception","bookings","support","help","ask","talk","connect","business","reservations","reservation","booking","events","event","enquires","frontdesk","stay","guestservices","concierge","hire","orders","shop","studio","welcome"]);
+  var ROLE_EMAIL_PREFIXES = new Set(["info","hello","hi","contact","contactus","enquiries","enquiry","inquiries","sales","admin","office","team","mail","general","reception","bookings","support","help","ask","talk","connect","business","reservations","reservation","booking","events","event","enquires","frontdesk","stay","guestservices","concierge","hire","orders","shop","studio","welcome","design","marketing","accounts","accountsreceivable","accountspayable","finance","billing","invoices","invoice","payments","payroll","press","media","pr","news","newsletter","editor","editorial","advertising","commercial","partnerships","partners","hr","people","jobs","careers","recruitment","recruiting","legal","compliance","privacy","dataprotection","gdpr","projects","project","quotes","quote","estimates","estimating","service","services","customerservice","customerservices","customercare","care","operations","ops","it","tech","web","webmaster","digital","creative","production","workshop","showroom","store","trade","wholesale","deliveries","delivery","dispatch","despatch","warehouse","membership","members","feedback","appointments","admissions","lettings","rentals","valuations","helpdesk","servicedesk","headoffice","hq","studios","gallery","designteam"]);
   var roleOrPersonal = function roleOrPersonal(localPart){const prefix=localPart.trim().toLowerCase();const bare=prefix.replace(/[._-]/g,"");return ROLE_EMAIL_PREFIXES.has(prefix)||ROLE_EMAIL_PREFIXES.has(bare)?"role":"personal"};
   var classifyEmailKind = function classifyEmailKind(email){const value=String(email??"").trim().toLowerCase();if(!value||(value.match(/@/g)||[]).length!==1)return null;const[local,domain]=value.split("@");if(!local||!domain||!domain.includes("."))return null;return roleOrPersonal(local)};
 
@@ -508,7 +508,7 @@
   // send to a named individual whose details were bought.
   var EMAIL_SOURCE_LABELS = {"scrape":"found on their website","provider":"from a paid data provider","manual":""};
   var emailSourceLabel = function emailSourceLabel(source){return EMAIL_SOURCE_LABELS[String(source??"")]??""};
-  var needsPersonalInboxConfirmation = function needsPersonalInboxConfirmation(kind,source){return kind==="personal"&&source!=="manual"&&!!source};
+  var needsPersonalInboxConfirmation = function needsPersonalInboxConfirmation(kind,source,email){if(typeof email==="string"&&classifyEmailKind(email)==="role")return false;return kind==="personal"&&source!=="manual"&&!!source};
 
   window.LeadEmailKind = {
     /** 'role' | 'personal' for a whole address, or null if it is not an address at all. */

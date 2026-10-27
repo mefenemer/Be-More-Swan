@@ -2887,7 +2887,7 @@ function _rqRecipient(r, statusKey) {
     const EK = window.LeadEmailKind;
     const origin = EK && typeof EK.sourceLabel === 'function' ? EK.sourceLabel(d.emailSource) : '';
     const needsConfirm = EK && typeof EK.needsConfirmation === 'function'
-        ? EK.needsConfirmation(d.emailKind, d.emailSource)
+        ? EK.needsConfirmation(d.emailKind, d.emailSource, to)
         : d.emailKind === 'personal';
     const bought = d.emailSource === 'provider';
     return `<div class="mt-2">
@@ -2926,7 +2926,7 @@ function _rqCardChips(r) {
         const to = (LR && typeof LR.resolve === 'function') ? (LR.resolve(d) || '') : '';
         const EK = window.LeadEmailKind;
         const needsConfirm = to && EK && typeof EK.needsConfirmation === 'function'
-            ? EK.needsConfirmation(d.emailKind, d.emailSource)
+            ? EK.needsConfirmation(d.emailKind, d.emailSource, to)
             : (!!to && d.emailKind === 'personal');
         if (outreach) {
             chips.push(outreach);

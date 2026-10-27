@@ -96,9 +96,9 @@ check('an unknown future source is gated by DEFAULT', () => {
 });
 
 check('both enforcement points use the shared predicate, not a literal', () => {
-    assert.ok(/needsPersonalInboxConfirmation\(emailKind, emailSource\)/.test(SEND),
+    assert.ok(/needsPersonalInboxConfirmation\(emailKind, emailSource, recipient\)/.test(SEND),
         'lead-generation.ts send gate no longer uses the shared predicate');
-    assert.ok(/needsPersonalInboxConfirmation\(emailKind, emailSource\)/.test(INBOX),
+    assert.ok(/needsPersonalInboxConfirmation\(emailKind, emailSource, resolveLeadRecipient\(rec\)\)/.test(INBOX),
         'signal-inbox.ts no longer uses the shared predicate');
     assert.ok(!/emailSource === 'scrape'/.test(SEND) && !/emailSource === 'scrape'/.test(INBOX),
         "a literal 'scrape' comparison is back — a purchased address would bypass it");
@@ -114,7 +114,7 @@ check('a purchased address states its origin to the reviewer', () => {
         'the recipient line no longer reads the shared provenance vocabulary');
     assert.ok(!/const scraped = d\.emailSource === 'scrape'/.test(ASSISTANTS),
         "the literal 'scrape' test is back — a purchased address would render with no origin");
-    assert.ok(/EK\.needsConfirmation\(d\.emailKind, d\.emailSource\)/.test(ASSISTANTS),
+    assert.ok(/EK\.needsConfirmation\(d\.emailKind, d\.emailSource, to\)/.test(ASSISTANTS),
         'the warning no longer uses the same predicate the server enforces');
     // And the browser must actually HAVE them.
     assert.ok(/sourceLabel: emailSourceLabel/.test(GENERATED) && /needsConfirmation: needsPersonalInboxConfirmation/.test(GENERATED),

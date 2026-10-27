@@ -83,7 +83,7 @@ async function main() {
         assert.deepStrictEqual(leadActionFromUiElement({ type: 'lead_action_proposal', action: 'send_all', recordIds: ['#12', 14, 12, 'x'] })?.recordIds, [12, 14]);
     });
     await check('the bulk card carries every sendable email verbatim and SKIPS a named person\'s inbox', async () => {
-        const personal = { ...lead('pending_approval', { emailKind: 'personal', emailSource: 'scrape' }), id: 13, title: 'Bob Ltd' };
+        const personal = { ...lead('pending_approval', { emailKind: 'personal', emailSource: 'scrape', outreachDraft: { ...DRAFT, to: 'bob.jones@acme.test' } }), id: 13, title: 'Bob Ltd' };
         const db = fakeDb([lead('pending_approval'), personal], ASSISTANT, ORG, []);
         const card = await resolveLeadActionProposal(db, 1, 7, { action: 'send_all', recordId: 0, recordIds: null, outcome: null, lossReason: null, valueGbp: null });
         assert.ok(card && !card.blocked, `blocked: ${card?.blocked}`);
@@ -157,7 +157,7 @@ async function main() {
         assert.match(String(noAddress?.blocked), /postal address/);
     });
     await check('a personal inbox is flagged on the card, so the click is the confirmation', async () => {
-        const card = await resolveLeadActionProposal(fakeDb([lead('approved', { emailKind: 'personal', emailSource: 'scrape' })], ASSISTANT, ORG, [{ onboardingContext: {} }], []), 1, 2, send);
+        const card = await resolveLeadActionProposal(fakeDb([lead('approved', { emailKind: 'personal', emailSource: 'scrape', outreachDraft: { ...DRAFT, to: 'bob.jones@acme.test' } })], ASSISTANT, ORG, [{ onboardingContext: {} }], []), 1, 2, send);
         assert.strictEqual(card?.personalInbox, true);
     });
 

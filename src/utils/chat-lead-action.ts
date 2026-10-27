@@ -290,7 +290,7 @@ export async function resolveLeadActionProposal(
                 card.body = draft.body;
                 card.draftHash = outreachDraftFingerprint(draft.to, draft.subject, draft.body);
             }
-            card.personalInbox = needsPersonalInboxConfirmation(data.emailKind, data.emailSource);
+            card.personalInbox = needsPersonalInboxConfirmation(data.emailKind, data.emailSource, resolveLeadRecipient(data));
             card.approveFirst = rec.approvalStatus === 'pending_approval';
             if (!card.blocked) await addSendContext(db, organisationId, aiAssistantId, card);
         }
@@ -336,7 +336,7 @@ function bulkSkipReason(rec: LeadRow): string | null {
     if (block) return block;
     const d = (rec.data && typeof rec.data === 'object' ? rec.data : {}) as Record<string, unknown>;
     // A named person's inbox needs its own yes — the one-lead card asks for it. A bulk click never gives it.
-    if (needsPersonalInboxConfirmation(d.emailKind, d.emailSource)) return 'The address looks like a named person’s own inbox, so it needs its own OK — ask me to send this one on its own.';
+    if (needsPersonalInboxConfirmation(d.emailKind, d.emailSource, resolveLeadRecipient(d))) return 'The address looks like a named person’s own inbox, so it needs its own OK — ask me to send this one on its own.';
     return null;
 }
 

@@ -1365,7 +1365,7 @@ Return STRICT JSON only: { "subject": "<subject>", "body": "<email body, UNDER 7
             // named individual whose details we paid a broker for — a stronger reason to confirm
             // than a scraped one, not a weaker one — and it carries emailSource 'provider', which
             // a literal 'scrape' test would wave straight through. See needsPersonalInboxConfirmation.
-            if (needsPersonalInboxConfirmation(emailKind, emailSource) && body.confirmPersonal !== true) {
+            if (needsPersonalInboxConfirmation(emailKind, emailSource, recipient) && body.confirmPersonal !== true) {
                 return json(200, { sent: false, reason: 'personal_inbox_unconfirmed', to: recipient });
             }
 
