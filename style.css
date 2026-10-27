@@ -5563,7 +5563,8 @@ button:not(:disabled), [role="button"]:not([aria-disabled="true"]), summary {
      .btn-destructive  Delete, Remove, Revoke, Disconnect, Reject, Discard
      .btn-utility      Copy, Refresh, Export, Upload, Preview, Help — quiet tools
      .btn-inverse      The white call-to-action on a pink banner (marketing footers)
-   Colour only: padding, size and radius stay on the element's own utilities.
+   Colour, plus a 1px border (transparent unless outlined) so heights match; padding, size and
+   radius stay on the element's own utilities.
 
    In @layer components, BELOW Tailwind's utilities layer, on purpose: a control that restyles
    itself from JS (a selected tab, a busy state) adds utilities, and those must still win.
@@ -5574,6 +5575,14 @@ button:not(:disabled), [role="button"]:not([aria-disabled="true"]), summary {
    Assistant shares the primary's deep pink (was violet #7c3aed until 2026-10-04 — the user asked
    for brand pink over purple); the button's icon and label carry the AI intent now, not its colour. */
 @layer components {
+  /* Every button carries a 1px border, transparent where the intent has no outline, so a solid
+     button and an outlined one (secondary, or an off-system bordered link beside it) are the same
+     height. Without it Get Started stood 36px against Log In's 38px in the nav (2026-10-27). A
+     border-2 / border-0 utility on the element still wins: this layer sits below the utilities. */
+  .btn-assistant, .btn-primary, .btn-golive, .btn-secondary, .btn-destructive, .btn-utility, .btn-inverse {
+    border-width: 1px;
+    border-style: solid;
+  }
   .btn-assistant, .btn-primary, .btn-golive, .btn-secondary, .btn-destructive, .btn-utility {
     transition: background-color .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
   }
