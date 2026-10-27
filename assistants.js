@@ -1946,6 +1946,7 @@ function _rqOutreachReadinessHtml(statusKey) {
         window.AssistantBubbles?.say('outreach-no-postal', {
             assistantId: window._currentAssistantId, name: window._currentAssistantName,
             text: 'I can’t send any outreach yet — anti-spam law needs your business postal address in every email. Add it in Business Information and I’ll be ready.',
+            view: 'assets',
             action: { label: 'Add it', run: () => window.loadView && window.loadView('assets') },
         });
         parts.push(`<div class="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 my-3">

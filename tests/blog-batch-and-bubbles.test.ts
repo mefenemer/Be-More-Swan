@@ -57,6 +57,19 @@ check('bubbles: page nudges, Mentor suggestions copied to Team Chat once a day, 
     assert.match(read('workspace.html'), /assistant-bubbles\.js/);
 });
 
+check('"while you work" bubbles reach Team Chat too; a chat button starts the chat on the reminder, unsent', () => {
+    const fn = read('netlify/functions/assistant-nudges.ts');
+    assert.match(fn, /const spotted = body\.spotted === true;/);
+    assert.match(fn, /if \(!spotted\) try \{/, 'Mentor suggestions only on page open');
+    assert.match(fn, /\.\.\.\(n\.view \? \{ view: n\.view \} : \{\}\)/);
+    const b = read('src/components/assistant-bubbles.js');
+    assert.match(b, /function say\(key, b\) \{[\s\S]{0,400}fetch\('\/\.netlify\/functions\/assistant-nudges'[\s\S]{0,200}spotted: true/);
+    assert.match(b, /openAssistantChat\?\.\(\{ assistantId, \.\.\.\(text \? \{ draft: chatDraft\(text\) \} : \{\}\) \}\)/, 'draft, never send');
+    assert.doesNotMatch(b, /openAssistantChat\?\.\(\{[^}]*send:/);
+    assert.match(read('src/components/team-feed.js'), /if \(l\.view\) \{ window\.loadView\?\.\(l\.view\); return; \}/);
+    assert.match(read('assistants.js'), /say\('outreach-no-postal', \{[\s\S]{0,400}view: 'assets',/);
+});
+
 check('Needs you items can be marked done without running their action', () => {
     const n = read('notifications.js');
     assert.match(n, /class="action-done/);

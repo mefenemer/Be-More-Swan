@@ -13,9 +13,14 @@
 //      server (assistant-nudges.ts) adds the Mentor's and also posts each one to Team Chat, once a
 //      day, so nothing that popped up is lost when it fades.
 //   2. say()         — while you work on a page: something the assistant has spotted (e.g. the
-//      Outreach tab cannot send). Shown once per page visit per key.
+//      Outreach tab cannot send). Shown once per page visit per key, and copied to Team Chat through
+//      the same once-a-day path as 1 (pass `view` / `tab` so the Team Chat copy links somewhere).
 //   3. onNotificationsRose() — a new notification from an assistant arrived (the badge poller in
 //      notifications.js calls this when its count goes up): its title pops up as that assistant.
+//
+// A button that opens an assistant's chat opens it with the reminder typed into the composer, NOT
+// sent: the chat starts on it, and nothing joins the conversation unless the person sends it. Team
+// Chat stays the one record of what popped up.
 //
 // Hover holds a bubble; × closes it; its button does the thing and closes it. At most three on
 // screen, the rest wait their turn. Purely a display layer — it never writes anything itself except
@@ -120,11 +125,20 @@
         setTimeout(next, 400 * Math.min(queue.length - 1, 4));
     }
 
-    /** Something the assistant spotted while you work. Once per key per page visit. */
+    /** Something the assistant spotted while you work. Once per key per page visit; Team Chat once a day.
+     *  { assistantId, name, text, action?, view?, tab? } — view/tab are where the Team Chat copy links. */
     function say(key, b) {
-        if (!key || saidThisPage.has(key)) return;
+        if (!key || !b || saidThisPage.has(key)) return;
         saidThisPage.add(key);
         show(b);
+        if (!b.assistantId) return;
+        fetch('/.netlify/functions/assistant-nudges', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({
+                assistantId: b.assistantId, spotted: true,
+                nudges: [{ key, text: b.text, view: b.view, tab: b.tab, label: b.action && b.action.label }],
+            }),
+        }).catch(() => { /* the bubble showed; the Team Chat copy is best-effort */ });
     }
 
     /** A page change: what was "said" on the last page may be said again here. */
@@ -135,7 +149,9 @@
         if (typeof window._activateMainTab === 'function') window._activateMainTab(tab);
         if (tab === 'review-queue') window.detailRqOpenStatus?.('review');
     };
-    const openChat = (assistantId) => () => window.openAssistantChat?.({ assistantId });
+    /** The chat, started on the reminder: typed into the composer for the person to send or change. */
+    const chatDraft = (text) => `About this: “${text}” — `;
+    const openChat = (assistantId, text) => () => window.openAssistantChat?.({ assistantId, ...(text ? { draft: chatDraft(text) } : {}) });
 
     /**
      * Opening an assistant's page. `items` are what the page knows ({ key, text, tab?, label? });
@@ -158,7 +174,7 @@
             show({
                 assistantId: n.from && n.from.id, name: n.from && n.from.name, text: n.text,
                 action: n.tab && fromSelf ? { label: n.label || 'Show me', run: openTab(n.tab) }
-                    : !fromSelf && n.from && n.from.id ? { label: n.label || 'Talk it through', run: openChat(n.from.id) } : null,
+                    : !fromSelf && n.from && n.from.id ? { label: n.label || 'Talk it through', run: openChat(n.from.id, n.text) } : null,
             });
         }
     }
@@ -184,5 +200,5 @@
         } catch { /* a missed bubble is fine; the notification itself is still there */ }
     }
 
-    window.AssistantBubbles = { show, say, pageNudges, onNotificationsRose, resetPage, _anchorFor: anchorFor };
+    window.AssistantBubbles = { show, say, pageNudges, onNotificationsRose, resetPage, _anchorFor: anchorFor, _chatDraft: chatDraft };
 })();
