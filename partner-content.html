@@ -188,7 +188,10 @@
     }
     show('pt-loading', false);
     if (!data.partner) {
-      document.getElementById('pt-error').textContent = 'This page is for Be More Swan partners.';
+      // While impersonating, this is the customer's page — say plainly that they aren't a partner.
+      document.getElementById('pt-error').textContent = data.impersonating
+        ? 'This customer isn’t a Be More Swan partner (or their application was turned down), so they have no Partner page.'
+        : 'This page is for Be More Swan partners.';
       show('pt-error');
       return;
     }

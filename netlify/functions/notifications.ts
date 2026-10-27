@@ -11,6 +11,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { liveRoleLabel } from '../../src/utils/live-role-label';
 import { readCombineCrossPosts, loadPostGroups, combineCrossPostNotes, expandCrossPostIds } from '../../src/utils/crosspost-view';
 import { requireTenant } from '../../src/utils/tenant';
+import { resolveImpersonation, impersonationWriteBlock } from '../../src/utils/impersonation';
 import { openQuestionCount, unreadCount as teamUnreadCount } from '../../src/utils/team-messages';
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -42,6 +43,16 @@ export default withLambda(async (event: HandlerEvent) => {
     }
 
     const db = getDb();
+
+    // An admin impersonating a customer sees THAT customer's notifications, read-only — the same
+    // identity switch requireTenant makes. Before this, aura_session alone decided the user, so the
+    // customer's inbox showed the admin's own rows (the staff-only "Quarterly Bias Review Due").
+    const imp = await resolveImpersonation(db, event.headers.cookie, userId);
+    if (imp) {
+        const blocked = impersonationWriteBlock(event.httpMethod, imp);
+        if (blocked) return blocked;
+        userId = imp.impersonatingUserId;
+    }
 
     try {
         // -------------------------------------------------------------

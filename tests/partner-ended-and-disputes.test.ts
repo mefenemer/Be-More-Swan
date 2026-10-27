@@ -58,7 +58,7 @@ check('ended partners are still paid what they earned (7.3), and earn nothing ne
 
 check('their Partner page keeps earnings and payout details, without the link or the assistant', () => {
     const hub = read('netlify/functions/partner-hub.ts');
-    assert.ok(hub.includes("const code = live && p.status !== 'ended' ? await ensureReferralCode(db, userId) : null;"));
+    assert.ok(hub.includes("const code = live && p.status !== 'ended'\n            ? impersonating ? await readReferralCode(db, userId) : await ensureReferralCode(db, userId)\n            : null;"));
     const page = read('partner-content.html');
     assert.ok(page.includes('id="pt-ended"') && page.includes("show('pt-invite-card', data.partner.status !== 'ended');"));
     assert.ok(page.includes("show('pt-assistant-card', data.partner.status !== 'ended');"));

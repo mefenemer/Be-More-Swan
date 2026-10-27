@@ -587,7 +587,9 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
                     vars: {
                         user: { first_name: p.firstName ?? '' }, assistant: { name }, workspace: { name: org?.name ?? '' },
                         review: { summary, proposals: proposalsLine },
-                        link: { action_url: `${base}/workspace.html` },
+                        // "Open my review" lands on the Mentor with this person's review chat open (workspace.html
+                        // ?view=assistant-detail&chatSessionId=…) — not the bare dashboard it once went to.
+                        link: { action_url: mentorReviewLink(base, mentor.id, sessions.get(p.userId) ?? null) },
                     },
                 }).catch((err: unknown) => console.warn('[mentor-review] email failed for user', p.userId, err instanceof Error ? err.message : err));
             }
@@ -600,6 +602,12 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
     }
 }
 
+
+/** Pure: where the weekly review email's "Open my review" button goes. */
+export function mentorReviewLink(base: string, mentorId: number, chatSessionId: number | null): string {
+    const q = `view=assistant-detail&assistantId=${mentorId}` + (chatSessionId ? `&chatSessionId=${chatSessionId}` : '');
+    return `${base}/workspace.html?${q}`;
+}
 
 /** Pure: the Mentor's own review settings, for its chat prompt — and how to change them with the set-up card. */
 export function renderReviewSettingsForMentor(mentorId: number, ctx: unknown): string {

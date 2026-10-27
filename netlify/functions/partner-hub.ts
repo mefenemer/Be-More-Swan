@@ -22,6 +22,7 @@ import { partnerProgrammeSettings, partnerRatePeriods, partners, users } from '.
 import { partnerHubSummary } from '../../src/utils/partner-ops';
 import { resolvePeriodAt } from '../../src/utils/partner-rate-periods';
 import { ensureReferralCode } from '../../src/utils/referral-code';
+import { resolveImpersonation } from '../../src/utils/impersonation';
 import { PARTNER_TERMS_UPDATED, PARTNER_TERMS_VERSION } from '../../src/config/partner-terms';
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import {
@@ -43,13 +44,21 @@ export default withLambda(async (event) => {
     } catch { return json(401, { error: 'Invalid session.' }); }
 
     const db = getDb();
+    // An impersonating admin sees the CUSTOMER's Partner page (read-only), as requireTenant does for
+    // the rest of the workspace. Until this, aura_session alone decided the user, so the admin got their
+    // own (non-existent) partner row and the page said "This page is for Be More Swan partners".
+    const imp = await resolveImpersonation(db, event.headers.cookie, userId);
+    if (imp) { userId = imp.impersonatingUserId; impersonating = true; }
     const [p] = await db.select().from(partners).where(eq(partners.userId, userId)).limit(1);
 
     if (event.httpMethod === 'GET') {
-        if (!p || p.status === 'rejected') return json(200, { partner: null });
+        if (!p || p.status === 'rejected') return json(200, { partner: null, impersonating });
         // 'ended' (Terms 7.1/7.2) still sees what it earned and where it's paid, but no invite link.
         const live = p.status === 'approved' || p.status === 'suspended' || p.status === 'ended';
-        const code = live && p.status !== 'ended' ? await ensureReferralCode(db, userId) : null;
+        // Never mint a code while impersonating: a GET must stay a read.
+        const code = live && p.status !== 'ended'
+            ? impersonating ? await readReferralCode(db, userId) : await ensureReferralCode(db, userId)
+            : null;
         const periods = await db.select().from(partnerRatePeriods).where(or(isNull(partnerRatePeriods.partnerId), eq(partnerRatePeriods.partnerId, p.id)));
         const now = new Date();
         const current = resolvePeriodAt(periods, p.id, now);
@@ -111,3 +120,8 @@ export default withLambda(async (event) => {
     }
     return json(400, { error: 'Unknown action.' });
 });
+
+async function readReferralCode(db: ReturnType<typeof getDb>, userId: number): Promise<string | null> {
+    const [u] = await db.select({ code: users.referralCode }).from(users).where(eq(users.id, userId)).limit(1);
+    return u?.code ?? null;
+}
