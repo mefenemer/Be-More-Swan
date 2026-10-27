@@ -19128,6 +19128,9 @@ function rqReviewPickOwnTime() {
 async function rqReviewScheduleMyself() {
     const targets = _rqReviewTargets();
     if (!targets.length) return;
+    // A second tap while the first is still approving (easy on a tablet) used to arrive after the
+    // post was already scheduled.
+    if (_rqCommitBusyDepth > 0) return;
     const instruction = document.getElementById('post-review-reschedule-instruction')?.value.trim() || '';
     const dtValue = document.getElementById('post-review-reschedule-dt')?.value || '';
     const statusEl = document.getElementById('post-review-reschedule-status');

@@ -328,7 +328,11 @@
       .ioe-hint{font-size:12px;color:#64748b;text-align:center;padding:20px 8px}
       .ioe-count{font-size:12px;color:#64748b}
       .ioe-none{display:flex;align-items:center;gap:6px;font-size:12px;color:#475569}
-      .ioe-swatchoff{opacity:.35;pointer-events:none}
+      .ioe-swatchoff{opacity:.35}
+      /* The same controls mounted in the post editor's side panel, outside .ioe-modal, had no sizing
+         at all: a bare colour input there is a sliver too small to tap on a tablet. */
+      .ioe-stack input[type=color]{width:38px;height:32px;padding:0;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer}
+      .ioe-stack input[type=range]{width:100%;touch-action:pan-y}
     `;
     document.head.appendChild(el);
   }
@@ -858,8 +862,16 @@
    */
   function attachPositionDrag(node, ov, getRect, hooks) {
     hooks = hooks || {};
+    // ⚠️ Set BEFORE any touch starts. Without it a finger on an iPad is a pan, not a drag: the
+    // browser scrolls the modal (so the picture slides along under the finger) and then cancels the
+    // pointer stream, leaving the box where it was. preventDefault on pointerdown cannot stop that.
+    node.style.touchAction = 'none';
+    node.style.webkitUserSelect = 'none';
+    node.style.webkitTouchCallout = 'none';
     node.addEventListener('pointerdown', (e) => {
       e.preventDefault();
+      // The box is the target, not anything behind it that also listens for a drag.
+      e.stopPropagation();
       if (hooks.onGrab) hooks.onGrab(ov);
       const m = getRect();
       if (!m || !(m.w > 0) || !(m.h > 0)) return;
@@ -966,7 +978,7 @@
       </div>
       <div class="ioe-row">
         <label>Background transparency \u2014 ${transparencyPct}%</label>
-        <input type="range" data-f="transparency" min="0" max="100" step="1" value="${transparencyPct}" ${ov.boxFill ? '' : 'disabled'}>
+        <input type="range" data-f="transparency" min="0" max="100" step="1" value="${transparencyPct}">
       </div>`;
   }
 
@@ -1057,14 +1069,18 @@
       size.addEventListener('change', committed);
     }
 
+    // Every picker applies its value on 'change' as well as 'input'. Safari on iPad can close its
+    // colour popover having sent only 'change', and a handler that only COMMITTED there saved the
+    // old colour: the font colour simply never moved.
     const col = q('[data-f="color"]');
     if (col) {
-      col.addEventListener('input', (e) => {
+      const apply = (e) => {
         ov.color = e.target.value;
         if (e.target.nextElementSibling) e.target.nextElementSibling.textContent = ov.color;
         changed();
-      });
-      col.addEventListener('change', committed);
+      };
+      col.addEventListener('input', apply);
+      col.addEventListener('change', (e) => { apply(e); committed(); });
     }
 
     const strokeOn = q('[data-f="strokeOn"]');
@@ -1073,10 +1089,18 @@
       ov.boxStroke = e.target.checked ? ((sw && sw.value) || '#ec4899') : null;
       changed(); committed(); redraw();
     });
+    // Choosing a colour for an outline or background that is switched off switches it on. The
+    // swatch used to ignore taps until "Show" was ticked, which read as a broken control.
+    const switchOn = (box, swatch) => {
+      const cb = q(`[data-f="${box}"]`);
+      if (cb) cb.checked = true;
+      if (swatch) swatch.classList.remove('ioe-swatchoff');
+    };
     const stroke = q('[data-f="boxStroke"]');
     if (stroke) {
-      stroke.addEventListener('input', (e) => { if (ov.boxStroke) { ov.boxStroke = e.target.value; changed(); } });
-      stroke.addEventListener('change', committed);
+      const apply = (e) => { ov.boxStroke = e.target.value; switchOn('strokeOn', stroke); changed(); };
+      stroke.addEventListener('input', apply);
+      stroke.addEventListener('change', (e) => { apply(e); committed(); });
     }
 
     const fillOn = q('[data-f="fillOn"]');
@@ -1086,20 +1110,30 @@
       changed(); committed(); redraw();
     });
     const fill = q('[data-f="boxFill"]');
+    const fillOnNow = () => {
+      if (ov.boxFill) return;
+      ov.boxFill = (fill && fill.value) || '#000000';
+      switchOn('fillOn', fill);
+    };
     if (fill) {
-      fill.addEventListener('input', (e) => { if (ov.boxFill) { ov.boxFill = e.target.value; changed(); } });
-      fill.addEventListener('change', committed);
+      const apply = (e) => { ov.boxFill = e.target.value; switchOn('fillOn', fill); changed(); };
+      fill.addEventListener('input', apply);
+      fill.addEventListener('change', (e) => { apply(e); committed(); });
     }
 
+    // Always live. It was disabled until the background was ticked on, so on a box with no
+    // background the slider could not be moved at all; moving it now turns the background on.
     const trans = q('[data-f="transparency"]');
     if (trans) {
-      trans.addEventListener('input', (e) => {
+      const apply = (e) => {
+        fillOnNow();
         ov.boxOpacity = clamp(1 - Number(e.target.value) / 100, 0, 1);
         const lbl = e.target.previousElementSibling;
         if (lbl) lbl.textContent = `Background transparency \u2014 ${e.target.value}%`;
         changed();
-      });
-      trans.addEventListener('change', committed);
+      };
+      trans.addEventListener('input', apply);
+      trans.addEventListener('change', (e) => { apply(e); committed(); });
     }
 
     root.querySelectorAll('[data-emojis] button').forEach((b) => {
