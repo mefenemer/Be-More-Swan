@@ -87,7 +87,10 @@ import { buildPlanSnapshot } from '../../src/utils/chat-plan-snapshot';
 import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGoalProposal, resolveTeamGoalProposal, type GoalCard } from '../../src/utils/chat-goals';
 import { introOfferCardFromUiElement, introOfferPromptBlock, type IntroOfferCard } from '../../src/utils/intro-offer';
 import { buildOutreachOfferChatBlock, OUTREACH_OFFER_CARD_TYPE, outreachOfferCardFrom, type OutreachOfferCard } from '../../src/utils/chat-outreach-offer';
-import { buildFollowUpPlanChatBlock, isFollowUpPlanProposal, resolveFollowUpPlanProposal, type FollowUpPlanCard } from '../../src/utils/chat-follow-up-plan';
+import {
+    buildFollowUpPlanChatBlock, isFollowUpPlanProposal, resolveFollowUpPlanProposal, type FollowUpPlanCard,
+    isFollowUpPreviewProposal, resolveFollowUpPreviewProposal,
+} from '../../src/utils/chat-follow-up-plan';
 import { listGiftForms } from '../../src/utils/outreach-offer';
 import { buildCtaChatBlock, CTA_CARD_TYPE, ctaCardFrom, roleHasCta, type CtaCard } from '../../src/utils/chat-call-to-action';
 import { resolveScheduleProposal, scheduleProposalFromUiElement, schedulePromptBlock, type ScheduleCard } from '../../src/utils/chat-schedule';
@@ -3567,6 +3570,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             followUpPlanCard = await resolveFollowUpPlanProposal(db, orgId, session.aiAssistantId, uiElement);
             uiElement = followUpPlanCard;
             if (!followUpPlanCard) content = 'I couldn’t read your follow-up plan just now, so I haven’t set anything up. Please try again in a moment, or use Follow-up plan on the Outreach tab.';
+        }
+        // A preview of one follow-up for one lead (same module) — the card's button drafts it via
+        // lead-generation.ts preview_follow_up and sends nothing. Not a profile card: it changes nothing.
+        if (route === ROUTES.lead_qualifier && !followUpPlanCard && isFollowUpPreviewProposal(uiElement)) {
+            uiElement = await resolveFollowUpPreviewProposal(db, orgId, session.aiAssistantId, uiElement);
+            if (!uiElement) content = 'I couldn’t look that lead up just now. Please try again in a moment, or use Preview the next one on that lead under Outreach › Following up.';
         }
         // A content assistant's call to action (src/utils/chat-call-to-action.ts), rebuilt against the
         // real gift forms; the click calls org-products.ts PATCH { callToAction }.

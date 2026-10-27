@@ -12,6 +12,7 @@
 //   POST { action: 'list_ideas',     assistantId }
 //   POST { action: 'get_follow_up_plan',  assistantId }  → the chasers after a first email, and on/off
 //   POST { action: 'save_follow_up_plan', assistantId, enabled, steps?: [{ stepNumber|null, delayDays, brief }], stopRunning? }
+//   POST { action: 'preview_follow_up',  assistantId, threadId, position?, brief?, planLength? } → a follow-up, drafted, sent to nobody
 //        → returns this assistant's lead_idea records (proposed | approved | declined).
 //   POST { action: 'approve_idea',   assistantId, ideaId }
 //        → LLM finds ~3-4 example leads matching the idea, scores each, tags a next-best-action
@@ -40,7 +41,9 @@ import { adaptForModel, replyText } from '../../src/config/model-options';
 import { loadRoleModel, withRoleModel } from '../../src/utils/assistant-model';
 import { and, asc, count, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { adminAuditLog, aiAssistants, assistantRecords, discoveredLeads, leadRejectFeedback, masterAssistants, organisations, revenueEvents, userOrganisations } from '../../db/schema';
+import { adminAuditLog, aiAssistants, assistantRecords, discoveredLeads, leadRejectFeedback, leadThreads, masterAssistants, organisations, revenueEvents, sequenceEnrolments, userOrganisations } from '../../db/schema';
+import { previewFollowUp } from './process-sequence-sends';
+import { meterInteraction } from '../../src/utils/task-credit';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { activeCampaignCapacity, campaignCapacityMessage, createDiscoveryRun } from '../../src/utils/discovery';
@@ -202,6 +205,11 @@ export default withLambda(async (event) => {
         enabled?: unknown;
         steps?: unknown;
         stopRunning?: unknown;
+        /** preview_follow_up: whose conversation, which follow-up (1-based), and an unsaved brief/plan length. */
+        threadId?: unknown;
+        position?: unknown;
+        brief?: unknown;
+        planLength?: unknown;
     };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
@@ -1932,6 +1940,80 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
                 : 0;
             const after = await loadFollowUpPlan(db, orgId, assistant.id);
             return json(200, { ...(after ?? before), summary: describe(after ?? before), limits: FOLLOW_UP_LIMITS, defaults, stopped });
+        }
+
+        // ── Preview a follow-up (docs/lead-outreach-restructure-plan.md, Phase 4) ──
+        // What one follow-up would say to one lead, drafted exactly as the worker drafts it and sent
+        // to nobody (process-sequence-sends.ts previewFollowUp). Three callers: the Follow-up plan
+        // panel's Preview (an unsaved brief, a chosen lead), "Preview the next one" on a conversation,
+        // and the chat's follow_up_preview card. Metered as an editing helper — fair use, not a task —
+        // because nothing is produced: no email, no message, no change to the plan or the lead.
+        if (action === 'preview_follow_up') {
+            if (assistant.roleKey !== 'lead_qualifier') return json(400, { error: 'Only a Lead Generator has follow-ups to preview.' });
+            const threadId = Number(body.threadId);
+            if (!Number.isInteger(threadId)) return json(400, { error: 'Choose a lead you have emailed.' });
+            const [thread] = await db
+                .select({ id: leadThreads.id, state: leadThreads.state, recordId: leadThreads.assistantRecordId, title: assistantRecords.title, contactEmail: leadThreads.contactEmail })
+                .from(leadThreads)
+                .leftJoin(assistantRecords, eq(assistantRecords.id, leadThreads.assistantRecordId))
+                .where(and(eq(leadThreads.id, threadId), eq(leadThreads.organisationId, orgId), eq(leadThreads.aiAssistantId, assistant.id)))
+                .limit(1);
+            if (!thread) return json(404, { error: 'That conversation isn’t one of this assistant’s.' });
+            if (thread.state !== 'open') {
+                return json(409, { error: thread.state === 'replied'
+                    ? 'They have replied, so no follow-up goes to them — answer them in the conversation instead.'
+                    : 'This conversation is closed, so no follow-up goes to them.' });
+            }
+
+            const plan = await loadFollowUpPlan(db, orgId, assistant.id);
+            if (!plan) return json(500, { error: 'The follow-up plan couldn’t be read. Please try again.' });
+
+            // Which follow-up: the one asked for, or this lead's NEXT one by the plan.
+            let position = Number(body.position);
+            if (!Number.isInteger(position)) {
+                const [enr] = await db.select({ last: sequenceEnrolments.lastStepSent, state: sequenceEnrolments.state })
+                    .from(sequenceEnrolments)
+                    .where(and(eq(sequenceEnrolments.leadThreadId, thread.id), eq(sequenceEnrolments.organisationId, orgId)))
+                    .limit(1);
+                if (enr && enr.state !== 'active') return json(409, { error: 'Follow-ups to this lead have stopped, so there is no next one to preview.' });
+                const idx = plan.steps.findIndex((st) => st.stepNumber > (enr?.last ?? 0));
+                if (idx === -1) return json(409, { error: 'Every follow-up in the plan has already gone to this lead.' });
+                position = idx + 1;
+            }
+
+            // An unsaved brief (the panel, mid-edit) and its plan's length — or the saved step's own.
+            const draftBrief = typeof body.brief === 'string' ? body.brief.replace(/\s+/g, ' ').trim() : '';
+            const planLength = Number.isInteger(Number(body.planLength)) ? Number(body.planLength) : plan.steps.length;
+            if (planLength < 1 || planLength > FOLLOW_UP_LIMITS.maxSteps || position < 1 || position > planLength) {
+                return json(400, { error: `There is no follow-up ${position} in this plan.` });
+            }
+            const brief = draftBrief || plan.steps[position - 1]?.brief || '';
+            if (brief.length < FOLLOW_UP_LIMITS.minBriefChars || brief.length > FOLLOW_UP_LIMITS.maxBriefChars) {
+                return json(400, { error: 'Say in a sentence what this follow-up should say, then preview it.' });
+            }
+
+            // Metered only once there is something to draft — a refused preview costs nothing.
+            const credit = await meterInteraction(db, orgId, 'helpers');
+            if (!credit.allowed) {
+                if (credit.failed) return json(503, { error: credit.limitMessage });
+                if (credit.fairUse) return json(429, { error: credit.limitMessage, code: 'FAIR_USE_LIMIT' });
+                return json(403, { error: credit.limitMessage, upgradeRequired: true });
+            }
+
+            const preview = await previewFollowUp(db, {
+                organisationId: orgId, aiAssistantId: assistant.id, leadThreadId: thread.id,
+                brief, position, isLast: position === planLength,
+            });
+            if (!preview) {
+                return json(422, { error: 'Your assistant wouldn’t write this one for this lead — usually because the conversation says they shouldn’t be contacted. Nothing was sent.' });
+            }
+            return json(200, {
+                ...preview,
+                position,
+                isLast: position === planLength,
+                lead: { threadId: thread.id, recordId: thread.recordId, title: thread.title || thread.contactEmail || `Lead #${thread.id}` },
+                note: 'A preview — nothing was sent. The real follow-up is written fresh when it is due, from the conversation as it is then, and the opt-out footer is added at send time.',
+            });
         }
 
         // ── List this assistant's lead ideas ─────────────────────────────────────

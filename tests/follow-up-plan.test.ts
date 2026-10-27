@@ -10,6 +10,8 @@
 //   4. one save action for the panel and the card, writing through the one writer;
 //   5. the panel, the card, and every sentence that used to type "3 days, a week".
 //
+//   6. Phase 4: a preview is the worker's own draft, written for one lead and sent to nobody.
+//
 // Run:  npx tsx tests/follow-up-plan.test.ts
 
 import assert from 'node:assert';
@@ -254,6 +256,63 @@ check('the Help Centre file swaps the exact paragraph the outreach-stages file w
     assert.ok(prior.includes(old), 'the paragraph being replaced is not what the earlier file published');
     const literals = help.slice(landmark(help, 'UPDATE help_articles'), landmark(help, 'RETURNING'));
     assert.ok(!literals.includes(';'), 'a semicolon inside a literal breaks the Neon editor');
+});
+
+// ── 6. preview (Phase 4) ────────────────────────────────────────────────────
+console.log('\n──── 6. preview: the real drafter, sent to nobody ────');
+
+const THREADS_UI = read('src/components/assistant-lead-threads.js');
+const CHAT_PLAN = read('src/utils/chat-follow-up-plan.ts');
+
+check('the preview is drafted by the worker’s own function, and writes nothing', () => {
+    const fn = WORKER.slice(landmark(WORKER, 'export async function previewFollowUp('), landmark(WORKER, '// ── One enrolment'));
+    assert.match(fn, /await draftFollowUp\(/, 'a second prompt would preview an email the worker never writes');
+    assert.match(fn, /preview: true/);
+    assert.ok(!/\.insert\(|\.update\(|\.delete\(/.test(fn), 'a preview must not write anything');
+    assert.ok(!fn.includes('offerLinkForThread('), 'a preview must not mint a tracked link');
+    assert.ok(!/send(Gmail|Outlook)Message\(/.test(fn), 'a preview must never send');
+});
+
+check('the action checks ownership and state, then meters as a helper, then drafts', () => {
+    const branch = LEADGEN.slice(landmark(LEADGEN, "if (action === 'preview_follow_up')"), landmark(LEADGEN, "// ── List this assistant's lead ideas"));
+    assert.match(branch, /eq\(leadThreads\.organisationId, orgId\), eq\(leadThreads\.aiAssistantId, assistant\.id\)/);
+    assert.match(branch, /thread\.state !== 'open'/, 'no preview for a lead who has replied');
+    const meter = branch.indexOf("meterInteraction(db, orgId, 'helpers')");
+    const draft = branch.indexOf('previewFollowUp(db,');
+    const validate = branch.indexOf('FOLLOW_UP_LIMITS.minBriefChars');
+    assert.ok(validate > -1 && meter > validate && draft > meter, 'validate → meter → draft, so a refused preview costs nothing');
+    assert.match(branch, /nothing was sent/i);
+});
+
+check('the panel previews the wording ON SCREEN, for a chosen emailed lead', () => {
+    const fn = PANEL.slice(landmark(PANEL, 'async function preview(i)'), landmark(PANEL, 'async function save()'));
+    assert.match(fn, /brief: s\.brief, planLength: state\.draft\.steps\.length/);
+    assert.match(PANEL, /previewableLeads\(\)/);
+    assert.match(THREADS_UI, /t\.threadId != null && t\.phase === 'following_up' && t\.state === 'open'/);
+});
+
+check('a conversation can preview its own next follow-up', () => {
+    assert.match(THREADS_UI, /action: 'preview_follow_up', assistantId: state\.assistantId, threadId: t\.threadId/);
+    assert.match(THREADS_UI, /data-lt-preview/);
+});
+
+check('the chat proposes a preview card and never writes the follow-up itself', () => {
+    assert.match(CHAT_PLAN, /"type": "follow_up_preview"/);
+    assert.match(CHAT_PLAN, /Never write the follow-up yourself/);
+    const fn = CHAT_PLAN.slice(landmark(CHAT_PLAN, 'export async function resolveFollowUpPreviewProposal('));
+    assert.match(fn, /eq\(assistantRecords\.organisationId, organisationId\), eq\(assistantRecords\.aiAssistantId, assistantId\)/);
+    assert.match(fn, /thread\.state !== 'open'/);
+    assert.match(CARDS, /register\('follow_up_preview', renderFollowUpPreviewCard\)/);
+    assert.match(CHAT_UI, /addEventListener\('lead:followUpPreview', onFollowUpPreview\)/);
+    assert.match(CHAT_UI, /removeEventListener\('lead:followUpPreview', onFollowUpPreview\)/);
+    assert.match(ORCH, /isFollowUpPreviewProposal\(uiElement\)/);
+});
+
+check('the Help Centre preview file appends after the exact sentence the plan file wrote', () => {
+    const help = read('db/help-articles-2026-12zzzzzzzzzzzz-follow-up-preview.sql');
+    assert.ok(read('db/help-articles-2026-12zzzzzzzzzzz-follow-up-plan.sql').includes('nothing changes until you press **Save this plan**.'));
+    assert.match(help, /NOT LIKE '%### Preview a follow-up%'/, 'idempotent');
+    assert.ok(!help.slice(landmark(help, 'UPDATE help_articles'), landmark(help, 'RETURNING')).includes(';'));
 });
 
 console.log(`\n${passed} checks passed.`);

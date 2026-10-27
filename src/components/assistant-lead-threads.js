@@ -98,6 +98,9 @@
     // They stay drawn in the stage they were in until the user changes stage, so the row the user
     // just acted on does not vanish from under the confirmation it is showing.
     sticky: new Set(),
+    // threadId → { loading, result, error } for "Preview the next one" (lead-generation.ts
+    // preview_follow_up). Drafted and shown here only — nothing is sent or stored.
+    preview: {},
     // The role's label for this tab, from the registry (conversationsTab.label). Held here rather
     // than read back off the button, because the button's text carries the record count once one
     // has landed and re-wrapping it would give "Conversations (12) (12)".
@@ -655,6 +658,24 @@
    * only evidence was the emails appearing. Saying it plainly, on the screen where they appear, is
    * most of the fix; the buttons beside it are the rest.
    */
+  /**
+   * A drafted-but-unsent follow-up, shown under the buttons. Shared shape with the Follow-up plan
+   * panel's preview (assistant-follow-up-plan.js renders the same server result).
+   */
+  function previewHtml(p) {
+    if (!p || p.loading) return '';
+    if (p.error) return `<p class="text-xs font-bold text-amber-700 mt-2">${esc(p.error)}</p>`;
+    const r = p.result;
+    if (!r) return '';
+    return `
+      <div class="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Preview · follow-up ${esc(r.position)}${r.isLast ? ' · the last one' : ''} · not sent</p>
+        <p class="text-sm font-semibold text-gray-900 mt-1">${esc(r.subject)}</p>
+        <p class="text-sm text-gray-700 mt-1 whitespace-pre-wrap">${esc(r.body)}</p>
+        <p class="text-[11px] text-gray-500 mt-2">${esc(r.note || '')}</p>
+      </div>`;
+  }
+
   function cadenceBanner(t, e) {
     const busy = !!state.busy[t.id];
     const btn = 'px-2.5 py-1 text-xs font-bold rounded-lg border transition disabled:opacity-50';
@@ -686,7 +707,11 @@
             class="${btn} bg-white border-gray-200 text-gray-700 hover:border-red-300 hover:text-red-700">Stop follow-ups</button>
           <button type="button" data-lt-direct="${t.id}" ${busy ? 'disabled' : ''}
             class="${btn} bg-white border-gray-200 text-gray-700 hover:border-amber-400 hover:text-amber-800">They replied to me directly</button>
+          <button type="button" data-lt-preview="${t.id}" ${busy || (state.preview[t.id] && state.preview[t.id].loading) ? 'disabled' : ''}
+            class="${btn} bg-white border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800">
+            ${state.preview[t.id] && state.preview[t.id].loading ? 'Writing a preview…' : 'Preview the next one'}</button>
         </div>
+        ${previewHtml(state.preview[t.id])}
         <p class="text-[11px] text-gray-500 mt-1.5">
           Chasers stop by themselves only when a reply comes back to the tracked address.
           If they answered your own inbox instead &mdash; or rang, or replied on another thread &mdash;
@@ -1328,8 +1353,28 @@
 
     td.querySelector('[data-lt-erase]')?.addEventListener('click', () => eraseProspectData(t));
 
+    td.querySelector('[data-lt-preview]')?.addEventListener('click', () => previewNext(t));
     td.querySelector('[data-lt-nudge]')?.addEventListener('click', () => runCadenceAction(t, 'nudge'));
     td.querySelector('[data-lt-stop]')?.addEventListener('click', () => runCadenceAction(t, 'stop_follow_ups'));
+  }
+
+  /** Draft this lead's next follow-up without sending it (lead-generation.ts preview_follow_up). */
+  async function previewNext(t) {
+    if (state.preview[t.id] && state.preview[t.id].loading) return;
+    state.preview[t.id] = { loading: true };
+    repaintDetail(t);
+    try {
+      const res = await fetch('/.netlify/functions/lead-generation', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ action: 'preview_follow_up', assistantId: state.assistantId, threadId: t.threadId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'The preview couldn’t be written.');
+      state.preview[t.id] = { result: data };
+    } catch (err) {
+      state.preview[t.id] = { error: err.message || 'The preview couldn’t be written.' };
+    }
+    repaintDetail(t);
   }
 
   /**
@@ -1779,6 +1824,7 @@
       state.replyNotice = {};
       state.sticky = new Set();
       state.phase = null;
+      state.preview = {};
       // Read here rather than on activation: init() starts the fetch, so the row it targets has to
       // be known before the rows are painted. Cleared off the window immediately — a stale global
       // would re-open this thread on the next assistant the user visits.
@@ -1813,6 +1859,16 @@
       const row = state.focus && state.threads.find(isFocus);
       if (row) window.AssistantLeadOutreach?.open(row.phase);
       // Not loaded yet: load() resolves the stage when the rows arrive.
+    },
+
+    /**
+     * Leads a follow-up could be previewed for — emailed from the app, still being followed up, no
+     * reply. For the Follow-up plan panel's lead picker. Most recent first.
+     */
+    previewableLeads() {
+      return state.threads
+        .filter((t) => t.threadId != null && t.phase === 'following_up' && t.state === 'open')
+        .map((t) => ({ threadId: t.threadId, title: t.title }));
     },
 
     /** The stage of the row a deep link is waiting to open, once the rows are here; else null. */

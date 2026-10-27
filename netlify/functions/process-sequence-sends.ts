@@ -187,8 +187,9 @@ async function draftFollowUp(
     originalSubject: string | null,
     /** The code adds the offer's link after the body (src/config/outreach-offer.ts) — the prompt introduces it. */
     withOfferLinkLine = false,
-    /** Where the step sits in the plan (1-based), and whether it is the last — see the caller. */
-    place: { position: number; isLast: boolean } = { position: step.stepNumber, isLast: false },
+    /** Where the step sits in the plan (1-based), and whether it is the last — see the caller.
+     *  `preview` only relabels the usage log: previewFollowUp drafts the same email and sends nothing. */
+    place: { position: number; isLast: boolean; preview?: boolean } = { position: step.stepNumber, isLast: false },
 ): Promise<{ subject: string; body: string } | null> {
     const history = await threadHistory(db, enrolment.lead_thread_id, 6);
 
@@ -250,7 +251,7 @@ Otherwise return STRICT JSON only (no markdown, no prose outside the JSON):
         model: MODEL,
         inputTokens: resp.usage.input_tokens,
         outputTokens: resp.usage.output_tokens,
-        sessionId: `sequence-send:${enrolment.ai_assistant_id}:step${step.stepNumber}`,
+        sessionId: `${place.preview ? 'sequence-preview' : 'sequence-send'}:${enrolment.ai_assistant_id}:step${step.stepNumber}`,
         dataCategories: ['business_context'],
     });
 
@@ -275,6 +276,59 @@ Otherwise return STRICT JSON only (no markdown, no prose outside the JSON):
         : (originalSubject ? `Re: ${originalSubject}`.slice(0, 300) : 'Following up');
 
     return { subject, body };
+}
+
+// ── Preview ──────────────────────────────────────────────────────────────────
+
+/**
+ * What a follow-up would say to one lead, written exactly as the worker would write it, and SENT TO
+ * NOBODY. docs/lead-outreach-restructure-plan.md, Phase 4 — the Follow-up plan panel's "Preview",
+ * the "Preview the next one" button on a conversation, and the chat's follow_up_preview card, all
+ * through lead-generation.ts `preview_follow_up`.
+ *
+ * Same prompt, same transcript, same sender identity and voice: draftFollowUp, not a copy of it —
+ * a preview built from a second prompt would show the user an email the worker never writes.
+ * What is deliberately NOT the same:
+ *   • no link is minted — a tracked offer link is per conversation, and a preview must not create
+ *     one; where the real email carries it, the preview shows a placeholder line;
+ *   • no footer — it is boilerplate added at send time, and says so in the result;
+ *   • nothing is written: no message, no enrolment change, no ledger row, no task. The caller meters
+ *     it as an editing helper (fair use), like the post editor's rewrite buttons.
+ *
+ * The caller has already checked the thread belongs to this organisation and assistant.
+ * Null = the model declined or returned nothing usable.
+ */
+export async function previewFollowUp(db: Db, input: {
+    organisationId: number;
+    aiAssistantId: number;
+    leadThreadId: number;
+    brief: string;
+    position: number;
+    isLast: boolean;
+}): Promise<{ subject: string; body: string; withOfferLink: boolean } | null> {
+    const assistant = await loadAssistant(db, input.aiAssistantId);
+    if (!assistant) return null;
+    const [opener] = await db
+        .select({ subject: leadMessages.subject })
+        .from(leadMessages)
+        .where(and(eq(leadMessages.leadThreadId, input.leadThreadId), eq(leadMessages.direction, 'outbound')))
+        .orderBy(leadMessages.occurredAt)
+        .limit(1);
+    const sender = await loadSenderIdentity(db, input.organisationId, input.aiAssistantId);
+    const withLink = !!(followUpLinkTarget(sender.outreachOffer, input.position) && sender.outreachOffer);
+    // draftFollowUp reads only these fields of the row (the transcript and the usage log).
+    const row = {
+        organisation_id: input.organisationId, ai_assistant_id: input.aiAssistantId, lead_thread_id: input.leadThreadId,
+    } as ClaimedRow;
+    const step = { id: 0, stepNumber: input.position, delayDays: 0, bodyPrompt: input.brief };
+    const draft = await draftFollowUp(db, row, assistant, sender, step, opener?.subject ?? null, withLink,
+        { position: input.position, isLast: input.isLast, preview: true });
+    if (!draft) return null;
+    return {
+        subject: draft.subject,
+        body: appendSignature(withLink ? `${draft.body.trimEnd()}\n\n[Your offer’s link goes here — added when it sends]` : draft.body, sender.signature || ''),
+        withOfferLink: withLink,
+    };
 }
 
 // ── One enrolment ────────────────────────────────────────────────────────────

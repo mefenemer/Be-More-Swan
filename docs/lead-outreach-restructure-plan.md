@@ -27,7 +27,14 @@ Raised by the owner 2026-10-27. Status:
   - **Copy:** the To approve note quotes the saved plan, and the fixed "3 days, a week" wording is gone from the code. Help copy is in `db/help-articles-2026-12zzzzzzzzzzz-follow-up-plan.sql` (**not applied**).
   - **Tests:** `tests/follow-up-plan.test.ts`.
 - **Found while building Phase 3: the worker used step NUMBERS** for "the first follow-up" (where the offer link goes), the 5-email cap, and "follow-up number N". Once a plan is edited, numbers have gaps, so all three now use the step's position in the plan. Switching chasing off still affects only NEW approvals unless the owner ticks "also stop the ones running".
-- Phase 4 (preview with a lead) not started.
+- **Phase 4 — BUILT 2026-10-27, not committed.** Details:
+  - **Drafter:** `previewFollowUp` in `process-sequence-sends.ts` calls the worker's own `draftFollowUp`. It mints no tracked link, sends nothing and writes nothing.
+  - **Action:** `preview_follow_up` in `lead-generation.ts`. It checks the lead belongs to this workspace and assistant and is still being followed up, then meters the call as a fair-use **helper** (not a task) before drafting.
+  - **Panel:** "Preview with [lead]" and a **Preview this one** button on each step, using the wording on screen even if unsaved.
+  - **Conversation row:** **Preview the next one** under Following up.
+  - **Chat:** a `follow_up_preview` card. The model never writes the follow-up itself.
+  - **Help:** `db/help-articles-2026-12zzzzzzzzzzzz-follow-up-preview.sql` (**not applied**).
+  - **Checked** in the component test page against a fake API. Not yet checked against the real model.
 
 Two refinements made during the build:
 - **Finished** gained an **Opted out** group, for a reply opt-out, suppression or do-not-contact.

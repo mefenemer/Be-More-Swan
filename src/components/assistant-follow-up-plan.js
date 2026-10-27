@@ -27,6 +27,9 @@
     error: '',
     notice: '',
     loadError: '',
+    // Phase 4 — "Preview": which emailed lead to preview with, and step index → { loading, result, error }.
+    previewThreadId: null,
+    previews: {},
   };
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
@@ -92,7 +95,51 @@
           <textarea rows="3" maxlength="${limits.maxBriefChars}" data-fp-brief="${i}"
             class="mt-1 w-full px-2 py-1.5 rounded-lg border border-gray-300 text-sm bg-white font-normal">${esc(s.brief)}</textarea></label>
         ${isLast ? '<p class="text-[11px] text-gray-500 mt-1">Whatever this one says, it also tells them it is the last email — that is added for you.</p>' : ''}
+        ${previewControlsHtml(i)}
       </div>`;
+  }
+
+  /** The emailed leads a preview can be written for (the conversations list holds them). */
+  function previewLeads() {
+    return (window.AssistantLeadThreads && window.AssistantLeadThreads.previewableLeads
+      && window.AssistantLeadThreads.previewableLeads()) || [];
+  }
+
+  /**
+   * "Preview with [lead]" above the steps. A preview needs a real conversation to write into — the
+   * worker drafts from the transcript — so with no emailed lead there is nothing to preview with, and
+   * the line says so instead of offering a button that can only fail.
+   */
+  function previewPickerHtml() {
+    const leads = previewLeads();
+    if (!leads.length) {
+      return '<p class="text-[11px] text-gray-500 mt-3">Preview becomes available once you have emailed a lead who hasn’t replied yet.</p>';
+    }
+    if (!leads.some((l) => l.threadId === state.previewThreadId)) state.previewThreadId = leads[0].threadId;
+    return `
+      <label class="flex flex-wrap items-center gap-2 text-xs text-gray-700 mt-3">Preview with
+        <select data-fp-preview-lead class="px-2 py-1 rounded-lg border border-gray-300 text-sm bg-white">
+          ${leads.map((l) => `<option value="${esc(l.threadId)}" ${l.threadId === state.previewThreadId ? 'selected' : ''}>${esc(l.title)}</option>`).join('')}
+        </select>
+        <span class="text-[11px] text-gray-500">— see what a follow-up would say to them. Nothing is sent.</span>
+      </label>`;
+  }
+
+  function previewControlsHtml(i) {
+    if (!previewLeads().length) return '';
+    const p = state.previews[i] || {};
+    const result = p.result ? `
+      <div class="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Preview for ${esc(p.result.lead && p.result.lead.title)} · not sent</p>
+        <p class="text-sm font-semibold text-gray-900 mt-1">${esc(p.result.subject)}</p>
+        <p class="text-sm text-gray-700 mt-1 whitespace-pre-wrap">${esc(p.result.body)}</p>
+        <p class="text-[11px] text-gray-500 mt-2">${esc(p.result.note || '')}</p>
+      </div>` : '';
+    return `
+      <button type="button" data-fp-preview="${i}" ${p.loading ? 'disabled' : ''}
+        class="mt-2 text-xs font-bold text-gray-700 underline hover:text-gray-900 disabled:opacity-50">${p.loading ? 'Writing a preview…' : 'Preview this one'}</button>
+      ${p.error ? `<p class="text-xs font-bold text-amber-700 mt-1">${esc(p.error)}</p>` : ''}
+      ${result}`;
   }
 
   function editorHtml() {
@@ -111,6 +158,7 @@
          </label>`
       : '';
     const steps = d.enabled ? `
+      ${previewPickerHtml()}
       <div class="flex flex-col gap-2 mt-3">${d.steps.map((s, i) => stepHtml(s, i, d.steps.length, L)).join('')}</div>
       <div class="flex flex-wrap items-center gap-3 mt-2">
         <button type="button" data-fp-add ${d.steps.length >= L.maxSteps ? 'disabled' : ''}
@@ -175,6 +223,10 @@
       paint();
     } else if (e.target.matches('[data-fp-stop]')) {
       state.draft.stopRunning = e.target.checked;
+    } else if (e.target.matches('[data-fp-preview-lead]')) {
+      state.previewThreadId = Number(e.target.value);
+      state.previews = {};                         // previews were for the previous lead
+      paint();
     }
   });
 
@@ -201,6 +253,7 @@
     if (remove) {
       state.draft.steps.splice(Number(remove.getAttribute('data-fp-remove')), 1);
       state.error = '';
+      state.previews = {};                         // keyed by position, which just moved
       paint();
       return;
     }
@@ -211,17 +264,40 @@
       host()?.querySelector(`[data-fp-brief="${state.draft.steps.length - 1}"]`)?.focus();
       return;
     }
-    if (t.closest('[data-fp-reset]')) { resetToDefault(); state.error = ''; paint(); return; }
+    if (t.closest('[data-fp-reset]')) { resetToDefault(); state.error = ''; state.previews = {}; paint(); return; }
+    const previewBtn = t.closest('[data-fp-preview]');
+    if (previewBtn) { await preview(Number(previewBtn.getAttribute('data-fp-preview'))); return; }
     if (t.closest('[data-fp-cancel]')) {
       state.open = false;
       state.error = '';
       state.draft = state.plan ? draftFrom(state.plan) : null;
+      state.previews = {};
       paint();
       document.dispatchEvent(new CustomEvent('lead:followUpPlanToggled', { detail: { open: false } }));
       return;
     }
     if (t.closest('[data-fp-save]')) await save();
   });
+
+  /**
+   * Draft step i for the chosen lead WITH THE WORDING ON SCREEN, saved or not — previewing before
+   * saving is the point. lead-generation.ts preview_follow_up; nothing is sent or stored.
+   */
+  async function preview(i) {
+    const s = state.draft && state.draft.steps[i];
+    if (!s || !state.previewThreadId) return;
+    state.previews[i] = { loading: true };
+    paint();
+    try {
+      const result = await call('preview_follow_up', {
+        threadId: state.previewThreadId, position: i + 1, brief: s.brief, planLength: state.draft.steps.length,
+      });
+      state.previews[i] = { result };
+    } catch (err) {
+      state.previews[i] = { error: err.message || 'The preview couldn’t be written.' };
+    }
+    paint();
+  }
 
   async function save() {
     if (state.saving) return;
@@ -261,7 +337,7 @@
   window.LeadFollowUpPlan = {
     /** Called by the stage strip's init. Loads at once: the To approve note quotes the plan. */
     init({ assistantId }) {
-      state = { assistantId, plan: null, draft: null, open: false, saving: false, error: '', notice: '', loadError: '' };
+      state = { assistantId, plan: null, draft: null, open: false, saving: false, error: '', notice: '', loadError: '', previewThreadId: null, previews: {} };
       load();
     },
     /** Open or close the panel. Opening discards nothing typed earlier in the same visit. */

@@ -2840,6 +2840,52 @@
   }
   register('follow_up_plan', renderFollowUpPlanCard);
 
+  // { type: 'follow_up_preview', recordId, threadId, leadTitle, position|null, blocked } — "what would
+  // the next follow-up to Acme say?" (src/utils/chat-follow-up-plan.ts). The button drafts it through
+  // lead-generation.ts preview_follow_up — the same action as Preview on the Outreach tab — and the
+  // card shows it. Nothing is sent or saved; it is metered as an editing helper.
+  function renderFollowUpPreviewCard(ui, esc) {
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-gray-200 rounded-xl shadow-sm p-5 max-w-lg';
+    const which = ui.position ? `Follow-up ${ui.position}` : 'Their next follow-up';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-gray-500 tracking-wider uppercase">Follow-up preview · nothing is sent</p>
+      <p class="text-sm font-bold text-gray-900 mt-2">${esc(which)} to ${esc(ui.leadTitle || 'this lead')}</p>
+      ${ui.blocked ? `<p class="text-xs font-semibold text-amber-800 mt-2">${esc(ui.blocked)}</p>` : `
+      <p class="text-xs text-gray-600 mt-1">Written the way your assistant writes the real one — from the conversation so far and your follow-up plan.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-fpv-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Write the preview</button>
+      </div>`}
+      <div data-fpv-out></div>`;
+    const out = el.querySelector('[data-fpv-out]');
+    el.addEventListener('click', (e) => {
+      const go = e.target.closest('[data-fpv-go]');
+      if (!go) return;
+      go.disabled = true;
+      go.textContent = 'Writing…';
+      el.dispatchEvent(new CustomEvent('lead:followUpPreview', {
+        bubbles: true,
+        detail: {
+          threadId: ui.threadId, position: ui.position ?? null,
+          respond({ ok, error, result }) {
+            go.disabled = false;
+            go.textContent = 'Write it again';
+            if (!ok) { out.innerHTML = `<p class="mt-2 text-xs font-semibold text-red-600">${esc(error || 'The preview couldn\'t be written.')}</p>`; return; }
+            out.innerHTML = `
+              <div class="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Follow-up ${esc(result.position)}${result.isLast ? ' · the last one' : ''} · not sent</p>
+                <p class="text-sm font-semibold text-gray-900 mt-1">${esc(result.subject)}</p>
+                <p class="text-sm text-gray-700 mt-1 whitespace-pre-wrap">${esc(result.body)}</p>
+                <p class="text-[11px] text-gray-500 mt-2">${esc(result.note || '')}</p>
+              </div>`;
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('follow_up_preview', renderFollowUpPreviewCard);
+
   // { type: 'call_to_action', summary, kind, kindLabel, formId, formName, giftLabel } — what a Social,
   // Blog or Email assistant's work invites people to do (src/config/call-to-action.ts), rebuilt by the
   // server against the real gift forms. The click → org-products.ts PATCH { callToAction }, the same
