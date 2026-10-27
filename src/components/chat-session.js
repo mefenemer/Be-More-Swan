@@ -1221,7 +1221,9 @@
       try {
         const r = await postActionCall('generate-blog', { assistantId: d.assistantId || assistantId, batch: d.topics || [] });
         const n = Number(r.queued) || 0;
-        respond({ ok: true, message: `Writing ${n} article${n === 1 ? '' : 's'} now. Each appears in the Review column of the Blogs tab as it’s finished — usually a minute or two apiece.` });
+        respond({ ok: true, message: n === 1
+          ? 'Writing it now. It appears in the Review column of the Blogs tab when it’s finished — usually a minute or two.'
+          : `Writing ${n} articles now. Each appears in the Review column of the Blogs tab as it’s finished — usually a minute or two apiece.` });
       } catch (err) {
         respond({ ok: false, error: err.message });
       }

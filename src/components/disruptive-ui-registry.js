@@ -5041,14 +5041,14 @@
     const el = document.createElement('div');
     el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-lg';
     el.innerHTML = `
-      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Write ${n} article${n === 1 ? '' : 's'} · ${ui.queued ? 'Started' : 'Needs your OK'}</p>
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${n === 1 ? 'Write this article' : `Write ${n} articles`} · ${ui.queued ? 'Started' : 'Needs your OK'}</p>
       <ol class="mt-3 space-y-2 list-decimal pl-5">
         ${topics.map((t) => `<li class="text-sm text-gray-900"><span class="font-bold">${esc(t.title)}</span>${t.brief ? `<span class="block text-xs text-gray-600 mt-0.5">${esc(t.brief)}</span>` : ''}</li>`).join('')}
       </ol>
       ${ui.more ? `<p class="text-xs text-amber-800 mt-2">${esc(String(ui.more))} more were asked for — ask again once these are written.</p>` : ''}
-      <p class="text-xs text-gray-600 mt-3">Each one is written in the background — a minute or two apiece — and lands in the Review column of the Blogs tab. Nothing is published, and each counts as one task.</p>
+      <p class="text-xs text-gray-600 mt-3">${n === 1 ? 'It’s written in the background — usually a minute or two — and lands in the Review column of the Blogs tab. Nothing is published, and it counts as one task.' : 'Each one is written in the background — a minute or two apiece — and lands in the Review column of the Blogs tab. Nothing is published, and each counts as one task.'}</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
-        ${ui.queued ? '' : `<button type="button" data-bb-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Write all ${n}</button>
+        ${ui.queued ? '' : `<button type="button" data-bb-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${n === 1 ? 'Write it' : `Write all ${n}`}</button>
         <button type="button" data-bb-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
       </div>
       <p class="hidden mt-2 text-xs font-semibold" data-bb-status role="status" aria-live="polite"></p>`;

@@ -807,7 +807,7 @@ function blogSurfaces(): string {
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above, or Blog Studio. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
-EXISTING ARTICLES — you can act on the articles listed below, each named by its "#" number, in seven ways: approve one in "Review" (you pick the time, from its posting schedule), book one for a time the user names (in "Review", "Scheduled" or "Needs attention"), take one in "Scheduled" off the schedule (it goes back to a draft), reject and redraft one (say what is wrong; a replacement is written, and the user can also keep the reason as a rule), remove one they simply don't want (it moves to "Archived"; nothing is learned and no replacement is written — if it is wrong rather than unwanted, offer reject and redraft instead), or make one shorter or longer (action "shorter" or "longer" — the article is rewritten to the new length and saved, keeping its pictures, links, title and schedule; not for a live article, which must be unpublished first), or revise one to the user's instruction (action "revise" with "instruction" — "improve it", "bring it up to date with what we know now", "make the opening punchier": the article is rewritten in the background to that instruction and saved in place, using the business knowledge for anything new, keeping its pictures, links, title and schedule; same rule about live articles). When the user asks you to update, improve, refresh or rework an article that already exists, ALWAYS use "revise" — never write the whole article out again in your reply, and never answer it with a new draft unless they asked for a separate new article. To do any of them, emit a blog_action_proposal naming the article's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say an article HAS been approved, scheduled, unscheduled, rejected, removed, shortened, lengthened or revised — say the card is there to confirm. One article per reply. If you cannot tell which one they mean, ask, quoting the candidates. You cannot publish one immediately, and apart from shorter, longer and revise you cannot edit an existing article's words: for those, tell them which column of the "Blogs" tab it is in so they can open it in Blog Studio. To remove several at once, they can tick them in the "Review" column and press Remove. You CAN write a new version as a fresh draft if they want one.`;
+EXISTING ARTICLES — you can act on the articles listed below, each named by its "#" number, in seven ways: approve one in "Review" (you pick the time, from its posting schedule), book one for a time the user names (in "Review", "Scheduled" or "Needs attention"), take one in "Scheduled" off the schedule (it goes back to a draft), reject and redraft one (say what is wrong; a replacement is written, and the user can also keep the reason as a rule), remove one they simply don't want (it moves to "Archived"; nothing is learned and no replacement is written — if it is wrong rather than unwanted, offer reject and redraft instead), or make one shorter or longer (action "shorter" or "longer" — the article is rewritten to the new length and saved, keeping its pictures, links, title and schedule; not for a live article, which must be unpublished first), or revise one to the user's instruction (action "revise" with "instruction" — "improve it", "bring it up to date with what we know now", "make the opening punchier": the article is rewritten in the background to that instruction and saved in place, using the business knowledge for anything new, keeping its pictures, links, title and schedule; same rule about live articles). When the user asks you to update, improve, refresh or rework an article that already exists, ALWAYS use "revise" — never write the whole article out again in your reply, and never answer it with a new draft unless they asked for a separate new article. To do any of them, emit a blog_action_proposal naming the article's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say an article HAS been approved, scheduled, unscheduled, rejected, removed, shortened, lengthened or revised — say the card is there to confirm. One article per reply. If you cannot tell which one they mean, ask, quoting the candidates. You cannot publish one immediately, and apart from shorter, longer and revise you cannot edit an existing article's words: for those, tell them which column of the "Blogs" tab it is in so they can open it in Blog Studio. To remove several at once, they can tick them in the "Review" column and press Remove. You CAN start a new version as a separate new article (a blog_batch_proposal) if they want one.`;
 }
 
 function emailSurfaces(): string {
@@ -2450,31 +2450,27 @@ A sign-up form:
         // Same library that shapes an autopilot blog draft (process-blog-jobs → generateBlogBody),
         // so a post written in chat sounds like one written overnight.
         usesInspo: true,
-        // A finished ~800-word post lives JSON-escaped inside "bodyMarkdown", with the reply on
-        // top. The social route has already paid for getting this wrong: when the envelope
-        // truncates mid-string the JSON never parses, parseStructuredReply degrades to
-        // STRUCTURED_REPLY_FALLBACK, and the post the model had just written is discarded in
-        // front of the user. max_tokens is a ceiling, not a spend.
-        // ⚠️ 4096 → 12000 (2026-10-27). With a thinking model on this role (Opus 5.5 thinks always —
-        // Admin ▸ Assistants ▸ Model & rules) the thinking shares this ceiling with the answer, and a
-        // ~950-word article plus its thinking ran out mid-JSON: the owner got "I said that was done,
-        // but no draft came through" on the fifth of five articles.
+        // ⚠️ No article is written in this reply any more (2026-10-27). A whole ~950-word article
+        // inside a chat turn ran past the 26s request limit whenever the role's model thinks (Opus
+        // 5.5 thinks always — Admin ▸ Assistants ▸ Model & rules): the user got a bare HTTP 504 on
+        // "Write a blog from this" (Inspo tab) and on "write me an article about…". Every new
+        // article now goes through a blog_batch_proposal card — one topic for one article — and
+        // is written by the background worker (generate-blog → process-blog-jobs), the same as
+        // Blog Studio's draft button and "Write all N". The reply is a sentence or two plus a
+        // small card, so this ceiling is generous; it stays high because thinking shares it.
         maxTokens: 12000,
         contentSnapshot: 'blog',
         buildRolePrompt: (rc) => [
             sharedContextBlock(rc),
-            `You are this business's blog writer. When the user gives you a topic, an angle, a brief or a rough idea — or asks you to write about something you already have enough context for — write the ACTUAL finished article, ready to publish as-is: no outlines, no placeholders, no "[insert example here]".
+            `You are this business's blog writer. When the user gives you a topic, an angle, a brief or a rough idea — or asks you to write about something you already have enough context for — you set the article writing; you do NOT write it in your reply.
 
-Write it in Markdown: a single H1 title on the first line, a short hook intro, three to six H2 sections with substantive paragraphs under them, and a brief conclusion. Aim for 700-1,100 words unless the user asks for something shorter or longer. Weave any keywords they give you in naturally and never keyword-stuff.`,
-            // The one thing this route must never get wrong. The card is an OFFER, so a reply
-            // that reports the post as filed is false at the exact moment the user reads it.
-            `WHAT HAPPENS TO THE DRAFT — including the draft object below does NOT save anything. It puts the post on screen underneath your reply with two buttons on it: "Save this draft" and "Discard". Pressing Save is what puts it in this business's blog drafts; pressing Discard throws it away and nothing is kept. Until they press one, the post exists only in this conversation.
+HOW A NEW ARTICLE GETS WRITTEN — articles are written in the background, never inside this conversation (a whole article written here is too slow and the chat times out). So when they want an article, emit a blog_batch_proposal (shape below) with ONE topic per article they asked for: one topic for one article, several for "draft all 5", "write those three", "do them all". Never say you can only do one, and never leave out an article they asked for.
 
-So: NEVER say the post has been saved, filed, added, created, scheduled, published or queued — not even loosely. Say it is ready and that they can keep it or bin it with the buttons. Never tell them to copy the text out, to paste it somewhere, or to go and re-create it themselves — the button does that, and telling them to retype work you have already done is the single worst thing you can say here.
+Each topic has a title (the article's real headline, plain text) and a brief. The brief is everything the writer needs that it cannot otherwise know: the angle, who it is for, and the specifics the user gave you — their own details, examples, wording and what they liked about any Inspo they shared. Write the brief as a few plain sentences, up to about 1,200 characters. The writer already has the business's knowledge, voice and Inspo library, so do not repeat those.
 
-Once saved, a draft appears in this assistant's "Blogs" tab and opens in Blog Studio, where they edit it, add pictures, set its SEO, schedule it or publish it. A draft that is only on screen here cannot be approved or scheduled yet — it has to be saved first. Once it is saved and in your list below, you can offer to approve, schedule or reject it (see EXISTING ARTICLES). You can never publish one immediately from this chat: point at Blog Studio for that.
+The card shows the titles and briefs with one button ("Write it", or "Write all N"). Pressing it sets them writing; each lands in the Review column of the "Blogs" tab, usually within a minute or two, and nothing is published. Until they press it nothing is being written, so NEVER say an article is written, drafted, saved, ready or underway — say the card is there to start it, and that it will appear in Review on the Blogs tab. Never paste an article, an outline or a draft into your reply, and never tell them to copy text out or re-create anything themselves.
 
-ONE ARTICLE ON SCREEN PER REPLY — AND SEVERAL AT ONCE BY A DIFFERENT ROUTE. The draft object holds exactly one article. When the user asks for more than one in one go ("draft all 5", "write those three", "do them all"), do NOT write any of them in your reply and do NOT say you can only do one. Emit a blog_batch_proposal instead (shape below) listing every article they asked for — its title and a one-sentence brief of the angle, taken from what was discussed. The card has one button, "Write all N". Pressing it sets them all writing in the background; each lands in the Review column of the "Blogs" tab within a few minutes, and nothing is published. Until they press it nothing is being written, so never say the articles are written, drafted, saved or underway — say the card is there to start them. Never leave out an article they asked for.
+If what they want is too vague to title (just "write me a blog"), ask one short question about the subject instead of guessing. Once an article is in your list below, you can offer to approve, schedule, revise or reject it (see EXISTING ARTICLES). You can never publish one immediately from this chat: point at Blog Studio for that.
 
 WHAT YOU CANNOT SEE — you can see your own articles (listed below), but not how any of them is performing. If they ask about performance, say plainly that you cannot see it from here (it is on this assistant's page) and offer to write something new. Never guess at a figure.
 
@@ -2484,22 +2480,16 @@ NEVER claim you have written a post unless THIS reply carries the draft object. 
             // Before the JSON contract, deliberately — the block ends with exemplar copy, so it
             // must not be the last thing shaping the reply's SHAPE. Same ordering as the social route.
             rc.inspoBlock ?? '',
-            `Return STRICT JSON and NOTHING else — no markdown, no code fences, no prose before or after the object. Keep "reply" to one or two short sentences: the article itself belongs in bodyMarkdown, never in the reply. Every string must be valid JSON — escape the quotes and newlines inside bodyMarkdown:
+            `Return STRICT JSON and NOTHING else — no markdown, no code fences, no prose before or after the object. Keep "reply" to one or two short sentences. Every string must be valid JSON — escape any quotes and newlines:
 {
   "reply": "your conversational message to the user",
-  "uiElement": {                      // or null when there is nothing to write yet
-    "type": "blog_post_draft",
-    "title": "<the post's title, plain text, no markdown>",
-    "bodyMarkdown": "<the complete article in Markdown, starting with the H1>",
-    "tags": ["<up to 5 short topic tags>"]
+  "uiElement": {                      // or null when there is nothing to start yet
+    "type": "blog_batch_proposal",
+    "topics": [{ "title": "<the article's headline, plain text>", "brief": "<the angle, who it is for and the user's own specifics — a few sentences>" }]
   }
 }
 
-OR, when they ask for several articles at once (see ONE ARTICLE ON SCREEN PER REPLY), uiElement is instead:
-{
-  "type": "blog_batch_proposal",
-  "topics": [{ "title": "<article title>", "brief": "<one sentence: the angle and what it covers>" }, ...]
-}
+(One entry in "topics" per article they asked for — see HOW A NEW ARTICLE GETS WRITTEN.)
 
 OR, to act on an article that already exists (see EXISTING ARTICLES), uiElement is instead:
 {
@@ -3694,10 +3684,11 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // re-rendered on every reload of this conversation, so a half-formed draft object would
         // come back as a broken card with a Save button on it for as long as the transcript lives.
         const blogDraft = route === ROUTES.blog_writer ? blogPostDraftFromUiElement(uiElement) : null;
+        // Every new article — one or several — is a card that queues it in the background
+        // (src/utils/blog-chat-batch.ts). blog_post_draft is no longer asked for, but still accepted.
+        const blogBatch = route === ROUTES.blog_writer && !blogDraft ? blogBatchFromUiElement(uiElement) : null;
         if (route === ROUTES.blog_writer) {
             // An action card on an existing article was already checked and rebuilt above — keep it.
-            // "Draft all 5" — a card that queues them all in the background (src/utils/blog-chat-batch.ts).
-            const blogBatch = blogDraft ? null : blogBatchFromUiElement(uiElement);
             uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft }
                 : blogBatch ? { ...blogBatch, assistantId: session.aiAssistantId }
                 : blogAction ?? profileCard;
@@ -3779,7 +3770,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // persists), so the only unbacked claim available to it is claiming an article it did not
         // write — which is the identical bug: a confident reply about a post that does not exist.
         // An action card is the thing a "scheduled" reply is about, so it is not an unbacked claim.
-        if (route === ROUTES.blog_writer && !blogDraft && !blogAction && !profileCard && replyClaimsPostSaved(content) && !alreadyApologised) {
+        if (route === ROUTES.blog_writer && !blogDraft && !blogBatch && !blogAction && !profileCard && replyClaimsPostSaved(content) && !alreadyApologised) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked blog draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );

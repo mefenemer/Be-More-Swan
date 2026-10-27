@@ -41,7 +41,7 @@ check('the batch queues through the interactive worker path, hidden while it is 
 
 check('the blog chat is told to propose a batch, never to refuse or write several in one reply', () => {
     const o = read('netlify/functions/chat-orchestrator.ts');
-    assert.match(o, /Emit a blog_batch_proposal instead/);
+    assert.match(o, /emit a blog_batch_proposal \(shape below\) with ONE topic per article/);
     assert.ok(!/If they ask for several, write the FIRST one properly and offer the next\./.test(o));
     assert.match(read('src/utils/chat-card-refresh.ts'), /refreshBlogBatchCards/);
     assert.match(read('src/components/chat-session.js'), /addEventListener\('blog:batch', onBlogBatch\)/);

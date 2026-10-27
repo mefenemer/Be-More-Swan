@@ -17,7 +17,9 @@ export const BLOG_BATCH_PROPOSAL_TYPE = 'blog_batch_proposal';
 /** The most one card queues. Each is a whole article and a task from the allowance. */
 export const MAX_BATCH_ARTICLES = 10;
 const MAX_TITLE = 200;
-const MAX_BRIEF = 600;
+// Long enough to carry the user's own specifics (an Inspo idea, their examples) to the writer —
+// the chat no longer writes the article itself, so the brief is all that crosses over.
+const MAX_BRIEF = 1500;
 
 export interface BlogBatchTopic {
     title: string;
