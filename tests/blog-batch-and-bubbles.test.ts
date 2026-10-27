@@ -102,6 +102,11 @@ check('the QR business card: name, purpose, email, website links, company detail
     assert.match(c, /mailto:hello@bemoreswan\.com/);
     assert.match(c, /href="https:\/\/bemoreswan\.com\/"/);
     assert.match(c, /company number 17378263/);
+    // Option A wording (owner, 2026-10-27): the growing team, approval, brand rules, time and cost.
+    assert.match(c, /A growing team of AI assistants for your business/);
+    assert.match(c, /You check and approve the work; they take the hours\./);
+    assert.match(c, /<meta name="description" content="Be More Swan: a growing team of pre-trained AI assistants/);
+    assert.doesNotMatch(c, /Your AI team for the busywork/);
     assert.match(read('be-more-swan.vcf'), /EMAIL;TYPE=WORK:hello@bemoreswan\.com/);
 });
 
