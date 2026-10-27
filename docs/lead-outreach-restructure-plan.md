@@ -7,7 +7,18 @@ Raised by the owner 2026-10-27. Status:
   - `tests/lead-outreach-phase.test.ts`
   - Nothing on screen uses it yet.
   - `board` has not yet been called against a real database.
-- Phases 2–4 not started.
+- **Phase 2 — BUILT 2026-10-27, not committed.** Details:
+  - **Stage strip:** `src/components/assistant-lead-outreach.js`.
+  - **Conversations list:** reads `board`, shows one stage at a time, and opens hand-sent leads to their notes and outcome.
+  - **Tab retired:** the Conversations tab button and panel are removed. `'conversations'` is now an alias for the Outreach tab.
+  - **Registry:** `reviewQueue.staged`, and `resultsTabAfter: 'review-queue'`.
+  - **Copy:** the chat prompt and the reply notification now name the stages. The help copy is in `db/help-articles-2026-12zzzzzzzzzz-outreach-stages.sql`, which has **not been applied** to either database.
+  - **Tests:** `tests/lead-outreach-stages.test.ts`.
+  - **Checked in a component test page** (`component-harness-outreach-stages`, port 4533): the real components on the real Outreach markup against a fake API. The `assistants.js` wiring is covered by tests only, not by a logged-in session.
+  - **Two bugs found and fixed in that check:**
+    - A conversation opened while the list was redrawn stayed on "Loading…" for good.
+    - The table's hidden "Open" label widened the whole page on a phone. That one was already true of the old Conversations tab.
+- Phases 3–4 not started.
 
 Two refinements made during the build:
 - **Finished** gained an **Opted out** group, for a reply opt-out, suppression or do-not-contact.

@@ -63,7 +63,7 @@ import {
 import { requireTenant } from '../../src/utils/tenant';
 import { haltReasonLabel } from '../../src/config/outreach-sequences';
 import { leadOutreachPhase } from '../../src/config/lead-outreach-phase';
-import { haltEnrolment } from '../../src/utils/outreach-sequences';
+import { haltEnrolment, previewFollowUps } from '../../src/utils/outreach-sequences';
 import { loadOutreachOffer, offerLinkForThread } from '../../src/utils/outreach-offer';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { drainSequenceSends } from './process-sequence-sends';
@@ -562,9 +562,14 @@ export default withLambda(async (event) => {
                 if (row.needsAttention) counts.needsAttention += 1;
             }
 
+            // How many follow-ups the plan sends, for "Chaser 2 of 3". Read-only (previewFollowUps
+            // provisions nothing); null when it cannot be read, and 0 when chasing is switched off.
+            const plan = await previewFollowUps(db, assistantId);
+
             return json(200, {
                 rows,
                 counts,
+                plan: { steps: plan ? (plan.enabled ? plan.steps.length : 0) : null },
                 truncated: threadRows.length > BOARD_MAX || recordRows.length > BOARD_MAX,
             });
         }

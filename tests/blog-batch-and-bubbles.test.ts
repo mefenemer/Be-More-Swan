@@ -77,12 +77,17 @@ check('Needs you items can be marked done without running their action', () => {
     assert.match(n, /pop-done[\s\S]{0,400}patch\(n\.id, \{ resolved: true \}\)/);
 });
 
-check('Lead Generator: All leads, a divider before supporting tabs, and Awaiting reply points at Conversations', () => {
-    assert.match(read('src/components/assistant-dashboard-registry.js'), /label: 'All leads'/);
+check('Lead Generator: All leads, a divider before supporting tabs, and Conversations folded into a staged Outreach', () => {
+    const registry = read('src/components/assistant-dashboard-registry.js');
+    assert.match(registry, /label: 'All leads'/);
     assert.match(read('assistant-detail.html'), /id="maintab-support-divider"/);
     const js = read('assistants.js');
     assert.match(js, /supportDivider\.classList\.toggle\('hidden', !goalsAnchor\)/);
-    assert.match(js, /statusKey === 'scheduled'[\s\S]{0,200}maintab-btn-conversations/);
+    // Was: the Awaiting reply column pointed at the Conversations tab. Both are now stages of one
+    // Outreach tab (docs/lead-outreach-restructure-plan.md), with Results straight after it.
+    assert.match(registry, /staged: true/);
+    assert.match(registry, /resultsTabAfter: 'review-queue'/);
+    assert.ok(!js.includes('maintab-btn-conversations'), 'nothing should point at the retired Conversations tab button');
     assert.ok(!read('index.html').includes('Autonomous Digital Workforce'));
 });
 
