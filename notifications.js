@@ -1342,7 +1342,7 @@ if (typeof window.routeToSupportTicket !== 'function') {
 }
 
 // ── Header Action Center popover ──────────────────────────────────────────────
-// Quick triage from the workspace bell: two tabs (Needs you / Updates), compact
+// Quick triage from the workspace bell: two tabs (Needs you / Updates) plus a Team Chat link, compact
 // actor-led cards built from the SAME window.NotifKit as the full Notifications page, a single
 // primary CTA per item, and "Open all" for the page itself. Needs you holds open actions AND
 // unanswered Team questions — the same two things the bell's red number counts. Opening the popover marks
@@ -1351,7 +1351,7 @@ if (typeof window.routeToSupportTicket !== 'function') {
 window.NotificationPopover = (function () {
     const K = window.NotifKit;
     const MAX_PER_TAB = 5;        // cap the popover; overflow lives behind "Open all".
-    let panel = null, listEl = null, tabActionBtn = null, tabUpdatesBtn = null, markAllBtn = null;
+    let panel = null, listEl = null, tabActionBtn = null, tabUpdatesBtn = null, teamChatBtn = null, markAllBtn = null;
     let anchorEl = null, activeTab = 'action', data = [], questions = [];
 
     const openInbox = () => {
@@ -1378,6 +1378,7 @@ window.NotificationPopover = (function () {
                 <div class="flex gap-1 px-3 pt-2 shrink-0">
                     <button type="button" id="notif-pop-tab-action" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg"></button>
                     <button type="button" id="notif-pop-tab-updates" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg"></button>
+                    <button type="button" id="notif-pop-team-chat" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg"></button>
                 </div>
                 <ul id="notif-pop-list" class="overflow-y-auto divide-y divide-gray-100 mt-1" style="flex:1 1 auto;"></ul>
             </div>`;
@@ -1390,6 +1391,13 @@ window.NotificationPopover = (function () {
         markAllBtn.addEventListener('click', markAllRead);
         tabActionBtn.addEventListener('click', () => { activeTab = 'action'; render(); });
         tabUpdatesBtn.addEventListener('click', () => { activeTab = 'updates'; render(); });
+        // Team Chat is a conversation, not a list — a link to Notifications → Messages, not a popover tab.
+        teamChatBtn = panel.querySelector('#notif-pop-team-chat');
+        teamChatBtn.addEventListener('click', () => {
+            close();
+            if (window.loadView) window.loadView('notifications', { tab: 'messages' });
+            else window.location.href = 'workspace.html?view=team';
+        });
         // Dismiss on outside-click / Esc. Registered once; guarded by panel visibility.
         document.addEventListener('click', (e) => {
             if (panel.style.display === 'none') return;
@@ -1543,6 +1551,9 @@ window.NotificationPopover = (function () {
         tabUpdatesBtn.className = activeTab === 'updates' ? on : off;
         tabActionBtn.innerHTML = `Needs you${pill(openActions, 'bg-red-100 text-red-700')}`;
         tabUpdatesBtn.innerHTML = `Updates${pill(unreadUpdates, 'bg-gray-100 text-gray-700')}`;
+        // The same unread Team figure the page's Messages tab shows.
+        teamChatBtn.className = off;
+        teamChatBtn.innerHTML = `Team Chat${pill(Number(window._notifCounts?.teamUnread) || 0, 'bg-gray-100 text-gray-700')}<span aria-hidden="true">&rarr;</span>`;
     };
 
     const render = () => {
