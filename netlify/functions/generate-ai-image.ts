@@ -2,7 +2,7 @@
 // Epic 1, US1: manual AI image generation for the post-media pool.
 //
 // Two-step flow (mirrors pexels-search.ts):
-//   POST { prompt, aspectRatio }              → moderate → hold 1 credit → Flux 2 (4 variations)
+//   POST { prompt, aspectRatio }              → moderate → hold 1 credit → Flux (4 different interpretations)
 //                                               → on success debit credit, return { jobId, images[] }
 //                                               → on policy flag / failure, REFUND the hold (US4 AC)
 //   POST { action:'select', jobId, index }    → persist the chosen variation as a content_asset
@@ -20,11 +20,11 @@ import { requireTenant } from '../../src/utils/tenant';
 import { orgHasAssistantFeature, featureUnavailableResponse } from '../../src/utils/assistant-capabilities';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import {
-    generateImages, falConfigured, ASPECT_RATIOS,
+    generateImageVariants, falConfigured, ASPECT_RATIOS,
     FalContentPolicyError, FalServiceError, FalError, type AspectRatio, type GeneratedImage,
 } from '../../src/lib/fal-gateway';
 import { holdCredits, settleHold, getBalance, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
-import { visualisePrompt } from '../../src/lib/image-prompt';
+import { visualisePrompts } from '../../src/lib/image-prompt';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const PROMPT_MAX = 1000;
@@ -107,9 +107,10 @@ export default withLambda(async (event) => {
 
     try {
         const images = falConfigured()
-            // What the person typed becomes a scene to draw first (src/lib/image-prompt.ts) — a sentence
-            // passed straight through was painted on as misspelt text. The job keeps their own words.
-            ? await generateImages({ prompt: await visualisePrompt(prompt, { workspaceId: orgId, userId }), aspectRatio, numImages: 4, usage: { workspaceId: orgId, userId }, timeoutMs: 20_000 })
+            // What the person typed becomes FOUR different scenes to draw (src/lib/image-prompt.ts) — a
+            // sentence passed straight through was painted on as misspelt text, and one scene drawn four
+            // times came back as four near-copies. The job keeps their own words.
+            ? await generateImageVariants({ prompts: await visualisePrompts(prompt, 4, { workspaceId: orgId, userId }), aspectRatio, usage: { workspaceId: orgId, userId }, timeoutMs: 18_000 })
             : mockImages(aspectRatio);
 
         // Success → debit the held credit and record the completed job with its candidate URLs.

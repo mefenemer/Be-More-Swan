@@ -1,6 +1,11 @@
 // src/components/assistant-bubbles.js
-// Assistant chat bubbles (owner, 2026-10-27): short messages from an assistant that pop up at the
-// bottom of the screen for 5 seconds and then go, on top of everything notifications already do.
+// Assistant chat bubbles (owner, 2026-10-27): short messages from an assistant that pop up for 5
+// seconds and then go, on top of everything notifications already do.
+//
+// WHERE: just under the header's assistant quick switcher (#nav-assistant-switcher-btn), above
+// everything on the page. They first sat bottom-left at z-index 60, and a page opened while one was
+// showing drew over part of it (owner, 2026-10-27). The host is re-placed on every bubble and on
+// resize; with the switcher hidden (phone widths) they sit top-right under the header.
 //
 // Three ways a bubble appears:
 //   1. pageNudges()  — opening an assistant's page: what it wants to remind you of (work waiting for
@@ -19,6 +24,8 @@
     'use strict';
 
     const SHOW_MS = 5000;
+    /** Above every page, modal and toast in the app. */
+    const TOP_Z = 2147483000;
     const MAX_ON_SCREEN = 3;
     const queue = [];
     let onScreen = 0;
@@ -32,11 +39,30 @@
             h = document.createElement('div');
             h.id = 'assistant-bubbles';
             h.setAttribute('aria-live', 'polite');
-            // Bottom-left: the bottom-right corner already holds toasts and the chat launcher.
-            h.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:60;display:flex;flex-direction:column;gap:8px;max-width:min(360px,calc(100vw - 32px));pointer-events:none';
+            h.style.cssText = `position:fixed;z-index:${TOP_Z};display:flex;flex-direction:column;gap:8px;width:min(360px,calc(100vw - 32px));pointer-events:none`;
             document.body.appendChild(h);
+            window.addEventListener('resize', () => place(h));
         }
+        // Last child of <body>, so nothing added since (a page, a modal) can sit over it at the same z-index.
+        if (h !== document.body.lastElementChild) document.body.appendChild(h);
+        place(h);
         return h;
+    }
+
+    /** Pure: where the stack goes — under the switcher, its right edge on the switcher's. */
+    function anchorFor(rect, viewportWidth) {
+        const GAP = 8, EDGE = 16;
+        if (!rect || !rect.width) return { top: 72, right: EDGE };
+        return { top: Math.round(rect.bottom + GAP), right: Math.max(EDGE, Math.round(viewportWidth - rect.right)) };
+    }
+
+    function place(h) {
+        const btn = document.getElementById('nav-assistant-switcher-btn');
+        const a = anchorFor(btn ? btn.getBoundingClientRect() : null, window.innerWidth);
+        h.style.top = `${a.top}px`;
+        h.style.right = `${a.right}px`;
+        h.style.left = 'auto';
+        h.style.bottom = 'auto';
     }
 
     function colourFor(assistantId) {
@@ -48,7 +74,7 @@
         const el = document.createElement('div');
         el.setAttribute('role', 'status');
         el.className = 'bg-white border border-gray-200 rounded-2xl shadow-lg p-3 flex gap-3 items-start';
-        el.style.cssText = 'pointer-events:auto;transition:opacity .25s,transform .25s;opacity:0;transform:translateY(8px)';
+        el.style.cssText = 'pointer-events:auto;transition:opacity .25s,transform .25s;opacity:0;transform:translateY(-8px)';
         const letter = esc((b.name || '?').trim().charAt(0).toUpperCase());
         const bg = colourFor(b.assistantId) || '#be185d';
         el.innerHTML = `
@@ -158,5 +184,5 @@
         } catch { /* a missed bubble is fine; the notification itself is still there */ }
     }
 
-    window.AssistantBubbles = { show, say, pageNudges, onNotificationsRose, resetPage };
+    window.AssistantBubbles = { show, say, pageNudges, onNotificationsRose, resetPage, _anchorFor: anchorFor };
 })();

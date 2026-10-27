@@ -512,8 +512,8 @@
     + '        <div class="bs-row">'
     // Approve is the primary action — the home page promise is "you just approve". Publish now was
     // the pink one, and it went live with a single click; it is now the outline button and asks first.
-    + '          <button id="bs-approve" class="bs-btn bs-btn-primary"><span>Approve \u2014 <span id="bs-approve-name">your assistant</span> picks the time</span></button>'
-    + '          <button id="bs-pick-time" class="bs-btn bs-btn-ghost">Pick a time myself</button>'
+    + '          <button id="bs-approve" class="bs-btn bs-btn-primary"><span>Approve \u2014 <span id="bs-approve-name">your assistant</span> picks the next free slot</span></button>'
+    + '          <button id="bs-pick-time" class="bs-btn bs-btn-ghost">Pick the time myself</button>'
     + '          <button id="bs-publish" class="bs-btn bs-btn-outline">Publish now</button>'
     // Only on an assistant-written draft that is still undecided (syncRejectButton). The social
     // Review has had "reject, say why, and the assistant learns" since reject-post.ts; a blog draft
@@ -625,9 +625,21 @@
     + '      <div id="bs-decide" class="bs-decide bs-hidden" role="region" aria-label="Decide on this draft">'
     + '        <span class="bs-decide-q">Waiting for you \u2014 how should it go out?</span>'
     + '        <div class="bs-row">'
+    + // The same words as the social Review (workspace.html #post-review-reschedule): "Approve" — the
+    // assistant picks the next free slot — or "Pick the time myself" (owner, 2026-10-27).
     + '          <button type="button" id="bs-decide-approve" class="bs-btn bs-btn-primary">Approve</button>'
-    + '          <button type="button" id="bs-decide-time" class="bs-btn bs-btn-ghost">Pick a time</button>'
+    + '          <button type="button" id="bs-decide-time" class="bs-btn bs-btn-ghost">Pick the time myself</button>'
     + '          <button type="button" id="bs-decide-reject" class="bs-btn bs-btn-danger bs-hidden">Reject\u2026</button>'
+    + '        </div>'
+    + '      </div>'
+    // After approving: say what happens next and offer the next draft waiting — as the social Review
+    // does (#post-review-approved, "Next: post 2 of 5 →"). Approving five articles used to be open →
+    // approve → close → find the next one, five times (owner, 2026-10-27).
+    + '      <div id="bs-approved" class="bs-decide bs-hidden" role="status">'
+    + '        <span class="bs-decide-q"><span style="color:#047857;">\u2713 Approved</span> <span id="bs-approved-msg" style="font-weight:400;"></span></span>'
+    + '        <div class="bs-row">'
+    + '          <button type="button" id="bs-next" class="bs-btn bs-btn-primary bs-hidden">Review next draft \u2192</button>'
+    + '          <button type="button" id="bs-approved-done" class="bs-btn bs-btn-ghost">Done</button>'
     + '        </div>'
     + '      </div>'
     + '      <div class="bs-actionbar">'
@@ -2106,6 +2118,14 @@
       openBlogStudio({ mode: 'setup', assistantId: aid });
     });
     el('bs-decide-approve').addEventListener('click', function () { el('bs-approve').click(); });
+    el('bs-next').addEventListener('click', function () {
+      var id = state.nextPostId;
+      if (!id) return;
+      var aid = state.assistantId;
+      closeBlogStudio();
+      openBlogStudio({ assistantId: aid, postId: id, intent: 'review' });
+    });
+    el('bs-approved-done').addEventListener('click', function () { el('bs-approved').classList.add('bs-hidden'); });
     el('bs-decide-time').addEventListener('click', function () { openPublishSection(); el('bs-pick-time').click(); });
     el('bs-decide-reject').addEventListener('click', function () { openPublishSection(); el('bs-reject').click(); });
 
@@ -2197,6 +2217,7 @@
           el('bs-unschedule').classList.remove('bs-hidden');
           syncDecideBar(res.body.post);
           notifyChanged();   // leaves Review for Scheduled — both counts move
+          showApproved(res.body.post);
         } else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not schedule this post.', 'error');
       });
     });
@@ -2774,11 +2795,55 @@
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────────────────────────
+  // The statuses Review's "To approve" lists (blog-posts.ts countReview, RQ_BLOG_STATUSES.review).
+  var REVIEW_STATUSES = ['draft', 'pending_approval', 'in_review'];
+
+  /** Pure: the drafts still waiting after this one, soonest slot first (undated last, then oldest id). */
+  function waitingAfter(posts, currentId) {
+    var at = function (p) { var t = p.publishDate ? Date.parse(p.publishDate) : NaN; return isFinite(t) ? t : Infinity; };
+    return (posts || []).filter(function (p) {
+      return p && p.id !== currentId && REVIEW_STATUSES.indexOf(p.status) !== -1 && p.writtenByAssistant !== false;
+    }).sort(function (a, b) { return (at(a) - at(b)) || (a.id - b.id); });
+  }
+
+  // "✓ Approved — Lyra will publish this on …", and the next draft waiting for the same writer.
+  function showApproved(post) {
+    var name = assistantName() || 'Your assistant';
+    var when = post && post.publishDate
+      ? new Date(post.publishDate).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+      : null;
+    el('bs-approved-msg').textContent = when
+      ? '\u2014 ' + name + ' will publish this on ' + when + '.'
+      : '\u2014 ' + name + ' will pick a time and schedule it.';
+    el('bs-decide').classList.add('bs-hidden');
+    el('bs-approved').classList.remove('bs-hidden');
+    var next = el('bs-next');
+    next.classList.add('bs-hidden');
+    state.nextPostId = null;
+    var approvedId = post && post.id;
+    var q = 'blog-posts' + (state.assistantId != null ? '?assistantId=' + encodeURIComponent(state.assistantId) : '');
+    api(q, { method: 'GET' }).then(function (res) {
+      if (state.postId !== approvedId) return;   // moved on while the list was out
+      var left = waitingAfter(res.ok && res.body ? res.body.posts : [], approvedId);
+      if (!left.length) {
+        el('bs-approved-msg').textContent += ' That was the last article waiting.';
+        el('bs-approved-done').focus();
+        return;
+      }
+      state.nextPostId = left[0].id;
+      next.textContent = left.length === 1 ? 'Review the last draft \u2192' : 'Next: 1 of ' + left.length + ' waiting \u2192';
+      next.classList.remove('bs-hidden');
+      next.focus();
+    });
+  }
+
   function openBlogStudio(opts) {
     opts = opts || {};
     inject();
     state.assistantId = opts.assistantId != null ? opts.assistantId : null;
     state.reviewIntent = opts.intent === 'review';
+    state.nextPostId = null;
+    el('bs-approved').classList.add('bs-hidden');
     var setup = opts.mode === 'setup';
     var bd = el('bms-blog-backdrop');
     bd.classList.toggle('bs-setup', setup);
